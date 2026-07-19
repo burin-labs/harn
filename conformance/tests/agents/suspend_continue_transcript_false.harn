@@ -26,11 +26,19 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "park_keep", name: "agent_await_resumption", arguments: {reason: "keep transcript"}}],
+        tool_calls: [
+          {id: "park_keep", name: "agent_await_resumption", arguments: {reason: "keep transcript"}},
+        ],
       },
       llm_text("kept transcript completion"),
       {
-        tool_calls: [{id: "park_reset", name: "agent_await_resumption", arguments: {reason: "reset transcript"}}],
+        tool_calls: [
+          {
+            id: "park_reset",
+            name: "agent_await_resumption",
+            arguments: {reason: "reset transcript"},
+          },
+        ],
       },
       llm_text("reset transcript completion"),
     ],
@@ -60,7 +68,9 @@ pipeline main() {
       )
       __io_println(
         "keep_no_digest_marker="
-          + to_string(!contains(kept_resumed_tail, "Prior conversation digest")),
+          + to_string(
+          !contains(kept_resumed_tail, "Prior conversation digest"),
+        ),
       )
       const session_reset = "continue-false-" + uuid()
       const handle_reset = sub_agent_run(
@@ -83,20 +93,28 @@ pipeline main() {
       __io_println("reset_status=" + done_reset.status)
       __io_println(
         "reset_resumed_at_turn="
-          + to_string(contains(reset_resumed_tail, "You were suspended at turn")),
+          + to_string(
+          contains(reset_resumed_tail, "You were suspended at turn"),
+        ),
       )
       __io_println(
         "reset_continuity_emitted="
           + to_string(
           contains(reset_resumed_tail, "Prior conversation")
-            || contains(reset_resumed_tail, "You were suspended at turn"),
+            || contains(
+            reset_resumed_tail,
+            "You were suspended at turn",
+          ),
         ),
       )
       __io_println(
         "paths_differ_in_input="
           + to_string(
           contains(kept_resumed_tail, "operator says go")
-            && contains(reset_resumed_tail, "operator says reset"),
+            && contains(
+            reset_resumed_tail,
+            "operator says reset",
+          ),
         ),
       )
     },

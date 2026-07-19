@@ -52,7 +52,10 @@ pub fn normalize(path) {
  */
 pub fn is_absolute(path) {
   const normalized = normalize(path)
-  const windows_drive_root = len(normalized) >= 3 && normalized.substring(1, 2) == ":" && normalized.substring(2, 3) == "/"
+  const windows_drive_root = len(normalized) >= 3 && normalized.substring(1, 2) == ":"
+    && normalized
+    .substring(2, 3)
+    == "/"
   return normalized.starts_with("/") || windows_drive_root
 }
 

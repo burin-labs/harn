@@ -1,7 +1,11 @@
 pipeline test(task) {
   host_call(
     "project.metadata_set",
-    {dir: "zig", namespace: "build_gotchas", value: {gotchas: ["use .map.count() on ArrayHashMap"]}},
+    {
+      dir: "zig",
+      namespace: "build_gotchas",
+      value: {gotchas: ["use .map.count() on ArrayHashMap"]},
+    },
   )
   const exact = host_call("project.metadata_get", {dir: "zig", namespace: "build_gotchas"})
   assert_eq(exact.gotchas[0], "use .map.count() on ArrayHashMap")
@@ -9,7 +13,10 @@ pipeline test(task) {
   assert_eq(inherited.gotchas[0], "use .map.count() on ArrayHashMap")
   const all = host_call("project.metadata_get", {dir: "zig/src"})
   assert_eq(all.build_gotchas.gotchas[0], "use .map.count() on ArrayHashMap")
-  const inspect = host_call("project.metadata_inspect", {dir: "zig/src", namespace: "build_gotchas", key: "gotchas"})
+  const inspect = host_call(
+    "project.metadata_inspect",
+    {dir: "zig/src", namespace: "build_gotchas", key: "gotchas"},
+  )
   assert_eq(inspect.origin_dir, "zig")
   assert_eq(inspect.inspected_dir, "zig")
   assert_eq(inspect.resolved.gotchas[0], "use .map.count() on ArrayHashMap")

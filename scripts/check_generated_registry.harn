@@ -47,7 +47,8 @@ const AUDIT_GATE_RUNNER = "scripts/audit_gates.sh"
  */
 fn is_word_or_hyphen(c: string) -> bool {
   return c == "-" || c == "_"
-    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".contains(c)
+    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    .contains(c)
 }
 
 /**
@@ -158,7 +159,9 @@ pub fn artifact_flag_errors(
   // make_all flag must be honoured by the all: recipe.
   if art?.make_all && check != "" && !whole_target_search(check, all_recipe) {
     errors = errors
-      + ["[${aid}] make_all = true but `${check}` is missing from the `all:` recipe in the Makefile."]
+      + [
+      "[${aid}] make_all = true but `${check}` is missing from the `all:` recipe in the Makefile.",
+    ]
   }
   // Source-owned outputs must exist in the checkout. Release/package payloads
   // are intentionally absent until their serial producer runs.
@@ -187,7 +190,9 @@ pub fn artifact_lifecycle_errors(art) -> list {
     let errors = []
     if art?.ci != true {
       errors = errors
-        + ["[${aid}] release-package artifacts must set ci = true for their serialized producer/check."]
+        + [
+        "[${aid}] release-package artifacts must set ci = true for their serialized producer/check.",
+      ]
     }
     if art?.make_all != false {
       errors = errors
@@ -219,7 +224,8 @@ pub fn completeness_errors(
           "Makefile target `${target}` generates an artifact but is not registered in scripts/generated_artifacts.toml (add an [[artifact]] block with gen = \"${target}\").",
         ]
       }
-    } else if target.starts_with("check-") && !registered_checks.contains(target) && !exempt.contains(target) {
+    } else if target.starts_with("check-") && !registered_checks.contains(target)
+      && !exempt.contains(target) {
       errors = errors
         + [
         "Makefile target `${target}` is a check but is neither registered as an [[artifact]].check nor listed in [meta].exempt_checks in scripts/generated_artifacts.toml.",
@@ -398,7 +404,10 @@ pipeline main(task) {
     }
   }
   const errors = validate(artifacts, exempt, targets, all_recipe, workflow_text, missing_outputs)
-    + preflight_dispatch_errors(targets, dispatch)
+    + preflight_dispatch_errors(
+    targets,
+    dispatch,
+  )
   if errors.count > 0 {
     __io_eprintln("error: generated-artifact registry is out of sync:\n")
     for e in errors {

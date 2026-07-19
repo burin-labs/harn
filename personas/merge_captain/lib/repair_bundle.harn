@@ -39,7 +39,13 @@ pub fn defaults() {
     allowed_write_scope: [],
     required_verification: [],
     push_target: {remote: "origin", branch: "", force_with_lease: true},
-    approval_required_for: ["semantic_repair", "force_push", "admin_merge", "release_tag", "branch_delete"],
+    approval_required_for: [
+      "semantic_repair",
+      "force_push",
+      "admin_merge",
+      "release_tag",
+      "branch_delete",
+    ],
     release_facts: nil,
     extra_context: {},
   }
@@ -143,7 +149,14 @@ pub fn output_schema() {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["diagnosis", "files_changed", "tests_run", "commits_created", "push_result", "residual_risk"],
+    required: [
+      "diagnosis",
+      "files_changed",
+      "tests_run",
+      "commits_created",
+      "push_result",
+      "residual_risk",
+    ],
     properties: {
       diagnosis: {type: "string"},
       files_changed: {
@@ -152,7 +165,10 @@ pub fn output_schema() {
           type: "object",
           required: ["path", "action"],
           additionalProperties: false,
-          properties: {path: {type: "string"}, action: {type: "string", enum: ["modified", "created", "deleted"]}},
+          properties: {
+            path: {type: "string"},
+            action: {type: "string", enum: ["modified", "created", "deleted"]},
+          },
         },
       },
       tests_run: {
@@ -202,7 +218,11 @@ pub fn output_schema() {
               type: "object",
               required: ["section", "before", "after"],
               additionalProperties: false,
-              properties: {section: {type: "string"}, before: {type: "string"}, after: {type: "string"}},
+              properties: {
+                section: {type: "string"},
+                before: {type: "string"},
+                after: {type: "string"},
+              },
             },
           },
           blockers: {type: "array", items: {type: "string"}},

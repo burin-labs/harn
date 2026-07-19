@@ -70,7 +70,10 @@ pipeline test() {
     ],
   )
   const pinned = transcript.inject_reminder(base, pin_reminder(goal_pin)).transcript
-  const compacted = transcript_compact(pinned, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const compacted = transcript_compact(
+    pinned,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
   const survivors = transcript_events_by_kind(compacted, "system_reminder")
   assert(len(survivors) == 1, "pin reminder survived compaction")
   assert(survivors[0].reminder.body == goal_pin.content, "pinned content preserved verbatim")
@@ -81,7 +84,10 @@ pipeline test() {
   const transcript_value = gc_transcript()
   const opts = {min_chars: 100, policy: "reachability_gc", root_window: 1}
   const without_pin = transcript_project(transcript_value, opts)
-  const with_pin = transcript_project(transcript_value, with_pin_roots(opts, [pin("artifact_ref", "src/old.rs")]))
+  const with_pin = transcript_project(
+    transcript_value,
+    with_pin_roots(opts, [pin("artifact_ref", "src/old.rs")]),
+  )
   assert(
     without_pin.redacted_count > with_pin.redacted_count,
     "pin root keeps referenced stale result alive",

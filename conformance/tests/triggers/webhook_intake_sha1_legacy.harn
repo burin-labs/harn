@@ -24,7 +24,10 @@ pipeline test(task) {
   const wrong = webhook_intake_feed(
     "legacy-sha1",
     {
-      headers: {"x-hub-signature": "sha1=" + hmac_sha256("legacy-secret", body), "x-legacy-delivery": "legacy-2"},
+      headers: {
+        "x-hub-signature": "sha1=" + hmac_sha256("legacy-secret", body),
+        "x-legacy-delivery": "legacy-2",
+      },
       body: body,
     },
   )

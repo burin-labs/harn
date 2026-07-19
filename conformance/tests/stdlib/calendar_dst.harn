@@ -1,16 +1,32 @@
 import { local_datetime } from "std/calendar"
 
 pipeline default() {
-  const earlier = local_datetime({year: 2024, month: 11, day: 3, hour: 1, minute: 30}, "America/New_York", "earlier")
-  const later = local_datetime({year: 2024, month: 11, day: 3, hour: 1, minute: 30}, "America/New_York", "later")
+  const earlier = local_datetime(
+    {year: 2024, month: 11, day: 3, hour: 1, minute: 30},
+    "America/New_York",
+    "earlier",
+  )
+  const later = local_datetime(
+    {year: 2024, month: 11, day: 3, hour: 1, minute: 30},
+    "America/New_York",
+    "later",
+  )
   __io_println(date_to_zone(earlier, "UTC"))
   __io_println(date_to_zone(later, "UTC"))
   const rejected_overlap = try {
-    local_datetime({year: 2024, month: 11, day: 3, hour: 1, minute: 30}, "America/New_York", "reject")
+    local_datetime(
+      {year: 2024, month: 11, day: 3, hour: 1, minute: 30},
+      "America/New_York",
+      "reject",
+    )
   }
   __io_println(is_err(rejected_overlap))
   const rejected_gap = try {
-    local_datetime({year: 2024, month: 3, day: 10, hour: 2, minute: 30}, "America/New_York", "earlier")
+    local_datetime(
+      {year: 2024, month: 3, day: 10, hour: 2, minute: 30},
+      "America/New_York",
+      "earlier",
+    )
   }
   __io_println(is_err(rejected_gap))
 }

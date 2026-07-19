@@ -10,7 +10,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(task) {
   const session = agent_session_open("typed-host-injection-conformance")
-  const provenance: HostInjectionProvenance = {initiator: "user", source: "conformance", host: "test", ts_ms: 1782000000000}
+  const provenance: HostInjectionProvenance = {
+    initiator: "user",
+    source: "conformance",
+    host: "test",
+    ts_ms: 1782000000000,
+  }
   const tool_payload: HostToolResultPayload = {
     tool_name: "web_fetch",
     kind: "fetch",
@@ -31,9 +36,11 @@ pipeline main(task) {
   require len(snapshot.messages) == 2, "both typed injections enter the transcript"
   require snapshot.events[0].kind == "host_tool_result", "tool event is typed"
   require snapshot.events[0].metadata.sanitization.trust == "untrusted", "fetch is untrusted"
-  require snapshot.events[0].metadata.sanitization.labels.includes("instruction_keywords"), "security labels are recorded"
+  require snapshot.events[0].metadata.sanitization.labels.includes("instruction_keywords"),
+    "security labels are recorded"
   require snapshot.events[1].kind == "host_attachment", "attachment event is typed"
-  require snapshot.events[1].metadata.sanitization.action == "pointerized", "missing artifact resolves to pointer-only"
+  require snapshot.events[1].metadata.sanitization.action == "pointerized",
+    "missing artifact resolves to pointer-only"
   with_llm_script(
     [llm_text("terminal shows a failed build")],
     { ->

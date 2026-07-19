@@ -29,7 +29,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
     let tx_arc = Arc::new(tx);
     let tx_for_task = tx_arc.clone();
 
-    tokio::task::spawn_local(async move {
+    tokio::task::spawn_local(crate::orchestration::scope_inline_subtask(async move {
         if provider == "mock" {
             let words: Vec<&str> = prompt_text.split_whitespace().collect();
             for word in &words {
@@ -48,7 +48,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
                 .await;
         }
         close_for_task.close();
-    });
+    }));
 
     #[allow(clippy::arc_with_non_send_sync)]
     let handle = VmChannelHandle {
@@ -64,16 +64,18 @@ fn llm_stream_chunk(
     delta: &str,
     visible_delta: &str,
     partial: &str,
-    finish_reason: Option<&str>,
+    stop_reason: Option<&str>,
 ) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_str("delta", delta);
     dict.put_str("visible_delta", visible_delta);
     dict.put_str("partial", partial);
     dict.put_str("role", "assistant");
+    // Same spelling as the final `llm_call` envelope: `stop_reason`, never
+    // the OpenAI wire name `finish_reason`.
     dict.insert(
-        "finish_reason".to_string(),
-        finish_reason
+        "stop_reason".to_string(),
+        stop_reason
             .map(|reason| VmValue::String(arcstr::ArcStr::from(reason.to_string())))
             .unwrap_or(VmValue::Nil),
     );
@@ -114,13 +116,14 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
     let mut cancel_rx = cancel.subscribe();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
 
-    tokio::task::spawn_local(async move {
+    tokio::task::spawn_local(crate::orchestration::scope_inline_subtask(async move {
         let mut visible = crate::visible_text::VisibleTextState::default();
         let mut partial = String::new();
         let mut deltas_open = true;
-        let mut llm_task = tokio::task::spawn_local(async move {
-            api::vm_call_llm_full_streaming(&opts, delta_tx).await
-        });
+        let mut llm_task =
+            tokio::task::spawn_local(crate::orchestration::scope_inline_subtask(async move {
+                api::vm_call_llm_full_streaming(&opts, delta_tx).await
+            }));
 
         loop {
             tokio::select! {
@@ -180,7 +183,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                 }
             }
         }
-    });
+    }));
 
     Ok(VmValue::stream(VmStream {
         done: Arc::new(AtomicBool::new(false)),

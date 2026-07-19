@@ -159,7 +159,11 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "required columns", safe_list(data["required_columns"]))
   print_list(harness, "data validation", safe_list(data["validation"]))
   print_list(harness, "corpus refresh", safe_list(corpus_refresh["generation_notes"]))
-  print_list(harness, "provenance manifest", safe_list(corpus_refresh["provenance_manifest_fields"]))
+  print_list(
+    harness,
+    "provenance manifest",
+    safe_list(corpus_refresh["provenance_manifest_fields"]),
+  )
   print_list(harness, "hard negatives", safe_list(corpus_refresh["hard_negative_slices"]))
   print_list(harness, "corpus gates", safe_list(corpus_refresh["acceptance_gates"]))
   const model_aware = safe_dict(corpus_refresh["model_aware_selection"])

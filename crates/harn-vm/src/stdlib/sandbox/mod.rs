@@ -47,6 +47,11 @@ use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
+use paths::{
+    is_standard_io_device_for_access, normalize_for_policy, normalize_io_device_path,
+    path_is_within,
+};
+
 #[cfg(target_os = "linux")]
 mod linux;
 mod locked_append;
@@ -54,6 +59,7 @@ mod locked_append;
 mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
+mod paths;
 mod policy;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -1919,6 +1925,19 @@ fn sandbox_denial_error(summary: String, detail: &str, policy: &CapabilityPolicy
             category: ErrorCategory::Environment,
         };
     }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(path) = toolchain_cache_default_named_in_denial(policy, detail) {
+        return VmError::CategorizedError {
+            message: format!(
+                "{summary}; the sandbox denied writing '{}', a well-known developer-toolchain \
+                 cache outside the active profile — a host environment/config gap, not the \
+                 agent's code defect. Enable the DeveloperToolchains preset, grant it with \
+                 process_sandbox.write_roots, or relocate the cache into the workspace",
+                path.display()
+            ),
+            category: ErrorCategory::Environment,
+        };
+    }
     sandbox_rejection(sandbox_process_violation_message(summary))
 }
 
@@ -1988,6 +2007,30 @@ fn toolchain_cache_gap_named_in_denial(
     _detail: &str,
 ) -> Option<(String, PathBuf)> {
     None
+}
+
+/// Fallback for toolchain caches that use their DEFAULT location (no env var
+/// set), which [`toolchain_cache_gap_named_in_denial`] cannot see. If the denial
+/// evidence names a well-known cache-write default (`~/Library/Caches/go-build`,
+/// `~/.cargo/registry`, …) that is NOT inside the active jail — i.e. the
+/// `DeveloperToolchains` preset is off or does not reach this policy — return the
+/// path so the caller reclassifies to [`ErrorCategory::Environment`] instead of a
+/// bare `ToolRejected`. When the preset IS active the cache is a jail root, so
+/// the guard suppresses this and a genuine policy refusal stays `ToolRejected`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn toolchain_cache_default_named_in_denial(
+    policy: &CapabilityPolicy,
+    detail: &str,
+) -> Option<PathBuf> {
+    let home = sandbox_user_home_dir()?;
+    let detail = detail.to_ascii_lowercase();
+    let jail = coverage_jail_roots(policy);
+    developer_toolchain_cache_write_roots_for_home(&home)
+        .into_iter()
+        .find(|root| {
+            detail.contains(&root.to_string_lossy().to_ascii_lowercase())
+                && !jail.iter().any(|jail_root| path_is_within(root, jail_root))
+        })
 }
 
 /// Helper for backends that can't attach confinement at all (macOS
@@ -2102,7 +2145,7 @@ fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     policy
         .workspace_roots
         .iter()
-        .map(|root| normalize_for_policy(&resolve_policy_path(root)))
+        .map(|root| render_policy_root(root))
         .collect()
 }
 
@@ -2316,6 +2359,14 @@ pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec
         "Library/Caches/go-build", // Go build cache (GOCACHE, macOS default)
         ".cache/go-build",         // Go build cache (GOCACHE, Linux default)
         "go/pkg/mod",              // Go module cache (GOMODCACHE default)
+        // Go env config (GOENV). `go` rewrites `go/env` on first use (e.g. to
+        // record GOTOOLCHAIN); when its parent is not writable the toolchain
+        // fails with `writing go env config: ... operation not permitted`. The
+        // macOS default is `~/Library/Application Support/go/env`
+        // (`os.UserConfigDir()/go`). The Linux default `~/.config/go/env` sits
+        // under the read-only `.config` package-manager root, so granting it
+        // needs a nested carve-out and is tracked separately.
+        "Library/Application Support/go", // Go env config dir (GOENV, macOS default)
         // Cargo registry + git caches. `cargo fetch`/`cargo build` unpack crate
         // sources into `registry/src`, download tarballs into `registry/cache`,
         // refresh the index under `registry/index`, and check out git deps under
@@ -2393,101 +2444,13 @@ fn resolve_policy_path(path: &str) -> PathBuf {
     }
 }
 
-fn normalize_for_policy(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    let absolute = normalize_lexically(&absolute);
-    if let Ok(canonical) = absolute.canonicalize() {
-        return canonical;
-    }
-
-    let mut existing = absolute.as_path();
-    let mut suffix = Vec::new();
-    while !existing.exists() {
-        let Some(parent) = existing.parent() else {
-            return normalize_lexically(&absolute);
-        };
-        if let Some(name) = existing.file_name() {
-            suffix.push(name.to_os_string());
-        }
-        existing = parent;
-    }
-
-    let mut normalized = existing
-        .canonicalize()
-        .unwrap_or_else(|_| normalize_lexically(existing));
-    for component in suffix.iter().rev() {
-        normalized.push(component);
-    }
-    normalize_lexically(&normalized)
-}
-
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            other => normalized.push(other.as_os_str()),
-        }
-    }
-    normalized
-}
-
-fn path_is_within(path: &Path, root: &Path) -> bool {
-    path == root || path.starts_with(root)
-}
-
-/// Resolve `path` to an absolute, lexically-normalized form for the standard
-/// I/O device check. Unlike [`normalize_for_policy`] this never calls
-/// `canonicalize`, which on macOS rewrites `/dev/stdout` to a per-process
-/// `/dev/fd/<…>.output` alias that no longer matches a known device file.
-fn normalize_io_device_path(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        crate::stdlib::process::execution_root_path().join(path)
-    };
-    normalize_lexically(&absolute)
-}
-
-/// Whether `path` is one of the standard process I/O device files that the
-/// sandbox treats as a stream rather than a workspace mutation for this access:
-/// stdin is read-only, stdout/stderr/null are read/write, and delete is never a
-/// stream operation. `path` must already be absolute and lexically normalized.
-fn is_standard_io_device_for_access(path: &Path, access: FsAccess) -> bool {
-    match access {
-        FsAccess::Read => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdin" | "/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
-        FsAccess::Write => {
-            matches!(
-                path.to_str(),
-                Some("/dev/stdout" | "/dev/stderr" | "/dev/null")
-            ) || is_dev_fd_descriptor(path)
-        }
-        FsAccess::Delete => false,
-    }
-}
-
-/// Whether `path` is exactly `/dev/fd/<N>` for a non-empty run of ASCII
-/// digits (the numeric file-descriptor aliases for the standard streams).
-fn is_dev_fd_descriptor(path: &Path) -> bool {
-    let Some(text) = path.to_str() else {
-        return false;
-    };
-    let Some(fd) = text.strip_prefix("/dev/fd/") else {
-        return false;
-    };
-    !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit())
+/// Render one configured policy-root string to the exact path the sandbox jails
+/// to — the single transform [`base_workspace_roots`] applies, exposed via
+/// `crate::process_sandbox` so host disclosure and provenance surfaces report
+/// the enforced jail path, not a pre-canonical approximation. Canonicalization
+/// is best-effort for nonexistent paths (lexical fallback) and never panics.
+pub fn render_policy_root(path: &str) -> PathBuf {
+    normalize_for_policy(&resolve_policy_path(path))
 }
 
 #[cfg(any(

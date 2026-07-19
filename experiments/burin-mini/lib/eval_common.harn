@@ -221,7 +221,8 @@ fn batch_output_lines(run) {
   for artifact in run?.artifacts ?? [] {
     const source = artifact?.source ?? ""
     const cleaned = strip_done_sentinel(artifact?.text ?? "")
-    if (artifact?.kind == "artifact" || artifact?.kind == "summary") && starts_with(source, "batch_")
+    if (artifact?.kind == "artifact" || artifact?.kind == "summary")
+      && starts_with(source, "batch_")
       && cleaned != "" {
       lines = lines + ["- ${source}: ${cleaned}"]
     }
@@ -274,8 +275,16 @@ pub fn render_inference_transcripts(task_root) {
   }
   return join(
     [
-      render_file_bundle(harness, path_join(task_root, "llm"), "Top-level and provider transcripts"),
-      render_file_bundle(harness, path_join(task_root, "events"), "Event logs and forked session traces"),
+      render_file_bundle(
+        harness,
+        path_join(task_root, "llm"),
+        "Top-level and provider transcripts",
+      ),
+      render_file_bundle(
+        harness,
+        path_join(task_root, "events"),
+        "Event logs and forked session traces",
+      ),
     ],
     "\n\n",
   )
@@ -331,10 +340,16 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   const signal_text = reference_signal_text(report, run)
   let architecture_issues = []
   if !text_contains_all(signal_text, reference?.required_strings ?? []) {
-    architecture_issues = architecture_issues + ["Run artifacts did not clearly preserve the key reference identifiers."]
+    architecture_issues = architecture_issues
+      + [
+      "Run artifacts did not clearly preserve the key reference identifiers.",
+    ]
   }
   if !text_contains_all(signal_text, reference?.expected_paths ?? []) {
-    architecture_issues = architecture_issues + ["Run artifacts did not clearly preserve the expected workspace paths."]
+    architecture_issues = architecture_issues
+      + [
+      "Run artifacts did not clearly preserve the expected workspace paths.",
+    ]
   }
   const completion_score = if len(gating_failures) == 0 {
     10
@@ -344,7 +359,9 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   const convergence_score = clamp_score(10 - len(churn) * 2 - len(failed) * 4)
   const tool_discipline_score = clamp_score(10 - len(churn) * 2)
   const architecture_score = clamp_score(10 - len(architecture_issues) * 3)
-  const overall_score = clamp_score((completion_score + convergence_score + tool_discipline_score + architecture_score) / 4)
+  const overall_score = clamp_score(
+    (completion_score + convergence_score + tool_discipline_score + architecture_score) / 4,
+  )
   let strengths = []
   if len(failed) == 0 {
     strengths = strengths + ["No workflow stages failed."]
@@ -353,9 +370,14 @@ pub fn heuristic_semantic_eval(report, run, reference) {
     strengths = strengths + ["No stage exceeded the reference iteration budget."]
   }
   if text_contains_all(signal_text, reference?.required_strings ?? [])
-    && text_contains_all(signal_text, reference?.expected_paths ?? []) {
+    && text_contains_all(
+    signal_text,
+    reference?.expected_paths ?? [],
+  ) {
     strengths = strengths
-      + ["The run artifacts preserve the expected identifiers, paths, and architecture cues."]
+      + [
+      "The run artifacts preserve the expected identifiers, paths, and architecture cues.",
+    ]
   }
   let weaknesses = []
   for item in gating_failures {
@@ -370,7 +392,9 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   let fixes = []
   if len(churn) > 0 {
     fixes = fixes
-      + ["Tighten the stage prompt or stop condition so repeated non-progress turns end earlier."]
+      + [
+      "Tighten the stage prompt or stop condition so repeated non-progress turns end earlier.",
+    ]
   }
   if len(failed) > 0 {
     fixes = fixes + ["Address the failing workflow stage before trusting semantic scores."]

@@ -485,7 +485,14 @@ pub fn fleet_finding(scope, room, premise, options = nil) {
     fleet_finding_schema(),
     "finding",
   )
-  return __fleet_post(scope, room, "finding", opts?.subject ?? ("Premise " + normalized), data, opts)
+  return __fleet_post(
+    scope,
+    room,
+    "finding",
+    opts?.subject ?? ("Premise " + normalized),
+    data,
+    opts,
+  )
 }
 
 /**
@@ -502,14 +509,25 @@ pub fn fleet_heartbeat(scope, room, state = "busy", options = nil) {
       schema: __FLEET_HEARTBEAT_SCHEMA,
       state: lowercase(trim(state)),
       lease_ms: __fleet_nonnegative_int(opts?.lease_ms, __FLEET_DEFAULT_LEASE_MS, "lease_ms"),
-      expected_silence_ms: __fleet_nonnegative_int(opts?.expected_silence_ms, 0, "expected_silence_ms"),
+      expected_silence_ms: __fleet_nonnegative_int(
+        opts?.expected_silence_ms,
+        0,
+        "expected_silence_ms",
+      ),
       current_claim_ids: __fleet_list(opts?.current_claim_ids),
       resource_ids: __fleet_list(opts?.resource_ids),
     },
     fleet_heartbeat_schema(),
     "heartbeat",
   )
-  return __fleet_post(scope, room, "heartbeat", opts?.subject ?? ("Heartbeat " + data.state), data, opts)
+  return __fleet_post(
+    scope,
+    room,
+    "heartbeat",
+    opts?.subject ?? ("Heartbeat " + data.state),
+    data,
+    opts,
+  )
 }
 
 /**
@@ -610,9 +628,13 @@ fn __fleet_claim_state(claim, ack, done, heartbeat, now_ms) {
   } else {
     0
   }
-  if heartbeat != nil && __fleet_contains(heartbeat.message.data.current_claim_ids, claim.message.id) {
+  if heartbeat != nil
+    && __fleet_contains(heartbeat.message.data.current_claim_ids, claim.message.id) {
     const heartbeat_expiry = heartbeat.at_ms
-      + max(heartbeat.message.data.lease_ms, heartbeat.message.data.expected_silence_ms)
+      + max(
+      heartbeat.message.data.lease_ms,
+      heartbeat.message.data.expected_silence_ms,
+    )
     if heartbeat_expiry > expires_at_ms {
       expires_at_ms = heartbeat_expiry
     }
@@ -680,7 +702,11 @@ pub fn fleet_project(messages, options = nil) {
     actors[actor_id] = filter_nil({actor_id: actor_id, actor: message.from})
     if !__fleet_known_data(message) {
       unknown_messages = unknown_messages
-        + [filter_nil({id: message?.id, kind: message?.kind, subject: message?.subject, actor_id: actor_id})]
+        + [
+        filter_nil(
+          {id: message?.id, kind: message?.kind, subject: message?.subject, actor_id: actor_id},
+        ),
+      ]
     } else if message.kind == "claim" {
       claims[message.id] = row + {actor_id: actor_id}
     } else if message.kind == "ack" {

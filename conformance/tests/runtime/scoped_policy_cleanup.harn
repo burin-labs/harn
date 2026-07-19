@@ -16,7 +16,10 @@ fn scoped_tools() {
 pipeline main() {
   const tools = scoped_tools()
   const call = {name: "write_note", arguments: {path: "notes.txt"}}
-  const denied = with_approval_policy({auto_deny: ["write*"]}, fn() { return agent_dispatch_tool_call(call, tools) })
+  const denied = with_approval_policy(
+    {auto_deny: ["write*"]},
+    fn() { return agent_dispatch_tool_call(call, tools) },
+  )
   __io_println(denied.ok)
   __io_println(denied.error_category)
   try {

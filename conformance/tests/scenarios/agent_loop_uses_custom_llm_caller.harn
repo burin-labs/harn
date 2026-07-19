@@ -9,17 +9,19 @@ import { with_fallback } from "std/llm/handlers"
 
 pipeline default() {
   const caller_a = { _call -> return {ok: false, status: "auth", error: "bad-key"} }
-  const caller_b = { _call -> return {
-    ok: true,
-    value: {
-      text: "FROM-B",
-      model: "mock",
-      provider: "mock",
-      input_tokens: 0,
-      output_tokens: 0,
-      usage: {input_tokens: 0, output_tokens: 0},
-    },
-  } }
+  const caller_b = { _call ->
+    return {
+      ok: true,
+      value: {
+        text: "FROM-B",
+        model: "mock",
+        provider: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
   // Wrap the fallback in an outer caller so we can println the merged
   // fallback_index for the test before returning to agent_loop.
   const inner = with_fallback([caller_a, caller_b])

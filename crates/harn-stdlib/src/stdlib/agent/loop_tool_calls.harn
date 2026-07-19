@@ -1,0 +1,968 @@
+import "std/agent/loop_call_resolution"
+import "std/agent/loop_foundation"
+import "std/agent/loop_result_status"
+import "std/agent/loop_support"
+
+// Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
+//
+// Each tool dispatch is funneled through `tool_caller(envelope, next)` when
+// the agent_loop options carry one. The envelope normalizes the call shape
+// so middleware doesn't have to peek at the underlying registry/schema:
+//
+//   envelope = {
+//     tool_name, tool_args, call_id,
+//     declared_executor?, schema?, description?,
+//     turn: {iteration, session_id},
+//   }
+//
+// The middleware returns a dispatch-shape dict. Calling `next(envelope)`
+// runs the default dispatch (with any envelope mutations the middleware
+// applied — typically `tool_args` rewrites or argument stripping). Callers
+// can short-circuit by returning their own dict without invoking `next`.
+//
+// See std/llm/tool_middleware for the userspace primitives + the bundled
+// middleware library (with_required_reason, with_audit_log, …).
+
+// -------------------------------------------------------------------------------------------------
+
+pub fn __tool_registry_entry(tools, tool_name) {
+  if tools == nil {
+    return nil
+  }
+  const entries = tools?.tools
+  if type_of(entries) != "list" {
+    return nil
+  }
+  for entry in entries {
+    if type_of(entry) != "dict" {
+      continue
+    }
+    const entry_name = if entry?.name != nil {
+      to_string(entry.name)
+    } else {
+      const func = entry?.function
+      if type_of(func) == "dict" {
+        to_string(func?.name ?? "")
+      } else {
+        ""
+      }
+    }
+    if entry_name == tool_name {
+      return entry
+    }
+  }
+  return nil
+}
+
+pub fn __tool_resource_annotations(entry, policy, tool_name) {
+  return agent_tool_annotations(entry, policy, tool_name)
+}
+
+pub fn __tool_envelope(call, tools, options) {
+  const tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  const tool_args_raw = call?.arguments ?? call?.tool_args
+  const tool_args = if type_of(tool_args_raw) == "dict" {
+    tool_args_raw
+  } else {
+    {}
+  }
+  const raw_call_id = to_string(call?.id ?? call?.tool_call_id ?? "")
+  const call_id = if raw_call_id == "" {
+    "tool_call_" + uuid()
+  } else {
+    raw_call_id
+  }
+  const entry = __tool_registry_entry(tools, tool_name)
+  const declared_executor = if entry == nil {
+    nil
+  } else {
+    const direct = entry?.executor
+    if direct != nil {
+      to_string(direct)
+    } else {
+      const func = entry?.function
+      if type_of(func) == "dict" && func?.executor != nil {
+        to_string(func.executor)
+      } else {
+        nil
+      }
+    }
+  }
+  const schema = if entry == nil {
+    nil
+  } else {
+    entry?.parameters ?? entry?.input_schema ?? entry?.inputSchema
+  }
+  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  const description = if entry == nil {
+    ""
+  } else {
+    const direct = entry?.description
+    if direct != nil {
+      to_string(direct)
+    } else {
+      const func = entry?.function
+      if type_of(func) == "dict" && func?.description != nil {
+        to_string(func.description)
+      } else {
+        ""
+      }
+    }
+  }
+  return {
+    tool_name: tool_name,
+    tool_args: tool_args,
+    call_id: call_id,
+    declared_executor: declared_executor,
+    schema: schema,
+    annotations: annotations,
+    description: description,
+    turn: {
+      iteration: options?._iteration ?? 0,
+      session_id: to_string(options?.session_id ?? ""),
+      run_id: options?.run_id ?? options?._run_id,
+      model: options?.model,
+      provider: options?.provider,
+      tool_call_index: options?._tool_call_index ?? 0,
+      max_concurrent_tools: options?._max_concurrent_tools ?? 1,
+      prefetch_next_turn: options?._prefetch_next_turn ?? false,
+    },
+  }
+}
+
+pub fn __default_invoke_tool(envelope, original_call, tools, options) {
+  const next_call = original_call
+    + {
+    id: envelope.call_id,
+    tool_call_id: envelope.call_id,
+    name: envelope.tool_name,
+    tool_name: envelope.tool_name,
+    arguments: envelope.tool_args,
+  }
+  return agent_dispatch_tool_call(next_call, tools, options)
+}
+
+pub fn __validate_tool_caller_result(r) {
+  if type_of(r) != "dict" {
+    throw "agent_loop: tool_caller must return a dict; got " + type_of(r)
+  }
+  const name = r?.tool_name ?? r?.name
+  if name == nil || to_string(name) == "" {
+    throw "agent_loop: tool_caller result missing `tool_name`"
+  }
+  const ok = r?.ok
+  if ok == nil {
+    const success = r?.success
+    if success == nil {
+      const status = r?.status
+      if status == nil {
+        throw "agent_loop: tool_caller result missing `ok`/`success`/`status`"
+      }
+    }
+  } else if type_of(ok) != "bool" {
+    throw "agent_loop: tool_caller result `ok` must be a bool; got " + type_of(ok)
+  }
+}
+
+pub fn __middleware_exception_result(envelope, err) {
+  const err_text = to_string(err)
+  const observation = "[error from " + envelope.tool_name + "]\n" + err_text
+    + "\n[end of "
+    + envelope.tool_name
+    + " error]\n"
+  return {
+    ok: false,
+    status: "error",
+    tool_name: envelope.tool_name,
+    tool_call_id: envelope.call_id,
+    arguments: envelope.tool_args,
+    result: nil,
+    rendered_result: err_text,
+    observation: observation,
+    error: err_text,
+    error_category: "tool_middleware_exception",
+    executor: nil,
+  }
+}
+
+pub fn __structural_validator_tool_name() -> string {
+  return "__structural_validator_turn__"
+}
+
+pub fn __structural_validator_pass_result(envelope) {
+  return {
+    ok: true,
+    status: "ok",
+    tool_name: envelope.tool_name,
+    tool_call_id: envelope.call_id,
+    arguments: envelope.tool_args,
+    result: {configured: false, vetoed: false, skipped: true, reason: "not_configured"},
+    rendered_result: "",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  }
+}
+
+pub fn __run_structural_validator(
+  caller,
+  session_id,
+  llm_result,
+  tool_calls,
+  parsed,
+  llm_opts,
+  turn_opts,
+  prior_successful_tools,
+  prior_rejected_tools,
+  attempts,
+) {
+  if caller == nil {
+    return {configured: false, vetoed: false, skipped: true, reason: "not_configured"}
+  }
+  const envelope = {
+    tool_name: __structural_validator_tool_name(),
+    tool_args: {
+      session_id: session_id,
+      iteration: turn_opts?._iteration ?? 0,
+      attempts: attempts,
+      tool_calls: tool_calls,
+      tools: turn_opts?.tools,
+      policy: turn_opts?.policy,
+      assistant_text: llm_result?.visible_text ?? llm_result?.text ?? "",
+      raw_text: llm_result?.raw_text ?? llm_result?.text ?? "",
+      parsed_done_marker: parsed?.done_marker ?? "",
+      tool_parse_errors: parsed?.tool_parse_errors ?? [],
+      protocol_violations: parsed?.protocol_violations ?? [],
+      tool_format: turn_opts?.tool_format ?? llm_opts?.tool_format ?? "",
+      output_tokens: llm_result?.usage?.output_tokens ?? 0,
+      max_output_tokens: llm_opts?.max_tokens ?? turn_opts?.max_tokens ?? 0,
+      provider: llm_result?.provider ?? "",
+      model: llm_result?.model ?? "",
+      prior_successful_tools: prior_successful_tools,
+      prior_rejected_tools: prior_rejected_tools,
+    },
+    call_id: "structural-validator-turn-" + to_string(turn_opts?._iteration ?? 0),
+    declared_executor: "harn",
+    schema: nil,
+    annotations: nil,
+    description: "Internal structural validator probe",
+    turn: {
+      iteration: turn_opts?._iteration ?? 0,
+      session_id: session_id,
+      run_id: turn_opts?.run_id ?? turn_opts?._run_id,
+      model: turn_opts?.model,
+      provider: turn_opts?.provider,
+      tool_call_index: 0,
+      max_concurrent_tools: 1,
+      prefetch_next_turn: false,
+    },
+  }
+  const next = { env_in -> __structural_validator_pass_result(env_in) }
+  const outcome = try {
+    caller(envelope, next)
+  }
+  if is_err(outcome) {
+    const err = unwrap_err(outcome)
+    if error_category(err) == "cancelled" {
+      throw err
+    }
+    throw "agent_loop: structural validator failed: " + to_string(err)
+  }
+  const result = unwrap(outcome)
+  if type_of(result) != "dict" {
+    throw "agent_loop: structural validator must return a dict; got " + type_of(result)
+  }
+  return if type_of(result?.result) == "dict" {
+    result.result
+  } else {
+    {}
+  }
+}
+
+pub fn __tool_lifecycle_session_id(envelope) -> string {
+  return to_string(envelope?.turn?.session_id ?? "")
+}
+
+pub fn __emit_tool_lifecycle_start(envelope) {
+  const session_id = __tool_lifecycle_session_id(envelope)
+  if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
+    return
+  }
+  let _ = agent_emit_event(
+    session_id,
+    "tool_call",
+    {
+      tool_call_id: envelope.call_id,
+      tool_name: envelope.tool_name,
+      status: "pending",
+      raw_input: envelope.tool_args,
+    },
+  )
+  let _ = agent_emit_event(
+    session_id,
+    "tool_call_update",
+    {
+      tool_call_id: envelope.call_id,
+      tool_name: envelope.tool_name,
+      status: "in_progress",
+      mutation_status: "unknown",
+      raw_input: envelope.tool_args,
+    },
+  )
+}
+
+pub fn __tool_terminal_status(result) -> string {
+  if __tool_result_product_error(result) {
+    return "failed"
+  }
+  if result?.ok || result?.success {
+    return "completed"
+  }
+  const status = to_string(result?.status ?? "")
+  if status == "ok" || status == "success" {
+    return "completed"
+  }
+  return "failed"
+}
+
+pub fn __emit_tool_lifecycle_finish(envelope, result) {
+  const session_id = __tool_lifecycle_session_id(envelope)
+  if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
+    return
+  }
+  const result_tool_call_id = to_string(result?.tool_call_id ?? "")
+  const tool_call_id = if result_tool_call_id != "" {
+    result_tool_call_id
+  } else {
+    envelope.call_id
+  }
+  const tool_name = to_string(result?.tool_name ?? result?.name ?? envelope.tool_name)
+  const raw_output = if result?.result != nil {
+    result.result
+  } else {
+    result?.rendered_result ?? result?.output ?? result
+  }
+  let payload = {
+    tool_call_id: tool_call_id,
+    tool_name: tool_name,
+    status: __tool_terminal_status(result),
+    raw_output: raw_output,
+    mutation_status: agent_tool_mutation_status(result?.mutation_status),
+  }
+  if result?.error != nil {
+    payload = payload + {error: result.error}
+  }
+  const duration_ms = result?.duration_ms ?? result?.execution_duration_ms
+  if duration_ms != nil {
+    payload = payload + {duration_ms: duration_ms}
+  }
+  if result?.execution_duration_ms != nil {
+    payload = payload + {execution_duration_ms: result.execution_duration_ms}
+  }
+  const error_category = agent_tool_lifecycle_error_category(result?.error_category)
+  if error_category != nil {
+    payload = payload + {error_category: error_category}
+  }
+  if result?.executor != nil {
+    payload = payload + {executor: result.executor}
+  }
+  if result?.changed_paths != nil {
+    payload = payload + {changed_paths: result.changed_paths}
+  }
+  let _ = agent_emit_event(session_id, "tool_call_update", payload)
+}
+
+pub fn __emit_synthetic_tool_lifecycle_finish(call, result, tools, options) {
+  const envelope = __tool_envelope(call, tools, options)
+  __emit_tool_lifecycle_finish(envelope, result)
+}
+
+/**
+ * Errors that must propagate out of the loop instead of being folded into a
+ * tool observation and marched past to a `done`/`stuck` status:
+ *   - `cancelled`: cooperative shutdown; the caller is tearing the run down.
+ *   - `internal`:  an engine/wiring bug (e.g. an undefined builtin, corrupt
+ *                  bytecode). No retry or model reasoning fixes it, and
+ *                  swallowing it as a tool error is exactly how a mis-wired
+ *                  builtin ships silently inert.
+ * Every tool/classifier catch site re-raises through this predicate so the
+ * outer `agent_loop` wrapper surfaces the fault loudly.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_error_must_propagate(err) -> bool {
+  const category = error_category(err)
+  return category == "cancelled" || category == "internal"
+}
+
+pub fn __invoke_tool(call, tools, options) {
+  const caller = options?._tool_caller
+  const envelope = __tool_envelope(call, tools, options)
+  __emit_tool_lifecycle_start(envelope)
+  if caller == nil {
+    const direct = agent_dispatch_tool_call(
+      call + {id: envelope.call_id, tool_call_id: envelope.call_id},
+      tools,
+      options,
+    )
+    __emit_tool_lifecycle_finish(envelope, direct)
+    return direct
+  }
+  const next = { env_in -> __default_invoke_tool(env_in, call, tools, options) }
+  const outcome = try {
+    caller(envelope, next)
+  }
+  if is_err(outcome) {
+    const err = unwrap_err(outcome)
+    if __agent_error_must_propagate(err) {
+      throw err
+    }
+    __maybe_emit_tool_audit(
+      envelope.turn.session_id,
+      envelope,
+      {layer: "tool_caller", status: "exception", error: to_string(err)},
+    )
+    const result = __middleware_exception_result(envelope, err)
+    __emit_tool_lifecycle_finish(envelope, result)
+    return result
+  }
+  const r = unwrap(outcome)
+  __validate_tool_caller_result(r)
+  __maybe_emit_tool_audit(envelope.turn.session_id, envelope, r?.audit, r?.receipt)
+  __emit_tool_lifecycle_finish(envelope, r)
+  return r
+}
+
+pub fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
+  if audit == nil && receipt == nil {
+    return
+  }
+  if session_id == "" {
+    return
+  }
+  const payload = if receipt == nil {
+    {tool_call_id: envelope.call_id, tool_name: envelope.tool_name, audit: audit}
+  } else {
+    {
+      tool_call_id: envelope.call_id,
+      tool_name: envelope.tool_name,
+      audit: audit ?? {},
+      receipt: receipt,
+    }
+  }
+  let _ = try {
+    agent_emit_event(session_id, "tool_call_audit", payload)
+  }
+}
+
+pub fn __visible_text(parsed, raw_text) {
+  let text = raw_text
+  if parsed?.user_response != nil && parsed.user_response != "" {
+    text = parsed.user_response
+  } else if parsed?.prose != nil && parsed.prose != "" {
+    text = parsed.prose
+  }
+  return __strip_internal_verdict_json(text)
+}
+
+pub fn __internal_verdict_object(value) -> bool {
+  if type_of(value) != "dict" {
+    return false
+  }
+  const verdict = lowercase(trim(to_string(value?.verdict ?? "")))
+  if verdict == "" {
+    return false
+  }
+  const completion = contains(["done", "continue"], verdict)
+    && __dict_has_any(
+    value,
+    ["reasoning", "reason", "next_step", "nextStep"],
+  )
+  const judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
+    && __dict_has_any(
+    value,
+    ["critique", "confidence", "category", "error"],
+  )
+  if !(completion || judged) {
+    return false
+  }
+  const allowed = [
+    "verdict",
+    "reasoning",
+    "reason",
+    "next_step",
+    "nextStep",
+    "critique",
+    "confidence",
+    "category",
+    "error",
+  ]
+  for key in value.keys() {
+    if !contains(allowed, key) {
+      return false
+    }
+  }
+  return true
+}
+
+pub fn __dict_has_any(value, keys) -> bool {
+  for key in keys {
+    if value[key] != nil {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn __internal_verdict_json(text) -> bool {
+  const parsed = try {
+    json_parse(trim(to_string(text ?? "")))
+  }
+  if is_err(parsed) {
+    return false
+  }
+  return __internal_verdict_object(unwrap(parsed))
+}
+
+pub fn __strip_internal_verdict_json(text) {
+  const raw = to_string(text ?? "")
+  if __internal_verdict_json(raw) {
+    return ""
+  }
+  const trimmed = trim(raw)
+  let start = trimmed.last_index_of("{")
+  if start < 0 {
+    return raw
+  }
+  const suffix = trimmed[start:len(trimmed)]
+  if !__internal_verdict_json(suffix) {
+    return raw
+  }
+  return trim(trimmed[0:start])
+}
+
+pub fn __agent_await_resumption_call(tool_calls) {
+  for call in tool_calls {
+    if __tool_call_name(call) == "agent_await_resumption" {
+      return call
+    }
+  }
+  return nil
+}
+
+pub fn __agent_await_resumption_args(call) {
+  const args = __tool_call_args(call)
+  return agent_await_resumption(args?.reason ?? "", args?.conditions, args?.resume_by)
+}
+
+/**
+ * Close out the persisted tool_use turn before suspension. The awaiting call
+ * gets an `awaiting_resumption` placeholder tool_result and any parallel
+ * siblings are recorded as `skipped` — default resume keeps the transcript,
+ * and Anthropic rejects any assistant tool_use with no adjacent tool_result
+ * (HTTP 400 on the first post-resume LLM call).
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_record_await_tool_results(session, await_call, tool_calls, reason) {
+  const await_reason = if type_of(reason) == "string" && reason != "" {
+    "agent suspended awaiting resumption: " + reason
+  } else {
+    "agent suspended awaiting resumption"
+  }
+  agent_session_record_undispatched_tool_results(
+    session.session_id,
+    [await_call],
+    "awaiting_resumption",
+    await_reason,
+  )
+  const await_id = to_string(await_call?.id ?? await_call?.tool_call_id ?? "")
+  let siblings = []
+  for call in tool_calls ?? [] {
+    if to_string(call?.id ?? call?.tool_call_id ?? "") != await_id {
+      siblings = siblings.push(call)
+    }
+  }
+  agent_session_record_undispatched_tool_results(
+    session.session_id,
+    siblings,
+    "skipped",
+    "not dispatched: the agent suspended (agent_await_resumption) before this call ran",
+  )
+}
+
+pub fn __agent_loop_await_resumption(session, iteration, call, parsed, opts) {
+  const worker = __agent_loop_current_worker()
+  if worker == nil {
+    return __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opts)
+  }
+  agent_emit_event(
+    session.session_id,
+    "tool_call_audit",
+    {
+      tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+      tool_name: "agent_await_resumption",
+      audit: {
+        layer: "agent_lifecycle",
+        status: "suspended",
+        initiator: "self",
+        reason: parsed.reason,
+        worker_id: worker?.id,
+        conditions: parsed.conditions,
+      },
+    },
+  )
+  suspend_agent(worker, parsed.reason, {initiator: "self", conditions: parsed.conditions})
+  let checkpoint = __agent_loop_suspend_checkpoint(session, iteration)
+  if checkpoint == nil {
+    throw "agent_await_resumption: suspend checkpoint did not yield"
+  }
+  return checkpoint
+}
+
+pub fn __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opts) {
+  agent_session_inject(
+    session.session_id,
+    transcript_reminder_event(
+      {
+        body: __agent_loop_suspend_reminder_body(parsed.reason),
+        source: "in_pipeline",
+        tags: ["agent_loop", "top_level_suspend"],
+        dedupe_key: "top_level_suspend:" + session.session_id,
+        ttl_turns: 1,
+        fired_at_turn: iteration + 1,
+      },
+    ),
+  )
+  const handle = __host_top_level_agent_suspend(
+    session.session_id,
+    session.task,
+    session.system,
+    opts,
+    parsed.reason,
+    parsed.conditions,
+    iteration,
+  )
+  agent_emit_event(
+    session.session_id,
+    "tool_call_audit",
+    {
+      tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+      tool_name: "agent_await_resumption",
+      audit: {
+        layer: "agent_lifecycle",
+        status: "suspended",
+        initiator: "self",
+        reason: parsed.reason,
+        worker_id: handle?.id,
+        conditions: parsed.conditions,
+      },
+    },
+  )
+  return {
+    status: "suspended",
+    handle: handle,
+    worker: handle,
+    reason: parsed.reason,
+    initiator: "self",
+    conditions: parsed.conditions,
+    resume_by: parsed?.resume_by,
+    iterations_completed: iteration,
+    session_id: session.session_id,
+  }
+}
+
+pub fn __agent_loop_invalid_await_resumption_feedback(error) {
+  return "Invalid agent_await_resumption call: "
+    + to_string(error)
+    + "\n\nThis lifecycle tool is only for parking until external input or a valid resume condition. "
+    + "For ordinary work, continue with the available project tools or finish normally. "
+    + "If you do need a resume condition, `conditions.trigger` must be an object trigger spec; "
+    + "use `conditions.on_event` for an event-topic string."
+}
+
+pub fn __native_fallback_feedback(policy, fallback_index) {
+  return native_tool_contract_feedback_prompt({policy: policy, fallback_index: fallback_index})
+}
+
+/**
+ * Inject corrective feedback after an assistant turn whose tool_use/tool-call
+ * blocks the loop DECLINED to dispatch (native-format fallback reject, all
+ * tool calls blank-name-dropped, parse-error with nothing dispatchable). A
+ * provider-native `tool_use` block that is not immediately followed by a
+ * matching `tool_result` is a hard protocol violation on Anthropic (a
+ * non-retryable HTTP 400 that kills the run) — so before appending the user-
+ * role feedback we first synthesize a `tool_result` for every orphaned block,
+ * carrying the SAME corrective text as the observation. The model still sees the
+ * steering, but pairing stays intact.
+ *
+ * `agent_session_pair_orphaned_tool_use` is a strict no-op when the trailing
+ * turn carries no structured tool_use (the common homogeneous text-format case
+ * keeps calls inline in `content`), so passing runs are unaffected — the pairing
+ * repair only fires on the exact escalation/native-fallback shape that orphans.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __inject_feedback_with_tool_repair(session_id, kind, content) {
+  let _ = agent_session_pair_orphaned_tool_use(session_id, content)
+  agent_session_inject_feedback(session_id, kind, content)
+}
+
+pub fn __parse_feedback_tool_annotations(entry) {
+  return agent_tool_entry_annotations(entry)
+}
+
+pub fn __parse_feedback_annotation_enabled(value) -> bool {
+  return type_of(value) == "bool" && value
+}
+
+pub fn __parse_feedback_tool_is_structural(entry) -> bool {
+  const annotations = __parse_feedback_tool_annotations(entry)
+  return __parse_feedback_annotation_enabled(annotations?.structural)
+    || __parse_feedback_annotation_enabled(
+    annotations?.agent_lifecycle,
+  )
+}
+
+pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
+  const entries = turn_opts?.tools?.tools ?? []
+  for entry in entries {
+    if type_of(entry) == "dict" && !__parse_feedback_tool_is_structural(entry) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * A turn whose tool calls were ALL dropped by the parser, or whose response
+ * violates the tagged protocol with 0 dispatched calls, is a malformed-output
+ * turn, not a no-progress monologue. The
+ * purpose-built `parse_guidance` prompt — which shows the heredoc syntax and
+ * names the exact parser diagnostic — is the right corrective feedback, but
+ * nothing consumed `tool_parse_errors` on the active path. This fires purely on
+ * the syntactic parse-error condition: strong models emit clean calls, hit zero
+ * parse errors, and never reach it (no regression).
+ *
+ * Partial-success turns (some calls parsed AND at least one was dropped) get
+ * the same parse_guidance note — flagged `has_partial_success` so the model
+ * knows the good calls dispatched and only re-emits the malformed one. Without
+ * this, the dropped call's diagnostic was silently swallowed and the model got
+ * zero signal to re-emit it.
+ *
+ * Returns true ONLY when the WHOLE turn was a parse failure (zero calls
+ * dispatched) so the caller can suppress the no-progress stall path. A
+ * partial-success turn made real progress (its parsed calls dispatched), so it
+ * returns false and stays subject to the normal stall accounting.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __parse_feedback_protocol_violations(parsed, turn_opts) {
+  if agent_tool_call_paradigm(turn_opts).kind != "text"
+    || !__parse_feedback_has_non_structural_tools(
+    turn_opts,
+  ) {
+    return []
+  }
+  return parsed?.protocol_violations ?? []
+}
+
+pub fn __parse_feedback_diagnostics(parsed, turn_opts) {
+  const parse_errors = parsed?.tool_parse_errors ?? []
+  const protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  return parse_errors + protocol_violations
+}
+
+pub fn __recovered_text_call_dispatch_cap(_turn_opts) -> int {
+  return 1
+}
+
+pub fn __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts) {
+  if agent_tool_call_paradigm(turn_opts).kind != "text" {
+    return nil
+  }
+  const recovered_count = to_int(parsed?.recovered_from_stray_count ?? 0) ?? 0
+  let cap = __recovered_text_call_dispatch_cap(turn_opts)
+  if recovered_count <= cap || len(tool_calls) == 0 {
+    return nil
+  }
+  const protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  if len(protocol_violations) == 0 {
+    return nil
+  }
+  return {
+    error_summary: "Recovered "
+      + to_string(recovered_count)
+      + " tool calls from top-level stray text or wrapper-corrupted output; none were dispatched because the batch is ambiguous. Retry with exactly one well-formed tool call.",
+    recovered_call_count: recovered_count,
+    dispatch_cap: cap,
+  }
+}
+
+pub fn __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts) {
+  const feedback = __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts)
+  if feedback == nil {
+    return {tool_calls: tool_calls, feedback: nil}
+  }
+  return {tool_calls: [], feedback: feedback}
+}
+
+pub fn __maybe_inject_parse_error_feedback(
+  session_id,
+  parsed,
+  tool_calls,
+  turn_opts,
+  feedback_override = nil,
+) -> bool {
+  const diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
+  const override_summary = to_string(feedback_override?.error_summary ?? "")
+  if len(diagnostics) == 0 && override_summary == "" {
+    return false
+  }
+  // Some calls parsed AND at least one was dropped: the good calls already
+  // dispatched, so flag the note as partial success and report how many landed
+  // so the model only re-emits the malformed call.
+  const parsed_count = len(tool_calls)
+  const has_partial_success = parsed_count > 0
+  const error_summary = if override_summary != "" {
+    override_summary
+  } else {
+    to_string(diagnostics[0])
+  }
+  const feedback = parse_guidance_prompt(
+    {
+      error_summary: error_summary,
+      has_partial_success: has_partial_success,
+      parsed_call_count: parsed_count,
+      body_hint: agent_tool_call_paradigm(turn_opts).body_hint,
+      is_native_format: agent_tool_format(turn_opts) == "native",
+      is_json_format: agent_tool_format(turn_opts) == "json",
+    },
+    turn_opts,
+  )
+  __inject_feedback_with_tool_repair(session_id, "parse_guidance", feedback)
+  // Only a full parse drop (zero calls dispatched) suppresses the no-progress
+  // stall path; a partial-success turn made real progress and stays subject to
+  // normal stall accounting.
+  return !has_partial_success
+}
+
+/**
+ * Count empty-name tool calls in the raw turn (native, else text-parsed) that
+ * `__resolve_tool_calls` will drop. Used by the dispatch site to inject
+ * parse-guidance so the model re-emits a valid call next turn instead of the
+ * loop terminating on the malformed sibling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __blank_name_dropped_count(llm_result, parsed) -> int {
+  const native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
+  const source = if len(native_calls) > 0 {
+    native_calls
+  } else {
+    parsed?.calls ?? []
+  }
+  return __filter_blank_name_tool_calls(source).dropped
+}
+
+/**
+ * Drop-only guidance for provider-malformed empty-name tool calls. The
+ * filtered valid siblings have already dispatched; this tells the model the
+ * nameless call was discarded and to re-emit a named call. Returns true when a
+ * note was injected (so the caller flags turn-level tool-call feedback and the
+ * stall accounting stays consistent with the parse-error path).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __maybe_inject_blank_name_feedback(
+  session_id,
+  llm_result,
+  parsed,
+  dispatched_count,
+  turn_opts,
+) -> bool {
+  let dropped = __blank_name_dropped_count(llm_result, parsed)
+  if dropped == 0 {
+    return false
+  }
+  const has_partial_success = dispatched_count > 0
+  const feedback = parse_guidance_prompt(
+    {
+      error_summary: "Dropped "
+        + to_string(dropped)
+        + " tool call(s) with an empty/blank name — every tool call must name a tool.",
+      has_partial_success: has_partial_success,
+      parsed_call_count: dispatched_count,
+      body_hint: agent_tool_call_paradigm(turn_opts).body_hint,
+      is_native_format: agent_tool_format(turn_opts) == "native",
+      is_json_format: agent_tool_format(turn_opts) == "json",
+    },
+    turn_opts,
+  )
+  __inject_feedback_with_tool_repair(session_id, "parse_guidance", feedback)
+  agent_emit_event(
+    session_id,
+    "tool_call_blank_name_dropped",
+    {
+      dropped_count: dropped,
+      dispatched_count: dispatched_count,
+      has_partial_success: has_partial_success,
+    },
+  )
+  return true
+}
+
+pub fn __detect_native_fallback(
+  llm_result,
+  parsed,
+  turn_opts,
+  fallback_index,
+  session_id,
+  iteration_index,
+) {
+  const native_calls = llm_result?.native_tool_calls ?? []
+  const parsed_calls = parsed?.calls ?? []
+  const format = turn_opts?.tool_format ?? ""
+  if format != "native" || len(native_calls) > 0 || len(parsed_calls) == 0 {
+    return {triggered: false, accepted: false, fallback_index: fallback_index, calls: nil}
+  }
+  const new_index = fallback_index + 1
+  const policy = turn_opts?.native_tool_fallback ?? "reject"
+  const accepted = if policy == "allow" {
+    true
+  } else if policy == "allow_once" {
+    new_index == 1
+  } else {
+    false
+  }
+  agent_record_native_tool_fallback(
+    session_id,
+    {
+      iteration: iteration_index + 1,
+      accepted: accepted,
+      policy: policy,
+      fallback_index: new_index,
+      tool_call_count: len(parsed_calls),
+    },
+  )
+  if !accepted {
+    __inject_feedback_with_tool_repair(
+      session_id,
+      "native_tool_contract",
+      __native_fallback_feedback(policy, new_index),
+    )
+  }
+  const resolved_calls = if accepted {
+    parsed_calls
+  } else {
+    []
+  }
+  return {triggered: true, accepted: accepted, fallback_index: new_index, calls: resolved_calls}
+}

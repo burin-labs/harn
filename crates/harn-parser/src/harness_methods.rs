@@ -59,6 +59,7 @@ pub fn harness_fs_ambient(method: &str) -> Option<&'static str> {
         "walk" | "walk_dir" => Some("walk_dir"),
         "glob" => Some("glob"),
         "find_text" => Some("find_text"),
+        "find_evidence" => Some("find_evidence"),
         _ => None,
     }
 }
@@ -256,6 +257,7 @@ pub fn harness_fs_replacement(name: &str) -> Option<&'static str> {
         "walk_dir" => Some("harness.fs.walk"),
         "glob" => Some("harness.fs.glob"),
         "find_text" => Some("harness.fs.find_text"),
+        "find_evidence" => Some("harness.fs.find_evidence"),
         _ => None,
     }
 }

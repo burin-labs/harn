@@ -64,8 +64,10 @@ fn build_tools() -> dict {
 
 pipeline main(task) {
   const registry = build_tools()
-  const task_text = "Investigate this small repo and tell me what the compute function does and how it is used in main."
-  const system_prompt = "/no_think You are a coding agent. Use the available tools to investigate the repo step by step, then return a concise final answer to the user."
+  const task_text =
+    "Investigate this small repo and tell me what the compute function does and how it is used in main."
+  const system_prompt =
+    "/no_think You are a coding agent. Use the available tools to investigate the repo step by step, then return a concise final answer to the user."
   const cb = { info ->
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0

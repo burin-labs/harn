@@ -24,7 +24,11 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"name\": \"Grace\", \"age\": 42}")],
     { ->
-      const grace = llm_call_structured("Summarize", schema, {provider: "mock", system: "You are precise."})
+      const grace = llm_call_structured(
+        "Summarize",
+        schema,
+        {provider: "mock", system: "You are precise."},
+      )
       __io_println(grace.name)
       const calls = llm_mock_calls()
       __io_println(calls[0].system)

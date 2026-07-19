@@ -40,7 +40,10 @@ pub fn default_executor(bundle, options) {
   const merged = default_agent_options() + supplied
   const schema = output_schema()
   const agent_options = merged
-    + {output_schema: schema, output_format: {kind: "json_schema", schema: schema, strict: true}}
+    + {
+    output_schema: schema,
+    output_format: {kind: "json_schema", schema: schema, strict: true},
+  }
   const result = agent_loop(bundle.prompt, supplied?.system, agent_options)
   const raw = result?.text ?? ""
   const checkpoint = typed_output_checkpoint_from_text(
@@ -122,7 +125,12 @@ fn _empty_output_run(args) {
 pub fn invoke(args) {
   const bundle = args.bundle
   const parent_receipt_ref = args.parent_receipt_ref
-    ?? {sweep_id: "", repo: bundle.repo, pr_number: bundle.pr_number, prior_state: "discovered"}
+    ?? {
+    sweep_id: "",
+    repo: bundle.repo,
+    pr_number: bundle.pr_number,
+    prior_state: "discovered",
+  }
   const started_at = _started()
   const bundle_err = validate_bundle(bundle)
   if bundle_err != nil {
@@ -161,7 +169,9 @@ pub fn invoke(args) {
         status: "blocked_pending_approval",
         approval_state: decision.approval_state,
         blocking_actions: decision.blocking_actions,
-        errors: ["repair worker requires human approval for: ${json_stringify(decision.blocking_actions)}"],
+        errors: [
+          "repair worker requires human approval for: ${json_stringify(decision.blocking_actions)}",
+        ],
         started_at: started_at,
       },
     )
@@ -271,7 +281,9 @@ pub fn invoke_for_ci_failure(args) {
     prior_state: args.prior_state ?? "discovered",
     classification_reason: args.classification_reason ?? "",
   }
-  const failing = (observation.failed_required_checks ?? []).map({ name -> {name: name, conclusion: "failure"} })
+  const failing = (observation.failed_required_checks ?? []).map(
+    { name -> {name: name, conclusion: "failure"} },
+  )
   const bundle = build(
     {
       kind: "ci_failure",
@@ -285,7 +297,8 @@ pub fn invoke_for_ci_failure(args) {
       changed_files: args.changed_files ?? [],
       failing_checks: failing,
       failing_check_logs: args.failing_check_logs ?? [],
-      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope ?? [],
+      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope
+        ?? [],
       required_verification: policy.local_verification ?? [],
       push_target: {remote: "origin", branch: observation.head_ref, force_with_lease: true},
       approval_required_for: ["semantic_repair"],
@@ -334,7 +347,8 @@ pub fn invoke_for_merge_conflict(args) {
       head_ref: observation.head_ref,
       changed_files: args.changed_files ?? [],
       conflict_paths: args.conflict_paths ?? [],
-      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope ?? [],
+      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope
+        ?? [],
       required_verification: policy.local_verification ?? [],
       push_target: {remote: "origin", branch: observation.head_ref, force_with_lease: true},
       approval_required_for: ["semantic_repair", "force_push"],
@@ -367,7 +381,12 @@ pub fn invoke_for_release_audit(args) {
     {
       kind: "release_audit",
       parent: args.parent_receipt_ref
-        ?? {sweep_id: "", repo: args.repo, pr_number: 0, prior_state: "discovered"},
+        ?? {
+        sweep_id: "",
+        repo: args.repo,
+        pr_number: 0,
+        prior_state: "discovered",
+      },
       repo: args.repo,
       pr_number: args.pr_number ?? 0,
       base_sha: args.base_sha ?? "",
@@ -376,9 +395,15 @@ pub fn invoke_for_release_audit(args) {
       head_ref: args.head_ref ?? "",
       changed_files: args.changed_files ?? [],
       release_facts: release_facts,
-      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope ?? [],
+      allowed_write_scope: policy?.repair_worker?.allowed_write_scope ?? args.allowed_write_scope
+        ?? [],
       required_verification: policy?.local_verification ?? [],
-      push_target: args.push_target ?? {remote: "origin", branch: args.head_ref ?? "", force_with_lease: false},
+      push_target: args.push_target
+        ?? {
+        remote: "origin",
+        branch: args.head_ref ?? "",
+        force_with_lease: false,
+      },
       approval_required_for: args.approval_required_for ?? ["semantic_repair", "release_tag"],
     },
   )

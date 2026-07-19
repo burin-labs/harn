@@ -20,7 +20,9 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "park for parent"}}],
+        tool_calls: [
+          {id: "park_1", name: "agent_await_resumption", arguments: {reason: "park for parent"}},
+        ],
         input_tokens: 7,
         output_tokens: 3,
       },

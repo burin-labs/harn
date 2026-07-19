@@ -1,0 +1,196 @@
+import "std/agent/loop_support"
+import "std/agent/loop_turn_options"
+import "std/agent/loop_turn_scope"
+
+/*
+ * The turn engine and terminal policy have different control-flow contracts.
+ * Keep reserve verification and the one-shot terminal callback here; callers
+ * receive an explicit `action` instead of smuggling `continue`/`break` across
+ * a module boundary.
+ */
+pub fn __agent_loop_terminal_boundary(session, state) -> dict {
+  let opts = state.opts
+  let final_status = state.final_status
+  let stop_reason = state.stop_reason
+  let terminal_write_unverified = state.terminal_write_unverified
+  let stall_state = state.stall_state
+  let terminal_verify_reserve_remaining = state.terminal_verify_reserve_remaining
+  let verify_attempts = state.verify_attempts
+  let verify_completion_judge_invocations = state.verify_completion_judge_invocations
+  let verify_completion_judge_vetoes = state.verify_completion_judge_vetoes
+  let current_max = state.current_max
+  let budget_exhausted_emitted = state.budget_exhausted_emitted
+  let budget_decisions = state.budget_decisions
+  let terminal_callback_continues = state.terminal_callback_continues
+  if final_status == "" && state.iteration >= current_max && stop_reason == nil {
+    final_status = "budget_exhausted"
+    stop_reason = stop_reason ?? "max_iterations"
+  }
+  if __agent_loop_should_spend_reserve(
+    state.reserve_cfg,
+    opts,
+    final_status,
+    terminal_write_unverified,
+    state.made_source_write,
+    verify_attempts < state.max_verify_attempts,
+  ) {
+    const reserve_kind = if terminal_write_unverified {
+      "reserved_terminal_verify"
+    } else {
+      "zero_write_terminal_verify"
+    }
+    const terminal_verdict = agent_verify_or_continue(
+      session,
+      opts
+        + {
+        _done_judge_due: false,
+        _done_judge_invocations: state.done_judge_invocations,
+        _verify_completion_judge_invocations: verify_completion_judge_invocations,
+      },
+      reserve_kind,
+      "",
+      state.iteration,
+    )
+    if terminal_verdict?.verify_completion_judge_invoked ?? false {
+      verify_completion_judge_invocations = verify_completion_judge_invocations + 1
+    }
+    if !terminal_verdict.vetoed {
+      terminal_write_unverified = false
+      stall_state = stall_state + {reverify_owed: false}
+      final_status = "done"
+      stop_reason = reserve_kind
+      agent_emit_event(
+        session.session_id,
+        "reserved_terminal_verify",
+        {kind: reserve_kind, phase: "verify_passed", iteration: state.iteration},
+      )
+      return state
+        + {
+        action: "break",
+        final_status: final_status,
+        stop_reason: stop_reason,
+        terminal_write_unverified: terminal_write_unverified,
+        stall_state: stall_state,
+        verify_completion_judge_invocations: verify_completion_judge_invocations,
+      }
+    }
+    verify_attempts = verify_attempts + 1
+    if terminal_verdict?.verify_completion_judge_invoked ?? false {
+      verify_completion_judge_vetoes = verify_completion_judge_vetoes + 1
+    }
+    agent_emit_event(
+      session.session_id,
+      "reserved_terminal_verify",
+      {
+        kind: reserve_kind,
+        phase: "verify_failed",
+        iteration: state.iteration,
+        terminal_status: final_status,
+      },
+    )
+    if terminal_verify_reserve_remaining > 0 && verify_attempts < state.max_verify_attempts {
+      terminal_verify_reserve_remaining = terminal_verify_reserve_remaining - 1
+      agent_emit_event(
+        session.session_id,
+        "reserved_terminal_verify",
+        {
+          kind: reserve_kind,
+          phase: "grant",
+          reserve_remaining: terminal_verify_reserve_remaining,
+          iteration: state.iteration,
+          prior_status: final_status,
+        },
+      )
+      current_max = current_max + 1
+      final_status = ""
+      stop_reason = nil
+      budget_exhausted_emitted = false
+      return state
+        + {
+        action: "continue",
+        final_status: final_status,
+        stop_reason: stop_reason,
+        terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,
+        verify_attempts: verify_attempts,
+        verify_completion_judge_invocations: verify_completion_judge_invocations,
+        verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+        current_max: current_max,
+        budget_exhausted_emitted: budget_exhausted_emitted,
+      }
+    }
+    stop_reason = reserve_kind + "_failed"
+  }
+  if final_status != "" && state.suspend_result == nil && state.terminal_error == nil
+    && terminal_callback_continues
+    == 0
+    && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
+    const terminal_outcome = agent_compute_terminal_callback(
+      session,
+      opts,
+      {
+        iteration: state.iteration,
+        final_status: final_status,
+        stop_reason: stop_reason ?? "",
+        max_iterations: current_max,
+        iteration_budget: state.budget,
+        session_successful_tools: state.successful_tools_seen,
+        session_rejected_tools: state.rejected_tools_seen,
+      },
+    )
+    if terminal_outcome.kind == "continue" {
+      terminal_callback_continues = terminal_callback_continues + 1
+      opts = __apply_post_turn_options(opts, terminal_outcome)
+      const old_limit = current_max
+      const extra = __agent_loop_terminal_callback_extend_by(state.budget)
+      current_max = max(current_max, state.iteration + extra)
+      budget_decisions = __agent_loop_record_terminal_callback_continue(
+        budget_decisions,
+        state.iteration,
+        old_limit,
+        current_max,
+      )
+      agent_emit_event(
+        session.session_id,
+        "loop_control_decision",
+        {
+          iteration: state.iteration,
+          action: "extend",
+          old_limit: old_limit,
+          new_limit: current_max,
+          reason: "terminal_callback_continue",
+          status: "",
+        },
+      )
+      final_status = ""
+      stop_reason = nil
+      budget_exhausted_emitted = false
+      return state
+        + {
+        action: "continue",
+        opts: opts,
+        final_status: final_status,
+        stop_reason: stop_reason,
+        terminal_callback_continues: terminal_callback_continues,
+        current_max: current_max,
+        budget_decisions: budget_decisions,
+        budget_exhausted_emitted: budget_exhausted_emitted,
+      }
+    }
+  }
+  return state
+    + {
+    action: "break",
+    opts: opts,
+    final_status: final_status,
+    stop_reason: stop_reason,
+    terminal_write_unverified: terminal_write_unverified,
+    terminal_verify_reserve_remaining: terminal_verify_reserve_remaining,
+    verify_attempts: verify_attempts,
+    verify_completion_judge_invocations: verify_completion_judge_invocations,
+    verify_completion_judge_vetoes: verify_completion_judge_vetoes,
+    current_max: current_max,
+    budget_exhausted_emitted: budget_exhausted_emitted,
+    budget_decisions: budget_decisions,
+    terminal_callback_continues: terminal_callback_continues,
+  }
+}

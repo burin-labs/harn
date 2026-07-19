@@ -12,7 +12,9 @@ pipeline test(task) {
         stage: "argv",
         code: "unknown_flag",
         message: "no flag named --nope",
-        issues: [{stage: "argv", code: "unknown_flag", message: "no flag named --nope", arg: "--nope"}],
+        issues: [
+          {stage: "argv", code: "unknown_flag", message: "no flag named --nope", arg: "--nope"},
+        ],
       },
     ),
   )

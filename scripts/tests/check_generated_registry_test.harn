@@ -285,7 +285,9 @@ pipeline test_preflight_dead_target_flagged(task) {
 pipeline test_preflight_invalid_tier_flagged(task) {
   assert_eq(
     preflight_dispatch_errors(["check-a"], {"check-a": "sourced"}),
-    ["[preflight.dispatch] `check-a` has invalid tier `sourced` (expected source|binary|excluded)."],
+    [
+      "[preflight.dispatch] `check-a` has invalid tier `sourced` (expected source|binary|excluded).",
+    ],
   )
 }
 
@@ -300,8 +302,17 @@ pipeline test_preflight_lint_target_allowed(task) {
 // --- validate (integration of the pure pieces) ----------------------------
 @test
 pipeline test_validate_clean(task) {
-  const artifacts = [{id: "h", check: "check-h", gen: "gen-h", ci: true, make_all: true, outputs: ["out.js"]}]
-  const errs = validate(artifacts, [], ["check-h", "gen-h"], "\tmake check-h\n", "make check-h\n", [])
+  const artifacts = [
+    {id: "h", check: "check-h", gen: "gen-h", ci: true, make_all: true, outputs: ["out.js"]},
+  ]
+  const errs = validate(
+    artifacts,
+    [],
+    ["check-h", "gen-h"],
+    "\tmake check-h\n",
+    "make check-h\n",
+    [],
+  )
   assert_eq(errs, [])
 }
 
@@ -314,7 +325,14 @@ pipeline test_validate_missing_check(task) {
 
 @test
 pipeline test_validate_rejects_unknown_lifecycle(task) {
-  const errs = validate([{id: "x", check: "check-x", lifecycle: "ephemeral"}], [], ["check-x"], "", "", [])
+  const errs = validate(
+    [{id: "x", check: "check-x", lifecycle: "ephemeral"}],
+    [],
+    ["check-x"],
+    "",
+    "",
+    [],
+  )
   assert_eq(errs.count, 1)
   assert_eq(errs[0].contains("unsupported lifecycle"), true)
 }

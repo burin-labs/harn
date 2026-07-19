@@ -15,7 +15,10 @@ pipeline main() {
   }
   __io_println(has_code(bad_trigger_shape, "HARN-SUS-002"))
   const bad_timeout_action = try {
-    agent_await_resumption("waiting on review", {timeout: {duration_minutes: 1, on_timeout: "explode"}})
+    agent_await_resumption(
+      "waiting on review",
+      {timeout: {duration_minutes: 1, on_timeout: "explode"}},
+    )
   }
   __io_println(has_code(bad_timeout_action, "HARN-SUS-002"))
   const lifecycle = agent_lifecycle_tools(tool_registry())

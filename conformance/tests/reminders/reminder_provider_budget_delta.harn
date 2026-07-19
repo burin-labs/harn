@@ -8,7 +8,9 @@ pipeline main() {
     {
       id: "large_delta",
       subscribes_to: ["session_idle"],
-      evaluate: { _ctx -> return {reminder: {body: long_body, tags: ["large_delta"], dedupe_key: "large_delta"}} },
+      evaluate: { _ctx ->
+        return {reminder: {body: long_body, tags: ["large_delta"], dedupe_key: "large_delta"}}
+      },
     },
   )
   const delta_session = agent_session_open("reminder-provider-budget-delta")
@@ -16,7 +18,10 @@ pipeline main() {
   const payload = {session: {id: delta_session}, iteration: 1, wake_interval_ms: 0}
   const first = agent_reminder_providers_fire(delta_session, "session_idle", payload, {})
   const second = agent_reminder_providers_fire(delta_session, "session_idle", payload, {})
-  const delta_events = transcript_events_by_kind(agent_session_snapshot(delta_session), "system_reminder")
+  const delta_events = transcript_events_by_kind(
+    agent_session_snapshot(delta_session),
+    "system_reminder",
+  )
   __io_println(first.reports[0].delta_compressed)
   __io_println(first.reports[0].body_bytes == first.reports[0].original_body_bytes)
   __io_println(second.reports[0].delta_compressed)
@@ -28,14 +33,18 @@ pipeline main() {
     {
       id: "budget_a",
       subscribes_to: ["session_idle"],
-      evaluate: { _ctx -> return {reminder: {body: long_body, tags: ["budget_a"], dedupe_key: "budget_a"}} },
+      evaluate: { _ctx ->
+        return {reminder: {body: long_body, tags: ["budget_a"], dedupe_key: "budget_a"}}
+      },
     },
   )
   register_reminder_provider(
     {
       id: "budget_b",
       subscribes_to: ["session_idle"],
-      evaluate: { _ctx -> return {reminder: {body: long_body, tags: ["budget_b"], dedupe_key: "budget_b"}} },
+      evaluate: { _ctx ->
+        return {reminder: {body: long_body, tags: ["budget_b"], dedupe_key: "budget_b"}}
+      },
     },
   )
   const budget_session = agent_session_open("reminder-provider-budget-skip")
@@ -47,7 +56,10 @@ pipeline main() {
     budget_payload,
     {reminders: {max_iteration_bytes: 300}},
   )
-  const budget_events = transcript_events_by_kind(agent_session_snapshot(budget_session), "system_reminder")
+  const budget_events = transcript_events_by_kind(
+    agent_session_snapshot(budget_session),
+    "system_reminder",
+  )
   __io_println(budget.fired_count)
   __io_println(budget.skipped_count)
   __io_println(budget.reports[0].provider)

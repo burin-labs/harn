@@ -45,7 +45,9 @@ pipeline test(task) {
     session,
     {
       strategy: "custom",
-      summarize_fn: { archived, _reminders -> {summary: "policy compacted " + to_string(len(archived))} },
+      summarize_fn: { archived, _reminders ->
+        {summary: "policy compacted " + to_string(len(archived))}
+      },
     },
   )
   __io_println(outcome["compacted"])

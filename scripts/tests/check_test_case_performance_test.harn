@@ -205,7 +205,8 @@ pipeline test_evaluation_rejects_unmeasured_zero_reference(task) {
 
 @test
 pipeline test_baseline_loader_is_platform_specific_and_versioned(task) {
-  const text = "schema_version = 1\nworkload_version = 1\n[platform.macos]\nmax_child_wall_ms = 12.0\n"
+  const text =
+    "schema_version = 1\nworkload_version = 1\n[platform.macos]\nmax_child_wall_ms = 12.0\n"
   const found = load_platform_baseline(text, "macos")
   assert_eq(found.ok, true)
   assert_eq(found.baseline.max_child_wall_ms, 12.0)

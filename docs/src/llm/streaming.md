@@ -30,10 +30,12 @@ for chunk in chunks {
 }
 ```
 
-Each chunk has `{delta, visible_delta, partial, role, finish_reason}`.
+Each chunk has `{delta, visible_delta, partial, role, stop_reason}` (the
+typed shape is `LlmStreamChunk` from `std/llm/envelope`).
 `delta` is the provider text delta, `visible_delta` and `partial` hide
 open internal `<think>` blocks, and the terminal chunk carries
-`finish_reason` when the provider reports one. Dropping the stream
+`stop_reason` — the same spelling as the `llm_call` envelope — when the
+provider reports one. Dropping the stream
 aborts the background LLM request. The existing `stream` option on
 `llm_call` and `llm_stream_call` still only controls provider transport
 selection; it does not change `llm_call`'s return type.

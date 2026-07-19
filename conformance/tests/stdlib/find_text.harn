@@ -21,7 +21,11 @@ pipeline test(task) {
   log(hits[0].col)
   log(contains(hits[0].path, "src/main.harn"))
   log(hits[0].text)
-  const limited = harness.fs.find_text(root, "secret_token", {case_insensitive: true, max_matches: 2})
+  const limited = harness.fs.find_text(
+    root,
+    "secret_token",
+    {case_insensitive: true, max_matches: 2},
+  )
   log(len(limited))
   log(harness.fs.find_text(root, "secret_token", {mode: "exists", parallel: true}))
   log(

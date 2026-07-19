@@ -117,7 +117,11 @@ pub fn max_canonical_tag(tags: list<string>) -> string? {
     }
     if parsed.major > best_major
       || (parsed.major == best_major && parsed.minor > best_minor)
-      || (parsed.major == best_major && parsed.minor == best_minor && parsed.patch > best_patch) {
+      || (parsed.major == best_major
+      && parsed
+      .minor
+      == best_minor
+      && parsed.patch > best_patch) {
       best_tag = tag
       best_major = parsed.major
       best_minor = parsed.minor

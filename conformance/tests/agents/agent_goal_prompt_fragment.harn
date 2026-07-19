@@ -5,19 +5,28 @@
 import { goal, with_goal } from "std/agent/goal"
 
 pipeline test() {
-  const g = goal({objective: "Answer with the codeword PIXEL", success_criteria: ["mentions PIXEL"]})
-  const caller = { call -> return {
-    ok: true,
-    value: {
-      input_tokens: 0,
-      model: "mock",
-      output_tokens: 0,
-      provider: "mock",
-      text: "SYS[" + to_string(call.system ?? "") + "]",
-    },
-  } }
+  const g = goal(
+    {objective: "Answer with the codeword PIXEL", success_criteria: ["mentions PIXEL"]},
+  )
+  const caller = { call ->
+    return {
+      ok: true,
+      value: {
+        input_tokens: 0,
+        model: "mock",
+        output_tokens: 0,
+        provider: "mock",
+        text: "SYS[" + to_string(call.system ?? "") + "]",
+      },
+    }
+  }
   const opts = with_goal(
-    {llm_caller: caller, max_iterations: 1, provider: "mock", session_id: "goal-fragment-conformance"},
+    {
+      llm_caller: caller,
+      max_iterations: 1,
+      provider: "mock",
+      session_id: "goal-fragment-conformance",
+    },
     g,
   )
   const result = agent_loop("Proceed.", nil, opts)

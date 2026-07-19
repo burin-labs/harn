@@ -43,7 +43,9 @@ pipeline default() {
   log(lifo_results[3].result)
   log(lifo_results[2].result)
   log(lifo_results[1].result)
-  const priority_pool = pool_create({name: "queue-strategy-priority", max_concurrent: 1, queue: priority()})
+  const priority_pool = pool_create(
+    {name: "queue-strategy-priority", max_concurrent: 1, queue: priority()},
+  )
   const priority_order = atomic(0)
   const priority_gate = channel(nil, 1)
   const priority_warmup = priority_pool.submit(
@@ -64,7 +66,11 @@ pipeline default() {
   log(priority_results[1].result)
   const strategy_ns = QueueStrategy()
   const fair_pool = pool_create(
-    {name: "queue-strategy-fair", max_concurrent: 1, queue: strategy_ns.fair_round_robin("tenant_id")},
+    {
+      name: "queue-strategy-fair",
+      max_concurrent: 1,
+      queue: strategy_ns.fair_round_robin("tenant_id"),
+    },
   )
   const fair_order = atomic(0)
   const fair_gate = channel(nil, 1)

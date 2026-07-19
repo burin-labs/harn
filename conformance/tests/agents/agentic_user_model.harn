@@ -3,7 +3,11 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main() {
   with_llm_script(
-    [llm_text("{\"action\":\"reply\",\"message\":\"Use node:test.\",\"reason\":\"no extra deps\"}")],
+    [
+      llm_text(
+        "{\"action\":\"reply\",\"message\":\"Use node:test.\",\"reason\":\"no extra deps\"}",
+      ),
+    ],
     { ->
       const answerer = agentic_user(
         {

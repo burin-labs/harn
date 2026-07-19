@@ -494,7 +494,11 @@ fn __stage_gate_prefix(options) -> string {
   if !ends_with(prefix, " ") {
     throw "stage_gate: `prefix` must end with a space (got: \"" + prefix + "\")"
   }
-  for delimiter in [__STAGE_GATE_DELIMITERS[1], __STAGE_GATE_DELIMITERS[2], __STAGE_GATE_DELIMITERS[3]] {
+  for delimiter in [
+    __STAGE_GATE_DELIMITERS[1],
+    __STAGE_GATE_DELIMITERS[2],
+    __STAGE_GATE_DELIMITERS[3],
+  ] {
     if prefix.index_of(delimiter) >= 0 {
       throw "stage_gate: `prefix` may not contain the marker delimiter '" + (delimiter ?? "")
         + "' (it would corrupt the stage_gate_parse round-trip); got: \""
@@ -577,7 +581,9 @@ pub fn stage_gate_label(base_label, gate, options = nil) {
     __stage_gate_reject_delimiters("allowed_tools token", tool_token)
   }
   const marker = prefix + "lane=" + lane + " stage=" + stage + " kinds="
-    + __stage_gate_token_string(kinds)
+    + __stage_gate_token_string(
+    kinds,
+  )
     + " tools="
     + __stage_gate_token_string(tools)
     + "]"

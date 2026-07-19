@@ -18,7 +18,9 @@ pub fn claude_dev_setup_cwd(input: string) -> string {
 }
 
 pub fn claude_dev_setup_context(message: string) -> string {
-  return json_stringify({hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: message}})
+  return json_stringify(
+    {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: message}},
+  )
 }
 
 fn arg_spec() {

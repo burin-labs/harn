@@ -85,7 +85,8 @@ pub fn verify_crate_packages_plan_rows(meta: dict, root: string) -> list<string>
     rows = rows
       + [
       "package\t" + package.name + "\t" + package.version + "\t" + package.manifest_path + "\t"
-        + package.dir,
+        + package
+        .dir,
     ]
   }
   return rows

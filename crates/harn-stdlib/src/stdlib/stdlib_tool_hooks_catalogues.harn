@@ -208,10 +208,16 @@ fn __cat_pred_rm_rf_root(command, _context) -> bool {
   // Recursive flag: short -r / -R / bundled with other letters, or
   // long --recursive.
   const recursive = __cat_re("(?:^|\\s)-[a-zA-Z]*[rR][a-zA-Z]*\\b", command)
-    || __cat_re("--recursive\\b", command)
+    || __cat_re(
+    "--recursive\\b",
+    command,
+  )
   // Force flag: short -f / bundled, or long --force.
   const forced = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command)
-    || __cat_re("--force\\b", command)
+    || __cat_re(
+    "--force\\b",
+    command,
+  )
   if !(recursive && forced) {
     return false
   }
@@ -266,10 +272,14 @@ pub fn tool_hooks_catalogue_rust() {
   const target_dir_rule = tool_rule(
     {
       id: "rust.cargo.target_dir_conflict",
-      pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?(?:build|test|check|run)(?:\\s|$)", ["--target-dir"]),
+      pattern: __cat_pred_prefix(
+        "^cargo (?:\\+[\\w.-]+ )?(?:build|test|check|run)(?:\\s|$)",
+        ["--target-dir"],
+      ),
       applies_to: ["rust"],
       severity: "warning",
-      explanation: "Concurrent cargo runs without --target-dir thrash the workspace lockfile; pin a shared target dir so parallel invocations stay deterministic.",
+      explanation:
+        "Concurrent cargo runs without --target-dir thrash the workspace lockfile; pin a shared target dir so parallel invocations stay deterministic.",
       references: [
         "https://github.com/rust-lang/cargo/issues/4282",
         "https://doc.rust-lang.org/cargo/reference/config.html#buildtarget-dir",
@@ -283,7 +293,8 @@ pub fn tool_hooks_catalogue_rust() {
       pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?test(?:\\s|$)", ["-- ", "--nocapture"]),
       applies_to: ["rust"],
       severity: "info",
-      explanation: "`cargo test` swallows print debugging by default; appending `-- --nocapture` keeps `println!` output visible for the agent to inspect.",
+      explanation:
+        "`cargo test` swallows print debugging by default; appending `-- --nocapture` keeps `println!` output visible for the agent to inspect.",
       references: [
         "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
         "https://doc.rust-lang.org/cargo/reference/config.html#testharness",
@@ -297,7 +308,8 @@ pub fn tool_hooks_catalogue_rust() {
       pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?clippy(?:\\s|$)", ["--workspace"]),
       applies_to: ["rust"],
       severity: "warning",
-      explanation: "`cargo clippy` defaults to the current package; sibling crates in a workspace go unchecked. Add `--workspace` to catch regressions across the tree.",
+      explanation:
+        "`cargo clippy` defaults to the current package; sibling crates in a workspace go unchecked. Add `--workspace` to catch regressions across the tree.",
       references: [
         "https://doc.rust-lang.org/cargo/commands/cargo-clippy.html",
         "https://github.com/rust-lang/rust-clippy/blob/master/book/src/usage.md",
@@ -311,7 +323,8 @@ pub fn tool_hooks_catalogue_rust() {
       pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?fmt(?:\\s|$)", ["--check"]),
       applies_to: ["rust"],
       severity: "info",
-      explanation: "Bare `cargo fmt` rewrites files in place. Prefer `cargo fmt --check` in CI / review contexts so the agent surfaces diffs before mutating the worktree.",
+      explanation:
+        "Bare `cargo fmt` rewrites files in place. Prefer `cargo fmt --check` in CI / review contexts so the agent surfaces diffs before mutating the worktree.",
       references: [
         "https://github.com/rust-lang/rustfmt#checking-style-on-a-cargo-project",
         "https://rust-lang.github.io/rustfmt/?version=v1.7.0&search=#check",
@@ -352,7 +365,8 @@ pub fn tool_hooks_catalogue_python() {
       pattern: __cat_pred_find_for_ext(["py"]),
       applies_to: ["python"],
       severity: "info",
-      explanation: "`rg --files -t py` walks the tree faster than `find` and respects `.gitignore`, so it doesn't surface `.venv/` or build artifacts.",
+      explanation:
+        "`rg --files -t py` walks the tree faster than `find` and respects `.gitignore`, so it doesn't surface `.venv/` or build artifacts.",
       references: [
         "https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#what-is-the-difference-between-ripgrep-and-find",
         "https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md#file-types",
@@ -369,7 +383,8 @@ pub fn tool_hooks_catalogue_python() {
       ),
       applies_to: ["python"],
       severity: "warning",
-      explanation: "Global `pip install` mutates the system interpreter. Activate a venv or pass `--user` so the install stays scoped to the agent's workspace.",
+      explanation:
+        "Global `pip install` mutates the system interpreter. Activate a venv or pass `--user` so the install stays scoped to the agent's workspace.",
       references: [
         "https://pip.pypa.io/en/stable/user_guide/#user-installs",
         "https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/",
@@ -385,7 +400,8 @@ pub fn tool_hooks_catalogue_python() {
       ),
       applies_to: ["python"],
       severity: "info",
-      explanation: "`pytest` swallows stdout by default; `-s` (alias for `--capture=no`) keeps `print` output visible for the agent to read.",
+      explanation:
+        "`pytest` swallows stdout by default; `-s` (alias for `--capture=no`) keeps `print` output visible for the agent to read.",
       references: ["https://docs.pytest.org/en/stable/how-to/capture-stdout-stderr.html"],
       rewrite: { command, _context -> __cat_append_flag(command, "-s") },
     },
@@ -419,7 +435,8 @@ pub fn tool_hooks_catalogue_typescript() {
       pattern: __cat_pred_find_for_ext(["ts", "tsx", "js", "jsx", "mjs", "cjs"]),
       applies_to: ["typescript"],
       severity: "info",
-      explanation: "`rg --files -t ts` is faster than `find` and respects `.gitignore`, so it skips `node_modules/` and `dist/` by default.",
+      explanation:
+        "`rg --files -t ts` is faster than `find` and respects `.gitignore`, so it skips `node_modules/` and `dist/` by default.",
       references: ["https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md#file-types"],
       rewrite: { command, _context -> __cat_find_to_rg(command, "ts") },
     },
@@ -435,7 +452,8 @@ pub fn tool_hooks_catalogue_typescript() {
       },
       applies_to: ["typescript"],
       severity: "warning",
-      explanation: "`npm install --force` and `--legacy-peer-deps` paper over peer-dep mismatches by skipping the resolver; the project ends up with an unverifiable dep graph. Resolve the conflict explicitly or pin a compatible version.",
+      explanation:
+        "`npm install --force` and `--legacy-peer-deps` paper over peer-dep mismatches by skipping the resolver; the project ends up with an unverifiable dep graph. Resolve the conflict explicitly or pin a compatible version.",
       references: [
         "https://docs.npmjs.com/cli/v10/commands/npm-install#force",
         "https://docs.npmjs.com/cli/v10/commands/npm-install#legacy-peer-deps",
@@ -470,7 +488,8 @@ pub fn tool_hooks_catalogue_swift() {
       pattern: "^swift (?:build\\s+--clean\\b|package\\s+clean\\b)",
       applies_to: ["swift"],
       severity: "warning",
-      explanation: "`swift build --clean` / `swift package clean` deletes `.build/`, forcing a full rebuild that can take several minutes. Confirm a stale-cache symptom first, or use `--target` / `--product` to scope.",
+      explanation:
+        "`swift build --clean` / `swift package clean` deletes `.build/`, forcing a full rebuild that can take several minutes. Confirm a stale-cache symptom first, or use `--target` / `--product` to scope.",
       references: [
         "https://github.com/swiftlang/swift-package-manager/blob/main/Sources/Commands/PackageCommands/Clean.swift",
         "https://www.swift.org/documentation/package-manager/",
@@ -514,7 +533,8 @@ pub fn tool_hooks_catalogue_sql() {
       },
       applies_to: ["sql"],
       severity: "warning",
-      explanation: "Unbounded `SELECT *` scans full tables, returns columns the agent may not need, and breaks downstream consumers when the schema gains a column. Prefer an explicit column list and add a `WHERE` / `LIMIT` clause.",
+      explanation:
+        "Unbounded `SELECT *` scans full tables, returns columns the agent may not need, and breaks downstream consumers when the schema gains a column. Prefer an explicit column list and add a `WHERE` / `LIMIT` clause.",
       references: [
         "https://www.postgresql.org/docs/current/sql-select.html",
         "https://learn.microsoft.com/en-us/sql/t-sql/queries/select-clause-transact-sql",
@@ -560,8 +580,11 @@ pub fn tool_hooks_catalogue_harn() {
       },
       applies_to: ["harn"],
       severity: "info",
-      explanation: "`cargo run --bin harn` prints build progress to stderr which interleaves with `harn` output. Pass `--quiet` to silence the build chatter so agents can parse the program's stdout cleanly.",
-      references: ["https://doc.rust-lang.org/cargo/commands/cargo-run.html#option-cargo-run--quiet"],
+      explanation:
+        "`cargo run --bin harn` prints build progress to stderr which interleaves with `harn` output. Pass `--quiet` to silence the build chatter so agents can parse the program's stdout cleanly.",
+      references: [
+        "https://doc.rust-lang.org/cargo/commands/cargo-run.html#option-cargo-run--quiet",
+      ],
       rewrite: { command, _context -> regex_replace("^cargo ", "cargo --quiet ", command) },
     },
   )
@@ -601,7 +624,8 @@ pub fn tool_hooks_catalogue_universal() {
       id: "universal.git_push_force_main",
       pattern: __cat_pred_force_push_main,
       severity: "error",
-      explanation: "Force-pushing to main/master rewrites history for every downstream clone. Set HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH=1 only after coordinating with the team, or use `--force-with-lease` (which fails safely on remote drift).",
+      explanation:
+        "Force-pushing to main/master rewrites history for every downstream clone. Set HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH=1 only after coordinating with the team, or use `--force-with-lease` (which fails safely on remote drift).",
       references: [
         "https://git-scm.com/docs/git-push#Documentation/git-push.txt---force",
         "https://git-scm.com/docs/git-push#Documentation/git-push.txt---force-with-lease",
@@ -615,7 +639,8 @@ pub fn tool_hooks_catalogue_universal() {
       id: "universal.rm_rf_root_adjacent",
       pattern: __cat_pred_rm_rf_root,
       severity: "error",
-      explanation: "Recursive deletes against /, ~, .., $HOME, or unquoted * are almost always a mistake and irreversible without backups. If you really need to remove a tree, target an absolute path under your worktree.",
+      explanation:
+        "Recursive deletes against /, ~, .., $HOME, or unquoted * are almost always a mistake and irreversible without backups. If you really need to remove a tree, target an absolute path under your worktree.",
       references: [
         "https://man7.org/linux/man-pages/man1/rm.1.html",
         "https://github.com/valvesoftware/steam-for-linux/issues/3671",

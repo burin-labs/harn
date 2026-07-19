@@ -18,7 +18,10 @@ pipeline default() {
   const src = agent_session_open("on-budget-replan-source")
   agent_session_inject(src, {role: "user", content: "seed"})
   agent_session_inject(src, {role: "assistant", content: "branch"})
-  const result = replan(harness, {session_id: src, iteration: 2, last_good_iteration: 1, kind: "wall_clock"})
+  const result = replan(
+    harness,
+    {session_id: src, iteration: 2, last_good_iteration: 1, kind: "wall_clock"},
+  )
   const snapshot = agent_session_snapshot(result.session_id)
   const reminders = transcript_events_by_kind(snapshot, "system_reminder")
   const body = reminders[0].reminder.body

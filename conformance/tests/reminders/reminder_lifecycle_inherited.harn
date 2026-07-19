@@ -34,7 +34,9 @@ pipeline main() {
           ],
         },
       )
-      const stream = event_log.subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
+      const stream = event_log.subscribe(
+        {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."},
+      )
       fn next_reminder_event(source) {
         let event = source.next().value
         while event != nil && event.kind == "transcript.reminder.provider_evaluated" {

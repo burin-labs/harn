@@ -49,7 +49,8 @@ pipeline test(task) {
     "https://mock-idp.example/token",
     {
       status: 200,
-      body: "{\"access_token\":\"AAA\",\"refresh_token\":\"RRR\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+      body:
+        "{\"access_token\":\"AAA\",\"refresh_token\":\"RRR\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
       headers: {"content-type": "application/json"},
     },
   )

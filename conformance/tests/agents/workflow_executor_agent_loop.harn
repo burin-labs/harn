@@ -39,8 +39,12 @@ pipeline default() {
     let r = agent_loop(ctx.task, nil, {provider: "mock", llm_caller: caller, max_iterations: 1})
     return {text: r.text}
   }
-  const verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} }
-  const out = workflow_run_repair({task: "do the work", executor: executor, verify: verifier, max_attempts: 2})
+  const verifier = { r ->
+    return {ok: contains(to_string(r?.visible_text), token), findings: [token]}
+  }
+  const out = workflow_run_repair(
+    {task: "do the work", executor: executor, verify: verifier, max_attempts: 2},
+  )
   __io_println(out.ok)
   __io_println(len(out.attempts))
   __io_println(out.attempts[0].status)

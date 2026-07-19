@@ -56,7 +56,10 @@ fn _normalize_request(raw) {
 
 fn _active_policy(policy) {
   const policy_or_default = policy ?? {}
-  return {risky_paths: policy_or_default.risky_paths ?? [], test_globs: policy_or_default.test_globs ?? []}
+  return {
+    risky_paths: policy_or_default.risky_paths ?? [],
+    test_globs: policy_or_default.test_globs ?? [],
+  }
 }
 
 fn _scan_secrets(diff) {

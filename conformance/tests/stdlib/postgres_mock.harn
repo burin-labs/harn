@@ -19,7 +19,8 @@ pipeline default() {
   __io_println(rows[0].id)
   __io_println(rows[0].payload.ok)
   __io_println(
-    pg_query_one(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"]).observed_at,
+    pg_query_one(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
+      .observed_at,
   )
   const result = pg_execute(
     db,

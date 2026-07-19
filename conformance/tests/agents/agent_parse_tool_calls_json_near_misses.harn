@@ -17,10 +17,18 @@ pipeline main() {
   )
   __io_println(tilde.tool_calls[0].arguments.path)
   __io_println(contains(tilde.protocol_violations[0], "~~~tool"))
-  const bare_json = agent_parse_tool_calls("{\"name\":\"read_file\",\"args\":{\"path\":\"c.rs\"}}", nil, "json")
+  const bare_json = agent_parse_tool_calls(
+    "{\"name\":\"read_file\",\"args\":{\"path\":\"c.rs\"}}",
+    nil,
+    "json",
+  )
   __io_println(bare_json.tool_calls[0].arguments.path)
   __io_println(contains(bare_json.protocol_violations[0], "bare JSON object"))
-  const tagged = agent_parse_tool_calls("<tool_call>\nread_file({ path: \"d.rs\" })\n</tool_call>", nil, "json")
+  const tagged = agent_parse_tool_calls(
+    "<tool_call>\nread_file({ path: \"d.rs\" })\n</tool_call>",
+    nil,
+    "json",
+  )
   __io_println(len(tagged.tool_calls))
   __io_println(len(tagged.protocol_violations) == 1)
   __io_println(contains(tagged.protocol_violations[0], "<tool_call>"))

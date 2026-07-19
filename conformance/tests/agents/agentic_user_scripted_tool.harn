@@ -6,13 +6,20 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "ask_1", name: "ask_user", arguments: {question: "Which test runner should I use?"}}],
+        tool_calls: [
+          {id: "ask_1", name: "ask_user", arguments: {question: "Which test runner should I use?"}},
+        ],
       },
       llm_text("Created index.test.ts with Vitest edge coverage."),
     ],
     { ->
       const answerer = scripted_user(
-        [{match: "*test runner*", reply: "Use Vitest and cover empty, invalid, and boundary inputs."}],
+        [
+          {
+            match: "*test runner*",
+            reply: "Use Vitest and cover empty, invalid, and boundary inputs.",
+          },
+        ],
         {max_replies: 2},
       )
       const session = "agentic-user-scripted-tool"
@@ -32,7 +39,9 @@ pipeline main() {
         ) },
       )
       const simulated_audit = captured.events.find(
-        { event -> return event.type == "tool_call_audit" && event.audit.event_type == "simulated_user_reply" },
+        { event ->
+          return event.type == "tool_call_audit" && event.audit.event_type == "simulated_user_reply"
+        },
       )
       const calls = llm_mock_calls()
       const status = simulated_user_status(answerer)

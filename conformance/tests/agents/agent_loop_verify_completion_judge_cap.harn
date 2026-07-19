@@ -18,9 +18,13 @@ fn run_capped() {
   with_llm_script(
     [
       llm_text("Round one. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto one\",\"next_step\":\"keep going\"}"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"reasoning\":\"veto one\",\"next_step\":\"keep going\"}",
+      ),
       llm_text("Round two. ##DONE##"),
-      llm_text("{\"verdict\":\"continue\",\"reasoning\":\"veto two\",\"next_step\":\"keep going\"}"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"reasoning\":\"veto two\",\"next_step\":\"keep going\"}",
+      ),
       llm_text("Round three. ##DONE##"),
     ],
     { ->

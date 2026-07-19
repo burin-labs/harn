@@ -16,7 +16,10 @@ fn tools() {
     r,
     "echo",
     "Echo back",
-    {handler: { args -> "echoed: " + to_string(args?.msg ?? "") }, parameters: {msg: {type: "string"}}},
+    {
+      handler: { args -> "echoed: " + to_string(args?.msg ?? "") },
+      parameters: {msg: {type: "string"}},
+    },
   )
 }
 

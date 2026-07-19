@@ -35,7 +35,10 @@ fn resume_signature(final) {
 
 pipeline main() {
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   const root = path_join(harness.fs.temp_dir(), "harn-session-bundle-resume-" + uuid_v7())
   const source_root = path_join(root, "source")
   const dest_root = path_join(root, "dest")
@@ -66,7 +69,15 @@ pipeline main() {
   __io_println("source_snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
   const snapshot_value = json_parse(harness.fs.read_text(snapshot_path))
   const bundle_path = path_join(source_root, "source.bundle.json")
-  const exported = exec_at(source_root, harn_bin, "session", "checkpoint", snapshot_path, "--out", bundle_path)
+  const exported = exec_at(
+    source_root,
+    harn_bin,
+    "session",
+    "checkpoint",
+    snapshot_path,
+    "--out",
+    bundle_path,
+  )
   __io_println("export_ok=" + to_string(exported.success))
   const validated = exec_at(source_root, harn_bin, "session", "validate", bundle_path, "--json")
   __io_println("validate_ok=" + to_string(validated.success))
@@ -93,27 +104,37 @@ pipeline main() {
   const imported_snapshot_value = json_parse(harness.fs.read_text(imported_snapshot))
   __io_println(
     "snapshot_self_ref_rewritten="
-      + to_string(imported_snapshot_value.snapshot_path == imported_snapshot),
+      + to_string(
+      imported_snapshot_value.snapshot_path == imported_snapshot,
+    ),
   )
   __io_println(
     "suspension_ref_rewritten="
-      + to_string(imported_snapshot_value.suspension?.snapshot_ref == imported_snapshot),
+      + to_string(
+      imported_snapshot_value.suspension?.snapshot_ref == imported_snapshot,
+    ),
   )
   __io_println(
     "transcript_prefix_preserved="
       + to_string(
       json_stringify(imported_snapshot_value.transcript?.messages ?? [])
-        == json_stringify(snapshot_value.transcript?.messages ?? []),
+        == json_stringify(
+        snapshot_value.transcript?.messages ?? [],
+      ),
     ),
   )
   __io_println(
     "resume_command_points_to_snapshot="
-      + to_string(import_report.worker_snapshots[0].resume_command[3] == imported_snapshot),
+      + to_string(
+      import_report.worker_snapshots[0].resume_command[3] == imported_snapshot,
+    ),
   )
   const imported_run = json_parse(harness.fs.read_text(imported_run_path))
   __io_println(
     "imported_run_metadata_rewritten="
-      + to_string(imported_run.metadata.worker_snapshot_path == imported_snapshot),
+      + to_string(
+      imported_run.metadata.worker_snapshot_path == imported_snapshot,
+    ),
   )
   const source_resumed = exec_at(source_root, harn_bin, "run", "--resume", snapshot_path, "--json")
   __io_println("source_resume_ok=" + to_string(source_resumed.success))
@@ -127,12 +148,15 @@ pipeline main() {
   const imported_signature = resume_signature(final)
   __io_println(
     "resume_signature_matches_source="
-      + to_string(json_stringify(imported_signature) == json_stringify(source_signature)),
+      + to_string(
+      json_stringify(imported_signature) == json_stringify(source_signature),
+    ),
   )
   __io_println("event_type=" + to_string(final.data.event_type))
   __io_println("resumed_status=" + to_string(final.data.value.status))
   __io_println("has_transcript=" + to_string(final.data.value.has_transcript))
   __io_println(
-    "summary_contains_mock=" + to_string(contains(final.data.value.result.summary, "Mock response")),
+    "summary_contains_mock="
+      + to_string(contains(final.data.value.result.summary, "Mock response")),
   )
 }

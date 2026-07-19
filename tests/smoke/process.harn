@@ -17,7 +17,11 @@ fn echo_argv(text) {
 
 fn file_capture_shell_spec() {
   if platform() == "windows" {
-    return {mode: "shell", shell_id: "cmd", command: "echo file-stdout && echo file-stderr 1>&2 && exit /b 7"}
+    return {
+      mode: "shell",
+      shell_id: "cmd",
+      command: "echo file-stdout && echo file-stderr 1>&2 && exit /b 7",
+    }
   }
   return {
     mode: "shell",
@@ -37,7 +41,10 @@ pipeline default() {
   if !contains(result.stdout, "smoke") {
     throw "process smoke failed: stdout did not contain expected marker (got ${result.stdout})"
   }
-  const file_result = command_run(file_capture_shell_spec(), {capture: {transport: "file", max_inline_bytes: 128}})
+  const file_result = command_run(
+    file_capture_shell_spec(),
+    {capture: {transport: "file", max_inline_bytes: 128}},
+  )
   if file_result.success {
     throw "process file-capture smoke failed: nonzero shell command unexpectedly succeeded"
   }

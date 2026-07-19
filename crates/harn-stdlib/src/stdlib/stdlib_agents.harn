@@ -142,7 +142,10 @@ pub fn verify_command(config) {
     return nil
   }
   const shell = host_call("process.get_default_shell", {})
-  const output = host_call("process.exec", {mode: "shell", command: config?.command, shell_id: shell?.id})
+  const output = host_call(
+    "process.exec",
+    {mode: "shell", command: config?.command, shell_id: shell?.id},
+  )
   let ok = output?.success
   if config?.expect_status != nil {
     const actual_status = output?.exit_code ?? output?.legacy_status ?? output?.status
@@ -168,7 +171,11 @@ pub fn verify_result(task, result, config) {
     return verify_command(config)
   }
   if config?.assert_text != nil {
-    return {kind: "text", ok: contains(result?.text ?? "", config?.assert_text), output: result?.text ?? ""}
+    return {
+      kind: "text",
+      ok: contains(result?.text ?? "", config?.assert_text),
+      output: result?.text ?? "",
+    }
   }
   return nil
 }
@@ -526,7 +533,9 @@ pub fn workflow_session_fork(prev) {
  */
 pub fn workflow_session_archive(prev) {
   const session = workflow_session(prev)
-  return workflow_session(session + {status: "archived", transcript: transcript_archive(session.transcript)})
+  return workflow_session(
+    session + {status: "archived", transcript: transcript_archive(session.transcript)},
+  )
 }
 
 /**
@@ -537,7 +546,9 @@ pub fn workflow_session_archive(prev) {
  */
 pub fn workflow_session_resume(prev) {
   const session = workflow_session(prev)
-  return workflow_session(session + {status: "active", transcript: transcript_resume(session.transcript)})
+  return workflow_session(
+    session + {status: "active", transcript: transcript_resume(session.transcript)},
+  )
 }
 
 /**

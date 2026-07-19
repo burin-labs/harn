@@ -36,7 +36,9 @@ fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
     if len(entry.files) == 0 {
       continue
     }
-    const res = rules_apply({rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe})
+    const res = rules_apply(
+      {rule: entry.rule, paths: entry.files, dry_run: !apply, allow_unsafe: allow_unsafe},
+    )
     for f in res.files ?? [] {
       if f.changed {
         changed = changed + 1
@@ -86,9 +88,7 @@ fn main(harness: Harness) {
   } else {
     let raw = harness.env.get_or("HARN_CODEMOD_PLAN_JSON", "")
     if raw == "" {
-      harness.stdio.eprintln(
-        "codemod: internal error — no codemod plan or recipe set by the shim",
-      )
+      harness.stdio.eprintln("codemod: internal error — no codemod plan or recipe set by the shim")
       exit(70)
     }
     run_codemod(json_parse(raw), apply, allow_unsafe)

@@ -10,7 +10,11 @@ pipeline test(task) {
   verification_profiles_set(
     {
       rows: [
-        {id: "check/shell", scope: {task: "verify"}, check: {rung: "R1", command: "echo verification-run"}},
+        {
+          id: "check/shell",
+          scope: {task: "verify"},
+          check: {rung: "R1", command: "echo verification-run"},
+        },
       ],
     },
   )

@@ -74,7 +74,13 @@ pub fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<Pat
                 .flatten()
                 .into_iter()
                 .collect::<Vec<_>>();
-            resolve_package_import(current_file, import_path, &snapshots)
+            let resolved = resolve_package_import(current_file, import_path, &snapshots);
+            if resolved.is_some() {
+                for snapshot in snapshots {
+                    snapshot.retain_for_process();
+                }
+            }
+            resolved
         }
     }
 }

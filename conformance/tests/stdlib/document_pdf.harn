@@ -10,7 +10,10 @@ pipeline test(task) {
       {source_format: "html"},
     ),
   )
-  let rendered = pdf_bytes("# Receipt\n- **Amount** $5.00", {source_format: "markdown", title: "Receipt"})
+  let rendered = pdf_bytes(
+    "# Receipt\n- **Amount** $5.00",
+    {source_format: "markdown", title: "Receipt"},
+  )
   let pdf_text = bytes_to_string(rendered)
   __io_println(starts_with(pdf_text, "%PDF-1.4"))
   __io_println(contains(pdf_text, "xref\n"))

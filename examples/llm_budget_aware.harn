@@ -24,8 +24,12 @@ pipeline default() {
     long_prompt = long_prompt + lorem
     i = i + 1
   }
-  const short_max = recommend_max_output_tokens({prompt: short_prompt, model: model, task_kind: "chat"})
-  const long_max = recommend_max_output_tokens({prompt: long_prompt, model: model, task_kind: "summarize"})
+  const short_max = recommend_max_output_tokens(
+    {prompt: short_prompt, model: model, task_kind: "chat"},
+  )
+  const long_max = recommend_max_output_tokens(
+    {prompt: long_prompt, model: model, task_kind: "summarize"},
+  )
   __io_println("short prompt -> recommended max_output_tokens = " + to_string(short_max))
   __io_println("long prompt  -> recommended max_output_tokens = " + to_string(long_max))
 }

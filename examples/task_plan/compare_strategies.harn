@@ -58,27 +58,32 @@ const __TASKS = [
   {
     id: "01_rate_limiter",
     label: "Rate limiter around auth middleware",
-    prompt: "Add a token-bucket rate limiter (60 requests per minute per token) around the existing auth middleware at `src/auth/middleware.rs`. Excess traffic must respond with HTTP 429 and emit a `rate_limited` metric. Cover the burst window and steady-state regime in unit tests.",
+    prompt:
+      "Add a token-bucket rate limiter (60 requests per minute per token) around the existing auth middleware at `src/auth/middleware.rs`. Excess traffic must respond with HTTP 429 and emit a `rate_limited` metric. Cover the burst window and steady-state regime in unit tests.",
   },
   {
     id: "02_config_option",
     label: "request_timeout_ms config option",
-    prompt: "Add a `request_timeout_ms` configuration option to the service. Thread it through `config.toml`, `ServiceConfig`, and the request handlers, falling back to 30000ms when unset. Add unit tests that prove the override and the default both apply.",
+    prompt:
+      "Add a `request_timeout_ms` configuration option to the service. Thread it through `config.toml`, `ServiceConfig`, and the request handlers, falling back to 30000ms when unset. Add unit tests that prove the override and the default both apply.",
   },
   {
     id: "03_failing_test",
     label: "Diagnose + fix one failing test",
-    prompt: "The unit test `service::tests::handles_zero_balance` is failing. Walk through the smallest reproducible diagnosis path and ship the minimal fix. Decide whether the test or the SUT is wrong, and justify the call.",
+    prompt:
+      "The unit test `service::tests::handles_zero_balance` is failing. Walk through the smallest reproducible diagnosis path and ship the minimal fix. Decide whether the test or the SUT is wrong, and justify the call.",
   },
   {
     id: "04_doc_rename",
     label: "Doc rename of Client::execute -> Client::run",
-    prompt: "We renamed the public API `Client::execute()` to `Client::run()` in v0.5. Update every `docs/`, `examples/`, and `README.md` reference. Preserve the surrounding prose tone. Confirm the snippets still compile via `scripts/check-docs-snippets.sh`.",
+    prompt:
+      "We renamed the public API `Client::execute()` to `Client::run()` in v0.5. Update every `docs/`, `examples/`, and `README.md` reference. Preserve the surrounding prose tone. Confirm the snippets still compile via `scripts/check-docs-snippets.sh`.",
   },
   {
     id: "05_cross_file_refactor",
     label: "Extract format_amount helper across 3 crates",
-    prompt: "Three crates duplicate a `format_amount(value: i64) -> String` helper. Extract it into a shared `format-utils` crate, replace the three call sites, and verify the workspace still passes `cargo test --workspace`.",
+    prompt:
+      "Three crates duplicate a `format_amount(value: i64) -> String` helper. Extract it into a shared `format-utils` crate, replace the three call sites, and verify the workspace still passes `cargo test --workspace`.",
   },
 ]
 
@@ -257,7 +262,10 @@ fn __score_baseline(call) {
   } else {
     bullets
   }
-  const mentions_files = __mentions_any(text, [".rs", ".toml", ".md", ".harn", "src/", "tests/", "docs/", "examples/"])
+  const mentions_files = __mentions_any(
+    text,
+    [".rs", ".toml", ".md", ".harn", "src/", "tests/", "docs/", "examples/"],
+  )
   const mentions_verify = __mentions_any(text, ["cargo test", "cargo check", "scripts/", "verify"])
   const success = chars > 80 && (step_count > 0 || mentions_files)
   return {
@@ -486,7 +494,9 @@ fn __validation_messages(report, wf_report, compiled) {
   let messages = []
   for error in report?.errors ?? [] {
     messages = messages
-      + [to_string(error?.code ?? "validate_error") + ": " + to_string(error?.message ?? error)]
+      + [
+      to_string(error?.code ?? "validate_error") + ": " + to_string(error?.message ?? error),
+    ]
   }
   if !compiled?.ok {
     for error in compiled?.errors ?? [] {
@@ -513,7 +523,12 @@ fn __burin_plan_schema() {
           type: "object",
           required: ["id", "content", "status"],
           additionalProperties: true,
-          properties: {id: {type: "string"}, content: {type: "string"}, status: {type: "string"}, priority: {}},
+          properties: {
+            id: {type: "string"},
+            content: {type: "string"},
+            status: {type: "string"},
+            priority: {},
+          },
         },
       },
       assumptions: {type: "array", items: {type: "string"}},
@@ -590,10 +605,10 @@ fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_o
       throw e
     }
   }
-  const telemetry = resp?.provider_telemetry ?? {}
+  const telemetry = resp?.usage?.provider_telemetry ?? {}
   const text = resp.text ?? ""
-  const input_tokens = resp.input_tokens ?? 0
-  const output_tokens = resp.output_tokens ?? 0
+  const input_tokens = resp.usage?.input_tokens ?? 0
+  const output_tokens = resp.usage?.output_tokens ?? 0
   const cost = estimate_call_cost(
     {
       provider: resp.provider ?? "unknown",
@@ -610,7 +625,7 @@ fn __call_model_once(model, prompt, system, max_tokens, schema, use_structured_o
     server_load_ms: telemetry?.server_load_ms ?? 0,
     model: resp.model ?? model,
     provider: resp.provider ?? "unknown",
-    finish_reason: resp?.finish_reason ?? resp?.stop_reason,
+    finish_reason: resp?.stop_reason,
     cost_usd: cost?.cost_usd,
     input_cost_usd: cost?.breakdown?.input_usd,
     output_cost_usd: cost?.breakdown?.output_usd,
@@ -659,7 +674,8 @@ fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_len
   const continuation_prompt = "Original task:\n"
     + prompt
     + "\n\nThe previous response stopped because it reached the output budget. Previous response prefix:\n"
-    + call.text
+    + call
+    .text
     + "\n\nContinue exactly where you left off. Do not add preamble, markdown fences, or a fresh opening object."
   const continuation = __call_model_once(model, continuation_prompt, system, max_tokens, nil, false)
   return __merge_calls(
@@ -673,10 +689,19 @@ fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_len
 fn __strategy_call(strategy, task, model, max_tokens, opts) {
   const schema = __schema_for_strategy(strategy)
   const use_structured = opts.structured_output && strategy != "baseline"
-    && __structured_output_supported(opts.capabilities)
+    && __structured_output_supported(
+    opts.capabilities,
+  )
   let call = nil
   if strategy == "baseline" {
-    call = __call_model_once(model, __baseline_prompt(task), __baseline_system(), max_tokens, nil, false)
+    call = __call_model_once(
+      model,
+      __baseline_prompt(task),
+      __baseline_system(),
+      max_tokens,
+      nil,
+      false,
+    )
     return __maybe_continue_length(
       call,
       model,
@@ -687,7 +712,14 @@ fn __strategy_call(strategy, task, model, max_tokens, opts) {
     )
   }
   if strategy == "burin_plan" {
-    call = __call_model_once(model, __burin_prompt(task), __burin_system(), max_tokens, schema, use_structured)
+    call = __call_model_once(
+      model,
+      __burin_prompt(task),
+      __burin_system(),
+      max_tokens,
+      schema,
+      use_structured,
+    )
     return __maybe_continue_length(
       call,
       model,
@@ -765,14 +797,27 @@ fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
     schema,
     use_structured,
   )
-  const repaired = __merge_calls(call, repair, repair.text, (call?.retry_history ?? []) + ["schema_repair"])
+  const repaired = __merge_calls(
+    call,
+    repair,
+    repair.text,
+    (call?.retry_history ?? []) + ["schema_repair"],
+  )
   return {call: repaired, score: __strategy_score(strategy, repaired)}
 }
 
 fn __run_cell(strategy, task, trial, model, max_tokens, opts) {
   const initial_call = __strategy_call(strategy, task, model, max_tokens, opts)
   const initial_score = __strategy_score(strategy, initial_call)
-  const repaired = __maybe_repair_schema(strategy, task, model, max_tokens, opts, initial_call, initial_score)
+  const repaired = __maybe_repair_schema(
+    strategy,
+    task,
+    model,
+    max_tokens,
+    opts,
+    initial_call,
+    initial_score,
+  )
   const call = repaired.call
   const score = repaired.score
   return {

@@ -4,7 +4,10 @@ pipeline test(task) {
     "https://api.example.com/retry-exhausted",
     {responses: [{status: 503}, {status: 503}, {status: 503}]},
   )
-  const resp = harness.net.get("https://api.example.com/retry-exhausted", {retry: {max: 2, backoff_ms: 0}})
+  const resp = harness.net.get(
+    "https://api.example.com/retry-exhausted",
+    {retry: {max: 2, backoff_ms: 0}},
+  )
   const calls = http_mock_calls()
   assert_eq(resp.status, 503)
   assert_eq(len(calls), 3)

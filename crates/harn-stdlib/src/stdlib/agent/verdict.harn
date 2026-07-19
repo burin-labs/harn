@@ -163,7 +163,10 @@ pub fn verdict_all(harness: Harness, verdicts: list) -> Verdict {
     proofs = proofs.push(v.proof)
   }
   if !harness.verdict.same_run(proofs) {
-    return verdict_indeterminate("cross_run", "receipts span multiple runs; cannot combine into one pass")
+    return verdict_indeterminate(
+      "cross_run",
+      "receipts span multiple runs; cannot combine into one pass",
+    )
   }
   return verdicts[0]
 }

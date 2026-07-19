@@ -4,7 +4,7 @@
 import Foundation
 
 public enum HarnProtocolConstants {
-    public static let artifactVersion = "0.10.24"
+    public static let artifactVersion = "0.10.28"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let harnAgentEventMethod = "_harn/agentEvent"
     public static let harnProviderCatalogMethod = "_harn/providerCatalog"
@@ -463,6 +463,14 @@ public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
 public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var schema: HarnACPPromptErrorSchema
     public var terminalClass: HarnAgentTerminalClass
+    public var category: String?
+    public var kind: String?
+    public var reason: String?
+    public var code: String?
+    public var retryable: Bool?
+    public var retryAfterMs: Int?
+    public var provider: String?
+    public var model: String?
 }
 
 public enum HarnToolCallReceiptStatus: String, Codable, Sendable, CaseIterable {

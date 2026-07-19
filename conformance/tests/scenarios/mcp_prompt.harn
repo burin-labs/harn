@@ -14,10 +14,12 @@ pipeline test(task) {
     {
       name: "pair_program",
       description: "Pair programming session",
-      handler: { args -> [
-        {role: "user", content: "Let's pair program"},
-        {role: "assistant", content: "Sure, what are we building?"},
-      ] },
+      handler: { args ->
+        [
+          {role: "user", content: "Let's pair program"},
+          {role: "assistant", content: "Sure, what are we building?"},
+        ]
+      },
     },
   )
   __io_println("mcp_prompt registered")

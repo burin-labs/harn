@@ -14,7 +14,9 @@ fn fail_handler(event: TriggerEvent) -> any {
 
 pipeline test(task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const ok_id = "ok-trigger-" + unique
   const fail_id = "fail-trigger-" + unique
   const ok_config = {
@@ -72,7 +74,9 @@ pipeline test(task) {
   __io_println(fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"))
   const dlq_before: list<DlqEntry> = trigger_inspect_dlq()
   const current_dlq_before = dlq_before.filter({ entry -> entry.binding_id == fail_handle.id })
-  __io_println(len(current_dlq_before) == 1 && current_dlq_before[0]?.event_id == fail_fire.event_id)
+  __io_println(
+    len(current_dlq_before) == 1 && current_dlq_before[0]?.event_id == fail_fire.event_id,
+  )
   __io_println(len(current_dlq_before[0]?.retry_history) == 1)
   __io_println(current_dlq_before[0]?.event?.provider == "github")
   const replay: DispatchHandle = trigger_replay(fail_fire.event_id)

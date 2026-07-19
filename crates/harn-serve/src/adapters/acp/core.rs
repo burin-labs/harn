@@ -258,58 +258,31 @@ impl AcpServer {
         }
     }
 
-    /// Send a `session/update` notification with an agent message chunk.
-    pub(super) fn send_update(&self, session_id: &str, text: &str) {
-        let visible_text = sanitize_visible_assistant_text(text, true);
-        let mut content = serde_json::json!({
-            "type": "text",
-            "text": text,
-        });
-        let mut content_meta = serde_json::Map::new();
-        content_meta.insert(
-            "visible_text".to_string(),
-            serde_json::Value::String(visible_text.clone()),
-        );
-        content_meta.insert(
-            "visible_delta".to_string(),
-            serde_json::Value::String(visible_text),
-        );
-        events::merge_harn_meta(&mut content, content_meta);
-        self.send_notification(
-            "session/update",
-            serde_json::json!({
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "agent_message_chunk",
-                    "content": content,
-                },
-            }),
-        );
-    }
-
-    pub(super) fn send_prompt_error(
-        &self,
-        session_id: &str,
-        id: &serde_json::Value,
-        message: &str,
-    ) {
-        self.send_prompt_error_with_class(
-            session_id,
+    /// Emit a terminal prompt failure as a single typed JSON-RPC error.
+    ///
+    /// A terminal failure is never assistant content: this path emits exactly
+    /// one JSON-RPC error carrying the typed [`AcpPromptErrorData`] and never a
+    /// `session/update` `agent_message_chunk`. Compile/setup/runtime string
+    /// errors carry the `generic_throw` class and no route facts.
+    pub(super) fn send_prompt_error(&self, id: &serde_json::Value, message: &str) {
+        self.send_prompt_failure(
             id,
             message,
             harn_vm::llm::AgentTerminalClass::GenericThrow,
+            super::types::AcpPromptFailureFacts::default(),
         );
     }
 
-    pub(super) fn send_prompt_error_with_class(
+    /// Emit a terminal prompt failure with the typed class and structured
+    /// machine facts projected from the thrown error dict.
+    pub(super) fn send_prompt_failure(
         &self,
-        session_id: &str,
         id: &serde_json::Value,
         message: &str,
         terminal_class: harn_vm::llm::AgentTerminalClass,
+        facts: super::types::AcpPromptFailureFacts,
     ) {
-        self.send_update(session_id, &format!("Error: {message}\n"));
-        let data = super::types::AcpPromptErrorData::new(terminal_class);
+        let data = super::types::AcpPromptErrorData::with_facts(terminal_class, facts);
         self.send_error_with_data(
             id,
             -32000,

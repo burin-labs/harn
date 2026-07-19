@@ -59,7 +59,8 @@ pipeline default(_task) {
   __io_println("=== review_captain · stage 1 (initial scan) ===")
   __io_println(initial_envelope.text)
   __io_println("")
-  const author_answer = "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
+  const author_answer =
+    "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
   const clarification_prompt = render_clarification_prompt(diff.pr_number, author_answer)
   const final_envelope = llm_call(clarification_prompt, system)
   const receipt = {

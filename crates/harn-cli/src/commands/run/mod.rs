@@ -24,6 +24,7 @@ pub mod harnpack;
 mod interrupts;
 pub mod json_events;
 mod lifecycle;
+mod llm_mock;
 mod manifest_runtime;
 mod sandbox;
 
@@ -38,6 +39,7 @@ use self::interrupts::{
 use self::json_events::NdjsonEmitter;
 pub use self::lifecycle::RunProfileOptions;
 use self::lifecycle::{RunExecution, TerminalRun};
+pub use self::llm_mock::*;
 pub(crate) use self::manifest_runtime::connect_mcp_servers;
 #[cfg(test)]
 use self::sandbox::default_run_capability_policy;
@@ -473,18 +475,6 @@ fn typecheck_with_imports(
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum CliLlmMockMode {
-    #[default]
-    Off,
-    Replay {
-        fixture_path: PathBuf,
-    },
-    Record {
-        fixture_path: PathBuf,
-    },
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RunAttestationOptions {
     pub receipt_out: Option<PathBuf>,
     pub agent_id: Option<String>,
@@ -521,34 +511,6 @@ pub struct RunOutcome {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
-}
-
-pub fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
-    harn_vm::llm::clear_cli_llm_mock_mode();
-    match mode {
-        CliLlmMockMode::Off => Ok(()),
-        CliLlmMockMode::Replay { fixture_path } => {
-            let fixture = harn_vm::llm::load_llm_mocks_jsonl(fixture_path)?;
-            harn_vm::llm::install_cli_llm_mock_fixture(fixture);
-            Ok(())
-        }
-        CliLlmMockMode::Record { .. } => {
-            harn_vm::llm::enable_cli_llm_mock_recording();
-            Ok(())
-        }
-    }
-}
-
-pub fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), String> {
-    let CliLlmMockMode::Record { fixture_path } = mode else {
-        harn_vm::llm::clear_cli_llm_mock_mode();
-        return Ok(());
-    };
-    let body = harn_vm::llm::serialize_llm_mock_fixture(harn_vm::llm::take_cli_llm_recordings())?;
-    let result = harn_vm::atomic_io::atomic_write(fixture_path, body.as_bytes())
-        .map_err(|error| format!("failed to write {}: {error}", fixture_path.display()));
-    harn_vm::llm::clear_cli_llm_mock_mode();
-    result
 }
 
 pub(crate) async fn run_file(

@@ -96,7 +96,13 @@ pipeline default(_task) {
     if decision == "block" {
       blocked = blocked + 1
     }
-    const row = {repo: pr.repo, pr: pr.number, title: pr.title, decision: decision, reasoning: llm_response}
+    const row = {
+      repo: pr.repo,
+      pr: pr.number,
+      title: pr.title,
+      decision: decision,
+      reasoning: llm_response,
+    }
     decisions = decisions + [row]
     __io_println("[#${pr.number}] ${pr.title}")
     __io_println("    decision: ${decision}")

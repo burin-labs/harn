@@ -140,10 +140,14 @@ fn __missing_tool_call_schema() {
   return {
     type: "object",
     properties: {
-      action: {type: "string", description: "One of: tool_call_intended, no_tool_call_intended, ambiguous."},
+      action: {
+        type: "string",
+        description: "One of: tool_call_intended, no_tool_call_intended, ambiguous.",
+      },
       tool_name: {
         type: "string",
-        description: "Exact candidate tool name when action is tool_call_intended; otherwise empty.",
+        description:
+          "Exact candidate tool name when action is tool_call_intended; otherwise empty.",
       },
       confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
       evidence: {type: "string", description: "Brief reason grounded in the assistant text."},
@@ -196,7 +200,9 @@ fn __missing_tool_call_normalize(
   const original_action = __missing_tool_call_action(raw?.action)
   const confidence = __missing_tool_call_float(raw?.confidence, 0.0)
   const tool_name = __missing_tool_call_tool_name(raw?.tool_name ?? raw?.tool, candidate_tools)
-  const action = if original_action == "tool_call_intended" && confidence >= threshold && tool_name != "" {
+  const action = if original_action == "tool_call_intended" && confidence >= threshold
+    && tool_name
+    != "" {
     "tool_call_intended"
   } else if original_action == "no_tool_call_intended" && confidence >= threshold {
     "no_tool_call_intended"
@@ -302,7 +308,9 @@ pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
         return __missing_tool_call_fail_open(err, threshold) + {classifier_kind: "custom"}
       }
       return __missing_tool_call_normalize(unwrap(custom), candidate_tools, threshold)
-        + {classifier_kind: "custom"}
+        + {
+        classifier_kind: "custom",
+      }
     }
     const schema = __missing_tool_call_schema()
     let llm_opts = {
@@ -330,9 +338,17 @@ pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
     )
     if !checkpoint.ok {
       return __missing_tool_call_fail_open(checkpoint.error, threshold)
-        + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
+        + {
+        classifier_kind: "llm",
+        model: model,
+        typed_checkpoint: checkpoint,
+      }
     }
     return __missing_tool_call_normalize(checkpoint.data, candidate_tools, threshold)
-      + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
+      + {
+      classifier_kind: "llm",
+      model: model,
+      typed_checkpoint: checkpoint,
+    }
   }
 }

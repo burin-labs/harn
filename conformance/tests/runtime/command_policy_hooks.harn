@@ -47,9 +47,15 @@ pipeline default() {
     },
   )
   assert(hostlib_denied?.status == "blocked", "hostlib command observes the same deny policy")
-  assert(hostlib_denied?.handle_id == nil, "blocked hostlib command does not return a process handle")
+  assert(
+    hostlib_denied?.handle_id == nil,
+    "blocked hostlib command does not return a process handle",
+  )
   assert(!harness.fs.exists(hostlib_marker), "blocked hostlib command must not spawn")
-  const rewritten = host_call("process.exec", {mode: "argv", argv: ["printf", "original"], cwd: root})
+  const rewritten = host_call(
+    "process.exec",
+    {mode: "argv", argv: ["printf", "original"], cwd: root},
+  )
   assert(rewritten?.stdout == "rewritten", "pre-hook rewrite updates argv")
   assert(
     rewritten?.command_policy?.annotation?.annotations?.checked,
@@ -62,13 +68,18 @@ pipeline default() {
     "post-hook annotation is recorded on the hostlib result",
   )
   harness.fs.write_text(path_join(root, ".env"), "TOKEN=secret\n")
-  const approval = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
+  const approval = host_call(
+    "process.exec",
+    {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root},
+  )
   assert(
     approval?.status == "blocked",
     "approval risk blocks before spawn without a host approval grant",
   )
   assert(contains(approval?.stderr ?? "", "requires approval"), "approval reason is surfaced")
-  const hostlib_approval = hostlib_tools_run_command({argv: ["cat", path_join(root, ".env")], cwd: root})
+  const hostlib_approval = hostlib_tools_run_command(
+    {argv: ["cat", path_join(root, ".env")], cwd: root},
+  )
   assert(hostlib_approval?.status == "blocked", "hostlib approval risk blocks before spawn")
   command_policy_pop()
   // ---- Consent gate ----
@@ -93,7 +104,10 @@ pipeline default() {
     },
   )
   command_policy_push(approve_policy)
-  const approved = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
+  const approved = host_call(
+    "process.exec",
+    {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root},
+  )
   assert(atomic_get(consent_asks) == 1, "consent ask fires for a require_approval command")
   assert(approved?.status != "blocked", "consented command is not blocked")
   assert(approved?.status != "consent_denied", "consented command is not consent-denied")
@@ -113,16 +127,25 @@ pipeline default() {
     "process.exec",
     {
       mode: "argv",
-      argv: ["sh", "-c", "cat \"" + path_join(root, ".env") + "\"; echo x > \"" + deny_marker + "\""],
+      argv: [
+        "sh",
+        "-c",
+        "cat \"" + path_join(root, ".env") + "\"; echo x > \"" + deny_marker + "\"",
+      ],
       cwd: root,
     },
   )
   assert(refused?.status == "consent_denied", "denied consent yields a consent_denied disposition")
   assert(!harness.fs.exists(deny_marker), "consent-denied command must not spawn")
   assert(contains(refused?.stderr ?? "", "not this time"), "consent denial reason is surfaced")
-  const hostlib_refused = hostlib_tools_run_command({argv: ["cat", path_join(root, ".env")], cwd: root})
+  const hostlib_refused = hostlib_tools_run_command(
+    {argv: ["cat", path_join(root, ".env")], cwd: root},
+  )
   assert(hostlib_refused?.status == "consent_denied", "hostlib preserves consent-denied status")
-  assert(contains(hostlib_refused?.stderr ?? "", "not this time"), "hostlib surfaces consent reason")
+  assert(
+    contains(hostlib_refused?.stderr ?? "", "not this time"),
+    "hostlib surfaces consent reason",
+  )
   command_policy_pop()
   // Bool-false shorthand denies too (with_consent prompt_fn parity).
   const bool_deny = command_policy(
@@ -133,7 +156,10 @@ pipeline default() {
     },
   )
   command_policy_push(bool_deny)
-  const bool_refused = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
+  const bool_refused = host_call(
+    "process.exec",
+    {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root},
+  )
   assert(bool_refused?.status == "consent_denied", "bool-false consent blocks execution")
   command_policy_pop()
   // ---- Catastrophic (never-approvable) command floor ----
@@ -155,10 +181,16 @@ pipeline default() {
   command_policy_push(floor_policy)
   // argv-mode catastrophe: `git reset --hard` is blocked even though a consent
   // closure would approve it.
-  const reset_blocked = host_call("process.exec", {mode: "argv", argv: ["git", "reset", "--hard"], cwd: root})
+  const reset_blocked = host_call(
+    "process.exec",
+    {mode: "argv", argv: ["git", "reset", "--hard"], cwd: root},
+  )
   assert(reset_blocked?.status == "blocked", "catastrophic git reset --hard is hard-denied")
   assert(reset_blocked?.status != "consent_denied", "catastrophic is not a consent disposition")
-  assert(contains(reset_blocked?.stderr ?? "", "git reset --hard"), "catastrophic reason is surfaced")
+  assert(
+    contains(reset_blocked?.stderr ?? "", "git reset --hard"),
+    "catastrophic reason is surfaced",
+  )
   // Redirection onto a source file is catastrophic and must not spawn.
   const floor_marker = path_join(root, "floor_should_not_spawn.rs")
   const redirect_blocked = host_call(
@@ -189,7 +221,9 @@ pipeline default() {
   assert(atomic_get(floor_asks) == 0, "wrapped catastrophic floor never consults the consent gate")
   command_policy_pop()
   const background_marker = path_join(root, "background_should_not_spawn")
-  const background_policy = command_policy({workspace_roots: [root], deny_patterns: ["*background-policy-deny*"]})
+  const background_policy = command_policy(
+    {workspace_roots: [root], deny_patterns: ["*background-policy-deny*"]},
+  )
   command_policy_push(background_policy)
   const background_blocked = hostlib_tools_run_command(
     {
@@ -198,7 +232,10 @@ pipeline default() {
       background: true,
     },
   )
-  assert(background_blocked?.status == "blocked", "background hostlib command is denied before spawn")
+  assert(
+    background_blocked?.status == "blocked",
+    "background hostlib command is denied before spawn",
+  )
   assert(background_blocked?.handle_id == nil, "denied background command has no process handle")
   assert(!harness.fs.exists(background_marker), "denied background command never starts")
   command_policy_pop()
@@ -234,7 +271,9 @@ pipeline default() {
     {
       parameters: {command: {type: "string"}},
       annotations: {kind: "execute", side_effect_level: "process_exec"},
-      handler: { args -> host_call("process.exec", {mode: "argv", argv: ["sh", "-c", args.command], cwd: root}) },
+      handler: { args ->
+        host_call("process.exec", {mode: "argv", argv: ["sh", "-c", args.command], cwd: root})
+      },
     },
   )
   with_llm_script(

@@ -7,11 +7,13 @@
 /** Build a normalized observation from raw GitHub PR + checks data. */
 pub fn from_github(pr, checks, required_checks) {
   const observed_checks = (checks ?? []).map(
-    { check -> {
-      name: check.name ?? check.context ?? "",
-      status: check.status ?? "unknown",
-      conclusion: check.conclusion,
-    } },
+    { check ->
+      {
+        name: check.name ?? check.context ?? "",
+        status: check.status ?? "unknown",
+        conclusion: check.conclusion,
+      }
+    },
   )
   const conclusion_for = { name ->
     let found = nil

@@ -112,7 +112,13 @@ pub fn cli_json_envelope(spec: CliJsonEnvelope) -> dict {
   } else {
     spec.warnings
   }
-  return {schemaVersion: spec.schema_version, ok: spec.ok, data: data, error: error, warnings: warnings}
+  return {
+    schemaVersion: spec.schema_version,
+    ok: spec.ok,
+    data: data,
+    error: error,
+    warnings: warnings,
+  }
 }
 
 /**

@@ -21,7 +21,9 @@ pub fn build_review_receipt(args) {
   const blocking = _has_blocking(combined_findings)
   const verdict = if blocking {
     "blocking"
-  } else if len(combined_findings) > 0 || len(missing_tests) > 0 || len(risky_hits) > 0 {
+  } else if len(combined_findings) > 0 || len(missing_tests) > 0
+    || len(risky_hits)
+    > 0 {
     "needs_follow_up"
   } else {
     "approve"
@@ -79,12 +81,14 @@ fn _findings_from_secrets(secret_findings) {
     findings = findings
       + [
       {
-        id: "secret:${finding.detector ?? finding.title ?? "unknown"}:${finding.fingerprint ?? to_string(finding.line ?? 0)}",
+        id:
+          "secret:${finding.detector ?? finding.title ?? "unknown"}:${finding.fingerprint ?? to_string(finding.line ?? 0)}",
         severity: "blocking",
         category: "secret",
         title: finding.title ?? "Secret detected",
         detail: "Secret-like value detected in diff (${finding.detector ?? "scanner"}).",
-        suggestion: "Rotate the credential and replace the literal with an environment variable or vaulted secret.",
+        suggestion:
+          "Rotate the credential and replace the literal with an environment variable or vaulted secret.",
         file: nil,
         line_start: finding.line,
         line_end: finding.line,

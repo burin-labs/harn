@@ -6,7 +6,10 @@ pipeline default() {
   __io_println(argv?.stdout)
   __io_println(argv?.command_id != nil)
   __io_println(argv?.pid != nil)
-  const shell = host_call("process.exec", {mode: "shell", command: "printf shell-v2", shell: {id: "sh"}})
+  const shell = host_call(
+    "process.exec",
+    {mode: "shell", command: "printf shell-v2", shell: {id: "sh"}},
+  )
   __io_println(shell?.status)
   __io_println(shell?.exit_code)
   __io_println(shell?.stdout)

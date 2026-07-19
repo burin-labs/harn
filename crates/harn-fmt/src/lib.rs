@@ -3,6 +3,7 @@ mod helpers;
 #[cfg(test)]
 mod tests;
 mod trailing_comma;
+mod width;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -14,6 +15,7 @@ pub(crate) use formatter::{Comment, Formatter};
 pub use trailing_comma::{
     apply_trailing_comma_fixes, trailing_comma_issues, TrailingCommaIssue, TrailingCommaKind,
 };
+pub use width::{line_width_violations, LineWidthViolation};
 
 /// `FmtOptions::separator_width` value that resolves section-header bars from
 /// `line_width` minus the current indent.
@@ -21,9 +23,8 @@ pub const AUTO_SEPARATOR_WIDTH: usize = 0;
 
 /// Maximum line width the formatter targets.
 ///
-/// Layout decisions use this shared budget, although unbreakable content and
-/// expression contexts that do not yet track their starting column can still
-/// produce longer lines.
+/// Layout decisions use this shared budget. The formatter's final width guard
+/// permits only single unbreakable tokens and comments to exceed it.
 pub const LINE_WIDTH_DEFAULT: usize = 100;
 
 /// Error returned when formatting cannot proceed.

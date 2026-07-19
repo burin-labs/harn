@@ -1,0 +1,101 @@
+pub fn __dispatch_results_list(dispatch) {
+  if dispatch == nil {
+    return []
+  }
+  if type_of(dispatch) == "list" {
+    return dispatch
+  }
+  return dispatch?.results ?? []
+}
+
+pub const __PRODUCT_ERROR_WRITE_TOOL_NAMES = ["edit", "scaffold", "run_codemod", "write"]
+
+pub fn __tool_result_write_product_tool(result) -> bool {
+  const name = lowercase(
+    trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")),
+  )
+  return contains(__PRODUCT_ERROR_WRITE_TOOL_NAMES, name)
+}
+
+pub fn __tool_result_dispatch_rejection_text(lower: string) -> bool {
+  return lower.contains("\"error\":\"invalid_arguments\"")
+    || lower.contains(
+    "\"error\": \"invalid_arguments\"",
+  )
+    || lower.contains("error: invalid_arguments")
+    || lower.contains("\"error\":\"permission_denied\"")
+    || lower.contains(
+    "\"error\": \"permission_denied\"",
+  )
+    || lower.contains("error: permission_denied")
+}
+
+pub fn __tool_result_write_product_error_text(text: string) -> bool {
+  const lower = lowercase(trim(text))
+  if lower == "" {
+    return false
+  }
+  if lower.starts_with("## diagnostics (") {
+    return !lower.starts_with("## diagnostics (0 errors")
+  }
+  if lower.starts_with("[result of ") && lower.contains("\n## diagnostics (") {
+    return !lower.contains("\n## diagnostics (0 errors")
+  }
+  return lower.starts_with("no ")
+    || lower.starts_with("file already exists")
+    || lower.starts_with("missing required parameter")
+    || lower.contains("[edit rejected]")
+    || __tool_result_dispatch_rejection_text(lower)
+}
+
+pub fn __tool_result_product_error(result) -> bool {
+  if type_of(result) != "dict" {
+    return false
+  }
+  const write_tool = __tool_result_write_product_tool(result)
+  for key in ["error", "observation", "rendered_result", "result", "output"] {
+    if result[key] != nil {
+      let text = trim(to_string(result[key]))
+      if starts_with(text, "Error:") {
+        return true
+      }
+      if starts_with(text, "[result of ") && contains(text, "\nError:") {
+        return true
+      }
+      if write_tool && __tool_result_write_product_error_text(text) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+pub fn __tool_result_ok(result) -> bool {
+  if __tool_result_product_error(result) {
+    return false
+  }
+  if result?.ok != nil {
+    return result.ok ? true : false
+  }
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  const status = result?.status ?? ""
+  return status == "ok" || status == "success"
+}
+
+pub fn __tool_result_name(result) {
+  return result?.tool_name ?? result?.name ?? ""
+}
+
+pub fn __tool_names_by_status(dispatch, want_ok) {
+  const results = __dispatch_results_list(dispatch)
+  let names = []
+  for result in results {
+    const name = __tool_result_name(result)
+    if name != "" && __tool_result_ok(result) == want_ok {
+      names = names.push(name)
+    }
+  }
+  return names
+}

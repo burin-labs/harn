@@ -97,7 +97,12 @@ pipeline test_summarize_sweep_aggregates(task) {
       observed_at: 1,
       policy: _policy(),
       observation: _obs(),
-      classification: {state: "blocked", action: "request_review", reason: "needs review", evidence: {}},
+      classification: {
+        state: "blocked",
+        action: "request_review",
+        reason: "needs review",
+        evidence: {},
+      },
       prior_state: "discovered",
       commands_run: [],
       outcome: "wait",

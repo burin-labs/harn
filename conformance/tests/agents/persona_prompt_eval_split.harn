@@ -6,14 +6,20 @@ import {
 @test
 pipeline test_persona_prompt_eval_split(_task) {
   const manifest = {split: {"meter-tune": ["tune-case"], "meter-holdout": ["holdout-case"]}}
-  assert_eq(persona_prompt_eval_selected_split(manifest, "meter-tune"), {"meter-tune": ["tune-case"]})
+  assert_eq(
+    persona_prompt_eval_selected_split(manifest, "meter-tune"),
+    {"meter-tune": ["tune-case"]},
+  )
   assert_eq(persona_prompt_eval_selected_split(manifest, "all"), manifest.split)
   assert_eq(
     persona_prompt_eval_executor(
       {argv: ["harn", "run", "executor.harn"], timeout_seconds: 300},
       "/tmp/harn-events/evals.sqlite",
     ),
-    {argv: ["harn", "run", "--write-root", "/tmp/harn-events", "executor.harn"], timeout_seconds: 300},
+    {
+      argv: ["harn", "run", "--write-root", "/tmp/harn-events", "executor.harn"],
+      timeout_seconds: 300,
+    },
   )
   __io_println("persona prompt eval split selection ok")
   return {output: "persona prompt eval split selection passed"}

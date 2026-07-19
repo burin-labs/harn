@@ -30,7 +30,12 @@ pipeline test(task) {
               label: "cheap",
               options: {max_tokens: 256, temperature: 0.0},
             },
-            {model: "mock-frontier", provider: "mock", label: "frontier", options: {max_tokens: 4096}},
+            {
+              model: "mock-frontier",
+              provider: "mock",
+              label: "frontier",
+              options: {max_tokens: 4096},
+            },
           ],
         },
       )

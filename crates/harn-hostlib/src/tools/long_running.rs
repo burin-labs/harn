@@ -42,6 +42,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
+use harn_vm::VmDictExt;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -145,6 +146,10 @@ fn kill_and_publish(killer: &dyn ProcessKiller, cancellation: &mut CancellationS
 struct OutputState {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    /// Wall-clock instant of the most recent stdout/stderr chunk, used to derive
+    /// `silence_ms` on progress snapshots (the byte-stall decision trigger).
+    /// `None` until the first byte of output arrives.
+    last_output_at: Option<std::time::Instant>,
 }
 
 /// Shared state for a single in-flight child process.
@@ -166,6 +171,13 @@ struct HandleEntry {
     result_txs: Vec<std::sync::mpsc::SyncSender<VmValue>>,
     /// Opaque verification snapshot binding provided by the caller.
     snapshot_binding: Option<harn_vm::value::DictMap>,
+    /// Spawn-time lease tag surfaced by `list_handles` (loop owns transitions).
+    lease: LeaseTag,
+    /// Human-readable command display, so `list_handles` can render a ledger
+    /// digest without the caller re-deriving it.
+    command_display: String,
+    /// RFC 3339 spawn timestamp, for `list_handles` elapsed reporting.
+    started_at: String,
 }
 
 #[derive(Default)]
@@ -216,14 +228,47 @@ pub struct LongRunningHandleInfo {
     pub snapshot_binding: Option<harn_vm::value::DictMap>,
 }
 
+/// Default ceiling for the progress-emission backoff schedule when the caller
+/// does not pin `progress_max_interval_ms`. The schedule starts at the base
+/// `progress_interval`, doubles after each snapshot, and is clamped here — so a
+/// multi-minute command emits a handful of re-entries (2s, 4s, 8s, 16s, 30s,
+/// 30s, ...) instead of one every base interval, keeping a silent long build
+/// token-cheap while still surfacing early, frequent progress.
+const DEFAULT_PROGRESS_MAX_INTERVAL: Duration = Duration::from_secs(30);
+
 pub(crate) struct LongRunningSpawnOptions {
     pub(crate) env_mode: EnvMode,
     pub(crate) env_remove: Vec<String>,
     pub(crate) capture: CaptureConfig,
     pub(crate) session_id: String,
     pub(crate) progress_interval: Option<Duration>,
+    pub(crate) progress_max_interval: Option<Duration>,
     pub(crate) progress_max_inline_bytes: usize,
     pub(crate) snapshot_binding: Option<harn_vm::value::DictMap>,
+    /// Initial lease classification recorded on the handle entry for
+    /// `list_handles` reporting. `"awaited"` (the loop schedules decision
+    /// re-entries and waits on it) or `"service"` (detached; runs until the
+    /// session-end reaper). The loop owns transitions after spawn; this is only
+    /// the spawn-time tag.
+    pub(crate) lease: LeaseTag,
+}
+
+/// Spawn-time lease classification stored on a handle entry. The agent loop's
+/// ledger owns lease transitions (e.g. `release_command` awaited -> service);
+/// this tag is the initial value surfaced by `list_handles`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LeaseTag {
+    Awaited,
+    Service,
+}
+
+impl LeaseTag {
+    fn as_str(self) -> &'static str {
+        match self {
+            LeaseTag::Awaited => "awaited",
+            LeaseTag::Service => "service",
+        }
+    }
 }
 
 struct WaiterContext {
@@ -234,6 +279,7 @@ struct WaiterContext {
     process_group_id: Option<u32>,
     command_display: String,
     progress_interval: Option<Duration>,
+    progress_max_interval: Option<Duration>,
     progress_max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
 }
@@ -252,7 +298,11 @@ struct ProgressThreadContext {
     cancel_state: Arc<CancelState>,
     done: Arc<AtomicBool>,
     started: std::time::Instant,
+    /// Base delay before the first progress snapshot and the seed of the
+    /// doubling backoff schedule.
     interval: Duration,
+    /// Upper bound the doubling schedule is clamped to.
+    max_interval: Duration,
     max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
 }
@@ -306,8 +356,10 @@ pub fn spawn_long_running(
             capture: CaptureConfig::default(),
             session_id,
             progress_interval: None,
+            progress_max_interval: None,
             progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
             snapshot_binding: None,
+            lease: LeaseTag::Awaited,
         },
     )
 }
@@ -368,6 +420,9 @@ pub(crate) fn spawn_long_running_with_options(
                 completion_tx: None,
                 result_txs: Vec::new(),
                 snapshot_binding: options.snapshot_binding.clone(),
+                lease: options.lease,
+                command_display: command_display.clone(),
+                started_at: started_at.clone(),
             },
         );
     }
@@ -380,6 +435,7 @@ pub(crate) fn spawn_long_running_with_options(
         process_group_id,
         command_display: command_display.clone(),
         progress_interval: options.progress_interval,
+        progress_max_interval: options.progress_max_interval,
         progress_max_inline_bytes: options.progress_max_inline_bytes,
         snapshot_binding: options.snapshot_binding.clone(),
     };
@@ -460,6 +516,14 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         .progress_interval
         .filter(|interval| !interval.is_zero())
         .map(|interval| {
+            // The backoff ceiling is never below the base interval: a caller that
+            // pins a large base without a cap gets a fixed cadence, not a cap that
+            // silently shrinks its interval.
+            let max_interval = context
+                .progress_max_interval
+                .filter(|cap| !cap.is_zero())
+                .unwrap_or(DEFAULT_PROGRESS_MAX_INTERVAL)
+                .max(interval);
             spawn_progress_thread(ProgressThreadContext {
                 command_id: context.command_id.clone(),
                 handle_id: context.handle_id.clone(),
@@ -475,6 +539,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
                 done: done.clone(),
                 started: waiter_start,
                 interval,
+                max_interval,
                 max_inline_bytes: context.progress_max_inline_bytes,
                 snapshot_binding: context.snapshot_binding.clone(),
             })
@@ -669,27 +734,47 @@ fn spawn_output_drain(
                 } else {
                     state.stderr.extend_from_slice(chunk);
                 }
+                state.last_output_at = Some(std::time::Instant::now());
             }
         }
     })
 }
 
+/// Next delay in the progress backoff schedule: double the current delay,
+/// clamped to `max`. Saturates to `max` rather than overflowing.
+fn next_progress_interval(current: Duration, max: Duration) -> Duration {
+    current.checked_mul(2).unwrap_or(max).min(max)
+}
+
 fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
+        // Exponential backoff: wait `interval`, emit a snapshot, then double the
+        // wait after each snapshot up to `max_interval`. Progress is frequent
+        // while the model most wants to know whether the command is moving, and
+        // thins out for a long-running command so it stays token-cheap. The final
+        // completion snapshot is emitted by the waiter thread on exit, independent
+        // of where this schedule is, so the terminal result is never delayed by a
+        // long backoff wait.
+        let mut current = context.interval;
         while !context.done.load(Ordering::Acquire)
             && !context.cancel_state.cancellation_published()
         {
-            std::thread::sleep(context.interval);
+            std::thread::sleep(current);
             if context.done.load(Ordering::Acquire) || context.cancel_state.cancellation_published()
             {
                 break;
             }
-            let (stdout, stderr) = {
+            current = next_progress_interval(current, context.max_interval);
+            let (stdout, stderr, last_output_at) = {
                 let state = context
                     .output_state
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner());
-                (state.stdout.clone(), state.stderr.clone())
+                (
+                    state.stdout.clone(),
+                    state.stderr.clone(),
+                    state.last_output_at,
+                )
             };
             let capture = CaptureConfig {
                 max_inline_bytes: context.max_inline_bytes,
@@ -697,6 +782,12 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
             };
             let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
             let byte_count = stdout.len().saturating_add(stderr.len());
+            // Milliseconds since the last output chunk (or since spawn if the
+            // command has produced nothing yet). The loop reads this to detect a
+            // byte-stall and to escalate a silent hang toward the ceiling.
+            let silence_ms = last_output_at
+                .map(|instant| instant.elapsed().as_millis() as i64)
+                .unwrap_or_else(|| context.started.elapsed().as_millis() as i64);
             let mut payload = serde_json::json!({
                 "command_id": &context.command_id,
                 "handle_id": &context.handle_id,
@@ -713,6 +804,15 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "stdout_path": to_agent_path(&context.stdout_path),
                 "stderr_path": to_agent_path(&context.stderr_path),
                 "byte_count": byte_count as i64,
+                // Monotonic combined-output offset the loop passes to
+                // `read_command_output` to page only the delta since its last
+                // digest (never re-paying for the cumulative tail).
+                "output_offset": byte_count as i64,
+                // Loop derives the "first stderr after a clean run" decision
+                // trigger from this count crossing zero; kept loop-side so all
+                // event-edge detection lives in one place (spec §1.4).
+                "stderr_byte_count": stderr.len() as i64,
+                "silence_ms": silence_ms,
                 "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
                 "process_group_id": context.process_group_id,
             });
@@ -845,6 +945,37 @@ pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> Option<VmVa
     rx.recv_timeout(timeout).ok()
 }
 
+/// Live handles for `session_id`, for the agent loop's ledger reconciliation and
+/// digest rendering. Each row carries the spawn-time lease tag, command display,
+/// and start timestamp; scheduling and lease transitions live in the loop. An
+/// entry disappears from this list the instant its waiter thread removes it on
+/// process exit, so a completed-and-drained command is never reported as live.
+pub(crate) fn list_session_handles(session_id: &str) -> VmValue {
+    let store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    let handles: Vec<VmValue> = store
+        .entries
+        .iter()
+        .filter(|(_id, entry)| entry.session_id == session_id)
+        .map(|(id, entry)| {
+            let mut row = harn_vm::value::DictMap::new();
+            row.put_str("handle_id", id.clone());
+            row.put_str("session_id", entry.session_id.clone());
+            row.put_str("lease", entry.lease.as_str());
+            row.put_str("command_or_op_descriptor", entry.command_display.clone());
+            row.put_str("started_at", entry.started_at.clone());
+            VmValue::dict(row)
+        })
+        .collect();
+    let mut response = harn_vm::value::DictMap::new();
+    response.insert(
+        harn_vm::value::intern_key("handles"),
+        VmValue::List(Arc::new(handles)),
+    );
+    VmValue::dict(response)
+}
+
 /// Tuple shape used by `cancel_session_handles` to drain entries while
 /// holding the store lock for as little as possible. Boxed-trait fields
 /// make it noisy to inline as an unnamed type.
@@ -934,9 +1065,29 @@ pub fn register_result_notifier(handle_id: &str) -> Option<std::sync::mpsc::Rece
 #[cfg(test)]
 mod tests {
     use std::sync::{mpsc, Arc};
+    use std::time::Duration;
 
-    use super::CancelState;
+    use super::{next_progress_interval, CancelState};
     use crate::process::ProcessCleanupReport;
+
+    #[test]
+    fn progress_backoff_doubles_then_clamps_to_max() {
+        let max = Duration::from_secs(30);
+        // Doubles from the base while below the cap.
+        assert_eq!(
+            next_progress_interval(Duration::from_secs(2), max),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            next_progress_interval(Duration::from_secs(8), max),
+            Duration::from_secs(16)
+        );
+        // Clamps to the cap once doubling would exceed it, and stays there.
+        assert_eq!(next_progress_interval(Duration::from_secs(16), max), max);
+        assert_eq!(next_progress_interval(max, max), max);
+        // Saturates instead of overflowing at the Duration ceiling.
+        assert_eq!(next_progress_interval(Duration::MAX, max), max);
+    }
 
     #[test]
     fn terminal_snapshot_waits_for_cleanup_publication() {

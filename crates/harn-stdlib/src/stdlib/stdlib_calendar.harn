@@ -76,9 +76,12 @@ type CalendarHoliday = {date: string, actual_date: string, name: string, observe
 
 type CalendarCustomHoliday = string | {date: string, name?: string}
 
-type CalendarCustomHolidays = list<string> | list<{date: string, name?: string}> | list<CalendarCustomHoliday>
+type CalendarCustomHolidays = list<string> \
+  | list<{date: string, name?: string}> \
+  | list<CalendarCustomHoliday>
 
-type CalendarBusinessCalendar = string | {
+type CalendarBusinessCalendar = string \
+  | {
   name?: string,
   timezone?: string,
   weekends?: CalendarWeekends,

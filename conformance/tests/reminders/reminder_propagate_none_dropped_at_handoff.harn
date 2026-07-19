@@ -54,17 +54,19 @@ pipeline main() {
   )
   with_llm_script(
     [{tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]}, llm_text("done")],
-    { -> agent_loop(
-      "Emit a handoff.",
-      nil,
-      {
-        provider: "mock",
-        session_id: parent,
-        tools: tools(),
-        tool_format: "native",
-        max_iterations: 2,
-        done_judge: nil,
-      },
-    ) },
+    { ->
+      agent_loop(
+        "Emit a handoff.",
+        nil,
+        {
+          provider: "mock",
+          session_id: parent,
+          tools: tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          done_judge: nil,
+        },
+      )
+    },
   )
 }

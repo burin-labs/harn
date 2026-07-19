@@ -12,7 +12,8 @@
  *  - tools-bearing calls bypass the cache (skip_when default)
  */
 import { cache_clear, mem_cache } from "std/cache"
-import { default_llm_caller, with_cache } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
+import { with_cache } from "std/llm/handlers"
 import { with_llm_script } from "std/testing"
 
 pipeline default() {

@@ -15,11 +15,15 @@ pipeline main() {
   register_tool_hook(
     {
       pattern: "hooked_tool",
-      pre: { _event -> return {reminder: {body: "pre tool reminder", tags: ["tool"], role_hint: "developer"}} },
-      post: { event -> return {
-        reminder: {body: "post tool reminder", tags: ["tool"], dedupe_key: "post-tool"},
-        then: {result: event.result.text + ":post-hook"},
-      } },
+      pre: { _event ->
+        return {reminder: {body: "pre tool reminder", tags: ["tool"], role_hint: "developer"}}
+      },
+      post: { event ->
+        return {
+          reminder: {body: "post tool reminder", tags: ["tool"], dedupe_key: "post-tool"},
+          then: {result: event.result.text + ":post-hook"},
+        }
+      },
     },
   )
   with_llm_script(

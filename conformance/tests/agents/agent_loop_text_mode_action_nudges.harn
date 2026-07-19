@@ -47,13 +47,15 @@ fn injected_kind_in(calls, idx, marker) {
 
 fn edit_missing_tool_call_recovery() {
   return {
-    classifier: { _payload -> return {
-      action: "tool_call_intended",
-      tool_name: "edit",
-      confidence: 0.96,
-      evidence: "fixture classifier found a tool action",
-      language: "fixture",
-    } },
+    classifier: { _payload ->
+      return {
+        action: "tool_call_intended",
+        tool_name: "edit",
+        confidence: 0.96,
+        evidence: "fixture classifier found a tool action",
+        language: "fixture",
+      }
+    },
   }
 }
 
@@ -84,7 +86,9 @@ pipeline default() {
       const calls = llm_mock_calls()
       __io_println("fenced.status=" + r.status)
       __io_println("fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")))
-      __io_println("fenced.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")))
+      __io_println(
+        "fenced.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
+      )
     },
   )
   // 2. Missing tool call → missing_tool_call nudge on the next turn.
@@ -111,7 +115,9 @@ pipeline default() {
       const calls = llm_mock_calls()
       __io_println("missing.status=" + r.status)
       __io_println("missing.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
-      __io_println("missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")))
+      __io_println(
+        "missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
+      )
     },
   )
   // 2b. Another typoed/non-English phrase depends on the classifier, not exact
@@ -138,7 +144,9 @@ pipeline default() {
       )
       const calls = llm_mock_calls()
       __io_println("multilingual.status=" + r.status)
-      __io_println("multilingual.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      __io_println(
+        "multilingual.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")),
+      )
       __io_println(
         "multilingual.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
       )
@@ -162,8 +170,12 @@ pipeline default() {
       )
       const calls = llm_mock_calls()
       __io_println("realcall.successful=" + json_stringify(r.tools.successful))
-      __io_println("realcall.no_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")))
-      __io_println("realcall.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")))
+      __io_println(
+        "realcall.no_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
+      )
+      __io_println(
+        "realcall.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
+      )
     },
   )
   // 3b. A braceless `name(key=...)` call shape also does NOT false-fire the
@@ -189,7 +201,9 @@ pipeline default() {
       )
       const calls = llm_mock_calls()
       __io_println("kwargshape.status=" + r.status)
-      __io_println("kwargshape.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")))
+      __io_println(
+        "kwargshape.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")),
+      )
     },
   )
   // 4. No-progress streak in the DEFAULT loop (loop_until_done so the toolless
@@ -220,7 +234,8 @@ pipeline default() {
       )
       const calls = llm_mock_calls()
       __io_println(
-        "streak.none_after_progress=" + to_string(!injected_kind_in(calls, 1, "no_progress_streak")),
+        "streak.none_after_progress="
+          + to_string(!injected_kind_in(calls, 1, "no_progress_streak")),
       )
       let streak_fired = false
       for i in range(2, len(calls)) {
@@ -240,7 +255,9 @@ pipeline default() {
     agent_loop_options({missing_tool_call_recovery: {enabled: "yes"}})
   }
   __io_println("invalid_enabled=" + to_string(is_err(invalid_enabled)))
-  __io_println(contains(to_string(unwrap_err(invalid_enabled)), "missing_tool_call_recovery.enabled"))
+  __io_println(
+    contains(to_string(unwrap_err(invalid_enabled)), "missing_tool_call_recovery.enabled"),
+  )
   const invalid_options = try {
     agent_loop_options({missing_tool_call_recovery: "yes"})
   }
@@ -253,7 +270,9 @@ pipeline default() {
   const threshold_error = unwrap_err(invalid_threshold)
   __io_println(
     "invalid_threshold.code="
-      + to_string(threshold_error.error == "missing_tool_call.invalid_confidence_threshold"),
+      + to_string(
+      threshold_error.error == "missing_tool_call.invalid_confidence_threshold",
+    ),
   )
   __io_println(
     "invalid_threshold.field=" + to_string(threshold_error.field == "confidence_threshold"),

@@ -95,7 +95,12 @@ pipeline test_selected_packages_unowned_change_selects_nothing(task) {
 
 @test
 pipeline test_selected_packages_crate_change_expands_reverse_deps(task) {
-  const selected = selected_packages(["crates/harn-core/src/lib.rs"], WORKSPACE, "/repo", ["Cargo.lock"])
+  const selected = selected_packages(
+    ["crates/harn-core/src/lib.rs"],
+    WORKSPACE,
+    "/repo",
+    ["Cargo.lock"],
+  )
   assert_eq(selected.mode, "partial")
   assert_eq(selected.directly_changed, ["harn-core"])
   assert_eq(selected.selected, ["harn-cli", "harn-core", "harn-tools"])

@@ -29,9 +29,12 @@ pipeline default() {
     }
   }
   // compose([logging, retry, cache])(base) == logging(retry(cache(base))).
-  const log_sink = { record -> __io_println(
-    "[logging] status=" + to_string(record?.status) + " latency_ms=" + to_string(record?.latency_ms),
-  ) }
+  const log_sink = { record ->
+    __io_println(
+      "[logging] status=" + to_string(record?.status) + " latency_ms="
+        + to_string(record?.latency_ms),
+    )
+  }
   const stack = compose(
     [
       { next -> with_logging(next, {sink: log_sink}) },

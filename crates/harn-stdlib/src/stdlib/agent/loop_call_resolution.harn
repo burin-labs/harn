@@ -1,0 +1,48 @@
+/**
+ * Return the provider-neutral name from a parsed or native tool call.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __tool_call_name(call) {
+  return to_string(call?.name ?? call?.tool_name ?? "")
+}
+
+/**
+ * Return normalized arguments from a parsed or native tool call.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __tool_call_args(call) {
+  const raw = call?.arguments ?? call?.tool_args
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  return {}
+}
+
+pub fn __tool_call_name_is_blank(call) -> bool {
+  return __tool_call_name(call).trim() == ""
+}
+
+pub fn __filter_blank_name_tool_calls(calls) {
+  let kept = []
+  let dropped = 0
+  for call in calls ?? [] {
+    if __tool_call_name_is_blank(call) {
+      dropped = dropped + 1
+    } else {
+      kept = kept.push(call)
+    }
+  }
+  return {calls: kept, dropped: dropped}
+}
+
+pub fn __resolve_tool_calls(llm_result, parsed) {
+  const native_calls = llm_result?.native_tool_calls ?? llm_result?.tool_calls ?? []
+  if len(native_calls) > 0 {
+    return __filter_blank_name_tool_calls(native_calls).calls
+  }
+  return __filter_blank_name_tool_calls(parsed?.calls ?? []).calls
+}

@@ -77,7 +77,9 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(task) {
   assert_eq(run_matrix("--mode warm --profile fast").success, false)
   assert_eq(run_matrix("--mode recovery --targets unknown-target").success, false)
   const root = dirname(dirname(runtime_paths().asset_root))
-  const policy = json_parse(harness.fs.read_text(path_join(root, ".github", "release-runner-policy.json")))
+  const policy = json_parse(
+    harness.fs.read_text(path_join(root, ".github", "release-runner-policy.json")),
+  )
   assert_eq(run_matrix_with_policy({...policy, typo: true}, "--mode primary").success, false)
   assert_eq(
     run_matrix_with_policy(

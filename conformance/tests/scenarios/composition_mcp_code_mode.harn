@@ -22,7 +22,9 @@ pipeline main() {
         _mcp_server: "docs",
         _mcp_tool_name: "search",
         defer_loading: true,
-        handler: { args -> return json_stringify({items: [{title: "Harn docs", query: args.query}], total: 1}) },
+        handler: { args ->
+          return json_stringify({items: [{title: "Harn docs", query: args.query}], total: 1})
+        },
       },
       {
         name: "local_echo",

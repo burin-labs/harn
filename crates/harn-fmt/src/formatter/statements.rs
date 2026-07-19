@@ -1,8 +1,8 @@
 use harn_parser::{Node, SNode};
 
 use crate::helpers::{
-    escape_string, format_catch_param, format_pattern, format_throws_clause, format_type_ann,
-    format_type_expr,
+    column_after, escape_string, format_catch_param, format_pattern, format_throws_clause,
+    format_type_ann_wrapped, format_type_expr, text_width,
 };
 
 use super::Formatter;
@@ -10,7 +10,12 @@ use super::Formatter;
 impl Formatter<'_> {
     /// Hybrid context (closure / block bodies): only handles node types that
     /// need multi-line treatment different from `format_expr`.
-    pub(super) fn format_expr_or_stmt(&self, node: &SNode, indent_level: usize) -> String {
+    pub(super) fn format_expr_or_stmt(
+        &self,
+        node: &SNode,
+        indent_level: usize,
+        column: usize,
+    ) -> String {
         match &node.node {
             Node::IfElse {
                 condition,
@@ -19,7 +24,7 @@ impl Formatter<'_> {
                 else_body,
                 else_span,
             } => {
-                let cond = self.format_expr(condition, indent_level);
+                let cond = self.format_expr(condition, indent_level, column + 5);
                 let inner = indent_level + 1;
                 let close = "  ".repeat(indent_level);
                 let mut result = format!("if {cond} {{\n");
@@ -35,7 +40,11 @@ impl Formatter<'_> {
                     if eb.len() == 1 && matches!(eb[0].node, Node::IfElse { .. }) {
                         result.push_str(&close);
                         result.push_str("} else ");
-                        result.push_str(&self.format_expr_or_stmt(&eb[0], indent_level));
+                        result.push_str(&self.format_expr_or_stmt(
+                            &eb[0],
+                            indent_level,
+                            column + 7,
+                        ));
                     } else {
                         result.push_str(&close);
                         result.push_str("} else {\n");
@@ -61,7 +70,11 @@ impl Formatter<'_> {
                 body,
             } => {
                 let pat = format_pattern(pattern);
-                let iter_str = self.format_expr(iterable, indent_level);
+                let iter_str = self.format_expr(
+                    iterable,
+                    indent_level,
+                    column + 4 + text_width(&format_pattern(pattern)) + 4,
+                );
                 self.format_block_expr(
                     &format!("for {pat} in {iter_str} {{"),
                     body,
@@ -70,7 +83,7 @@ impl Formatter<'_> {
                 )
             }
             Node::WhileLoop { condition, body } => {
-                let cond = self.format_expr(condition, indent_level);
+                let cond = self.format_expr(condition, indent_level, column + 6);
                 self.format_block_expr(
                     &format!("while {cond} {{"),
                     body,
@@ -103,6 +116,7 @@ impl Formatter<'_> {
                     return_type,
                     throws,
                     where_clauses,
+                    column,
                     indent_level,
                 );
                 self.format_block_expr(&format!("{sig} {{"), body, indent_level, node.span.line)
@@ -117,14 +131,22 @@ impl Formatter<'_> {
                 is_pub,
             } => {
                 let pub_prefix = if *is_pub { "pub " } else { "" };
-                let ret = if let Some(rt) = return_type {
-                    format!(" -> {}", format_type_expr(rt))
-                } else {
-                    String::new()
-                };
+                let ret_inline = return_type
+                    .as_ref()
+                    .map(|rt| format!(" -> {}", format_type_expr(rt)))
+                    .unwrap_or_default();
                 let throws_str = format_throws_clause(throws);
-                let prefix_len = indent_level * 2 + pub_prefix.len() + 5 + name.len() + 1;
-                let params_str = self.format_typed_params_wrapped(params, prefix_len, indent_level);
+                let prefix_col = column + text_width(pub_prefix) + 5 + text_width(name) + 1;
+                let suffix_len = text_width(&ret_inline) + text_width(&throws_str) + 2;
+                let params_str =
+                    self.format_typed_params_wrapped(params, prefix_col + suffix_len, indent_level);
+                let ret = self.format_return_type(
+                    return_type,
+                    prefix_col,
+                    &params_str,
+                    indent_level,
+                    text_width(&throws_str) + 2,
+                );
                 let mut effective_body = Vec::new();
                 if let Some(desc) = description {
                     let escaped = escape_string(desc);
@@ -152,7 +174,8 @@ impl Formatter<'_> {
                 let close_indent = "  ".repeat(indent_level);
                 let mut inner = String::new();
                 for (field_name, field_expr) in fields {
-                    let expr_str = self.format_expr(field_expr, indent_level + 1);
+                    let expr_str =
+                        self.format_expr(field_expr, indent_level + 1, (indent_level + 1) * 2);
                     inner.push_str(&item_indent);
                     inner.push_str(field_name);
                     inner.push(' ');
@@ -182,7 +205,11 @@ impl Formatter<'_> {
                 let close_indent = "  ".repeat(indent_level);
                 let mut inner = String::new();
                 for (field_name, field_expr) in fields {
-                    let expr_str = self.format_expr(field_expr, indent_level + 1);
+                    let expr_str = self.format_expr(
+                        field_expr,
+                        indent_level + 1,
+                        (indent_level + 1) * 2 + text_width(field_name) + 2,
+                    );
                     inner.push_str(&item_indent);
                     inner.push_str(field_name);
                     inner.push_str(": ");
@@ -210,9 +237,12 @@ impl Formatter<'_> {
                 ..
             } => {
                 let pat = format_pattern(pattern);
-                let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value, indent_level);
-                format!("let {pat}{type_str} = {val}")
+                let type_col = column + text_width("let ") + text_width(&pat) + 2;
+                let type_str =
+                    format_type_ann_wrapped(type_ann, indent_level, type_col, self.line_width);
+                let prefix = format!("let {pat}{type_str} = ");
+                let val = self.format_expr(value, indent_level, column_after(column, &prefix));
+                self.format_prefixed_value(&prefix, &val, indent_level, column)
             }
             Node::ConstBinding {
                 pattern,
@@ -221,9 +251,12 @@ impl Formatter<'_> {
                 ..
             } => {
                 let pat = format_pattern(pattern);
-                let type_str = format_type_ann(type_ann);
-                let val = self.format_expr(value, indent_level);
-                format!("const {pat}{type_str} = {val}")
+                let type_col = column + text_width("const ") + text_width(&pat) + 2;
+                let type_str =
+                    format_type_ann_wrapped(type_ann, indent_level, type_col, self.line_width);
+                let prefix = format!("const {pat}{type_str} = ");
+                let val = self.format_expr(value, indent_level, column_after(column, &prefix));
+                self.format_prefixed_value(&prefix, &val, indent_level, column)
             }
             Node::TryCatch {
                 body,
@@ -272,7 +305,7 @@ impl Formatter<'_> {
                 result.push('}');
                 result
             }
-            _ => self.format_expr(node, indent_level),
+            _ => self.format_expr(node, indent_level, column),
         }
     }
 }

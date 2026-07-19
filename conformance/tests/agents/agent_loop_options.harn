@@ -11,9 +11,13 @@ pipeline default() {
   const judged = agent_loop_options({provider: "mock", tools: tool_registry(), done_judge: true})
   __io_println(judged.done_sentinel)
   __io_println(type_of(judged.done_judge))
-  const client_search = agent_loop_options({provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}})
+  const client_search = agent_loop_options(
+    {provider: "mock", tools: tool_registry(), tool_search: {mode: "client"}},
+  )
   __io_println(client_search.tool_format)
-  const explicit_native = agent_loop_options({provider: "mock", tools: tool_registry(), tool_format: "native"})
+  const explicit_native = agent_loop_options(
+    {provider: "mock", tools: tool_registry(), tool_format: "native"},
+  )
   __io_println(explicit_native.tool_format)
   __io_println(contains(explicit_native.keys(), "done_sentinel"))
   const persistent_native = agent_loop_options(
@@ -56,10 +60,14 @@ pipeline default() {
   __io_println(explicit_ledger.task_ledger.deliverables[0].id)
   const default_transport = agent_loop_options({provider: "mock"})
   assert_eq(default_transport._llm_caller_transport, {forwards_assistant_prefill: false})
-  const prefill_transport = agent_loop_options({provider: "mock", llm_caller_transport: {forwards_assistant_prefill: true}})
+  const prefill_transport = agent_loop_options(
+    {provider: "mock", llm_caller_transport: {forwards_assistant_prefill: true}},
+  )
   assert_eq(prefill_transport._llm_caller_transport, {forwards_assistant_prefill: true})
   const invalid_prefill = try {
-    agent_loop_options({provider: "mock", llm_caller_transport: {forwards_assistant_prefill: "yes"}})
+    agent_loop_options(
+      {provider: "mock", llm_caller_transport: {forwards_assistant_prefill: "yes"}},
+    )
   }
   assert_eq(is_err(invalid_prefill), true)
   assert_eq(

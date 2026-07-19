@@ -901,7 +901,6 @@ async fn host_agent_session_finalize(
             "output_tokens": session.output_tokens,
             "cache_read_tokens": session.cache_read_tokens,
             "cache_write_tokens": session.cache_write_tokens,
-            "cache_creation_input_tokens": session.cache_write_tokens,
         },
         "tools": {
             "calls": session.tool_calls,
@@ -955,8 +954,7 @@ pub(crate) fn canonical_acp_stop_reason(
 
 pub(crate) fn canonical_provider_stop_reason(last_llm_stop_reason: Option<&str>) -> &'static str {
     match last_llm_stop_reason {
-        Some(reason) if reason.eq_ignore_ascii_case("max_tokens") => "max_tokens",
-        Some(reason) if reason.eq_ignore_ascii_case("length") => "max_tokens",
+        Some(reason) if super::api::result::stop_reason_is_length(reason) => "max_tokens",
         Some(reason) if reason.eq_ignore_ascii_case("refusal") => "refusal",
         _ => "end_turn",
     }
@@ -2025,8 +2023,11 @@ fn host_agent_session_record_usage_builtin(
     let usage_block = dict_get(&llm_result, "usage")
         .cloned()
         .unwrap_or(VmValue::Nil);
-    let input_tokens = first_dict_i64(&[&llm_block, &llm_result], &["input_tokens"]);
-    let output_tokens = first_dict_i64(&[&llm_block, &llm_result], &["output_tokens"]);
+    // Probe order: agent-loop result block, canonical envelope `usage`, then
+    // top-level for legacy recordings that predate the canonical envelope.
+    let input_tokens = first_dict_i64(&[&llm_block, &usage_block, &llm_result], &["input_tokens"]);
+    let output_tokens =
+        first_dict_i64(&[&llm_block, &usage_block, &llm_result], &["output_tokens"]);
     let usage_sources = [&llm_result, &usage_block, &llm_block];
     let cache_read_tokens =
         first_provider_cache_usage_i64(&usage_sources, super::api::extract_cache_read_tokens);
@@ -2085,7 +2086,6 @@ fn host_agent_session_record_usage_builtin(
                 "output_tokens": output_tokens,
                 "cache_read_tokens": cache_read_tokens,
                 "cache_write_tokens": cache_write_tokens,
-                "cache_creation_input_tokens": cache_write_tokens,
                 "provider": provider,
                 "model": model,
                 "cost_usd": cost,
@@ -2110,10 +2110,6 @@ fn host_agent_session_record_usage_builtin(
     );
     out.insert(
         crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(totals.3),
-    );
-    out.insert(
-        crate::value::intern_key("cache_creation_input_tokens"),
         VmValue::Int(totals.3),
     );
     Ok(VmValue::dict(out))
@@ -2295,10 +2291,6 @@ fn host_agent_session_totals_builtin(
     );
     out.insert(
         crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(totals.5),
-    );
-    out.insert(
-        crate::value::intern_key("cache_creation_input_tokens"),
         VmValue::Int(totals.5),
     );
     Ok(VmValue::dict(out))

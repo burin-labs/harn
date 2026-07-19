@@ -4,11 +4,18 @@ pipeline main() {
       name: "trigger_predicate_observability",
       entry: "gate",
       nodes: {
-        gate: {kind: "condition", context_policy: {include_kinds: ["plan"]}, metadata: {contains_text: "go"}},
+        gate: {
+          kind: "condition",
+          context_policy: {include_kinds: ["plan"]},
+          metadata: {contains_text: "go"},
+        },
         act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
         skip: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
       },
-      edges: [{from: "gate", to: "act", branch: "true"}, {from: "gate", to: "skip", branch: "false"}],
+      edges: [
+        {from: "gate", to: "act", branch: "true"},
+        {from: "gate", to: "skip", branch: "false"},
+      ],
     },
   )
   const trigger = {

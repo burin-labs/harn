@@ -13,8 +13,13 @@ pipeline test(task) {
     "pub struct UserName;\npub fn greet_name() -> &'static str { \"hi\" }\n",
   )
   const base = project_scan(base_dir, {tiers: ["ambient", "config"]})
-  const prompt = "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
-  const schema = {type: "object", required: ["framework"], properties: {framework: {type: "string"}}}
+  const prompt =
+    "Project path: {{path}}\n{{ for file in files }}FILE {{file.path}}\n{{file.content}}\n{{ end }}\nReturn JSON."
+  const schema = {
+    type: "object",
+    required: ["framework"],
+    properties: {framework: {type: "string"}},
+  }
   const result = project_enrich(
     base_dir,
     {

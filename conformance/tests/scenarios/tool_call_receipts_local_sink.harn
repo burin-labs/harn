@@ -62,15 +62,17 @@ pipeline default() {
   register_tool_hook(
     {
       pattern: "echo_receipt",
-      pre: { _event -> return {
-        reminder: {
-          body: "receipt hook reminder",
-          tags: ["receipt"],
-          dedupe_key: "receipt-hook",
-          ttl_turns: 1,
-          role_hint: "developer",
-        },
-      } },
+      pre: { _event ->
+        return {
+          reminder: {
+            body: "receipt hook reminder",
+            tags: ["receipt"],
+            dedupe_key: "receipt-hook",
+            ttl_turns: 1,
+            role_hint: "developer",
+          },
+        }
+      },
     },
   )
   const local_session = "receipt-local-" + uuid()
@@ -90,7 +92,9 @@ pipeline default() {
   const reminder_lifecycle = reminder_audit?.lifecycle ?? []
   const expected_args_hash = sha256("{\"message\":\"hello\",\"reason\":\"Need a receipt\"}")
   const expected_receipt_uri = "file://" + path_join(cwd(), local_path)
-  const local_audit_events = local_captured.events.filter({ event -> event.type == "tool_call_audit" })
+  const local_audit_events = local_captured.events.filter(
+    { event -> event.type == "tool_call_audit" },
+  )
   const local_audit_uri = to_string(local_audit_events[0]?.audit?.receipt_uri ?? "")
   __io_println("local_status=" + local_result.status)
   __io_println("local_records=" + to_string(len(records)))
@@ -102,7 +106,9 @@ pipeline default() {
   __io_println("result_hash_present=" + to_string(len(to_string(receipt.result_hash ?? "")) == 64))
   __io_println(
     "receipt_uri_in_receipt="
-      + to_string(to_string(receipt?.audit?.receipt_uri ?? "") == expected_receipt_uri),
+      + to_string(
+      to_string(receipt?.audit?.receipt_uri ?? "") == expected_receipt_uri,
+    ),
   )
   __io_println("receipt_uri_in_audit_event=" + to_string(local_audit_uri == expected_receipt_uri))
   __io_println("reminder_audit_origin=" + to_string(reminder_audit?.origin ?? ""))
@@ -120,7 +126,9 @@ pipeline default() {
     cloud_session,
     fn() { return run_receipt_agent(cloud_session, {sink: "cloud", redact: ["secret"]}) },
   )
-  const receipt_events = captured.events.filter({ event -> event.type == "tool_call_audit" && event?.receipt != nil })
+  const receipt_events = captured.events.filter(
+    { event -> event.type == "tool_call_audit" && event?.receipt != nil },
+  )
   __io_println("cloud_receipts=" + to_string(len(receipt_events)))
   __io_println("cloud_reason=" + receipt_events[0].receipt.reason)
   __io_println(
@@ -128,7 +136,9 @@ pipeline default() {
   )
   __io_println(
     "cloud_reminder_audit="
-      + to_string(receipt_events[0]?.receipt?.audit?.reminders?.origin == "tool_hook"),
+      + to_string(
+      receipt_events[0]?.receipt?.audit?.reminders?.origin == "tool_hook",
+    ),
   )
   clear_tool_hooks()
 }

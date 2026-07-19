@@ -113,12 +113,18 @@ fn __record_to_fixture(value, line_no) -> string {
     fixture = fixture + {provider: provider}
   }
   const input_tokens = __optional_int(value, "input_tokens")
-    ?? __optional_int(response_obj, "input_tokens")
+    ?? __optional_int(
+    response_obj,
+    "input_tokens",
+  )
   if input_tokens != nil {
     fixture = fixture + {input_tokens: input_tokens}
   }
   const output_tokens = __optional_int(value, "output_tokens")
-    ?? __optional_int(response_obj, "output_tokens")
+    ?? __optional_int(
+    response_obj,
+    "output_tokens",
+  )
   if output_tokens != nil {
     fixture = fixture + {output_tokens: output_tokens}
   }

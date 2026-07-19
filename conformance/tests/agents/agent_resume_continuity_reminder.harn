@@ -16,7 +16,9 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}}],
+        tool_calls: [
+          {id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
+        ],
         input_tokens: 7,
         output_tokens: 3,
       },

@@ -7,111 +7,49 @@ pub import {
   git_checkout_plan,
 } from "std/git/checkout"
 import { git_checkout_run } from "std/git/checkout"
+pub import {
+  GitBranchResult,
+  GitCommandResult,
+  GitConflict,
+  GitConflictsData,
+  GitConflictsReceipt,
+  GitDescribeData,
+  GitDescribeReceipt,
+  GitDiffData,
+  GitDiffReceipt,
+  GitDiscoverData,
+  GitDiscoverReceipt,
+  GitFetchData,
+  GitFetchReceipt,
+  GitLsRemoteData,
+  GitLsRemoteReceipt,
+  GitMergeBaseData,
+  GitMergeBaseReceipt,
+  GitOutputRef,
+  GitPlannedData,
+  GitPushData,
+  GitPushReceipt,
+  GitRebaseData,
+  GitRebaseReceipt,
+  GitReceipt,
+  GitRemoteRef,
+  GitRepo,
+  GitStatusData,
+  GitStatusEntry,
+  GitStatusReceipt,
+  GitTagListData,
+  GitTagListReceipt,
+  GitWorktreeCreateData,
+  GitWorktreeCreateReceipt,
+  GitWorktreeRemoveData,
+  GitWorktreeRemoveReceipt,
+} from "std/git/contracts"
 /**
  * std/git — typed local git operations with audit receipts.
  *
  * Import: import "std/git"
  */
 import { process_result_success, process_result_text, process_run } from "std/runtime"
-
-type GitOutputRef = {kind: string, bytes: int, sha256: string, inline: string, truncated: bool}
-
-type GitRepo = {
-  path: string,
-  root: string,
-  git_dir: string,
-  bare: bool,
-  inside_work_tree: bool,
-  input: string,
-}
-
-/** One path-level row returned by `git_status`. */
-pub type GitStatusEntry = {
-  xy: string,
-  index: string,
-  worktree: string,
-  path: string,
-  original_path: string?,
-  conflict_kind: string?,
-}
-
-type GitConflict = {path: string, xy: string, kind: string}
-
-type GitDiscoverData = {repo: GitRepo}
-
-type GitStatusData = {branch: string?, entries: list<GitStatusEntry>, dirty: bool}
-
-type GitConflictsData = {conflicts: list<GitConflict>, has_conflicts: bool}
-
-type GitDiffData = {diff: string}
-
-type GitMergeBaseData = {oid: string}
-
-type GitReceipt = {
-  schema: string,
-  receipt_id: string,
-  operation: string,
-  action: string,
-  status: string,
-  success: bool,
-  exit_category: string,
-  exit_code: int,
-  command_args: list<string>,
-  argv: list<string>,
-  working_dir: string,
-  cwd: string,
-  affected_paths: list<string>,
-  agent: string,
-  trace_id: string,
-  autonomy_tier: string,
-  stdout: GitOutputRef,
-  stderr: GitOutputRef,
-  command_policy: dict?,
-  approval: dict?,
-  encoding_error: string?,
-  data: dict?,
-  repo: GitRepo?,
-}
-
-type GitCommandResult = {
-  ok: bool,
-  success: bool,
-  status: string,
-  exit_code: int?,
-  timed_out: bool?,
-  command_id: string?,
-  handle_id: string?,
-  argv: list<string>,
-  command_args: list<string>,
-  cwd: string,
-  stdout: string,
-  stderr: string,
-  combined: string,
-  output_path: string?,
-  stdout_path: string?,
-  stderr_path: string?,
-}
-
-type GitBranchResult = {
-  ok: bool,
-  success: bool,
-  status: string,
-  exit_code: int?,
-  timed_out: bool?,
-  command_id: string?,
-  handle_id: string?,
-  argv: list<string>,
-  command_args: list<string>,
-  cwd: string,
-  stdout: string,
-  stderr: string,
-  combined: string,
-  output_path: string?,
-  stdout_path: string?,
-  stderr_path: string?,
-  branch: string,
-  detached: bool,
-}
 
 type GitRunOptions = {
   repo?: string | GitRepo | GitReceipt,
@@ -162,31 +100,6 @@ type GitTagListOptions = {pattern?: string, sort?: string}
 
 type GitDescribeOptions = {tags?: bool, match?: string, rev?: string}
 
-type GitTagListData = {tags: list<string>}
-
-type GitDescribeData = {describe: string, tag: string?, distance: int?, sha: string, dirty: bool}
-
-/** One remote ref returned by `git_ls_remote`. */
-pub type GitRemoteRef = {oid: string, ref: string, name: string, peeled: bool}
-
-type GitLsRemoteData = {remote: string, refs: list<GitRemoteRef>}
-
-type GitDiscoverReceipt = GitReceipt & {data: GitDiscoverData}
-
-type GitStatusReceipt = GitReceipt & {data: GitStatusData}
-
-type GitConflictsReceipt = GitReceipt & {data: GitConflictsData}
-
-type GitDiffReceipt = GitReceipt & {data: GitDiffData}
-
-type GitMergeBaseReceipt = GitReceipt & {data: GitMergeBaseData}
-
-type GitTagListReceipt = GitReceipt & {data: GitTagListData}
-
-type GitDescribeReceipt = GitReceipt & {data: GitDescribeData}
-
-type GitLsRemoteReceipt = GitReceipt & {data: GitLsRemoteData}
-
 type GitLsRemoteOptions = {
   repo?: string | GitRepo | GitReceipt,
   refs?: list<string>,
@@ -220,7 +133,20 @@ type GitPullOptions = {
 
 type GitToolGroup = "read" | "mutation"
 
-type GitToolOperation = "status" | "current_branch" | "log" | "diff" | "branch_list" | "remote_list" | "show" | "discover" | "conflicts" | "merge_base" | "fetch" | "switch" | "pull_ff_only" | "rebase"
+type GitToolOperation = "status" \
+  | "current_branch" \
+  | "log" \
+  | "diff" \
+  | "branch_list" \
+  | "remote_list" \
+  | "show" \
+  | "discover" \
+  | "conflicts" \
+  | "merge_base" \
+  | "fetch" \
+  | "switch" \
+  | "pull_ff_only" \
+  | "rebase"
 
 type GitToolCatalogOptions = {
   include_mutations?: bool,
@@ -339,7 +265,12 @@ pub fn git_env_remove() -> list<string> {
  * @errors: []
  */
 pub fn git_noninteractive_env() -> dict {
-  return {GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "", SSH_ASKPASS: "", GIT_SSH_COMMAND: "ssh -oBatchMode=yes"}
+  return {
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
+    GIT_SSH_COMMAND: "ssh -oBatchMode=yes",
+  }
 }
 
 fn __git_non_empty_string(value, label) -> string {
@@ -616,7 +547,7 @@ pub fn git_ls_remote(remote: string, options: GitLsRemoteOptions = {}) -> GitLsR
  * @effects: []
  * @errors: []
  */
-pub fn git_rebase(base_ref: string, repo = ".") -> GitReceipt {
+pub fn git_rebase(base_ref: string, repo = ".") -> GitRebaseReceipt {
   return git.rebase(repo, __git_ref_arg(base_ref, "base_ref"))
 }
 
@@ -626,7 +557,7 @@ pub fn git_rebase(base_ref: string, repo = ".") -> GitReceipt {
  * @effects: []
  * @errors: []
  */
-pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> GitReceipt {
+pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> GitPushReceipt {
   return git.push(repo, __git_ref_arg(remote, "remote"), __git_ref_arg(refspec, "refspec"), lease)
 }
 
@@ -641,7 +572,7 @@ pub fn git_worktree_create(
   path: string,
   repo = ".",
   options: dict = {},
-) -> GitReceipt {
+) -> GitWorktreeCreateReceipt {
   return git.worktree_create(
     repo,
     __git_ref_arg(branch, "branch"),
@@ -656,7 +587,7 @@ pub fn git_worktree_create(
  * @effects: []
  * @errors: []
  */
-pub fn git_worktree_remove(path: string, options: dict = {}) -> GitReceipt {
+pub fn git_worktree_remove(path: string, options: dict = {}) -> GitWorktreeRemoveReceipt {
   return git.worktree_remove(__git_non_empty_string(path, "path"), options)
 }
 
@@ -815,7 +746,7 @@ pub fn git_pull_ff_only(
  * @effects: []
  * @errors: []
  */
-pub fn git_fetch(remote = "origin", repo = ".", refspecs: list<string> = []) -> GitReceipt {
+pub fn git_fetch(remote = "origin", repo = ".", refspecs: list<string> = []) -> GitFetchReceipt {
   return git.fetch(repo, __git_ref_arg(remote, "remote"), __git_string_list(refspecs, "refspecs"))
 }
 
@@ -947,7 +878,11 @@ fn __git_catalog_all() {
       group: "read",
       description: "Find the merge-base OID for two refs.",
       keywords: ["merge-base", "merge", "base", "ancestor", "refs"],
-      parameters: {repo: {type: "string", required: false}, left: {type: "string"}, right: {type: "string"}},
+      parameters: {
+        repo: {type: "string", required: false},
+        left: {type: "string"},
+        right: {type: "string"},
+      },
       side_effect_level: "read_only",
     },
     {
@@ -1019,11 +954,15 @@ pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCata
       continue
     }
     if enabled != nil && !__git_list_contains(enabled, "all")
-      && !__git_list_contains(enabled, entry.operation)
+      && !__git_list_contains(
+      enabled,
+      entry.operation,
+    )
       && !__git_list_contains(enabled, entry.group) {
       continue
     }
-    if __git_list_contains(disabled, entry.operation) || __git_list_contains(disabled, entry.group) {
+    if __git_list_contains(disabled, entry.operation)
+      || __git_list_contains(disabled, entry.group) {
       continue
     }
     out = out.push(entry)
@@ -1206,13 +1145,23 @@ pub fn git_run_tool(
 fn __git_tool_enabled(options, key, group) -> bool {
   const opts = options ?? {}
   const enabled = opts?.enabled_tools
-    ?? ["git_status", "git_current_branch", "git_log", "git_diff", "git_branch_list", "git_remote_list"]
+    ?? [
+    "git_status",
+    "git_current_branch",
+    "git_log",
+    "git_diff",
+    "git_branch_list",
+    "git_remote_list",
+  ]
   const disabled = opts?.disabled_tools ?? []
   if __git_list_contains(disabled, key) || __git_list_contains(disabled, group) {
     return false
   }
   return __git_list_contains(enabled, "all") || __git_list_contains(enabled, key)
-    || __git_list_contains(enabled, group)
+    || __git_list_contains(
+    enabled,
+    group,
+  )
 }
 
 fn __git_tool_name(options, key) -> string {
@@ -1316,7 +1265,10 @@ fn __git_toolbox_enabled(options, key) -> bool {
     return false
   }
   return __git_list_contains(enabled, "all") || __git_list_contains(enabled, "toolbox")
-    || __git_list_contains(enabled, key)
+    || __git_list_contains(
+    enabled,
+    key,
+  )
 }
 
 fn __git_toolbox_find_options(opts, args) {
@@ -1363,7 +1315,11 @@ pub fn git_toolbox_tools(registry = nil, options: GitToolRegistryOptions = {}) {
         {
           parameters: {query: {type: "string"}, max_results: {type: "integer", required: false}},
           returns: {type: "object"},
-          annotations: __git_tool_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
+          annotations: __git_tool_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
           handler: { args -> git_find_tool(args.query, __git_toolbox_find_options(opts, args)) },
         },
       ),

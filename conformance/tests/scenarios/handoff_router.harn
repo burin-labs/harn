@@ -31,7 +31,11 @@ pipeline main() {
     allowed_side_effects: ["comment_on_pr"],
   }
   const routed = handoff_routed(seed, routes, {})
-  const dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
+  const dispatch = handoff_dispatch(
+    routed,
+    nil,
+    {dispatchers: {review_captain: review_captain_mock}},
+  )
   const exhausted = handoff_routed(
     seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
     routes,

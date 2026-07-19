@@ -12,7 +12,11 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"verdict\": \"pass\"}")],
     { ->
-      const r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
+      const r = schema_recover(
+        "model said pass but failed to format it",
+        schema,
+        {provider: "mock"},
+      )
       __io_println(r.ok)
       __io_println(r.stage)
       const data = r.data

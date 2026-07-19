@@ -18,7 +18,10 @@ pipeline default(_task) {
       dir: "demo",
       namespace: "learning",
       value: {
-        gotchas: ["prefer relative imports for sibling modules", "refresh hashes after structural edits"],
+        gotchas: [
+          "prefer relative imports for sibling modules",
+          "refresh hashes after structural edits",
+        ],
         source: "demo",
       },
     },
@@ -26,7 +29,10 @@ pipeline default(_task) {
   const exact = host_call("project.metadata_get", {dir: "demo", namespace: "learning"})
   const inherited = host_call("project.metadata_get", {dir: "demo/src", namespace: "learning"})
   const all = host_call("project.metadata_get", {dir: "demo/src"})
-  const before = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
+  const before = host_call(
+    "project.metadata_inspect",
+    {dir: "demo/src", namespace: "learning", key: "gotchas"},
+  )
   require exact.gotchas[0] == "prefer relative imports for sibling modules"
   require inherited.gotchas[1] == "refresh hashes after structural edits"
   require all.learning.source == "demo"
@@ -36,7 +42,10 @@ pipeline default(_task) {
   require type_of(stale_before.tier1) == "list"
   require type_of(stale_before.tier2) == "list"
   host_call("project.metadata_refresh_hashes", {dir: "demo"})
-  const after = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
+  const after = host_call(
+    "project.metadata_inspect",
+    {dir: "demo/src", namespace: "learning", key: "gotchas"},
+  )
   require after.origin_dir == "demo"
   require !after.missing_structure_hash
   require !after.stale_tier1

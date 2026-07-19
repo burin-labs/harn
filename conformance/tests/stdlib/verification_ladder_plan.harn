@@ -7,19 +7,31 @@ pipeline test(task) {
         {
           id: "any/full",
           scope: {},
-          check: {rung: "R4", command: {mode: "shell", command: "echo full"}, resourceClass: "heavy"},
+          check: {
+            rung: "R4",
+            command: {mode: "shell", command: "echo full"},
+            resourceClass: "heavy",
+          },
           timings: {warmMs: {p95: 9000}},
         },
         {
           id: "tx/parse",
           scope: {language: "toolchainx", task: "post_edit"},
-          check: {rung: "R0", command: {mode: "shell", command: "echo parse"}, resourceClass: "cheap"},
+          check: {
+            rung: "R0",
+            command: {mode: "shell", command: "echo parse"},
+            resourceClass: "cheap",
+          },
           timings: {warmMs: {p95: 80}},
         },
         {
           id: "tx/unit",
           scope: {dir: "src/**", language: "toolchainx"},
-          check: {rung: "R2", command: {mode: "shell", command: "echo unit"}, resource_class: "moderate"},
+          check: {
+            rung: "R2",
+            command: {mode: "shell", command: "echo unit"},
+            resource_class: "moderate",
+          },
           timings: {warmMs: {p95: 500}},
         },
         {
@@ -42,19 +54,31 @@ pipeline test(task) {
         {
           id: "tx/row-stale",
           scope: {language: "toolchainx"},
-          check: {rung: "R0", command: {mode: "shell", command: "echo row-stale"}, resourceClass: "cheap"},
+          check: {
+            rung: "R0",
+            command: {mode: "shell", command: "echo row-stale"},
+            resourceClass: "cheap",
+          },
           stale_prone: true,
         },
         {
           id: "tx/r0-slow-cheap",
           scope: {language: "toolchainx"},
-          check: {rung: "R0", command: {mode: "shell", command: "echo slow"}, resourceClass: "cheap"},
+          check: {
+            rung: "R0",
+            command: {mode: "shell", command: "echo slow"},
+            resourceClass: "cheap",
+          },
           timings: {warmMs: {p95: 2000000000}},
         },
         {
           id: "tx/r0-fast-moderate",
           scope: {language: "toolchainx"},
-          check: {rung: "R0", command: {mode: "shell", command: "echo moderate"}, resourceClass: "moderate"},
+          check: {
+            rung: "R0",
+            command: {mode: "shell", command: "echo moderate"},
+            resourceClass: "moderate",
+          },
           timings: {warmMs: {p95: 1}},
         },
         {
@@ -78,7 +102,10 @@ pipeline test(task) {
   assert_eq(matches[7].row.id, "tx/r0-fast-moderate")
   assert_eq(matches[8].row.id, "tx/r1-fast")
   assert_eq(matches[9].row.id, "any/full")
-  const plan = verification_ladder_plan(query, {resource_classes: ["cheap", "moderate"], allow_stale_prone: false})
+  const plan = verification_ladder_plan(
+    query,
+    {resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
+  )
   assert_eq(plan.schema, "harn.verification.ladder_plan.v1")
   assert_eq(plan.reason, "profile_rows_selected")
   assert_eq(len(plan.selected), 5)

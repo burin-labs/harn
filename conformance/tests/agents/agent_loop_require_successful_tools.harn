@@ -18,7 +18,10 @@ fn tools() {
 
 pipeline main() {
   with_llm_script(
-    [{tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]}, llm_text("Finished.")],
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "x"}}]},
+      llm_text("Finished."),
+    ],
     { ->
       const failed = agent_loop(
         "Use one tool.",
@@ -38,7 +41,10 @@ pipeline main() {
     },
   )
   with_llm_script(
-    [{tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "x"}}]}, llm_text("Finished.")],
+    [
+      {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "x"}}]},
+      llm_text("Finished."),
+    ],
     { ->
       const satisfied = agent_loop(
         "Use one tool.",

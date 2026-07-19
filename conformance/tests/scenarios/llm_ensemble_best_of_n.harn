@@ -10,7 +10,9 @@ pipeline default() {
       llm_text("candidate-B"),
       llm_text("candidate-C"),
       llm_text("candidate-D"),
-      llm_text("{\"best_index\": 2, \"scores\": [0.1, 0.2, 0.9, 0.3], \"reasoning\": \"C is best\"}"),
+      llm_text(
+        "{\"best_index\": 2, \"scores\": [0.1, 0.2, 0.9, 0.3], \"reasoning\": \"C is best\"}",
+      ),
     ],
     { ->
       const result = best_of_n(

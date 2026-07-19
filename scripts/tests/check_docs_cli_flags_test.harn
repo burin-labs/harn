@@ -61,7 +61,10 @@ pipeline test_tokens_basic(task) {
 
 @test
 pipeline test_tokens_separators_padded(task) {
-  assert_eq(shell_tokens("harn a&&harn b|grep c"), ["harn", "a", "&&", "harn", "b", "|", "grep", "c"])
+  assert_eq(
+    shell_tokens("harn a&&harn b|grep c"),
+    ["harn", "a", "&&", "harn", "b", "|", "grep", "c"],
+  )
 }
 
 @test

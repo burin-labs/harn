@@ -114,7 +114,8 @@ fn __cc_grep_short_circuits(segment) {
       if token.starts_with("-") && !token.starts_with("--") && token.len() > 1 {
         const cluster = token.substring(1, token.len())
         if cluster.contains("q") || cluster.contains("m") || cluster.contains("l")
-          || cluster.contains("L") {
+          || cluster
+          .contains("L") {
           return true
         }
       }
@@ -444,5 +445,12 @@ pub fn command_capture_annotate(result, plan) {
     + path
     + "\"} or read_file) instead of re-running the command."
   return result
-    + {output_capture: {full_output_path: path, producer: plan.producer, filter: plan.filter, hint: hint}}
+    + {
+    output_capture: {
+      full_output_path: path,
+      producer: plan.producer,
+      filter: plan.filter,
+      hint: hint,
+    },
+  }
 }

@@ -10,8 +10,13 @@ pipeline default() {
     "import \"std/signal\"\n\npipeline default() {\n  on_interrupt({ -> __io_println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  __io_println(\"ready\")\n  try {\n    sleep(duration_seconds(30))\n  } catch (e) {\n    __io_println(\"caught\")\n  }\n  __io_println(interrupted())\n}\n",
   )
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
-  const start = shell("\"" + harn_bin + "\" run \"" + script_path + "\" >\"" + log_path + "\" 2>&1 & echo $!")
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  const start = shell(
+    "\"" + harn_bin + "\" run \"" + script_path + "\" >\"" + log_path + "\" 2>&1 & echo $!",
+  )
   const pid = start.stdout.trim()
   require start.success, "failed to start harn run child"
   require pid != "", "missing child pid"

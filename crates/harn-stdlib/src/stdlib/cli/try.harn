@@ -47,7 +47,9 @@ fn main(harness: Harness) {
     options = options + {tool_format_override_reason: override_reason}
   }
   const result = agent_loop(prompt, nil, options)
-  const warning = agent_first_tool_format_override_warning_text(transcript_events(result?.transcript))
+  const warning = agent_first_tool_format_override_warning_text(
+    transcript_events(result?.transcript),
+  )
   if warning != nil {
     __io_eprintln(warning)
   }

@@ -7,7 +7,13 @@ import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/poo
 pipeline default() {
   const dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-pipeline-" + uuid())
   const pool = pool_create(
-    {name: "pipeline-demo", scope: "pipeline", pipeline_id: "pipe_001", max_concurrent: 1, dir: dir},
+    {
+      name: "pipeline-demo",
+      scope: "pipeline",
+      pipeline_id: "pipe_001",
+      max_concurrent: 1,
+      dir: dir,
+    },
   )
   log(pool.scope)
   log(pool.scope_id)
@@ -24,7 +30,13 @@ pipeline default() {
   // Re-create the pool with the same name + pipeline_id. The store
   // re-hydrates terminal tasks and surfaces them via snapshot.
   const resumed = pool_create(
-    {name: "pipeline-demo", scope: "pipeline", pipeline_id: "pipe_001", max_concurrent: 1, dir: dir},
+    {
+      name: "pipeline-demo",
+      scope: "pipeline",
+      pipeline_id: "pipe_001",
+      max_concurrent: 1,
+      dir: dir,
+    },
   )
   log(resumed.scope)
   log(resumed.durable)

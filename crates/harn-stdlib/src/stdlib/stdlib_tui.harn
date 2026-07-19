@@ -478,7 +478,10 @@ pub fn select_from(items: list, opts: SelectFromOptions = {}) -> dict {
   }
   const prefer = __tui_to_string(options.prefer_external ?? "auto")
   if prefer != "auto" && prefer != "fzf" && prefer != "gum" && prefer != "none" {
-    return __tui_error(options, "select_from: prefer_external must be auto/fzf/gum/none (got " + prefer + ")")
+    return __tui_error(
+      options,
+      "select_from: prefer_external must be auto/fzf/gum/none (got " + prefer + ")",
+    )
   }
   const display_fn = options.display
   if display_fn != nil && !__tui_is_callable(display_fn) {

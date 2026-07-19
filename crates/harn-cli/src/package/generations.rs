@@ -244,6 +244,11 @@ fn collect_old_generations(ctx: &ManifestContext, current: &str) -> Result<(), P
         let lease = match OpenOptions::new().read(true).write(true).open(&lease_path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            // On Windows, a shared byte-range lock can reject a write-capable
+            // open before we get a handle on which to try the exclusive lock.
+            // That is the same observable state as lock contention: a live
+            // reader owns this generation, so collection must leave it alone.
+            Err(error) if lock_is_contended(&error) => continue,
             Err(error) => {
                 return Err(format!("failed to open {}: {error}", lease_path.display()).into())
             }
@@ -256,13 +261,18 @@ fn collect_old_generations(ctx: &ManifestContext, current: &str) -> Result<(), P
                 drop(lease);
                 remove_generation_path(&entry.path())?;
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) if lock_is_contended(&error) => {}
             Err(error) => {
                 return Err(format!("failed to lock {}: {error}", lease_path.display()).into())
             }
         }
     }
     Ok(())
+}
+
+fn lock_is_contended(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::WouldBlock
+        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }
 
 fn remove_abandoned_staging_directories(generations_dir: &Path) -> Result<(), PackageError> {

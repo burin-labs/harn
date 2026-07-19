@@ -7,7 +7,10 @@
 import "../provider_catalog_refresh.harn"
 import "../provider_catalog_sources.harn"
 
-const FIXTURE_BASE = {observed_at: "2026-05-11T00:00:00Z", http_options: {fetched_at: "fixture-time"}}
+const FIXTURE_BASE = {
+  observed_at: "2026-05-11T00:00:00Z",
+  http_options: {fetched_at: "fixture-time"},
+}
 
 fn make_env(secrets) {
   return FIXTURE_BASE + {secrets: secrets ?? {}}
@@ -52,14 +55,24 @@ const SAMPLE_CATALOG = {
       provider: "anthropic",
       name: "Claude Haiku 4.5",
       context_window: 200000,
-      pricing: {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+      pricing: {
+        input_per_mtok: 1.0,
+        output_per_mtok: 5.0,
+        cache_read_per_mtok: 0.1,
+        cache_write_per_mtok: 1.25,
+      },
     },
     {
       id: "claude-opus-4-7-20260301",
       provider: "anthropic",
       name: "Claude Opus 4.7",
       context_window: 200000,
-      pricing: {input_per_mtok: 15.0, output_per_mtok: 75.0, cache_read_per_mtok: 1.5, cache_write_per_mtok: 18.75},
+      pricing: {
+        input_per_mtok: 15.0,
+        output_per_mtok: 75.0,
+        cache_read_per_mtok: 1.5,
+        cache_write_per_mtok: 18.75,
+      },
     },
   ],
 }
@@ -100,12 +113,22 @@ pipeline test_normalize_merges_disjoint_fields(task) {
 pipeline test_build_drift_flags_added_changed_unknown(task) {
   const obs_existing = provider_obs(
     "claude-haiku-4-5-20251001",
-    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    {
+      input_per_mtok: 1.0,
+      output_per_mtok: 5.0,
+      cache_read_per_mtok: 0.1,
+      cache_write_per_mtok: 1.25,
+    },
     200000,
   )
   const obs_changed = provider_obs(
     "claude-opus-4-7-20260301",
-    {input_per_mtok: 20.0, output_per_mtok: 100.0, cache_read_per_mtok: 2.0, cache_write_per_mtok: 25.0},
+    {
+      input_per_mtok: 20.0,
+      output_per_mtok: 100.0,
+      cache_read_per_mtok: 2.0,
+      cache_write_per_mtok: 25.0,
+    },
     200000,
   )
   const obs_added = provider_obs("claude-haiku-5-20260601", nil, 250000)
@@ -145,7 +168,12 @@ pipeline test_build_drift_skips_removal_for_unseen_provider(task) {
 pipeline test_build_drift_reports_removal_when_provider_observed(task) {
   const only_one = provider_obs(
     "claude-haiku-4-5-20251001",
-    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    {
+      input_per_mtok: 1.0,
+      output_per_mtok: 5.0,
+      cache_read_per_mtok: 0.1,
+      cache_write_per_mtok: 1.25,
+    },
     200000,
   )
   const drift = build_drift([only_one], SAMPLE_CATALOG)
@@ -186,7 +214,12 @@ pipeline test_build_drift_keys_catalog_identity_by_provider_and_model(task) {
 pipeline test_render_markdown_report_includes_diagnostics(task) {
   const obs = provider_obs(
     "claude-haiku-4-5-20251001",
-    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    {
+      input_per_mtok: 1.0,
+      output_per_mtok: 5.0,
+      cache_read_per_mtok: 0.1,
+      cache_write_per_mtok: 1.25,
+    },
     200000,
   )
   const drift = build_drift([obs], SAMPLE_CATALOG)
@@ -202,7 +235,12 @@ pipeline test_render_markdown_report_includes_diagnostics(task) {
       key_envs: [],
     },
   ]
-  const report = render_markdown_report(drift, [], runs, {generated_at: "fixture-time", run_mode: "fixtures"})
+  const report = render_markdown_report(
+    drift,
+    [],
+    runs,
+    {generated_at: "fixture-time", run_mode: "fixtures"},
+  )
   assert(contains(report, "# Provider catalog refresh — drift report"))
   assert(contains(report, "## Adapter runs"))
   assert(contains(report, "## Added models"))
@@ -215,13 +253,23 @@ pipeline test_render_candidate_toml_emits_added_and_changed_only(task) {
   const added_obs = provider_obs("claude-haiku-5-20260601", nil, 250000)
   const changed_obs = provider_obs(
     "claude-opus-4-7-20260301",
-    {input_per_mtok: 20.0, output_per_mtok: 100.0, cache_read_per_mtok: 2.0, cache_write_per_mtok: 25.0},
+    {
+      input_per_mtok: 20.0,
+      output_per_mtok: 100.0,
+      cache_read_per_mtok: 2.0,
+      cache_write_per_mtok: 25.0,
+    },
     200000,
   )
   // Unchanged observation should NOT appear in the candidate.
   const unchanged_obs = provider_obs(
     "claude-haiku-4-5-20251001",
-    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    {
+      input_per_mtok: 1.0,
+      output_per_mtok: 5.0,
+      cache_read_per_mtok: 0.1,
+      cache_write_per_mtok: 1.25,
+    },
     200000,
   )
   const drift = build_drift([added_obs, changed_obs, unchanged_obs], SAMPLE_CATALOG)
@@ -235,29 +283,46 @@ pipeline test_render_candidate_toml_emits_added_and_changed_only(task) {
 
 @test
 pipeline test_render_candidate_toml_keeps_aggregator_discovery_out_of_patch(task) {
-  const discovered = aggregator_obs("claude-next-unverified", {input_per_mtok: 9.0, output_per_mtok: 45.0})
+  const discovered = aggregator_obs(
+    "claude-next-unverified",
+    {input_per_mtok: 9.0, output_per_mtok: 45.0},
+  )
   const drift = build_drift([discovered], SAMPLE_CATALOG)
   const toml = render_candidate_toml(drift, {generated_at: "fixture-time", run_mode: "live"})
   assert(!contains(toml, "[models.\"claude-next-unverified\"]"))
-  assert(contains(toml, "No provider-owned, high-confidence metadata additions or changes detected"))
+  assert(
+    contains(toml, "No provider-owned, high-confidence metadata additions or changes detected"),
+  )
 }
 
 @test
 pipeline test_render_candidate_toml_handles_no_changes(task) {
   const unchanged_obs = provider_obs(
     "claude-haiku-4-5-20251001",
-    {input_per_mtok: 1.0, output_per_mtok: 5.0, cache_read_per_mtok: 0.1, cache_write_per_mtok: 1.25},
+    {
+      input_per_mtok: 1.0,
+      output_per_mtok: 5.0,
+      cache_read_per_mtok: 0.1,
+      cache_write_per_mtok: 1.25,
+    },
     200000,
   )
   // Need to observe both anthropic catalog entries so removal logic doesn't add the missing one.
   const unchanged_obs_2 = provider_obs(
     "claude-opus-4-7-20260301",
-    {input_per_mtok: 15.0, output_per_mtok: 75.0, cache_read_per_mtok: 1.5, cache_write_per_mtok: 18.75},
+    {
+      input_per_mtok: 15.0,
+      output_per_mtok: 75.0,
+      cache_read_per_mtok: 1.5,
+      cache_write_per_mtok: 18.75,
+    },
     200000,
   )
   const drift = build_drift([unchanged_obs, unchanged_obs_2], SAMPLE_CATALOG)
   const toml = render_candidate_toml(drift, {generated_at: "fixture-time", run_mode: "fixtures"})
-  assert(contains(toml, "No provider-owned, high-confidence metadata additions or changes detected"))
+  assert(
+    contains(toml, "No provider-owned, high-confidence metadata additions or changes detected"),
+  )
 }
 
 @test
@@ -368,7 +433,8 @@ pipeline test_json_adapter_parses_payload(task) {
     {
       status: 200,
       headers: {"content-type": "application/json"},
-      body: "{\"data\":[{\"id\":\"claude-haiku-4-5-20251001\",\"name\":\"Claude Haiku 4.5\",\"context_length\":200000}]}",
+      body:
+        "{\"data\":[{\"id\":\"claude-haiku-4-5-20251001\",\"name\":\"Claude Haiku 4.5\",\"context_length\":200000}]}",
     },
   )
   const env = make_env(nil)
@@ -382,7 +448,9 @@ pipeline test_json_adapter_parses_payload(task) {
       let entries = []
       for record in payload?.data ?? [] {
         entries = entries
-          + [{model_id: record.id, name: record?.name, context_window: record?.context_length}]
+          + [
+          {model_id: record.id, name: record?.name, context_window: record?.context_length},
+        ]
       }
       return entries
     },

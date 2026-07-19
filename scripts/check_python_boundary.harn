@@ -81,7 +81,8 @@ pub fn python_boundary_rule_for(path: string) -> dict {
   return {
     allowed: false,
     category: "forbidden",
-    reason: "Repo orchestration should be Harn unless bootstrap, foreign artifact validation, or a subprocess fixture requires Python.",
+    reason:
+      "Repo orchestration should be Harn unless bootstrap, foreign artifact validation, or a subprocess fixture requires Python.",
   }
 }
 

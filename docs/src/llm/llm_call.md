@@ -90,33 +90,83 @@ for routes that declare video support. `std/llm/media` also provides
 
 ### Return value
 
-`llm_call` always returns a dict:
+`llm_call` returns one rigid, canonical envelope. Every field uses a
+single snake_case spelling — there are no top-level aliases, and all
+accounting lives under `usage`. The typed contract is
+`LlmResponse` from `std/llm/envelope`; the same module exports
+`LlmUsage`, `LlmOutcome`, `LlmOutcomeKind`, `LlmToolCall`, and
+`LlmStreamChunk`.
 
 | Field | Type | Description |
 |---|---|---|
-| `text` | string | The text content of the response |
-| `visible_text` | string | Human-visible assistant output |
-| `model` | string | The model used |
+| `model` | string | The model that produced the response |
 | `provider` | string | Canonical provider identifier |
-| `input_tokens` | int | Input/prompt token count |
-| `output_tokens` | int | Output/completion token count |
-| `cache_read_tokens` | int | Prompt tokens served from provider-side cache when supported |
-| `cache_write_tokens` | int | Prompt tokens written into provider-side cache when supported |
-| `cache_creation_input_tokens` | int | Anthropic-compatible alias for `cache_write_tokens` |
-| `usage.cost_usd` | float \| nil | Catalog-priced response cost; `nil` when pricing is unknown |
-| `cache_hit_ratio` | float | Fraction of prompt tokens served from provider-side cache |
-| `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; cache writes can be negative when writes cost more than normal input |
-| `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
-| `usage` | dict | Token and prompt-cache accounting fields, including the cache fields above and `served_fast` |
+| `usage` | `LlmUsage` | Single owner of all call accounting — tokens, cost, prompt-cache, and serving tier. See [Usage](#usage) below. |
+| `outcome` | `LlmOutcome` | Typed classification of what the call produced. Branch on this, never on raw `stop_reason`. See [Outcome](#outcome) below. |
+| `text` | string | The public answer, after tool/protocol projection |
+| `raw_text` | string | Pre-projection parser source, with protocol tags intact |
+| `visible_text` | string | Sanitized human-visible assistant output |
+| `canonical_text` | string | Canonical replay form of a tagged-protocol response (present only for tagged responses) |
 | `data` | any | Parsed JSON (when `response_format: "json"`) |
-| `tool_calls` | list | Tool calls (when model uses tools) |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
-| `private_reasoning` | string | Provider reasoning metadata kept separate from visible text |
-| `blocks` | list | Canonical structured content blocks across providers |
-| `logprobs` | list | Token log probability records when requested and returned by the provider |
-| `stop_reason` | string | `"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"` |
+| `thinking_summary` | string | Provider-supplied summary of the reasoning trace, when available |
+| `stop_reason` | string | Provider-native stop vocabulary (`"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"`), kept for forensics — prefer `outcome` |
+| `tool_calls` | `list<LlmToolCall>` | Dispatchable tool calls, merged from the provider-native and text-protocol channels. Always present, possibly empty. |
+| `native_tool_calls` | `list<LlmToolCall>` | Provider-native tool calls only. Always present, possibly empty. |
+| `protocol_violations` | list | Text-protocol violations detected while parsing tool calls |
+| `tool_parse_errors` | list | Errors from parsing malformed tool-call payloads |
+| `done_marker` | string | The completion sentinel the model emitted, when one was parsed |
 | `provider_response_id` | string | Provider-native response id when available, such as OpenAI Responses `resp_*` |
 | `transcript` | dict | Transcript carrying message history, events, summary, metadata, and id |
+| `blocks` | list | Canonical structured content blocks across providers. Always present, possibly empty. |
+| `logprobs` | list | Token log probability records when requested and returned by the provider |
+| `routing` | dict | Route-resolution metadata when the call went through the routing layer |
+
+The four text channels each have a distinct job — none are aliases.
+`text` is the public answer after projection, `raw_text` is the
+pre-projection source with protocol tags intact, `visible_text` is the
+sanitized human-visible output, and `canonical_text` is the canonical
+replay form of a tagged-protocol response.
+
+#### Usage
+
+`usage` is the single owner of all call accounting; no accounting field
+is duplicated at the envelope's top level.
+
+| Field | Type | Description |
+|---|---|---|
+| `input_tokens` | int | Input/prompt token count |
+| `output_tokens` | int | Output/completion token count |
+| `cost_usd` | float \| nil | Catalog-priced response cost; `nil` (not `0`) when pricing is unknown |
+| `cache_read_tokens` | int | Prompt tokens served from provider-side cache |
+| `cache_write_tokens` | int | Prompt tokens written into provider-side cache |
+| `cache_hit_ratio` | float \| nil | Fraction of prompt tokens served from cache; `nil` when the provider reports no cache accounting |
+| `cache_visibility` | string | `"unsupported"` when the provider exposes no cache accounting (e.g. native Ollama), so a local model is never scored as a 100% cache miss |
+| `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; negative when cache writes cost more than normal input |
+| `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
+| `provider_telemetry` | dict | Raw provider-reported usage/telemetry, passed through when present |
+
+#### Outcome
+
+Every response carries `outcome: {kind, billed}`. `billed` is `true`
+when the provider charged tokens for the call. Consumers should branch on
+`outcome.kind` rather than re-deriving intent from the provider-native
+`stop_reason`:
+
+| `kind` | Meaning |
+|---|---|
+| `"complete"` | The model committed a normal answer and stopped cleanly. |
+| `"tool_use"` | The actionable content is one or more tool calls. |
+| `"truncated"` | Generation was cut on an output-token limit; text and especially tool-call arguments are suspect. |
+| `"refused"` | The provider refused or filtered the completion. |
+| `"paused"` | The provider paused the turn (e.g. Anthropic `pause_turn`); resume it rather than judging it. |
+| `"empty"` | Nothing usable was committed: no visible text, no tool calls, no thinking. |
+
+`kind == "empty"` together with `billed == true` is the
+billed-noncommittal signal — the condition default retry policy
+re-dispatches on. `std/llm/envelope` ships predicates for these branches
+so callers do not re-implement them: `llm_response_is_empty`,
+`llm_response_is_billed_empty`, and `llm_response_is_truncated`.
 
 ### Options dict
 
@@ -177,7 +227,7 @@ call sites toward it.
 | `budget` | dict | nil | Pre-flight LLM budget envelope. Supports `max_cost_usd`, `max_input_tokens`, `max_output_tokens`, and `total_budget_usd` |
 | `cache` | bool | provider capability default | Enable provider-side prompt caching for routes that support it. Defaults on for cache-capable routes and off otherwise. |
 | `prompt_cache_ttl` | `"5m"` or `"1h"` | provider default | Optional provider-side prompt-cache TTL. Anthropic uses `5m` by default; `1h` requests the extended cache when the route advertises that TTL in `prompt_cache_ttls`. |
-| `fast` | bool | `false` | Opt into the model's accelerated-serving serving tier. Maps to the `fast` entry in the catalog's `serving_tiers` array (`speed` for Anthropic, `service_tier` for OpenAI) and injects the Anthropic beta header when required. Rejected for models with no usable `fast` serving tier. Billed at the tier's premium pricing only when the provider confirms it served fast (`result.served_fast`). `speed: "fast"` is accepted as an alias. |
+| `fast` | bool | `false` | Opt into the model's accelerated-serving serving tier. Maps to the `fast` entry in the catalog's `serving_tiers` array (`speed` for Anthropic, `service_tier` for OpenAI) and injects the Anthropic beta header when required. Rejected for models with no usable `fast` serving tier. Billed at the tier's premium pricing only when the provider confirms it served fast (`result.usage.served_fast`). `speed: "fast"` is accepted as an alias. |
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
 | `timeout` | int | `120` | Request timeout in seconds. `timeout_ms` accepted as an alias and rounded up to whole seconds (HTTP transports take `Duration::from_secs`); sub-second budgets must be enforced at the caller. |
 | `messages` | list | nil | Full message list (overrides prompt) |
@@ -429,7 +479,7 @@ Repair-pass semantics:
   callsite.
 - Code that also needs token counts, transcript, thinking traces, or
   to pass a pre-built transcript: call `llm_call` directly and read
-  `.text` / `.data` / `.input_tokens` / etc. off the full result
+  `.text` / `.data` / `.usage.input_tokens` / etc. off the full result
   dict.
 - Call sites that prefer explicit branching over `try` blocks:
   `llm_call_structured_safe` (the non-throwing envelope).
@@ -449,13 +499,30 @@ cache / circuit breaker) to compose resilience without forking the
 loop:
 
 ```harn,ignore
-import {default_llm_caller, with_retry} from "std/llm/handlers"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry} from "std/llm/handlers"
 
 const caller = with_retry(default_llm_caller(), {max_attempts: 4})
 
 const result = agent_loop(task, system, {
   loop_until_done: true,
   llm_caller: caller,
+})
+```
+
+`llm_caller(opts = nil)` is the blessed default stack — it is exactly
+`with_retry(default_llm_caller(), opts?.retry ?? {})` with typed
+reserved-status classification and billed-empty re-dispatch on by
+default. Reach for it instead of re-composing retry by hand, and compose
+`with_cache` / `with_budget` / `with_logging` around it when you need
+more:
+
+```harn,ignore
+import {llm_caller} from "std/llm/caller"
+
+const result = agent_loop(task, system, {
+  loop_until_done: true,
+  llm_caller: llm_caller({retry: {max_attempts: 4}}),
 })
 ```
 
@@ -591,11 +658,41 @@ llm_mock({error: {status: 503, kind: "transient", reason: "upstream_unavailable"
 
 // Inspect what was sent to the mock provider
 const calls = llm_mock_calls()
-// Each entry: {messages: [...], system: "..." or nil, tools: [...] or nil}
+// Each entry includes mock_scope plus {messages: [...], system: "..." or nil,
+// tools: [...] or nil}.
 
 // Clear all mocks and call log between tests
 llm_mock_clear()
 ```
+
+For concurrent agent work, load one complete versioned JSONL document with
+`llm_mock_load_jsonl(text)`. Version 1 requires an explicit `id`, open-string
+`scope`, and `consume: "once"` or `"sticky"` on every entry:
+
+```harn
+const fixture = """
+{"schemaVersion":1,"strictScopes":false}
+{"id":"main-1","scope":"agent.main","consume":"once","text":"MAIN"}
+{"id":"judge-1","scope":"completion.judge","consume":"sticky","match":"*","text":"JUDGE"}
+"""
+const loaded = llm_mock_load_jsonl(fixture)
+const receipts = llm_mock_receipts()
+const queue = llm_mock_snapshot()
+const harn_purposes = llm_mock_known_scopes()
+```
+
+Matching checks the requested scope first. With `strictScopes: false`, a
+non-`default` request may fall through only to the `default` bucket; it never
+consumes another purpose's queue. `llm_mock_load_jsonl` validates the complete
+document before replacing the active store, so malformed input preserves the
+previous fixture. Headerless v0 documents retain the legacy default-scope
+FIFO/pattern behavior. Unknown v1 scopes are accepted as open strings and
+returned as advisory `warnings` rather than being rejected.
+`llm_mock_known_scopes()` exposes Harn's current purpose vocabulary to scripts;
+it is advisory and does not close the open-string `scope` field.
+Each `llm_mock_receipts()` item contains the authored `id`, requested and
+resolved scopes, `consume`, `fell_through`, and the post-match `remaining`
+count; `llm_mock_snapshot()` exposes the remaining count for every scope.
 
 When no `llm_mock()` responses are queued, the mock provider falls back to
 its default deterministic behavior (echoing prompt metadata). This means

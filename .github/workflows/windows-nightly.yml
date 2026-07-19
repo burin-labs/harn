@@ -50,6 +50,7 @@ jobs:
           # part of rust-cache's environment hash, while runner-local sccache
           # reported zero hits and made this target cache unreachable to PRs.
           shared-key: workspace-windows
+          source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           cache-on-failure: true
           cache-bin: false
           save: true

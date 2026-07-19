@@ -1,0 +1,157 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/envelope — THE canonical `llm_call` response contract.
+//
+// One rigid snake_case envelope, one spelling per field, all accounting owned
+// by `usage`, and a typed `outcome` classification so no consumer ever
+// re-derives "what did this call produce?" from stop-reason vocabularies or
+// token probing. The Rust projection (`vm_build_llm_result` in
+// `crates/harn-vm/src/llm/api/result.rs`) is the single producer; its
+// `envelope_top_level_keys_are_canonical` test and these types must move
+// together.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Canonical outcome vocabulary for a completed (non-thrown) LLM call.
+ *
+ * - `complete`  — the model committed a normal answer and stopped cleanly.
+ * - `tool_use`  — the actionable content is one or more tool calls.
+ * - `truncated` — generation was cut on an output-token limit; text and
+ *   especially tool-call arguments are suspect.
+ * - `refused`   — the provider refused or filtered the completion.
+ * - `paused`    — the provider paused the turn (e.g. Anthropic `pause_turn`);
+ *   resume it rather than judging it.
+ * - `empty`     — nothing usable was committed: no visible text, no tool
+ *   calls, no thinking.
+ */
+pub type LlmOutcomeKind = "complete" | "tool_use" | "truncated" | "refused" | "paused" | "empty"
+
+/**
+ * Typed outcome carried on every `llm_call` response. `billed` is true when
+ * the provider charged tokens for the call; `kind == "empty"` together with
+ * `billed` is the billed-noncommittal signal (the S2 failure class in the
+ * tool-calling north star) that retry policy keys on.
+ */
+pub type LlmOutcome = {kind: LlmOutcomeKind, billed: bool}
+
+/**
+ * Single owner of ALL call accounting. No usage field is duplicated at the
+ * envelope's top level.
+ *
+ * `cost_usd` is nil (not 0) when catalog pricing is unknown. `cache_hit_ratio`
+ * is nil with `cache_visibility: "unsupported"` when the provider reports no
+ * cache accounting at all (native Ollama), so a local model is never scored as
+ * a 100% cache miss.
+ */
+pub type LlmUsage = {
+  input_tokens: int,
+  output_tokens: int,
+  cost_usd?: float,
+  cache_read_tokens: int,
+  cache_write_tokens: int,
+  cache_hit_ratio?: float,
+  cache_visibility?: string,
+  cache_savings_usd: float,
+  served_fast: bool,
+  provider_telemetry?: dict,
+}
+
+/**
+ * A dispatchable tool call from the merged (provider-native + text-protocol)
+ * channel. `arguments` is the parsed argument dict; `id` is present when the
+ * provider assigned one.
+ */
+pub type LlmToolCall = {id?: string, type?: string, name: string, arguments?: dict}
+
+/**
+ * The canonical `llm_call` response envelope.
+ *
+ * Text channels (each with a distinct job — none are aliases):
+ * - `text`         — the public answer after tool/protocol projection.
+ * - `raw_text`     — the pre-projection parser source (protocol tags intact).
+ * - `visible_text` — sanitized human-visible output.
+ * - `canonical_text` — canonical replay form of a tagged-protocol response.
+ *
+ * `tool_calls` (merged) and `native_tool_calls` (provider-native only) are
+ * always present, possibly empty. `stop_reason` is the provider-native stop
+ * vocabulary kept for forensics; `outcome` is the canonical interpretation —
+ * consumers should branch on `outcome`, never on `stop_reason`.
+ */
+pub type LlmResponse = {
+  model: string,
+  provider: string,
+  usage: LlmUsage,
+  outcome: LlmOutcome,
+  text: string,
+  raw_text: string,
+  visible_text: string,
+  canonical_text?: string,
+  data?: any,
+  thinking?: string,
+  thinking_summary?: string,
+  stop_reason?: string,
+  tool_calls: list<LlmToolCall>,
+  native_tool_calls: list<LlmToolCall>,
+  protocol_violations?: list<string>,
+  tool_parse_errors?: list<string>,
+  done_marker?: string,
+  provider_response_id?: string,
+  transcript?: dict,
+  blocks: list,
+  logprobs?: list,
+  routing?: dict,
+}
+
+/**
+ * One streamed chunk from `llm_stream_call`. The terminal chunk carries the
+ * envelope's `stop_reason` (same spelling as `LlmResponse.stop_reason`);
+ * non-terminal chunks carry nil.
+ */
+pub type LlmStreamChunk = {
+  delta: string,
+  visible_delta: string,
+  partial: string,
+  role: string,
+  stop_reason?: string,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+fn __envelope_outcome_kind(response) -> string {
+  return to_string(response?.outcome?.kind ?? "")
+}
+
+/**
+ * True when the response committed nothing usable (outcome `empty`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_response_is_empty(response) -> bool {
+  return __envelope_outcome_kind(response) == "empty"
+}
+
+/**
+ * True for the billed-noncommittal class: the provider charged tokens and the
+ * response committed nothing usable. This is the condition default retry
+ * policy re-dispatches on.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_response_is_billed_empty(response) -> bool {
+  return llm_response_is_empty(response) && (response?.outcome?.billed ?? false)
+}
+
+/**
+ * True when generation was cut on an output-token limit. A truncated response
+ * with tool calls must not be dispatched as a clean tool_use — arguments may
+ * be partial.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_response_is_truncated(response) -> bool {
+  return __envelope_outcome_kind(response) == "truncated"
+}

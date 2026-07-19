@@ -52,7 +52,10 @@ pipeline test(task) {
   )
   assert(keyed1 == 10, "first keyed stage should run")
   const keyed_record = checkpoint_get("keyed_step")
-  assert(keyed_record.schema == "harn.checkpoint_stage.keyed.v1", "keyed stage should store envelope")
+  assert(
+    keyed_record.schema == "harn.checkpoint_stage.keyed.v1",
+    "keyed stage should store envelope",
+  )
   assert(keyed_record.fingerprint.starts_with("sha256:"), "keyed stage should store digest")
   assert(!json_stringify(keyed_record).contains("abc"), "raw keyed identity must not be persisted")
   const keyed2 = checkpoint_stage_keyed(
@@ -75,7 +78,11 @@ pipeline test(task) {
     "malformed_keyed_step",
     {schema: "harn.checkpoint_stage.keyed.v1", fingerprint: malformed_fingerprint},
   )
-  const replaced_malformed = checkpoint_stage_keyed("malformed_keyed_step", {pin: "abc"}, fn() { 9 })
+  const replaced_malformed = checkpoint_stage_keyed(
+    "malformed_keyed_step",
+    {pin: "abc"},
+    fn() { 9 },
+  )
   assert(replaced_malformed == 9, "keyed envelope without a value must be invalidated")
   const cached_nil = checkpoint_stage_keyed("nil_keyed_step", {pin: "abc"}, fn() { nil })
   assert(cached_nil == nil, "keyed stage should cache nil results")
@@ -93,7 +100,12 @@ pipeline test(task) {
   }
   assert(is_err(failed_keyed_retry), "exhausted keyed retry should fail")
   assert(!checkpoint_exists("keyed_retry"), "failed keyed retry must not cache completion")
-  const recovered_keyed_retry = checkpoint_stage_keyed_retry("keyed_retry", {pin: "abc"}, 1, fn() { "recovered" })
+  const recovered_keyed_retry = checkpoint_stage_keyed_retry(
+    "keyed_retry",
+    {pin: "abc"},
+    1,
+    fn() { "recovered" },
+  )
   assert(recovered_keyed_retry == "recovered", "later keyed retry should execute after failure")
   checkpoint_clear()
   log("checkpoint_stage tests passed")

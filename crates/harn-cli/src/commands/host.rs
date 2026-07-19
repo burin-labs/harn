@@ -10,7 +10,7 @@ use crate::cli::{
 };
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonError};
 
-pub const HOST_LEASE_CLI_SCHEMA_VERSION: u32 = 2;
+pub const HOST_LEASE_CLI_SCHEMA_VERSION: u32 = 3;
 const EX_TEMPFAIL: i32 = 75;
 
 mod cargo_run;
@@ -59,6 +59,7 @@ fn acquire(store: &harn_hostlib::HostLeaseStore, args: HostLeaseAcquireArgs) -> 
     let request = harn_hostlib::HostLeaseRequest {
         host,
         resource_class: resource_class(args.resource_class),
+        domain: args.domain,
         execution_context: None,
         owner: args.owner,
         priority_class: priority(args.priority_class),
@@ -132,9 +133,10 @@ fn renew(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRenewArgs) -> i32 
     let host = args
         .host
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
-    match store.renew_for_resource(
+    match store.renew_for_domain(
         &host,
         resource_class(args.resource_class),
+        &args.domain,
         &args.lease_id,
         args.ttl_ms,
     ) {
@@ -161,7 +163,12 @@ fn release(store: &harn_hostlib::HostLeaseStore, args: HostLeaseReleaseArgs) -> 
     let host = args
         .host
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
-    match store.release_for_resource(&host, resource_class(args.resource_class), &args.lease_id) {
+    match store.release_for_domain(
+        &host,
+        resource_class(args.resource_class),
+        &args.domain,
+        &args.lease_id,
+    ) {
         Ok(receipt) if receipt.released => {
             print_success(&receipt, args.json, |_| {
                 format!("Released lease {}", args.lease_id)
@@ -185,7 +192,7 @@ fn status(store: &harn_hostlib::HostLeaseStore, args: HostLeaseStatusArgs) -> i3
     let host = args
         .host
         .unwrap_or_else(harn_hostlib::HostLeaseStore::default_host);
-    match store.status_for_resource(&host, resource_class(args.resource_class)) {
+    match store.status_for_domain(&host, resource_class(args.resource_class), &args.domain) {
         Ok(state) => {
             print_success(&state, args.json, |state| match state.active.as_ref() {
                 Some(active) => format!(

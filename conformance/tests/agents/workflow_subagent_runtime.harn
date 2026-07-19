@@ -9,7 +9,11 @@ pipeline main() {
           mode: "llm",
           model_policy: {provider: "mock"},
           output_contract: {output_kinds: ["summary"]},
-          metadata: {worker_name: "delegate-1", request: {source: "workflow"}, workflow_stages: ["delegate"]},
+          metadata: {
+            worker_name: "delegate-1",
+            request: {source: "workflow"},
+            workflow_stages: ["delegate"],
+          },
         },
       },
       edges: [],
@@ -22,7 +26,9 @@ pipeline main() {
   __io_println(result?.run?.stages[0]?.metadata?.worker?.request?.payload?.source == "workflow")
   __io_println(result?.run?.stages[0]?.artifacts[0]?.metadata?.delegated)
   __io_println(result?.run?.stages[0]?.artifacts[1]?.kind == "worker_result")
-  __io_println(result?.run?.stages[0]?.artifacts[1]?.data?.request?.workflow_stages[0] == "delegate")
+  __io_println(
+    result?.run?.stages[0]?.artifacts[1]?.data?.request?.workflow_stages[0] == "delegate",
+  )
   const artifact_worker_id = result?.run?.stages[0]?.artifacts[1]?.data?.provenance?.worker_id
   const stage_worker_id = result?.run?.stages[0]?.metadata?.worker?.id
   __io_println(artifact_worker_id == stage_worker_id)

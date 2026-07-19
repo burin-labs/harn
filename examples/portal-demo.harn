@@ -8,7 +8,11 @@ pipeline main() {
       name: "portal_demo",
       entry: "gate",
       nodes: {
-        gate: {kind: "condition", context_policy: {include_kinds: ["plan"]}, metadata: {contains_text: "go"}},
+        gate: {
+          kind: "condition",
+          context_policy: {include_kinds: ["plan"]},
+          metadata: {contains_text: "go"},
+        },
         fan: {kind: "fork"},
         map_docs: {
           kind: "map",
@@ -21,7 +25,10 @@ pipeline main() {
           context_policy: {include_kinds: ["summary"]},
           input_contract: {input_kinds: ["summary"]},
           output_contract: {output_kinds: ["plan"]},
-          capability_policy: {capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"},
+          capability_policy: {
+            capabilities: {workspace: ["read_text"]},
+            side_effect_level: "read_only",
+          },
         },
       },
       edges: [

@@ -8,7 +8,11 @@ import {
 } from "std/edit"
 
 pipeline default() {
-  const exact = edit_apply_old_new_patch("alpha\n  color: red;\nomega\n", "color: red;", "color: blue;")
+  const exact = edit_apply_old_new_patch(
+    "alpha\n  color: red;\nomega\n",
+    "color: red;",
+    "color: blue;",
+  )
   __io_println(exact.ok)
   __io_println(exact.match_kind)
   __io_println(exact.start_line)
@@ -52,13 +56,25 @@ pipeline default() {
   const lazy_dots = edit_apply_old_new_patch("a\nb\nc", "b", "... unchanged ...")
   __io_println(lazy_dots.ok)
   __io_println(lazy_dots.error_code)
-  const lazy_comment = edit_apply_old_new_patch("alpha\nbody\nomega\n", "body", "kept\n// ... rest of implementation")
+  const lazy_comment = edit_apply_old_new_patch(
+    "alpha\nbody\nomega\n",
+    "body",
+    "kept\n// ... rest of implementation",
+  )
   __io_println(lazy_comment.ok)
   __io_println(lazy_comment.error_code)
-  const lazy_todo = edit_apply_old_new_patch("alpha\nbody\nomega\n", "body", "kept\n// TODO: implement the rest")
+  const lazy_todo = edit_apply_old_new_patch(
+    "alpha\nbody\nomega\n",
+    "body",
+    "kept\n// TODO: implement the rest",
+  )
   __io_println(lazy_todo.ok)
   __io_println(lazy_todo.error_code)
-  const lazy_pass = edit_apply_old_new_patch("alpha\nbody\nomega\n", "body", "kept_body\npass # ... rest")
+  const lazy_pass = edit_apply_old_new_patch(
+    "alpha\nbody\nomega\n",
+    "body",
+    "kept_body\npass # ... rest",
+  )
   __io_println(lazy_pass.ok)
   __io_println(lazy_pass.error_code)
   const spliced = edit_splice_lines("a\nb\nc", 1, 2, "B")
@@ -104,7 +120,11 @@ pipeline default() {
     "alpha\nbeta\ngamma\ndelta",
   )
   __io_println(real_rewrite.ok)
-  const region_report = edit_validate_changed_regions("a\nb\nc", "a\nB\nc", [{start_line: 1, end_line: 1}])
+  const region_report = edit_validate_changed_regions(
+    "a\nb\nc",
+    "a\nB\nc",
+    [{start_line: 1, end_line: 1}],
+  )
   __io_println(region_report.ok)
   const multi_region_report = edit_validate_changed_regions(
     "a\nb\nc\nd",

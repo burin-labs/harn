@@ -10,7 +10,11 @@ pipeline default() {
   with_llm_script(
     [llm_text("{\"note\": \"nope\"}"), llm_text("{\"note\": \"still nope\"}")],
     { ->
-      const r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0, repair: {enabled: true}})
+      const r = llm_call_structured_result(
+        "Grade",
+        schema,
+        {provider: "mock", retries: 0, repair: {enabled: true}},
+      )
       __io_println(r.ok)
       __io_println(r.data == nil)
       __io_println(r.error_category)

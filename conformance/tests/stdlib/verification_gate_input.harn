@@ -6,14 +6,18 @@ pipeline test(task) {
     rowId: "zig/test",
     at: "2026-07-03T00:00:00Z",
     snapshot: {"src/writer.zig": "old"},
-    diagnostics: [{path: "src/writer.zig", line: 10, column: 2, code: "E1", message: "missing writeEscaped"}],
+    diagnostics: [
+      {path: "src/writer.zig", line: 10, column: 2, code: "E1", message: "missing writeEscaped"},
+    ],
   }
   const fresh_red = {
     rung: "R2",
     rowId: "zig/test",
     at: "2026-07-03T00:01:00Z",
     snapshot: {"src/writer.zig": "new"},
-    diagnostics: [{path: "src/writer.zig", line: 99, column: 7, code: "E1", message: "missing writeEscaped"}],
+    diagnostics: [
+      {path: "src/writer.zig", line: 99, column: 7, code: "E1", message: "missing writeEscaped"},
+    ],
   }
   const hashes = {"src/writer.zig": "new"}
   const normalization = {row: {diagnosticDelta: {include_path: true}}}
@@ -78,7 +82,11 @@ pipeline test(task) {
   assert_eq(late_background_red.blocks_completion, false)
   assert_eq(late_background_red.current.classification.status, "bound_stale")
   assert_eq(late_background_red.current.value.source, "background")
-  const stale_previous_not_baseline = verification_gate_input(old_red, fresh_red + {diagnostics: ["B"]}, hashes)
+  const stale_previous_not_baseline = verification_gate_input(
+    old_red,
+    fresh_red + {diagnostics: ["B"]},
+    hashes,
+  )
   assert_eq(stale_previous_not_baseline.status, "initialized")
   assert_eq(stale_previous_not_baseline.progress_credit, false)
   assert_eq(stale_previous_not_baseline.blocks_completion, true)

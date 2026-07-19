@@ -58,7 +58,9 @@ pipeline default() {
         local_status: local.status,
         remote_status: remote.status,
         same_logical_output: local.result.status == remote.result.status
-          && local.result.title == remote.result.title
+          && local.result.title
+          == remote
+          .result.title
           && local.result.labels[0] == remote.result.labels[0],
         local_result: local.result,
         remote_result: remote.result,

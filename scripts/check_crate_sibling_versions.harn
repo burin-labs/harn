@@ -80,7 +80,9 @@ pub fn sibling_dep_errors_from_line_with_context(
   }
   const version_match = regex_captures(VERSION_RE, body)
   if version_match.count == 0 {
-    return ["${path}:${line_no}: ${name} path dependency must set version = \"${expected_version}\""]
+    return [
+      "${path}:${line_no}: ${name} path dependency must set version = \"${expected_version}\"",
+    ]
   }
   const actual = version_match[0].groups[0]
   if actual != expected_version {
@@ -97,7 +99,15 @@ pub fn sibling_dep_errors_from_line(
   line: string,
   expected_version: string,
 ) -> list<string> {
-  return sibling_dep_errors_from_line_with_context(path, line_no, line, expected_version, "", [], true)
+  return sibling_dep_errors_from_line_with_context(
+    path,
+    line_no,
+    line,
+    expected_version,
+    "",
+    [],
+    true,
+  )
 }
 
 pub fn sibling_dep_errors_from_text_with_context(
@@ -189,7 +199,9 @@ pipeline main(task) {
   }
   __io_println(
     "Harn sibling crate dependency pins match workspace version "
-      + expected_dependency_version(workspace_version),
+      + expected_dependency_version(
+      workspace_version,
+    ),
   )
   return 0
 }

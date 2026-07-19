@@ -2,7 +2,7 @@ pipeline main() {
   const result = llm_call("hello world", nil, {provider: "mock"})
   __io_println(result.provider)
   __io_println(result.visible_text != "")
-  __io_println(result.private_reasoning == nil)
+  __io_println(result.thinking == nil)
   __io_println(len(result.blocks) >= 1)
   __io_println(len(transcript_events(result.transcript)) >= 2)
   __io_println(contains(transcript_render_visible(result.transcript), "assistant:"))

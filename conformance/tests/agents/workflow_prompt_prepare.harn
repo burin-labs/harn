@@ -55,7 +55,8 @@ pipeline default() {
     {
       task: "Create the missing test file with one edit call.",
       task_label: "Create Required Outputs",
-      rendered_context: "<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>",
+      rendered_context:
+        "<artifact>\n<title>tests/unit/test_example.py</title>\n<body>\npass\n</body>\n</artifact>",
       verification_contracts: [{required_identifiers: ["rateLimit"]}],
     },
   )

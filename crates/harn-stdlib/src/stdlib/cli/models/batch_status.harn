@@ -37,7 +37,9 @@ import {
 /** Poll submitted batches and persist normalized lifecycle receipts. */
 fn __status_job_base(job: dict, dry_run: bool) -> dict {
   return __batch_lifecycle_job_base(job, dry_run)
-    + {request_count: __safe_int(job["request_count"]) ?? 0}
+    + {
+    request_count: __safe_int(job["request_count"]) ?? 0,
+  }
 }
 
 fn __cached_status_job(job: dict, dry_run: bool) -> dict {
@@ -74,7 +76,10 @@ fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string
     "GET",
     __join_url(__provider_base_url(harness, provider), "/batches/" + batch_id),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -206,7 +211,11 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   if !safe_bool(account["ok"], false) {
-    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(account["error"], "")]}
+    return {
+      ok: false,
+      job: base_job + {status: "failed"},
+      errors: [safe_string(account["error"], "")],
+    }
   }
   const account_id = safe_string(account["value"], "")
   const batch_id = __fireworks_batch_id_path(safe_string(job["provider_batch_id"], ""))
@@ -218,7 +227,10 @@ fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
       "/accounts/" + account_id + "/batchInferenceJobs/" + batch_id,
     ),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -275,7 +287,10 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
     "GET",
     __join_url(__provider_base_url(harness, "xai"), "/batches/" + batch_id),
     {
-      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        Authorization: "Bearer " + safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -316,7 +331,10 @@ fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
     "GET",
     __join_url(__provider_base_url(harness, "gemini"), "/v1beta/" + batch_id),
     {
-      headers: {"x-goog-api-key": safe_string(auth["value"], ""), "content-type": "application/json"},
+      headers: {
+        "x-goog-api-key": safe_string(auth["value"], ""),
+        "content-type": "application/json",
+      },
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -395,7 +413,8 @@ fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
     for job in jobs {
       const status = safe_string(safe_dict(job)["status"], "")
       if status == "completed" || status == "running" || status == "ready" || status == "unknown"
-        || status == "canceling"
+        || status
+        == "canceling"
         || status == "canceled" {
         return "partial"
       }
@@ -460,7 +479,11 @@ fn __render_status_json(report: dict) -> string {
       {
         schema_version: 1,
         ok: false,
-        error: {code: "batch_status_failed", message: "Submitted batch jobs could not be polled.", details: report},
+        error: {
+          code: "batch_status_failed",
+          message: "Submitted batch jobs could not be polled.",
+          details: report,
+        },
         warnings: safe_list(report["warnings"]),
       },
     ),

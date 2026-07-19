@@ -50,6 +50,7 @@ pub mod jsonl;
 pub mod local_profiles;
 pub(crate) mod mock;
 mod mock_builtins;
+pub(crate) mod mock_store;
 mod model_test;
 pub(crate) mod permissions;
 pub mod plan;
@@ -879,7 +880,9 @@ mod tests {
                     let mut vm = crate::Vm::new();
                     crate::register_vm_stdlib(&mut vm);
                     vm.execute(&chunk).await.expect("execute");
+                    let outer = mock::swap_llm_mock_context(vm.llm_mock_context.clone());
                     assert!(mock::builtin_llm_mock_active());
+                    let _ = mock::swap_llm_mock_context(outer);
                     assert!(vm.builtin_names().iter().any(|name| name == "llm_mock"));
                     assert!(vm.builtin_names().iter().any(|name| name == "llm_call"));
                 })

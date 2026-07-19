@@ -7,7 +7,12 @@ pipeline default() {
   // Sonnet 4: 3.00/15.00 per MTok. 10k input + 1k output =
   //   10000 * 3/1e6 + 1000 * 15/1e6 = 0.03 + 0.015 = 0.045.
   const row = estimate_call_cost(
-    {provider: "anthropic", model: "claude-sonnet-4-20250514", input_tokens: 10000, output_tokens: 1000},
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-4-20250514",
+      input_tokens: 10000,
+      output_tokens: 1000,
+    },
   )
   __io_println("pricing_known=" + to_string(row.pricing_known))
   __io_println("cost=" + format_usd(row.cost_usd))
@@ -43,12 +48,19 @@ pipeline default() {
   __io_println("many cost=" + format_usd(many.cost_usd))
   // Unknown commercial: pricing_known=false, cost_usd nil.
   const unknown = estimate_call_cost(
-    {provider: "nonexistent_provider", model: "ghost-model", input_tokens: 1000, output_tokens: 500},
+    {
+      provider: "nonexistent_provider",
+      model: "ghost-model",
+      input_tokens: 1000,
+      output_tokens: 500,
+    },
   )
   __io_println("unknown_known=" + to_string(unknown.pricing_known))
   __io_println("unknown_cost_nil=" + to_string(unknown.cost_usd == nil))
   // Free provider (ollama): pricing_known=true, cost=0.
-  const free = estimate_call_cost({provider: "ollama", model: "llama3.2", input_tokens: 1000, output_tokens: 500})
+  const free = estimate_call_cost(
+    {provider: "ollama", model: "llama3.2", input_tokens: 1000, output_tokens: 500},
+  )
   __io_println("free_known=" + to_string(free.pricing_known))
   __io_println("free_cost=" + format_usd(free.cost_usd))
 }

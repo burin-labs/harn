@@ -31,7 +31,10 @@ pipeline test_testing_toolkit(task) {
     {tool_calls: [{id: "write_note", name: "write_note", arguments: {path: "n.txt"}}]},
   )
   // Explicit id is honored; missing args default to {}.
-  assert_eq(llm_tool_call("read", nil, "c1"), {tool_calls: [{id: "c1", name: "read", arguments: {}}]})
+  assert_eq(
+    llm_tool_call("read", nil, "c1"),
+    {tool_calls: [{id: "c1", name: "read", arguments: {}}]},
+  )
   // Parallel tool calls auto-index ids when absent and honor explicit ones.
   const multi = llm_tool_calls([{name: "a", args: {x: 1}}, {name: "b", id: "bb"}])
   assert_eq(len(multi.tool_calls), 2)

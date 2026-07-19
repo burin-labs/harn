@@ -11,7 +11,12 @@
  * fixture under `assets/demo/provider-race/`. Invoke `--live` to race
  * the configured providers instead.
  */
-fn provider_meta() -> list<{name: string, model: string, est_cost_usd: float, sim_latency_ms: int}> {
+fn provider_meta() -> list<{
+  name: string,
+  model: string,
+  est_cost_usd: float,
+  sim_latency_ms: int,
+}> {
   return [
     {name: "anthropic", model: "claude-opus-4-7", est_cost_usd: 0.0142, sim_latency_ms: 820},
     {name: "openai", model: "gpt-5", est_cost_usd: 0.0098, sim_latency_ms: 640},
@@ -39,7 +44,13 @@ pipeline default(_task) {
     envelope.text
   }
   // Zip provider metadata + LLM response into a typed result list.
-  let results: list<{provider: string, model: string, latency_ms: int, est_cost_usd: float, response: string}> = []
+  let results: list<{
+    provider: string,
+    model: string,
+    latency_ms: int,
+    est_cost_usd: float,
+    response: string,
+  }> = []
   let i = 0
   for p in prov {
     const row = {

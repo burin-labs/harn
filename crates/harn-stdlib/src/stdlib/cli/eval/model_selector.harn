@@ -161,7 +161,8 @@ fn main(harness: Harness) -> int {
   // round-trip. Also keeps the linter from flagging the helpers as
   // unused — they're public API for sibling scripts but the main
   // entrypoint is currently the only consumer.
-  const labelled = resolved + {label: selector_label(resolved), is_local: selector_is_local(resolved)}
+  const labelled = resolved
+    + {label: selector_label(resolved), is_local: selector_is_local(resolved)}
   harness.stdio.println(json_stringify(labelled))
   return 0
 }

@@ -31,7 +31,8 @@ fn __call(method, params = {}) {
 }
 
 fn __configured_slack_disclosure(options) {
-  return options?._harn?.disclosure?.slack ?? options?.slack_disclosure ?? options?.disclosure?.slack
+  return options?._harn?.disclosure?.slack ?? options?.slack_disclosure
+    ?? options?.disclosure?.slack
 }
 
 fn __slack_actor_chain(options) {
@@ -52,7 +53,10 @@ fn __with_slack_disclosure(options) {
     return opts
   }
   const disclosure = slack_message_disclosure(chain, __slack_disclosure_options(opts))
-  const harn = merge(opts?._harn ?? {}, {disclosure: merge(opts?._harn?.disclosure ?? {}, {slack: disclosure})})
+  const harn = merge(
+    opts?._harn ?? {},
+    {disclosure: merge(opts?._harn?.disclosure ?? {}, {slack: disclosure})},
+  )
   return merge(opts, {_harn: harn})
 }
 
@@ -67,7 +71,10 @@ fn __with_slack_disclosure(options) {
  */
 pub fn post_message(channel, text, blocks = nil, options = nil) {
   const opts = __with_slack_disclosure(options)
-  return __call("post_message", filter_nil(merge(opts, {channel: channel, text: text, blocks: blocks})))
+  return __call(
+    "post_message",
+    filter_nil(merge(opts, {channel: channel, text: text, blocks: blocks})),
+  )
 }
 
 /**
@@ -180,10 +187,16 @@ pub fn message_source(channel = nil, options = nil) {
       const payload = __slack_payload(log_event)
       return event?.provider == "slack"
         && (event?.kind == "message" || event?.kind == "app_mention"
-        || starts_with(event?.kind ?? "", "message."))
+        || starts_with(
+        event?.kind ?? "",
+        "message.",
+      ))
         && __slack_channel_matches(payload, channel)
         && __slack_user_matches(payload, options?.user)
-        && (options?.thread_ts == nil || payload?.thread_ts == options.thread_ts)
+        && (options?.thread_ts == nil
+        || payload?.thread_ts
+        == options
+        .thread_ts)
         && __slack_text_matches(payload, options?.text_contains)
     },
   }
@@ -215,7 +228,10 @@ pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
       return event?.provider == "slack"
         && event?.kind == "reaction_added"
         && (reaction == nil || payload?.reaction == reaction)
-        && (channel == nil || payload?.item?.channel == channel || payload?.channel_id == channel)
+        && (channel == nil
+        || payload?.item?.channel
+        == channel
+        || payload?.channel_id == channel)
         && __slack_user_matches(payload, options?.user)
     },
   }

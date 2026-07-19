@@ -103,7 +103,9 @@ pub fn check_python_protocol_bindings(python: string = "python3", root: string =
       stderr: compile.stderr,
     }
   }
-  const probe = harness.process.spawn_captured({cmd: python, args: python_binding_probe_args(artifacts)})
+  const probe = harness.process.spawn_captured(
+    {cmd: python, args: python_binding_probe_args(artifacts)},
+  )
   return {
     ok: probe.success,
     stage: if probe.success {

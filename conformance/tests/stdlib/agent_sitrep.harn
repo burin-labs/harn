@@ -42,7 +42,10 @@ pipeline test(task) {
       __io_println(len(llm_mock_calls()) == 0)
     },
   )
-  const unavailable_result = agent_sitrep(messages, {routes: [{provider: "definitely-not-a-real-provider"}]})
+  const unavailable_result = agent_sitrep(
+    messages,
+    {routes: [{provider: "definitely-not-a-real-provider"}]},
+  )
   __io_println(unavailable_result.skipped)
   __io_println(unavailable_result.reason == "no_available_provider")
   // agent_sitrep_append wraps the summary in <sitrep>...</sitrep> and
@@ -50,13 +53,19 @@ pipeline test(task) {
   with_llm_script(
     [llm_text("STATE — A.\nWORK — B.\nNEXT — C.")],
     { ->
-      const appended = agent_sitrep_append(messages, {routes: [{provider: "mock", model: "mock-sitrep"}]})
+      const appended = agent_sitrep_append(
+        messages,
+        {routes: [{provider: "mock", model: "mock-sitrep"}]},
+      )
       __io_println(len(appended) == len(messages) + 1)
       __io_println(appended[len(appended) - 1].role == "system")
       __io_println(appended[len(appended) - 1].content.contains("<sitrep>"))
       __io_println(appended[len(appended) - 1].content.contains("STATE — A."))
     },
   )
-  const appended_skipped = agent_sitrep_append([], {routes: [{provider: "mock", model: "mock-sitrep"}]})
+  const appended_skipped = agent_sitrep_append(
+    [],
+    {routes: [{provider: "mock", model: "mock-sitrep"}]},
+  )
   __io_println(len(appended_skipped) == 0)
 }

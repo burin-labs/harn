@@ -33,7 +33,11 @@ pipeline default() {
   const tail = command_output_tail(step, {length: 3})
   assert_eq(tail.content, "llo")
   assert_eq(tail.eof, true)
-  const failed = command_step("fail", failing_command(), {capture: {max_inline_bytes: 100}, tail_bytes: 100})
+  const failed = command_step(
+    "fail",
+    failing_command(),
+    {capture: {max_inline_bytes: 100}, tail_bytes: 100},
+  )
   assert_eq(failed.success, false)
   assert_eq(failed.ok, false)
   assert_eq(failed.status, "completed")

@@ -30,8 +30,7 @@ pipeline default() {
       ],
     },
   )
-  sleep(25ms)
-  const state = supervisor_state(sup)
+  const state = supervisor_wait(sup)
   const events = supervisor_events(sup)
   const debug = runtime_context().debug
   __io_println(atomic_get(flaky_starts))

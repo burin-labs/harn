@@ -130,14 +130,21 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     properties: {
       verdict: {type: "string", description: "Use `done` or `continue`."},
       reasoning: {type: "string"},
-      rationale: {type: "string", description: "Alias for reasoning; accepted for stricter contracts."},
+      rationale: {
+        type: "string",
+        description: "Alias for reasoning; accepted for stricter contracts.",
+      },
       next_step: {type: "string"},
       specific_gaps: {
         type: "list",
         items: {type: "string"},
         description: "Concrete gaps to repair when verdict is `continue`.",
       },
-      accepted_evidence: {type: "list", items: {type: "string"}, description: "Evidence accepted when verdict is `done`."},
+      accepted_evidence: {
+        type: "list",
+        items: {type: "string"},
+        description: "Evidence accepted when verdict is `done`.",
+      },
     },
     required: ["verdict"],
   }
@@ -180,12 +187,23 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   const reasoning = to_string(result?.reasoning ?? result?.rationale ?? "")
   const next_step = to_string(result?.next_step ?? result?.nextStep ?? "")
   const specific_gaps = __judge_string_list(result?.specific_gaps ?? result?.specificGaps)
-  const accepted_evidence = __judge_string_list(result?.accepted_evidence ?? result?.acceptedEvidence)
+  const accepted_evidence = __judge_string_list(
+    result?.accepted_evidence ?? result?.acceptedEvidence,
+  )
   // The done-judge prompt only ever asks for `done` or `continue`. A reflexive
   // `"yes"` from a cheap model usually means "yes, keep going" (continue), and
   // a bare `"true"` is just as ambiguous — classifying either as DONE
   // terminates incomplete work. Both are dropped from the allow-list.
-  const done_verdicts = ["done", "pass", "passed", "safe", "yield", "yield_to_user", "complete", "completed"]
+  const done_verdicts = [
+    "done",
+    "pass",
+    "passed",
+    "safe",
+    "yield",
+    "yield_to_user",
+    "complete",
+    "completed",
+  ]
   const feedback_default = judge_cfg?.feedback_fallback ?? ""
   const outcome = __judge_classify_verdict(
     result?.verdict ?? "continue",
@@ -353,7 +371,10 @@ pub fn agent_done_contract(options = {}) {
   } else {
     {}
   }
-  const max_invocations = opts?.max_invocations ?? opts?.max_feedback ?? judge?.max_invocations ?? judge?.max_feedback ?? 3
+  const max_invocations = opts?.max_invocations ?? opts?.max_feedback ?? judge?.max_invocations
+    ?? judge
+    ?.max_feedback
+    ?? 3
   const bundle = {
     done_judge: judge
       + {
@@ -410,7 +431,10 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
   }
   const done_judge_due = opts?._done_judge_due ?? true
   const done_judge_applies = opts?.done_judge != nil
-    && (stop_reason == "sentinel" || stop_reason == "natural" || stop_reason == "stalled")
+    && (stop_reason == "sentinel"
+    || stop_reason
+    == "natural"
+    || stop_reason == "stalled")
     && done_judge_due
   let done_judge_cap_reached = false
   const prior_done_judge_invocations = opts?._done_judge_invocations ?? 0
@@ -546,7 +570,8 @@ fn __completion_gate_validate_options(opts) {
   for field in ["facts", "classify_write", "verify_command", "veto_combine"] {
     const value = opts[field]
     if value != nil && !__completion_gate_callable(value) {
-      throw "agent_completion_gate: `" + field + "` must be a callable or nil; got " + type_of(value)
+      throw "agent_completion_gate: `" + field + "` must be a callable or nil; got "
+        + type_of(value)
     }
   }
   if opts?.classify_write != nil && opts?.facts == nil {
@@ -556,7 +581,9 @@ fn __completion_gate_validate_options(opts) {
     && opts.judge_seam != "verify_completion_judge"
     && opts.judge_seam != "done_judge" {
     throw "agent_completion_gate: `judge_seam` must be \"verify_completion_judge\" or \"done_judge\"; got "
-      + to_string(opts.judge_seam)
+      + to_string(
+      opts.judge_seam,
+    )
   }
   const templates = opts?.feedback_templates
   if templates != nil {
@@ -566,12 +593,15 @@ fn __completion_gate_validate_options(opts) {
     const known = __completion_gate_feedback_keys()
     for key in keys(templates) {
       if !contains(known, key) {
-        throw "agent_completion_gate: unknown `feedback_templates` key `" + key + "`; expected one of "
+        throw "agent_completion_gate: unknown `feedback_templates` key `" + key
+          + "`; expected one of "
           + join(known, ", ")
       }
       if type_of(templates[key]) != "string" {
         throw "agent_completion_gate: `feedback_templates." + key + "` must be a string; got "
-          + type_of(templates[key])
+          + type_of(
+          templates[key],
+        )
       }
     }
   }
@@ -596,7 +626,11 @@ fn __completion_gate_veto_class_key(session_id, reason) {
  * host may read a per-class count for. Only the vetoing rules that actually reach
  * the budget-charge path are counted; the abstain/allow reasons never charge.
  */
-const __COMPLETION_GATE_VETO_CLASSES = ["missing_verification", "no_source_write", "verification_after_write_red"]
+const __COMPLETION_GATE_VETO_CLASSES = [
+  "missing_verification",
+  "no_source_write",
+  "verification_after_write_red",
+]
 
 /** Per-session vetoes charged so far (0 without a session id). */
 fn __completion_gate_vetoes_used(session_id) {
@@ -735,7 +769,11 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
   if resolved?.ok ?? false {
     return {confirm: true, reason: resolved?.reason ?? "", converted_from: resolved?.converted_from}
   }
-  return {confirm: false, message: to_string(resolved?.feedback ?? ""), reason: resolved?.reason ?? ""}
+  return {
+    confirm: false,
+    message: to_string(resolved?.feedback ?? ""),
+    reason: resolved?.reason ?? "",
+  }
 }
 
 /**
@@ -788,7 +826,8 @@ pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
       {}
     }
     const seam = opts.judge_seam ?? "verify_completion_judge"
-    const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+    const cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback
+      ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
     out = out + {[seam]: judge_cfg + {max_invocations: cap}}
   }
   return out

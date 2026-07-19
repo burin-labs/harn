@@ -32,7 +32,8 @@ pipeline default() {
   __io_println(schema.tools[0].inputSchema["type"])
   __io_println(schema.tools[0].outputSchema.type)
   // Test tool_parse_call with single tool call (always returns a list)
-  const text = "I'll search for that. <tool_call>{\"name\": \"search\", \"arguments\": {\"query\": \"tokyo\"}}</tool_call>"
+  const text =
+    "I'll search for that. <tool_call>{\"name\": \"search\", \"arguments\": {\"query\": \"tokyo\"}}</tool_call>"
   const calls = tool_parse_call(text)
   __io_println(calls.count())
   __io_println(calls[0].name)

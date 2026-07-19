@@ -36,7 +36,10 @@ pipeline default() {
       )
       __io_println(fallback?.trace?.native_text_tool_fallbacks == 2)
       __io_println(fallback?.trace?.native_text_tool_fallback_rejections == 1)
-      const fallback_events = transcript_events_by_kind(fallback?.transcript, "native_tool_fallback")
+      const fallback_events = transcript_events_by_kind(
+        fallback?.transcript,
+        "native_tool_fallback",
+      )
       __io_println(len(fallback_events) == 2)
       __io_println(fallback_events[0]?.metadata?.accepted)
       __io_println(!fallback_events[1]?.metadata?.accepted)
@@ -51,7 +54,8 @@ pipeline default() {
       {
         error: {
           category: "server_error",
-          message: "openai-compatible model mock reported completion_tokens=1 but delivered no content, reasoning, or tool calls",
+          message:
+            "openai-compatible model mock reported completion_tokens=1 but delivered no content, reasoning, or tool calls",
         },
       },
       llm_text("<done>##DONE##</done>"),

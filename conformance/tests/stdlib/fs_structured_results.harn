@@ -47,7 +47,9 @@ fn manifest_schema() -> Schema<Manifest> {
       mode: schema_field(schema_enum(["strict", "relaxed"])),
       owners: schema_field(
         schema_list(
-          schema_closed_object({name: schema_field(schema_string()), active: schema_field(schema_bool())}),
+          schema_closed_object(
+            {name: schema_field(schema_string()), active: schema_field(schema_bool())},
+          ),
         ),
       ),
       settings: schema_field(schema_closed_object({enabled: schema_field(schema_bool())})),
@@ -176,22 +178,28 @@ pipeline default(task) {
     {
       format: "json",
       extension: "json",
-      valid: "{\"name\":\"Ada\",\"mode\":\"strict\",\"owners\":[{\"name\":\"Lin\",\"active\":true}],\"settings\":{\"enabled\":true}}",
-      invalid: "{\"name\":\"Ada\",\"mode\":\"unsafe\",\"owners\":[{\"name\":\"Lin\",\"active\":true}],\"settings\":{\"enabled\":true,\"extra\":\"no\"}}",
+      valid:
+        "{\"name\":\"Ada\",\"mode\":\"strict\",\"owners\":[{\"name\":\"Lin\",\"active\":true}],\"settings\":{\"enabled\":true}}",
+      invalid:
+        "{\"name\":\"Ada\",\"mode\":\"unsafe\",\"owners\":[{\"name\":\"Lin\",\"active\":true}],\"settings\":{\"enabled\":true,\"extra\":\"no\"}}",
       malformed: "{bad",
     },
     {
       format: "yaml",
       extension: "yaml",
-      valid: "name: Ada\nmode: strict\nowners:\n  - name: Lin\n    active: true\nsettings:\n  enabled: true\n",
-      invalid: "name: Ada\nmode: unsafe\nowners:\n  - name: Lin\n    active: true\nsettings:\n  enabled: true\n  extra: no\n",
+      valid:
+        "name: Ada\nmode: strict\nowners:\n  - name: Lin\n    active: true\nsettings:\n  enabled: true\n",
+      invalid:
+        "name: Ada\nmode: unsafe\nowners:\n  - name: Lin\n    active: true\nsettings:\n  enabled: true\n  extra: no\n",
       malformed: "name: [\n",
     },
     {
       format: "toml",
       extension: "toml",
-      valid: "name = \"Ada\"\nmode = \"strict\"\nowners = [{ name = \"Lin\", active = true }]\n[settings]\nenabled = true\n",
-      invalid: "name = \"Ada\"\nmode = \"unsafe\"\nowners = [{ name = \"Lin\", active = true }]\n[settings]\nenabled = true\nextra = \"no\"\n",
+      valid:
+        "name = \"Ada\"\nmode = \"strict\"\nowners = [{ name = \"Lin\", active = true }]\n[settings]\nenabled = true\n",
+      invalid:
+        "name = \"Ada\"\nmode = \"unsafe\"\nowners = [{ name = \"Lin\", active = true }]\n[settings]\nenabled = true\nextra = \"no\"\n",
       malformed: "name = [\n",
     },
   ]
@@ -215,7 +223,9 @@ pipeline default(task) {
     )
     const invalid_manifest_path = path_join(root, "manifest-invalid." + case.extension)
     harness.fs.write_text(invalid_manifest_path, case.invalid)
-    const schema_failure = unwrap_err(read_manifest_result(case.format, invalid_manifest_path, manifest_schema))
+    const schema_failure = unwrap_err(
+      read_manifest_result(case.format, invalid_manifest_path, manifest_schema),
+    )
     const issue_json = json_stringify(schema_failure.issues)
     __io_println(
       schema_failure.format
@@ -239,7 +249,9 @@ pipeline default(task) {
         + ":"
         + to_string(thrown_failure.path == invalid_manifest_path),
     )
-    const absent_failure = unwrap_err(read_structured_result(case.format, path_join(root, "missing." + case.extension)))
+    const absent_failure = unwrap_err(
+      read_structured_result(case.format, path_join(root, "missing." + case.extension)),
+    )
     __io_println(absent_failure.format + ":" + absent_failure.kind)
     const unreadable_failure = unwrap_err(read_structured_result(case.format, root))
     __io_println(unreadable_failure.format + ":" + unreadable_failure.kind)

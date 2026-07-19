@@ -16,9 +16,9 @@ include = [
 blake3 = "1"
 croner = "3.0.1"
 fs2 = "0.4"
-harn-lexer = { path = "../harn-lexer", version = "=0.10.24" }
-harn-parser = { path = "../harn-parser", version = "=0.10.24" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.24" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.28" }
+harn-parser = { path = "../harn-parser", version = "=0.10.28" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.28" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 toml = "1.1"

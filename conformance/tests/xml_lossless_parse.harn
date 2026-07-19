@@ -9,7 +9,10 @@ pipeline test(task) {
   assert_eq(default_addresses[1], 2, "second list element preserved")
   // Lossless mode keeps the inner tag. Useful for general XML
   // ingestion where the tag itself carries semantic meaning.
-  const lossless = from_xml("<addresses><a>1</a><a>2</a></addresses>", {preserve_repeated_tag: true})
+  const lossless = from_xml(
+    "<addresses><a>1</a><a>2</a></addresses>",
+    {preserve_repeated_tag: true},
+  )
   assert_eq(len(lossless.addresses.a), 2, "preserve mode keeps inner tag in the result")
   assert_eq(lossless.addresses.a[0], 1, "first value preserved under inner tag")
   // The parser refuses pathologically nested input. The try-block

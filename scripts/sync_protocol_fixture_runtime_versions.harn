@@ -160,7 +160,8 @@ fn parse_args() -> any {
       missing = missing + ["--to"]
     }
     const usage = "usage: sync_protocol_fixture_runtime_versions.py [-h] --from OLD --to NEW"
-    const err = "sync_protocol_fixture_runtime_versions.py: error: the following arguments are required: ${missing.join(", ")}"
+    const err =
+      "sync_protocol_fixture_runtime_versions.py: error: the following arguments are required: ${missing.join(", ")}"
     return {old: "", new: "", error: usage + "\n" + err, code: 2}
   }
   return {old: old, new: new, error: nil, code: 0}

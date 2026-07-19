@@ -208,10 +208,6 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             feedback_content(NO_PROGRESS_STREAK_NUDGE_FALLBACK.to_string()),
             feedback_streak(payload),
         ),
-        "tool_parse_error_feedback" => feedback(
-            "tool_parse_error_feedback",
-            feedback_content(obj_string(payload, "error_summary")),
-        ),
         "tool_call_blank_name_dropped" => feedback(
             "tool_call_blank_name_dropped",
             feedback_content(obj_usize(payload, "dropped_count").to_string()),

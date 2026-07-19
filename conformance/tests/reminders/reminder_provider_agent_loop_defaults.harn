@@ -25,7 +25,10 @@ pipeline main() {
           provider: "mock",
           model: "mock",
           session_id: "reminder-provider-loop-defaults-disabled",
-          reminders: {providers: ["-token_pressure"], config: {token_pressure: {context_window: 100}}},
+          reminders: {
+            providers: ["-token_pressure"],
+            config: {token_pressure: {context_window: 100}},
+          },
         },
       )
       const disabled_reminders = transcript_events_by_kind(disabled.transcript, "system_reminder")

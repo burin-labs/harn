@@ -65,7 +65,12 @@ pipeline default() {
             loop_until_done: true,
             iteration_budget: {mode: "adaptive", initial: 3, max: 12, extend_by: 3},
             session_id: session,
-            stall_diagnostics: {enabled: true, repair_aware: true, post_edit_reverify: true, no_net_progress_extend_guard: true},
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              post_edit_reverify: true,
+              no_net_progress_extend_guard: true,
+            },
           },
         ) },
       )

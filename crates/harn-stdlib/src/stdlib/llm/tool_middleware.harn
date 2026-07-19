@@ -139,7 +139,9 @@ fn __tool_mw_canonical_json(value) -> string {
     const keys = value.keys().sort()
     let parts = []
     for key in keys {
-      parts = parts.push(json_stringify(to_string(key)) + ":" + __tool_mw_canonical_json(value[key]))
+      parts = parts.push(
+        json_stringify(to_string(key)) + ":" + __tool_mw_canonical_json(value[key]),
+      )
     }
     return "{" + join(parts, ",") + "}"
   }
@@ -227,7 +229,14 @@ fn __safe_call_caller(caller, envelope, next) {
       error_category: "tool_middleware_exception",
       executor: nil,
       audit: {
-        layers: [{name: "tool_caller", status: "exception", error: to_string(err), at: __tool_mw_now_iso()}],
+        layers: [
+          {
+            name: "tool_caller",
+            status: "exception",
+            error: to_string(err),
+            at: __tool_mw_now_iso(),
+          },
+        ],
       },
     }
   }
@@ -319,7 +328,8 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
   }
   const params = entry?.parameters
   if type_of(params) == "dict" && contains(params.keys(), "type")
-    && to_string(params.type) == "object" {
+    && to_string(params.type)
+    == "object" {
     const props = __tool_mw_dict(params?.properties)
     if contains(props.keys(), name) {
       return entry
@@ -436,7 +446,9 @@ pub fn with_required_reason(opts = nil) {
   const on_missing = to_string(cfg?.on_missing ?? "reject")
   const schema_required = cfg?.schema_required ?? true
   const schema_fragment = {type: "string", description: description, required: schema_required}
-  const schema_transform = { entry -> return tool_inject_param(entry, field, schema_fragment, {required: schema_required}) }
+  const schema_transform = { entry ->
+    return tool_inject_param(entry, field, schema_fragment, {required: schema_required})
+  }
   const caller = { call, next ->
     let raw = call.tool_args?.[field]
     let value = if type_of(raw) == "string" {
@@ -460,7 +472,10 @@ pub fn with_required_reason(opts = nil) {
         let result = next(call + {tool_args: stripped_args})
         return __tool_mw_attach_audit(
           result,
-          {[audit_key]: "(no reason given)", layers: [{name: "with_required_reason", status: "fill_blank"}]},
+          {
+            [audit_key]: "(no reason given)",
+            layers: [{name: "with_required_reason", status: "fill_blank"}],
+          },
         )
       }
       return __tool_mw_short_circuit(
@@ -536,7 +551,8 @@ fn __tool_mw_receipt_status(result) -> string {
   if status == "ok" || status == "success" || status == "completed" {
     return "ok"
   }
-  if status == "schema_violation" || category == "schema_violation" || category == "schema_validation" {
+  if status == "schema_violation" || category == "schema_violation"
+    || category == "schema_validation" {
     return "schema_violation"
   }
   if status == "consent_denied" || category == "consent_denied" {
@@ -626,7 +642,8 @@ fn __tool_mw_audit_log_config(sink) {
     return {mode: "closure", sink_fn: raw_sink, redact_keys: redact_keys}
   }
   if type_of(raw_sink) != "string" {
-    throw "with_audit_log: sink must be callable or one of local/cloud/both; got " + type_of(raw_sink)
+    throw "with_audit_log: sink must be callable or one of local/cloud/both; got "
+      + type_of(raw_sink)
   }
   const mode = to_string(raw_sink)
   if mode != "local" && mode != "cloud" && mode != "both" {
@@ -867,7 +884,9 @@ pub fn with_scoped_executor(opts) {
           error_category: "scope_violation",
           audit: {
             scope: scope_descriptor,
-            layers: [{name: "with_scoped_executor", status: "rejected", stage: stage, reason: reason}],
+            layers: [
+              {name: "with_scoped_executor", status: "rejected", stage: stage, reason: reason},
+            ],
           },
         },
       )
@@ -885,7 +904,10 @@ pub fn with_scoped_executor(opts) {
     const result = with_execution_policy(policy, fn() { return next(call) })
     return __tool_mw_attach_audit(
       result,
-      {scope: scope_descriptor, layers: [{name: "with_scoped_executor", status: "ok", stage: stage}]},
+      {
+        scope: scope_descriptor,
+        layers: [{name: "with_scoped_executor", status: "ok", stage: stage}],
+      },
     )
   }
 }
@@ -1042,7 +1064,10 @@ pub fn with_idempotency(key_fn, opts = nil) {
     if result?.ok ?? false {
       const _ = cache_put(key, result, cache_options)
     }
-    return __tool_mw_attach_audit(result, {layers: [{name: "with_idempotency", status: "miss", key: key}]})
+    return __tool_mw_attach_audit(
+      result,
+      {layers: [{name: "with_idempotency", status: "miss", key: key}]},
+    )
   }
 }
 
@@ -1210,7 +1235,10 @@ pub fn with_summary(format_fn) {
     if summary == "" {
       return result
     }
-    return __tool_mw_attach_audit(result, {summary: summary, layers: [{name: "with_summary", status: "ok"}]})
+    return __tool_mw_attach_audit(
+      result,
+      {summary: summary, layers: [{name: "with_summary", status: "ok"}]},
+    )
   }
 }
 
@@ -1290,7 +1318,8 @@ pub fn with_handoff_artifact(opts = nil) {
     }
     if type_of(payload) != "dict" {
       if strict {
-        throw "with_handoff_artifact: detect/`result.handoff` must be a dict; got " + type_of(payload)
+        throw "with_handoff_artifact: detect/`result.handoff` must be a dict; got "
+          + type_of(payload)
       }
       return result
     }
@@ -1310,7 +1339,11 @@ pub fn with_handoff_artifact(opts = nil) {
         result,
         {
           layers: [
-            {name: "with_handoff_artifact", status: "invalid", error: to_string(unwrap_err(normalized_outcome))},
+            {
+              name: "with_handoff_artifact",
+              status: "invalid",
+              error: to_string(unwrap_err(normalized_outcome)),
+            },
           ],
         },
       )
@@ -1396,7 +1429,8 @@ pub fn with_timeout(opts) {
       + {
       ok: false,
       status: "error",
-      error: message + " (elapsed: " + to_string(elapsed) + "ms, limit: " + to_string(limit) + "ms)",
+      error: message + " (elapsed: " + to_string(elapsed) + "ms, limit: " + to_string(limit)
+        + "ms)",
       error_category: "timeout",
     }
     return __tool_mw_attach_audit(

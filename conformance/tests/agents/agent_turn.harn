@@ -10,7 +10,10 @@ pipeline default() {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"answer is complete\"}"),
     ],
     { ->
-      const result = agent_turn("Do the task", {provider: "mock", system: "You are helpful.", max_iterations: 3})
+      const result = agent_turn(
+        "Do the task",
+        {provider: "mock", system: "You are helpful.", max_iterations: 3},
+      )
       __io_println(result.status)
       __io_println(result.visible_text)
       __io_println(len(result.judge_decisions))
