@@ -38,7 +38,9 @@ pipeline default() {
     {
       routes: [{id: "blocked"}],
       call: { _route, _ctx -> return {ok: false, status: 400} },
-      classify: { _route, _response, _ctx -> return {action: "terminal", reason: "content_policy"} },
+      classify: { _route, _response, _ctx ->
+        return {action: "terminal", reason: "content_policy"}
+      },
     },
   )
   __io_println(terminal.ok)

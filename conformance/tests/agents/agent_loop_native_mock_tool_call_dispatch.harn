@@ -43,7 +43,10 @@ preferred_tool_format = "native"
     provider_capabilities_clear()
   }
   with_llm_script(
-    [llm_tool_call("record_choice", {choice: "json"}), llm_text("Recorded.\n\n<done>##DONE##</done>")],
+    [
+      llm_tool_call("record_choice", {choice: "json"}),
+      llm_text("Recorded.\n\n<done>##DONE##</done>"),
+    ],
     { ->
       const result = agent_loop(
         "Choose an output format and call record_choice.",

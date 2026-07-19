@@ -45,26 +45,34 @@ fn handoff_tool_call() {
 }
 
 fn successful_handoff_result(payload) {
-  return { call -> return {
-    ok: true,
-    status: "ok",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: {__handoff: payload},
-    rendered_result: "handoff",
-    observation: "",
-    error: nil,
-    error_category: nil,
-    executor: "harn",
-  } }
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: {__handoff: payload},
+      rendered_result: "handoff",
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
 }
 
 fn review_captain_mock(envelope) {
   const policy = current_policy()
   const tools = note_tools()
-  const read_result = agent_dispatch_tool_call({name: "read_note", id: "read-1", arguments: {path: "notes.txt"}}, tools)
-  const denied = agent_dispatch_tool_call({name: "write_note", id: "write-1", arguments: {path: "notes.txt"}}, tools)
+  const read_result = agent_dispatch_tool_call(
+    {name: "read_note", id: "read-1", arguments: {path: "notes.txt"}},
+    tools,
+  )
+  const denied = agent_dispatch_tool_call(
+    {name: "write_note", id: "write-1", arguments: {path: "notes.txt"}},
+    tools,
+  )
   return {
     source_handoff: envelope?.audit?.scope?.source_handoff,
     handoff_policy_tool: envelope?.handoff?.policy_override?.tools[0],
@@ -97,7 +105,11 @@ pipeline main() {
   const mw = with_handoff_artifact()
   const audited = mw(handoff_tool_call(), successful_handoff_result(payload))
   const routed = handoff_routed(payload, routes, {})
-  const dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
+  const dispatch = handoff_dispatch(
+    routed,
+    nil,
+    {dispatchers: {review_captain: review_captain_mock}},
+  )
   const invocation = dispatch?.dispatch_receipt?.invocation_result
   __io_println(record?.policy_override?.tools[0] == "read_note")
   __io_println(audited?.audit?.handoff?.policy_override?.tools[0] == "read_note")

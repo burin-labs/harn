@@ -26,7 +26,10 @@ const __VERDICT_SCHEMA = {
   type: "object",
   required: ["supported"],
   properties: {
-    supported: {type: "boolean", description: "true only if the claim is fully entailed by the provided context."},
+    supported: {
+      type: "boolean",
+      description: "true only if the claim is fully entailed by the provided context.",
+    },
     reason: {type: "string"},
   },
 }
@@ -84,7 +87,9 @@ fn __structured_value(prompt, schema, llm_opts) -> dict {
   if !(envelope?.ok ?? false) {
     throw {
       kind: "faithfulness",
-      message: "faithfulness_guard: structured call failed (" + to_string(envelope?.status ?? "error") + ")",
+      message: "faithfulness_guard: structured call failed ("
+        + to_string(envelope?.status ?? "error")
+        + ")",
       error: envelope?.error,
     }
   }
@@ -111,7 +116,11 @@ fn __decompose_claims(answer, llm_opts) -> list {
 }
 
 fn __judge_claim(claim, contexts_text, llm_opts) -> dict {
-  const value = __structured_value(__verdict_prompt(claim, contexts_text), __VERDICT_SCHEMA, llm_opts)
+  const value = __structured_value(
+    __verdict_prompt(claim, contexts_text),
+    __VERDICT_SCHEMA,
+    llm_opts,
+  )
   return {
     claim: claim,
     supported: value?.supported ?? false ? true : false,

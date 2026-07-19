@@ -54,7 +54,9 @@ pipeline test(task) {
   } catch (e) {
     to_string(e)
   }
-  __io_println(contains(tally_error, "tally") && contains(tally_error, "expected a list of strings"))
+  __io_println(
+    contains(tally_error, "tally") && contains(tally_error, "expected a list of strings"),
+  )
   // Explicit coercion still tallies.
   const by_string = [1, 2, 1, 1, 3].map({ x -> to_string(x) }).tally()
   __io_println(by_string["1"] == 3 && by_string["2"] == 1 && by_string["3"] == 1)

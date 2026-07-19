@@ -25,9 +25,12 @@ pipeline default() {
   )
   harness.fs.mkdir(root)
   // 1) Rust add_parameter with default_fill across THREE call sites.
-  const rs_body = "fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\nfn main() {\n    let x = add(1, 2);\n    let y = add(3, 4);\n    let z = add(5, 6);\n}\n"
+  const rs_body =
+    "fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\nfn main() {\n    let x = add(1, 2);\n    let y = add(3, 4);\n    let z = add(5, 6);\n}\n"
   const rs_path = write_fixture(root, "add.rs", rs_body)
-  const rs_ap = edit_add_parameter({path: rs_path, symbol: {name: "add"}, param: "c: i64", default: "0"})
+  const rs_ap = edit_add_parameter(
+    {path: rs_path, symbol: {name: "add"}, param: "c: i64", default: "0"},
+  )
   __io_println(rs_ap.result)
   const rs_after = harness.fs.read_text(rs_path)
   __io_println(contains(rs_after, "fn add(a: i64, b: i64, c: i64) -> i64"))
@@ -45,7 +48,8 @@ pipeline default() {
   __io_println(contains(py_after, "sub(3, 10)"))
   __io_println(contains(py_after, "sub(5, 20)"))
   // 3) TypeScript change_return_type — definition rewrite + caller warning.
-  const ts_body = "function add(a: number, b: number): number {\n  return a + b\n}\nconst x = add(1, 2)\n"
+  const ts_body =
+    "function add(a: number, b: number): number {\n  return a + b\n}\nconst x = add(1, 2)\n"
   const ts_path = write_fixture(root, "add.ts", ts_body)
   const ts_rt = edit_change_return_type({path: ts_path, symbol: {name: "add"}, new_type: "string"})
   __io_println(ts_rt.result)
@@ -54,7 +58,8 @@ pipeline default() {
   )
   __io_println(len(ts_rt.warnings) == 1)
   // 4) change_signature(strict) refuses when call sites exist; no write.
-  const cs_body = "function mul(a: number, b: number): number {\n  return a * b\n}\nconst r = mul(2, 3)\n"
+  const cs_body =
+    "function mul(a: number, b: number): number {\n  return a * b\n}\nconst r = mul(2, 3)\n"
   const cs_path = write_fixture(root, "mul.ts", cs_body)
   const strict = edit_change_signature(
     {path: cs_path, symbol: {name: "mul"}, new_params: "a: number, b: number, c: number"},

@@ -34,7 +34,8 @@ pub fn right_trim(s: string) -> string {
 /** True when `c` is a word character or hyphen ([A-Za-z0-9_-]). */
 pub fn is_word_or_hyphen(c: string) -> bool {
   return c == "-" || c == "_"
-    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".contains(c)
+    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    .contains(c)
 }
 
 /**
@@ -481,7 +482,9 @@ fn resolve_harn_bin() -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
+    const build = harness.process.spawn_captured(
+      {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
+    )
     if !build.success {
       __io_eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
@@ -522,7 +525,9 @@ pipeline main(task) {
         if tokens == nil {
           if logical.command.contains("harn") {
             parse_errors = parse_errors
-              + [{file: md_file, line_no: logical.line_no, command: logical.command}]
+              + [
+              {file: md_file, line_no: logical.line_no, command: logical.command},
+            ]
           }
           continue
         }
@@ -575,7 +580,9 @@ pipeline main(task) {
   )
   if total_failures > 0 {
     __io_println("")
-    __io_println("hint: fix the docs or add inline `# ${ALLOW_STALE}` for intentional stale examples.")
+    __io_println(
+      "hint: fix the docs or add inline `# ${ALLOW_STALE}` for intentional stale examples.",
+    )
     return 1
   }
   return 0

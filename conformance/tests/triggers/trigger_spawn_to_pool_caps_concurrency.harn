@@ -15,19 +15,25 @@ pipeline test(task) {
   const peak = atomic(0)
   const completed = atomic(0)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const pool_name = "spawn-to-pool-cap-demo-" + unique
-  const _ = pool_create({name: pool_name, max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")})
-  const task_factory = { _event -> return { ->
-    let now = atomic_add(inflight, 1) + 1
-    if now > atomic_get(peak) {
-      atomic_set(peak, now)
+  const _ = pool_create(
+    {name: pool_name, max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")},
+  )
+  const task_factory = { _event ->
+    return { ->
+      let now = atomic_add(inflight, 1) + 1
+      if now > atomic_get(peak) {
+        atomic_set(peak, now)
+      }
+      receive(gate)
+      atomic_add(inflight, -1)
+      atomic_add(completed, 1)
+      return now
     }
-    receive(gate)
-    atomic_add(inflight, -1)
-    atomic_add(completed, 1)
-    return now
-  } }
+  }
   const trigger_id = "trigger-spawn-to-pool-" + unique
   const handle: TriggerHandle = trigger_register(
     {

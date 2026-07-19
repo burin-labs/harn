@@ -58,8 +58,12 @@ pub fn persona_prompt_eval_artifact_schema() -> dict {
       pass: schema_bool(),
       expected: persona_prompt_eval_expected_schema(),
       compiler: schema_dict(),
-      materialization: schema_object({manifest_path: schema_string(), result: schema_object({success: schema_bool()})}),
-      daemon_fire: schema_object({result: schema_object({success: schema_bool(), stdout: schema_string()})}),
+      materialization: schema_object(
+        {manifest_path: schema_string(), result: schema_object({success: schema_bool()})},
+      ),
+      daemon_fire: schema_object(
+        {result: schema_object({success: schema_bool(), stdout: schema_string()})},
+      ),
     },
   )
 }
@@ -78,7 +82,11 @@ fn __dispatch_receipt_schema() -> dict {
       persona: schema_string(),
       status: schema_string(),
       result: schema_object(
-        {ok: schema_bool(), status: schema_string(), receipt: schema_object({status: schema_string()})},
+        {
+          ok: schema_bool(),
+          status: schema_string(),
+          receipt: schema_object({status: schema_string()}),
+        },
       ),
     },
   )
@@ -140,7 +148,8 @@ pub fn persona_prompt_fire_verdict(
       && receipt.status == "completed"
       && receipt.result.ok
       && contains(["completed", "success"], receipt.result.status)
-      && receipt.result.receipt.status == "success",
+      && receipt.result.receipt.status
+      == "success",
     "persona dispatch result did not prove successful workflow completion",
     failures,
   )
@@ -161,7 +170,11 @@ fn __compile_failures(
 ) -> list<string> {
   let failures: list<string> = []
   failures = __expect(receipt.ok, "compiler receipt was not accepted", failures)
-  failures = __expect(receipt.checkpoint.status == "accepted", "checkpoint was not accepted", failures)
+  failures = __expect(
+    receipt.checkpoint.status == "accepted",
+    "checkpoint was not accepted",
+    failures,
+  )
   failures = __expect(
     receipt.checkpoint.attempts == 1,
     "checkpoint did not use exactly one model call",
@@ -175,19 +188,31 @@ fn __compile_failures(
   failures = __expect(!receipt.checkpoint.repaired, "checkpoint repaired model output", failures)
   failures = __expect(receipt.prompt_digest != "", "prompt digest is missing", failures)
   failures = __expect(receipt.catalog_digest != "", "catalog digest is missing", failures)
-  failures = __expect(receipt.validation?.valid == true, "blueprint validation did not pass", failures)
+  failures = __expect(
+    receipt.validation?.valid == true,
+    "blueprint validation did not pass",
+    failures,
+  )
   failures = __expect(receipt.lowering != nil, "lowering is missing", failures)
   const lowering = receipt.lowering
   guard lowering != nil else {
     return failures
   }
-  failures = __expect(lowering.profile == "prompt_compiled_v1", "lowering profile widened", failures)
+  failures = __expect(
+    lowering.profile == "prompt_compiled_v1",
+    "lowering profile widened",
+    failures,
+  )
   failures = __expect(
     lowering.template == expected.template,
     "template selection differs from the rubric",
     failures,
   )
-  failures = __expect(lowering.persona.name == expected.name, "name override was not preserved", failures)
+  failures = __expect(
+    lowering.persona.name == expected.name,
+    "name override was not preserved",
+    failures,
+  )
   failures = __expect(
     lowering.policy.autonomy_tier == "suggest",
     "generated authority exceeds suggest",
@@ -198,7 +223,11 @@ fn __compile_failures(
     "generated receipts are not required",
     failures,
   )
-  failures = __expect(len(lowering.triggers) == 1, "lowering must contain exactly one daemon trigger", failures)
+  failures = __expect(
+    len(lowering.triggers) == 1,
+    "lowering must contain exactly one daemon trigger",
+    failures,
+  )
   if len(lowering.triggers) != 1 {
     return failures
   }
@@ -212,20 +241,52 @@ fn __compile_failures(
     failures,
   )
   if expected.source_kind == "cron" {
-    failures = __expect(trigger.kind == "cron", "cron request lowered to a non-cron transport", failures)
-    failures = __expect(trigger.provider == "cron", "cron request lowered to a non-cron provider", failures)
-    failures = __expect(trigger.events == ["cron.tick"], "cron request lowered to the wrong event", failures)
-    failures = __expect(trigger.schedule == expected.cron, "cron expression differs from the rubric", failures)
-    failures = __expect(trigger.timezone == expected.timezone, "cron timezone differs from the rubric", failures)
+    failures = __expect(
+      trigger.kind == "cron",
+      "cron request lowered to a non-cron transport",
+      failures,
+    )
+    failures = __expect(
+      trigger.provider == "cron",
+      "cron request lowered to a non-cron provider",
+      failures,
+    )
+    failures = __expect(
+      trigger.events == ["cron.tick"],
+      "cron request lowered to the wrong event",
+      failures,
+    )
+    failures = __expect(
+      trigger.schedule == expected.cron,
+      "cron expression differs from the rubric",
+      failures,
+    )
+    failures = __expect(
+      trigger.timezone == expected.timezone,
+      "cron timezone differs from the rubric",
+      failures,
+    )
   } else {
     failures = __expect(
       trigger.provider == expected.provider,
       "external provider differs from the rubric",
       failures,
     )
-    failures = __expect(trigger.events == [expected.event], "external event differs from the rubric", failures)
-    failures = __expect(trigger.schedule == nil, "external trigger unexpectedly carries a schedule", failures)
-    failures = __expect(trigger.timezone == nil, "external trigger unexpectedly carries a timezone", failures)
+    failures = __expect(
+      trigger.events == [expected.event],
+      "external event differs from the rubric",
+      failures,
+    )
+    failures = __expect(
+      trigger.schedule == nil,
+      "external trigger unexpectedly carries a schedule",
+      failures,
+    )
+    failures = __expect(
+      trigger.timezone == nil,
+      "external trigger unexpectedly carries a timezone",
+      failures,
+    )
   }
   return failures
 }
@@ -254,8 +315,16 @@ pub fn persona_prompt_materialized_verdict(
   let failures: list<string> = []
   const personas = manifest?.personas ?? []
   const triggers = manifest?.triggers ?? []
-  failures = __expect(len(personas) == 1, "materialized package must contain exactly one persona", failures)
-  failures = __expect(len(triggers) == 1, "materialized package must contain exactly one root trigger", failures)
+  failures = __expect(
+    len(personas) == 1,
+    "materialized package must contain exactly one persona",
+    failures,
+  )
+  failures = __expect(
+    len(triggers) == 1,
+    "materialized package must contain exactly one root trigger",
+    failures,
+  )
   if len(personas) == 1 {
     const persona = personas[0]
     guard persona != nil else {
@@ -265,11 +334,31 @@ pub fn persona_prompt_materialized_verdict(
         failures: failures + ["materialized persona is missing"],
       }
     }
-    failures = __expect(persona.name == lowering.persona.name, "materialized persona name drifted", failures)
-    failures = __expect(persona.autonomy_tier == "suggest", "materialized authority exceeds suggest", failures)
-    failures = __expect(persona.receipt_policy == "required", "materialized receipts are not required", failures)
-    failures = __expect(persona.triggers == nil, "legacy persona triggers survived materialization", failures)
-    failures = __expect(persona.schedules == nil, "legacy persona schedules survived materialization", failures)
+    failures = __expect(
+      persona.name == lowering.persona.name,
+      "materialized persona name drifted",
+      failures,
+    )
+    failures = __expect(
+      persona.autonomy_tier == "suggest",
+      "materialized authority exceeds suggest",
+      failures,
+    )
+    failures = __expect(
+      persona.receipt_policy == "required",
+      "materialized receipts are not required",
+      failures,
+    )
+    failures = __expect(
+      persona.triggers == nil,
+      "legacy persona triggers survived materialization",
+      failures,
+    )
+    failures = __expect(
+      persona.schedules == nil,
+      "legacy persona schedules survived materialization",
+      failures,
+    )
   }
   if len(triggers) == 1 {
     const actual = triggers[0]
@@ -283,11 +372,31 @@ pub fn persona_prompt_materialized_verdict(
     }
     failures = __expect(actual.id == expected.id, "materialized trigger id drifted", failures)
     failures = __expect(actual.kind == expected.kind, "materialized trigger kind drifted", failures)
-    failures = __expect(actual.provider == expected.provider, "materialized trigger provider drifted", failures)
-    failures = __expect(actual.match?.events == expected.events, "materialized trigger events drifted", failures)
-    failures = __expect(actual.handler == expected.handler, "materialized trigger handler drifted", failures)
-    failures = __expect(actual.schedule == expected.schedule, "materialized trigger schedule drifted", failures)
-    failures = __expect(actual.timezone == expected.timezone, "materialized trigger timezone drifted", failures)
+    failures = __expect(
+      actual.provider == expected.provider,
+      "materialized trigger provider drifted",
+      failures,
+    )
+    failures = __expect(
+      actual.match?.events == expected.events,
+      "materialized trigger events drifted",
+      failures,
+    )
+    failures = __expect(
+      actual.handler == expected.handler,
+      "materialized trigger handler drifted",
+      failures,
+    )
+    failures = __expect(
+      actual.schedule == expected.schedule,
+      "materialized trigger schedule drifted",
+      failures,
+    )
+    failures = __expect(
+      actual.timezone == expected.timezone,
+      "materialized trigger timezone drifted",
+      failures,
+    )
   }
   return {
     pass: len(failures) == 0,

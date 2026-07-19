@@ -162,7 +162,9 @@ fn post_eval_verdict(verdict, options) {
   if !(response?.ok ?? false) {
     return Err(
       "Slack chat.postMessage failed: "
-        + to_string(response?.error?.message ?? response?.error?.category ?? response?.status ?? "unknown"),
+        + to_string(
+        response?.error?.message ?? response?.error?.category ?? response?.status ?? "unknown",
+      ),
     )
   }
   const body = response?.json ?? {}
@@ -200,7 +202,8 @@ fn slack_verdict_title(verdict) -> string {
 }
 
 fn slack_verdict_summary(verdict) -> string {
-  return to_string(verdict?.suite ?? "eval suite") + " / " + to_string(verdict?.model ?? "model") + " / "
+  return to_string(verdict?.suite ?? "eval suite") + " / " + to_string(verdict?.model ?? "model")
+    + " / "
     + to_string(verdict?.split ?? "all")
 }
 
@@ -210,8 +213,14 @@ fn slack_verdict_fields(verdict) -> list {
     {type: "mrkdwn", text: "*Model*\n" + to_string(verdict?.model ?? "unknown")},
     {type: "mrkdwn", text: "*Split*\n" + to_string(verdict?.split ?? "all")},
     {type: "mrkdwn", text: "*Current macro pass@1*\n" + slack_rate(verdict?.macro_pass_at_1)},
-    {type: "mrkdwn", text: "*Baseline macro pass@1*\n" + slack_rate(verdict?.baseline_macro_pass_at_1)},
-    {type: "mrkdwn", text: "*Paired delta*\n" + to_string(verdict?.paired_delta?.status ?? "unknown")},
+    {
+      type: "mrkdwn",
+      text: "*Baseline macro pass@1*\n" + slack_rate(verdict?.baseline_macro_pass_at_1),
+    },
+    {
+      type: "mrkdwn",
+      text: "*Paired delta*\n" + to_string(verdict?.paired_delta?.status ?? "unknown"),
+    },
   ]
 }
 
@@ -278,7 +287,8 @@ fn verdict_decision(gate, paired) -> string {
 fn should_notify(decision, config) -> bool {
   const notify_inconclusive = config.notify_inconclusive ?? false
   return decision == "regression" || decision == "improved"
-    || (decision == "inconclusive" && notify_inconclusive)
+    || (decision == "inconclusive"
+    && notify_inconclusive)
 }
 
 fn top_regressed_cases(baseline_rows, current_rows) -> list {

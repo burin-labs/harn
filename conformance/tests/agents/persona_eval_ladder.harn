@@ -17,7 +17,10 @@ pipeline main() {
           profile: "value",
         },
       ],
-      timeout_tiers: [{id: "tiny", max_tool_calls: 1}, {id: "balanced", max_tool_calls: 4, max_model_calls: 1}],
+      timeout_tiers: [
+        {id: "tiny", max_tool_calls: 1},
+        {id: "balanced", max_tool_calls: 4, max_model_calls: 1},
+      ],
     },
   )
   const report = persona_eval_ladder_run(manifest)

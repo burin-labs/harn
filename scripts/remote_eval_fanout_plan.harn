@@ -68,7 +68,13 @@ fn arg_spec() {
         {kind: "flag", name: "model", long: "--model", parse: "string", default: DEFAULT_MODEL},
         {kind: "flag", name: "split", long: "--split", parse: "string", default: DEFAULT_SPLIT},
         {kind: "flag", name: "runner", long: "--runner", parse: "string", default: DEFAULT_RUNNER},
-        {kind: "flag", name: "backend", long: "--backend", parse: "string", default: DEFAULT_BACKEND},
+        {
+          kind: "flag",
+          name: "backend",
+          long: "--backend",
+          parse: "string",
+          default: DEFAULT_BACKEND,
+        },
         {kind: "flag", name: "flag", long: "--flag", parse: "string", multi: true, default: []},
         {kind: "flag", name: "out", long: "--out", parse: "string", default: ""},
         {kind: "switch", name: "json", long: "--json", default: false},
@@ -194,8 +200,14 @@ pub fn remote_eval_fanout_plan(options, catalog) {
   }
   const trials = require_positive_int("--trials", options?.trials ?? DEFAULT_TRIALS)
   const k = require_positive_int("--k", options?.k ?? DEFAULT_K)
-  const max_concurrency = require_positive_int("--max-concurrency", options?.max_concurrency ?? DEFAULT_MAX_CONCURRENCY)
-  const max_escalating = require_positive_int("--max-escalating", options?.max_escalating ?? DEFAULT_MAX_ESCALATING)
+  const max_concurrency = require_positive_int(
+    "--max-concurrency",
+    options?.max_concurrency ?? DEFAULT_MAX_CONCURRENCY,
+  )
+  const max_escalating = require_positive_int(
+    "--max-escalating",
+    options?.max_escalating ?? DEFAULT_MAX_ESCALATING,
+  )
   if max_escalating > max_concurrency {
     throw "--max-escalating cannot exceed --max-concurrency"
   }
@@ -261,7 +273,9 @@ fn __receipt_ingest_ok(receipt) -> bool {
   if receipt?.result?.passed != nil && !receipt.result.passed {
     return false
   }
-  return ["ok", "pass", "passed", "success", "complete", "completed"].contains(__receipt_status(receipt))
+  return ["ok", "pass", "passed", "success", "complete", "completed"].contains(
+    __receipt_status(receipt),
+  )
 }
 
 fn __slash_join(base: string, tail: string) -> string {
@@ -345,7 +359,9 @@ pub fn remote_eval_fanout_rejoin_receipt(plan, receipts) {
     if __receipt_ingest_ok(receipt) {
       accepted = accepted.push(receipt)
     } else {
-      failed = failed.push({shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt})
+      failed = failed.push(
+        {shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt},
+      )
     }
   }
   let missing = []

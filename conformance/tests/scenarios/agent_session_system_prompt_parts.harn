@@ -16,7 +16,10 @@ pipeline default() {
       const direct = llm_call(
         "direct prompt",
         "Direct base.",
-        {provider: "mock", system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"})},
+        {
+          provider: "mock",
+          system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"}),
+        },
       )
       __io_println(len(transcript_messages(direct.transcript)))
       __io_println(len(events_by_kind(direct.transcript, "system_prompt")))

@@ -9,7 +9,9 @@ import "std/triggers"
  */
 pipeline test(task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const parent_grant = [
     {kind: {kind: "net"}, scope: "write", resource: "https://api.example"},
     {kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"},
@@ -29,7 +31,10 @@ pipeline test(task) {
   const grandchild_actor = "agent:" + grandchild_agent
   const parent_actor_chain = {sub: actor_origin, act: {sub: parent_actor}}
   const child_actor_chain = {sub: actor_origin, act: {sub: child_actor, act: {sub: parent_actor}}}
-  const grandchild_actor_chain = {sub: actor_origin, act: {sub: grandchild_actor, act: {sub: child_actor, act: {sub: parent_actor}}}}
+  const grandchild_actor_chain = {
+    sub: actor_origin,
+    act: {sub: grandchild_actor, act: {sub: child_actor, act: {sub: parent_actor}}},
+  }
   const parent_id: TrustEntryId = trust_graph_record(
     {
       agent: parent_agent,
@@ -49,7 +54,11 @@ pipeline test(task) {
       outcome: "success",
       trace_id: "trace-child-" + unique,
       autonomy_tier: "act_auto",
-      metadata: {actor_chain: child_actor_chain, effects_grant: child_grant, parent_record_id: parent_id},
+      metadata: {
+        actor_chain: child_actor_chain,
+        effects_grant: child_grant,
+        parent_record_id: parent_id,
+      },
     },
   )
   const _grandchild_id: TrustEntryId = trust_graph_record(
@@ -60,7 +69,11 @@ pipeline test(task) {
       outcome: "success",
       trace_id: "trace-grandchild-" + unique,
       autonomy_tier: "act_auto",
-      metadata: {actor_chain: grandchild_actor_chain, effects_used: grandchild_used, parent_record_id: child_id},
+      metadata: {
+        actor_chain: grandchild_actor_chain,
+        effects_used: grandchild_used,
+        parent_record_id: child_id,
+      },
     },
   )
   const parent: list<TrustRecord> = trust_query({agent: parent_agent})

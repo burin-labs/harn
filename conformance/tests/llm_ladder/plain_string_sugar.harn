@@ -10,7 +10,12 @@ pipeline test(task) {
     [
       {
         // This fixture owns route escalation, not production cooldown timing.
-        error: {category: "overloaded", message: "HTTP 503 overloaded", status: 503, retry_after_ms: 0},
+        error: {
+          category: "overloaded",
+          message: "HTTP 503 overloaded",
+          status: 503,
+          retry_after_ms: 0,
+        },
         model: "mock-cheap",
         provider: "mock",
       },

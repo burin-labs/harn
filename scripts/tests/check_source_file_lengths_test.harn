@@ -68,7 +68,10 @@ pipeline test_exact_existing_count_passes_and_growth_fails(task) {
       lines: 1800,
     },
   ]
-  assert_eq(evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1800}], baseline).count, 0)
+  assert_eq(
+    evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1800}], baseline).count,
+    0,
+  )
   const findings = evaluate_inventory([{path: "crates/example/src/lib.rs", lines: 1801}], baseline)
   assert_eq(findings.count, 1)
   assert_eq(findings[0]?.kind, "growth")
@@ -93,7 +96,10 @@ pipeline test_shrink_requires_tightening_or_shard_deletion(task) {
 
 @test
 pipeline test_invalid_and_orphan_baselines_fail_closed(task) {
-  const malformed = parse_baseline(baseline_path_for("crates/example/src/malformed.rs"), "not-a-number\n")
+  const malformed = parse_baseline(
+    baseline_path_for("crates/example/src/malformed.rs"),
+    "not-a-number\n",
+  )
   const under_cap = parse_baseline(baseline_path_for("crates/example/src/under.rs"), "1400\n")
   const orphan = parse_baseline(baseline_path_for("crates/example/src/orphan.rs"), "1800\n")
   const empty_path = parse_baseline("scripts/source-file-length-baseline/.lines", "1800\n")
@@ -136,7 +142,10 @@ pipeline test_baseline_parser_requires_canonical_positive_integer(task) {
     parse_baseline("scripts/source-file-length-baseline/bad.txt", "1800\n").error != nil,
     true,
   )
-  assert_eq(parse_baseline("scripts/source-file-length-baseline/.lines", "1800\n").error != nil, true)
+  assert_eq(
+    parse_baseline("scripts/source-file-length-baseline/.lines", "1800\n").error != nil,
+    true,
+  )
 }
 
 @test
@@ -218,7 +227,12 @@ pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(task) {
   const edits = plan_baseline_update(sources, baselines)
   assert_eq(
     edits.map({ edit -> edit.source_path }).to_list(),
-    ["crates/a/src/lib.rs", "crates/b/src/lib.rs", "crates/orphan/src/lib.rs", "crates/z/src/lib.rs"],
+    [
+      "crates/a/src/lib.rs",
+      "crates/b/src/lib.rs",
+      "crates/orphan/src/lib.rs",
+      "crates/z/src/lib.rs",
+    ],
   )
   assert_eq(edits.map({ edit -> edit.kind }).to_list(), ["write", "delete", "delete", "write"])
   assert_eq(edits.map({ edit -> edit.lines }).to_list(), [1600, nil, nil, 1700])

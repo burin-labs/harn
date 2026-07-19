@@ -60,7 +60,9 @@ pipeline main() {
       name: "Checkout incident context",
       owner: "sre",
       triggers: [{kind: "repeated_query", source: "incident-triage"}],
-      included_queries: [{id: "splunk_errors", provider: "splunk", query: "index=checkout service=api error"}],
+      included_queries: [
+        {id: "splunk_errors", provider: "splunk", query: "index=checkout service=api error"},
+      ],
       secrets: [{name: "SPLUNK_READ_TOKEN", capability: "splunk.search", required: true}],
       capabilities: ["splunk.search"],
       output_slots: [{name: "splunk_errors", artifact_kind: "context"}],
@@ -85,7 +87,10 @@ pipeline main() {
   __io_println(
     len(events) == 2
       && contains(events[0].redacted_summary, "redacted")
-      && !contains(events[0].redacted_summary, "token=secret"),
+      && !contains(
+      events[0].redacted_summary,
+      "token=secret",
+    ),
   )
   __io_println(events[0].metadata.api_key == "[redacted]")
   __io_println(len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack")

@@ -12,7 +12,9 @@ fn handle_issue(event: TriggerEvent) -> dict {
 
 pipeline test(task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const trigger_id = "trigger-autonomy-budget-" + unique
   const handle: TriggerHandle = trigger_register(
     {
@@ -51,7 +53,9 @@ pipeline test(task) {
   const pending = hitl_pending({}).filter({ row -> row.agent == trigger_id })
   __io_println(len(pending) >= 1)
   // The trust graph captures the act_auto -> act_with_approval transition.
-  const transitions: list<TrustRecord> = trust_query({agent: trigger_id, action: "autonomy.tier_transition"})
+  const transitions: list<TrustRecord> = trust_query(
+    {agent: trigger_id, action: "autonomy.tier_transition"},
+  )
   __io_println(len(transitions) == 1)
   __io_println(transitions[0]?.autonomy_tier)
   __io_println(transitions[0]?.outcome)

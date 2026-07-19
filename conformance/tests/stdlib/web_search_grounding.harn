@@ -76,9 +76,15 @@ pipeline test(task) {
   assert_eq(api.backend.kind, "api")
   assert_eq(api.results[0].url, "https://harnlang.com/docs/builtins.html#web")
   assert(api.backend.api == nil, "web_search does not expose backend request config")
-  assert(!contains(json_stringify(api), "SECRET_SEARCH_TOKEN"), "web_search redacts API credentials")
+  assert(
+    !contains(json_stringify(api), "SECRET_SEARCH_TOKEN"),
+    "web_search redacts API credentials",
+  )
   const calls = http_mock_calls({redact_sensitive: false})
-  assert(contains(calls[0].url, "https://search.example/api?"), "web_search used web_fetch/http mock")
+  assert(
+    contains(calls[0].url, "https://search.example/api?"),
+    "web_search used web_fetch/http mock",
+  )
   assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
   const root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + uuid_v7())
   harness.fs.mkdir(root)
@@ -128,7 +134,12 @@ pipeline test(task) {
           symbols: ["createRoot"],
           source_url: "https://www.npmjs.com/package/react-dom",
         },
-        {ecosystem: "cargo", name: "serde", symbols: ["Serialize"], source_url: "https://docs.rs/serde/"},
+        {
+          ecosystem: "cargo",
+          name: "serde",
+          symbols: ["Serialize"],
+          source_url: "https://docs.rs/serde/",
+        },
         {
           ecosystem: "npm",
           name: "fresh-slop",
@@ -150,7 +161,10 @@ pipeline test(task) {
     "missing Rust crate",
   )
   assert(has_finding(verified.unresolved, "symbol_not_found", "fastapi"), "missing Python symbol")
-  assert(has_import_status(verified.imports, "fastapi", "FastAPI", "resolved"), "known Python symbol")
+  assert(
+    has_import_status(verified.imports, "fastapi", "FastAPI", "resolved"),
+    "known Python symbol",
+  )
   assert(
     has_import_status(verified.imports, "react-dom", "createRoot", "resolved"),
     "known npm symbol",
@@ -163,7 +177,10 @@ pipeline test(task) {
   assert(has_finding(verified.warnings, "fresh_package", "fresh-slop"), "fresh package warning")
   const explained = prompt_explain({tools: web_grounding_tools()})
   assert(contains(explained.system, "call web_search"), "search guidance is gated with the tool")
-  assert(contains(explained.system, "call verify_imports"), "verify guidance is gated with the tool")
+  assert(
+    contains(explained.system, "call verify_imports"),
+    "verify guidance is gated with the tool",
+  )
   harness.fs.delete(root)
   __io_println("web_search_grounding_ok")
 }

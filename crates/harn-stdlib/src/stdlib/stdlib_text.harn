@@ -68,25 +68,34 @@ pub fn extract_paths(text) {
   )
   let seen = []
   return lines.flat_map(
-    { line -> return split(trim(line), " ").map(
-      { word ->
-        let clean = regex_replace("^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$", "", trim(word))
-        while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":")
-          || ends_with(clean, ";") {
-          clean = substring(clean, 0, len(clean) - 1)
-        }
-        return clean
-      },
-    )
-      .filter(
-        { clean ->
-          if !contains(clean, "/") && !contains(clean, ".") {
-            return false
+    { line ->
+      return split(trim(line), " ").map(
+        { word ->
+          let clean = regex_replace(
+            "^[\"'`,;:()\\[\\]{}><]+|[\"'`,;:()\\[\\]{}><]+$",
+            "",
+            trim(word),
+          )
+          while ends_with(clean, ".") || ends_with(clean, ",") || ends_with(clean, ":")
+            || ends_with(
+            clean,
+            ";",
+          ) {
+            clean = substring(clean, 0, len(clean) - 1)
           }
-          const ext = extname(clean)
-          return ext != "" && len(ext) <= 11
+          return clean
         },
-      ) },
+      )
+        .filter(
+          { clean ->
+            if !contains(clean, "/") && !contains(clean, ".") {
+              return false
+            }
+            const ext = extname(clean)
+            return ext != "" && len(ext) <= 11
+          },
+        )
+    },
   )
     .filter(
       { p ->
@@ -316,11 +325,13 @@ pub fn has_got_want(output) {
  */
 pub fn format_test_errors(output) {
   const error_lines = split(output, "\n").filter(
-    { line -> return contains(line, "FAIL")
-      || contains(line, "Error")
-      || contains(line, "error")
-      || contains(line, "AssertionError")
-      || contains(line, "assert") },
+    { line ->
+      return contains(line, "FAIL")
+        || contains(line, "Error")
+        || contains(line, "error")
+        || contains(line, "AssertionError")
+        || contains(line, "assert")
+    },
   )
   if len(error_lines) > 20 {
     return join(error_lines[:20], "\n")

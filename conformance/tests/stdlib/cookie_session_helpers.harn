@@ -49,7 +49,10 @@ pipeline test(task) {
   assert(contains(set_cookie, "Secure"))
   assert(contains(set_cookie, "SameSite=Lax"))
   log("session")
-  const round_trip = cookie_round_trip("sid=old; theme=light", [set_cookie, cookie_delete("sid", {secure: false})])
+  const round_trip = cookie_round_trip(
+    "sid=old; theme=light",
+    [set_cookie, cookie_delete("sid", {secure: false})],
+  )
   assert_eq(round_trip.cookies.theme, "light")
   assert_eq(round_trip.cookies.sid, nil)
   const from_cookie = session_from_cookies(round_trip.cookie_header, "harn_session", "secret")

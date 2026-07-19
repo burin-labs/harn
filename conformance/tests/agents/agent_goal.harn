@@ -18,7 +18,11 @@ pipeline test() {
       objective: "Fix the flaky login test",
       success_criteria: [
         "the suite passes twice in a row",
-        {check: { facts -> return facts?.ci_green == true }, description: "CI is green", id: "green"},
+        {
+          check: { facts -> return facts?.ci_green == true },
+          description: "CI is green",
+          id: "green",
+        },
       ],
     },
   )

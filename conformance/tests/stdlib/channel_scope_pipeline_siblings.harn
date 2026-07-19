@@ -6,9 +6,21 @@
  * sibling reader on pipeline P2 cannot see emits made on P1.
  */
 pipeline default() {
-  const _ = emit_channel("stage.done", {stage: "build"}, {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-1"})
-  const _ = emit_channel("stage.done", {stage: "test"}, {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-2"})
-  const _ = emit_channel("stage.done", {stage: "build"}, {scope: "pipeline", pipeline_id: "pipe-B", id: "pB-1"})
+  const _ = emit_channel(
+    "stage.done",
+    {stage: "build"},
+    {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-1"},
+  )
+  const _ = emit_channel(
+    "stage.done",
+    {stage: "test"},
+    {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-2"},
+  )
+  const _ = emit_channel(
+    "stage.done",
+    {stage: "build"},
+    {scope: "pipeline", pipeline_id: "pipe-B", id: "pB-1"},
+  )
   const pipe_a = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-A"})
   const pipe_b = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-B"})
   const pipe_c = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-C"})

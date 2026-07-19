@@ -8,7 +8,12 @@ pipeline default() {
   __io_println(
     render_string(
       template,
-      {fn_name: "greet", params: [{name: "name", optional: true}], greeting: "hello", show_note: true},
+      {
+        fn_name: "greet",
+        params: [{name: "name", optional: true}],
+        greeting: "hello",
+        show_note: true,
+      },
     ),
   )
   __io_println(

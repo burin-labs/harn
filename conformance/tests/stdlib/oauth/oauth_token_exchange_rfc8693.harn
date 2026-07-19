@@ -30,7 +30,8 @@ pipeline test(task) {
     "https://as.example.com/as/token.oauth2",
     {
       status: 200,
-      body: "{\"access_token\":\"delegated.jwt\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_type\":\"N_A\",\"expires_in\":3600,\"scope\":\"status feed\"}",
+      body:
+        "{\"access_token\":\"delegated.jwt\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_type\":\"N_A\",\"expires_in\":3600,\"scope\":\"status feed\"}",
       headers: {"content-type": "application/json"},
     },
   )

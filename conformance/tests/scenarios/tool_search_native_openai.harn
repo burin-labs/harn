@@ -64,7 +64,10 @@ pipeline test(task) {
       )
       const calls = llm_mock_calls()
       assert(len(calls) >= 1, "at least one LLM call happened")
-      assert(calls[0].api_mode == "responses", "OpenAI native tool search selects the Responses API")
+      assert(
+        calls[0].api_mode == "responses",
+        "OpenAI native tool search selects the Responses API",
+      )
       const tools = calls[0].tools
       assert(tools != nil, "tools captured")
       assert(len(tools) == 4, "meta-tool + 3 user tools = 4")
@@ -99,14 +102,22 @@ pipeline test(task) {
         llm_call(
           "x",
           nil,
-          {provider: "mock", model: "gpt-4o", tools: registry, tool_search: {variant: "bm25", mode: "native"}},
+          {
+            provider: "mock",
+            model: "gpt-4o",
+            tools: registry,
+            tool_search: {variant: "bm25", mode: "native"},
+          },
         )
         nil
       } catch (e) {
         e
       }
       assert(pre54_err != nil, "pre-5.4 gpt rejects native")
-      assert(pre54_err.contains("does not expose native"), "diagnostic mentions missing native support")
+      assert(
+        pre54_err.contains("does not expose native"),
+        "diagnostic mentions missing native support",
+      )
       log("tool_search_native_openai tests passed")
     },
   )

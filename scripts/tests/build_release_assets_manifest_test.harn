@@ -139,14 +139,18 @@ pipeline test_full_manifest_json_byte_format(task) {
   // indent, expanded lists). This locks the on-disk byte format.
   const base = "https://github.com/burin-labs/harn/releases/download/v0.8.21"
   let assets: any = {}
-  assets = {...assets, "aarch64-apple-darwin": asset_record("aarch64-apple-darwin", base, "aaa", 100)}
+  assets = {
+    ...assets,
+    "aarch64-apple-darwin": asset_record("aarch64-apple-darwin", base, "aaa", 100),
+  }
   const manifest = build_manifest(
     "0.8.21",
     "v0.8.21",
     "https://github.com/burin-labs/harn/releases/tag/v0.8.21",
     assets,
   )
-  const expected = "{\n  \"assets\": {\n    \"aarch64-apple-darwin\": {\n      \"binaries\": [\n        \"harn\",\n        \"harn-dap\",\n        \"harn-lsp\"\n      ],\n      \"filename\": \"harn-aarch64-apple-darwin.tar.gz\",\n      \"format\": \"tar.gz\",\n      \"sha256\": \"aaa\",\n      \"size\": 100,\n      \"url\": \"https://github.com/burin-labs/harn/releases/download/v0.8.21/harn-aarch64-apple-darwin.tar.gz\"\n    }\n  },\n  \"release_url\": \"https://github.com/burin-labs/harn/releases/tag/v0.8.21\",\n  \"tag\": \"v0.8.21\",\n  \"version\": \"0.8.21\"\n}"
+  const expected =
+    "{\n  \"assets\": {\n    \"aarch64-apple-darwin\": {\n      \"binaries\": [\n        \"harn\",\n        \"harn-dap\",\n        \"harn-lsp\"\n      ],\n      \"filename\": \"harn-aarch64-apple-darwin.tar.gz\",\n      \"format\": \"tar.gz\",\n      \"sha256\": \"aaa\",\n      \"size\": 100,\n      \"url\": \"https://github.com/burin-labs/harn/releases/download/v0.8.21/harn-aarch64-apple-darwin.tar.gz\"\n    }\n  },\n  \"release_url\": \"https://github.com/burin-labs/harn/releases/tag/v0.8.21\",\n  \"tag\": \"v0.8.21\",\n  \"version\": \"0.8.21\"\n}"
   assert_eq(json_stringify_pretty(manifest), expected)
 }
 

@@ -8,7 +8,10 @@ pipeline default() {
     {kind: "fact", subject: "release published", body: "Harn release assets are published."},
     {id: "coord-fact-1"},
   )
-  const remembered = coord_remember(receipt, {namespace: "coordination-test", tags: ["coordination", "release"]})
+  const remembered = coord_remember(
+    receipt,
+    {namespace: "coordination-test", tags: ["coordination", "release"]},
+  )
   const hits = memory_recall("coordination-test", "release assets", 3)
   __io_println(remembered.namespace)
   __io_println(remembered.key)

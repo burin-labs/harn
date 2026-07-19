@@ -76,7 +76,11 @@ pipeline default() {
   const inbox = coord_inbox("session", "schema", opts + {consumer_id: "agent-A"})
   __io_println(is_type(inbox, coord_inbox_schema()))
   __io_println(coord_inbox_report(inbox).ok)
-  const inbox_with_events = coord_inbox("session", "schema", opts + {consumer_id: "agent-A", include_events: true})
+  const inbox_with_events = coord_inbox(
+    "session",
+    "schema",
+    opts + {consumer_id: "agent-A", include_events: true},
+  )
   __io_println(is_type(inbox_with_events, coord_inbox_schema()))
   __io_println(is_type(inbox_with_events.messages[0], coord_event_message_schema()))
   const wait = coord_wait_reply(

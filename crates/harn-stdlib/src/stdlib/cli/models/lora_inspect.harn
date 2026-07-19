@@ -131,7 +131,9 @@ fn __render_human(harness: Harness, report: dict) {
     }
     harness.stdio.println(
       "  contract route: base="
-        + __base_match_label(safe_string(contract["base_model_match"], "unknown"))
+        + __base_match_label(
+        safe_string(contract["base_model_match"], "unknown"),
+      )
         + " provider="
         + provider_match
         + " tool_format="

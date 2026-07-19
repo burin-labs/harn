@@ -130,7 +130,14 @@ fn __run_artifacts_standard_paths(run: {dir: string, ...rest}) -> RunArtifactPat
 }
 
 fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> RunArtifactsRun {
-  const base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
+  const base = {
+    kind: kind,
+    namespace: namespace,
+    run_id: run_id,
+    root: root,
+    dir: dir,
+    modified: modified,
+  }
   return base + {paths: __run_artifacts_standard_paths(base)}
 }
 
@@ -319,7 +326,9 @@ pub fn run_artifacts_list(
     }
     if is_ok(info) && (unwrap(info)?.is_dir ?? false) {
       const stat = unwrap(info)
-      rows = rows.push(__run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified))
+      rows = rows.push(
+        __run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified),
+      )
     }
   }
   return rows.sort_by(

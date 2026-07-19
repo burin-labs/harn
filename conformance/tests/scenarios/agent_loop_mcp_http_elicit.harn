@@ -32,7 +32,9 @@ pipeline default() {
     [
       {
         text: "Calling MCP elicitation tool.",
-        tool_calls: [{id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}}],
+        tool_calls: [
+          {id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}},
+        ],
       },
       llm_text("<done>##DONE##</done>"),
     ],
@@ -58,7 +60,8 @@ pipeline default() {
           return nil
         },
       )
-      require events != nil, "timed out waiting for MCP server to record the tool call and elicitation response"
+      require events != nil,
+        "timed out waiting for MCP server to record the tool call and elicitation response"
       process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
       const tool_call = events.find({ event -> event?.kind == "tool_call" })
       const elicit_response = events.find({ event -> event?.kind == "elicit_response" })

@@ -30,7 +30,12 @@ pipeline default() {
       {
         project_root: unrelated_root,
         env: false,
-        config: {identities: {"agent:merge-captain": {name: "Config Bot"}, "user:kenneth": {name: "Config Human"}}},
+        config: {
+          identities: {
+            "agent:merge-captain": {name: "Config Bot"},
+            "user:kenneth": {name: "Config Human"},
+          },
+        },
       },
     ),
   )

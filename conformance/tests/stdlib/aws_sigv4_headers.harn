@@ -14,10 +14,16 @@ pipeline test(task) {
     },
   )
   assert_eq(signed.amz_date, "20150830T123600Z")
-  assert_eq(signed.content_sha256, "93a23971a914e5eacbf0a8d25154cda309c3c1c72fbb9914d47c60f3cb681588")
+  assert_eq(
+    signed.content_sha256,
+    "93a23971a914e5eacbf0a8d25154cda309c3c1c72fbb9914d47c60f3cb681588",
+  )
   assert_eq(signed.signed_headers, "content-type;host;x-amz-content-sha256;x-amz-date")
   assert(
-    contains(signed.authorization, "Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request"),
+    contains(
+      signed.authorization,
+      "Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request",
+    ),
   )
   assert(
     contains(
@@ -58,7 +64,8 @@ pipeline test(task) {
   const edge = aws_sigv4_headers(
     {
       method: "GET",
-      url: "https://example.amazonaws.com/a%2Fb/space%20here/tilde%7e?Param=value%2Fwith%20space&plus=a+b&empty&Param=second",
+      url:
+        "https://example.amazonaws.com/a%2Fb/space%20here/tilde%7e?Param=value%2Fwith%20space&plus=a+b&empty&Param=second",
       service: "execute-api",
       region: "us-east-1",
       access_key_id: "AKIDEXAMPLE",
@@ -69,7 +76,10 @@ pipeline test(task) {
   )
   assert(contains(edge.canonical_request, "\n/a%2Fb/space%20here/tilde~\n"))
   assert(
-    contains(edge.canonical_request, "\nParam=second&Param=value%2Fwith%20space&empty=&plus=a%2Bb\n"),
+    contains(
+      edge.canonical_request,
+      "\nParam=second&Param=value%2Fwith%20space&empty=&plus=a%2Bb\n",
+    ),
   )
   assert(contains(edge.canonical_request, "x-amz-target:Example.Action\n"))
   const failed = try {

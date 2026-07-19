@@ -5,7 +5,11 @@ pipeline default() {
   const raw_handler = fn(call) { return llm_call(call.prompt, call?.system, call.opts) }
   const pooled = with_circuit_breaker(raw_handler, {threshold: 2, reset_ms: 60000})
   const bad_call = {prompt: "bad route", system: nil, opts: {provider: "mock", model: "bad-model"}}
-  const good_call = {prompt: "good route", system: nil, opts: {provider: "mock", model: "good-model"}}
+  const good_call = {
+    prompt: "good route",
+    system: nil,
+    opts: {provider: "mock", model: "good-model"},
+  }
   with_llm_script(
     [
       {error: {category: "server_error", message: "bad model failed once"}},
@@ -36,7 +40,10 @@ pipeline default() {
         __io_println(e3.circuit)
       }
       __io_println(len(llm_mock_calls()))
-      const shared = with_circuit_breaker(raw_handler, {name: "shared-model-circuit", threshold: 1, reset_ms: 60000})
+      const shared = with_circuit_breaker(
+        raw_handler,
+        {name: "shared-model-circuit", threshold: 1, reset_ms: 60000},
+      )
       try {
         shared(bad_call)
       } catch (e4) {

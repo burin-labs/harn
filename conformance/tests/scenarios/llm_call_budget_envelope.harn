@@ -3,7 +3,12 @@ import { with_llm_script } from "std/testing"
 pipeline test(task) {
   with_llm_script(
     [
-      {text: "should not be consumed", input_tokens: 1, output_tokens: 1, model: "claude-opus-4-20250514"},
+      {
+        text: "should not be consumed",
+        input_tokens: 1,
+        output_tokens: 1,
+        model: "claude-opus-4-20250514",
+      },
     ],
     { ->
       const expensive = try {

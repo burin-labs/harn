@@ -24,7 +24,13 @@ pipeline test(task) {
         nil,
         {
           models: [
-            {model: "mock", provider: "mock", label: "cheap", family: "haiku", capabilities: ["tools"]},
+            {
+              model: "mock",
+              provider: "mock",
+              label: "cheap",
+              family: "haiku",
+              capabilities: ["tools"],
+            },
             {
               model: "mock-strong",
               provider: "mock",

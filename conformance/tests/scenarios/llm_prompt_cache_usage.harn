@@ -1,7 +1,8 @@
 pipeline default() {
   let prompt = ""
   for i in range(0, 80) {
-    prompt += "stable cacheable prefix line " + to_string(i) + ": explain prompt caching usage fields.\n"
+    prompt += "stable cacheable prefix line " + to_string(i)
+      + ": explain prompt caching usage fields.\n"
   }
   const options = {provider: "mock", model: "claude-sonnet-4-20250514", cache: true}
   const first = llm_call(prompt, nil, options)

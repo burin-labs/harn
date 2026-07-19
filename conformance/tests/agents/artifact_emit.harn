@@ -16,7 +16,10 @@ pipeline main() {
         {
           mark: "bar",
           data: {values: [{name: "a", count: 2}]},
-          encoding: {x: {field: "name", type: "nominal"}, y: {field: "count", type: "quantitative"}},
+          encoding: {
+            x: {field: "name", type: "nominal"},
+            y: {field: "count", type: "quantitative"},
+          },
         },
         {
           session_id: session,

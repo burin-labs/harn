@@ -341,6 +341,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
+        repeat(lineBreak($)),
         field("value", $._expression)
       ),
 
@@ -350,6 +351,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
+        repeat(lineBreak($)),
         field("value", $._expression)
       ),
 
@@ -364,6 +366,7 @@ module.exports = grammar({
         field("name", $._binding_pattern),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
+        repeat(lineBreak($)),
         field("value", $._expression)
       ),
 
@@ -498,7 +501,7 @@ module.exports = grammar({
       seq(
         "require",
         field("condition", $._expression),
-        optional(seq(",", field("message", $._expression)))
+        optional(seq(",", repeat(lineBreak($)), field("message", $._expression)))
       ),
 
     mutex_block: ($) =>
@@ -1140,6 +1143,7 @@ module.exports = grammar({
           )
         ),
         ":",
+        repeat(lineBreak($)),
         field("value", $._expression)
       ),
 

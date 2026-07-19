@@ -53,7 +53,8 @@ pipeline test_body_has_full_trio(task) {
 
 @test
 pipeline test_violations_in_text_flags_envelope_copy(task) {
-  const src = "pub struct Dup {\n  pub parent_run_id: string,\n  pub trace_id: string,\n  pub cost_usd: float,\n}\n"
+  const src =
+    "pub struct Dup {\n  pub parent_run_id: string,\n  pub trace_id: string,\n  pub cost_usd: float,\n}\n"
   const v = violations_in_text("crates/x/src/dup.rs", src)
   assert_eq(v.count, 1)
   assert_eq(v[0], "crates/x/src/dup.rs:1: pub struct Dup")
@@ -68,7 +69,8 @@ pipeline test_violations_in_text_ignores_partial_struct(task) {
 @test
 pipeline test_violations_in_text_ignores_commented_fields(task) {
   // The trio appears only inside a block comment → stripped → no violation.
-  const src = "pub struct Looks {\n  /* pub parent_run_id: string, pub trace_id: string, pub cost_usd: f64 */\n  pub other: int,\n}\n"
+  const src =
+    "pub struct Looks {\n  /* pub parent_run_id: string, pub trace_id: string, pub cost_usd: f64 */\n  pub other: int,\n}\n"
   assert_eq(violations_in_text("a.rs", src).count, 0)
 }
 

@@ -14,14 +14,18 @@ pipeline default() {
     }
     return {text: "first attempt"}
   }
-  const verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: ["need " + token]} }
-  const builder = { ctx -> return token
-    + "|attempt="
-    + to_string(ctx.attempt)
-    + "|findings="
-    + join(ctx.findings, ",")
-    + "|prior="
-    + ctx.prior_text }
+  const verifier = { r ->
+    return {ok: contains(to_string(r?.visible_text), token), findings: ["need " + token]}
+  }
+  const builder = { ctx ->
+    return token
+      + "|attempt="
+      + to_string(ctx.attempt)
+      + "|findings="
+      + join(ctx.findings, ",")
+      + "|prior="
+      + ctx.prior_text
+  }
   const out = workflow_run_repair(
     {
       task: "base",

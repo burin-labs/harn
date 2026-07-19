@@ -10,7 +10,11 @@ pipeline default() {
   const synthetic = { call ->
     let n = atomic_add(counter, 1)
     if n < 1 {
-      return {ok: false, status: "schema_validation", error: {message: "missing required key 'verdict'"}}
+      return {
+        ok: false,
+        status: "schema_validation",
+        error: {message: "missing required key 'verdict'"},
+      }
     }
     if contains(call.prompt, "schema validation") {
       let _ = atomic_set(nudged, 1)
@@ -40,7 +44,9 @@ pipeline default() {
     return {ok: false, status: "rate_limited", error: "429"}
   }
   const other_caller = with_repair(other_synth, {})
-  const other_env = other_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
+  const other_env = other_caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
   __io_println(other_env.ok)
   __io_println(other_env.status)
   __io_println(other_env?.repair_attempted ?? false)

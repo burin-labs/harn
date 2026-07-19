@@ -51,7 +51,9 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
         tools: terminal_callback_tools(),
         loop_until_done: true,
         iteration_budget: {mode: "fixed", initial: 4, max: 4, extend_by: 0, expose_decisions: true},
-        post_turn_callback: { _info -> return {message: "Keep going until the done sentinel is present."} },
+        post_turn_callback: { _info ->
+          return {message: "Keep going until the done sentinel is present."}
+        },
         terminal_callback: { info ->
           assert_eq(info?.final_status, "budget_exhausted")
           assert_eq(info?.stop_reason, "max_iterations")
@@ -83,7 +85,10 @@ pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
           saw_terminal_feedback = true
         }
       }
-      assert(saw_post_turn_feedback, "post-turn callback feedback should keep the normal post_turn label")
+      assert(
+        saw_post_turn_feedback,
+        "post-turn callback feedback should keep the normal post_turn label",
+      )
       assert(
         saw_terminal_feedback,
         "terminal callback feedback should be labeled separately from post_turn feedback",

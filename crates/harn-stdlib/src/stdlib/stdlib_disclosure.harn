@@ -174,10 +174,14 @@ fn __profile_for(subject: string, config: DisclosureConfig) -> dict {
 fn __principal(subject: string, config: DisclosureConfig, role: string, position: int) -> dict {
   const profile = __profile_for(subject, config)
   const parts = actor_chain_subject_parts(subject)
-  const name = to_string(profile?.name ?? profile?.display_name ?? profile?.label ?? parts.id ?? subject)
+  const name = to_string(
+    profile?.name ?? profile?.display_name ?? profile?.label ?? parts.id ?? subject,
+  )
   const label = to_string(profile?.label ?? profile?.slack_label ?? profile?.display_name ?? name)
   const email_domain = to_string(config.defaults?.email_domain ?? "actors.harn.invalid")
-  const email = to_string(profile?.email ?? (__slug(parts.kind + "+" + parts.id) + "@" + email_domain))
+  const email = to_string(
+    profile?.email ?? (__slug(parts.kind + "+" + parts.id) + "@" + email_domain),
+  )
   let principal = {
     subject: subject,
     kind: parts.kind,
@@ -278,7 +282,8 @@ fn __select_principal(ctx: DisclosureContext, selector) {
 
 fn __render_text(surface_config: dict, ctx: DisclosureContext) -> string {
   const template = surface_config?.template
-  require template != nil && template != "", "std/disclosure: text disclosure surfaces require a template"
+  require template != nil && template != "",
+    "std/disclosure: text disclosure surfaces require a template"
   return render_string(to_string(template), ctx)
 }
 
@@ -406,16 +411,23 @@ fn __public_principals(ctx: DisclosureContext) -> list<dict> {
 
 fn __slack_customize(surface_config: dict, ctx: DisclosureContext) -> dict {
   const username = __render_optional_template(surface_config?.customize_name_template, ctx)
-  let customize = {scope: "chat:write.customize", enabled: surface_config?.customize_enabled != false}
+  let customize = {
+    scope: "chat:write.customize",
+    enabled: surface_config?.customize_enabled != false,
+  }
   if username != nil {
     customize["username"] = username
   }
   if surface_config?.customize_icon_url != nil
-    && trim(to_string(surface_config.customize_icon_url)) != "" {
+    && trim(to_string(surface_config.customize_icon_url))
+    != "" {
     customize["icon_url"] = to_string(surface_config.customize_icon_url)
   }
   if surface_config?.customize_icon_emoji != nil
-    && trim(to_string(surface_config.customize_icon_emoji)) != "" {
+    && trim(
+    to_string(surface_config.customize_icon_emoji),
+  )
+    != "" {
     customize["icon_emoji"] = to_string(surface_config.customize_icon_emoji)
   }
   return customize

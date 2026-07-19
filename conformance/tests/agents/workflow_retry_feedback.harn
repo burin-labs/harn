@@ -10,7 +10,11 @@ pipeline default() {
     ok: true,
     result: {status: "failed", visible_text: "boom"},
     error: "prior error",
-    verification: {kind: "composite", ok: false, checks: [{kind: "expect_status", ok: false, expected: 0, actual: 7}]},
+    verification: {
+      kind: "composite",
+      ok: false,
+      checks: [{kind: "expect_status", ok: false, expected: 0, actual: 7}],
+    },
   }
   // 1. repair_prompt_builder receives EXACTLY the pinned context keys
   //    (alphabetical): attempt, error, findings, prior_text, stage, task,
@@ -31,14 +35,26 @@ pipeline default() {
   const verbatim = { ctx -> return "REPLACEMENT for attempt " + to_string(ctx.attempt) }
   __io_println(
     workflow_stage_retry_task(
-      {policy: {repair_prompt_builder: verbatim}, task: "do it", attempt: 2, prior: prior, node: {}},
+      {
+        policy: {repair_prompt_builder: verbatim},
+        task: "do it",
+        attempt: 2,
+        prior: prior,
+        node: {},
+      },
     ),
   )
   // 3. the builder sees the prior attempt's verification findings.
   const findings_probe = { ctx -> return join(ctx.findings, "|") }
   __io_println(
     workflow_stage_retry_task(
-      {policy: {repair_prompt_builder: findings_probe}, task: "x", attempt: 1, prior: prior, node: {}},
+      {
+        policy: {repair_prompt_builder: findings_probe},
+        task: "x",
+        attempt: 1,
+        prior: prior,
+        node: {},
+      },
     ),
   )
   // 4. feedback: true appends the bounded template with the prior findings.

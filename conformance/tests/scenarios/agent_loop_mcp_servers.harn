@@ -43,7 +43,10 @@ pipeline default() {
         provider: "mock",
         tool_format: "native",
         max_iterations: 3,
-        mcp_servers: [{name: "remote", transport: "http", url: url}, {name: "mirror", transport: "http", url: url}],
+        mcp_servers: [
+          {name: "remote", transport: "http", url: url},
+          {name: "mirror", transport: "http", url: url},
+        ],
       }
       const result = agent_loop("Use both MCP echo tools", nil, opts)
       const calls = wait_for_file_content(

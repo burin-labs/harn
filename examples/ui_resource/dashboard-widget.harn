@@ -55,7 +55,10 @@ pipeline default() {
       validation: {allow_network: false},
     },
   )
-  const meta = ui_tool_meta(resource, {visibility: "app_only", initial_view: {window: "7d", focus: "signups"}})
+  const meta = ui_tool_meta(
+    resource,
+    {visibility: "app_only", initial_view: {window: "7d", focus: "signups"}},
+  )
   const mcp_meta = ui_tool_meta_to_mcp(meta)
   __io_println("ui_resource.uri=" + resource.uri)
   __io_println("ui_resource.validation.ok=" + to_string(resource.validation.ok))

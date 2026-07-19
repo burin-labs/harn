@@ -155,7 +155,14 @@ fn __agent_required_tools_preserve_terminal_error(result: dict) -> bool {
   }
   const status = to_string(result?.status ?? "")
   const final_status = to_string(result?.final_status ?? "")
-  const terminal_statuses = ["provider_error", "error", "blocked", "suspended", "cancelled", "scope_alert"]
+  const terminal_statuses = [
+    "provider_error",
+    "error",
+    "blocked",
+    "suspended",
+    "cancelled",
+    "scope_alert",
+  ]
   return contains(terminal_statuses, status) || contains(terminal_statuses, final_status)
 }
 
@@ -210,5 +217,9 @@ pub fn agent_required_tools_feedback(missing: list<string>) -> string {
  * @api_stability: experimental
  */
 pub fn agent_required_tools_inject_feedback(session_id: string, missing: list<string>) {
-  agent_session_inject_feedback(session_id, "required_tools", agent_required_tools_feedback(missing))
+  agent_session_inject_feedback(
+    session_id,
+    "required_tools",
+    agent_required_tools_feedback(missing),
+  )
 }

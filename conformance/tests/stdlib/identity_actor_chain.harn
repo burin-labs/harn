@@ -10,7 +10,11 @@ pipeline default() {
     sub: "user:owner",
     scopes: ["repo:read", "repo:write"],
     may_act: {sub: "agent:delegate"},
-    act: {sub: "agent:reviewer", scopes: ["repo:read"], act: {sub: "agent:planner", scope: "repo:read"}},
+    act: {
+      sub: "agent:reviewer",
+      scopes: ["repo:read"],
+      act: {sub: "agent:planner", scope: "repo:read"},
+    },
   }
   const report = actor_chain_report(chain)
   __io_println(report.ok)

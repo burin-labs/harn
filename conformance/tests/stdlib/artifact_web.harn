@@ -6,7 +6,8 @@ import {
 } from "std/artifact/web"
 
 pipeline default() {
-  const good = "<!doctype html><html><head><style>.card { color: red; }</style></head><body><main><h1>Hello</h1><button id=\"b\">Count</button><script>const count = 1; document.getElementById('b').textContent = count;</script></main></body></html>"
+  const good =
+    "<!doctype html><html><head><style>.card { color: red; }</style></head><body><main><h1>Hello</h1><button id=\"b\">Count</button><script>const count = 1; document.getElementById('b').textContent = count;</script></main></body></html>"
   const extracted = web_artifact_extract(good)
   __io_println(len(extracted.styles))
   __io_println(len(extracted.scripts))

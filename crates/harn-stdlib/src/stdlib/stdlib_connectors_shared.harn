@@ -96,7 +96,11 @@ pub fn verify_jwt(token, jwks_url, options = nil) {
   let jwks = opts.inline_jwks
   if jwks == nil {
     if jwks_url == nil || trim(jwks_url) == "" {
-      return {ok: false, claims: nil, error: "jwks_url is required unless options.inline_jwks is provided"}
+      return {
+        ok: false,
+        claims: nil,
+        error: "jwks_url is required unless options.inline_jwks is provided",
+      }
     }
     const response = harness.net.get(jwks_url, {headers: {Accept: "application/json"}})
     if !(response.ok ?? false) {
@@ -106,11 +110,21 @@ pub fn verify_jwt(token, jwks_url, options = nil) {
       json_parse(response.body)
     }
     if is_err(parsed_jwks) {
-      return {ok: false, claims: nil, error: "JWKS response was not valid JSON", status: response.status}
+      return {
+        ok: false,
+        claims: nil,
+        error: "JWKS response was not valid JSON",
+        status: response.status,
+      }
     }
     jwks = unwrap(parsed_jwks)
     if type_of(jwks) != "dict" {
-      return {ok: false, claims: nil, error: "JWKS response was not a JSON object", status: response.status}
+      return {
+        ok: false,
+        claims: nil,
+        error: "JWKS response was not a JSON object",
+        status: response.status,
+      }
     }
   }
   return connector_shared_verify_jwt_inline(token, jwks, opts)
@@ -221,7 +235,9 @@ fn __connector_http_retry_options(options) {
       max_attempts = 1
     }
   }
-  let base_ms = to_int(policy?.base_ms ?? policy?.backoff_ms ?? opts?.base_ms ?? opts?.backoff_ms ?? 200)
+  let base_ms = to_int(
+    policy?.base_ms ?? policy?.backoff_ms ?? opts?.base_ms ?? opts?.backoff_ms ?? 200,
+  )
   if base_ms == nil || base_ms < 0 {
     base_ms = 0
   }
@@ -321,7 +337,9 @@ fn __connector_http_headers(options) {
   }
   const idempotency_key = opts.idempotency_key
   if idempotency_key != nil && trim(to_string(idempotency_key)) != ""
-    && !__connector_http_has_idempotency_key(headers) {
+    && !__connector_http_has_idempotency_key(
+    headers,
+  ) {
     headers["Idempotency-Key"] = to_string(idempotency_key)
   }
   return headers
@@ -456,7 +474,12 @@ fn __connector_http_error_envelope(response, error) {
 
 fn __connector_http_success_envelope(response) {
   const rate_limit = connector_http_rate_limit(response)
-  let envelope = {ok: true, status: response.status, headers: response.headers ?? {}, body: response.body ?? ""}
+  let envelope = {
+    ok: true,
+    status: response.status,
+    headers: response.headers ?? {},
+    body: response.body ?? "",
+  }
   if response?.final_url != nil {
     envelope["final_url"] = response.final_url
   }
@@ -575,7 +598,11 @@ pub fn connector_http_request(method, url, options = nil) {
     if response.ok ?? false {
       return __connector_http_success_envelope(response)
     }
-    const should_retry = __connector_http_should_retry_response(response, retry_policy, retry_allowed)
+    const should_retry = __connector_http_should_retry_response(
+      response,
+      retry_policy,
+      retry_allowed,
+    )
     const retry_after_ms = connector_http_rate_limit(response)?.retry_after_ms
     const error = __connector_http_error_from_response(response, opts, should_retry)
     if !should_retry || attempt + 1 >= retry_policy.max_attempts {
@@ -677,7 +704,11 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
   }
   const body = unwrap(parsed)
   if type_of(body) != "dict" {
-    return {ok: false, status: response.status, error: "OAuth2 token response was not a JSON object"}
+    return {
+      ok: false,
+      status: response.status,
+      error: "OAuth2 token response was not a JSON object",
+    }
   }
   return merge(body, {ok: true, status: response.status})
 }
@@ -723,7 +754,11 @@ pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
       retry_after_ms = 1
     }
   }
-  return {allowed: allowed, retry_after_ms: retry_after_ms, state: {tokens: tokens, last_refill_ms: now}}
+  return {
+    allowed: allowed,
+    retry_after_ms: retry_after_ms,
+    state: {tokens: tokens, last_refill_ms: now},
+  }
 }
 
 fn __page_items(page, items_path) {
@@ -802,7 +837,9 @@ fn __git_forge_payload(value) {
 
 fn __git_forge_provider(provider, payload, options) {
   return lowercase(
-    trim(to_string(provider ?? options?.provider ?? payload?.provider ?? payload?.raw?.provider ?? "")),
+    trim(
+      to_string(provider ?? options?.provider ?? payload?.provider ?? payload?.raw?.provider ?? ""),
+    ),
   )
 }
 
@@ -864,9 +901,15 @@ fn __git_forge_delivery_id(raw) {
   return __git_forge_text(
     raw?.delivery_id
       ?? connector_http_header(headers, "X-GitHub-Delivery")
-      ?? connector_http_header(headers, "X-Gitlab-Event-UUID")
+      ?? connector_http_header(
+      headers,
+      "X-Gitlab-Event-UUID",
+    )
       ?? connector_http_header(headers, "X-Gitlab-Delivery")
-      ?? connector_http_header(headers, "X-Gitea-Delivery"),
+      ?? connector_http_header(
+      headers,
+      "X-Gitea-Delivery",
+    ),
   )
 }
 
@@ -907,7 +950,9 @@ fn __git_forge_event(provider, lifecycle, repo, pr, raw, options) -> GitForgePul
       web_url: pull_request.web_url,
     },
   )
-  const provider_metadata: dict<string, any> = filter_nil(merge(raw?.provider_metadata ?? {}, options?.provider_metadata ?? {}))
+  const provider_metadata: dict<string, any> = filter_nil(
+    merge(raw?.provider_metadata ?? {}, options?.provider_metadata ?? {}),
+  )
   return {
     topic: GIT_FORGE_PULL_REQUEST_TOPIC,
     event: "pull_request",
@@ -952,7 +997,11 @@ fn __git_forge_gitlab_event(payload, options) {
   if attrs == nil {
     return nil
   }
-  const repo = {full_name: raw?.project?.path_with_namespace, id: raw?.project?.id, web_url: raw?.project?.web_url}
+  const repo = {
+    full_name: raw?.project?.path_with_namespace,
+    id: raw?.project?.id,
+    web_url: raw?.project?.web_url,
+  }
   const pr = merge(
     attrs,
     {
@@ -1071,7 +1120,12 @@ pub fn git_forge_writeback_request(
   if provider == "github" {
     const repo = __git_forge_repo_parts(target.repository_full_name)
     const params = filter_nil(
-      {owner: repo?.owner, repo: repo?.repo, issue_number: target.pull_request_number, body: comment_body},
+      {
+        owner: repo?.owner,
+        repo: repo?.repo,
+        issue_number: target.pull_request_number,
+        body: comment_body,
+      },
     )
     return {provider: "github", method: "issues.create_comment", params: params, target: target}
   }

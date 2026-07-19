@@ -118,7 +118,13 @@ pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
     if !repo_filter_allows(repo, include_repos) {
       continue
     }
-    const prior = totals[repo] ?? {label: "repo:" + repo, minutes: 0.0, usd: 0.0, source: "billing-usage"}
+    const prior = totals[repo]
+      ?? {
+      label: "repo:" + repo,
+      minutes: 0.0,
+      usd: 0.0,
+      source: "billing-usage",
+    }
     totals = totals
       + {
       [repo]: prior
@@ -168,7 +174,10 @@ pub fn run_timing_rows(samples: list) -> list {
     totals = totals
       + {
       [key]: prior
-        + {minutes: number_value(prior.minutes) + minutes, usd: number_value(prior.usd) + usd},
+        + {
+        minutes: number_value(prior.minutes) + minutes,
+        usd: number_value(prior.usd) + usd,
+      },
     }
   }
   let rows = []
@@ -267,7 +276,8 @@ fn main(_harness: Harness) {
   } else {
     requested_repos
   }
-  const runs_per_repo = to_int(parsed?.runs_per_repo ?? DEFAULT_RUNS_PER_REPO) ?? DEFAULT_RUNS_PER_REPO
+  const runs_per_repo = to_int(parsed?.runs_per_repo ?? DEFAULT_RUNS_PER_REPO)
+    ?? DEFAULT_RUNS_PER_REPO
   require_gh()
   const billing_path = "/orgs/${org}/settings/billing/usage?year=${current_utc_year()}"
   const billing = gh_api_json(billing_path)
@@ -278,7 +288,8 @@ fn main(_harness: Harness) {
       harness.stdio.println(
         json_stringify(
           {
-            error: "billing usage endpoint unavailable; rerun without --json for the run-timing fallback table",
+            error:
+              "billing usage endpoint unavailable; rerun without --json for the run-timing fallback table",
           },
         ),
       )

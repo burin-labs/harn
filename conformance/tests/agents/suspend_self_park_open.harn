@@ -21,7 +21,9 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "park_open", name: "agent_await_resumption", arguments: {reason: "blocked"}}],
+        tool_calls: [
+          {id: "park_open", name: "agent_await_resumption", arguments: {reason: "blocked"}},
+        ],
         input_tokens: 7,
         output_tokens: 3,
       },
@@ -37,7 +39,9 @@ pipeline main() {
       __io_println("initiator=" + (suspended?.suspension?.initiator ?? ""))
       __io_println("reason=" + (suspended?.suspension?.reason ?? ""))
       __io_println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
-      __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+      __io_println(
+        "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
+      )
       const resumed = resume_agent(handle)
       const done = wait_agent(handle)
       __io_println("resume_status=" + resumed.status)

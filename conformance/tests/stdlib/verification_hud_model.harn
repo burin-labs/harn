@@ -9,7 +9,10 @@ pipeline test(task) {
   assert_eq(fresh.status, "bound_fresh")
   assert_eq(fresh.fresh, true)
   assert_eq(fresh.stale_files, [])
-  const stale = verification_snapshot_staleness({"src/a.tx": "h1", "src/b.tx": "h2"}, {"src/a.tx": "h9"})
+  const stale = verification_snapshot_staleness(
+    {"src/a.tx": "h1", "src/b.tx": "h2"},
+    {"src/a.tx": "h9"},
+  )
   assert_eq(stale.status, "bound_stale")
   assert_eq(stale.stale, true)
   assert_eq(stale.stale_files, ["src/a.tx", "src/b.tx"])
@@ -22,13 +25,21 @@ pipeline test(task) {
         {
           id: "tx/full",
           scope: {language: "toolchainx"},
-          check: {rung: "R4", command: {mode: "shell", command: "toolchainx test --all"}, resourceClass: "heavy"},
+          check: {
+            rung: "R4",
+            command: {mode: "shell", command: "toolchainx test --all"},
+            resourceClass: "heavy",
+          },
           timings: {warmMs: {p95: 9000}, coldMs: {p95: 21000}},
         },
         {
           id: "tx/parse",
           scope: {language: "toolchainx", task: "post_edit"},
-          check: {rung: "R0", command: {mode: "shell", command: "toolchainx parse {file}"}, resourceClass: "cheap"},
+          check: {
+            rung: "R0",
+            command: {mode: "shell", command: "toolchainx parse {file}"},
+            resourceClass: "cheap",
+          },
           timings: {warmMs: {p95: 80}},
         },
       ],
@@ -42,7 +53,12 @@ pipeline test(task) {
       language: "toolchainx",
       task: "post_edit",
       current_hashes: {"src/a.tx": "h2"},
-      last_check: {rung: "R2", verdict: "failed", at_ms: 110000, bound_snapshot: {"src/a.tx": "h1"}},
+      last_check: {
+        rung: "R2",
+        verdict: "failed",
+        at_ms: 110000,
+        bound_snapshot: {"src/a.tx": "h1"},
+      },
     },
     {now_ms: 121000},
   )

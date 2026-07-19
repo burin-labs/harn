@@ -23,7 +23,10 @@ pipeline test(task) {
   } catch (e3) {
     __io_println(
       to_string(e3).contains("b")
-        && (to_string(e3).contains("expected int") || to_string(e3).contains("expected type 'int'")),
+        && (to_string(e3).contains("expected int")
+        || to_string(e3).contains(
+        "expected type 'int'",
+      )),
     )
   }
 }

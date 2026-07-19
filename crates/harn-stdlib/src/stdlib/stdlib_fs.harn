@@ -94,7 +94,14 @@ fn __fs_read_structured_result(
   }
   const failure = unwrap_err(parsed)
   return Err(
-    __fs_structured_failure(failure.kind, format, path, failure.message, failure.line, failure.column),
+    __fs_structured_failure(
+      failure.kind,
+      format,
+      path,
+      failure.message,
+      failure.line,
+      failure.column,
+    ),
   )
 }
 
@@ -388,7 +395,10 @@ pub fn touch(path: string) {
  * @errors: []
  */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
-  const matches = harness.fs.glob(pattern, {base: root, long_running: options?.long_running ?? false})
+  const matches = harness.fs.glob(
+    pattern,
+    {base: root, long_running: options?.long_running ?? false},
+  )
   if options?.relative ?? false {
     return matches.map({ path -> relative_path(root, path) }).to_list()
   }
@@ -504,7 +514,9 @@ fn __fs_snapshot_session(opts) -> string {
 pub fn fs_snapshot(paths: list<string> = [], opts = {}) -> dict {
   const session = __fs_snapshot_session(opts)
   const scope = opts?.snapshot_id ?? ("snapshot-" + uuid_v7())
-  return hostlib_fs_snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
+  return hostlib_fs_snapshot(
+    {session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root},
+  )
 }
 
 /**

@@ -5,7 +5,9 @@
  * `m` to a two-variant union so the shared `kind` field is still
  * accessible without touching the variant-specific `reason` field.
  */
-type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}
+type Msg = {kind: "ping", ttl: int} \
+  | {kind: "pong", latency_ms: int} \
+  | {kind: "close", reason: string}
 
 pipeline default() {
   fn summarise(m: Msg) -> string {

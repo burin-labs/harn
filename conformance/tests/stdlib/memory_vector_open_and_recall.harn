@@ -7,7 +7,10 @@ pipeline default() {
   // then 1.0 across all records and order falls through to the
   // newest-first tiebreak, which is enough to verify the wire-up.
   host_mock("memory", "embed", {result: {vector: [0.5, 0.5, 0.5], dim: 3, model: "test"}})
-  const opened = memory_open("agent/vector", {backend: "vector", embed_dim: 3, embed_model_hint: "test", root: root})
+  const opened = memory_open(
+    "agent/vector",
+    {backend: "vector", embed_dim: 3, embed_model_hint: "test", root: root},
+  )
   __io_println(opened._type)
   __io_println(opened.backend)
   __io_println(opened.embed_dim)

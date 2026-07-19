@@ -208,7 +208,14 @@ pub fn project_deep_scan(path = ".", options = nil) {
       last_refresh = __project_deep_scan_last_refresh(last_refresh, cached?.refreshed_at)
       continue
     }
-    const record = __project_deep_scan_refresh_entry(namespace, entry, tiers, opts?.enrichment ?? {}, signature, now)
+    const record = __project_deep_scan_refresh_entry(
+      namespace,
+      entry,
+      tiers,
+      opts?.enrichment ?? {},
+      signature,
+      now,
+    )
     metadata_set(entry.dir, namespace, {_deep_scan: record})
     cache[entry.dir] = {_deep_scan: record}
     tree[entry.path] = __project_deep_scan_select_tiers(record.evidence ?? {}, tiers)

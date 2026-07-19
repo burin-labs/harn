@@ -177,13 +177,17 @@ fn __autocontinue_max_continuations(llm_opts) {
  */
 fn __autocontinue_raised_cap(current, llm_opts) {
   const base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
-    && llm_opts.truncation_auto_continue_base > 0 {
+    && llm_opts
+    .truncation_auto_continue_base
+    > 0 {
     llm_opts.truncation_auto_continue_base
   } else {
     16384
   }
   const ceiling = if type_of(llm_opts?.truncation_auto_continue_ceiling) == "int"
-    && llm_opts.truncation_auto_continue_ceiling > 0 {
+    && llm_opts
+    .truncation_auto_continue_ceiling
+    > 0 {
     llm_opts.truncation_auto_continue_ceiling
   } else {
     32768
@@ -292,7 +296,10 @@ fn __invoke_llm_with_autocontinue(
     )
     cap = raised
     const retry_opts = retry_llm_opts
-      + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
+      + {
+      max_tokens: raised,
+      _truncation_auto_continue_attempt: attempts,
+    }
     call = agent_invoke_llm(message, turn_system, retry_opts)
   }
   return call
@@ -871,9 +878,15 @@ fn __internal_verdict_object(value) -> bool {
     return false
   }
   const completion = contains(["done", "continue"], verdict)
-    && __dict_has_any(value, ["reasoning", "reason", "next_step", "nextStep"])
+    && __dict_has_any(
+    value,
+    ["reasoning", "reason", "next_step", "nextStep"],
+  )
   const judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
-    && __dict_has_any(value, ["critique", "confidence", "category", "error"])
+    && __dict_has_any(
+    value,
+    ["critique", "confidence", "category", "error"],
+  )
   if !(completion || judged) {
     return false
   }
@@ -1158,7 +1171,9 @@ fn __parse_feedback_annotation_enabled(value) -> bool {
 fn __parse_feedback_tool_is_structural(entry) -> bool {
   const annotations = __parse_feedback_tool_annotations(entry)
   return __parse_feedback_annotation_enabled(annotations?.structural)
-    || __parse_feedback_annotation_enabled(annotations?.agent_lifecycle)
+    || __parse_feedback_annotation_enabled(
+    annotations?.agent_lifecycle,
+  )
 }
 
 fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
@@ -1194,7 +1209,9 @@ fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
  */
 fn __parse_feedback_protocol_violations(parsed, turn_opts) {
   if agent_tool_call_paradigm(turn_opts).kind != "text"
-    || !__parse_feedback_has_non_structural_tools(turn_opts) {
+    || !__parse_feedback_has_non_structural_tools(
+    turn_opts,
+  ) {
     return []
   }
   return parsed?.protocol_violations ?? []
@@ -1463,7 +1480,9 @@ fn __intra_turn_failure_signature(result) {
   }
   const name = to_string(result?.tool_name ?? result?.name ?? "")
   const args = result?.arguments ?? {}
-  const failure_text = to_string(result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "")
+  const failure_text = to_string(
+    result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "",
+  )
   return sha256(json_stringify({name: name, args: args, failure: failure_text}))
 }
 
@@ -1483,7 +1502,15 @@ fn __intra_turn_call_signature(call) {
   return sha256(json_stringify({name: name, args: args}))
 }
 
-const __INTRA_TURN_RESOURCE_MUTATING_KINDS = ["edit", "write", "scaffold", "delete", "move", "mutation", "mutate"]
+const __INTRA_TURN_RESOURCE_MUTATING_KINDS = [
+  "edit",
+  "write",
+  "scaffold",
+  "delete",
+  "move",
+  "mutation",
+  "mutate",
+]
 
 fn __intra_turn_call_args(call) {
   const raw = call?.arguments ?? call?.tool_args
@@ -1501,20 +1528,24 @@ fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
   if type_of(annotations) != "dict" {
     return false
   }
-  const kind = __intra_turn_annotation_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  const kind = __intra_turn_annotation_text(
+    annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind,
+  )
   if contains(__INTRA_TURN_RESOURCE_MUTATING_KINDS, kind) {
     return true
   }
   const side_effect = __intra_turn_annotation_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations?.sideEffect,
+      ?? annotations
+      ?.sideEffect,
   )
   if side_effect == "workspace_write" {
     return true
   }
   const mutation = __intra_turn_annotation_text(
     annotations?.mutation_classification ?? annotations?.mutationClassification
-      ?? annotations?.mutation,
+      ?? annotations
+      ?.mutation,
   )
   return mutation == "workspace_write"
 }
@@ -1523,7 +1554,9 @@ fn __intra_turn_annotation_path_params(annotations) {
   if type_of(annotations) != "dict" {
     return []
   }
-  const direct = annotations?.path_params ?? annotations?.pathParams ?? annotations?.resource_path_params
+  const direct = annotations?.path_params ?? annotations?.pathParams
+    ?? annotations
+    ?.resource_path_params
     ?? annotations?.resourcePathParams
   if type_of(direct) == "list" {
     return direct
@@ -1547,7 +1580,8 @@ fn __intra_turn_annotation_dependency_key_params(annotations) {
     return []
   }
   const direct = annotations?.dependency_key_params ?? annotations?.dependencyKeyParams
-    ?? annotations?.resource_dependency_params
+    ?? annotations
+    ?.resource_dependency_params
     ?? annotations?.resourceDependencyParams
     ?? annotations?.resource_key_params
     ?? annotations?.resourceKeyParams
@@ -1559,7 +1593,8 @@ fn __intra_turn_annotation_dependency_key_params(annotations) {
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   const params = schema?.dependency_key_params ?? schema?.dependencyKeyParams
-    ?? schema?.resource_dependency_params
+    ?? schema
+    ?.resource_dependency_params
     ?? schema?.resourceDependencyParams
     ?? schema?.resource_key_params
     ?? schema?.resourceKeyParams
@@ -1578,7 +1613,8 @@ fn __intra_turn_annotation_dependency_range_params(annotations) {
     return []
   }
   const direct = annotations?.dependency_range_params ?? annotations?.dependencyRangeParams
-    ?? annotations?.resource_dependency_ranges
+    ?? annotations
+    ?.resource_dependency_ranges
     ?? annotations?.resourceDependencyRanges
     ?? annotations?.resource_range_params
     ?? annotations?.resourceRangeParams
@@ -1590,7 +1626,8 @@ fn __intra_turn_annotation_dependency_range_params(annotations) {
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   const params = schema?.dependency_range_params ?? schema?.dependencyRangeParams
-    ?? schema?.resource_dependency_ranges
+    ?? schema
+    ?.resource_dependency_ranges
     ?? schema?.resourceDependencyRanges
     ?? schema?.resource_range_params
     ?? schema?.resourceRangeParams
@@ -1609,7 +1646,9 @@ fn __intra_turn_annotation_arg_aliases(annotations) {
     return {}
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
-  const aliases = schema?.arg_aliases ?? schema?.argAliases ?? annotations?.arg_aliases ?? annotations?.argAliases
+  const aliases = schema?.arg_aliases ?? schema?.argAliases ?? annotations?.arg_aliases
+    ?? annotations
+    ?.argAliases
     ?? {}
   if type_of(aliases) == "dict" {
     return aliases
@@ -1677,10 +1716,14 @@ fn __intra_turn_dependency_range_param_names(spec) {
     return nil
   }
   const start_name = trim(
-    to_string(spec?.start ?? spec?.start_param ?? spec?.startParam ?? spec?.from ?? spec?.begin ?? ""),
+    to_string(
+      spec?.start ?? spec?.start_param ?? spec?.startParam ?? spec?.from ?? spec?.begin ?? "",
+    ),
   )
   const end_name = trim(
-    to_string(spec?.end ?? spec?.end_param ?? spec?.endParam ?? spec?.to ?? spec?.stop ?? start_name),
+    to_string(
+      spec?.end ?? spec?.end_param ?? spec?.endParam ?? spec?.to ?? spec?.stop ?? start_name,
+    ),
   )
   if start_name == "" {
     return nil
@@ -1847,7 +1890,11 @@ fn __intra_turn_intersects(keys, failed_keys) -> bool {
 
 fn __intra_turn_ranges_overlap(current, failed) -> bool {
   return to_string(current?.resource_key ?? "") == to_string(failed?.resource_key ?? "")
-    && (to_int(current?.start) ?? 0) <= (to_int(failed?.end) ?? -1)
+    && (to_int(
+    current?.start,
+  )
+    ?? 0)
+    <= (to_int(failed?.end) ?? -1)
     && (to_int(failed?.start) ?? 0) <= (to_int(current?.end) ?? -1)
 }
 
@@ -1863,7 +1910,10 @@ fn __intra_turn_range_intersects(current_ranges, failed_ranges) -> bool {
 }
 
 fn __intra_turn_guard_intersects(current_guard, failed_guard) -> bool {
-  if !__intra_turn_intersects(current_guard?.resource_keys ?? [], failed_guard?.resource_keys ?? []) {
+  if !__intra_turn_intersects(
+    current_guard?.resource_keys ?? [],
+    failed_guard?.resource_keys ?? [],
+  ) {
     return false
   }
   const target_ranges = current_guard?.target_ranges ?? []
@@ -2046,7 +2096,13 @@ fn __intra_turn_resource_blocked_result(
   skipped_suffix_count,
 ) {
   const name = to_string(call?.name ?? call?.tool_name ?? "")
-  const receipt = __intra_turn_partial_apply_receipt(call, current_guard, blocking_guard, index, skipped_suffix_count)
+  const receipt = __intra_turn_partial_apply_receipt(
+    call,
+    current_guard,
+    blocking_guard,
+    index,
+    skipped_suffix_count,
+  )
   const keys = receipt.resource_keys
   const rendered_keys = join(keys, ", ")
   const observation = "[skipped dependent `" + name + "` call from this turn]\n"
@@ -2078,7 +2134,11 @@ fn __intra_turn_resource_blocked_result(
     tool_name: name,
     tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
     arguments: call?.arguments ?? {},
-    result: {message: observation, partial_apply: receipt, next_expected_action: receipt.next_expected_action},
+    result: {
+      message: observation,
+      partial_apply: receipt,
+      next_expected_action: receipt.next_expected_action,
+    },
     receipt_kind: "intra_turn_same_resource_partial_apply",
     partial_apply: receipt,
     next_expected_action: receipt.next_expected_action,
@@ -2212,7 +2272,12 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
   }
   const caller = turn_opts?._tool_caller
-  const raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
+  const raw_dispatch = __dispatch_tool_calls_with_middleware(
+    tool_calls,
+    tools,
+    dispatch_options,
+    cap,
+  )
   const audit_flushes = __collect_audit_flushes(raw_dispatch)
   const dispatch = __strip_internal_dispatch(raw_dispatch)
   agent_session_record_tool_results(session_id, dispatch)
@@ -2237,7 +2302,11 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   // declaration order still match.
   const resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
   const keyed_mutating_batch = resource_fail_fast
-    && __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options)
+    && __intra_turn_has_keyed_mutating_calls(
+    tool_calls,
+    tools,
+    options,
+  )
   if cap <= 1 || len(tool_calls) <= 1 || keyed_mutating_batch {
     // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
     // of consecutive byte-identical FAILING results. Once that streak reaches
@@ -2263,9 +2332,18 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       } else {
         nil
       }
-      const blocking_guard = __intra_turn_first_blocking_guard(resource_guard, failed_resource_guards)
+      const blocking_guard = __intra_turn_first_blocking_guard(
+        resource_guard,
+        failed_resource_guards,
+      )
       if blocking_guard != nil {
-        const skipped_suffix_count = __intra_turn_dependent_suffix_count(tool_calls, tools, options, index, blocking_guard)
+        const skipped_suffix_count = __intra_turn_dependent_suffix_count(
+          tool_calls,
+          tools,
+          options,
+          index,
+          blocking_guard,
+        )
         const blocked = __intra_turn_resource_blocked_result(
           call,
           resource_guard,
@@ -2278,7 +2356,8 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         continue
       }
       if fanout_cap > 0 && capped_call_signature != nil
-        && __intra_turn_call_signature(call) == capped_call_signature {
+        && __intra_turn_call_signature(call)
+        == capped_call_signature {
         // Same failing call as the one that tripped the cap — skip dispatch.
         if !collapsed_emitted {
           const collapsed = __intra_turn_collapsed_result(call, capped_sample)
@@ -2296,7 +2375,9 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       // independent later edit to the same file is NOT stale and may run.
       // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
-        && __intra_turn_failure_poisons_resource(result) {
+        && __intra_turn_failure_poisons_resource(
+        result,
+      ) {
         failed_resource_guards = failed_resource_guards.push(
           __intra_turn_failed_guard_record(call, index, resource_guard, result),
         )
@@ -2414,16 +2495,22 @@ fn __tool_result_ok(result) {
 const __PRODUCT_ERROR_WRITE_TOOL_NAMES = ["edit", "scaffold", "run_codemod", "write"]
 
 fn __tool_result_write_product_tool(result) -> bool {
-  const name = lowercase(trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")))
+  const name = lowercase(
+    trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")),
+  )
   return contains(__PRODUCT_ERROR_WRITE_TOOL_NAMES, name)
 }
 
 fn __tool_result_dispatch_rejection_text(lower: string) -> bool {
   return lower.contains("\"error\":\"invalid_arguments\"")
-    || lower.contains("\"error\": \"invalid_arguments\"")
+    || lower.contains(
+    "\"error\": \"invalid_arguments\"",
+  )
     || lower.contains("error: invalid_arguments")
     || lower.contains("\"error\":\"permission_denied\"")
-    || lower.contains("\"error\": \"permission_denied\"")
+    || lower.contains(
+    "\"error\": \"permission_denied\"",
+  )
     || lower.contains("error: permission_denied")
 }
 
@@ -2493,7 +2580,9 @@ fn __turn_made_edit(dispatch, tools) -> bool {
   for name in __tool_names_by_status(dispatch, true) {
     const entry = __tool_registry_entry(tools, name)
     const annotations = agent_tool_entry_annotations(entry)
-    const kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
+    const kind = lowercase(
+      to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
+    )
     if contains(__REPAIR_EDIT_KINDS, kind) {
       return true
     }
@@ -2712,9 +2801,13 @@ fn __agent_loop_enable_equivalent_failover(llm_opts, primary_provider, primary_m
   const has_primary = primary_provider != "" || primary_model != ""
   const has_current = provider != "" || model != ""
   const partial_route_patch = (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
-    && !(loop_opts?._agent_loop_last_llm_route_patch_complete ?? false)
+    && !(loop_opts
+    ?._agent_loop_last_llm_route_patch_complete
+    ?? false)
   const changed_partial_route = has_primary && has_current
-    && (provider != primary_provider || model != primary_model)
+    && (provider != primary_provider
+    || model
+    != primary_model)
     && partial_route_patch
   return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
 }
@@ -2794,7 +2887,8 @@ fn __next_progress_count(made_progress, turns_since_progress) {
 pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
   const action = if has_tools {
     "Emit exactly one well-formed " + paradigm.call_noun + " now, or state your final answer "
-      + paradigm.final_answer
+      + paradigm
+      .final_answer
       + " and stop."
   } else {
     "Make concrete progress in your reply now, or state your final answer and stop."
@@ -2909,13 +3003,29 @@ fn __agent_loop_budget_exhaustion(
   const aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
   if budget?.wall_clock_ms != nil && aggregates.wall_clock_ms >= budget.wall_clock_ms {
     return aggregates
-      + {exhausted: true, kind: "wall_clock", iteration: iteration, max_iterations: max_iterations}
+      + {
+      exhausted: true,
+      kind: "wall_clock",
+      iteration: iteration,
+      max_iterations: max_iterations,
+    }
   }
   if budget?.total_cost_usd != nil && aggregates.cost_usd >= budget.total_cost_usd {
     return aggregates
-      + {exhausted: true, kind: "total_cost", iteration: iteration, max_iterations: max_iterations}
+      + {
+      exhausted: true,
+      kind: "total_cost",
+      iteration: iteration,
+      max_iterations: max_iterations,
+    }
   }
-  return aggregates + {exhausted: false, kind: "", iteration: iteration, max_iterations: max_iterations}
+  return aggregates
+    + {
+    exhausted: false,
+    kind: "",
+    iteration: iteration,
+    max_iterations: max_iterations,
+  }
 }
 
 fn __agent_loop_emit_budget_exhausted(session_id, exhaustion) {
@@ -2984,16 +3094,19 @@ fn __agent_loop_failure_matches_kind(error, wanted) {
   const status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
   if wanted == "transient" {
     return kind == "transient" || category == "transient_network" || category == "timeout"
-      || reason == "timeout"
+      || reason
+      == "timeout"
   }
   if wanted == "rate_limit" {
     return kind == "rate_limit" || category == "rate_limit" || category == "rate_limited"
-      || reason == "rate_limit"
+      || reason
+      == "rate_limit"
       || status == 429
   }
   if wanted == "provider_5xx" {
     return kind == "provider_5xx" || category == "server_error" || category == "overloaded"
-      || reason == "server_error"
+      || reason
+      == "server_error"
       || (status >= 500 && status < 600)
   }
   return category == wanted || reason == wanted || kind == wanted
@@ -3031,7 +3144,10 @@ fn __agent_loop_is_escalation_transport_failure(error) {
     return true
   }
   return __agent_loop_failure_matches_kind(error, "transient")
-    || __agent_loop_failure_matches_kind(error, "rate_limit")
+    || __agent_loop_failure_matches_kind(
+    error,
+    "rate_limit",
+  )
     || __agent_loop_failure_matches_kind(error, "provider_5xx")
 }
 
@@ -3191,10 +3307,17 @@ fn __agent_loop_suspend_checkpoint(session, iteration) {
  */
 fn __agent_loop_checkpoint_modes(kind) {
   if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
-    return {immediate: true, finish_step: false, audit_only: false, inbox: false, typed_delivery: nil}
+    return {
+      immediate: true,
+      finish_step: false,
+      audit_only: false,
+      inbox: false,
+      typed_delivery: nil,
+    }
   }
   if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START
-    || kind == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
+    || kind
+    == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
     || kind == "iteration_end" {
     const typed_delivery = if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START {
       __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY
@@ -3212,12 +3335,30 @@ fn __agent_loop_checkpoint_modes(kind) {
     }
   }
   if kind == "pre_compact" || kind == "post_compact" {
-    return {immediate: false, finish_step: false, audit_only: false, inbox: true, typed_delivery: nil}
+    return {
+      immediate: false,
+      finish_step: false,
+      audit_only: false,
+      inbox: true,
+      typed_delivery: nil,
+    }
   }
   if kind == "loop_exit" {
-    return {immediate: false, finish_step: false, audit_only: true, inbox: false, typed_delivery: nil}
+    return {
+      immediate: false,
+      finish_step: false,
+      audit_only: true,
+      inbox: false,
+      typed_delivery: nil,
+    }
   }
-  return {immediate: false, finish_step: false, audit_only: false, inbox: false, typed_delivery: nil}
+  return {
+    immediate: false,
+    finish_step: false,
+    audit_only: false,
+    inbox: false,
+    typed_delivery: nil,
+  }
 }
 
 /**
@@ -3452,7 +3593,11 @@ fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_index
     if __agent_error_must_propagate(err) {
       throw err
     }
-    __agent_input_guardrail_fail_open(err, nil, {session_id: session.session_id, iteration: iteration})
+    __agent_input_guardrail_fail_open(
+      err,
+      nil,
+      {session_id: session.session_id, iteration: iteration},
+    )
   } else {
     __agent_input_guardrail_normalize(
       unwrap(outcome),
@@ -3503,10 +3648,18 @@ fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
         0,
         text,
       )
-        + {dispatch_skipped: true, skip_reason: "input_guardrail_tripwire", input_guardrail_verdict: verdict},
+        + {
+        dispatch_skipped: true,
+        skip_reason: "input_guardrail_tripwire",
+        input_guardrail_verdict: verdict,
+      },
     },
   )
-  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  let _ = __agent_loop_checkpoint(
+    session.session_id,
+    "iteration_end",
+    {iteration: iteration_index + 1},
+  )
   return text
 }
 
@@ -3573,7 +3726,9 @@ fn __scope_classifier_alert_body(verdict, session) {
   const anchor = verdict?.workspace_anchor ?? agent_session_workspace_anchor(session.session_id)
   const primary = to_string(anchor?.primary ?? "(none)")
   return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
-    + to_string(verdict?.evidence ?? "")
+    + to_string(
+    verdict?.evidence ?? "",
+  )
     + "\n\nCurrent anchor: "
     + primary
     + "\nMounted roots:\n"
@@ -3652,7 +3807,11 @@ fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
       },
     },
   )
-  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  let _ = __agent_loop_checkpoint(
+    session.session_id,
+    "iteration_end",
+    {iteration: iteration_index + 1},
+  )
   return text
 }
 
@@ -3702,7 +3861,8 @@ fn __agent_loop_wrapup_response_protocol_tail(opts) {
  * appends this — a wrap-up that claims "I completed the task" on a failed run is
  * the exact failure this guards against.
  */
-const __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY: string = "The run's terminal outcome is already decided and is stated as fact in this instruction and the context above; narrate it truthfully and do NOT re-judge it or claim success on a run that did not succeed."
+const __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY: string =
+  "The run's terminal outcome is already decided and is stated as fact in this instruction and the context above; narrate it truthfully and do NOT re-judge it or claim success on a run that did not succeed."
 
 /**
  * The wrap-up directive for a terminal turn.
@@ -3755,7 +3915,11 @@ fn __agent_loop_effective_wrapup_context(opts, final_status, stop_reason) {
     {}
   }
   return host_context
-    + {terminal_kind: final_status, final_status: final_status, stop_reason: stop_reason ?? ""}
+    + {
+    terminal_kind: final_status,
+    final_status: final_status,
+    stop_reason: stop_reason ?? "",
+  }
 }
 
 /**
@@ -4007,7 +4171,11 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     parts = parts.push(directive)
     join(parts, "\n\n")
   }
-  const wrapup_context = __agent_loop_effective_wrapup_context(wrapup_opts, final_status, stop_reason)
+  const wrapup_context = __agent_loop_effective_wrapup_context(
+    wrapup_opts,
+    final_status,
+    stop_reason,
+  )
   const turn_messages = if host_wrapup {
     turn_prompt.messages.push(
       {role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)},
@@ -4128,7 +4296,9 @@ fn __agent_loop_output_schema_value(text, schema) {
 fn __agent_loop_output_schema_repair_prompt(schema, text) {
   return "Your previous final answer did not satisfy the required output schema.\n"
     + "Reply with ONLY a JSON value that validates against this JSON Schema:\n\n"
-    + json_stringify_pretty(schema)
+    + json_stringify_pretty(
+    schema,
+  )
     + "\n\nYour previous final answer was:\n\n"
     + text
 }
@@ -4179,7 +4349,12 @@ fn __agent_loop_apply_output_schema(final_result, opts, session, message, iterat
   const repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
   const second = __agent_loop_output_schema_value(repaired_text, schema)
   return final_result
-    + {text: repaired_text, visible_text: repaired_text, output: second.value, output_valid: second.ok}
+    + {
+    text: repaired_text,
+    visible_text: repaired_text,
+    output: second.value,
+    output_valid: second.ok,
+  }
 }
 
 @complexity(allow)
@@ -4238,7 +4413,8 @@ fn __agent_loop_run(message, session, initial_opts) {
     let terminal_write_unverified = false
     let made_source_write = false
     let terminal_verify_reserve_remaining = if __reserve_cfg.reserved_terminal_verify
-      || __reserve_cfg.zero_write_terminal_verify {
+      || __reserve_cfg
+      .zero_write_terminal_verify {
       __reserve_cfg.reserved_terminal_verify_iterations
     } else {
       0
@@ -4258,7 +4434,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         if boundary_exhaustion.exhausted {
           __agent_loop_emit_budget_exhausted(session.session_id, boundary_exhaustion)
           budget_exhausted_emitted = true
-          budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, boundary_exhaustion.kind)
+          budget_decisions = __agent_loop_record_budget_stop(
+            budget_decisions,
+            iteration,
+            current_max,
+            boundary_exhaustion.kind,
+          )
           final_status = "budget_exhausted"
           stop_reason = boundary_exhaustion.kind
           break
@@ -4277,9 +4458,12 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
         const iteration_index = iteration
-        const monologue_actuation_prior_read_streak = stall_state.monologue_actuation.read_only_streak
+        const monologue_actuation_prior_read_streak = stall_state.monologue_actuation
+          .read_only_streak
         stall_state = stall_state
-          + {monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0}}
+          + {
+          monologue_actuation: stall_state.monologue_actuation + {read_only_streak: 0},
+        }
         const pending_prefill = agent_take_one_shot_prefill(opts)
         opts = pending_prefill.options
         const iteration_opts = __agent_loop_effective_llm_options(opts)
@@ -4297,7 +4481,11 @@ fn __agent_loop_run(message, session, initial_opts) {
         } catch (e) {
           nil
         }
-        __agent_loop_checkpoint(session.session_id, "iteration_start", {iteration: iteration_index + 1})
+        __agent_loop_checkpoint(
+          session.session_id,
+          "iteration_start",
+          {iteration: iteration_index + 1},
+        )
         let turn_opts = agent_skills_match(session, iteration_opts, iteration_index)
         if turn_opts?._skill_activated_this_turn ?? false {
           opts = agent_reset_tool_surface_narrowing(opts)
@@ -4319,7 +4507,11 @@ fn __agent_loop_run(message, session, initial_opts) {
         const turn_llm_opts = __agent_loop_effective_llm_options(turn_opts)
         __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
         agent_autocompact_if_needed(session, turn_llm_opts)
-        __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: iteration_index + 1})
+        __agent_loop_checkpoint(
+          session.session_id,
+          "post_compact",
+          {iteration: iteration_index + 1},
+        )
         const input_guardrail_verdict = __run_input_guardrail(
           turn_llm_opts?._input_guardrail ?? opts?._input_guardrail,
           session,
@@ -4375,7 +4567,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         const base_llm_opts = if monologue_actuation.applied {
           direct_llm_opts
         } else {
-          __agent_loop_enable_equivalent_failover(direct_llm_opts, primary_provider, primary_model, opts)
+          __agent_loop_enable_equivalent_failover(
+            direct_llm_opts,
+            primary_provider,
+            primary_model,
+            opts,
+          )
         }
         const llm_opts = if one_shot_prefill != "" {
           llm_arm_one_shot_prefill(one_shot_prefill, base_llm_opts)
@@ -4405,11 +4602,15 @@ fn __agent_loop_run(message, session, initial_opts) {
           const failed_provider = to_string(turn_llm_opts?.provider ?? "")
           const failed_model = to_string(turn_llm_opts?.model ?? "")
           const was_escalated = (primary_provider != "" || primary_model != "")
-            && (failed_provider != primary_provider || failed_model != primary_model)
+            && (failed_provider
+            != primary_provider
+            || failed_model != primary_model)
           const failure_config = __agent_loop_consecutive_failure_config(budget)
           if was_escalated
             && __agent_loop_tracks_failure(call?.error, failure_config)
-            && __agent_loop_is_escalation_transport_failure(call?.error) {
+            && __agent_loop_is_escalation_transport_failure(
+            call?.error,
+          ) {
             iteration = iteration + 1
             __agent_loop_emit_provider_error(
               session.session_id,
@@ -4428,7 +4629,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           if __agent_loop_tracks_failure(call?.error, failure_config) {
             iteration = iteration + 1
             consecutive_failure_count = consecutive_failure_count + 1
-            const failure_aggregates = __agent_loop_budget_aggregates(session.session_id, nil, loop_start_ms)
+            const failure_aggregates = __agent_loop_budget_aggregates(
+              session.session_id,
+              nil,
+              loop_start_ms,
+            )
             agent_emit_event(
               session.session_id,
               "iteration_end",
@@ -4457,11 +4662,25 @@ fn __agent_loop_run(message, session, initial_opts) {
               if paused_for_ms > 0 {
                 __agent_loop_clock_sleep_ms(paused_for_ms)
               }
-              const exhaustion = __agent_loop_budget_aggregates(session.session_id, nil, loop_start_ms)
-                + {exhausted: true, kind: "consecutive_failures", iteration: iteration, max_iterations: current_max}
+              const exhaustion = __agent_loop_budget_aggregates(
+                session.session_id,
+                nil,
+                loop_start_ms,
+              )
+                + {
+                exhausted: true,
+                kind: "consecutive_failures",
+                iteration: iteration,
+                max_iterations: current_max,
+              }
               __agent_loop_emit_budget_exhausted(session.session_id, exhaustion)
               budget_exhausted_emitted = true
-              budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, exhaustion.kind)
+              budget_decisions = __agent_loop_record_budget_stop(
+                budget_decisions,
+                iteration,
+                current_max,
+                exhaustion.kind,
+              )
               final_status = "budget_exhausted"
               stop_reason = "circuit_breaker"
               terminal_error = call?.error
@@ -4480,7 +4699,11 @@ fn __agent_loop_run(message, session, initial_opts) {
             "",
           )
           if can_retry_primary {
-            const primary_route = __agent_loop_route_options(primary_provider, primary_model, primary_tool_format)
+            const primary_route = __agent_loop_route_options(
+              primary_provider,
+              primary_model,
+              primary_tool_format,
+            )
             opts = opts
               + primary_route
               + {llm_options: (opts?.llm_options ?? {}) + primary_route}
@@ -4501,7 +4724,11 @@ fn __agent_loop_run(message, session, initial_opts) {
         const parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
         const visible_text = __visible_text(parsed, raw_text)
         const normalized = llm_result
-          + {text: visible_text, visible_text: visible_text, _agent_tool_format: turn_opts?.tool_format ?? ""}
+          + {
+          text: visible_text,
+          visible_text: visible_text,
+          _agent_tool_format: turn_opts?.tool_format ?? "",
+        }
         const fallback_outcome = __detect_native_fallback(
           llm_result,
           parsed,
@@ -4516,8 +4743,16 @@ fn __agent_loop_run(message, session, initial_opts) {
         } else {
           __resolve_tool_calls(llm_result, parsed)
         }
-        const recovered_batch_drop = __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts)
-        tool_calls = agent_collapse_duplicate_read_calls(recovered_batch_drop.tool_calls, turn_opts?.tools, turn_opts)
+        const recovered_batch_drop = __drop_unsafe_recovered_text_batch(
+          parsed,
+          tool_calls,
+          turn_opts,
+        )
+        tool_calls = agent_collapse_duplicate_read_calls(
+          recovered_batch_drop.tool_calls,
+          turn_opts?.tools,
+          turn_opts,
+        )
         const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
           normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
         } else {
@@ -4549,13 +4784,24 @@ fn __agent_loop_run(message, session, initial_opts) {
             __agent_await_resumption_args(await_call)
           }
           if !is_err(await_parsed) {
-            __agent_loop_record_await_tool_results(session, await_call, tool_calls, unwrap(await_parsed).reason)
+            __agent_loop_record_await_tool_results(
+              session,
+              await_call,
+              tool_calls,
+              unwrap(await_parsed).reason,
+            )
           }
           const await_result = if is_err(await_parsed) {
             await_parsed
           } else {
             try {
-              __agent_loop_await_resumption(session, iteration, await_call, unwrap(await_parsed), opts)
+              __agent_loop_await_resumption(
+                session,
+                iteration,
+                await_call,
+                unwrap(await_parsed),
+                opts,
+              )
             }
           }
           if is_err(await_result) {
@@ -4573,7 +4819,12 @@ fn __agent_loop_run(message, session, initial_opts) {
               "agent_await_resumption",
               __agent_loop_invalid_await_resumption_feedback(await_error),
             )
-            const await_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+            const await_totals = agent_session_record_usage(
+              session.session_id,
+              llm_result,
+              turn_llm_opts,
+              iteration_index + 1,
+            )
             agent_emit_event(
               session.session_id,
               "iteration_end",
@@ -4601,7 +4852,12 @@ fn __agent_loop_run(message, session, initial_opts) {
             if await_exhaustion.exhausted {
               __agent_loop_emit_budget_exhausted(session.session_id, await_exhaustion)
               budget_exhausted_emitted = true
-              budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, await_exhaustion.kind)
+              budget_decisions = __agent_loop_record_budget_stop(
+                budget_decisions,
+                iteration,
+                current_max,
+                await_exhaustion.kind,
+              )
               final_status = "budget_exhausted"
               stop_reason = await_exhaustion.kind
               break
@@ -4609,7 +4865,12 @@ fn __agent_loop_run(message, session, initial_opts) {
             continue
           }
           suspend_result = unwrap(await_result)
-          const _totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+          const _totals = agent_session_record_usage(
+            session.session_id,
+            llm_result,
+            turn_llm_opts,
+            iteration_index + 1,
+          )
           agent_emit_event(
             session.session_id,
             "iteration_end",
@@ -4629,7 +4890,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           stop_reason = "suspended"
           break
         }
-        const stall_judge_due = agent_stall_done_judge_due(turn_opts, done_judge_invocations, iteration_index + 1)
+        const stall_judge_due = agent_stall_done_judge_due(
+          turn_opts,
+          done_judge_invocations,
+          iteration_index + 1,
+        )
         const stall_prev_turn_made_edit = __turn_made_edit(stall_prev_dispatch, opts?.tools)
         const stall_observation = agent_stall_observe_tool_calls(
           session.session_id,
@@ -4643,7 +4908,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           had_parse_errors,
           stall_prev_turn_made_edit,
           llm_result?.stop_reason ?? "",
-          {dispatch: stall_prev_dispatch, iteration: iteration_index + 1, session_id: session.session_id},
+          {
+            dispatch: stall_prev_dispatch,
+            iteration: iteration_index + 1,
+            session_id: session.session_id,
+          },
         )
         stall_state = stall_observation.state
         stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
@@ -4675,7 +4944,12 @@ fn __agent_loop_run(message, session, initial_opts) {
           if feedback != "" {
             agent_session_inject_feedback(session.session_id, "structural_validator", feedback)
           }
-          const structural_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+          const structural_totals = agent_session_record_usage(
+            session.session_id,
+            llm_result,
+            turn_llm_opts,
+            iteration_index + 1,
+          )
           agent_emit_event(
             session.session_id,
             "iteration_end",
@@ -4729,7 +5003,13 @@ fn __agent_loop_run(message, session, initial_opts) {
             _done_judge_trigger: "stalled",
             _done_judge_invocations: done_judge_invocations,
           }
-          const stall_verdict = agent_verify_or_continue(session, stall_verify_opts, "stalled", visible_text, iteration_index + 1)
+          const stall_verdict = agent_verify_or_continue(
+            session,
+            stall_verify_opts,
+            "stalled",
+            visible_text,
+            iteration_index + 1,
+          )
           if stall_verdict?.done_judge_invoked ?? false {
             done_judge_invocations = done_judge_invocations + 1
           }
@@ -4752,7 +5032,12 @@ fn __agent_loop_run(message, session, initial_opts) {
               )
             }
           } else {
-            const stall_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+            const stall_totals = agent_session_record_usage(
+              session.session_id,
+              llm_result,
+              turn_llm_opts,
+              iteration_index + 1,
+            )
             const tool_count = len(tool_calls)
             agent_emit_event(
               session.session_id,
@@ -4780,12 +5065,21 @@ fn __agent_loop_run(message, session, initial_opts) {
             if stall_exhaustion.exhausted {
               __agent_loop_emit_budget_exhausted(session.session_id, stall_exhaustion)
               budget_exhausted_emitted = true
-              budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, stall_exhaustion.kind)
+              budget_decisions = __agent_loop_record_budget_stop(
+                budget_decisions,
+                iteration,
+                current_max,
+                stall_exhaustion.kind,
+              )
               final_status = "budget_exhausted"
               stop_reason = stall_exhaustion.kind
               break
             }
-            const stalled_done_checkpoint = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+            const stalled_done_checkpoint = __agent_loop_checkpoint(
+              session.session_id,
+              "iteration_end",
+              {iteration: iteration_index + 1},
+            )
             if stalled_done_checkpoint.delivered > 0 {
               continue
             }
@@ -4796,7 +5090,10 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
         if stall_observation.hard_stop {
           if stall_hard_stop_rescues == 0
-            && __agent_loop_thrash_recovery_allowed(stall_warning, tool_calls) {
+            && __agent_loop_thrash_recovery_allowed(
+            stall_warning,
+            tool_calls,
+          ) {
             stall_hard_stop_rescues = stall_hard_stop_rescues + 1
             const old_limit = current_max
             current_max = max(current_max, iteration + 1)
@@ -4813,7 +5110,12 @@ fn __agent_loop_run(message, session, initial_opts) {
               __agent_loop_thrash_recovery_key(stall_warning),
               __agent_loop_thrash_recovery_feedback(stall_warning, visible_text),
             )
-            const thrash_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+            const thrash_totals = agent_session_record_usage(
+              session.session_id,
+              llm_result,
+              turn_llm_opts,
+              iteration_index + 1,
+            )
             agent_emit_event(
               session.session_id,
               "iteration_end",
@@ -4827,7 +5129,10 @@ fn __agent_loop_run(message, session, initial_opts) {
                   thrash_totals,
                   loop_start_ms,
                 )
-                  + {dispatch_skipped: true, skip_reason: __agent_loop_thrash_recovery_skip_reason(stall_warning)},
+                  + {
+                  dispatch_skipped: true,
+                  skip_reason: __agent_loop_thrash_recovery_skip_reason(stall_warning),
+                },
               },
             )
             const recovery_reason = __agent_loop_thrash_recovery_reason(stall_warning)
@@ -4856,7 +5161,11 @@ fn __agent_loop_run(message, session, initial_opts) {
             )
             continue
           }
-          const recovery_skip_outcome = __agent_loop_thrash_recovery_skip_outcome(stall_warning, tool_calls, stall_hard_stop_rescues)
+          const recovery_skip_outcome = __agent_loop_thrash_recovery_skip_outcome(
+            stall_warning,
+            tool_calls,
+            stall_hard_stop_rescues,
+          )
           __agent_loop_emit_thrash_recovery_checkpoint(
             session.session_id,
             iteration_index + 1,
@@ -4910,7 +5219,12 @@ fn __agent_loop_run(message, session, initial_opts) {
                 __inject_feedback_with_tool_repair(session.session_id, "step_judge", critique)
               }
             }
-            const step_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+            const step_totals = agent_session_record_usage(
+              session.session_id,
+              llm_result,
+              turn_llm_opts,
+              iteration_index + 1,
+            )
             agent_emit_event(
               session.session_id,
               "iteration_end",
@@ -4943,7 +5257,12 @@ fn __agent_loop_run(message, session, initial_opts) {
             if step_exhaustion.exhausted {
               __agent_loop_emit_budget_exhausted(session.session_id, step_exhaustion)
               budget_exhausted_emitted = true
-              budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, step_exhaustion.kind)
+              budget_decisions = __agent_loop_record_budget_stop(
+                budget_decisions,
+                iteration,
+                current_max,
+                step_exhaustion.kind,
+              )
               final_status = "budget_exhausted"
               stop_reason = step_exhaustion.kind
               break
@@ -4953,7 +5272,11 @@ fn __agent_loop_run(message, session, initial_opts) {
             step_judge_attempts = 0
           }
         }
-        const pre_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "pre_tool_dispatch", {iteration: iteration_index + 1})
+        const pre_dispatch_checkpoint = __agent_loop_checkpoint(
+          session.session_id,
+          "pre_tool_dispatch",
+          {iteration: iteration_index + 1},
+        )
         if pre_dispatch_checkpoint.dispatch_skipped {
           agent_session_record_undispatched_tool_results(
             session.session_id,
@@ -4962,7 +5285,12 @@ fn __agent_loop_run(message, session, initial_opts) {
             "a user interrupt arrived before this tool call was dispatched",
           )
           const tool_count_skipped = len(tool_calls)
-          const totals_skipped = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+          const totals_skipped = agent_session_record_usage(
+            session.session_id,
+            llm_result,
+            turn_llm_opts,
+            iteration_index + 1,
+          )
           agent_emit_event(
             session.session_id,
             "iteration_end",
@@ -4990,7 +5318,12 @@ fn __agent_loop_run(message, session, initial_opts) {
           if skipped_exhaustion.exhausted {
             __agent_loop_emit_budget_exhausted(session.session_id, skipped_exhaustion)
             budget_exhausted_emitted = true
-            budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, skipped_exhaustion.kind)
+            budget_decisions = __agent_loop_record_budget_stop(
+              budget_decisions,
+              iteration,
+              current_max,
+              skipped_exhaustion.kind,
+            )
             final_status = "budget_exhausted"
             stop_reason = skipped_exhaustion.kind
             break
@@ -5024,16 +5357,32 @@ fn __agent_loop_run(message, session, initial_opts) {
             monologue_actuation_prior_read_streak,
             len(actuation_dispatch_results) > 0
               && len(actuation_dispatch_results) == len(tool_calls)
-              && actuation_dispatch_results.all({ result -> __tool_result_ok(result) })
+              && actuation_dispatch_results.all(
+              { result -> __tool_result_ok(result) },
+            )
               && agent_tool_calls_are_read_only(tool_calls, turn_opts?.tools, turn_opts?.policy),
           ),
         }
         stall_prev_dispatch = dispatch
-        audit_background_tasks = __spawn_audit_flushes(audit_background_tasks, dispatched.audit_flushes)
+        audit_background_tasks = __spawn_audit_flushes(
+          audit_background_tasks,
+          dispatched.audit_flushes,
+        )
         opts = __sync_tool_search_state(opts, dispatched.turn_opts)
-        successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))
-        rejected_tools_seen = __merge_tool_names(rejected_tools_seen, __tool_names_by_status(dispatch, false))
-        const totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
+        successful_tools_seen = __merge_tool_names(
+          successful_tools_seen,
+          __tool_names_by_status(dispatch, true),
+        )
+        rejected_tools_seen = __merge_tool_names(
+          rejected_tools_seen,
+          __tool_names_by_status(dispatch, false),
+        )
+        const totals = agent_session_record_usage(
+          session.session_id,
+          llm_result,
+          turn_llm_opts,
+          iteration_index + 1,
+        )
         const tool_count = len(tool_calls)
         agent_emit_event(
           session.session_id,
@@ -5050,7 +5399,11 @@ fn __agent_loop_run(message, session, initial_opts) {
             ),
           },
         )
-        const post_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "post_tool_dispatch", {iteration: iteration_index + 1})
+        const post_dispatch_checkpoint = __agent_loop_checkpoint(
+          session.session_id,
+          "post_tool_dispatch",
+          {iteration: iteration_index + 1},
+        )
         const bridge_step_delivered = post_dispatch_checkpoint.delivered
         const exhaustion = __agent_loop_budget_exhaustion(
           session.session_id,
@@ -5063,7 +5416,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         if exhaustion.exhausted {
           __agent_loop_emit_budget_exhausted(session.session_id, exhaustion)
           budget_exhausted_emitted = true
-          budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, exhaustion.kind)
+          budget_decisions = __agent_loop_record_budget_stop(
+            budget_decisions,
+            iteration,
+            current_max,
+            exhaustion.kind,
+          )
           final_status = "budget_exhausted"
           stop_reason = exhaustion.kind
           break
@@ -5083,7 +5441,10 @@ fn __agent_loop_run(message, session, initial_opts) {
         const text_only_nudge_budget_exceeded = turn_loop_until_done
           && tool_count == 0
           && consecutive_text_only > turn_max_nudges
-        const missing_required_for_loop = agent_required_tools_missing_from_session(opts, successful_tools_seen)
+        const missing_required_for_loop = agent_required_tools_missing_from_session(
+          opts,
+          successful_tools_seen,
+        )
         const cadence_loop_state = agent_loop_snapshot_state(
           {
             iteration: iteration,
@@ -5121,18 +5482,26 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
         const outcome = __agent_loop_with_llm_render_context(
           turn_llm_opts,
-          { _effective -> agent_compute_post_turn(
-            session,
-            normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
-            dispatch,
-            post_turn_opts,
-            iteration_index,
-          ) },
+          { _effective ->
+            agent_compute_post_turn(
+              session,
+              normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
+              dispatch,
+              post_turn_opts,
+              iteration_index,
+            )
+          },
         )
         opts = __apply_post_turn_options(opts, outcome)
         opts = agent_stance_post_turn(session, opts)
         const repair_cfg = agent_stall_repair_config(turn_opts?.stall_diagnostics)
-        const reverify_mandated = __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, opts?.tools)
+        const reverify_mandated = __agent_loop_post_edit_reverify_mandated(
+          repair_cfg,
+          turn_opts,
+          stall_state,
+          dispatch,
+          opts?.tools,
+        )
         if __turn_made_edit(dispatch, opts?.tools) {
           terminal_write_unverified = true
           made_source_write = true
@@ -5236,7 +5605,10 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
         }
         if should_continue && post_edit_reverify_confirmed && iteration >= current_max {
-          const missing_after_reverify = agent_required_tools_missing_from_session(opts, successful_tools_seen)
+          const missing_after_reverify = agent_required_tools_missing_from_session(
+            opts,
+            successful_tools_seen,
+          )
           if len(missing_after_reverify) == 0 {
             final_status = "done"
             stop_reason = "post_edit_reverify"
@@ -5244,9 +5616,15 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
         }
         if should_continue {
-          const repeated_verified_pass = agent_stall_repeated_verified_pass(turn_opts?.stall_diagnostics, stall_state)
+          const repeated_verified_pass = agent_stall_repeated_verified_pass(
+            turn_opts?.stall_diagnostics,
+            stall_state,
+          )
           if repeated_verified_pass && len(turn_rejected) == 0 && trim(visible_text) == "" {
-            const missing_after_verified_pass = agent_required_tools_missing_from_session(opts, successful_tools_seen)
+            const missing_after_verified_pass = agent_required_tools_missing_from_session(
+              opts,
+              successful_tools_seen,
+            )
             if len(missing_after_verified_pass) == 0 {
               final_status = "done"
               stop_reason = "repeated_verified_pass"
@@ -5276,7 +5654,12 @@ fn __agent_loop_run(message, session, initial_opts) {
             const has_tools = len(opts?.tools?.tools ?? []) > 0
             const paradigm = agent_tool_call_paradigm(turn_opts)
             const made_tool_calls = tool_count > 0
-            const nudge_text = __progress_nudge_text(turns_since_progress, has_tools, paradigm, made_tool_calls)
+            const nudge_text = __progress_nudge_text(
+              turns_since_progress,
+              has_tools,
+              paradigm,
+              made_tool_calls,
+            )
             __inject_feedback_with_tool_repair(session.session_id, "no_progress_streak", nudge_text)
             agent_emit_event(
               session.session_id,
@@ -5292,7 +5675,10 @@ fn __agent_loop_run(message, session, initial_opts) {
             )
           }
         }
-        const loop_no_net_progress = agent_stall_no_net_progress(turn_opts?.stall_diagnostics, stall_state)
+        const loop_no_net_progress = agent_stall_no_net_progress(
+          turn_opts?.stall_diagnostics,
+          stall_state,
+        )
           || agent_stall_repeated_verified_pass(turn_opts?.stall_diagnostics, stall_state)
         const loop_state = agent_loop_snapshot_state(
           {
@@ -5393,7 +5779,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         agent_emit_event(
           session.session_id,
           "reserved_terminal_verify",
-          {kind: reserve_kind, phase: "verify_failed", iteration: iteration, terminal_status: final_status},
+          {
+            kind: reserve_kind,
+            phase: "verify_failed",
+            iteration: iteration,
+            terminal_status: final_status,
+          },
         )
         if terminal_verify_reserve_remaining > 0 && verify_attempts < max_verify_attempts {
           terminal_verify_reserve_remaining = terminal_verify_reserve_remaining - 1
@@ -5417,7 +5808,8 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = reserve_kind + "_failed"
       }
       if final_status != "" && suspend_result == nil && terminal_error == nil
-        && terminal_callback_continues == 0
+        && terminal_callback_continues
+        == 0
         && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
         const terminal_outcome = agent_compute_terminal_callback(
           session,
@@ -5438,7 +5830,12 @@ fn __agent_loop_run(message, session, initial_opts) {
           const old_limit = current_max
           const extra = __agent_loop_terminal_callback_extend_by(budget)
           current_max = max(current_max, iteration + extra)
-          budget_decisions = __agent_loop_record_terminal_callback_continue(budget_decisions, iteration, old_limit, current_max)
+          budget_decisions = __agent_loop_record_terminal_callback_continue(
+            budget_decisions,
+            iteration,
+            old_limit,
+            current_max,
+          )
           agent_emit_event(
             session.session_id,
             "loop_control_decision",
@@ -5460,7 +5857,11 @@ fn __agent_loop_run(message, session, initial_opts) {
       break
     }
     if final_status == "budget_exhausted" && !budget_exhausted_emitted {
-      const terminal_exhaustion = __agent_loop_budget_aggregates(session.session_id, nil, loop_start_ms)
+      const terminal_exhaustion = __agent_loop_budget_aggregates(
+        session.session_id,
+        nil,
+        loop_start_ms,
+      )
         + {
         exhausted: true,
         kind: stop_reason ?? "max_iterations",
@@ -5469,7 +5870,12 @@ fn __agent_loop_run(message, session, initial_opts) {
       }
       __agent_loop_emit_budget_exhausted(session.session_id, terminal_exhaustion)
       budget_exhausted_emitted = true
-      budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, terminal_exhaustion.kind)
+      budget_decisions = __agent_loop_record_budget_stop(
+        budget_decisions,
+        iteration,
+        current_max,
+        terminal_exhaustion.kind,
+      )
     }
     const wrapup_enabled = opts?.final_wrapup ?? true
     // A no-tool terminal normally skips wrap-up (nothing to summarize), but a
@@ -5515,7 +5921,11 @@ fn __agent_loop_run(message, session, initial_opts) {
     } else {
       stall_state
     }
-    const result_with_stalls = agent_stall_apply_result(result, stall_enabled_seen, final_stall_state)
+    const result_with_stalls = agent_stall_apply_result(
+      result,
+      stall_enabled_seen,
+      final_stall_state,
+    )
     const enforced = if suspend_result != nil {
       result_with_stalls
     } else {
@@ -5561,7 +5971,13 @@ fn __agent_loop_run(message, session, initial_opts) {
       final_result = final_result + suspend_result
     }
     if terminated_ok && opts?.output_schema != nil {
-      final_result = __agent_loop_apply_output_schema(final_result, opts, session, message, iteration)
+      final_result = __agent_loop_apply_output_schema(
+        final_result,
+        opts,
+        session,
+        message,
+        iteration,
+      )
     }
     final_result
   }

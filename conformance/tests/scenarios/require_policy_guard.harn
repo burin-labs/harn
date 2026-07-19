@@ -31,7 +31,12 @@ pipeline test(task) {
   const mismatch = require_policy(
     {
       matches: [
-        {kind: "tenant_mismatch", label: "tenant", left: "req.path_params.tenant", right: {value: "globex"}},
+        {
+          kind: "tenant_mismatch",
+          label: "tenant",
+          left: "req.path_params.tenant",
+          right: {value: "globex"},
+        },
       ],
     },
     req,
@@ -55,7 +60,14 @@ pipeline test(task) {
       method_path: "body.method",
       methods: {
         "doc.write": {
-          matches: [{kind: "resource_mismatch", label: "owner", left: "body.owner", right: {value: "user_2"}}],
+          matches: [
+            {
+              kind: "resource_mismatch",
+              label: "owner",
+              left: "body.owner",
+              right: {value: "user_2"},
+            },
+          ],
         },
       },
     },

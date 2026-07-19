@@ -12,19 +12,21 @@ import {
 } from "std/llm/tool_middleware"
 
 fn synthetic_next() {
-  return { call -> return {
-    ok: true,
-    status: "ok",
-    tool_name: call.tool_name,
-    tool_call_id: call.call_id,
-    arguments: call.tool_args,
-    result: "ran " + call.tool_name,
-    rendered_result: "ran " + call.tool_name,
-    observation: "[result of " + call.tool_name + "]\n",
-    error: nil,
-    error_category: nil,
-    executor: "harn",
-  } }
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "ran " + call.tool_name,
+      rendered_result: "ran " + call.tool_name,
+      observation: "[result of " + call.tool_name + "]\n",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
 }
 
 fn envelope(name, args) {
@@ -53,7 +55,9 @@ pipeline default() {
     let result = inner(call + {tool_args: call.tool_args + {seen_by: "outer"}})
     return result + {wrapped_by: "outer"}
   }
-  const middle = { call, inner -> return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}}) }
+  const middle = { call, inner ->
+    return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}})
+  }
   const composed = compose_tool_callers([outer, middle])
   const r2 = composed(envelope("write", {path: "/tmp/x"}), next)
   __io_println(r2.wrapped_by)

@@ -11,9 +11,12 @@ pipeline main() {
       annotations: {kind: "execute", side_effect_level: "process_exec", emits_artifacts: true},
     },
   )
-  const missing_reader = tool_surface_validate({tools: tools, policy: {side_effect_level: "process_exec"}})
+  const missing_reader = tool_surface_validate(
+    {tools: tools, policy: {side_effect_level: "process_exec"}},
+  )
   require !missing_reader.valid, "execute artifact tool without reader is invalid"
-  require missing_reader.diagnostics[0].code == "TOOL_SURFACE_MISSING_RESULT_READER", "stable missing-reader code"
+  require missing_reader.diagnostics[0].code == "TOOL_SURFACE_MISSING_RESULT_READER",
+    "stable missing-reader code"
   tools = tool_define(
     tools,
     "read_command_output",
@@ -31,7 +34,9 @@ pipeline main() {
       policy: {
         tools: ["run_command", "read_command_output"],
         side_effect_level: "process_exec",
-        tool_arg_constraints: [{tool: "run_command", arg_key: "missing", arg_patterns: ["cargo *"]}],
+        tool_arg_constraints: [
+          {tool: "run_command", arg_key: "missing", arg_patterns: ["cargo *"]},
+        ],
       },
       approval_policy: {auto_deny: ["delete_file"]},
       system: "Use run_command({command: \"cargo test\"}) and never delete_file({path: \"x\"}).",

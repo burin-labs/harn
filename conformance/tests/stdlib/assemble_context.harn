@@ -6,7 +6,9 @@ pipeline test(task) {
   const short_a = artifact(
     {id: "short_a", kind: "summary", text: "parser drift diagnostics traced to tokenizer spans"},
   )
-  const short_b = artifact({id: "short_b", kind: "summary", text: "completely unrelated weather report on Tuesday"})
+  const short_b = artifact(
+    {id: "short_b", kind: "summary", text: "completely unrelated weather report on Tuesday"},
+  )
   const large = artifact({id: "large", kind: "workspace_snapshot", text: long_body})
   // Relevance strategy with enough budget to include both short artifacts.
   const packed = assemble_context(
@@ -86,15 +88,17 @@ pipeline test(task) {
       dedup: "none",
       strategy: "relevance",
       query: "parser",
-      ranker_callback: { _q, chunks -> chunks.map(
-        { c ->
-          if c.artifact_id == "short_b" {
-            0.99
-          } else {
-            0.01
-          }
-        },
-      ) },
+      ranker_callback: { _q, chunks ->
+        chunks.map(
+          { c ->
+            if c.artifact_id == "short_b" {
+              0.99
+            } else {
+              0.01
+            }
+          },
+        )
+      },
     },
   )
   __io_println(len(custom.chunks) == 1)

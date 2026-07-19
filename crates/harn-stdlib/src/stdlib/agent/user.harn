@@ -38,7 +38,12 @@ fn __sim_user_truncate(text, max_chars) {
 }
 
 fn __sim_user_reply(message, reason = nil, metadata = nil) {
-  return {action: "reply", message: __sim_user_string(message), reason: reason, metadata: metadata ?? {}}
+  return {
+    action: "reply",
+    message: __sim_user_string(message),
+    reason: reason,
+    metadata: metadata ?? {},
+  }
 }
 
 fn __sim_user_stop(reason = nil, metadata = nil) {
@@ -175,11 +180,15 @@ fn __sim_user_preflight(answerer) {
   const state = __sim_user_state(answerer)
   if state?.stopped ?? false {
     if answerer?.max_replies != nil
-      && __sim_user_state_int(answerer, "replies", 0) >= answerer.max_replies {
+      && __sim_user_state_int(answerer, "replies", 0)
+      >= answerer
+      .max_replies {
       return __sim_user_stop("max_replies")
     }
     if answerer?.max_llm_calls != nil
-      && __sim_user_state_int(answerer, "llm_calls", 0) >= answerer.max_llm_calls {
+      && __sim_user_state_int(answerer, "llm_calls", 0)
+      >= answerer
+      .max_llm_calls {
       return __sim_user_stop("max_llm_calls")
     }
     return __sim_user_stop("stopped")
@@ -395,7 +404,8 @@ fn __scripted_user_respond(answerer, payload = nil) {
 
 fn __sim_user_config(task_or_config, behavior, tools, model, options) {
   if type_of(task_or_config) == "dict" && behavior == nil && tools == nil && model == nil
-    && options == nil {
+    && options
+    == nil {
     return task_or_config
   }
   const opts = options ?? {}
@@ -469,7 +479,10 @@ fn __agentic_user_bindings(answerer, payload) {
 fn __agentic_user_prompt(answerer, payload) {
   const bindings = __agentic_user_bindings(answerer, payload)
   const system = answerer?.system_prompt
-    ?? render_agent_prompt("agentic_user_system.harn.prompt", bindings)
+    ?? render_agent_prompt(
+    "agentic_user_system.harn.prompt",
+    bindings,
+  )
   const prompt = answerer?.prompt
     ?? render_agent_prompt("agentic_user_user.harn.prompt", bindings)
   return {system: system, prompt: prompt}
@@ -724,8 +737,15 @@ pub fn user_tools(answerer, registry = nil, options = nil) {
           ?? "No further simulated user input is available; continue or finish from existing context."
       },
       parameters: {
-        question: {type: "string", description: "The clarification question to ask the simulated user."},
-        context: {type: "string", required: false, description: "Optional concise context for the question."},
+        question: {
+          type: "string",
+          description: "The clarification question to ask the simulated user.",
+        },
+        context: {
+          type: "string",
+          required: false,
+          description: "Optional concise context for the question.",
+        },
         choices: {
           type: "array",
           required: false,

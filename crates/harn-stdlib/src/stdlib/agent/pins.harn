@@ -120,7 +120,9 @@ pub fn pin(kind, content, opts = nil) {
   const allowed = __pin_allowed_kinds(options)
   if type_of(kind) != "string" || !contains(allowed, kind) {
     throw "pin(kind, content, opts?): kind must be one of " + join(allowed, ", ") + "; got "
-      + to_string(kind)
+      + to_string(
+      kind,
+    )
   }
   if type_of(content) != "string" || content == "" {
     throw "pin(\"" + kind + "\", content): content must be a non-empty string"

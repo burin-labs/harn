@@ -41,7 +41,9 @@ pipeline main() {
       )
       const suspended = wait_agent(handle)
       __io_println("status=" + suspended.status)
-      __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+      __io_println(
+        "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
+      )
       const _ = advance_time(6 * 60 * 1000)
       yield_now()
       yield_now()

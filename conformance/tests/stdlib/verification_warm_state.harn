@@ -49,13 +49,21 @@ pipeline test(task) {
         {
           id: "svc/warm",
           scope: {language: "toolchainy", task: "post_edit"},
-          check: {rung: "R2", command: {mode: "shell", command: "echo warm"}, resourceClass: "moderate"},
+          check: {
+            rung: "R2",
+            command: {mode: "shell", command: "echo warm"},
+            resourceClass: "moderate",
+          },
           timings: {warmMs: {p95: 120}, coldMs: {p95: 5000}},
         },
         {
           id: "svc/cold",
           scope: {language: "toolchainy", task: "post_edit"},
-          check: {rung: "R2", command: {mode: "shell", command: "echo cold"}, resourceClass: "moderate"},
+          check: {
+            rung: "R2",
+            command: {mode: "shell", command: "echo cold"},
+            resourceClass: "moderate",
+          },
           timings: {warmMs: {p95: 10}, coldMs: {p95: 7000}},
         },
       ],

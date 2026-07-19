@@ -169,7 +169,13 @@ pub fn selected_packages(
   const all_crates = workspace.all_crates ?? []
   let hits = global_hits(files, global_paths)
   if hits.count > 0 {
-    return {mode: "full", selected: all_crates, global_hits: hits, directly_changed: [], unowned: []}
+    return {
+      mode: "full",
+      selected: all_crates,
+      global_hits: hits,
+      directly_changed: [],
+      unowned: [],
+    }
   }
   let directly_changed: list<string> = []
   let unowned: list<string> = []
@@ -313,7 +319,10 @@ fn main(harness: Harness) {
     if (selection.unowned ?? []).count > 0 {
       harness.stdio.eprintln(
         "affected-crates: note: non-crate files also changed (not test-relevant at the crate level): "
-          + preview(selection.unowned, 8),
+          + preview(
+          selection.unowned,
+          8,
+        ),
       )
     }
   }

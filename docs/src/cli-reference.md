@@ -802,6 +802,11 @@ not count toward the line width**. This matches `rustfmt`, Prettier, and
 There is no separate "line too long" lint — width is a formatter concern, so a
 trailing comment that overflows is never reported as a diagnostic.
 
+After formatting, `harn fmt` verifies the complete emitted output as a final
+guard. If a breakable line still exceeds the configured width, the command
+reports the offending line and leaves the file unchanged; only a single
+unbreakable token or an overflowing comment may remain longer.
+
 ## harn lint
 
 Lint one or more `.harn` files or directories for common issues (unused

@@ -18,7 +18,10 @@ fn tools() {
 
 pipeline default() {
   with_llm_script(
-    [llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"query\":\"x\"}}\n```"), llm_text("evidence")],
+    [
+      llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"query\":\"x\"}}\n```"),
+      llm_text("evidence"),
+    ],
     { ->
       const result = agent_loop(
         "Use lookup.",

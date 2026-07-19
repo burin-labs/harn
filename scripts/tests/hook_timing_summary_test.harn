@@ -105,7 +105,10 @@ pipeline test_slowest_hook_timings_honors_limit(task) {
 @test
 pipeline test_filter_hook_timings_combines_repo_hook_and_min_duration(task) {
   const parsed = parse_hook_timing_text(SAMPLE_LOG)
-  const filtered = filter_hook_timings(parsed.events, {repo: "harn4745", hook: "pre-push", min_ms: 1000})
+  const filtered = filter_hook_timings(
+    parsed.events,
+    {repo: "harn4745", hook: "pre-push", min_ms: 1000},
+  )
   assert_eq(filtered.count, 1)
   assert_eq(filtered[0]?.duration_ms, 405030)
 }

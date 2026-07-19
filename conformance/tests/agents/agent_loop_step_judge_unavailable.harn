@@ -61,7 +61,9 @@ pipeline default() {
   with_llm_script(
     [
       llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"pass\",\"reasoning\":\"correct\",\"critique\":\"\",\"confidence\":0.95}"),
+      llm_text(
+        "{\"verdict\":\"pass\",\"reasoning\":\"correct\",\"critique\":\"\",\"confidence\":0.95}",
+      ),
     ],
     { ->
       const session = "step-judge-pass-" + uuid()

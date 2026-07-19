@@ -29,7 +29,10 @@ pub fn append_blocks(page_id, blocks, options = nil) {
 }
 
 pub fn query_database(id, filter = nil, sorts = nil, options = nil) {
-  return __call("query_database", filter_nil((options ?? {}) + {id: id, filter: filter, sorts: sorts}))
+  return __call(
+    "query_database",
+    filter_nil((options ?? {}) + {id: id, filter: filter, sorts: sorts}),
+  )
 }
 
 pub fn search(query, options = nil) {

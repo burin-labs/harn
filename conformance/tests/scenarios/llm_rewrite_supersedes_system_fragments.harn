@@ -29,15 +29,24 @@ pipeline test(task) {
         fn(prompt, system, opts) { return {system: "REWRITTEN PRIMARY"} },
       )
       const _ = rewriter(call)
-      assert(llm_mock_calls()[0].system == "REWRITTEN PRIMARY", "system rewrite wins over fragments")
+      assert(
+        llm_mock_calls()[0].system == "REWRITTEN PRIMARY",
+        "system rewrite wins over fragments",
+      )
     },
   )
   with_llm_script(
     [llm_text("ok")],
     { ->
-      const passthrough = with_prompt_rewrite(default_llm_caller(), fn(prompt, system, opts) { return {} })
+      const passthrough = with_prompt_rewrite(
+        default_llm_caller(),
+        fn(prompt, system, opts) { return {} },
+      )
       const _ = passthrough(call)
-      assert(llm_mock_calls()[0].system == "ORIGINAL JOINED", "fragments retained when system untouched")
+      assert(
+        llm_mock_calls()[0].system == "ORIGINAL JOINED",
+        "fragments retained when system untouched",
+      )
       log("llm_rewrite_supersedes_system_fragments tests passed")
     },
   )

@@ -175,11 +175,15 @@ fn __case_status(evidence: dict, minimum_trials: int) -> dict {
   } else if per_case_count != total_cases {
     status = "fail"
     reason = "per_case_count_mismatch: " + to_string(per_case_count) + "/" + to_string(total_cases)
-    errors = errors + [case_id + " " + route_role + " per_case row count does not match summary total"]
+    errors = errors
+      + [case_id + " " + route_role + " per_case row count does not match summary total"]
   } else if !__case_ids_match(case_id, per_case_ids) {
     status = "fail"
     reason = "per_case_identity_mismatch"
-    errors = errors + [case_id + " " + route_role + " per_case rows do not all match the required case id"]
+    errors = errors
+      + [
+      case_id + " " + route_role + " per_case rows do not all match the required case id",
+    ]
   } else if route_role == "adapter" && (passed_cases != total_cases || len(failed_case_reasons) > 0) {
     status = "fail"
     reason = to_string(passed_cases) + "/" + to_string(total_cases) + " adapter probe cases passed"
@@ -239,7 +243,10 @@ fn __promotion_report(bundle: dict) -> dict {
   const provenance_exception = safe_string(request["trainer_provenance_exception"], "")
   if !safe_bool(trainer_identity["promotable"], false) && provenance_exception == "" {
     for error in safe_list(trainer_identity["errors"]) {
-      errors = errors + ["trainer identity: " + safe_string(error, "trainer identity is not promotable")]
+      errors = errors
+        + [
+        "trainer identity: " + safe_string(error, "trainer identity is not promotable"),
+      ]
     }
     if len(safe_list(trainer_identity["errors"])) == 0 {
       errors = errors + ["trainer identity is not promotable"]
@@ -248,7 +255,9 @@ fn __promotion_report(bundle: dict) -> dict {
   if !safe_bool(trainer_environment["promotable"], false) && provenance_exception == "" {
     for error in safe_list(trainer_environment["errors"]) {
       errors = errors
-        + ["trainer environment: " + safe_string(error, "trainer environment is not promotable")]
+        + [
+        "trainer environment: " + safe_string(error, "trainer environment is not promotable"),
+      ]
     }
     if len(safe_list(trainer_environment["errors"])) == 0 {
       errors = errors + ["trainer environment is not promotable"]

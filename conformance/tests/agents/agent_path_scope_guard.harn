@@ -18,17 +18,19 @@ fn path_tools() {
 fn run_read(session, path) {
   return with_llm_script(
     [{tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]}, llm_text("done")],
-    { -> return agent_loop(
-      "Use Read",
-      nil,
-      {
-        session_id: session,
-        provider: "mock",
-        tools: path_tools(),
-        tool_format: "native",
-        max_iterations: 2,
-      },
-    ) },
+    { ->
+      return agent_loop(
+        "Use Read",
+        nil,
+        {
+          session_id: session,
+          provider: "mock",
+          tools: path_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+        },
+      )
+    },
   )
 }
 

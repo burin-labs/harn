@@ -12,13 +12,15 @@ pipeline main() {
     },
   ]
   const manifest = composition_binding_manifest(tools)
-  const dispatch = { name, input -> return if name == "read_file" {
-    {kind: "text", path: input.path, content: "<" + input.path + ">"}
-  } else if name == "search" {
-    {kind: "matches", query: input.query, count: 2}
-  } else {
-    {error: "unknown binding " + name}
-  } }
+  const dispatch = { name, input ->
+    return if name == "read_file" {
+      {kind: "text", path: input.path, content: "<" + input.path + ">"}
+    } else if name == "search" {
+      {kind: "matches", query: input.query, count: 2}
+    } else {
+      {error: "unknown binding " + name}
+    }
+  }
   const report = composition_execute(
     "let readme = read_file({path: \"README.md\"})\nlet hits = search({query: readme.content})\nreturn {readme_content: readme.content, hits_query: hits.query, hits_count: hits.count}",
     manifest,

@@ -73,7 +73,12 @@ pipeline default(_task) {
   //    `<previous_chats>` element gets repeated `<item>` children
   //    automatically — the canonical shape for "list of strings"
   //    fields in system prompts.
-  const context = {config: merged.config, goal: merged.goal, persona: merged.persona, previous_chats: chats}
+  const context = {
+    config: merged.config,
+    goal: merged.goal,
+    persona: merged.persona,
+    previous_chats: chats,
+  }
   const xml = to_xml(context, {pretty: true, root: "context"})
   // 5. Round-trip through the parser so the demo asserts to_xml +
   //    from_xml are inverses on real data. The runner just verifies
@@ -84,7 +89,10 @@ pipeline default(_task) {
   //     `<addresses><a>...</a><a>...</a></addresses>` where `a` is
   //     meaningful), `preserve_repeated_tag` keeps the tag instead
   //     of collapsing the children to a bare list.
-  const lossless = from_xml("<addresses><a>1</a><a>2</a></addresses>", {preserve_repeated_tag: true})
+  const lossless = from_xml(
+    "<addresses><a>1</a><a>2</a></addresses>",
+    {preserve_repeated_tag: true},
+  )
   const lossless_count = len(lossless.addresses.a)
   // 6. Frame the rendered context inside a 60-column margin with a
   //    visible divider so it's easy to diff against future renders.

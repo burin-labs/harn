@@ -247,7 +247,9 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("error: no positive .harn files found for tree-sitter parse sweep")
     return 1
   }
-  const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-tree-sitter-paths.XXXXXX"]})
+  const mk = harness.process.spawn_captured(
+    {cmd: "mktemp", args: ["-d", "harn-tree-sitter-paths.XXXXXX"]},
+  )
   if !mk.success {
     harness.stdio.eprintln("error: could not create tree-sitter path-list temp directory")
     return 1
@@ -261,7 +263,16 @@ fn main(harness: Harness) -> int {
   const result = harness.process.spawn_captured(
     {
       cmd: path_join(dir, "scripts/tree-sitter-cli.sh"),
-      args: ["parse", "--quiet", "--lib-path", lib_path, "--lang-name", "harn", "--paths", paths_file],
+      args: [
+        "parse",
+        "--quiet",
+        "--lib-path",
+        lib_path,
+        "--lang-name",
+        "harn",
+        "--paths",
+        paths_file,
+      ],
       cwd: dir,
     },
   )

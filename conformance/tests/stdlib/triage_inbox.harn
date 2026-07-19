@@ -2,7 +2,9 @@ import { triage_emit, triage_normalize, triage_start_my_day } from "std/triage"
 
 fn fixture(harness: Harness, name) {
   const root = project_root() ?? cwd()
-  return json_parse(harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
+  return json_parse(
+    harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")),
+  )
 }
 
 pipeline default() {
@@ -26,7 +28,8 @@ pipeline default() {
   __io_println(github_event.id == github_retry_event.id)
   __io_println(github_event.raw_payload.issue.title)
   __io_println(
-    github_event.action_intents.find({ intent -> intent.kind == "convert_to_task" }).requires_approval,
+    github_event.action_intents.find({ intent -> intent.kind == "convert_to_task" })
+      .requires_approval,
   )
   const missing_source = try {
     triage_normalize(
@@ -58,7 +61,9 @@ pipeline default() {
   __io_println(len(feed.events))
   __io_println(len(feed.receipts))
   const receipt = triage_emit(github_event, {topic: "triage.inbox.test.single"})
-  const stream = event_log.subscribe({topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1})
+  const stream = event_log.subscribe(
+    {topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1},
+  )
   const logged = stream.next().value
   __io_println(logged.kind)
   __io_println(logged.payload.provider)

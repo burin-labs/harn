@@ -175,7 +175,8 @@ fn __alternative_suffix(
   selected_model: string,
 ) -> string {
   const local = __resolve_local_model(local_model)
-  if local != nil && (local["provider"] != selected_provider || local["model_id"] != selected_model) {
+  if local != nil
+    && (local["provider"] != selected_provider || local["model_id"] != selected_model) {
     const cached = if __safe_bool(__safe_dict(local_model)["cached"], false) {
       "cached"
     } else {
@@ -274,16 +275,25 @@ fn main(harness: Harness) -> int {
     return 1
   }
   const local_resolved = __resolve_local_model(local_model)
-  const selected = if local_resolved != nil && __safe_bool(__safe_dict(local_model)["cached"], false) {
+  const selected = if local_resolved != nil
+    && __safe_bool(__safe_dict(local_model)["cached"], false) {
     local_resolved
   } else {
     resolved
   }
   const provider = selected["provider"]
   const model_id = selected["model_id"]
-  const harn_selector = __safe_string(selected["harn_selector"], __harn_selector_for(provider, model_id))
+  const harn_selector = __safe_string(
+    selected["harn_selector"],
+    __harn_selector_for(provider, model_id),
+  )
   const rationale = __rationale(ram["available_bytes"], gpu, has_provider_key, model_id)
-    + __alternative_suffix(local_model, cloud_model, provider, model_id)
+    + __alternative_suffix(
+    local_model,
+    cloud_model,
+    provider,
+    model_id,
+  )
   const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     const envelope = {

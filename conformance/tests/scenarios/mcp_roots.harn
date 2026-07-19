@@ -4,7 +4,10 @@ pipeline default() {
   require local_roots[0].uri.starts_with("file://"), "root URI should be a file URI"
   require local_roots[0].path.count > 0, "script root should include a local path"
   const root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", harness.env.get("HARN_BIN") ?? "harn")
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    harness.env.get("HARN_BIN") ?? "harn",
+  )
   const server_path = path_join(root, "conformance/helpers/mcp_roots_server.harn")
   const client = mcp_connect(harn_bin, ["serve", "mcp", server_path])
   const tools = mcp_list_tools(client)

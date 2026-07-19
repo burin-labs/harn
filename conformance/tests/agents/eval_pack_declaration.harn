@@ -27,7 +27,13 @@ pipeline main() {
     base_dir: dir
     baseline: "candidate.json"
     fixtures: [{id: "candidate-run", kind: "run-record", path: "candidate.json"}]
-    rubrics: [{id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: "completed"}]}]
+    rubrics: [
+      {
+        id: "status",
+        kind: "deterministic",
+        assertions: [{kind: "run-status", expected: "completed"}],
+      },
+    ]
     cases: [{id: "case_1", run: "candidate-run", rubrics: ["status"]}]
     for case in cases {
       __io_println(case.id)

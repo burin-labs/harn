@@ -13,7 +13,11 @@ pipeline default() {
   )
   harness.fs.mkdir(root)
   const reformat_a = write_fixture(root, "reformat_before.rs", "fn add(a:i32,b:i32)->i32{a+b}\n")
-  const reformat_b = write_fixture(root, "reformat_after.rs", "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n")
+  const reformat_b = write_fixture(
+    root,
+    "reformat_after.rs",
+    "fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+  )
   const reformat = structural_diff(reformat_a, reformat_b, "rust")
   __io_println(reformat.result == "ok")
   __io_println(reformat.structural)

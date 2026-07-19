@@ -164,7 +164,10 @@ fn __sv_rule_entry_schema() {
 fn __sv_options_schema() {
   return schema_object(
     {
-      on_failure: schema_default(schema_enum(["regenerate_with_feedback", "raise"]), "regenerate_with_feedback"),
+      on_failure: schema_default(
+        schema_enum(["regenerate_with_feedback", "raise"]),
+        "regenerate_with_feedback",
+      ),
       max_attempts: schema_default(schema_int() + {min: 1}, 3),
       locale: schema_default(schema_string(), "en"),
       no_phantom_completion_catalog: schema_field(schema_dict(schema_list(schema_string())), false),
@@ -203,7 +206,9 @@ fn __sv_validate_opts(opts) {
     max_attempts: cfg.max_attempts,
     rules: rules,
     locale: __sv_locale(cfg?.locale),
-    no_phantom_completion_catalog: __sv_normalize_no_phantom_completion_catalog(cfg?.no_phantom_completion_catalog),
+    no_phantom_completion_catalog: __sv_normalize_no_phantom_completion_catalog(
+      cfg?.no_phantom_completion_catalog,
+    ),
   }
 }
 
@@ -226,7 +231,9 @@ fn __sv_annotation_enabled(value) -> bool {
 fn __sv_tool_entry_is_structural(entry) -> bool {
   const annotations = __sv_tool_annotations(entry)
   return __sv_annotation_enabled(annotations?.structural)
-    || __sv_annotation_enabled(annotations?.agent_lifecycle)
+    || __sv_annotation_enabled(
+    annotations?.agent_lifecycle,
+  )
 }
 
 fn __sv_tool_entry_has_write_capability(entry) -> bool {
@@ -234,7 +241,9 @@ fn __sv_tool_entry_has_write_capability(entry) -> bool {
     return false
   }
   const annotations = __sv_tool_annotations(entry)
-  const side_effect_level = lowercase(__sv_string(annotations?.side_effect_level ?? annotations?.sideEffectLevel))
+  const side_effect_level = lowercase(
+    __sv_string(annotations?.side_effect_level ?? annotations?.sideEffectLevel),
+  )
   if side_effect_level == "none" || side_effect_level == "read_only" {
     return false
   }
@@ -296,7 +305,9 @@ fn __sv_registry_tool_entry(registry, name) {
 fn __sv_any_prior_write_tools(payload) -> bool {
   const tools = payload?.tools
   const prior = __sv_string_list(payload?.prior_successful_tools)
-    + __sv_string_list(payload?.prior_rejected_tools)
+    + __sv_string_list(
+    payload?.prior_rejected_tools,
+  )
   for name in prior {
     const entry = __sv_registry_tool_entry(tools, name)
     if entry != nil && __sv_tool_entry_has_write_capability(entry) {
@@ -344,7 +355,8 @@ fn __sv_non_empty_when_writes_expected(payload) {
   return {
     rule: "non_empty_when_writes_expected",
     diagnostic: "Assistant emitted no tool calls while writable tools were available.",
-    recommended_action: "Emit the concrete write or edit tool call needed for the task, or only mark the task done after that work is complete.",
+    recommended_action:
+      "Emit the concrete write or edit tool call needed for the task, or only mark the task done after that work is complete.",
   }
 }
 
@@ -363,8 +375,10 @@ fn __sv_no_phantom_completion(payload, cfg, rule_cfg) {
   }
   return {
     rule: "no_phantom_completion",
-    diagnostic: "Assistant claimed completion before any write-capable tool call occurred in this session.",
-    recommended_action: "Call the concrete write or edit tool that performs the work before claiming the task is complete.",
+    diagnostic:
+      "Assistant claimed completion before any write-capable tool call occurred in this session.",
+    recommended_action:
+      "Call the concrete write or edit tool that performs the work before claiming the task is complete.",
   }
 }
 
@@ -594,7 +608,8 @@ fn __sv_tool_calls_well_formed(payload) {
   return {
     rule: "tool_calls_well_formed",
     diagnostic: "Assistant emitted malformed tool calls: " + details,
-    recommended_action: "Emit only well-formed tool calls that match the bound tool schemas and Harn tool-call protocol.",
+    recommended_action:
+      "Emit only well-formed tool calls that match the bound tool schemas and Harn tool-call protocol.",
   }
 }
 
@@ -615,14 +630,20 @@ fn __sv_output_token_cap_with_zero_calls(payload) {
   }
   return {
     rule: "output_token_cap_with_zero_calls",
-    diagnostic: "Assistant used nearly the full output-token budget without emitting any tool calls.",
-    recommended_action: "The model appears stuck in a prose loop. Emit the next tool call directly or shorten the narration and try again.",
+    diagnostic:
+      "Assistant used nearly the full output-token budget without emitting any tool calls.",
+    recommended_action:
+      "The model appears stuck in a prose loop. Emit the next tool call directly or shorten the narration and try again.",
   }
 }
 
 fn __sv_feedback_payload(verdict) {
   return json_stringify(
-    {rule: verdict.rule, diagnostic: verdict.diagnostic, recommended_action: verdict.recommended_action},
+    {
+      rule: verdict.rule,
+      diagnostic: verdict.diagnostic,
+      recommended_action: verdict.recommended_action,
+    },
   )
 }
 
@@ -724,7 +745,16 @@ fn __sv_handle_turn(call, cfg) {
   const iteration = to_int(payload?.iteration ?? call?.turn?.iteration) ?? 0
   const attempts = to_int(payload?.attempts) ?? 0
   if attempts >= cfg.max_attempts {
-    __sv_emit_decision(session_id, iteration, cfg, nil, attempts, false, true, "max_attempts_reached")
+    __sv_emit_decision(
+      session_id,
+      iteration,
+      cfg,
+      nil,
+      attempts,
+      false,
+      true,
+      "max_attempts_reached",
+    )
     return __sv_pass_result(call, true, true, "max_attempts_reached")
   }
   for rule_cfg in cfg.rules {

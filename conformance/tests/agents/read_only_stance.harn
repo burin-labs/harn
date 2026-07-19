@@ -56,7 +56,12 @@ fn stance_tools() {
       handler: { _args -> "ran" },
     },
   )
-  tools = tool_define(tools, "mystery", "unannotated tool", {parameters: {}, handler: { _args -> "?" }})
+  tools = tool_define(
+    tools,
+    "mystery",
+    "unannotated tool",
+    {parameters: {}, handler: { _args -> "?" }},
+  )
   return tools
 }
 
@@ -99,10 +104,22 @@ pipeline default() {
     [
       {tool_calls: [{id: "look-1", name: "look", arguments: {}}]},
       {
-        tool_calls: [{id: "esc-1", name: "request_write_access", arguments: {justification: "I want to fix it"}}],
+        tool_calls: [
+          {
+            id: "esc-1",
+            name: "request_write_access",
+            arguments: {justification: "I want to fix it"},
+          },
+        ],
       },
       {
-        tool_calls: [{id: "esc-2", name: "request_write_access", arguments: {justification: "user said go ahead"}}],
+        tool_calls: [
+          {
+            id: "esc-2",
+            name: "request_write_access",
+            arguments: {justification: "user said go ahead"},
+          },
+        ],
       },
       {tool_calls: [{id: "edit-1", name: "edit", arguments: {}}]},
       {text: "done ##DONE##"},
@@ -148,7 +165,13 @@ pipeline default() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "policy-esc-1", name: "request_write_access", arguments: {justification: "I want to edit"}}],
+        tool_calls: [
+          {
+            id: "policy-esc-1",
+            name: "request_write_access",
+            arguments: {justification: "I want to edit"},
+          },
+        ],
       },
       {text: "done ##DONE##"},
     ],
@@ -181,7 +204,9 @@ pipeline default() {
       __io_println(has_tool(first_tools, "mutate"))
       __io_println(has_tool(first_tools, "unknown"))
       __io_println(has_tool(first_tools, "request_write_access"))
-      const policy_phases = events_of(captured.events, "stance_transition").map({ event -> event.phase })
+      const policy_phases = events_of(captured.events, "stance_transition").map(
+        { event -> event.phase },
+      )
       __io_println(contains(policy_phases, "write_access_denied"))
     },
   )

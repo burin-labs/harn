@@ -63,7 +63,11 @@ pipeline main() {
   __io_println(harness.fs.read_text(path_join(root, "notes/rep.txt")))
   // --- edit_file uniqueness error (2 matches, no replace_all) ---
   const ambiguous = agent_dispatch_tool_call(
-    {id: "e3", name: "edit_file", arguments: {path: "notes/rep.txt", old_string: "y", new_string: "z"}},
+    {
+      id: "e3",
+      name: "edit_file",
+      arguments: {path: "notes/rep.txt", old_string: "y", new_string: "z"},
+    },
     tools,
   )
   __io_println(ambiguous.ok)
@@ -87,12 +91,18 @@ pipeline main() {
   __io_println(made.ok)
   __io_println(harness.fs.stat(path_join(root, "deep/nested/dir")).is_dir)
   // --- delete_path: file removed ---
-  const del = agent_dispatch_tool_call({id: "x1", name: "delete_path", arguments: {path: "notes/rep.txt"}}, tools)
+  const del = agent_dispatch_tool_call(
+    {id: "x1", name: "delete_path", arguments: {path: "notes/rep.txt"}},
+    tools,
+  )
   const del_data = json_parse(del.rendered_result)
   __io_println(del_data.removed)
   __io_println(harness.fs.exists(path_join(root, "notes/rep.txt")))
   // --- delete_path refuses non-empty dir without recursive ---
-  const refuse = agent_dispatch_tool_call({id: "x2", name: "delete_path", arguments: {path: "notes"}}, tools)
+  const refuse = agent_dispatch_tool_call(
+    {id: "x2", name: "delete_path", arguments: {path: "notes"}},
+    tools,
+  )
   __io_println(refuse.ok)
   __io_println(contains(refuse.error, "recursive"))
   __io_println(harness.fs.exists(path_join(root, "notes/hello.txt")))
@@ -148,7 +158,12 @@ pipeline main() {
   const mw_root = path_join(harness.fs.temp_dir(), "harn-edit-tools-mw-" + uuid())
   harness.fs.mkdir(mw_root, true)
   const edit = agent_edit_tools(nil, {root: mw_root, cwd: mw_root})
-  const dispatch_next = { call -> agent_dispatch_tool_call({id: call.call_id, name: call.tool_name, arguments: call.tool_args}, edit) }
+  const dispatch_next = { call ->
+    agent_dispatch_tool_call(
+      {id: call.call_id, name: call.tool_name, arguments: call.tool_args},
+      edit,
+    )
+  }
   const consent_hits = atomic(0)
   const audit_hits = atomic(0)
   const approve = { _call ->
@@ -177,7 +192,9 @@ pipeline main() {
   __io_println(atomic_get(audit_hits))
   __io_println(harness.fs.read_text(path_join(mw_root, "out/mw.txt")))
   // --- deny path: consent short-circuits, underlying write never runs ---
-  const deny_caller = compose_tool_callers([with_consent({ _call -> false }), default_tool_caller()])
+  const deny_caller = compose_tool_callers(
+    [with_consent({ _call -> false }), default_tool_caller()],
+  )
   const denied = deny_caller(
     envelope + {call_id: "mw2", tool_args: {content: "nope", path: "out/denied.txt"}},
     dispatch_next,

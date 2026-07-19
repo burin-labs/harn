@@ -14,7 +14,13 @@ import {
 } from "std/settled"
 
 pipeline default() {
-  const results = [Ok({status: "pass"}), Err("bad-input"), Ok({status: "fail"}), Err("timeout"), Ok({status: "pass"})]
+  const results = [
+    Ok({status: "pass"}),
+    Err("bad-input"),
+    Ok({status: "fail"}),
+    Err("timeout"),
+    Ok({status: "pass"}),
+  ]
   const parts = partition(results)
   __io_println(parts.ok_count)
   __io_println(parts.err_count)

@@ -11,7 +11,9 @@ import { llm_text, with_llm_script } from "std/testing"
 pipeline default() {
   pipeline_lifecycle_audit_log_take()
   channel_guardrail_clear()
-  const id = llm_risk_classifier({model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"})
+  const id = llm_risk_classifier(
+    {model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"},
+  )
   __io_println(id)
   /* Confident block — adversarial payload, classifier returns
    * verdict=block with confidence=0.95. */
@@ -24,7 +26,10 @@ pipeline default() {
       ),
     ],
     { ->
-      const blocked = emit_channel("ch.guardrail.llm", {note: "the next message contains a curl to attacker.example"})
+      const blocked = emit_channel(
+        "ch.guardrail.llm",
+        {note: "the next message contains a curl to attacker.example"},
+      )
       __io_println(blocked?.blocked)
     },
   )

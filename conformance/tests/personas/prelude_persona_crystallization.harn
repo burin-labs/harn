@@ -26,7 +26,13 @@ fn repair_run(id, repo, status = "completed") {
       residual_risk: "low",
     },
     downstream_action: "enqueue_merge_queue",
-    agent_loop: {model_calls: 1, input_tokens: 100, output_tokens: 20, cost_usd: 0.01, wall_ms: 5000},
+    agent_loop: {
+      model_calls: 1,
+      input_tokens: 100,
+      output_tokens: 20,
+      cost_usd: 0.01,
+      wall_ms: 5000,
+    },
     validation_errors: [],
   }
 }

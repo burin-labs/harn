@@ -6,7 +6,11 @@ fn child_tools() {
     tools,
     "read_file",
     "Read a file",
-    {parameters: {path: {type: "string"}}, namespace: "read", handler: { args -> "read " + args.path }},
+    {
+      parameters: {path: {type: "string"}},
+      namespace: "read",
+      handler: { args -> "read " + args.path },
+    },
   )
   tools = tool_define(
     tools,
@@ -29,10 +33,12 @@ fn workflow_tools() {
     "Delegate a read-only investigation",
     {
       parameters: {task: {type: "string"}},
-      handler: { args -> sub_agent_run(
-        args.task,
-        {provider: "mock", tools: child_tools(), tool_format: "native", max_iterations: 1},
-      ) },
+      handler: { args ->
+        sub_agent_run(
+          args.task,
+          {provider: "mock", tools: child_tools(), tool_format: "native", max_iterations: 1},
+        )
+      },
     },
   )
   return tools
@@ -63,7 +69,9 @@ pipeline test(task) {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "stage_1", name: "delegate_readonly", arguments: {task: "Inspect the config file"}}],
+        tool_calls: [
+          {id: "stage_1", name: "delegate_readonly", arguments: {task: "Inspect the config file"}},
+        ],
       },
       llm_text("I inspected the config path."),
       llm_text("Delegation finished."),

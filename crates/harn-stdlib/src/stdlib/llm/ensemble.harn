@@ -527,7 +527,9 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
     indexed = indexed.push({index: i, item: item})
     i = i + 1
   }
-  const raw = parallel each indexed with { max_concurrent: __clamp_int(cfg?.max_concurrent ?? 4, 1, 64) } { entry ->
+  const raw = parallel each indexed with {
+    max_concurrent: __clamp_int(cfg?.max_concurrent ?? 4, 1, 64),
+  } { entry ->
     const started = harness.clock.now_ms()
     const r = try {
       judge_fn(entry.item)
@@ -535,7 +537,13 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
     const duration = harness.clock.now_ms() - started
     if is_err(r) {
       const err = unwrap_err(r)
-      const record = {index: entry.index, item: entry.item, ok: false, error: err, duration_ms: duration}
+      const record = {
+        index: entry.index,
+        item: entry.item,
+        ok: false,
+        error: err,
+        duration_ms: duration,
+      }
       if on_progress != nil {
         let _ = try {
           on_progress({index: entry.index, total: total, item: entry.item, verdict: nil})
@@ -544,7 +552,13 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
       record
     } else {
       const verdict = unwrap(r)
-      const record = {index: entry.index, item: entry.item, ok: true, verdict: verdict, duration_ms: duration}
+      const record = {
+        index: entry.index,
+        item: entry.item,
+        ok: true,
+        verdict: verdict,
+        duration_ms: duration,
+      }
       if on_progress != nil {
         let _ = try {
           on_progress({index: entry.index, total: total, item: entry.item, verdict: verdict})
@@ -674,7 +688,11 @@ fn __debate_options(raw) {
   if contains(raw.keys(), "adaptive_stop") && type_of(raw.adaptive_stop) != "bool" {
     throw "debate: opts.adaptive_stop must be a bool"
   }
-  const threshold = __debate_float(raw?.stability_threshold ?? raw?.threshold, 0.15, "stability_threshold")
+  const threshold = __debate_float(
+    raw?.stability_threshold ?? raw?.threshold,
+    0.15,
+    "stability_threshold",
+  )
   if threshold <= 0.0 || threshold > 1.0 {
     throw "debate: stability_threshold must be > 0 and <= 1"
   }
@@ -730,7 +748,8 @@ fn __debate_system(opts, debater) {
   if type_of(opts?.system) == "string" && trim(opts.system) != "" {
     parts = parts.push(trim(opts.system))
   }
-  if type_of(debater) == "dict" && type_of(debater?.system) == "string" && trim(debater.system) != "" {
+  if type_of(debater) == "dict" && type_of(debater?.system) == "string"
+    && trim(debater.system) != "" {
     parts = parts.push(trim(debater.system))
   }
   parts = parts.push(
@@ -1218,7 +1237,8 @@ pub fn tree_of_thoughts(opts) {
     require __tot_is_callable(stop), "tree_of_thoughts: opts.stop must be callable"
   }
   const search = opts?.search ?? "bfs"
-  require search == "bfs" || search == "dfs" || search == "beam", "tree_of_thoughts: opts.search must be \"bfs\", \"dfs\", or \"beam\""
+  require search == "bfs" || search == "dfs" || search == "beam",
+    "tree_of_thoughts: opts.search must be \"bfs\", \"dfs\", or \"beam\""
   const k = __tot_require_positive_int(opts?.k ?? 1, "opts.k")
   const max_depth = __tot_require_non_negative_int(opts?.max_depth ?? 8, "opts.max_depth")
   const beam_width = __tot_require_positive_int(opts?.beam_width ?? k, "opts.beam_width")
@@ -1235,5 +1255,15 @@ pub fn tree_of_thoughts(opts) {
   if search == "beam" {
     return __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, beam_width)
   }
-  return __tot_search_frontier(search, root, expand, evaluate, is_terminal, stop, k, max_depth, beam_width)
+  return __tot_search_frontier(
+    search,
+    root,
+    expand,
+    evaluate,
+    is_terminal,
+    stop,
+    k,
+    max_depth,
+    beam_width,
+  )
 }

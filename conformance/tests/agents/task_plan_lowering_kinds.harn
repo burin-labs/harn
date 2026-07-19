@@ -16,14 +16,20 @@ pipeline main() {
         tools: ["edit"],
         effects: ["writes_files"],
       },
-      worker: {kind: "sub_agent", sub_agent: {worker_name: "doc-writer", preset: "writer", task_label: "draft"}},
+      worker: {
+        kind: "sub_agent",
+        sub_agent: {worker_name: "doc-writer", preset: "writer", task_label: "draft"},
+      },
       fan: {
         kind: "workflow_map",
         prompt: "summarise each file",
         map: {item_artifact_kind: "file", max_concurrency: 2},
       },
       gate: {kind: "human_gate", human_gate: {approval_id: "ship_approval", skippable: false}},
-      run_tests: {kind: "deterministic_command", command: {tool: "cargo", args: ["test", "-p", "auth"]}},
+      run_tests: {
+        kind: "deterministic_command",
+        command: {tool: "cargo", args: ["test", "-p", "auth"]},
+      },
       compact_now: {kind: "compact", compact: {threshold_tokens: 4000, preserve_recent: 6}},
       sync: {kind: "join"},
       check: {kind: "verify", verify: {command: "cargo test -p auth", expect_status: 0}},

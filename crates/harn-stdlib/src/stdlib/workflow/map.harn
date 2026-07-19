@@ -90,7 +90,11 @@ fn __map_join_target(plan) {
 }
 
 fn __map_execute_branch(node_id, plan, opts, item) {
-  const branch_artifact = __host_workflow_map_branch_artifact(node_id, item, __map_list(plan?.lineage))
+  const branch_artifact = __host_workflow_map_branch_artifact(
+    node_id,
+    item,
+    __map_list(plan?.lineage),
+  )
   return __host_workflow_map_execute_branch(node_id, plan, item, branch_artifact, opts ?? {})
 }
 
@@ -121,7 +125,11 @@ fn __map_collect_branch_outcomes(branches, join_target) {
         )
       } else {
         failures = failures.push(
-          {index: __map_item_index(branch), status: branch?.status ?? "failed", error: branch?.error},
+          {
+            index: __map_item_index(branch),
+            status: branch?.status ?? "failed",
+            error: branch?.error,
+          },
         )
       }
     } else {
@@ -231,7 +239,13 @@ pub fn workflow_map_stage_plan(config = nil) {
   return {
     runs_stage: true,
     output_kind: output_kind,
-    stage_node: node + {kind: "stage", map_policy: {}, join_policy: {}, output_contract: output_contract},
+    stage_node: node
+      + {
+      kind: "stage",
+      map_policy: {},
+      join_policy: {},
+      output_contract: output_contract,
+    },
   }
 }
 
@@ -287,7 +301,9 @@ pub fn workflow_map_execution_plan(config = nil) {
     } else {
       strategy
     },
-    join_target: workflow_map_join_target({join_policy: node?.join_policy ?? {}, total: len(items)}),
+    join_target: workflow_map_join_target(
+      {join_policy: node?.join_policy ?? {}, total: len(items)},
+    ),
     max_concurrent: node?.map_policy?.max_concurrent,
     stage_node: stage_plan.stage_node,
     output_kind: stage_plan.output_kind,
@@ -349,7 +365,13 @@ pub fn workflow_map_finalize(config = nil) {
     "mapped"
   }
   return {
-    result: {status: status, text: text, join_strategy: strategy, completed: completed, failures: failures},
+    result: {
+      status: status,
+      text: text,
+      join_strategy: strategy,
+      completed: completed,
+      failures: failures,
+    },
     outcome: "mapped",
     branch: branch,
   }

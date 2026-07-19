@@ -89,7 +89,10 @@ pipeline test_validate_tests_rejects_empty_when_required(task) {
 
 pipeline test_validate_tests_rejects_missing_required_command(task) {
   const bundle = _bundle({required_verification: [{name: "lint", command: "make lint"}]})
-  const bad = _good_output() + {tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}]}
+  const bad = _good_output()
+    + {
+    tests_run: [{name: "tests", command: "make test", status: "ok", exit_code: 0}],
+  }
   const v = validate_tests(bundle, bad)
   assert(!v.ok)
   assert(v.errors[0].contains("missing tests"))
@@ -99,7 +102,9 @@ pipeline test_validate_tests_rejects_missing_required_command(task) {
 pipeline test_validate_tests_rejects_failing(task) {
   const bundle = _bundle({})
   const bad = _good_output()
-    + {tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}]}
+    + {
+    tests_run: [{name: "tests", command: "make test", status: "failed", exit_code: 1}],
+  }
   const v = validate_tests(bundle, bad)
   assert(!v.ok)
   assert(v.errors[0].contains("failing tests"))
@@ -109,7 +114,10 @@ pipeline test_validate_write_scope_blocks_outside(task) {
   const bundle = _bundle({})
   const bad = _good_output()
     + {
-    files_changed: [{path: "src/foo.rs", action: "modified"}, {path: "secrets/key.pem", action: "created"}],
+    files_changed: [
+      {path: "src/foo.rs", action: "modified"},
+      {path: "secrets/key.pem", action: "created"},
+    ],
   }
   const v = validate_write_scope(bundle, bad)
   assert(!v.ok)
@@ -125,7 +133,12 @@ pipeline test_validate_write_scope_allows_inside(task) {
 
 pipeline test_validate_write_scope_empty_scope_blocks_writes(task) {
   // build() requires at least one entry, so we forge a raw bundle.
-  const bundle = {_type: "merge_captain.repair_bundle", version: 1, kind: "ci_failure", allowed_write_scope: []}
+  const bundle = {
+    _type: "merge_captain.repair_bundle",
+    version: 1,
+    kind: "ci_failure",
+    allowed_write_scope: [],
+  }
   const v = validate_write_scope(bundle, _good_output())
   assert(!v.ok)
   assert(v.errors[0].contains("unexpected write scope"))

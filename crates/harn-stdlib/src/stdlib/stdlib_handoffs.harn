@@ -64,7 +64,8 @@ fn __handoff_budget_exhausted(handoff, context) -> bool {
   }
   const budget = handoff?.budget_remaining
   return (budget?.tokens != nil && budget.tokens <= 0)
-    || (budget?.tool_calls != nil && budget.tool_calls <= 0)
+    || (budget?.tool_calls != nil
+    && budget.tool_calls <= 0)
     || (budget?.dollars != nil && budget.dollars <= 0.0)
 }
 
@@ -72,7 +73,9 @@ fn __handoff_approval_denied(handoff, context) -> bool {
   if context?.approval_denied {
     return true
   }
-  const status = lowercase(__handoff_value_string(context?.approval_status ?? handoff?.approval_status))
+  const status = lowercase(
+    __handoff_value_string(context?.approval_status ?? handoff?.approval_status),
+  )
   return status == "denied" || status == "rejected"
 }
 
@@ -134,12 +137,26 @@ pub fn handoff_route_select(handoff_payload, routes = nil, context = nil) {
       const when = __handoff_value_string(route_target?.when)
       if when == "" || when == "always" {
         if fallback == nil {
-          fallback = __handoff_decision(route, route_index, route_target, target_index, handoff_payload, context)
+          fallback = __handoff_decision(
+            route,
+            route_index,
+            route_target,
+            target_index,
+            handoff_payload,
+            context,
+          )
         }
         continue
       }
       if __handoff_predicate_matches(route_target?.when, handoff_payload, context) {
-        return __handoff_decision(route, route_index, route_target, target_index, handoff_payload, context)
+        return __handoff_decision(
+          route,
+          route_index,
+          route_target,
+          target_index,
+          handoff_payload,
+          context,
+        )
       }
     }
     if fallback != nil {
@@ -257,7 +274,11 @@ pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
     {handoff_id: handoff_value.id, target: selected.target},
   )
   const dispatcher = __handoff_dispatcher(options, selected)
-  const invocation_envelope = payload + {decision_event_id: decision_event_id, enqueue_event_id: enqueue_event_id}
+  const invocation_envelope = payload
+    + {
+    decision_event_id: decision_event_id,
+    enqueue_event_id: enqueue_event_id,
+  }
   const invocation_result = if dispatcher == nil {
     nil
   } else {

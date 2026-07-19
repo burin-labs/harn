@@ -11,7 +11,9 @@ pipeline main() {
     {
       id: "render_local_fallback",
       subscribes_to: ["session_idle"],
-      evaluate: { _ctx -> return {reminder: {body: "local fallback reminder", role_hint: "system"}} },
+      evaluate: { _ctx ->
+        return {reminder: {body: "local fallback reminder", role_hint: "system"}}
+      },
     },
   )
   const session = agent_session_open("reminder-render-local-fallback")
@@ -24,7 +26,12 @@ pipeline main() {
       llm_call(
         "ignored",
         "base system",
-        {provider: "mock", model: "mock", messages: agent_session_messages(session), session_id: session},
+        {
+          provider: "mock",
+          model: "mock",
+          messages: agent_session_messages(session),
+          session_id: session,
+        },
       )
       const call = llm_mock_calls()[0]
       const last = call.messages[len(call.messages) - 1]

@@ -12,7 +12,10 @@ fn entry(name, annotations) {
 pipeline default() {
   const read = entry("read", {kind: "read"})
   const mcp_read = entry("mcp_read", {readOnlyHint: true, destructiveHint: false})
-  const destructive = entry("destructive", {kind: "read", readOnlyHint: true, destructiveHint: true})
+  const destructive = entry(
+    "destructive",
+    {kind: "read", readOnlyHint: true, destructiveHint: true},
+  )
   const edit = entry("edit", {kind: "edit", side_effect_level: "workspace_write"})
   const tools = {tools: [read, mcp_read, destructive, edit]}
   __io_println(agent_tool_is_read_only(read))

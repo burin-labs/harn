@@ -142,7 +142,11 @@ pub fn category_code(category: string) -> string? {
  */
 pub fn check_registry_text(text: string) -> any {
   let errors: list<string> = []
-  const entries = regex_captures(r#"^\s*([A-Za-z][A-Za-z0-9_]*),\s+"([^"]+)",\s+([A-Za-z]+),"#, text, "m")
+  const entries = regex_captures(
+    r#"^\s*([A-Za-z][A-Za-z0-9_]*),\s+"([^"]+)",\s+([A-Za-z]+),"#,
+    text,
+    "m",
+  )
   if entries.count < 40 {
     errors = errors
       + ["${REGISTRY}: expected at least 40 registered codes, found ${entries.count}"]

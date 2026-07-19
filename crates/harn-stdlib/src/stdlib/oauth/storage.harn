@@ -46,7 +46,9 @@ fn __wrap_host_handle(inner) {
     + {
     _namespace: "oauth_storage",
     get: { key -> __oauth_storage_get(inner, key) },
-    set: { key, token_set, ttl_seconds = nil -> __oauth_storage_set(inner, key, token_set, ttl_seconds) },
+    set: { key, token_set, ttl_seconds = nil ->
+      __oauth_storage_set(inner, key, token_set, ttl_seconds)
+    },
     delete: { key -> __oauth_storage_delete(inner, key) },
     with_refresh_lock: { key, body -> __oauth_storage_with_refresh_lock(inner, key, body) },
   }
@@ -153,7 +155,14 @@ pub fn custom(handlers) -> Storage {
     throw "std/oauth/storage: custom.with_refresh_lock must be a function"
   }
   const id = trim(to_string(handlers?.id ?? "custom"))
-  const base = {_namespace: "oauth_storage", kind: "custom", id: id, get: get_fn, set: set_fn, delete: delete_fn}
+  const base = {
+    _namespace: "oauth_storage",
+    kind: "custom",
+    id: id,
+    get: get_fn,
+    set: set_fn,
+    delete: delete_fn,
+  }
   const with_lock = if lock_fn == nil {
     { key, body -> __oauth_storage_with_refresh_lock(base, key, body) }
   } else {

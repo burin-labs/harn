@@ -9,8 +9,18 @@ fn raw_transcript() {
     [
       {role: "user", content: "run it"},
       {role: "assistant", content: "", tool_calls: [{id: "call_1", name: "run", arguments: {}}]},
-      {role: "tool", tool_call_id: "call_1", name: "run", content: "Error: missing arg", is_error: true},
-      {role: "assistant", content: "", tool_calls: [{id: "call_2", name: "run", arguments: {arg: "x"}}]},
+      {
+        role: "tool",
+        tool_call_id: "call_1",
+        name: "run",
+        content: "Error: missing arg",
+        is_error: true,
+      },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: "call_2", name: "run", arguments: {arg: "x"}}],
+      },
       {role: "tool", tool_call_id: "call_2", name: "run", content: "ok"},
     ],
   )
@@ -72,7 +82,11 @@ fn long_gc_transcript(stale_count) {
       body = body + "stale output " + to_string(i) + " line " + to_string(j) + "\n"
     }
     messages = messages.push(
-      {role: "assistant", content: "", tool_calls: [{id: call_id, name: "read", arguments: {path: path}}]},
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: call_id, name: "read", arguments: {path: path}}],
+      },
     )
     messages = messages.push({role: "tool", tool_call_id: call_id, name: "read", content: body})
   }
@@ -88,7 +102,9 @@ fn long_gc_transcript(stale_count) {
     },
   )
   const live_result_index = messages.count
-  messages = messages.push({role: "tool", tool_call_id: "live_call", name: "read", content: live_body})
+  messages = messages.push(
+    {role: "tool", tool_call_id: "live_call", name: "read", content: live_body},
+  )
   messages = messages.push({role: "assistant", content: "The active change is in src/live.rs."})
   messages = messages.push({role: "user", content: "Continue from the live file finding."})
   return {transcript: transcript_from_messages(messages), live_result_index: live_result_index}
@@ -134,17 +150,23 @@ pipeline default() {
   )
   __io_println("bypassed_safety:" + to_string(bypassed.provider_safety_blocked))
   __io_println("bypassed_dropped:" + to_string(bypassed.dropped_count))
-  const gc = transcript_project(gc_transcript(), {policy: "reachability_gc", root_window: 2, min_chars: 100})
+  const gc = transcript_project(
+    gc_transcript(),
+    {policy: "reachability_gc", root_window: 2, min_chars: 100},
+  )
   __io_println("gc_policy:" + gc.policy)
   __io_println("gc_redacted:" + to_string(gc.redacted_count))
   __io_println("gc_reclaimed:" + to_string(gc.reclaimed_tokens > 0))
   __io_println(
-    "gc_old_reclaimed:" + to_string(gc.messages[2].content.contains("reclaimed by reachability_gc")),
+    "gc_old_reclaimed:"
+      + to_string(gc.messages[2].content.contains("reclaimed by reachability_gc")),
   )
   __io_println(
     "gc_live_preserved:" + to_string(gc.messages[4].content.contains("IMPORTANT_LIVE_VALUE")),
   )
-  __io_println("gc_roots:" + to_string(gc.event.metadata.roots_consulted.contains("last_2_messages")))
+  __io_println(
+    "gc_roots:" + to_string(gc.event.metadata.roots_consulted.contains("last_2_messages")),
+  )
   __io_println("gc_pointer:" + gc.redaction_pointers[0].source)
   const blocked_gc = transcript_project(
     gc_transcript(),
@@ -172,7 +194,9 @@ pipeline default() {
   __io_println("long_gc_reclaimed:" + to_string(long_gc.reclaimed_tokens > 1000))
   __io_println(
     "long_gc_live_preserved:"
-      + to_string(long_gc.messages[long_case.live_result_index].content.contains("IMPORTANT_LIVE_VALUE")),
+      + to_string(
+      long_gc.messages[long_case.live_result_index].content.contains("IMPORTANT_LIVE_VALUE"),
+    ),
   )
   __io_println("long_barrier_gc_redacted:" + to_string(long_barrier_gc.redacted_count))
 }

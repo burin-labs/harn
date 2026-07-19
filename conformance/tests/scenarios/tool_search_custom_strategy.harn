@@ -2,7 +2,12 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(task) {
   let registry = tool_registry()
-  registry = tool_define(registry, "anchor", "Always visible", {parameters: {}, handler: { _ -> "anchor" }})
+  registry = tool_define(
+    registry,
+    "anchor",
+    "Always visible",
+    {parameters: {}, handler: { _ -> "anchor" }},
+  )
   registry = tool_define(
     registry,
     "deploy_tool",
@@ -25,7 +30,12 @@ pipeline test(task) {
             mode: "client",
             name: "find_tool",
             strategy: {
-              handler: { query, _candidates, _state -> {tool_names: ["deploy_tool"], ranked: [{tool_name: "deploy_tool", score: 1.0, snippet: query}]} },
+              handler: { query, _candidates, _state ->
+                {
+                  tool_names: ["deploy_tool"],
+                  ranked: [{tool_name: "deploy_tool", score: 1.0, snippet: query}],
+                }
+              },
               name: "fixture",
             },
           },
@@ -41,7 +51,8 @@ pipeline test(task) {
           saw_fixture = ev.metadata.strategy == "fixture"
         }
         if ev.kind == "tool_search_result" {
-          promoted = len(ev.metadata.promoted ?? []) == 1 && ev.metadata.promoted[0] == "deploy_tool"
+          promoted = len(ev.metadata.promoted ?? []) == 1
+            && ev.metadata.promoted[0] == "deploy_tool"
         }
       }
       assert(saw_fixture, "custom strategy label recorded")

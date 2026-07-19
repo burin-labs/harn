@@ -14,7 +14,13 @@ pipeline main() {
   with_llm_script(
     [
       {
-        tool_calls: [{id: "park_close", name: "agent_await_resumption", arguments: {reason: "park before close"}}],
+        tool_calls: [
+          {
+            id: "park_close",
+            name: "agent_await_resumption",
+            arguments: {reason: "park before close"},
+          },
+        ],
       },
     ],
     { ->
@@ -32,7 +38,9 @@ pipeline main() {
       __io_println("resume_failed=" + to_string(is_err(resume_attempt)))
       __io_println(
         "resume_err_has_code="
-          + to_string(contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010")),
+          + to_string(
+          contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010"),
+        ),
       )
       const closed_again = close_agent(handle)
       __io_println("reclose_status=" + closed_again.status)

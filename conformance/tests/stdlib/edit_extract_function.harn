@@ -23,9 +23,12 @@ pipeline default() {
   //    are enclosing params used in the block -> captured. `cache_scaled`
   //    is a module-level free name in both block and enclosing -> NOT a
   //    parameter.
-  const py_body = "def render(base, qty):\n    scaled = base * qty\n    shifted = scaled + qty\n    cache_scaled(scaled, shifted)\n    final = base - qty\n    return final\n"
+  const py_body =
+    "def render(base, qty):\n    scaled = base * qty\n    shifted = scaled + qty\n    cache_scaled(scaled, shifted)\n    final = base - qty\n    return final\n"
   const py_path = write_fixture(root, "render.py", py_body)
-  const py = edit_extract_function({path: py_path, range: {start_line: 1, end_line: 3}, new_name: "prepare"})
+  const py = edit_extract_function(
+    {path: py_path, range: {start_line: 1, end_line: 3}, new_name: "prepare"},
+  )
   __io_println(py.result)
   __io_println(py.applied)
   const py_after = harness.fs.read_text(py_path)
@@ -36,7 +39,8 @@ pipeline default() {
   __io_println(contains(py_after, "    final = base - qty"))
   __io_println(py_after.index_of("def render") < py_after.index_of("def prepare"))
   // 2) TypeScript dry-run: same shape, untyped synthesized params.
-  const ts_body = "function render(base: number, qty: number) {\n  const scaled = base * qty\n  const shifted = scaled + qty\n  cacheScaled(scaled, shifted)\n  const total = base - qty\n  return total\n}\n"
+  const ts_body =
+    "function render(base: number, qty: number) {\n  const scaled = base * qty\n  const shifted = scaled + qty\n  cacheScaled(scaled, shifted)\n  const total = base - qty\n  return total\n}\n"
   const ts_path = write_fixture(root, "render.ts", ts_body)
   const ts = edit_extract_function(
     {path: ts_path, range: {start_line: 1, end_line: 3}, new_name: "prepare", dry_run: true},
@@ -57,7 +61,9 @@ pipeline default() {
   __io_println(rs.result)
   // 4) Range not inside a top-level function -> unsupported.
   const mod_path = write_fixture(root, "mod.py", "x = 1\ny = 2\n")
-  const outside = edit_extract_function({path: mod_path, range: {start_line: 0, end_line: 0}, new_name: "z"})
+  const outside = edit_extract_function(
+    {path: mod_path, range: {start_line: 0, end_line: 0}, new_name: "z"},
+  )
   __io_println(outside.result)
   __io_println(outside.errors[0].code)
 }

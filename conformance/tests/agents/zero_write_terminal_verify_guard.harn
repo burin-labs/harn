@@ -51,7 +51,8 @@ fn build_tools() {
  */
 fn is_zero_write_event(event) -> bool {
   return event.type == "reserved_terminal_verify"
-    && (event?.payload?.kind ?? "") == "zero_write_terminal_verify"
+    && (event?.payload?.kind ?? "")
+    == "zero_write_terminal_verify"
 }
 
 fn count_zero_write_events(events) {
@@ -126,7 +127,11 @@ fn run_scenario(zero_write_on, reserve_iterations, release_verify) {
           },
         ) },
       )
-      return {status: captured.result.status, stop_reason: captured.result.stop_reason, events: captured.events}
+      return {
+        status: captured.result.status,
+        stop_reason: captured.result.stop_reason,
+        events: captured.events,
+      }
     },
   )
 }
@@ -186,6 +191,9 @@ pipeline default() {
     count_zero_write_events(case3.events) == 0,
     "case3: OFF must emit no zero-write-verify events",
   )
-  assert(!terminal_verify_ran(case3.events), "case3: OFF must never run a terminal zero-write verify")
+  assert(
+    !terminal_verify_ran(case3.events),
+    "case3: OFF must never run a terminal zero-write verify",
+  )
   assert(case3.stop_reason != "", "case3: sealed stop_reason must never be empty even OFF")
 }

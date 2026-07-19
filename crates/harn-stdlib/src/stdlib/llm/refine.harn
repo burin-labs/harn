@@ -319,7 +319,11 @@ pub fn refine_prompt(input, options = nil) {
     properties: {prompt: {type: "string"}, notes: {type: "string"}},
     required: ["prompt"],
   }
-  const result = llm_call_structured_result(__legacy_refine_meta_prompt(input), schema, __llm_options(options))
+  const result = llm_call_structured_result(
+    __legacy_refine_meta_prompt(input),
+    schema,
+    __llm_options(options),
+  )
   if result?.ok ?? false {
     return result.data.prompt
   }
@@ -358,8 +362,15 @@ pub fn propose_instructions(base_prompt, options = nil) {
     properties: {instructions: {type: "array", items: {type: "string"}}},
     required: ["instructions"],
   }
-  const call_opts = __llm_options(opts) + {system: opts?.system ?? "You improve prompts for reliable task execution."}
-  const result = llm_call_structured_result(__proposal_prompt(base_prompt, count), schema, call_opts)
+  const call_opts = __llm_options(opts)
+    + {
+    system: opts?.system ?? "You improve prompts for reliable task execution.",
+  }
+  const result = llm_call_structured_result(
+    __proposal_prompt(base_prompt, count),
+    schema,
+    call_opts,
+  )
   if result?.ok ?? false {
     let generated = __string_values(result.data.instructions)
     if !contains(generated, base_prompt) {

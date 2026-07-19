@@ -170,7 +170,15 @@ pub type AgentLoopOptions = {
   fallback_strategy?: string,
   strategy?: string,
   equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
-  models?: list<string | {provider?: string, model?: string, options?: dict, label?: string, family?: string, capabilities?: list}>,
+  models?: list<string \
+    | {
+    provider?: string,
+    model?: string,
+    options?: dict,
+    label?: string,
+    family?: string,
+    capabilities?: list,
+  }>,
   ladder?: string,
   api_mode?: string,
   max_tokens?: int,
@@ -351,7 +359,25 @@ pub type AgentLoopOptions = {
  *
  * Rust twin: none — presets are stdlib-owned option packs.
  */
-pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: any, telemetry?: any, rate_limit?: bool | dict, dry_run?: bool | dict, handoff_sink?: any, cheap_caller?: any, frontier_caller?: any, escalate_predicate?: any, logging_sink?: any, logging_options?: dict, llm_options?: dict, persona?: any, task_kind?: string, judge?: bool | JudgeConfig, model_ladder?: list<string>}
+pub type AgentPresetOptions = AgentLoopOptions \
+  & {
+  consent?: any,
+  audit_sink?: any,
+  telemetry?: any,
+  rate_limit?: bool | dict,
+  dry_run?: bool | dict,
+  handoff_sink?: any,
+  cheap_caller?: any,
+  frontier_caller?: any,
+  escalate_predicate?: any,
+  logging_sink?: any,
+  logging_options?: dict,
+  llm_options?: dict,
+  persona?: any,
+  task_kind?: string,
+  judge?: bool | JudgeConfig,
+  model_ladder?: list<string>,
+}
 
 fn __profile_defaults(profile) {
   if profile == "tool_using" {
@@ -510,7 +536,9 @@ fn __tool_format_is_text_channel(format) {
 fn __validate_explicit_tool_format(value) {
   if __valid_tool_format(value) == nil {
     throw "agent_loop: `tool_format` must be one of native, text, json, auto (or omitted); got "
-      + to_string(value)
+      + to_string(
+      value,
+    )
   }
 }
 
@@ -680,7 +708,9 @@ pub fn agent_tool_format_override_warning_text(event) {
   const parity = payload?.catalog_parity ?? "unknown"
   const override_reason = trim(to_string(payload?.override_reason ?? ""))
   const needs_reason = (parity == "native_unreliable" && requested == "native")
-    || (parity == "text_unreliable" && requested == "text")
+    || (parity
+    == "text_unreliable"
+    && requested == "text")
   let line = "warning: tool_format override: "
     + provider
     + ":"
@@ -724,7 +754,8 @@ fn __capability_gap_event(pair, requested, fallback) {
     model: pair.model,
     requested_tool_format: requested,
     fallback_tool_format: fallback,
-    message: "No preferred_tool_format recommendation for provider/model; using fallback tool_format.",
+    message:
+      "No preferred_tool_format recommendation for provider/model; using fallback tool_format.",
   }
 }
 
@@ -757,7 +788,13 @@ pub fn agent_tool_format_resolution(options = nil) {
     }
     const override_reason = __optional_text(opts?.tool_format_override_reason)
     __validate_tool_format_parity(pair, explicit, parity, override_reason)
-    const override_event = __tool_format_override_event(pair, explicit, preferred, parity, override_reason)
+    const override_event = __tool_format_override_event(
+      pair,
+      explicit,
+      preferred,
+      parity,
+      override_reason,
+    )
     // Parity steering must match the wire. The Rust `extract_llm_options`
     // capability gate silently rewrites a tool-bearing request whose channel
     // the route's `tool_mode_parity` forbids (e.g. `native` on a
@@ -771,7 +808,10 @@ pub fn agent_tool_format_resolution(options = nil) {
     // `tool_format_override_reason` opts out (the author is forcing a known-risky
     // channel deliberately, and the Rust gate is bypassed in mock/replay too).
     const steered = if override_reason == nil
-      && __parity_conflicts_with_requested(__catalog_parity(parity), explicit) {
+      && __parity_conflicts_with_requested(
+      __catalog_parity(parity),
+      explicit,
+    ) {
       __steer_tool_format(__catalog_parity(parity), preferred)
     } else {
       nil
@@ -827,7 +867,12 @@ pub fn agent_tool_format_resolution(options = nil) {
       tool_format_override_event: nil,
     }
   }
-  return {tool_format: nil, source: "unresolved", capability_gap_event: nil, tool_format_override_event: nil}
+  return {
+    tool_format: nil,
+    source: "unresolved",
+    capability_gap_event: nil,
+    tool_format_override_event: nil,
+  }
 }
 
 // Mirror the Rust gate's target selection: prefer the route's declared
@@ -915,7 +960,9 @@ fn __context_profile_disabled(opts) {
 
 fn __with_project_context_profile(opts) {
   if __has_key(opts, "context_profile") || __has_key(opts, "project_context_profile")
-    || __context_profile_disabled(opts) {
+    || __context_profile_disabled(
+    opts,
+  ) {
     return opts
   }
   const resolved = try {
@@ -1011,7 +1058,9 @@ fn __validate_judge_cadence(label, value) {
     return
   }
   throw "agent_loop: `" + label + ".when` must be \"always\", \"stalled\", a closure, or nil; got "
-    + to_string(when)
+    + to_string(
+    when,
+  )
 }
 
 fn __validate_done_judge_cadence(value) {
@@ -1069,16 +1118,24 @@ fn __normalize_consecutive_failure_budget(value) {
   }
   if type_of(value) != "dict" {
     throw "agent_loop: `iteration_budget.consecutive_failures` must be a dict or nil; got "
-      + type_of(value)
+      + type_of(
+      value,
+    )
   }
   if value?.max == nil {
     throw "agent_loop: `iteration_budget.consecutive_failures.max` is required"
   }
-  const max_count = __positive_int_budget_field(value?.max, nil, "iteration_budget.consecutive_failures.max")
+  const max_count = __positive_int_budget_field(
+    value?.max,
+    nil,
+    "iteration_budget.consecutive_failures.max",
+  )
   const kinds = value?.kinds ?? ["transient", "rate_limit", "provider_5xx"]
   if type_of(kinds) != "list" {
     throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must be a list of strings; got "
-      + type_of(kinds)
+      + type_of(
+      kinds,
+    )
   }
   if len(kinds) == 0 {
     throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must not be empty"
@@ -1170,16 +1227,23 @@ fn __validate_missing_tool_call_recovery(value) {
     return
   }
   if type_of(value) != "dict" {
-    throw "agent_loop: `missing_tool_call_recovery` must be a bool, dict, or nil; got " + type_of(value)
+    throw "agent_loop: `missing_tool_call_recovery` must be a bool, dict, or nil; got "
+      + type_of(
+      value,
+    )
   }
   if value?.enabled != nil && type_of(value.enabled) != "bool" {
     throw "agent_loop: `missing_tool_call_recovery.enabled` must be a bool or nil; got "
-      + type_of(value.enabled)
+      + type_of(
+      value.enabled,
+    )
   }
   const classifier = value?.classifier
   if classifier != nil && type_of(classifier) != "closure" {
     throw "agent_loop: `missing_tool_call_recovery.classifier` must be a closure or nil; got "
-      + type_of(classifier)
+      + type_of(
+      classifier,
+    )
   }
 }
 
@@ -1237,7 +1301,14 @@ fn __tool_surface_safe_defaults() {
     mode: "safe",
     hard_keep: __default_tool_surface_hard_keep(),
     prune_classes: ["read_only"],
-    keep_classes: ["mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    keep_classes: [
+      "mutating",
+      "approval",
+      "session_control",
+      "progress",
+      "result_polling",
+      "unknown",
+    ],
     unknown_tool_policy: "keep",
   }
 }
@@ -1248,7 +1319,15 @@ fn __tool_surface_aggressive_defaults() {
     window_turns: 5,
     mode: "aggressive",
     hard_keep: __default_tool_surface_hard_keep(),
-    prune_classes: ["read_only", "mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    prune_classes: [
+      "read_only",
+      "mutating",
+      "approval",
+      "session_control",
+      "progress",
+      "result_polling",
+      "unknown",
+    ],
     keep_classes: [],
     unknown_tool_policy: "prune",
   }
@@ -1406,7 +1485,8 @@ fn __validate_agent_loop_completion_options(opts) {
 
 fn __is_transcript_projection_policy(policy) {
   return policy == "raw" || policy == "clean_tool_repair" || policy == "squash_failed_calls"
-    || policy == "summary_prefix"
+    || policy
+    == "summary_prefix"
     || policy == "reachability_gc"
     || policy == "context_gc"
     || policy == "tool_result_gc"
@@ -1436,7 +1516,8 @@ fn __validate_transcript_projection(value) {
     return
   }
   if type_of(value) != "dict" {
-    throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(value)
+    throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got "
+      + type_of(value)
   }
   const policy = value?.policy ?? "raw"
   if type_of(policy) != "string" {
@@ -1527,7 +1608,10 @@ fn __with_resolved_tool_format(opts, resolution) {
     return opts
   }
   let next = opts
-    + {tool_format: resolution.tool_format, _tool_format_source: resolution?.source ?? "unresolved"}
+    + {
+    tool_format: resolution.tool_format,
+    _tool_format_source: resolution?.source ?? "unresolved",
+  }
   if resolution?.capability_gap_event != nil {
     next = next + {_tool_format_capability_gap: resolution.capability_gap_event}
   }
@@ -1543,7 +1627,9 @@ fn __auto_tool_format_source(value) {
 }
 
 fn __clear_tool_format_resolution(opts) {
-  return opts.remove("tool_format").remove("_tool_format_source").remove("_tool_format_capability_gap")
+  return opts.remove("tool_format").remove("_tool_format_source").remove(
+    "_tool_format_capability_gap",
+  )
     .remove("_tool_format_override")
 }
 
@@ -1651,10 +1737,16 @@ fn __normalize_iteration_budget(opts) {
   } else {
     max_cap
   }
-  const initial = __positive_int_budget_field(user_budget?.initial, initial_default, "iteration_budget.initial")
+  const initial = __positive_int_budget_field(
+    user_budget?.initial,
+    initial_default,
+    "iteration_budget.initial",
+  )
   if initial > max_cap {
     throw "agent_loop: `iteration_budget.initial` must be less than or equal to `iteration_budget.max`; got initial="
-      + to_string(initial)
+      + to_string(
+      initial,
+    )
       + ", max="
       + to_string(max_cap)
   }
@@ -1666,7 +1758,9 @@ fn __normalize_iteration_budget(opts) {
   const expose_decisions = if user_budget?.expose_decisions != nil {
     if type_of(user_budget.expose_decisions) != "bool" {
       throw "agent_loop: `iteration_budget.expose_decisions` must be a bool; got "
-        + type_of(user_budget.expose_decisions)
+        + type_of(
+        user_budget.expose_decisions,
+      )
     }
     user_budget.expose_decisions
   } else {
@@ -1678,8 +1772,16 @@ fn __normalize_iteration_budget(opts) {
     max: max_cap,
     extend_by: extend_by,
     expose_decisions: expose_decisions,
-    wall_clock_ms: __positive_int_budget_field(user_budget?.wall_clock_ms, nil, "iteration_budget.wall_clock_ms"),
-    total_cost_usd: __positive_float_budget_field(user_budget?.total_cost_usd, nil, "iteration_budget.total_cost_usd"),
+    wall_clock_ms: __positive_int_budget_field(
+      user_budget?.wall_clock_ms,
+      nil,
+      "iteration_budget.wall_clock_ms",
+    ),
+    total_cost_usd: __positive_float_budget_field(
+      user_budget?.total_cost_usd,
+      nil,
+      "iteration_budget.total_cost_usd",
+    ),
     consecutive_failures: __normalize_consecutive_failure_budget(user_budget?.consecutive_failures),
   }
 }
@@ -1763,7 +1865,10 @@ pub fn agent_loop_options(options = nil) {
   opts = __with_project_context_profile(opts)
   opts = agent_refresh_tool_format_for_route(opts)
   if !__has_key(opts, "tool_format")
-    && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
+    && (opts?.tools == nil
+    || __client_tool_search_requested(
+    opts?.tool_search,
+  )) {
     opts = opts + {tool_format: __fallback_tool_format(), _tool_format_source: "fallback"}
   }
   if (opts?.loop_until_done ?? false) && !__has_key(opts, "done_sentinel") {
@@ -1777,14 +1882,19 @@ pub fn agent_loop_options(options = nil) {
     }
   }
   if __has_key(opts, "done_judge") && __judge_enabled(opts?.done_judge)
-    && !__has_key(opts, "done_sentinel")
+    && !__has_key(
+    opts,
+    "done_sentinel",
+  )
     && !__native_tools_complete_naturally(opts) {
     opts = opts + {done_sentinel: "##DONE##"}
   }
   if __has_key(opts, "verify_completion_judge") {
     if __judge_enabled(opts?.verify_completion_judge) {
       opts = opts
-        + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge, opts)}
+        + {
+        verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge, opts),
+      }
     } else {
       opts = opts + {verify_completion_judge: nil}
     }
@@ -2045,7 +2155,11 @@ fn __stack_sanitize_result(options, policy = nil) {
   let stripped = []
   const mode = __stack_sanitize_mode(policy)
   if mode == "healthcheck" || mode == "preflight" || mode == "probe" {
-    const deliberation = __stack_strip_option_keys(out, stripped, ["reasoning_effort", "thinking", "effort"])
+    const deliberation = __stack_strip_option_keys(
+      out,
+      stripped,
+      ["reasoning_effort", "thinking", "effort"],
+    )
     out = deliberation.options
     stripped = deliberation.stripped
   }
@@ -2097,7 +2211,12 @@ fn __stack_configured_model_options(cfg, prefixes) {
     [cfg?.model, user?.model, __stack_first_env(prefixes, "MODEL"), defaults?.model],
   )
   const model_role = __stack_first_non_empty(
-    [cfg?.model_role, user?.model_role, __stack_first_env(prefixes, "MODEL_ROLE"), defaults?.model_role],
+    [
+      cfg?.model_role,
+      user?.model_role,
+      __stack_first_env(prefixes, "MODEL_ROLE"),
+      defaults?.model_role,
+    ],
   )
   const task = __stack_first_non_empty(
     [cfg?.task, user?.task, __stack_first_env(prefixes, "TASK"), defaults?.task],

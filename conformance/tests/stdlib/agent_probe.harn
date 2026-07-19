@@ -7,7 +7,10 @@ pipeline test_agent_probe(_task) {
   const root = path_join(harness.fs.temp_dir(), "harn-agent-probe-" + uuid())
   const opts = {root: root, namespace: "agent/facts"}
   const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   // --- eval probe: shell command, no expected → pass derived from exit code
   const eval_pass = probe_eval("echo probe-eval-ok", opts + {now: "2026-05-23T22:00:00Z"})
   assert_eq(eval_pass.schema, "harn.probe.v1")
@@ -18,7 +21,11 @@ pipeline test_agent_probe(_task) {
   assert(starts_with(eval_pass.evidence.trace_id, "probe_"))
   assert(eval_pass.fact_id != nil && starts_with(eval_pass.fact_id, "fact_"))
   // --- eval probe with explicit expected (mismatch surfaces as fail)
-  const eval_fail = probe("Eval", "echo not-the-expected", opts + {expected: "expected", now: "2026-05-23T22:00:01Z"})
+  const eval_fail = probe(
+    "Eval",
+    "echo not-the-expected",
+    opts + {expected: "expected", now: "2026-05-23T22:00:01Z"},
+  )
   assert_eq(eval_fail.outcome, "fail")
   assert_eq(eval_fail.expected, "expected")
   // --- eval probe: non-zero exit derives fail without expected

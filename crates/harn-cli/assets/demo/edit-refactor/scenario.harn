@@ -32,7 +32,9 @@ pipeline default(_task) {
   const add_param = edit_add_parameter(
     {path: rs, symbol: {name: "scale"}, param: "offset: i64", default: "0", dry_run: true},
   )
-  const ret = edit_change_return_type({path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true})
+  const ret = edit_change_return_type(
+    {path: rs, symbol: {name: "scale"}, new_type: "i32", dry_run: true},
+  )
   __io_println("=== edit-refactor demo ===")
   __io_println("extract_function   -> " + extract.result)
   __io_println("add_parameter      -> " + add_param.result)
@@ -43,9 +45,15 @@ pipeline default(_task) {
     extract_result: extract.result,
     extract_signature: contains(extract.unified_diff[0].diff, "def compute_subtotal(base, qty):"),
     add_param_result: add_param.result,
-    add_param_def: contains(add_param.unified_diff[0].diff, "fn scale(value: i64, factor: i64, offset: i64)"),
+    add_param_def: contains(
+      add_param.unified_diff[0].diff,
+      "fn scale(value: i64, factor: i64, offset: i64)",
+    ),
     add_param_calls_filled: contains(add_param.unified_diff[0].diff, "scale(2, 3, 0)")
-      && contains(add_param.unified_diff[0].diff, "scale(6, 7, 0)"),
+      && contains(
+      add_param.unified_diff[0].diff,
+      "scale(6, 7, 0)",
+    ),
     return_type_result: ret.result,
   }
   __io_println(json_stringify(receipt))

@@ -16,7 +16,9 @@ pipeline default() {
   const root = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
   const _ = hostlib_code_index_rebuild({root: root})
   // 1. Direct Cypher pass-through.
-  const alpha: LibrarianCypherResult = code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
+  const alpha: LibrarianCypherResult = code_librarian_query(
+    "MATCH (f:Function {name: 'main'}) RETURN f.path AS path",
+  )
   __io_println("functions named `main`: " + to_string(len(alpha.rows)))
   // 2. Who calls a hot function?
   const callers: list<LibrarianCallSite> = code_librarian_who_calls("fetchUser")

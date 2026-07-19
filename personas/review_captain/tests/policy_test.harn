@@ -14,7 +14,8 @@ pipeline test_load_policy_json_returns_default_when_empty(task) {
 }
 
 pipeline test_load_policy_json_round_trips(task) {
-  const raw = "{\"repo\":\"example-org/example-app\",\"risky_paths\":[\"Package.swift\"],\"test_globs\":[\"Tests/\"]}"
+  const raw =
+    "{\"repo\":\"example-org/example-app\",\"risky_paths\":[\"Package.swift\"],\"test_globs\":[\"Tests/\"]}"
   const result = load_policy_json(raw)
   assert_eq(result.ok, true)
   assert_eq(result.policy.repo, "example-org/example-app")

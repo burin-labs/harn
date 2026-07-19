@@ -95,7 +95,8 @@ pub fn publish_plan_version(packages: list<PublishPlanPackage>) -> string {
   for package in packages {
     if package.version != version {
       throw "publishable workspace packages use multiple versions: " + version + " and "
-        + package.version
+        + package
+        .version
     }
   }
   return version

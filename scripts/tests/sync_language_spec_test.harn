@@ -4,7 +4,8 @@
 // independent of the test runner's working directory.
 import "../sync_language_spec.harn"
 
-const EXPECTED_HEADER = "<!-- Generated from spec/chapters/*.md by scripts/sync_language_spec.harn -->\n\n"
+const EXPECTED_HEADER =
+  "<!-- Generated from spec/chapters/*.md by scripts/sync_language_spec.harn -->\n\n"
 
 @test
 pipeline test_render_mirror_starts_with_header(task) {

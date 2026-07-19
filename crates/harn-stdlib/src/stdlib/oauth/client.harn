@@ -256,7 +256,9 @@ fn __token_is_stale(token, now_s) {
   if lifetime <= 0 {
     return false
   }
-  const threshold = to_int(issued) + lifetime * __TTL_PREREFRESH_NUMERATOR / __TTL_PREREFRESH_DENOMINATOR
+  const threshold = to_int(issued)
+    + lifetime * __TTL_PREREFRESH_NUMERATOR
+    / __TTL_PREREFRESH_DENOMINATOR
   return now_s >= threshold
 }
 
@@ -321,7 +323,8 @@ fn __post_token_request(
     } else {
       {}
     }
-    const detail = (error_body?.error_description ?? error_body?.error ?? "token endpoint returned status ")
+    const detail = (error_body?.error_description ?? error_body?.error
+      ?? "token endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/client: token request failed: " + to_string(detail)
   }
@@ -329,7 +332,8 @@ fn __post_token_request(
     json_parse(response?.body ?? "")
   }
   if is_err(parsed) {
-    throw "std/oauth/client: token endpoint did not return valid JSON: " + unwrap_err(parsed).message
+    throw "std/oauth/client: token endpoint did not return valid JSON: "
+      + unwrap_err(parsed).message
   }
   const parsed_body = unwrap(parsed)
   if type_of(parsed_body) != "dict" {
@@ -385,12 +389,26 @@ fn __audit_refresh(provider_id, storage_key, prev, next, reason) {
     prev: __redact_token(prev),
     next: __redact_token(next),
   }
-  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REFRESH, payload, {provider: to_string(provider_id)})
+  const _ = event_log.emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_REFRESH,
+    payload,
+    {provider: to_string(provider_id)},
+  )
 }
 
 fn __audit_exchange(provider_id, storage_key, next) {
-  const payload = {provider: to_string(provider_id), storage_key: to_string(storage_key), next: __redact_token(next)}
-  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
+  const payload = {
+    provider: to_string(provider_id),
+    storage_key: to_string(storage_key),
+    next: __redact_token(next),
+  }
+  const _ = event_log.emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_EXCHANGE,
+    payload,
+    {provider: to_string(provider_id)},
+  )
 }
 
 fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_type) {
@@ -403,7 +421,12 @@ fn __audit_token_exchange(provider_id, storage_key, next, mode, requested_token_
     issued_token_type: next?.issued_token_type,
     next: __redact_token(next),
   }
-  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
+  const _ = event_log.emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_EXCHANGE,
+    payload,
+    {provider: to_string(provider_id)},
+  )
 }
 
 fn __audit_revoked(provider_id, storage_key, prev, revoke_url_used) {
@@ -416,7 +439,12 @@ fn __audit_revoked(provider_id, storage_key, prev, revoke_url_used) {
     revoke_endpoint: __redact_endpoint(revoke_url_used),
     prev: __redact_token(prev),
   }
-  const _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REVOKED, payload, {provider: to_string(provider_id)})
+  const _ = event_log.emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_REVOKED,
+    payload,
+    {provider: to_string(provider_id)},
+  )
 }
 
 fn __try_revoke_remote(harness: Harness, cfg, token_value) {
@@ -432,7 +460,9 @@ fn __try_revoke_remote(harness: Harness, cfg, token_value) {
     return nil
   }
   const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  const body = __form_body([{key: "token", value: token_value}, {key: "client_id", value: cfg.client_id}])
+  const body = __form_body(
+    [{key: "token", value: token_value}, {key: "client_id", value: cfg.client_id}],
+  )
   try {
     const _ = harness.net.post(url_text, body, {headers: headers})
   } catch (_err) {
@@ -444,7 +474,11 @@ fn __try_revoke_remote(harness: Harness, cfg, token_value) {
 fn __revoke_locked(harness: Harness, cfg) {
   const prev = cfg.storage.get(cfg.storage_key)
   const access = prev?.access_token
-  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(harness, cfg, to_string(access))
+  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(
+    harness,
+    cfg,
+    to_string(access),
+  )
   cfg.storage.delete(cfg.storage_key)
   __audit_revoked(cfg.provider_id, cfg.storage_key, prev, remote_url)
   return nil
@@ -477,7 +511,8 @@ fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
     // gone (expired, revoked, or rotated by another caller). Surface
     // the dedicated HARN-OAU-002 diagnostic so scripts can pattern-
     // match on it and re-run authorization rather than retrying.
-    throw __DIAGNOSTIC_REFRESH_EXPIRED + ": std/oauth/client: refresh failed (" + to_string(err) + ")"
+    throw __DIAGNOSTIC_REFRESH_EXPIRED + ": std/oauth/client: refresh failed (" + to_string(err)
+      + ")"
   }
   const next_token = __build_token_set(parsed, cfg.scopes, issued_at, refresh)
   cfg.storage.set(cfg.storage_key, next_token)
@@ -497,7 +532,10 @@ fn __same_token_identity(stored, observed_token) -> bool {
     return true
   }
   return __same_access_token(stored, observed_token)
-    && to_string(stored?.refresh_token ?? "") == to_string(observed_token?.refresh_token ?? "")
+    && to_string(stored?.refresh_token ?? "")
+    == to_string(
+    observed_token?.refresh_token ?? "",
+  )
 }
 
 fn __refresh_needed(stored, now_s, reason, observed_token = nil) -> bool {
@@ -698,7 +736,9 @@ fn __list_allows(values, value) {
 }
 
 fn __require_token_exchange_capability(cfg) {
-  const capability = token_exchange_capability({id: cfg.provider_id, token_exchange: cfg.token_exchange})
+  const capability = token_exchange_capability(
+    {id: cfg.provider_id, token_exchange: cfg.token_exchange},
+  )
   if capability == nil || !capability.supported {
     throw "std/oauth/client: token exchange is not supported for provider `" + cfg.provider_id + "`"
   }
@@ -713,15 +753,21 @@ fn __validate_token_exchange(
 ) {
   if !__list_allows(capability?.subject_token_types, subject_token_type) {
     throw "std/oauth/client: subject_token_type `" + subject_token_type + "` is not supported by "
-      + capability.id
+      + capability
+      .id
   }
   if actor_token_type != nil && !__list_allows(capability?.actor_token_types, actor_token_type) {
     throw "std/oauth/client: actor_token_type `" + actor_token_type + "` is not supported by "
-      + capability.id
+      + capability
+      .id
   }
   if requested_token_type != nil
-    && !__list_allows(capability?.requested_token_types, requested_token_type) {
-    throw "std/oauth/client: requested_token_type `" + requested_token_type + "` is not supported by "
+    && !__list_allows(
+    capability?.requested_token_types,
+    requested_token_type,
+  ) {
+    throw "std/oauth/client: requested_token_type `" + requested_token_type
+      + "` is not supported by "
       + capability.id
   }
   if actor_token_type == nil && !(capability?.impersonation ?? true) {
@@ -738,7 +784,9 @@ fn __token_exchange(harness: Harness, cfg, opts) {
   }
   const capability = __require_token_exchange_capability(cfg)
   const subject_token = __require_string(opts?.subject_token, "opts.subject_token")
-  const subject_token_type = token_type(__require_string(opts?.subject_token_type, "opts.subject_token_type"))
+  const subject_token_type = token_type(
+    __require_string(opts?.subject_token_type, "opts.subject_token_type"),
+  )
   const actor_token = opts?.actor_token
   const has_actor = actor_token != nil && to_string(actor_token) != ""
   const actor_token_type = if has_actor {
@@ -771,7 +819,10 @@ fn __token_exchange(harness: Harness, cfg, opts) {
   }
   if has_actor {
     form = form
-      + [{key: "actor_token", value: actor_token}, {key: "actor_token_type", value: actor_token_type}]
+      + [
+      {key: "actor_token", value: actor_token},
+      {key: "actor_token_type", value: actor_token_type},
+    ]
   }
   if opts?.extra_params != nil {
     for key in opts.extra_params.keys() {
@@ -787,10 +838,13 @@ fn __token_exchange(harness: Harness, cfg, opts) {
     cfg.token_auth_method,
     form,
   )
-  const issued_token_type = token_type(__require_string(parsed?.issued_token_type, "token response issued_token_type"))
+  const issued_token_type = token_type(
+    __require_string(parsed?.issued_token_type, "token response issued_token_type"),
+  )
   if !__list_allows(capability?.issued_token_types, issued_token_type) {
     throw "std/oauth/client: issued_token_type `" + issued_token_type + "` is not supported by "
-      + capability.id
+      + capability
+      .id
   }
   let token_set = __build_token_set(parsed, __scope_list(opts?.scope), issued_at, nil)
   const mode = has_actor ? "delegation" : "impersonation"
@@ -906,7 +960,9 @@ pub fn client(provider, opts) -> OAuthClient {
     token: { -> __get_valid_token(harness, cfg).access_token },
     current_token: { -> cfg.storage.get(cfg.storage_key) },
     token_exchange: { exchange_opts -> __token_exchange(harness, cfg, exchange_opts) },
-    request: { method, url, http_opts = nil -> __token_request(harness, cfg, method, url, http_opts) },
+    request: { method, url, http_opts = nil ->
+      __token_request(harness, cfg, method, url, http_opts)
+    },
     revoke: { -> __revoke_locked(harness, cfg) },
   }
 }

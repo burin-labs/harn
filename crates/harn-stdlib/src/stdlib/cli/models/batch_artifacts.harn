@@ -7,7 +7,11 @@
  */
 import { safe_dict, safe_list, safe_string } from "std/cli/render"
 
-pub type BatchArtifactKind = "manifest" | "prepare_receipt" | "submission_receipt" | "status_receipt" | "cancel_source_receipt"
+pub type BatchArtifactKind = "manifest" \
+  | "prepare_receipt" \
+  | "submission_receipt" \
+  | "status_receipt" \
+  | "cancel_source_receipt"
 
 pub type BatchRequestSourceRow = {line_no: int, row: dict}
 
@@ -154,7 +158,11 @@ pub fn __batch_artifact_read(
   const parsed = try {
     json_parse(source)
   } catch (failure) {
-    return {artifact: {}, source_sha256: sha256(source), errors: [contract.malformed_error + failure.message]}
+    return {
+      artifact: {},
+      source_sha256: sha256(source),
+      errors: [contract.malformed_error + failure.message],
+    }
   }
   if type_of(parsed) != "dict" {
     return {artifact: {}, source_sha256: sha256(source), errors: [contract.object_error]}

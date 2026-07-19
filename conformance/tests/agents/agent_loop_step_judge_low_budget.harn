@@ -9,7 +9,9 @@ pipeline default() {
   with_llm_script(
     [
       llm_text("<user_response>safe answer</user_response>\n<done>##DONE##</done>"),
-      llm_text("{\"verdict\":\"revise\",\"reasoning\":\"force a regression\",\"critique\":\"try again\"}"),
+      llm_text(
+        "{\"verdict\":\"revise\",\"reasoning\":\"force a regression\",\"critique\":\"try again\"}",
+      ),
     ],
     { ->
       const session = "step-judge-low-budget-" + uuid()

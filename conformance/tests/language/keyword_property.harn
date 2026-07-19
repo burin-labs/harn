@@ -6,12 +6,23 @@ pipeline default() {
   __io_println(cfg.match)
   __io_println(cfg.for)
   __io_println(cfg.enum)
-  const gates = {request_approval: true, ask_user: "owner", dual_control: 2, escalate_to: "frontier"}
+  const gates = {
+    request_approval: true,
+    ask_user: "owner",
+    dual_control: 2,
+    escalate_to: "frontier",
+  }
   __io_println(gates.request_approval)
   __io_println(gates.ask_user)
   __io_println(gates.dual_control)
   __io_println(gates.escalate_to)
-  const flow = {finally: "cleanup", require: "policy", select: "ready", skill: "review", eval_pack: "smoke"}
+  const flow = {
+    finally: "cleanup",
+    require: "policy",
+    select: "ready",
+    skill: "review",
+    eval_pack: "smoke",
+  }
   __io_println(flow.finally)
   __io_println(flow.require)
   __io_println(flow.select)

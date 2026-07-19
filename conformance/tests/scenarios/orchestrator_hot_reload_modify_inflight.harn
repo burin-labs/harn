@@ -6,7 +6,10 @@ pipeline default() {
   const base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-" + unique)
   const workspace = path_join(base, "workspace")
   const state_dir = path_join(base, "state")
-  const binary = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  const binary = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
   assert(harness.fs.exists(binary), "missing built harn binary at " + binary)
   const script = """
     set -eu
@@ -263,6 +266,8 @@ pipeline default() {
   assert(summary.state_version == 2, "state snapshot reflects reloaded binding version")
   log(
     "orchestrator hot reload versions: " + to_string(summary.versions[0]) + ","
-      + to_string(summary.versions[1]),
+      + to_string(
+      summary.versions[1],
+    ),
   )
 }

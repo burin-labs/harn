@@ -1,4 +1,16 @@
-pub type AgentToolLifecycleErrorCategory = "schema_validation" | "tool_error" | "mcp_server_error" | "host_bridge_error" | "permission_denied" | "rejected_loop" | "parse_aborted" | "timeout" | "network" | "resource_busy" | "cancelled" | "abandoned_at_loop_exit" | "unknown"
+pub type AgentToolLifecycleErrorCategory = "schema_validation" \
+  | "tool_error" \
+  | "mcp_server_error" \
+  | "host_bridge_error" \
+  | "permission_denied" \
+  | "rejected_loop" \
+  | "parse_aborted" \
+  | "timeout" \
+  | "network" \
+  | "resource_busy" \
+  | "cancelled" \
+  | "abandoned_at_loop_exit" \
+  | "unknown"
 
 pub type AgentToolMutationStatus = "applied" | "not_applied" | "unknown"
 
@@ -50,10 +62,16 @@ pub fn agent_tool_lifecycle_error_category(raw: any) -> AgentToolLifecycleErrorC
   if contains(["rate_limit", "overloaded", "server_error", "transient_network"], category) {
     return "network"
   }
-  if contains(["tool_middleware_exception", "tool_parallel_dispatch_exception", "generic"], category) {
+  if contains(
+    ["tool_middleware_exception", "tool_parallel_dispatch_exception", "generic"],
+    category,
+  ) {
     return "tool_error"
   }
-  if contains(["auth", "channel_closed", "not_found", "circuit_open", "budget_exceeded"], category) {
+  if contains(
+    ["auth", "channel_closed", "not_found", "circuit_open", "budget_exceeded"],
+    category,
+  ) {
     return "host_bridge_error"
   }
   return "unknown"

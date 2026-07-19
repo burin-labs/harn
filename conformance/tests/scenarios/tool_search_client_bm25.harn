@@ -73,14 +73,20 @@ pipeline test(task) {
       const first_system = calls[0].system
       assert(contains(first_system, "__harn_tool_search"), "synthetic tool advertised on turn 1")
       assert(contains(first_system, "look"), "non-deferred `look` tool on turn 1")
-      assert(!contains(first_system, "deploy_service"), "deferred `deploy_service` hidden on turn 1")
+      assert(
+        !contains(first_system, "deploy_service"),
+        "deferred `deploy_service` hidden on turn 1",
+      )
       assert(!contains(first_system, "query_metrics"), "deferred `query_metrics` hidden on turn 1")
       const second_system = calls[1].system
       assert(
         contains(second_system, "deploy_service"),
         "BM25 must promote `deploy_service` into turn 2's contract prompt",
       )
-      assert(!contains(second_system, "query_metrics"), "non-matching deferred tools must stay hidden")
+      assert(
+        !contains(second_system, "query_metrics"),
+        "non-matching deferred tools must stay hidden",
+      )
       const events = transcript_events(result?.transcript)
       let query_events = 0
       let result_events = 0

@@ -6,7 +6,12 @@ pipeline main() {
     "Scaffold file",
     {handler: { _args -> "scaffold-ok" }, parameters: {}},
   )
-  tools = tool_define(tools, "edit", "Edit file", {handler: { _args -> "replace-body-ok" }, parameters: {}})
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit file",
+    {handler: { _args -> "replace-body-ok" }, parameters: {}},
+  )
   const flow = workflow_graph(
     {
       name: "preserve_handlers",

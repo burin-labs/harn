@@ -18,7 +18,9 @@ pipeline default() {
   enable_tracing(true)
   const stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
+    + to_string(
+    harness.random.gen_range(100000, 999999),
+  )
   const _ = trigger_register(
     {
       id: "channel-otel-idem-" + unique,

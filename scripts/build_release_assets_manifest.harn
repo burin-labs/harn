@@ -25,7 +25,8 @@ const PROG = "build_release_assets_manifest.py"
 
 // argparse usage block (deterministic width-80 / non-tty form) and the help
 // epilog (the module docstring), reproduced verbatim from the Python.
-const USAGE = "usage: build_release_assets_manifest.py [-h] --artifacts-dir ARTIFACTS_DIR\n                                        --tag TAG --output OUTPUT"
+const USAGE =
+  "usage: build_release_assets_manifest.py [-h] --artifacts-dir ARTIFACTS_DIR\n                                        --tag TAG --output OUTPUT"
 
 /**
  * Ordered list of Rust target triples. Order matches the Python `TARGETS`
@@ -184,9 +185,11 @@ pub fn help_text() -> string {
   return USAGE + "\n\n" + DOC + "\n\n" + OPTIONS
 }
 
-const DOC = "Emit `release-assets.json` for a Harn GitHub release.\n\nDownstream consumers (`burin-code/scripts/fetch-harn.sh`, the Scoop\nmanifest generator, the `@burin/cli` npm postinstall) read this file\nto verify and fetch the correct per-architecture binary archive\nwithout scraping the GitHub releases API.\n\nSchema:\n    {\n      \"version\": \"0.8.21\",\n      \"tag\": \"v0.8.21\",\n      \"release_url\": \"https://github.com/.../releases/tag/v0.8.21\",\n      \"assets\": {\n        \"<rust-target-triple>\": {\n          \"filename\": \"harn-<triple>.tar.gz\" | \"harn-<triple>.zip\",\n          \"url\":      \"https://github.com/.../releases/download/<tag>/<filename>\",\n          \"sha256\":   \"<hex>\",\n          \"size\":     <bytes>,\n          \"format\":   \"tar.gz\" | \"zip\",\n          \"binaries\": [\"harn\", \"harn-dap\", \"harn-lsp\"] | [\"harn.exe\", ...]\n        }\n      }\n    }\n\nThe schema is keyed by Rust target triple so consumers can map their\nown platform detection (e.g. `uname -s`/`uname -m`, Node `process.platform`/\n`process.arch`) onto a single lookup. See\n`docs/src/dev/release-assets-manifest.md` for the consumer contract."
+const DOC =
+  "Emit `release-assets.json` for a Harn GitHub release.\n\nDownstream consumers (`burin-code/scripts/fetch-harn.sh`, the Scoop\nmanifest generator, the `@burin/cli` npm postinstall) read this file\nto verify and fetch the correct per-architecture binary archive\nwithout scraping the GitHub releases API.\n\nSchema:\n    {\n      \"version\": \"0.8.21\",\n      \"tag\": \"v0.8.21\",\n      \"release_url\": \"https://github.com/.../releases/tag/v0.8.21\",\n      \"assets\": {\n        \"<rust-target-triple>\": {\n          \"filename\": \"harn-<triple>.tar.gz\" | \"harn-<triple>.zip\",\n          \"url\":      \"https://github.com/.../releases/download/<tag>/<filename>\",\n          \"sha256\":   \"<hex>\",\n          \"size\":     <bytes>,\n          \"format\":   \"tar.gz\" | \"zip\",\n          \"binaries\": [\"harn\", \"harn-dap\", \"harn-lsp\"] | [\"harn.exe\", ...]\n        }\n      }\n    }\n\nThe schema is keyed by Rust target triple so consumers can map their\nown platform detection (e.g. `uname -s`/`uname -m`, Node `process.platform`/\n`process.arch`) onto a single lookup. See\n`docs/src/dev/release-assets-manifest.md` for the consumer contract."
 
-const OPTIONS = "options:\n  -h, --help            show this help message and exit\n  --artifacts-dir ARTIFACTS_DIR\n                        Directory holding the downloaded per-target archives.\n  --tag TAG             Release tag, e.g. \"v0.8.21\".\n  --output OUTPUT       Where to write release-assets.json."
+const OPTIONS =
+  "options:\n  -h, --help            show this help message and exit\n  --artifacts-dir ARTIFACTS_DIR\n                        Directory holding the downloaded per-target archives.\n  --tag TAG             Release tag, e.g. \"v0.8.21\".\n  --output OUTPUT       Where to write release-assets.json."
 
 /**
  * Parse argv into `{help, error, artifacts_dir, tag, output}`.

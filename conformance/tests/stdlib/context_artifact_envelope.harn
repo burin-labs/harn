@@ -65,7 +65,9 @@ pipeline default() {
     ),
     {merge_body: true},
   )
-  const secret = context_artifact({id: "api-key", kind: "secret", body: "TOKEN<abc>", sensitivity: "secret"})
+  const secret = context_artifact(
+    {id: "api-key", kind: "secret", body: "TOKEN<abc>", sensitivity: "secret"},
+  )
   const redaction_override = context_artifact(
     {id: "secret-option", kind: "secret", body: "TOKEN<option>", sensitivity: "internal"},
     {redaction: {sensitivity: "secret", redacted: false}},
@@ -74,8 +76,12 @@ pipeline default() {
   const ctx_with_artifact = context_add_artifact(context([], {artifacts: []}), primary)
   const same_body_a = context_artifact({kind: "note", path: "a.md", body: "shared body"})
   const same_body_b = context_artifact({kind: "note", path: "b.md", body: "shared body"})
-  const overlap_hash_a = context_artifact({kind: "note", body: "left", source_hashes: ["sha256:left", "sha256:shared"]})
-  const overlap_hash_b = context_artifact({kind: "note", body: "right", source_hashes: ["sha256:right", "sha256:shared"]})
+  const overlap_hash_a = context_artifact(
+    {kind: "note", body: "left", source_hashes: ["sha256:left", "sha256:shared"]},
+  )
+  const overlap_hash_b = context_artifact(
+    {kind: "note", body: "right", source_hashes: ["sha256:right", "sha256:shared"]},
+  )
   const budgeted = context_artifact_budget(
     [duplicate, primary, digest],
     {

@@ -39,7 +39,8 @@ const __SITREP_DEFAULT_ROUTES = [
   {provider: "mock"},
 ]
 
-const __SITREP_SYSTEM_PROMPT = "You distill agent transcripts into concise 3-sentence situation reports for end users. Be specific, factual, and never invent details the transcript does not contain. Treat tool calls and tool results as authoritative when they conflict with surrounding prose."
+const __SITREP_SYSTEM_PROMPT =
+  "You distill agent transcripts into concise 3-sentence situation reports for end users. Be specific, factual, and never invent details the transcript does not contain. Treat tool calls and tool results as authoritative when they conflict with surrounding prose."
 
 const __SITREP_DEFAULT_MAX_TOKENS = 400
 
@@ -188,7 +189,14 @@ fn __sitrep_normalize_lines(text) {
 }
 
 fn __sitrep_empty_result(reason) {
-  return {summary: "", lines: [], model_used: nil, provider_used: nil, skipped: true, reason: reason}
+  return {
+    summary: "",
+    lines: [],
+    model_used: nil,
+    provider_used: nil,
+    skipped: true,
+    reason: reason,
+  }
 }
 
 /**

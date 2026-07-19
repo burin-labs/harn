@@ -128,7 +128,9 @@ pipeline test_veto_counts_accumulate_per_class(task) {
   // pre-populated persistent store. max_vetoes:0 disables the budget so soft vetoes
   // always charge.
   const sid = "gate6-classcount"
-  const bundle = agent_completion_gate({facts: __class_facts, max_vetoes: 0, verify_command: __red_verify})
+  const bundle = agent_completion_gate(
+    {facts: __class_facts, max_vetoes: 0, verify_command: __red_verify},
+  )
   const gate = bundle.verify_completion
   const before = agent_completion_gate_veto_counts(sid)
   gate({session_id: sid, text: "nowrite", transcript: "[]"})

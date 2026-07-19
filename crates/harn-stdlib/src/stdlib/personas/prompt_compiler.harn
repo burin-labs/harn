@@ -18,7 +18,8 @@ import {
 import "std/schema"
 import { list_providers } from "std/triggers"
 
-type PersonaPromptBlueprintSource = {kind: "cron", cron: string, timezone: string} | {kind: "external", provider: string, event: string}
+type PersonaPromptBlueprintSource = {kind: "cron", cron: string, timezone: string} \
+  | {kind: "external", provider: string, event: string}
 
 type PersonaPromptBlueprintCandidate = {
   schema_version: "1",
@@ -49,7 +50,10 @@ pub type PersonaPromptCompileUsage = {
   realized_cost_usd: float?,
 }
 
-pub type PersonaPromptCheckpointStatus = "not_attempted" | "accepted" | "schema_rejected" | "validator_rejected"
+pub type PersonaPromptCheckpointStatus = "not_attempted" \
+  | "accepted" \
+  | "schema_rejected" \
+  | "validator_rejected"
 
 pub type PersonaPromptCheckpointReceipt = {
   status: PersonaPromptCheckpointStatus,
@@ -83,7 +87,9 @@ fn __persona_prompt_blueprint_schema() -> dict {
       name: schema_string(),
       description: schema_string(),
       goal: schema_string(),
-      template: schema_enum(["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"]),
+      template: schema_enum(
+        ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"],
+      ),
       source: schema_union(
         [
           schema_closed_object(
@@ -102,9 +108,10 @@ fn __persona_prompt_catalog(providers) -> list<PersonaPromptCatalogEntry> {
   let catalog: list<PersonaPromptCatalogEntry> = []
   for provider in providers {
     const transports = provider.kinds.map({ kind -> to_string(kind) }).sort_by({ kind -> kind })
-    const required_secrets = provider.secret_requirements.filter({ requirement -> requirement.required }).map(
-      { requirement -> to_string(requirement.name) },
+    const required_secrets = provider.secret_requirements.filter(
+      { requirement -> requirement.required },
     )
+      .map({ requirement -> to_string(requirement.name) })
       .sort_by({ name -> name })
     catalog = catalog.push(
       {provider: provider.provider, transports: transports, required_secrets: required_secrets},
@@ -151,7 +158,9 @@ fn __persona_prompt_candidate_blueprint(
       + {cron: {cron: candidate.source.cron, timezone: candidate.source.timezone}}
   } else {
     blueprint = blueprint
-      + {external: {provider: candidate.source.provider, event: candidate.source.event}}
+      + {
+      external: {provider: candidate.source.provider, event: candidate.source.event},
+    }
   }
   if options.name_override != nil {
     return blueprint + {name: options.name_override}
@@ -237,7 +246,11 @@ fn __persona_prompt_validation_error(
 ) -> PersonaBlueprintDiagnostic {
   if len(report.errors) > 0 {
     return report.errors[0]
-      ?? {code: "blueprint_invalid", path: "", message: "persona blueprint failed validation"}
+      ?? {
+      code: "blueprint_invalid",
+      path: "",
+      message: "persona blueprint failed validation",
+    }
   }
   return {code: "blueprint_invalid", path: "", message: "persona blueprint failed validation"}
 }
@@ -303,7 +316,9 @@ pub fn persona_compile_prompt(
       const validation = persona_blueprint_validate(normalized, live_providers)
       return {
         ok: validation.valid,
-        errors: validation.errors.map({ diagnostic -> diagnostic.path + ": " + diagnostic.message }),
+        errors: validation.errors.map(
+          { diagnostic -> diagnostic.path + ": " + diagnostic.message },
+        ),
       }
     },
   )
@@ -338,7 +353,11 @@ pub fn persona_compile_prompt(
       blueprint: nil,
       validation: nil,
       lowering: nil,
-      error: {code: checkpoint.error_category ?? "schema_rejected", path: "", message: checkpoint.error},
+      error: {
+        code: checkpoint.error_category ?? "schema_rejected",
+        path: "",
+        message: checkpoint.error,
+      },
     }
   }
   const blueprint = __persona_prompt_candidate_blueprint(checkpoint.data, opts)

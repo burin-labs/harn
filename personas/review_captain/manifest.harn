@@ -15,7 +15,9 @@ import { review_pr } from "lib/review"
 pub fn review_captain_persona(ctx) {
   const input = resolve_review_input_step(ctx)
   const secret_scan_findings = scan_secrets_step(input)
-  const risky_paths = classify_risky_paths_step({input: input, secret_scan_findings: secret_scan_findings})
+  const risky_paths = classify_risky_paths_step(
+    {input: input, secret_scan_findings: secret_scan_findings},
+  )
   const llm_findings = run_self_review_step({input: input, risky_paths: risky_paths})
   const receipt = build_review_receipt_step(
     {

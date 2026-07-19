@@ -7,7 +7,9 @@ fn in_range(name, actual, low, high) {
   if actual < low || actual > high {
     __io_println(
       name + " out of range: " + to_string(actual) + " not in [" + to_string(low) + ", "
-        + to_string(high)
+        + to_string(
+        high,
+      )
         + "]",
     )
     return false
@@ -17,7 +19,8 @@ fn in_range(name, actual, low, high) {
 
 pipeline default() {
   // English: ~98 chars → ~25 tokens. Allow 20-30.
-  const english = "the quick brown fox jumps over the lazy dog and then keeps on running through fields and trees end"
+  const english =
+    "the quick brown fox jumps over the lazy dog and then keeps on running through fields and trees end"
   __io_println(in_range("english", estimate_text_tokens(english, "any"), 20, 30))
   // Code: braces and parens push it into the code branch (length/3.5).
   const code = "fn foo() { let bar = (1 + 2) * 3; if (bar > 0) { return bar } else { return 0 } }"

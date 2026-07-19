@@ -20,7 +20,9 @@ pipeline default() {
   /* Rust rule fires (rewrite). */
   run(rust_wrapper, "cargo build --release")
   /* Universal deny fires even though we only opted into rust. */
-  const deny_wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  const deny_wrapper = preset_run_command(
+    {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
   run(deny_wrapper, "git push --force origin main")
   run(deny_wrapper, "rm -rf /")
   /* Sibling-of-deny command passes through unscathed. */

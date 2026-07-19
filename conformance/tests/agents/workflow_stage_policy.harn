@@ -8,7 +8,10 @@ import {
 
 pipeline default() {
   const verification = workflow_evaluate_verification(
-    {verify: {assert_text: "ok", expect_status: 0}, result: {visible_text: "all ok", exit_status: 0}},
+    {
+      verify: {assert_text: "ok", expect_status: 0},
+      result: {visible_text: "all ok", exit_status: 0},
+    },
   )
   __io_println(verification.kind)
   __io_println(verification.ok)
@@ -21,7 +24,10 @@ pipeline default() {
   const condition = workflow_evaluate_condition(
     {
       metadata: {contains_text: "needle"},
-      artifacts: [{id: "a", kind: "summary", text: "hay"}, {id: "b", kind: "summary", text: "needle here"}],
+      artifacts: [
+        {id: "a", kind: "summary", text: "hay"},
+        {id: "b", kind: "summary", text: "needle here"},
+      ],
     },
   )
   __io_println(condition.matched)
@@ -62,7 +68,11 @@ pipeline default() {
   const static_reduce = workflow_prepare_static_stage(
     {
       node_id: "reduce",
-      node: {kind: "reduce", reduce_policy: {separator: " / "}, output_contract: {output_kinds: ["plan"]}},
+      node: {
+        kind: "reduce",
+        reduce_policy: {separator: " / "},
+        output_contract: {output_kinds: ["plan"]},
+      },
       artifacts: [{id: "a", kind: "summary", text: "one"}, {id: "b", kind: "summary", text: "two"}],
     },
   )
@@ -72,7 +82,10 @@ pipeline default() {
   const static_escalation = workflow_prepare_static_stage(
     {
       node_id: "escalate",
-      node: {kind: "escalation", escalation_policy: {queue: "review", level: "high", reason: "needs owner"}},
+      node: {
+        kind: "escalation",
+        escalation_policy: {queue: "review", level: "high", reason: "needs owner"},
+      },
       artifacts: [{id: "input", kind: "plan", text: "blocked"}],
     },
   )
@@ -121,7 +134,10 @@ pipeline default() {
         auto_compact: {token_threshold: 1},
         output_contract: {output_kinds: ["context_summary"]},
       },
-      artifacts: [{id: "a", kind: "summary", text: "first"}, {id: "b", kind: "summary", text: "second"}],
+      artifacts: [
+        {id: "a", kind: "summary", text: "first"},
+        {id: "b", kind: "summary", text: "second"},
+      ],
     },
   )
   __io_println(static_compact.branch)

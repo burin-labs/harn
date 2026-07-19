@@ -103,7 +103,9 @@ fn command_stdout_or(cmd: string, args: list<string>, fallback: string) -> strin
 }
 
 fn current_commit_sha(repo_root: string) -> string {
-  const res = harness.process.spawn_captured({cmd: "git", args: ["rev-parse", "HEAD"], cwd: repo_root})
+  const res = harness.process.spawn_captured(
+    {cmd: "git", args: ["rev-parse", "HEAD"], cwd: repo_root},
+  )
   if res.success {
     return res.stdout.trim()
   }
@@ -116,7 +118,11 @@ fn harn_version(harn_bin: string) -> string {
 
 fn host_label() -> string {
   return command_stdout_or("uname", ["-s"], "unknown") + " "
-    + command_stdout_or("uname", ["-m"], "unknown")
+    + command_stdout_or(
+    "uname",
+    ["-m"],
+    "unknown",
+  )
 }
 
 pub fn most_recent_baseline_for(payload, key: string, exclude_sha: string) {
@@ -158,7 +164,9 @@ pub fn build_invocation(args_template: list<string>, tmpdir: string) -> list<str
   let rendered: list<string> = []
   for piece in args_template {
     rendered = rendered
-      + [piece.replace("{trace_input}", trace_input).replace("{trace_output}", trace_output)]
+      + [
+      piece.replace("{trace_input}", trace_input).replace("{trace_output}", trace_output),
+    ]
   }
   return rendered
 }
@@ -488,7 +496,10 @@ fn main(harness: Harness) -> int {
   const budgets_file = require_env("HARN_CLI_BUDGETS_FILE")
   const baseline_file = require_env("HARN_CLI_BASELINE_FILE")
   const repo_root = require_env("HARN_CLI_REPO_ROOT")
-  const iterations_res = parse_positive_int("HARN_CLI_ITERATIONS", require_env("HARN_CLI_ITERATIONS"))
+  const iterations_res = parse_positive_int(
+    "HARN_CLI_ITERATIONS",
+    require_env("HARN_CLI_ITERATIONS"),
+  )
   if !iterations_res.ok {
     harness.stdio.eprintln("error: ${iterations_res.error}")
     return 2
@@ -557,7 +568,15 @@ fn main(harness: Harness) -> int {
     }
     return 1
   }
-  const merged = merge_baseline(baseline, sha, measurements, update_baseline, host, version, date_now_iso())
+  const merged = merge_baseline(
+    baseline,
+    sha,
+    measurements,
+    update_baseline,
+    host,
+    version,
+    date_now_iso(),
+  )
   save_baseline(baseline_file, merged)
   return 0
 }

@@ -37,11 +37,13 @@ pub fn env_bool(name: string, fallback: bool = false) -> bool {
   }
   const normalized = lowercase(trim(value))
   if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "y"
-    || normalized == "on" {
+    || normalized
+    == "on" {
     return true
   }
   if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "n"
-    || normalized == "off" {
+    || normalized
+    == "off" {
     return false
   }
   return fallback

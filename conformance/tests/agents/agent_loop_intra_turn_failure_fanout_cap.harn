@@ -25,7 +25,10 @@ fn rejecting_edit_tools() {
       handler: { _args ->
         throw "missing action, expected one of create/patch/replace_body"
       },
-      parameters: {action: {type: "string", description: "Edit kind"}, path: {type: "string", description: "Path"}},
+      parameters: {
+        action: {type: "string", description: "Edit kind"},
+        path: {type: "string", description: "Path"},
+      },
       returns: {type: "string"},
       annotations: {kind: "edit", side_effect_level: "workspace_write"},
     },

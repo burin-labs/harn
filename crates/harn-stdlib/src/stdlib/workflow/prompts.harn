@@ -164,7 +164,11 @@ fn __workflow_render_contract(contract) {
   out = __workflow_push_int_field(out, "expect_status", contract?.expect_status)
   out = __workflow_push_optional_field(out, "assert_text", contract?.assert_text)
   out = __workflow_push_optional_field(out, "expect_text", contract?.expect_text)
-  out = __workflow_push_string_list(out, "required_identifiers", contract?.required_identifiers ?? [])
+  out = __workflow_push_string_list(
+    out,
+    "required_identifiers",
+    contract?.required_identifiers ?? [],
+  )
   out = __workflow_push_string_list(out, "required_paths", contract?.required_paths ?? [])
   out = __workflow_push_string_list(out, "required_text", contract?.required_text ?? [])
   out = __workflow_push_checks(out, contract?.checks ?? [])
@@ -208,9 +212,14 @@ fn __workflow_stage_label(label) {
 pub fn workflow_prepare_stage_prompt(config = nil) {
   const opts = config ?? {}
   const rendered_context = opts?.rendered_context
-    ?? workflow_render_artifacts_context(opts?.artifacts ?? [], opts?.context_policy ?? {})
+    ?? workflow_render_artifacts_context(
+    opts?.artifacts ?? [],
+    opts?.context_policy ?? {},
+  )
   const rendered_verification = opts?.rendered_verification
-    ?? workflow_render_verification_context(opts?.verification_contracts ?? [])
+    ?? workflow_render_verification_context(
+    opts?.verification_contracts ?? [],
+  )
   const prompt = workflow_stage_prompt(
     {
       label: __workflow_escape_prompt_text(__workflow_stage_label(opts?.task_label)),
@@ -219,5 +228,9 @@ pub fn workflow_prepare_stage_prompt(config = nil) {
       context: trim(rendered_context),
     },
   )
-  return {prompt: prompt, rendered_context: rendered_context, rendered_verification: rendered_verification}
+  return {
+    prompt: prompt,
+    rendered_context: rendered_context,
+    rendered_verification: rendered_verification,
+  }
 }

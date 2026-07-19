@@ -6,7 +6,8 @@ fn __env_int(harness: Harness, name: string, default_value: int) -> int {
 
 fn __shared_ledger_path(harness: Harness) -> string {
   const path = harness.env.get_or("HARN_EVENT_LOG_SQLITE_PATH", "")
-  if harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite" && path != "" && is_absolute(path) {
+  if harness.env.get_or("HARN_EVENT_LOG_BACKEND", "") == "sqlite" && path != ""
+    && is_absolute(path) {
     return path
   }
   return ""
@@ -56,7 +57,9 @@ pub fn persona_prompt_eval_selected_split(manifest: dict, split: string) -> dict
 pub fn persona_prompt_eval_executor(executor: dict, ledger_path: string) -> dict {
   const argv = executor.argv
   return executor
-    + {argv: [...argv.slice(0, 2), "--write-root", dirname(ledger_path), ...argv.slice(2, len(argv))]}
+    + {
+    argv: [...argv.slice(0, 2), "--write-root", dirname(ledger_path), ...argv.slice(2, len(argv))],
+  }
 }
 
 fn main(harness: Harness) -> int {
@@ -87,13 +90,22 @@ fn main(harness: Harness) -> int {
     if !confirmed || max_cells < planned_cells || shared_ledger_path == "" {
       harness.stdio.eprintln(
         "live persona prompt eval requires spend confirmation, a cell ceiling >= "
-          + to_string(planned_cells)
+          + to_string(
+          planned_cells,
+        )
           + ", and HARN_EVENT_LOG_BACKEND=sqlite with an absolute HARN_EVENT_LOG_SQLITE_PATH shared by both revisions",
       )
       return 2
     }
   }
-  const manifest = persona_prompt_eval_manifest(raw, split, trials, provider, model, shared_ledger_path)
+  const manifest = persona_prompt_eval_manifest(
+    raw,
+    split,
+    trials,
+    provider,
+    model,
+    shared_ledger_path,
+  )
   let options = {
     namespace: raw.metadata.ledger_namespace,
     suite: raw.id,

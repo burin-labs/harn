@@ -33,7 +33,13 @@ const WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS = [
   ".DS_Store",
 ]
 
-pub type WorktreePruneReason = "main_checkout" | "current_worktree" | "in_use" | "dirty" | "unpushed" | "not_merged" | "too_young"
+pub type WorktreePruneReason = "main_checkout" \
+  | "current_worktree" \
+  | "in_use" \
+  | "dirty" \
+  | "unpushed" \
+  | "not_merged" \
+  | "too_young"
 
 pub type WorktreePruneFacts = {
   path: string,
@@ -305,7 +311,14 @@ pub fn worktree_create(repo, name, base_ref, path, options = {}) {
   harness.fs.mkdir(repo + "/.harn")
   harness.fs.mkdir(repo + "/.harn/worktrees")
   const result = __worktree_git(repo, ["worktree", "add", "-B", name, target, base_ref], options)
-  return {repo: repo, name: name, path: target, base_ref: base_ref, result: result, success: result?.success}
+  return {
+    repo: repo,
+    name: name,
+    path: target,
+    base_ref: base_ref,
+    result: result,
+    success: result?.success,
+  }
 }
 
 /**

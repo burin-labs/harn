@@ -52,7 +52,9 @@ fn __host_attachment_description_route(
     }
     return {provider: options.provider, model: options.model}
   }
-  const candidates = models_with({strengths: ["vision"], available_only: true, exclude_deprecated: true})
+  const candidates = models_with(
+    {strengths: ["vision"], available_only: true, exclude_deprecated: true},
+  )
   if len(candidates) == 0 {
     return nil
   }
@@ -77,7 +79,9 @@ pub fn describe_host_attachment(
   }
   const prompt = options.prompt
     ?? "Describe this image precisely for a coding agent. Preserve visible text, state, errors, and spatial relationships."
-  const messages = [{role: "user", content: [text_content(prompt), image_content(source, options.image ?? {})]}]
+  const messages = [
+    {role: "user", content: [text_content(prompt), image_content(source, options.image ?? {})]},
+  ]
   const result = try {
     if route.provider == nil {
       llm_call("", options.system, {model: route.model, vision: true, messages: messages})

@@ -183,7 +183,8 @@ pub fn provider_tool_probe_campaign_catalog_snapshot(
     nil
   }
   if type_of(parsed) != "dict" || type_of(parsed?.providers) != "list"
-    || type_of(parsed?.models) != "list"
+    || type_of(parsed?.models)
+    != "list"
     || type_of(parsed?.routing_routes) != "list" {
     return {
       receipt: __catalog_receipt(
@@ -331,7 +332,11 @@ fn __provider_tool_probe_campaign_catalog(
   const command = ["provider", "catalog", "show"]
   const child = try {
     harness.process.spawn_captured(
-      {cmd: harn_bin, args: command, env: provider_tool_probe_campaign_command_env(providers_config)},
+      {
+        cmd: harn_bin,
+        args: command,
+        env: provider_tool_probe_campaign_command_env(providers_config),
+      },
     )
   } catch (error) {
     {exit_code: -1, stdout: "", stderr: to_string(error)}
@@ -635,7 +640,11 @@ fn __catalog_routes_from_models(
         env_keys: __as_string_list(meta.auth?.env ?? meta.auth_envs),
         local: local,
         cheap: cheap,
-        metadata: {source: "catalog_model", catalog_model_id: model_id, catalog_wire_model: model.wire_model},
+        metadata: {
+          source: "catalog_model",
+          catalog_model_id: model_id,
+          catalog_wire_model: model.wire_model,
+        },
       },
     ]
   }
@@ -670,7 +679,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "tool_calling_non_streaming",
       category: "tool_calls",
-      description: "Single required tool call through non-streaming transport, classified by Harn provider tool-probe.",
+      description:
+        "Single required tool call through non-streaming transport, classified by Harn provider tool-probe.",
       runner: "provider_tool_probe",
       probe_case: "single_tool_call",
       modes: ["non-streaming"],
@@ -680,7 +690,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "tool_calling_streaming",
       category: "tool_calls",
-      description: "Single required tool call through streaming transport, classified by Harn provider tool-probe.",
+      description:
+        "Single required tool call through streaming transport, classified by Harn provider tool-probe.",
       runner: "provider_tool_probe",
       probe_case: "single_tool_call",
       modes: ["streaming"],
@@ -690,7 +701,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "parallel_tool_calls",
       category: "dispatch",
-      description: "Multiple sibling tool calls in one assistant turn; assertion target is dispatch receipt cardinality.",
+      description:
+        "Multiple sibling tool calls in one assistant turn; assertion target is dispatch receipt cardinality.",
       runner: "provider_tool_probe",
       probe_case: "parallel_tool_calls",
       modes: ["non-streaming"],
@@ -700,7 +712,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "multi_turn_tool_results",
       category: "dispatch",
-      description: "Tool result consumed in a follow-up turn without provider-side message-order rejection.",
+      description:
+        "Tool result consumed in a follow-up turn without provider-side message-order rejection.",
       runner: "provider_tool_probe",
       probe_case: "tool_result_followup",
       modes: ["non-streaming"],
@@ -710,7 +723,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "stop_sequences",
       category: "options",
-      description: "Stop sequence option is either accepted by the route or catalog-gated before dispatch.",
+      description:
+        "Stop sequence option is either accepted by the route or catalog-gated before dispatch.",
       runner: "planned_llm_call",
       modes: ["non-streaming"],
       tool_formats: ["none"],
@@ -719,7 +733,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "presence_frequency_penalties",
       category: "options",
-      description: "Presence/frequency penalties are provider-gated so unsupported routes fail before live API 400s.",
+      description:
+        "Presence/frequency penalties are provider-gated so unsupported routes fail before live API 400s.",
       runner: "planned_llm_call",
       modes: ["non-streaming"],
       tool_formats: ["none"],
@@ -728,7 +743,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "temperature_top_p_policy",
       category: "options",
-      description: "Route-specific temperature/top_p policy is catalog-owned, including Kimi-style constraints.",
+      description:
+        "Route-specific temperature/top_p policy is catalog-owned, including Kimi-style constraints.",
       runner: "planned_llm_call",
       modes: ["non-streaming"],
       tool_formats: ["none"],
@@ -737,7 +753,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "long_heredoc_unicode_args",
       category: "parser",
-      description: "Long heredoc and Unicode tool arguments survive provider parsing and dispatch byte-identically.",
+      description:
+        "Long heredoc and Unicode tool arguments survive provider parsing and dispatch byte-identically.",
       runner: "provider_tool_probe",
       probe_case: "large_string_argument",
       modes: ["non-streaming"],
@@ -747,7 +764,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "harmony_control_tokens_in_content",
       category: "parser",
-      description: "Harmony-looking control tokens inside user/tool payload content remain payload bytes, not framing.",
+      description:
+        "Harmony-looking control tokens inside user/tool payload content remain payload bytes, not framing.",
       runner: "planned_agent_loop",
       modes: ["non-streaming"],
       tool_formats: ["native", "json", "text/tagged"],
@@ -756,7 +774,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "tool_choice_forcing",
       category: "options",
-      description: "Forced tool_choice either reaches the provider correctly or is rejected before dispatch.",
+      description:
+        "Forced tool_choice either reaches the provider correctly or is rejected before dispatch.",
       runner: "planned_agent_loop",
       modes: ["non-streaming"],
       tool_formats: ["native", "json", "text/tagged"],
@@ -765,7 +784,8 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
     {
       id: "empty_args_calls",
       category: "parser",
-      description: "Empty-argument tool calls are preserved as empty dicts, not treated as dropped or truncated args.",
+      description:
+        "Empty-argument tool calls are preserved as empty dicts, not treated as dropped or truncated args.",
       runner: "planned_agent_loop",
       modes: ["non-streaming"],
       tool_formats: ["native", "json", "text/tagged"],
@@ -998,7 +1018,8 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
           continue
         }
         if behavior.runner == "provider_tool_probe" && max_probes > 0
-          && executable_units_selected >= max_probes {
+          && executable_units_selected
+          >= max_probes {
           probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
           continue
         }
@@ -1007,7 +1028,10 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
           executable_units_selected = executable_units_selected + 1
         }
         for format in behavior.tool_formats {
-          cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
+          cells = cells
+            + [
+            __planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs),
+          ]
         }
       }
     }
@@ -1151,7 +1175,10 @@ fn __auth_readiness(routes: list<ProviderToolProbeRoute>, env: dict, env_source:
       missing_by_provider = __increment_key(missing_by_provider, route.provider)
       missing_env_candidates_by_provider = missing_env_candidates_by_provider
         + {
-        [route.provider]: __merge_unique_strings(missing_env_candidates_by_provider[route.provider] ?? [], missing),
+        [route.provider]: __merge_unique_strings(
+          missing_env_candidates_by_provider[route.provider] ?? [],
+          missing,
+        ),
       }
     }
   }
@@ -1216,8 +1243,15 @@ fn __run_tool_probe(
     repeat,
     timeout_secs,
   )
-  const artifact_path = provider_tool_probe_campaign_artifact_path(route, behavior, mode, output_dir)
-  const child = harness.process.spawn_captured({cmd: harn_bin, args: command[1:len(command)], env: env})
+  const artifact_path = provider_tool_probe_campaign_artifact_path(
+    route,
+    behavior,
+    mode,
+    output_dir,
+  )
+  const child = harness.process.spawn_captured(
+    {cmd: harn_bin, args: command[1:len(command)], env: env},
+  )
   const stdout = child.stdout ?? ""
   if trim(stdout) != "" {
     harness.fs.write_text(artifact_path, stdout)
@@ -1299,7 +1333,11 @@ fn __live_cells(
           probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
           continue
         }
-        const ready_provider_probe = behavior.runner == "provider_tool_probe" && len(__missing_env_keys(route, env)) == 0
+        const ready_provider_probe = behavior.runner == "provider_tool_probe"
+          && len(
+          __missing_env_keys(route, env),
+        )
+          == 0
         if ready_provider_probe && max_probes > 0 && executable_units_selected >= max_probes {
           probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
           continue
@@ -1307,7 +1345,10 @@ fn __live_cells(
         probe_units_selected = probe_units_selected + 1
         if behavior.runner != "provider_tool_probe" {
           for format in behavior.tool_formats {
-            cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
+            cells = cells
+              + [
+              __planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs),
+            ]
           }
           continue
         }
@@ -1315,7 +1356,17 @@ fn __live_cells(
           executable_units_selected = executable_units_selected + 1
         }
         cells = cells
-          + __run_tool_probe(harness, route, behavior, mode, harn_bin, env, repeat, timeout_secs, output_dir)
+          + __run_tool_probe(
+          harness,
+          route,
+          behavior,
+          mode,
+          harn_bin,
+          env,
+          repeat,
+          timeout_secs,
+          output_dir,
+        )
       }
     }
   }
@@ -1374,11 +1425,15 @@ fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
 fn __runner_summary(cells: list<ProviderToolProbeCell>) -> dict {
   let summary: dict = {}
   for cell in cells {
-    const current = summary[cell.runner] ?? {total: 0, pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
+    const current = summary[cell.runner]
+      ?? {total: 0, pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
     summary = summary
       + {
       [cell.runner]: current
-        + {total: (current.total ?? 0) + 1, [cell.status]: (current[cell.status] ?? 0) + 1},
+        + {
+        total: (current.total ?? 0) + 1,
+        [cell.status]: (current[cell.status] ?? 0) + 1,
+      },
     }
   }
   return summary
@@ -1404,7 +1459,10 @@ fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
       executable_cells_by_provider = __increment_key(executable_cells_by_provider, cell.provider)
       if cell.tool_format == "native" {
         executable_commands = executable_commands + 1
-        executable_commands_by_provider = __increment_key(executable_commands_by_provider, cell.provider)
+        executable_commands_by_provider = __increment_key(
+          executable_commands_by_provider,
+          cell.provider,
+        )
       }
     } else {
       missing_runner = missing_runner + 1
@@ -1688,19 +1746,27 @@ fn __target_runtime_context(
     harness.stdio.eprintln(providers_config_error)
     exit(2)
   }
-  const runtime: ProviderToolProbeRuntimeReceipt = __provider_tool_probe_campaign_runtime(harness, harn_bin)
+  const runtime: ProviderToolProbeRuntimeReceipt = __provider_tool_probe_campaign_runtime(
+    harness,
+    harn_bin,
+  )
   if live && !provider_tool_probe_campaign_runtime_allows_live(runtime) {
     harness.stdio.eprintln(
       "target Harn runtime is not identifiable; refusing live provider probes: " + runtime.reason,
     )
     exit(2)
   }
-  const catalog_snapshot = __provider_tool_probe_campaign_catalog(harness, harn_bin, providers_config)
+  const catalog_snapshot = __provider_tool_probe_campaign_catalog(
+    harness,
+    harn_bin,
+    providers_config,
+  )
   const catalog: ProviderToolProbeCatalogReceipt = catalog_snapshot.receipt
   if catalog.status != "verified" && (live || catalog_routes || providers_config != "") {
     harness.stdio.eprintln(
       "target Harn provider catalog is not identifiable; refusing catalog-bound probes: "
-        + catalog.reason,
+        + catalog
+        .reason,
     )
     exit(2)
   }

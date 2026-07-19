@@ -15,7 +15,9 @@ pipeline default() {
   __io_println(json_stringify(parse_first_json("{see below} for details: {\"real\": 1}")))
   __io_println("---")
   // Array payload.
-  __io_println(json_stringify(parse_first_json("results were [1, \"two\", {\"three\": 3}] overall")))
+  __io_println(
+    json_stringify(parse_first_json("results were [1, \"two\", {\"three\": 3}] overall")),
+  )
   __io_println("---")
   // Braces and escaped quotes inside strings survive the scan AND the parse.
   __io_println(json_stringify(parse_first_json("{\"msg\": \"brace } and quote \\\" inside\"}")))
