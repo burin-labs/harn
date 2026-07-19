@@ -4,11 +4,12 @@
 
 mod test_util;
 
-use std::process::{Child, Command};
+use std::process::Child;
 
 use test_util::package_generation::{
     create_package_generation, package_content_hash, publish_package_generation,
 };
+use test_util::process::harn_e2e_command;
 
 fn wait_success(child: &mut Child, command: &str) {
     let status = child.wait().unwrap();
@@ -63,12 +64,12 @@ fn parallel_test_and_strict_check_share_installed_packages() {
     )
     .unwrap();
 
-    let mut tests = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut tests = harn_e2e_command()
         .current_dir(root)
         .args(["test", "tests", "--parallel"])
         .spawn()
         .unwrap();
-    let mut check = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let mut check = harn_e2e_command()
         .current_dir(root)
         .args(["check", "--strict-types", "tests"])
         .spawn()
