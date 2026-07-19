@@ -96,7 +96,12 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
         process::exit(1);
     }
 
-    let chunk = match harn_vm::Compiler::new().compile(&program) {
+    let chunk = match crate::typecheck_imports::compiler_with_resolved_imports(
+        harn_vm::Compiler::new(),
+        file_path,
+    )
+    .compile(&program)
+    {
         Ok(chunk) => chunk,
         Err(error) => {
             eprintln!("error: compile error: {error}");

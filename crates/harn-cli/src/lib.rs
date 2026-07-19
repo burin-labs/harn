@@ -2572,8 +2572,14 @@ async fn execute_with_skill_dirs_and_optional_harness(
     // The REPL / `-e` path invokes this without `source_path`, where there
     // is no importing file context; we fall back to no-imports checking.
     let mut checker = TypeChecker::new();
+    let mut compiler = harn_vm::Compiler::new();
     if let Some(path) = source_path {
-        checker = crate::typecheck_imports::checker_with_resolved_imports(checker, path);
+        // Resolve the import graph once and configure both the checker and the
+        // compiler from it, so imported enum construction/match lowers the same
+        // way the checker validates it (harn#5203).
+        let graph = harn_modules::build(&[path.to_path_buf()]);
+        checker = crate::typecheck_imports::configure_checker_with_graph(checker, &graph, path);
+        compiler = crate::typecheck_imports::configure_compiler_with_graph(compiler, &graph, path);
     }
     let type_diagnostics = checker.check(&program);
     let mut warning_lines = Vec::new();
@@ -2588,7 +2594,7 @@ async fn execute_with_skill_dirs_and_optional_harness(
         }
     }
 
-    let chunk = harn_vm::Compiler::new()
+    let chunk = compiler
         .compile(&program)
         .map_err(|e| ExecError::new(ExecStage::Compile, e.to_string()))?;
 

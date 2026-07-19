@@ -52,7 +52,20 @@ impl Compiler {
             local_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
             captured_bindings: std::collections::HashSet::new(),
+            imported_type_decls: Vec::new(),
         }
+    }
+
+    /// Attach the type/struct/enum/interface declarations this module imports,
+    /// resolved by the caller (see `harn_modules::ModuleGraph`). They are
+    /// folded into the catalog before the module's own declarations when
+    /// `compile` runs, so references to an imported enum's variants lower
+    /// correctly while a same-named local declaration still shadows the import.
+    /// Mirrors the typechecker's `with_imported_type_decls` so the compiler and
+    /// checker agree on which imported types are visible.
+    pub fn with_imported_type_decls(mut self, imported: Vec<SNode>) -> Self {
+        self.imported_type_decls = imported;
+        self
     }
 
     /// Compiler instance for a nested function-like body (fn, closure,
@@ -338,6 +351,11 @@ impl Compiler {
     /// Compile a program (list of top-level nodes) into a Chunk.
     /// Finds the entry pipeline and compiles its body, including inherited bodies.
     pub fn compile(mut self, program: &[SNode]) -> Result<Chunk, CompileError> {
+        // Seed imported types first so the module can construct and `match` an
+        // imported enum's variants; the module's own declarations below then
+        // shadow any same-named import.
+        let imported_type_decls = std::mem::take(&mut self.imported_type_decls);
+        self.seed_imported_type_catalog(&imported_type_decls);
         // Pre-scan so we can recognize EnumName.Variant as enum construction
         // even when the enum is declared inside a pipeline.
         self.seed_module_catalog(program);

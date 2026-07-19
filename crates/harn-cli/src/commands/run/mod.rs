@@ -355,7 +355,11 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     let compile_step_start = Instant::now();
-    let chunk = match harn_vm::Compiler::new().compile(&program) {
+    let compiler = crate::typecheck_imports::compiler_with_resolved_imports(
+        harn_vm::Compiler::new(),
+        Path::new(path),
+    );
+    let chunk = match compiler.compile(&program) {
         Ok(c) => c,
         Err(e) => {
             stderr.push_str(&format!("error: compile error: {e}\n"));

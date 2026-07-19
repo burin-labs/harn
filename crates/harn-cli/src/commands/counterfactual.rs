@@ -200,9 +200,12 @@ fn run_plan_source_inner(source: &str, plan_path: &Path) -> Result<JsonValue, St
         }
     }
 
-    let chunk = harn_vm::Compiler::new()
-        .compile(&program)
-        .map_err(|error| format!("counterfactual plan compile error: {error}"))?;
+    let chunk = crate::typecheck_imports::compiler_with_resolved_imports(
+        harn_vm::Compiler::new(),
+        plan_path,
+    )
+    .compile(&program)
+    .map_err(|error| format!("counterfactual plan compile error: {error}"))?;
 
     let source_parent = plan_path
         .parent()

@@ -16,6 +16,84 @@ fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
     stdlib_module_artifact_cache_ptr(module, source)
 }
 
+/// Parse `source` and keep only the type-like declarations an import would make
+/// visible (enum / struct / type-alias / interface), mirroring what
+/// `harn_modules::imported_type_declarations_for_file` hands the compiler.
+fn imported_type_decls_from(source: &str) -> Vec<harn_parser::SNode> {
+    let mut lexer = harn_lexer::Lexer::new(source);
+    let tokens = lexer.tokenize().expect("lex imported module");
+    let mut parser = harn_parser::Parser::new(tokens);
+    let program = parser.parse().expect("parse imported module");
+    program
+        .into_iter()
+        .filter(|sn| {
+            let inner = match &sn.node {
+                harn_parser::Node::AttributedDecl { inner, .. } => &inner.node,
+                other => other,
+            };
+            matches!(
+                inner,
+                harn_parser::Node::EnumDecl { .. }
+                    | harn_parser::Node::StructDecl { .. }
+                    | harn_parser::Node::TypeDecl { .. }
+                    | harn_parser::Node::InterfaceDecl { .. }
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn importer_constructs_and_matches_imported_enum() {
+    // Regression for harn#5203: with the imported enum's declaration seeded via
+    // `with_imported_type_decls`, the importing module both CONSTRUCTS
+    // (`Verdict.Pass(1)`) and MATCHES (`match v { Verdict.Pass(_) -> }`) the
+    // imported enum's variants. Before the fix these lowered to a bare variable
+    // load of the enum name and threw "Undefined variable: Verdict" at runtime
+    // even though `check` passed. The library defines only the enum, so this
+    // isolates the importer-side path from harn#5062.
+    let imported = imported_type_decls_from("pub enum Verdict { Pass(int) Fail(int) }\n");
+
+    let mut lexer = harn_lexer::Lexer::new(
+        r#"
+pub fn label(v: Verdict) -> string {
+  match v {
+    Verdict.Pass(_p) -> { return "pass" }
+    Verdict.Fail(_f) -> { return "fail" }
+  }
+}
+
+pipeline default() {
+  return label(Verdict.Pass(1))
+}
+"#,
+    );
+    let tokens = lexer.tokenize().expect("lex importer");
+    let mut parser = harn_parser::Parser::new(tokens);
+    let program = parser.parse().expect("parse importer");
+
+    let chunk = crate::Compiler::new()
+        .with_imported_type_decls(imported)
+        .compile(&program)
+        .expect("importer compiles");
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let result = vm
+            .execute(&chunk)
+            .await
+            .expect("imported enum construction+match runs without Undefined variable");
+        let VmValue::String(label) = result else {
+            panic!("expected string result, got {result:?}");
+        };
+        assert_eq!(label.as_str(), "pass");
+    });
+}
+
 #[test]
 fn child_cow_module_cache_reuses_loaded_module_arcs_but_fresh_roots_do_not() {
     let runtime = tokio::runtime::Builder::new_current_thread()

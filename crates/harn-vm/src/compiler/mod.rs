@@ -244,6 +244,13 @@ pub struct Compiler {
     /// emits. Identity includes the declaration span, so a shadowing parameter
     /// or block-local never boxes an unrelated same-named `let`.
     captured_bindings: std::collections::HashSet<harn_parser::lexical::BindingId>,
+    /// Type/struct/enum/interface declarations brought in by this module's
+    /// imports, resolved by the caller (the checker resolves the same set via
+    /// `with_imported_type_decls`). Seeded into the catalog before the module's
+    /// own declarations so that `ImportedEnum.Variant(...)` construction and
+    /// match arms lower against a known enum instead of a bare variable load,
+    /// while a local declaration of the same name still shadows the import.
+    imported_type_decls: Vec<SNode>,
 }
 
 impl Compiler {

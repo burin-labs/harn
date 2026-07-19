@@ -92,6 +92,31 @@ impl Compiler {
         self.collect_type_aliases(program);
     }
 
+    /// Fold a set of imported type/struct/enum/interface declarations into this
+    /// compiler's catalog. Unlike `seed_module_catalog`, which scans the
+    /// module's own program (with lexical scoping and predeclared-span
+    /// bookkeeping), this takes the flat list of declarations the module's
+    /// imports make visible — the same set the typechecker receives via
+    /// `with_imported_type_decls`. Registering imported enums here is what lets
+    /// the importing module construct and `match` an imported enum's variants;
+    /// without it those lower to a bare variable load and crash at runtime even
+    /// though `check` passes (harn#5203). Call this BEFORE `seed_module_catalog`
+    /// so a same-named local declaration shadows the import.
+    pub(crate) fn seed_imported_type_catalog(&mut self, decls: &[SNode]) {
+        for node in decls {
+            let declaration = match &node.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => node,
+            };
+            if let Node::EnumDecl { name, variants, .. } = &declaration.node {
+                self.register_enum_decl(name, variants);
+            }
+        }
+        Self::collect_struct_layouts(decls, &mut self.struct_layouts);
+        Self::collect_interface_methods(decls, &mut self.interface_methods);
+        self.collect_type_aliases(decls);
+    }
+
     /// Seed the built-in `Result` enum's variants into the owner map.
     pub(super) fn seed_builtin_variant_owners(
         owners: &mut std::collections::HashMap<String, Vec<String>>,
