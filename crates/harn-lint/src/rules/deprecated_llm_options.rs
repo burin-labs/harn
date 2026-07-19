@@ -1,11 +1,17 @@
-//! `deprecated_llm_options` rule: hard-error on `llm_retries` /
-//! `llm_backoff_ms` keys passed in dict-literal options to
-//! `llm_call`-family surfaces. These options were REMOVED in v0.10 —
-//! the runtime no longer reads them — so any occurrence is dead config
-//! at best and a silent behavior change at worst. The migration is the
-//! `with_retry(default_llm_caller(), {...})` handler in
-//! `std/llm/handlers`; mind the off-by-one (`llm_retries: K` retried K
-//! times after the first attempt ⇒ `max_attempts: K + 1`).
+//! `deprecated_llm_options` rule: hard-error on removed option keys passed
+//! in dict-literal options to `llm_call`-family surfaces.
+//!
+//! Two sources feed the removed-key set:
+//! * the canonical option registry's removal table
+//!   (`harn_builtin_meta::llm_options::LLM_REMOVED_OPTIONS`) — every synonym
+//!   the W2 options re-cut killed, each carrying its replacement; and
+//! * the legacy `llm_retries` / `llm_backoff_ms` pair (removed in v0.10,
+//!   pre-registry) with its bespoke off-by-one migration note
+//!   (`llm_retries: K` retried K times after the first attempt ⇒
+//!   `with_retry(..., {max_attempts: K + 1})`).
+//!
+//! The runtime rejects these keys too (the extractor's unknown-key gate);
+//! this rule surfaces them at `harn check` time for dict-literal call sites.
 
 use harn_lexer::Span;
 use harn_parser::{DiagnosticCode as Code, DictEntry, MatchArm, Node, SNode, SelectCase};
@@ -14,18 +20,25 @@ use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
 const RULE_NAME: &str = "deprecated_llm_options";
 
-const DEPRECATED_KEYS: &[&str] = &["llm_retries", "llm_backoff_ms"];
+const LEGACY_RETRY_KEYS: &[&str] = &["llm_retries", "llm_backoff_ms"];
 
-const TARGET_CALLEES: &[&str] = &[
-    "llm_call",
-    "llm_call_safe",
-    "llm_call_structured",
-    "llm_call_structured_result",
-    "agent_loop",
-];
+fn options_arg_index(name: &str) -> Option<usize> {
+    match name {
+        "llm_completion" => Some(3),
+        "llm_call"
+        | "llm_call_safe"
+        | "llm_call_structured"
+        | "llm_call_structured_safe"
+        | "llm_call_structured_result"
+        | "llm_stream"
+        | "llm_stream_call"
+        | "agent_loop" => Some(2),
+        _ => None,
+    }
+}
 
 /// Walk the program looking for calls to LLM surfaces whose dict-literal
-/// argument(s) contain removed keys. Emits one Error per offending
+/// options argument contains removed keys. Emits one Error per offending
 /// key occurrence, anchored to the key's span.
 pub(crate) fn check_deprecated_llm_options(
     program: &[SNode],
@@ -39,11 +52,13 @@ pub(crate) fn check_deprecated_llm_options(
 fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
     match &node.node {
         Node::FunctionCall { name, args, .. } => {
-            if TARGET_CALLEES.contains(&name.as_str()) {
-                for arg in args {
-                    if let Node::DictLiteral(entries) = &arg.node {
-                        scan_entries(entries, diagnostics);
-                    }
+            if let Some(index) = options_arg_index(name) {
+                if let Some(SNode {
+                    node: Node::DictLiteral(entries),
+                    ..
+                }) = args.get(index)
+                {
+                    scan_entries(entries, diagnostics);
                 }
             }
             for arg in args {
@@ -297,20 +312,34 @@ fn visit_select_case(case: &SelectCase, diagnostics: &mut Vec<LintDiagnostic>) {
     visit_nodes(&case.body, diagnostics);
 }
 
-/// Scan a dict-literal's entries (one of an LLM call's args) and emit
-/// an Error for every key matching a removed name. Also recurses into
+/// Scan an LLM call's dict-literal options and emit an Error for every key
+/// matching a removed name. Also recurses into
 /// each value so a nested `{opts: {llm_retries: ...}}` is still flagged
 /// in the unlikely case it appears at this level.
 fn scan_entries(entries: &[DictEntry], diagnostics: &mut Vec<LintDiagnostic>) {
     for entry in entries {
         if let Node::StringLiteral(name) = &entry.key.node {
-            if DEPRECATED_KEYS.contains(&name.as_str()) {
+            if LEGACY_RETRY_KEYS.contains(&name.as_str()) {
                 diagnostics.push(make_diagnostic(name, entry.key.span));
+            } else if let Some(removed) = harn_builtin_meta::llm_options::removed_llm_option(name) {
+                diagnostics.push(make_registry_diagnostic(name, removed.fix, entry.key.span));
             }
         }
         // Walk the value so nested dict literals or other call sites
         // inside the value still get linted normally.
         visit_node(&entry.value, diagnostics);
+    }
+}
+
+fn make_registry_diagnostic(key: &str, fix: &str, span: Span) -> LintDiagnostic {
+    LintDiagnostic {
+        code: Code::LintDeprecatedLlmOptions,
+        rule: RULE_NAME.into(),
+        message: format!("option `{key}` was removed — {fix}"),
+        span,
+        severity: LintSeverity::Error,
+        suggestion: Some(fix.to_string()),
+        fix: None,
     }
 }
 
@@ -428,7 +457,7 @@ pipeline default(task) {
         let diags = lint(
             r#"
 pipeline default(task) {
-    llm_call_structured("hi", nil, {schema: "x"}, {llm_retries: 3})
+    llm_call_structured("hi", {schema: "x"}, {llm_retries: 3})
 }
 "#,
         );
@@ -440,11 +469,39 @@ pipeline default(task) {
         let diags = lint(
             r#"
 pipeline default(task) {
-    llm_call_structured_result("hi", nil, {schema: "x"}, {llm_retries: 3})
+    llm_call_structured_result("hi", {schema: "x"}, {llm_retries: 3})
 }
 "#,
         );
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
+    }
+
+    #[test]
+    fn triggers_on_all_remaining_option_surfaces() {
+        let diags = lint(
+            r#"
+pipeline default(task) {
+    llm_completion("hi", nil, nil, {llm_retries: 3})
+    llm_call_structured_safe("hi", {type: "string"}, {llm_retries: 3})
+    llm_stream("hi", nil, {llm_retries: 3})
+    llm_stream_call("hi", nil, {llm_retries: 3})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 4, "diags: {diags:?}");
+    }
+
+    #[test]
+    fn does_not_trigger_on_structured_schema_argument() {
+        let diags = lint(
+            r#"
+pipeline default(task) {
+    llm_call_structured("hi", {schema: "x"})
+    llm_call_structured_result("hi", {schema: "x"})
+}
+"#,
+        );
+        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
     }
 
     #[test]

@@ -56,9 +56,9 @@ pipeline test(task) {
   const preset_overrides: AgentPresetOptions = {
     provider: "mock",
     rate_limit: {max_calls: 5},
-    task_kind: "verify",
+    reasoning_task: "verify",
   }
-  log("preset task_kind=" + to_string(agent_preset_options(preset_overrides).task_kind))
+  log("preset reasoning_task=" + to_string(agent_preset_options(preset_overrides).reasoning_task))
   const stage_retry: WorkflowRetryPolicy = {max_attempts: 3, verify: true, backoff_ms: 100}
   const stage: StageSpec = {
     id: "repair",

@@ -30,7 +30,7 @@ context_packs = ["repo_policy", "release_policy", "merge_policy"]
 evals = ["merge_captain_smoke"]
 owner = "platform"
 budget = { daily_usd = 10.0, frontier_escalations = 1, max_tokens = 60000, max_runtime_seconds = 600 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], effort = "medium" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["template-pack"] }
 package_source = { package = "harn-persona-template-pack", path = "examples/personas" }
 stages = [
@@ -61,7 +61,7 @@ context_packs = ["repo_policy", "review_policy"]
 evals = ["review_captain_smoke"]
 owner = "engineering"
 budget = { daily_usd = 4.0, frontier_escalations = 1, max_tokens = 40000, max_runtime_seconds = 300 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], effort = "medium" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["template-pack"] }
 package_source = { package = "harn-persona-template-pack", path = "examples/personas" }
 
@@ -88,6 +88,6 @@ context_packs = ["oncall_runbook", "service_ownership", "release_policy"]
 evals = ["oncall_captain_smoke"]
 owner = "sre"
 budget = { daily_usd = 8.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 900 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "high" }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], effort = "high" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["template-pack"] }
 package_source = { package = "harn-persona-template-pack", path = "examples/personas" }

@@ -19,10 +19,8 @@ pipeline default() {
         nil,
         {
           provider: "mock",
-          output_schema: schema,
-          output_validation: "error",
+          output: {schema: schema, strict: true, validation: "error"},
           schema_retries: 2,
-          response_format: "json",
         },
       )
       __io_println(r.data.verdict)
@@ -62,10 +60,8 @@ pipeline default() {
           nil,
           {
             provider: "mock",
-            output_schema: schema,
-            output_validation: "error",
+            output: {schema: schema, strict: true, validation: "error"},
             schema_retries: 0,
-            response_format: "json",
           },
         )
       }
@@ -84,11 +80,9 @@ pipeline default() {
         nil,
         {
           provider: "mock",
-          output_schema: schema,
-          output_validation: "error",
+          output: {schema: schema, strict: true, validation: "error"},
           schema_retries: 1,
           schema_retry_nudge: false,
-          response_format: "json",
         },
       )
       __io_println(bare.data.verdict)
@@ -108,10 +102,8 @@ pipeline default() {
           nil,
           {
             provider: "mock",
-            output_schema: schema,
-            output_validation: "error",
+            output: {schema: schema, strict: true, validation: "error"},
             schema_retries: 1,
-            response_format: "json",
           },
         )
       }

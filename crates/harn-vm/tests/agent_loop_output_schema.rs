@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
-//! Coverage for `agent_loop`'s terminal `output_schema` gate.
+//! Coverage for `agent_loop`'s terminal `output` gate.
 //!
-//! `output_schema` promises the loop's FINAL answer parses against a schema.
+//! `output` promises the loop's FINAL answer parses against a schema.
 //! It is a terminal-answer contract, not a per-turn one — the loop never
 //! forces mid-loop turns into structured mode (that would fight tool-calling).
 //! At finalize (only on a `"done"` completion) the loop validates the terminal
@@ -15,8 +15,8 @@
 //!   (a) an off-shape terminal answer re-asks once and yields a valid output;
 //!   (b) an already-valid terminal answer fires NO repair call;
 //!   (c) a persistently off-shape answer yields `output_valid: false`, no crash;
-//!   (d) with `output_schema` UNSET the run carries no `output`/`output_valid`;
-//!   (e) tool-calling mid-loop still works with `output_schema` set.
+//!   (d) with `output` UNSET the run carries no `output`/`output_valid`;
+//!   (e) tool-calling mid-loop still works with `output` set.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -81,7 +81,7 @@ pipeline main(task) {
     required: ["answer"],
   }
   const mock_llm = { _call ->
-    if _call?.opts?._output_schema_repair == true {
+    if _call?.opts?._output_contract_repair == true {
       const snap = shared_snapshot(repair_counter)
       shared_cas(repair_counter, snap, snap.value + 1)
       return {ok: true, value: {text: "{\"answer\": 42}", provider: "mock", model: "mock"}}
@@ -105,7 +105,7 @@ pipeline main(task) {
       done_sentinel: "FINISHED",
       tool_format: "text",
       session_id: session,
-      output_schema: schema,
+      output: schema,
       llm_caller: mock_llm,
     },
   )
@@ -149,7 +149,7 @@ pipeline main(task) {
     required: ["answer"],
   }
   const mock_llm = { _call ->
-    if _call?.opts?._output_schema_repair == true {
+    if _call?.opts?._output_contract_repair == true {
       const snap = shared_snapshot(repair_counter)
       shared_cas(repair_counter, snap, snap.value + 1)
     }
@@ -172,7 +172,7 @@ pipeline main(task) {
       done_sentinel: "FINISHED",
       tool_format: "text",
       session_id: session,
-      output_schema: schema,
+      output: schema,
       llm_caller: mock_llm,
     },
   )
@@ -233,7 +233,7 @@ pipeline main(task) {
       done_sentinel: "FINISHED",
       tool_format: "text",
       session_id: session,
-      output_schema: schema,
+      output: schema,
       llm_caller: mock_llm,
     },
   )
@@ -251,10 +251,10 @@ pipeline main(task) {
     );
 }
 
-/// With `output_schema` unset the run carries no `output`/`output_valid`
+/// With `output` unset the run carries no `output`/`output_valid`
 /// keys — behavior is byte-unchanged for callers that never opt in.
 #[test]
-fn unset_output_schema_leaves_run_unchanged() {
+fn unset_output_leaves_run_unchanged() {
     let raw = run_with_bridge(
         r#"
 pipeline main(task) {
@@ -298,11 +298,11 @@ pipeline main(task) {
     assert_eq!(lines[2], "true", "expected no output key; lines: {lines:?}");
 }
 
-/// Tool-calling mid-loop still works when `output_schema` is set: the model
+/// Tool-calling mid-loop still works when `output` is set: the model
 /// dispatches a tool first, then completes with a schema-valid answer. The
 /// tool fires (terminal-only gating does not block it) and the output validates.
 #[test]
-fn tool_calling_still_works_with_output_schema_set() {
+fn tool_calling_still_works_with_output_set() {
     let raw = run_with_bridge(
         r#"
 pipeline main(task) {
@@ -324,7 +324,7 @@ pipeline main(task) {
     required: ["answer"],
   }
   const mock_llm = { _call ->
-    if _call?.opts?._output_schema_repair == true {
+    if _call?.opts?._output_contract_repair == true {
       return {ok: true, value: {text: "{\"answer\": 99}", provider: "mock", model: "mock"}}
     }
     const snap = shared_snapshot(tool_counter)
@@ -362,7 +362,7 @@ pipeline main(task) {
       loop_until_done: true,
       done_sentinel: "FINISHED",
       session_id: session,
-      output_schema: schema,
+      output: schema,
       llm_caller: mock_llm,
     },
   )

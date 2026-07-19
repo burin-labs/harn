@@ -403,14 +403,13 @@ impl Compiler {
         if !has_spread {
             for entry in entries {
                 self.compile_node(&entry.key)?;
-                // Sugar: `output_schema: TypeAlias` inside an
-                // `llm_call(..., { ... })` options dict lowers to
-                // the alias's JSON-Schema dict constant. This lets
-                // users reuse one `type T = { ... }` declaration
-                // for both type-checking and structured-output
-                // validation. Falls through to the normal expression
-                // path when the name does not resolve.
-                if Self::entry_key_is(&entry.key, "output_schema") {
+                // Schema-as-type sugar for the canonical output contract:
+                // `output: TypeAlias` and `output: {schema: TypeAlias}` both
+                // lower the alias to its JSON-Schema constant. The latter is
+                // handled while compiling the nested `schema` entry.
+                if Self::entry_key_is(&entry.key, "output")
+                    || Self::entry_key_is(&entry.key, "schema")
+                {
                     if let Node::Identifier(alias) = &entry.value.node {
                         if self.emit_schema_for_alias(alias) {
                             continue;

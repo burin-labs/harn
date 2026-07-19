@@ -963,16 +963,6 @@ fn insert_json_vm_option<T: Serialize>(
     Ok(())
 }
 
-fn merge_raw_model_policy_options(options: &mut crate::value::DictMap, node: &WorkflowNode) {
-    if let Some(raw) = raw_model_policy_dict(node) {
-        for (key, value) in raw {
-            if !matches!(value, VmValue::Nil) {
-                options.insert(key.clone(), value.clone());
-            }
-        }
-    }
-}
-
 fn stage_tools_value(node: &WorkflowNode) -> Option<VmValue> {
     node.raw_tools.clone().or_else(|| {
         if matches!(node.tools, serde_json::Value::Null) {
@@ -1001,13 +991,19 @@ fn workflow_stage_llm_options(
     tools_value: &Option<VmValue>,
     tool_names: &[String],
     stage_agent_options: &super::WorkflowStageAgentOptions,
-) -> crate::value::DictMap {
+) -> Result<crate::value::DictMap, VmError> {
     let mut options = stage_agent_options.llm_options_vm_dict();
-    merge_raw_model_policy_options(&mut options, node);
+    if let Some(raw) = raw_model_policy_dict(node) {
+        for (key, value) in crate::llm::helpers::project_llm_options(raw)? {
+            if !matches!(value, VmValue::Nil) {
+                options.insert(key, value);
+            }
+        }
+    }
     options.put_str("session_id", stage_session_id);
     options.put_str("tool_format", stage_agent_options.tool_format.clone());
     add_stage_tools_option(&mut options, tools_value, tool_names);
-    options
+    Ok(options)
 }
 
 /// Assemble the agent_loop options for one stage.
@@ -1280,7 +1276,7 @@ pub async fn prepare_stage_node(
             &tools_value,
             &tool_names,
             &stage_agent_options,
-        );
+        )?;
         let agent_loop_options = if stage_agent_options.run_agent_loop {
             workflow_stage_agent_loop_options(
                 ctx,

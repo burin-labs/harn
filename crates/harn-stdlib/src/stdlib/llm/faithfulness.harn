@@ -8,6 +8,7 @@
 // through `safe_structured_call` (std/llm/safe) — the same schema-validated,
 // auto-repairing structured caller the judges and routers use — so this module
 // never hand-rolls a provider request.
+import { llm_call_options } from "std/llm/options"
 import { safe_structured_call } from "std/llm/safe"
 
 const __CLAIM_SCHEMA = {
@@ -167,9 +168,9 @@ pub fn faithfulness_guard(answer, contexts, opts = nil) -> dict {
     {}
   }
   const llm_opts = if type_of(cfg?.llm) == "dict" {
-    cfg.llm
+    llm_call_options(cfg.llm)
   } else {
-    cfg
+    llm_call_options(cfg)
   }
   const max_concurrent = cfg?.max_concurrent
   const contexts_text = __contexts_text(contexts)

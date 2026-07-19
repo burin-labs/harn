@@ -98,8 +98,8 @@ top-level keys before `v0.8`).
 | `terminal` | dict | Producer-owned terminal classification: `{kind, reason, owner}`. `kind` distinguishes `natural`, user cancellation, policy budget/no-progress/guardrail/custom stops, provider/runtime errors, suspension, and unknown future states. ACP hosts receive the same value before `session/prompt` completes as a `typed_checkpoint` with `schema: "harn.agent_terminal.v1"`; use it instead of inferring success from ACP's coarse `stopReason`. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
-| `output` | any | Present only when `output_schema` is set and the loop completed (`status` `"done"`). The final answer parsed into a value that validates against `output_schema` (or, on a persistent mismatch, the best-effort parse). |
-| `output_valid` | bool | Present only when `output_schema` is set and the loop completed. `true` when the terminal answer validated against `output_schema` (directly, or after the one repair re-ask); `false` when it could not be made to parse. |
+| `output` | any | Present when an `output` contract is set and the loop completed (`status` `"done"`). The terminal answer parsed as JSON and, for schema contracts, validated against the schema. |
+| `output_valid` | bool | Present when an `output` contract is set and the loop completed. `true` when the terminal answer parsed and, when applicable, validated (directly or after one repair call); otherwise `false`. |
 | `llm` | dict | LLM execution metrics — see below |
 | `tools` | dict | Tool invocation summary — see below |
 | `deferred_user_messages` | list | Queued human messages deferred until agent yield/completion |
@@ -359,7 +359,7 @@ Same as `llm_call`, plus additional options:
 | `history` | list | nil | Caller-managed conversation history to seed. A list of messages in the canonical `llm_call` shape (`{role, content, ...}`, roles `user`/`assistant`/`tool_result`/`system`) prepended to the transcript as real turns ahead of the task message, so the first LLM call sees them exactly as `llm_call`'s `messages` array would. Transient seeding, not session persistence — the caller owns the history. When `history` is non-empty and the task `message` is blank, no empty user turn is appended. See [Seeding caller-managed history](#seeding-caller-managed-history) |
 | `loop_until_done` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
 | `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool loop-until-done loops default to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"` |
-| `output_schema` | dict | nil | JSON Schema the loop's **final answer** must satisfy. This is a terminal-answer contract, not a per-turn one: the loop does not force every mid-loop turn into structured mode (which would fight tool-calling). At finalize (only on a `"done"` completion) it validates the terminal answer; if off-shape it re-asks **once** through the `llm_caller` seam for a schema-shaped value. The parsed value is surfaced on `run.output`, and `run.output_valid` reports whether validation passed. For strict one-shot structured extraction with no agent loop, use `llm_call_structured` instead. |
+| `output` | `"text"` \| `"json"` \| dict | nil | Terminal-answer contract. Ordinary tool turns omit it so structured transport cannot interfere with tool calling. At a `"done"` completion, the loop parses JSON and validates schema forms; one failed result gets one repair call through `llm_caller`. The value is `run.output` and the verdict is `run.output_valid`. Use `llm_call_structured` for one-shot extraction. |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips. Equivalent to `iteration_budget: {mode: "fixed", initial: N, max: N}` |
 | `iteration_budget` | string\|dict | nil | Adaptive or fixed iteration cap. Pass a dict `{mode, initial, max, extend_by}` or the string `"adaptive"` / `"fixed"`. See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `loop_control` | closure | nil | Per-iteration policy callback `state -> command`. Receives a normalized loop-state snapshot and returns a command (`extend`/`stop`/`none`). See [Adaptive iteration budget](#adaptive-iteration-budget) |
@@ -367,8 +367,8 @@ Same as `llm_call`, plus additional options:
 | `nudge` | string | see below | Custom message to send when nudging the agent |
 | `llm_caller` | closure | nil | Custom caller wrapping the per-turn `llm_call`. The resilience surface: compose `with_retry` / `with_fallback` from `std/llm/handlers` here. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
 | `on_delta` | closure | nil | Observational streaming callback `delta -> nil`, invoked once per streamed chunk of the assistant's visible text during each turn. Lets chat-shaped harnesses render or transform the token stream without leaving `agent_loop`. See [Streaming visible-text deltas](#streaming-visible-text-deltas). |
-| `reasoning_policy` / `thinking_policy` | string/bool | `"auto"` | Provider-aware reasoning policy. `auto` chooses a task/scale-appropriate setting; `off` disables thinking where possible and otherwise uses the provider's lowest reasoning floor; `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` request explicit levels. Caller-supplied `thinking` or `reasoning_effort` always wins |
-| `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large` |
+| `reasoning_policy` | string/bool | `"auto"` | Provider-aware reasoning policy. `auto` chooses a task/scale-appropriate setting; `off` disables thinking where possible and otherwise uses the provider's lowest reasoning floor; explicit levels run from `minimal` through `max`. Caller-supplied `thinking` or `effort` wins. |
+| `reasoning_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
@@ -415,9 +415,9 @@ Same as `llm_call`, plus additional options:
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 | `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
 
-`agent_loop` forwards `thinking`, `reasoning_effort`, `interleaved_thinking`,
-and `anthropic_beta_features` to every model turn. When neither `thinking` nor
-`reasoning_effort` is set, `reasoning_policy: "auto"` lowers provider quirks
+`agent_loop` forwards `thinking`, `effort`, `interleaved_thinking`, and
+`anthropic_beta_features` to every model turn. When neither `thinking` nor
+`effort` is set, `reasoning_policy: "auto"` lowers provider quirks
 into explicit typed thinking options before the call reaches the provider. For
 example, OpenAI reasoning models get `thinking: {mode: "effort"}` (`off`
 becomes `none` on newer GPT-5 routes that advertise it, otherwise `minimal`),
@@ -434,7 +434,7 @@ interleaved-thinking beta header.
 ACP clients can pin the same abstraction for a session with
 `session/set_config_option(configId="thought_level")`. Agent loops running in
 that session inherit the pin unless their options explicitly set
-`reasoning_policy`, `thinking_policy`, `thinking`, or `reasoning_effort`.
+`reasoning_policy`, `thinking`, or `effort`.
 
 Profiles preload the common loop-budget and retry keys below. Pass any
 key explicitly to override the profile's value for that call.
@@ -723,17 +723,15 @@ Every preset kind layers three things under your explicit input:
 
 1. **Behavior template** — profile, iteration budget, turn policy, reasoning
    defaults (and, for captains, the opt-in middleware layers below).
-2. **Fill-nil pack rows** — per-kind defaults for `provider`, `timeout_ms`,
-   `budget` (session-cumulative `total_budget_usd`), and `model_ladder`.
-   Pack rows fill **only** nil/absent keys at one lower-priority seam; they
-   never override explicit caller input. Defaults are data rows, not code
-   branches. The model route rows (`provider`, `model`, `models`, `ladder`,
-   `model_ladder`, `routing`, and related routing-policy keys) are treated as
-   one ownership group: if you provide any route at top level or under
-   `llm_options`, the preset does not add a different built-in provider or
-   ladder. Supplying both top-level `provider` and `model` without a ladder
-   produces a single-step `model_ladder` in the returned options for downstream
-   policy code to inspect.
+2. **Fill-nil pack rows** — per-kind defaults for `timeout_ms`, `budget`
+   (session-cumulative `total_budget_usd`), and model routes. Preset ladder
+   defaults are canonical `models` steps; each step owns its provider. Pack
+   rows fill **only** absent keys at one lower-priority seam and never override
+   caller input. Route fields (`provider`, `model`, `models`, `ladder`,
+   `routing`, and related policy keys) form one ownership group: providing any
+   route at top level or under `llm_options` suppresses the entire preset route.
+   A direct `provider` plus `model` remains a direct route; it is not rewritten
+   into a conflicting ladder.
 3. **Default transport retry** — v0.10 removed the per-call `llm_retries`
    budget, making a bare `agent_loop` fail-fast on transient transport
    errors. Presets bake bounded resilience back in by wrapping the effective
@@ -854,7 +852,7 @@ const ship_opts = agent_preset("release_captain", {
   dry_run: true,
   cheap_caller: cheap_default_caller,
   frontier_caller: frontier_caller,
-  escalate_predicate: { call -> call?.opts?.task_kind == "judge" },
+  escalate_predicate: { call -> call?.opts?.reasoning_task == "judge" },
   logging_sink: { record -> receipts.llm_call(record) },
 })
 const shipping = agent_loop("Cut v0.9.0.", ship_opts?.system, ship_opts)
@@ -871,12 +869,12 @@ the cost-moat substrate) and an optional `logging_sink` for receipts.
 
 Each preset installs `reasoning_policy: "auto"`, `reasoning_scale: "small"`,
 and a role-appropriate `reasoning_task` when the caller has not already set a
-low-level `thinking` / `reasoning_effort` option or a reasoning policy hint.
+low-level `thinking` / `effort` option or a reasoning policy hint.
 `agent_loop_options` then applies the same provider-aware defaults used by
 `llm_call`, so known model quirks are handled consistently instead of being
 duplicated in each preset.
 
-Caller-supplied `thinking`, `reasoning_effort`, `reasoning_policy`,
+Caller-supplied `thinking`, `effort`, `reasoning_policy`,
 `reasoning_scale`, `reasoning_task`, and `iteration_budget` always win. Sugar:
 `iteration_budget: "adaptive"` keeps the preset's numeric defaults and
 explicitly switches the mode to adaptive.

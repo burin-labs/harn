@@ -92,16 +92,6 @@ pub(super) fn parse_route_policy_option(
 ) -> Result<crate::llm::api::LlmRoutePolicy, VmError> {
     use crate::llm::api::LlmRoutePolicy;
     let Some(raw) = options.and_then(|o| o.get("route_policy")) else {
-        if let Some(prefer) = options.and_then(|o| o.get("prefer")) {
-            let targets = vm_string_list(prefer);
-            if !targets.is_empty() {
-                let strategy = options
-                    .and_then(|o| o.get("fallback_strategy").or_else(|| o.get("strategy")))
-                    .map(|value| value.display())
-                    .unwrap_or_else(|| "prefer_order".to_string());
-                return Ok(LlmRoutePolicy::PreferenceList { targets, strategy });
-            }
-        }
         return Ok(LlmRoutePolicy::Manual);
     };
     match raw {
@@ -109,14 +99,25 @@ pub(super) fn parse_route_policy_option(
         VmValue::Bool(false) => Ok(LlmRoutePolicy::Manual),
         VmValue::String(text) => parse_route_policy_text(text),
         VmValue::Dict(d) => {
+            // Canonical dict grammar: {mode, target?, targets?, strategy?}. Any
+            // other key is a hard error rather than a silent drop.
+            for (key, _) in d.iter() {
+                let key: &str = key.as_ref();
+                if !matches!(key, "mode" | "target" | "targets" | "strategy") {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        format!(
+                            "route_policy: unknown key `{key}` — the dict form is \
+                             {{mode, target?, targets?, strategy?}}"
+                        ),
+                    ))));
+                }
+            }
             let mode = d
                 .get("mode")
                 .map(|value| value.display())
                 .unwrap_or_else(|| "manual".to_string());
             let target = d
                 .get("target")
-                .or_else(|| d.get("quality"))
-                .or_else(|| d.get("id"))
                 .map(|value| value.display())
                 .unwrap_or_default();
             match mode.as_str() {
@@ -124,26 +125,25 @@ pub(super) fn parse_route_policy_option(
                 "always" => Ok(LlmRoutePolicy::Always(target)),
                 "cheapest_over_quality" => Ok(LlmRoutePolicy::CheapestOverQuality(target)),
                 "fastest_over_quality" => Ok(LlmRoutePolicy::FastestOverQuality(target)),
-                "preference_list" | "prefer" => {
-                    let targets = d
-                        .get("targets")
-                        .or_else(|| d.get("prefer"))
-                        .map(vm_string_list)
-                        .unwrap_or_default();
+                "preference_list" => {
+                    let targets = d.get("targets").map(vm_string_list).unwrap_or_default();
                     if targets.is_empty() {
                         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                            "route_policy.prefer: expected at least one model/provider target",
+                            "route_policy.targets: expected at least one model/provider target",
                         ))));
                     }
                     let strategy = d
                         .get("strategy")
-                        .or_else(|| d.get("fallback_strategy"))
                         .map(|value| value.display())
                         .unwrap_or_else(|| "prefer_order".to_string());
                     Ok(LlmRoutePolicy::PreferenceList { targets, strategy })
                 }
                 other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!("route_policy.mode: unsupported value {other:?}"),
+                    format!(
+                        "route_policy.mode: unsupported value `{other}` — expected \
+                         manual, always, cheapest_over_quality, fastest_over_quality, \
+                         or preference_list"
+                    ),
                 )))),
             }
         }
@@ -276,12 +276,8 @@ fn equivalent_failover_has_route_owner(options: Option<&crate::value::DictMap>) 
         "routing",
         "models",
         "ladder",
-        "model_ladder",
         "route_policy",
-        "prefer",
         "fallback_chain",
-        "fallback_strategy",
-        "strategy",
     ]
     .iter()
     .any(|key| route_owner_option_present(options, key))

@@ -456,9 +456,7 @@ fn build_review_llm_options() -> VmValue {
         "provider": "auto",
         "model_tier": DEFAULT_MODEL_TIER,
         "temperature": 0.1,
-        "response_format": "json",
-        "output_schema": schema,
-        "output_validation": "error",
+        "output": {"schema": schema, "validation": "error"},
         "schema_retries": 3,
     }))
 }

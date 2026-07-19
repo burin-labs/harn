@@ -1,7 +1,7 @@
 use crate::llm::helpers::{
-    extract_llm_options, is_transcript_value, new_transcript_with_events, transcript_asset_list,
-    transcript_event, transcript_id, transcript_message_list, transcript_summary_text,
-    vm_value_to_json,
+    extract_llm_options, is_transcript_value, new_transcript_with_events, project_llm_options,
+    transcript_asset_list, transcript_event, transcript_id, transcript_message_list,
+    transcript_summary_text, vm_value_to_json,
 };
 use crate::orchestration::{
     compact_strategy_name, estimate_message_tokens, run_compaction_lifecycle_with_ctx,
@@ -42,7 +42,7 @@ async fn compact_transcript_impl(
     ctx: &crate::vm::AsyncBuiltinCtx,
     transcript: &crate::value::DictMap,
     options: Option<&crate::value::DictMap>,
-    raw_options: Option<VmValue>,
+    _raw_options: Option<VmValue>,
 ) -> Result<VmValue, VmError> {
     let provider_options = options
         .map(crate::llm::reminder_providers::options_map_to_json)
@@ -79,10 +79,18 @@ async fn compact_transcript_impl(
     }
 
     let llm_opts = if config.compact_strategy == CompactStrategy::Llm {
+        let projected = options
+            .map(|options| {
+                let mut llm_options = options.clone();
+                llm_options.remove("strategy");
+                project_llm_options(&llm_options)
+            })
+            .transpose()?
+            .unwrap_or_default();
         Some(extract_llm_options(&[
             VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
-            raw_options.unwrap_or(VmValue::Nil),
+            VmValue::dict(projected),
         ])?)
     } else {
         None

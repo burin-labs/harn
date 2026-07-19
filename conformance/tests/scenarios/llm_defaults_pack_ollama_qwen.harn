@@ -1,13 +1,13 @@
-// pack_for(qwen3:8b, thinking="off") → no `thinking` key emitted by the pack;
+// pack_for(qwen3:8b, reasoning_policy="off") → no low-level `thinking` key;
 // the host-level capability path is responsible for the /no_think directive.
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  const r = pack_for({model: "qwen3:8b", thinking: "off"})
+  const r = pack_for({model: "qwen3:8b", reasoning_policy: "off"})
   assert_eq(r.provider, "ollama")
   assert_eq(r.has("thinking"), false)
-  // No reasoning_effort or thinkingBudget either — qwen3 path is a no-op.
-  assert_eq(r.has("reasoning_effort"), false)
+  // No effort or thinkingBudget either — qwen3 path is a no-op.
+  assert_eq(r.has("effort"), false)
   assert_eq(r.has("thinkingBudget"), false)
   log("llm_defaults_pack_ollama_qwen passed")
 }

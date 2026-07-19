@@ -17,8 +17,7 @@ pipeline test(task) {
           provider: "mock",
           model: "gpt-5.4-preview",
           api_mode: "responses",
-          output_format: {
-            kind: "json_schema",
+          output: {
             schema: {type: "object", properties: {ok: {type: "boolean"}}, required: ["ok"]},
             strict: true,
           },
@@ -32,7 +31,7 @@ pipeline test(task) {
             },
           ],
           previous_response_id: "resp_prev",
-          response_store: false,
+          store: false,
           background: true,
           truncation: "auto",
           compact: true,

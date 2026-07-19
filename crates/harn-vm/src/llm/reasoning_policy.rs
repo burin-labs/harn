@@ -1,6 +1,6 @@
 //! Provider-aware reasoning policy normalization.
 //!
-//! `thinking` and `reasoning_effort` are intentionally lower-level: each
+//! `thinking` and `effort` are intentionally lower-level: each
 //! provider exposes a different wire shape. This module owns Harn's
 //! user-facing policy vocabulary (`auto`, `off`, `low`, ...), lowering it
 //! into the canonical [`ThinkingConfig`] that providers already understand.
@@ -30,8 +30,8 @@ pub(crate) struct ReasoningPolicyApplication {
 ///
 /// `None` means "clear the session pin". `"none"` is accepted as a
 /// user-friendly alias for Harn's provider-agnostic `"off"` policy; raw
-/// OpenAI `reasoning_effort: "none"` remains available through the lower-level
-/// per-call option.
+/// OpenAI reasoning-off remains available through the lower-level per-call
+/// `effort: "none"` option.
 pub fn normalize_policy_selector(raw: &str) -> Result<Option<String>, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == INHERIT_POLICY_VALUE {
@@ -162,10 +162,7 @@ fn selected_policy(
     options: Option<&crate::value::DictMap>,
     default_policy: Option<&str>,
 ) -> Result<Option<String>, VmError> {
-    if let Some(value) = options.and_then(|opts| {
-        opts.get("reasoning_policy")
-            .or_else(|| opts.get("thinking_policy"))
-    }) {
+    if let Some(value) = options.and_then(|opts| opts.get("reasoning_policy")) {
         return normalize_policy_vm_value(value).map(Some);
     }
     if let Some(session_id) = crate::agent_sessions::current_session_id() {
@@ -180,13 +177,13 @@ fn caller_set_reasoning(options: Option<&crate::value::DictMap>) -> bool {
     let Some(opts) = options else {
         return false;
     };
-    if opts.contains_key("thinking") || opts.contains_key("reasoning_effort") {
+    if opts.contains_key("thinking") || opts.contains_key("effort") {
         return true;
     }
     opts.get("llm_options")
         .and_then(VmValue::as_dict)
         .is_some_and(|llm_opts| {
-            llm_opts.contains_key("thinking") || llm_opts.contains_key("reasoning_effort")
+            llm_opts.contains_key("thinking") || llm_opts.contains_key("effort")
         })
 }
 
@@ -228,10 +225,7 @@ fn normalize_policy_str(raw: &str) -> Result<String, String> {
 
 fn reasoning_scale(options: Option<&crate::value::DictMap>) -> Result<String, VmError> {
     let raw = options
-        .and_then(|opts| {
-            opts.get("reasoning_scale")
-                .or_else(|| opts.get("problem_scale"))
-        })
+        .and_then(|opts| opts.get("reasoning_scale"))
         .map(VmValue::display)
         .unwrap_or_else(|| "medium".to_string());
     let scale = raw.trim().to_ascii_lowercase();
@@ -247,11 +241,7 @@ fn reasoning_scale(options: Option<&crate::value::DictMap>) -> Result<String, Vm
 }
 
 fn reasoning_task(options: Option<&crate::value::DictMap>) -> Result<String, VmError> {
-    let raw = options.and_then(|opts| {
-        opts.get("reasoning_task")
-            .or_else(|| opts.get("task_kind"))
-            .or_else(|| opts.get("task"))
-    });
+    let raw = options.and_then(|opts| opts.get("reasoning_task"));
     if let Some(raw) = raw {
         let task = raw.display().trim().to_ascii_lowercase();
         if task.is_empty() {

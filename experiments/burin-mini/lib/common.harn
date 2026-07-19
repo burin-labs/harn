@@ -771,7 +771,7 @@ pub fn generator_options(system, tools, allowed_tools) {
     system: system,
     tools: tools,
     allowed_tools: allowed_tools,
-    response_format: "json",
+    output: "json",
     temperature: 0,
     max_iterations: 6,
   }
@@ -791,7 +791,7 @@ pub fn evaluator_options(system, tools) {
     system: system,
     tools: tools,
     allowed_tools: ["read", "search", "run"],
-    response_format: "json",
+    output: "json",
     temperature: 0,
     max_iterations: 4,
   }

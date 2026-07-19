@@ -135,7 +135,11 @@ pub fn agent_stance_default_consent_check(justification, session_id, options = n
     },
     required: ["consent", "reasoning"],
   }
-  const llm_options = (options ?? {}) + {schema: schema, temperature: 0}
+  const llm_options = (options ?? {})
+    + {
+    output: {schema: schema, strict: true, validation: "error"},
+    temperature: 0,
+  }
   const outcome = try {
     llm_call(prompt, nil, llm_options)
   } catch (e) {

@@ -207,10 +207,15 @@ pub(super) async fn transcript_auto_compact_builtin(
         }
     }
     let llm_opts = if config.compact_strategy == crate::orchestration::CompactStrategy::Llm {
+        let projected = options
+            .as_ref()
+            .map(crate::llm::helpers::project_llm_options)
+            .transpose()?
+            .unwrap_or_default();
         Some(crate::llm::extract_llm_options(&[
             VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
-            args.get(1).cloned().unwrap_or(VmValue::Nil),
+            VmValue::dict(projected),
         ])?)
     } else {
         None

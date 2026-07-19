@@ -1,17 +1,17 @@
-// pack_chat(model) is a thin wrapper over pack_for({model, task: "chat"}).
+// pack_chat(model) is a thin wrapper over pack_for({model, reasoning_task: "chat"}).
 // Both forms must produce the same shape (modulo minor non-determinism we
 // don't expect here).
 import { pack_chat, pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
   const a = pack_chat("claude-sonnet-4-5")
-  const b = pack_for({model: "claude-sonnet-4-5", task: "chat"})
+  const b = pack_for({model: "claude-sonnet-4-5", reasoning_task: "chat"})
   assert_eq(a.model, b.model)
   assert_eq(a.provider, b.provider)
   assert_eq(a.temperature, b.temperature)
   assert_eq(a.max_tokens, b.max_tokens)
   assert_eq(a.top_p, b.top_p)
   assert_eq(a.schema_retries, b.schema_retries)
-  assert_eq(a.output_format.kind, b.output_format.kind)
+  assert_eq(a.output, b.output)
   log("llm_defaults_pack_chat_convenience passed")
 }

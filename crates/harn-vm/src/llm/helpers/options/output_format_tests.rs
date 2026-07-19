@@ -1,28 +1,26 @@
 use super::output::*;
 use super::*;
-use crate::value::VmDictExt;
 
 #[test]
-fn parses_explicit_json_schema_output_format() {
-    let mut fmt = crate::value::DictMap::new();
-    fmt.put_str("kind", "json_schema");
-    fmt.insert(
+fn parses_explicit_json_schema_output() {
+    let mut spec = crate::value::DictMap::new();
+    spec.insert(
         crate::value::intern_key("schema"),
         VmValue::dict(crate::value::DictMap::from_iter([(
             crate::value::intern_key("type"),
             VmValue::String(arcstr::ArcStr::from("object")),
         )])),
     );
-    fmt.insert(crate::value::intern_key("strict"), VmValue::Bool(false));
+    spec.insert(crate::value::intern_key("strict"), VmValue::Bool(false));
     let options = crate::value::DictMap::from_iter([(
-        crate::value::intern_key("output_format"),
-        VmValue::dict(fmt),
+        crate::value::intern_key("output"),
+        VmValue::dict(spec),
     )]);
 
-    let parsed = parse_output_format_option(Some(&options), None, None).expect("output_format");
+    let parsed = parse_output_option(Some(&options)).expect("output");
 
     assert_eq!(
-        parsed,
+        parsed.format,
         crate::llm::api::OutputFormat::JsonSchema {
             schema: serde_json::json!({"type": "object"}),
             strict: false,
@@ -43,7 +41,7 @@ fn normalizes_harn_schema_types_for_provider_output() {
         }
     }));
 
-    let parsed = parse_schema_value(Some(&schema), "output_schema")
+    let parsed = parse_schema_value(Some(&schema), "output")
         .expect("valid Harn schema")
         .expect("present schema");
 
@@ -71,7 +69,7 @@ fn normalizes_harn_schema_types_in_unions_and_type_arrays() {
         }
     }));
 
-    let parsed = parse_schema_value(Some(&schema), "output_schema")
+    let parsed = parse_schema_value(Some(&schema), "output")
         .expect("valid Harn schema")
         .expect("present schema");
 
@@ -89,23 +87,29 @@ fn normalizes_harn_schema_types_in_unions_and_type_arrays() {
 }
 
 #[test]
-fn legacy_response_format_and_json_schema_map_to_typed_output_format() {
-    let schema = serde_json::json!({"type": "object"});
+fn parser_does_not_revive_removed_output_synonyms() {
+    // W2 collapsed the `response_format` / `json_schema` / top-level `schema`
+    // spellings onto the single canonical `output` key. `parse_output_option`
+    // no longer reads the legacy keys, so a call carrying only them lowers to
+    // plain text output — guarding against an accidental synonym revival.
+    let schema = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("type"),
+        VmValue::String(arcstr::ArcStr::from("object")),
+    )]);
+    let options = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("response_format"),
+            VmValue::String(arcstr::ArcStr::from("json")),
+        ),
+        (
+            crate::value::intern_key("json_schema"),
+            VmValue::dict(schema),
+        ),
+    ]);
 
-    let parsed = parse_output_format_option(
-        Some(&crate::value::DictMap::new()),
-        Some("json"),
-        Some(&schema),
-    )
-    .expect("legacy output format");
+    let parsed = parse_output_option(Some(&options)).expect("output");
 
-    assert_eq!(
-        parsed,
-        crate::llm::api::OutputFormat::JsonSchema {
-            schema,
-            strict: true,
-        }
-    );
+    assert_eq!(parsed.format, crate::llm::api::OutputFormat::Text);
 }
 
 #[test]
@@ -124,7 +128,7 @@ fn rejects_json_schema_when_capability_is_absent() {
 
     assert!(err
         .to_string()
-        .contains("option `output_format` is not supported by `custom-model`"));
+        .contains("option `output` is not supported by `custom-model`"));
 }
 
 #[test]

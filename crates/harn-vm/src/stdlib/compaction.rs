@@ -153,11 +153,7 @@ async fn compaction_run_impl(
     // `agent_session_compact` so the policy primitive doesn't lose the
     // ability to drive specific models.
     let llm_opts = if matches!(config.compact_strategy, CompactStrategy::Llm) {
-        let raw = if plan.is_empty() {
-            VmValue::Nil
-        } else {
-            VmValue::dict(plan.clone())
-        };
+        let raw = VmValue::dict(crate::llm::helpers::project_llm_options(&plan)?);
         Some(extract_llm_options(&[
             VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,

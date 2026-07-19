@@ -351,14 +351,14 @@ mod cache_key_identity_tests {
             VmValue::Float(0.3),
         );
         explicit_same.insert(
-            crate::value::intern_key("reasoning_effort"),
+            crate::value::intern_key("effort"),
             VmValue::String(arcstr::ArcStr::from("high")),
         );
         assert_eq!(default_key, key("hello", dict(explicit_same)));
 
         let mut low_effort = gpt_oss_options();
         low_effort.insert(
-            crate::value::intern_key("reasoning_effort"),
+            crate::value::intern_key("effort"),
             VmValue::String(arcstr::ArcStr::from("low")),
         );
         assert_ne!(default_key, key("hello", dict(low_effort)));

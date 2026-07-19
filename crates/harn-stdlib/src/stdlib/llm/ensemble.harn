@@ -716,7 +716,7 @@ fn __copy_top_level_llm_options(opts, base) {
     "max_tokens",
     "timeout_ms",
     "budget",
-    "response_format",
+    "output",
     "schema_retries",
     "session_id",
   ] {

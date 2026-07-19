@@ -55,7 +55,7 @@ fn logical_defaults_flow_through_request_options_with_caller_precedence() {
     );
 
     options.insert(crate::value::intern_key("temperature"), VmValue::Float(0.2));
-    options.put_str("reasoning_effort", "low");
+    options.put_str("effort", "low");
     let explicit = extract(options.clone()).expect("caller overrides");
     assert_eq!(explicit.temperature, Some(0.2));
     assert_eq!(explicit.top_p, Some(0.95));
@@ -66,7 +66,7 @@ fn logical_defaults_flow_through_request_options_with_caller_precedence() {
         }
     );
 
-    options.remove("reasoning_effort");
+    options.remove("effort");
     options.insert(crate::value::intern_key("thinking"), VmValue::Bool(false));
     let disabled = extract(options).expect("explicit disabled thinking");
     assert_eq!(disabled.thinking, ThinkingConfig::Disabled);

@@ -51,6 +51,32 @@ pub(super) fn schema_type_expr_from_node(node: &SNode, scope: &TypeScope) -> Opt
     }
 }
 
+/// Resolve the schema carried by the canonical `output` option. The option
+/// accepts either a schema value directly or `{schema, ...}` configuration.
+pub(super) fn output_schema_type_expr_from_node(
+    node: &SNode,
+    scope: &TypeScope,
+) -> Option<TypeExpr> {
+    if let Node::DictLiteral(entries) = &node.node {
+        if let Some(schema) = entries.iter().find(|entry| {
+            matches!(&entry.key.node, Node::StringLiteral(key) | Node::Identifier(key) if key == "schema")
+        }) {
+            return schema_type_expr_from_node(&schema.value, scope);
+        }
+    }
+    schema_type_expr_from_node(node, scope)
+}
+
+pub(super) fn output_validation_is_required(node: &SNode) -> bool {
+    let Node::DictLiteral(entries) = &node.node else {
+        return false;
+    };
+    entries.iter().any(|entry| {
+        matches!(&entry.key.node, Node::StringLiteral(key) | Node::Identifier(key) if key == "validation")
+            && matches!(&entry.value.node, Node::StringLiteral(value) if value == "error")
+    })
+}
+
 pub(super) fn schema_type_expr_from_dict(
     entries: &[DictEntry],
     scope: &TypeScope,

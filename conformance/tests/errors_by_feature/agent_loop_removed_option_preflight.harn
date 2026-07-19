@@ -1,0 +1,8 @@
+fn main(harness: Harness) {
+  let opts = {
+    provider: "mock",
+    llm_caller: { _call -> return {text: "custom caller must not mask removed keys"} },
+  }
+  opts["output_schema"] = {type: "object"}
+  agent_loop("Validate options before invoking the custom caller.", nil, opts)
+}

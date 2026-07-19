@@ -509,6 +509,7 @@ fn model_ladder_step_accepts_scalar_overrides() {
             VmValue::dict(dict(&[
                 ("max_tokens", VmValue::Int(256)),
                 ("temperature", VmValue::Float(0.0)),
+                ("speed", VmValue::String(arcstr::ArcStr::from("fast"))),
             ])),
         ),
     ]);
@@ -530,6 +531,45 @@ fn model_ladder_step_accepts_scalar_overrides() {
     let linked = auth::link_options(&base, &policy, &policy.chain[0]);
     assert_eq!(linked.max_tokens, 256);
     assert_eq!(linked.temperature, Some(0.0));
+    assert!(linked.fast);
+}
+
+#[test]
+fn model_ladder_step_rejects_invalid_speed_override() {
+    let step = dict(&[
+        ("model", VmValue::String(arcstr::ArcStr::from("m"))),
+        (
+            "options",
+            VmValue::dict(dict(&[(
+                "speed",
+                VmValue::String(arcstr::ArcStr::from("turbo")),
+            )])),
+        ),
+    ]);
+    let options = dict(&[(
+        "models",
+        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
+    )]);
+    let err = build_model_ladder_policy(&options, "mock", "base").unwrap_err();
+    assert!(format!("{err:?}").contains("standard"));
+}
+
+#[test]
+fn model_ladder_step_rejects_removed_fast_override() {
+    let step = dict(&[
+        ("model", VmValue::String(arcstr::ArcStr::from("m"))),
+        (
+            "options",
+            VmValue::dict(dict(&[("fast", VmValue::Bool(true))])),
+        ),
+    ]);
+    let options = dict(&[(
+        "models",
+        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
+    )]);
+    let err = build_model_ladder_policy(&options, "mock", "base").unwrap_err();
+    assert!(format!("{err:?}").contains("not a supported"));
+    assert!(format!("{err:?}").contains("speed"));
 }
 
 /// Minimal `LlmCallOptions` for `link_options` unit tests. Mirrors the

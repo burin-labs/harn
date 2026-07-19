@@ -1,11 +1,14 @@
+true
 anthropic
 120000
 true
 true
-mock
+true
 42
 true
+mock
 only-mine
+true
 openai
 60000
 llamacpp
@@ -14,8 +17,10 @@ llamacpp
 gemma4-local
 true
 true
-anthropic
+true
+true
 frontier
+anthropic
 claude-opus-4-8
 llamacpp
 true

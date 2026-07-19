@@ -1,6 +1,6 @@
 provider=anthropic
 model=claude-sonnet-4-6
-prefer.nil=false
+prefer.nil=true
 failover.nil=true
 done
 visible=

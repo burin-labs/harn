@@ -1517,16 +1517,14 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
             VmValue::Float(temperature),
         );
     }
-    llm_options.insert(
-        crate::value::intern_key("output_schema"),
-        options.schema.clone(),
-    );
-    llm_options.put_str("output_validation", "error");
+    let mut output = crate::value::DictMap::new();
+    output.insert(crate::value::intern_key("schema"), options.schema.clone());
+    output.put_str("validation", "error");
+    llm_options.insert(crate::value::intern_key("output"), VmValue::dict(output));
     llm_options.insert(
         crate::value::intern_key("schema_retries"),
         VmValue::Int(options.schema_retries as i64),
     );
-    llm_options.put_str("response_format", "json");
     llm_options.insert(
         crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(vec![json_to_vm_value(

@@ -9,6 +9,7 @@ homepage.workspace = true
 description = "Linter for the Harn programming language"
 
 [dependencies]
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.28" }
 harn-fmt = { path = "../harn-fmt", version = "=0.10.28" }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.28" }
 harn-parser = { path = "../harn-parser", version = "=0.10.28" }

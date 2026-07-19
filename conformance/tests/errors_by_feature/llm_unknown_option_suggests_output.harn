@@ -1,0 +1,5 @@
+fn main(harness: Harness) {
+  let opts = {provider: "mock"}
+  opts["outpt"] = "json"
+  llm_call("x", nil, opts)
+}

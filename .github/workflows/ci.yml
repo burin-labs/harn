@@ -479,7 +479,9 @@ jobs:
   # Keep the full environment-neutral Rust suite on a dedicated consumer so
   # Ubuntu proof lanes can start as soon as the producer has published the
   # exact behavior payload. The producer's workspace-behavior cache is safe to
-  # reuse because this job waits for the complete rust-builds matrix.
+  # reuse because this job waits for the complete rust-builds matrix. Keep
+  # enough wall time for the hosted-runner fallback to rebuild on a cold cache;
+  # current cold runs need about 10 minutes to compile before nextest starts.
   rust-test:
     name: Rust test
     needs: [changes, rust-builds]

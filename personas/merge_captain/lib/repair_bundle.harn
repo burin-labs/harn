@@ -142,8 +142,8 @@ pub fn default_prompt(kind) {
 
 /**
  * The JSON schema the worker is held to. Returned as a Harn dict so it
- * can be passed straight into `llm_call(... output_schema: ...)` or
- * `agent_loop(... output_schema: ...)`.
+ * can be passed straight into the `output` contract of `llm_call` or
+ * `agent_loop`.
  */
 pub fn output_schema() {
   return {

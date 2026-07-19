@@ -580,14 +580,7 @@ fn __llm_options(model, max_tokens, schema, use_structured_output) {
   let opts = {model: model, temperature: 0.0, max_tokens: max_tokens}
   if use_structured_output && schema != nil {
     opts = opts
-      + {
-      response_format: "json",
-      json_schema: schema,
-      output_schema: schema,
-      output_format: {kind: "json_schema", schema: schema, strict: true},
-      output_validation: "warn",
-      schema_retries: 0,
-    }
+      + {output: {schema: schema, strict: true, validation: "warn"}, schema_retries: 0}
   }
   return opts
 }

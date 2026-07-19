@@ -527,11 +527,7 @@ pub fn __stack_sanitize_result(options, policy = nil) {
   let stripped = []
   const mode = __stack_sanitize_mode(policy)
   if mode == "healthcheck" || mode == "preflight" || mode == "probe" {
-    const deliberation = __stack_strip_option_keys(
-      out,
-      stripped,
-      ["reasoning_effort", "thinking", "effort"],
-    )
+    const deliberation = __stack_strip_option_keys(out, stripped, ["thinking", "effort"])
     out = deliberation.options
     stripped = deliberation.stripped
   }
@@ -539,9 +535,9 @@ pub fn __stack_sanitize_result(options, policy = nil) {
   if caps == nil {
     return {options: out, stripped: stripped}
   }
-  if __stack_has_key(out, "reasoning_effort") && !(caps?.reasoning_effort_supported ?? false) {
-    out = out.remove("reasoning_effort")
-    stripped = stripped + ["reasoning_effort"]
+  if __stack_has_key(out, "effort") && !(caps?.reasoning_effort_supported ?? false) {
+    out = out.remove("effort")
+    stripped = stripped + ["effort"]
   }
   if __stack_has_key(out, "thinking") && !__stack_thinking_supported(caps, out.thinking) {
     out = out.remove("thinking")
@@ -590,8 +586,13 @@ pub fn __stack_configured_model_options(cfg, prefixes) {
       defaults?.model_role,
     ],
   )
-  const task = __stack_first_non_empty(
-    [cfg?.task, user?.task, __stack_first_env(prefixes, "TASK"), defaults?.task],
+  const reasoning_task = __stack_first_non_empty(
+    [
+      cfg?.reasoning_task,
+      user?.reasoning_task,
+      __stack_first_env(prefixes, "REASONING_TASK"),
+      defaults?.reasoning_task,
+    ],
   )
   const effort = __stack_first_non_empty(
     [cfg?.effort, user?.effort, __stack_first_env(prefixes, "EFFORT"), defaults?.effort],
@@ -614,8 +615,8 @@ pub fn __stack_configured_model_options(cfg, prefixes) {
   if model_role != nil {
     base = base + {model_role: model_role}
   }
-  if task != nil {
-    base = base + {task: task}
+  if reasoning_task != nil {
+    base = base + {reasoning_task: reasoning_task}
   }
   if effort != nil {
     base = base + {effort: effort}
@@ -629,7 +630,7 @@ pub fn __stack_configured_model_options(cfg, prefixes) {
 /**
  * Return a capability-sanitized options dict for a provider/model route.
  * Unsupported provider-specific knobs are dropped instead of leaking to the
- * wire. Currently strips unsupported `reasoning_effort`, `thinking`, and prompt-cache
+ * wire. Currently strips unsupported `effort`, `thinking`, and prompt-cache
  * request keys. Pass `{mode: "healthcheck"}` (or `"preflight"` / `"probe"`)
  * to also drop deliberate-reasoning knobs for cheap readiness probes even
  * when the full route supports them.

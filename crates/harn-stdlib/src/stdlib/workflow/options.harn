@@ -208,11 +208,9 @@ type WorkflowModelPolicy = {
   top_k?: int,
   max_tokens?: int,
   thinking?: any,
-  reasoning_effort?: string,
+  effort?: string,
   reasoning_policy?: any,
-  thinking_policy?: any,
   reasoning_scale?: any,
-  problem_scale?: any,
   reasoning_task?: string,
   nudge?: any,
   tool_examples?: string,
@@ -319,21 +317,11 @@ fn __workflow_llm_options(
   model_policy: WorkflowModelPolicy,
   tool_format: string,
 ) -> dict {
-  const model_option_keys = [
-    "provider",
-    "model",
-    "model_tier",
-    "temperature",
-    "max_tokens",
-    "thinking",
-    "reasoning_effort",
-  ]
-  let options = {tool_format: tool_format}
-    + pick_keys(
-    model_policy,
-    model_option_keys,
-    {drop_nil: true},
-  )
+  const model_option_keys = __llm_call_option_registry().keys
+  let options = pick_keys(model_policy, model_option_keys, {drop_nil: true})
+    + {
+    tool_format: tool_format,
+  }
   if __workflow_non_empty_string(config.session_id) != nil {
     options = options + {session_id: __workflow_non_empty_string(config.session_id)}
   }
@@ -353,9 +341,7 @@ fn __workflow_agent_loop_options(
     "require_successful_tools",
     "iteration_budget",
     "reasoning_policy",
-    "thinking_policy",
     "reasoning_scale",
-    "problem_scale",
     "reasoning_task",
   ]
   let options = {

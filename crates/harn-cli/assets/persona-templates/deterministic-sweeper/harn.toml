@@ -14,4 +14,4 @@ autonomy_tier = "act_with_approval"
 receipt_policy = "required"
 triggers = ["github.pr_opened"]
 budget = { daily_usd = 2.0, run_usd = 0.05, max_tokens = 10000, max_runtime_seconds = 120 }
-model_policy = { default_model = "mock", escalation_model = "mock", fallback_models = ["mock"], reasoning_effort = "low" }
+model_policy = { default_model = "mock", escalation_model = "mock", fallback_models = ["mock"], effort = "low" }

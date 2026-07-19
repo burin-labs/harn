@@ -13,8 +13,9 @@ pub(crate) use messages::{
 pub(crate) use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub(crate) use options::{
     assemble_system_prompt, compose_system_prompt, expects_structured_output, extract_json,
-    extract_llm_options, resolve_catalog_thinking_config, resolve_thinking_config,
-    system_prompt_event_metadata, system_prompt_metadata,
+    extract_llm_options, project_llm_options, resolve_catalog_thinking_config,
+    resolve_thinking_config, system_prompt_event_metadata, system_prompt_metadata,
+    validate_llm_option_keys,
 };
 pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvider};
 #[cfg(test)]
@@ -299,8 +300,7 @@ mod tests {
             VmValue::Nil,
             options,
         ])
-        .err()
-        .expect("transcript option is rejected");
+        .expect_err("transcript option is rejected");
         let msg = match err {
             crate::value::VmError::Thrown(VmValue::String(s)) => s.to_string(),
             other => panic!("unexpected error: {other:?}"),

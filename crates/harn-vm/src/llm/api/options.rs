@@ -339,7 +339,7 @@ impl ReminderLifecycleEmission {
 }
 
 /// All options for an LLM API call, extracted once from user-facing args.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct LlmCallOptions {
     // --- Routing ---
     pub provider: String,
@@ -380,7 +380,7 @@ pub(crate) struct LlmCallOptions {
     pub mock_scope: Option<String>,
     /// Where each resolved dispatch field (provider/model/wire_format/
     /// thinking/tool_format) came from. Populated by the pipeline resolver
-    /// (via a `dispatch_provenance` entry in the agent-loop options dict) and
+    /// (via an internal `_dispatch_provenance` entry in the agent-loop options dict) and
     /// emitted verbatim into the `resolved_dispatch` transcript record so a
     /// consumer can tell an operator pin from a value silently
     /// `inherited_from_primary`. `None` for raw `llm_call(...)` invocations

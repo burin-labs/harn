@@ -34,7 +34,7 @@ fn _err(messages) {
 }
 
 /**
- * Schema-shape validator. Doesn't replace the LLM-side `output_schema`
+ * Schema-shape validator. Doesn't replace the LLM-side `output` contract
  * check — that one runs while the model still has room to retry. This
  * is the harness-side belt-and-braces pass.
  */

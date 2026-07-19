@@ -118,7 +118,7 @@ table.
 An overlay only ever **adds** a fragment via the existing
 `context_profile.prompt_fragments` channel (harn#2631,
 `std/agent/preflight::agent_build_turn_system_fragments`) — it never touches
-or replaces `agent_options.system`, `system_prefix`, or any fragment the
+or replaces `agent_options.system` or any fragment the
 caller already set. Within the overlay's own content, `options.overrides`
 (keyed by `"<mode>"` or `"<mode>:<lane>"`) supplies caller lines that **win**
 over that slot's row default — the row only fills the slot when the caller
@@ -131,7 +131,7 @@ with_overlay(opts, rows, "agent", {overrides: {agent: ["Custom nudge instead of 
 ## Preset packs
 
 `agent_preset`/`agent_preset_register` accept `lane_policy` and
-`overlay_policy` pack keys (alongside `budget`, `model_ladder`,
+`overlay_policy` pack keys (alongside `budget`, `models`,
 `completion_gate`, ...) via the existing fill-nil pack mechanism
 (`std/agent/presets`): a pack row fills the option only when the caller left
 it nil, and a consumer explicitly lowers it —

@@ -11,19 +11,23 @@ pub(super) fn system_prompt_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
-pub(super) fn system_prompt_position(
+/// Parse a fragment's `position`. Canonical spellings only: `"before"`
+/// (the default) places the fragment ahead of the primary system block,
+/// `"after"` behind it. The legacy aliases (`prepend`/`prefix`/`start`,
+/// `append`/`suffix`/`end`) are removed — a clear error names the two
+/// accepted values.
+pub(super) fn system_fragment_position(
     value: Option<&VmValue>,
     source: &str,
-    fallback: SystemPromptPosition,
 ) -> Result<SystemPromptPosition, VmError> {
     let Some(value) = value else {
-        return Ok(fallback);
+        return Ok(SystemPromptPosition::Before);
     };
     match value {
-        VmValue::Nil => Ok(fallback),
+        VmValue::Nil => Ok(SystemPromptPosition::Before),
         VmValue::String(raw) => match raw.as_ref() {
-            "before" | "prepend" | "prefix" | "start" => Ok(SystemPromptPosition::Before),
-            "after" | "append" | "suffix" | "end" => Ok(SystemPromptPosition::After),
+            "before" => Ok(SystemPromptPosition::Before),
+            "after" => Ok(SystemPromptPosition::After),
             other => Err(system_prompt_error(format!(
                 "{source}.position: expected \"before\" or \"after\", got \"{other}\""
             ))),
@@ -35,6 +39,7 @@ pub(super) fn system_prompt_position(
     }
 }
 
+/// A fragment dict is enabled unless it carries `enabled: false` (or nil).
 pub(super) fn enabled_system_prompt_part(part: &crate::value::DictMap) -> bool {
     !matches!(
         part.get("enabled"),
@@ -42,20 +47,48 @@ pub(super) fn enabled_system_prompt_part(part: &crate::value::DictMap) -> bool {
     )
 }
 
-pub(super) fn system_prompt_part_content(part: &crate::value::DictMap) -> Option<String> {
-    part.get("content")
-        .or_else(|| part.get("text"))
-        .or_else(|| part.get("prompt"))
-        .map(VmValue::display)
+/// The only keys a `system`-list fragment dict may carry. Anything else is a
+/// hard error: removed aliases name their canonical replacement, unknown keys
+/// name the whole fragment shape.
+const SYSTEM_FRAGMENT_KEYS: &[&str] = &["content", "title", "position", "enabled"];
+
+const SYSTEM_FRAGMENT_SHAPE: &str =
+    "a system fragment is a string, or {content: string, title?: string, \
+     position?: \"before\"|\"after\", enabled?: bool}";
+
+fn system_fragment_alias_fix(key: &str) -> Option<&'static str> {
+    match key {
+        "text" | "prompt" => Some("content"),
+        "label" | "name" => Some("title"),
+        _ => None,
+    }
 }
 
-pub(super) fn render_system_prompt_part(content: String, part: &crate::value::DictMap) -> String {
-    let title = part
-        .get("label")
-        .or_else(|| part.get("title"))
-        .or_else(|| part.get("name"))
-        .map(VmValue::display)
-        .unwrap_or_default();
+/// Reject any non-canonical key in a fragment dict, always naming the
+/// canonical shape so the fix is unambiguous.
+fn validate_system_fragment_keys(
+    part: &crate::value::DictMap,
+    source: &str,
+) -> Result<(), VmError> {
+    for (key, _) in part.iter() {
+        let key: &str = key.as_ref();
+        if SYSTEM_FRAGMENT_KEYS.contains(&key) {
+            continue;
+        }
+        return Err(system_prompt_error(match system_fragment_alias_fix(key) {
+            Some(canonical) => format!(
+                "{source}: fragment key `{key}` was removed — use `{canonical}`. {SYSTEM_FRAGMENT_SHAPE}."
+            ),
+            None => format!("{source}: unknown fragment key `{key}` — {SYSTEM_FRAGMENT_SHAPE}."),
+        }));
+    }
+    Ok(())
+}
+
+/// Render one fragment dict into its block. An optional `title` becomes a
+/// `## <title>` heading above the trimmed content.
+pub(super) fn render_system_fragment(content: &str, part: &crate::value::DictMap) -> String {
+    let title = part.get("title").map(VmValue::display).unwrap_or_default();
     let title = title.trim();
     let content = content.trim();
     if title.is_empty() {
@@ -65,67 +98,65 @@ pub(super) fn render_system_prompt_part(content: String, part: &crate::value::Di
     }
 }
 
-/// Expand a host-provided system-prompt option (`system_preamble`,
-/// `system_prompt_parts`, …) into [`crate::llm::prompt::PromptFragment`]s,
-/// faithfully mirroring the legacy string / list / dict shapes
-/// (`{content|text|prompt, position, parts, enabled, label}`). The resulting
-/// fragments are reduced by [`crate::llm::prompt::assemble`].
-pub(super) fn append_host_fragments(
+/// Expand the options-dict `system` key, when it is a LIST of fragments, into
+/// [`crate::llm::prompt::PromptFragment`]s. Each item is either a bare string
+/// (content, position `"before"`) or a dict with the canonical fragment shape
+/// (`{content, title?, position?, enabled?}`). This is the single replacement
+/// for the removed `system_preamble` / `system_prefix` / `system_context` /
+/// `system_prompt_parts` keys (position `"before"`) and `system_appendix` /
+/// `system_suffix` keys (position `"after"`). String-form `system` is the
+/// primary block and is handled on the primary path, not here.
+pub(super) fn append_system_list_fragments(
     out: &mut Vec<crate::llm::prompt::PromptFragment>,
-    value: Option<&VmValue>,
-    source: &str,
-    forced_position: SystemPromptPosition,
+    options: Option<&crate::value::DictMap>,
 ) -> Result<(), VmError> {
-    use crate::llm::prompt::PromptFragment;
-    let Some(value) = value else {
+    let Some(VmValue::List(items)) = options.and_then(|options| options.get("system")) else {
         return Ok(());
     };
-    match value {
-        VmValue::Nil | VmValue::Bool(false) => Ok(()),
+    for (index, item) in items.iter().enumerate() {
+        append_system_fragment(out, item, index)?;
+    }
+    Ok(())
+}
+
+fn append_system_fragment(
+    out: &mut Vec<crate::llm::prompt::PromptFragment>,
+    item: &VmValue,
+    index: usize,
+) -> Result<(), VmError> {
+    use crate::llm::prompt::PromptFragment;
+    let source = format!("system[{index}]");
+    match item {
         VmValue::String(text) => {
             out.push(PromptFragment::new(
-                format!("host:{source}"),
-                format!("host:{source}"),
-                fragment_bucket(forced_position),
+                source.clone(),
+                source,
+                fragment_bucket(SystemPromptPosition::Before),
                 text.to_string(),
             ));
             Ok(())
         }
-        VmValue::List(items) => {
-            for (index, item) in items.iter().enumerate() {
-                append_host_fragments(
-                    out,
-                    Some(item),
-                    &format!("{source}[{index}]"),
-                    forced_position,
-                )?;
-            }
-            Ok(())
-        }
         VmValue::Dict(part) => {
+            validate_system_fragment_keys(part, &source)?;
             if !enabled_system_prompt_part(part) {
                 return Ok(());
             }
-            let position = system_prompt_position(part.get("position"), source, forced_position)?;
-            if let Some(parts) = part.get("parts") {
-                return append_host_fragments(out, Some(parts), source, position);
-            }
-            let content = system_prompt_part_content(part).ok_or_else(|| {
+            let content = part.get("content").map(VmValue::display).ok_or_else(|| {
                 system_prompt_error(format!(
-                    "{source}: system prompt part must include `content`, `text`, `prompt`, or `parts`"
+                    "{source}: fragment dict must include `content` — {SYSTEM_FRAGMENT_SHAPE}."
                 ))
             })?;
-            let rendered = render_system_prompt_part(content, part);
+            let position = system_fragment_position(part.get("position"), &source)?;
             out.push(PromptFragment::new(
-                format!("host:{source}"),
-                format!("host:{source}"),
+                source.clone(),
+                source,
                 fragment_bucket(position),
-                rendered,
+                render_system_fragment(&content, part),
             ));
             Ok(())
         }
         other => Err(system_prompt_error(format!(
-            "{source}: expected a string, dict, list, nil, or false; got {}",
+            "{source}: {SYSTEM_FRAGMENT_SHAPE}; got {}",
             other.type_name()
         ))),
     }
@@ -196,44 +227,13 @@ pub(crate) fn assemble_system_prompt(
     use crate::llm::prompt::{assemble, FragmentBucket, PromptFragment};
 
     let mut fragments: Vec<PromptFragment> = Vec::new();
-    if let Some(options) = options {
-        append_host_fragments(
-            &mut fragments,
-            options.get("system_preamble"),
-            "system_preamble",
-            SystemPromptPosition::Before,
-        )?;
-        append_host_fragments(
-            &mut fragments,
-            options.get("system_prefix"),
-            "system_prefix",
-            SystemPromptPosition::Before,
-        )?;
-        append_host_fragments(
-            &mut fragments,
-            options.get("system_context"),
-            "system_context",
-            SystemPromptPosition::Before,
-        )?;
-        append_host_fragments(
-            &mut fragments,
-            options.get("system_prompt_parts"),
-            "system_prompt_parts",
-            SystemPromptPosition::Before,
-        )?;
-        append_host_fragments(
-            &mut fragments,
-            options.get("system_appendix"),
-            "system_appendix",
-            SystemPromptPosition::After,
-        )?;
-        append_host_fragments(
-            &mut fragments,
-            options.get("system_suffix"),
-            "system_suffix",
-            SystemPromptPosition::After,
-        )?;
-    }
+    // Host-provided surrounding fragments come from the LIST form of the
+    // single `system` option key. Each fragment's `position` ("before" /
+    // "after") lands it in the Before / After bucket around the primary block;
+    // this is the one replacement for the removed `system_preamble` /
+    // `system_prefix` / `system_context` / `system_prompt_parts` (before) and
+    // `system_appendix` / `system_suffix` (after) keys.
+    append_system_list_fragments(&mut fragments, options)?;
 
     // The agent loop hands us the primary block pre-decomposed into its
     // constituent parts (system text, MCP advisory, active skills, skill
@@ -247,10 +247,14 @@ pub(crate) fn assemble_system_prompt(
         let primary_system = system
             .filter(|system| !system.trim().is_empty())
             .or_else(|| {
+                // Only the STRING form of `system` is the primary block; the
+                // LIST form is surrounding fragments (already appended above).
                 options
                     .and_then(|options| options.get("system"))
-                    .filter(|value| !matches!(value, VmValue::Nil | VmValue::Bool(false)))
-                    .map(VmValue::display)
+                    .and_then(|value| match value {
+                        VmValue::String(text) => Some(text.to_string()),
+                        _ => None,
+                    })
                     .filter(|system| !system.trim().is_empty())
             });
         if let Some(system) = primary_system {
@@ -320,8 +324,8 @@ pub(super) fn tool_entry_list(value: Option<&VmValue>) -> Option<Vec<VmValue>> {
 }
 
 /// Append a capability-gated guidance fragment for every active tool that
-/// declares a `guidance` (or `system_guidance`) string. The fragment is gated
-/// on the tool's own presence so instruction and tool can never drift.
+/// declares a `guidance` string. The fragment is gated on the tool's own
+/// presence so instruction and tool can never drift.
 pub(super) fn append_tool_guidance_fragments(
     fragments: &mut Vec<crate::llm::prompt::PromptFragment>,
     options: Option<&crate::value::DictMap>,
@@ -343,7 +347,6 @@ pub(super) fn append_tool_guidance_fragments(
         };
         let guidance = dict
             .get("guidance")
-            .or_else(|| dict.get("system_guidance"))
             .map(VmValue::display)
             .map(|text| text.trim().to_string())
             .filter(|text| !text.is_empty());
@@ -437,11 +440,7 @@ pub(super) fn append_context_profile_fragments(
 ) {
     use crate::llm::prompt::{FragmentBucket, PromptFragment};
     let Some(profile) = options
-        .and_then(|options| {
-            options
-                .get("context_profile")
-                .or_else(|| options.get("project_context_profile"))
-        })
+        .and_then(|options| options.get("context_profile"))
         .and_then(VmValue::as_dict)
     else {
         return;
@@ -504,13 +503,11 @@ pub(super) fn caps_from_options(
     let Some(options) = options else {
         return caps;
     };
-    collect_caps(options.get("caps"), &mut caps);
     collect_caps(options.get("capabilities"), &mut caps);
-    if let Some(profile) = options
-        .get("context_profile")
-        .or_else(|| options.get("project_context_profile"))
-        .and_then(VmValue::as_dict)
-    {
+    // NB: `profile.get("caps")` reads the context-profile's OWN internal
+    // grant list (the profile shape, host-constructed) — not the removed
+    // top-level `caps` option, which is now `capabilities`.
+    if let Some(profile) = options.get("context_profile").and_then(VmValue::as_dict) {
         collect_caps(profile.get("caps"), &mut caps);
     }
     caps

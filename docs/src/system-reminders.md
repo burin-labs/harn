@@ -323,8 +323,8 @@ distinct providers raises `HARN-RMD-007`.
 ## Capability-aware rendering
 
 `llm_call(...)` loads pending reminders from the active `session_id`
-transcript, renders them after `system_prompt_parts` and the primary
-system prompt, and before `system_appendix` / `system_suffix`.
+transcript, renders them after `system` fragments positioned `before` and
+the primary system prompt, but before fragments positioned `after`.
 
 Rendering follows provider capabilities first, then `role_hint`:
 

@@ -263,8 +263,7 @@ pub fn edit_fast_apply(params) {
   llm_opts = llm_opts.merge(
     {
       model_role: opts?.model_role ?? llm_opts?.model_role ?? "merge",
-      output_schema: __edit_fast_apply_schema(),
-      output_validation: "error",
+      output: {schema: __edit_fast_apply_schema(), strict: true, validation: "error"},
       schema_retries: opts?.schema_retries ?? llm_opts?.schema_retries ?? 1,
       stream: false,
       session_id: opts?.session_id ?? llm_opts?.session_id,

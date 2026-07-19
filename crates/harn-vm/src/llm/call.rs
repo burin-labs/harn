@@ -877,16 +877,10 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     VmValue::dict(dict)
 }
 
-/// Rewrite `(prompt, schema, options?)` — the ergonomic
-/// `llm_call_structured` argument shape — into the canonical
-/// `(prompt, system, options)` arg list that `extract_llm_options` and
-/// `llm_call_impl` expect. Schema is installed as `output_schema`; the
-/// JSON-schema-validated-output defaults (`response_format: "json"`,
-/// `output_validation: "error"`, `schema_retries: 3`) are applied
-/// unless the caller already set them. The caller's `system` key
-/// (when present) is lifted out of the options dict into the second
-/// positional slot. Built as a standalone helper so the non-bridge
-/// and bridge-aware paths share one definition.
+/// Rewrite `(prompt, schema, options?)` into the canonical
+/// `(prompt, system, options)` arguments used by `llm_call`. The positional
+/// schema owns the `output` contract; callers may tune retries but cannot
+/// install a second, conflicting schema through the options dict.
 pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>, VmError> {
     if args.len() < 2 {
         return Err(VmError::Runtime(
@@ -920,10 +914,8 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
         .remove("system")
         .filter(|v| !matches!(v, VmValue::Nil));
 
-    // Public ergonomic alias: `retries` maps to `schema_retries`. Honor
-    // the long form if the caller passes it explicitly; otherwise
-    // default to 3 (enough to recover from small-model JSON drift while
-    // staying cheap on frontier models that rarely miss).
+    // Structured helpers treat `retries` as their short retry-budget key.
+    // `schema_retries` wins when both are present.
     let retries_alias = options.remove("retries").and_then(|v| v.as_int());
     if let Some(n) = retries_alias {
         options
@@ -935,27 +927,11 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
             .or_insert(VmValue::Int(3));
     }
 
-    options
-        .entry(crate::value::intern_key("output_schema"))
-        .or_insert(schema.clone());
-    options
-        .entry(crate::value::intern_key("json_schema"))
-        .or_insert(schema.clone());
-    options
-        .entry(crate::value::intern_key("output_format"))
-        .or_insert_with(|| {
-            let mut fmt = std::collections::BTreeMap::new();
-            fmt.put_str("kind", "json_schema");
-            fmt.insert("schema".to_string(), schema);
-            fmt.insert("strict".to_string(), VmValue::Bool(true));
-            VmValue::dict(fmt)
-        });
-    options
-        .entry(crate::value::intern_key("response_format"))
-        .or_insert(VmValue::String(arcstr::ArcStr::from("json")));
-    options
-        .entry(crate::value::intern_key("output_validation"))
-        .or_insert(VmValue::String(arcstr::ArcStr::from("error")));
+    let mut output = crate::value::DictMap::new();
+    output.insert(crate::value::intern_key("schema"), schema);
+    output.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
+    output.put_str("validation", "error");
+    options.insert(crate::value::intern_key("output"), VmValue::dict(output));
 
     Ok(vec![
         prompt,

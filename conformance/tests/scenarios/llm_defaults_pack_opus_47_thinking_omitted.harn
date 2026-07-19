@@ -8,11 +8,11 @@ pipeline test(task) {
   const model = "claude-opus-4-7-20260101"
   // Sanity: lineage_of must classify this id as the adaptive variant.
   assert_eq(lineage_of(model), "claude-opus-adaptive")
-  const r = pack_for({model: model, task: "agent", thinking: "medium"})
+  const r = pack_for({model: model, reasoning_policy: "medium", reasoning_task: "agent"})
   assert_eq(type_of(r), "dict")
   assert_eq(r.model, model)
   assert_eq(r.provider, "anthropic")
-  // Thinking patch was empty → no `thinking` field.
+  // Policy lowering was empty → no low-level `thinking` field.
   assert_eq(r.has("thinking"), false)
   log("llm_defaults_pack_opus_47_thinking_omitted passed")
 }

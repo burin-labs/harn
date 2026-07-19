@@ -25,6 +25,6 @@ context_packs = ["oncall_runbook", "service_ownership", "release_policy"]
 evals = ["oncall_captain_smoke"]
 owner = "sre"
 budget = { daily_usd = 8.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 900 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "high" }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], effort = "high" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["oncall-captain-v1"] }
 package_source = { package = "harn-oncall-captain-persona", path = "personas/oncall_captain" }

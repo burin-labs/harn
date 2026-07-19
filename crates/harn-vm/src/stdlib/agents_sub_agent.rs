@@ -724,12 +724,11 @@ fn collect_transcript_fallbacks(transcript: &VmValue) -> TranscriptFallbacks {
 }
 
 fn option_requests_structured_output(options: &crate::value::DictMap) -> bool {
-    matches!(
-        options.get("response_format"),
-        Some(VmValue::String(value)) if value.as_str() == "json"
-    ) || options.contains_key("output_format")
-        || options.contains_key("json_schema")
-        || options.contains_key("output_schema")
+    options.get("output").is_some_and(|value| match value {
+        VmValue::Nil => false,
+        VmValue::String(kind) => kind.as_str() != "text",
+        _ => true,
+    })
 }
 
 fn synthesize_sub_agent_result(

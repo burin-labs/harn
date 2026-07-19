@@ -11,7 +11,7 @@ pipeline default() {
   }
   const raw =
     "Sure, here's the answer:\n```json\n{\"verdict\": \"pass\", \"note\": \"clean\"}\n```\nLet me know if you need more."
-  const r = schema_recover(raw, schema, {llm_repair: false})
+  const r = schema_recover(raw, schema, {repair: false})
   __io_println(r.ok)
   __io_println(r.stage)
   const data = r.data

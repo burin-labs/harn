@@ -11,7 +11,7 @@ pipeline default() {
     properties: {name: {type: "string"}, age: {type: "integer"}, active: {type: "boolean"}},
   }
   const raw = "name: \"Grace Hopper\", age: 85, active: yes"
-  const r = schema_recover(raw, schema, {llm_repair: false})
+  const r = schema_recover(raw, schema, {repair: false})
   __io_println(r.ok)
   __io_println(r.stage)
   const data = r.data

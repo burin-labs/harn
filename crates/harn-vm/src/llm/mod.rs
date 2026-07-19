@@ -36,6 +36,8 @@ mod context_breakdown;
 mod conversation;
 pub(crate) mod cost;
 #[cfg(test)]
+mod cost_budget_tests;
+#[cfg(test)]
 mod cost_context_tests;
 pub(crate) mod cost_route;
 #[cfg(test)]

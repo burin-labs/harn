@@ -154,7 +154,7 @@ pub fn goal_text(g) {
 /**
  * goal_prompt_part(goal) returns an `llm::prompt` reducer system-prompt part
  * (position "before") rendering the goal. Feed it through
- * `with_system_prompt_parts` for direct `llm_call` callers; for `agent_loop` use
+ * `with_system_fragments` for direct `llm_call` callers; for `agent_loop` use
  * `with_goal(...)`, which routes through the context-profile fragment channel
  * the loop assembles per turn.
  *

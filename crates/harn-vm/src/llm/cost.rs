@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
+use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 thread_local! {
@@ -131,10 +131,8 @@ pub fn peek_llm_token_budget() -> Option<u64> {
     LLM_TOKEN_BUDGET.with(|b| *b.borrow())
 }
 
-// `Serialize` exists for the typed-options parity test
-// (`orchestration/typed_options_parity.rs`), which compares this struct's
-// serialized default key set against the `LlmBudget` alias in
-// `std/llm/options.harn`.
+// `Serialize` lets the typed-options parity test compare this default key set
+// with `LlmBudget` in `std/llm/options.harn`.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub(crate) struct LlmBudgetEnvelope {
     pub max_cost_usd: Option<f64>,
@@ -255,8 +253,8 @@ fn parse_budget_fields(
     Ok(())
 }
 
-pub(crate) fn parse_budget_envelope(
-    options: Option<&crate::value::DictMap>,
+pub(crate) fn parse_budget(
+    options: Option<&DictMap>,
 ) -> Result<Option<LlmBudgetEnvelope>, VmError> {
     let Some(options) = options else {
         return Ok(None);
@@ -266,14 +264,16 @@ pub(crate) fn parse_budget_envelope(
         match value {
             VmValue::Nil => {}
             VmValue::Dict(fields) => parse_budget_fields(fields, &mut envelope)?,
+            VmValue::Int(_) | VmValue::Float(_) => {
+                envelope.max_cost_usd = Some(numeric_value(value, "budget")?);
+            }
             _ => {
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "budget: expected a dict {max_cost_usd?, total_budget_usd?, max_input_tokens?, max_output_tokens?}",
+                    "budget: expected a number (max_cost_usd) or a dict {max_cost_usd?, total_budget_usd?, max_input_tokens?, max_output_tokens?}",
                 ))));
             }
         }
     }
-    parse_budget_fields(options, &mut envelope)?;
     Ok((!envelope.is_empty()).then_some(envelope))
 }
 

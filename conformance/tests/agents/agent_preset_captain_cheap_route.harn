@@ -52,7 +52,7 @@ pipeline default() {
       },
     }
   }
-  const escalate = { call -> call?.opts?.escalate ?? false }
+  const escalate = { call -> contains(call.prompt, "Frontier") }
   const logging_sink = { _record ->
     let _ = atomic_add(log_records, 1)
   }
@@ -75,13 +75,12 @@ pipeline default() {
   __io_println(atomic_get(cheap_calls))
   __io_println(atomic_get(frontier_calls))
   __io_println(atomic_get(log_records))
-  // Escalated route: predicate matches via `escalate: true` in opts.
+  // Escalated route: the predicate classifies the prompt before dispatch.
   const frontier_run = preset_agent(
     "release_captain",
     "Frontier path.",
     {
       provider: "mock",
-      escalate: true,
       cheap_caller: cheap,
       frontier_caller: frontier,
       escalate_predicate: escalate,

@@ -1,0 +1,17 @@
+fn main(_harness: Harness) {
+  const registry = __llm_call_option_registry()
+  let tested = 0
+  for key in keys(registry.removed) {
+    let opts = {provider: "mock"}
+    opts[key] = nil
+    const result = try {
+      llm_call("This call must fail before dispatch.", nil, opts)
+    }
+    require is_err(result), "removed option must fail: " + key
+    const message = to_string(unwrap_err(result))
+    require contains(message, "option `" + key + "` was removed"), message
+    require contains(message, registry.removed[key]), message
+    tested = tested + 1
+  }
+  __io_println(tested == len(keys(registry.removed)))
+}

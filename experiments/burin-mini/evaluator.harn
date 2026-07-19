@@ -84,10 +84,8 @@ fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
     {
       provider: semantic_eval_provider(),
       model: semantic_eval_model(),
-      output_schema: semantic_eval_schema(),
-      output_validation: "error",
+      output: {schema: semantic_eval_schema(), validation: "error"},
       schema_retries: 2,
-      response_format: "json",
       temperature: 0,
     },
   )

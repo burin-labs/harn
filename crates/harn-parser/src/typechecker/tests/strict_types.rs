@@ -162,7 +162,10 @@ fn test_strict_types_llm_call_with_schema_clean() {
     let errs = strict_errors(
         r#"pipeline t(task) {
   const result = llm_call("prompt", "system", {
-schema: {type: "object", properties: {name: {type: "string"}}}
+output: {
+  schema: {type: "object", properties: {name: {type: "string"}}},
+  validation: "error"
+}
   })
   log(result.data)
   log(result.text)
@@ -200,7 +203,7 @@ steps: {type: "list", items: {type: "string"}}
 
   // Good: schema-aware llm_call
   const result = llm_call("generate a workflow", "system", {
-schema: payload_schema
+output: {schema: payload_schema, validation: "error"}
   })
   const workflow_name = result.data.name
 
@@ -225,7 +228,7 @@ fn test_strict_types_llm_call_with_schema_via_variable() {
         r#"pipeline t(task) {
   const my_schema = {type: "object", properties: {score: {type: "float"}}}
   const result = llm_call("rate this", "system", {
-schema: my_schema
+output: {schema: my_schema, validation: "error"}
   })
   log(result.data.score)
 }"#,

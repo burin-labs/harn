@@ -1,5 +1,5 @@
 [harn] llm provider=mock budget=0.25
 [harn] ladder len=2
 [harn] loop until_done=true prose_cap=800
-[harn] preset task_kind=verify
+[harn] preset reasoning_task=verify
 [harn] stage id=repair retries=3

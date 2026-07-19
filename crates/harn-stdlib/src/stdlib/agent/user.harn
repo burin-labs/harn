@@ -494,24 +494,7 @@ fn __agentic_user_base_llm_options(answerer) {
 }
 
 fn __agentic_user_llm_option_keys() {
-  return [
-    "provider",
-    "model",
-    "model_tier",
-    "temperature",
-    "top_p",
-    "max_tokens",
-    "seed",
-    "api_base",
-    "api_key",
-    "thinking",
-    "reasoning_effort",
-    "reasoning_policy",
-    "thinking_policy",
-    "reasoning_scale",
-    "problem_scale",
-    "reasoning_task",
-  ]
+  return __llm_call_option_registry().keys
 }
 
 fn __agentic_user_remaining_llm_calls(answerer) {

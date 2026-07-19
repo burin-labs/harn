@@ -1,3 +1,5 @@
+import { llm_call_options } from "std/llm/options"
+
 fn __rerank_text(value) {
   if type_of(value) == "string" {
     return value
@@ -174,7 +176,7 @@ fn __rerank_schema() {
 }
 
 fn __rerank_llm_options(opts) {
-  const base = opts?.llm_options ?? opts ?? {}
+  const base = llm_call_options(opts?.llm_options ?? opts ?? {})
   return base
     + {
     max_tokens: base?.max_tokens ?? 128,

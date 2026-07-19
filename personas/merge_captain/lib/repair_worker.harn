@@ -20,14 +20,7 @@ import { harness_validate, validate_all } from "repair_validator"
 
 /** Default agent_loop options for a repair worker turn. */
 pub fn default_agent_options() {
-  return {
-    profile: "tool_using",
-    max_iterations: 24,
-    max_nudges: 3,
-    output_validation: "error",
-    schema_retries: 2,
-    output_format: {kind: "json_schema", strict: true},
-  }
+  return {profile: "tool_using", max_iterations: 24, max_nudges: 3, schema_retries: 2}
 }
 
 /**
@@ -40,10 +33,7 @@ pub fn default_executor(bundle, options) {
   const merged = default_agent_options() + supplied
   const schema = output_schema()
   const agent_options = merged
-    + {
-    output_schema: schema,
-    output_format: {kind: "json_schema", schema: schema, strict: true},
-  }
+    + {output: {schema: schema, strict: true, validation: "error"}}
   const result = agent_loop(bundle.prompt, supplied?.system, agent_options)
   const raw = result?.text ?? ""
   const checkpoint = typed_output_checkpoint_from_text(
@@ -52,8 +42,8 @@ pub fn default_executor(bundle, options) {
     schema,
     merged
       + {
-      llm_repair: false,
-      output_format: {kind: "json_schema", schema: schema, strict: true},
+      repair: false,
+      output: {schema: schema, strict: true, validation: "error"},
       validator_retries: merged?.validator_retries ?? 1,
     },
     fn(output) { return validate_all(bundle, output) },

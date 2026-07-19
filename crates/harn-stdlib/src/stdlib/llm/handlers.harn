@@ -1613,7 +1613,7 @@ fn __routing_resolve(routes, call) {
  *       default: cheap,
  *       routes: [
  *         {name: "frontier",
- *          when: { call -> call?.opts?.task_kind == "judge" || (call?.opts?.escalate ?? false) },
+ *          when: { call -> contains(call.prompt, "high-stakes") },
  *          caller: strong},
  *       ],
  *     })

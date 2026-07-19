@@ -34,6 +34,6 @@ pipeline default() {
   )
 }
 // Exhaust the retry budget by setting `retries: 0` — the helper
-// throws because `output_validation: "error"` is the forced default.
+// throws because the strict `output` contract is the forced default.
 // After #534 the thrown value is a {category, message, ...} dict
 // — dispatch on category instead of string-matching the message.

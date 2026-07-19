@@ -555,7 +555,7 @@ pub fn typed_prompt_checkpoint(id, evidence, options = nil, validator = nil) {
     schema,
     opts
       + {
-      output_format: {kind: "json_schema", schema: schema, strict: true},
+      output: {schema: schema, strict: true, validation: "error"},
       validator_retries: opts?.validator_retries ?? 1,
     },
     _checkpoint_validator(id, context, validator),

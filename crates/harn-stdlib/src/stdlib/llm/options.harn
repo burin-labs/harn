@@ -53,256 +53,138 @@ pub type ModelLadderStep = {
 pub type ModelLadder = list<string | ModelLadderStep>
 
 /**
- * The public `llm_call` options surface. Mirrors the options table in
- * `docs/src/llm/llm_call.md`; the runtime accepted-key list is
- * `__llm_call_option_keys()` below and parity is pinned by
- * `typed_options_parity.rs`.
- *
- * Deprecated keys (`llm_retries`, `llm_backoff_ms`) are intentionally
- * absent: the typed path is the clean path — compose retries with
- * `with_retry` from `std/llm/handlers` instead.
+ * One fragment of a composed system prompt. String entries in the `system`
+ * list are shorthand for `{content: <string>}` (position "before").
+ */
+pub type SystemFragment = {
+  content: string,
+  title?: string,
+  position?: "before" | "after",
+  enabled?: bool,
+}
+
+/**
+ * The single structured-output contract accepted by the `output:` option:
+ * "text" (default), "json" (provider JSON mode), a JSON-Schema dict, or the
+ * config form `{schema, strict?, validation?, stream_abort?}`.
+ */
+pub type OutputSpec = "text" | "json" | dict
+
+/**
+ * The public `llm_call` options surface — one spelling per option, no
+ * synonyms. The runtime registry (`__llm_call_option_registry()`, backed by
+ * `crates/harn-builtin-meta/src/llm_options.rs`) is the single source of
+ * truth; this alias mirrors it for `harn check` and is parity-pinned by
+ * `typed_options_parity.rs`. Unknown or removed keys are hard runtime errors.
  */
 pub type LlmCallOptions = {
+  // Routing and model selection.
   provider?: string,
   model?: string,
   model_role?: string,
   model_tier?: string,
-  route_policy?: string,
-  prefer?: string | list<string>,
+  api_mode?: "chat_completions" | "responses",
+  route_policy?: string | dict,
   fallback_chain?: list<string>,
-  fallback_strategy?: string,
-  strategy?: string,
+  routing?: dict,
   equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
   models?: ModelLadder,
   ladder?: string,
-  api_mode?: string,
+  // Conversation and system prompt.
+  system?: string | list<string | SystemFragment>,
+  messages?: list,
+  session_id?: string,
+  mock_scope?: string,
+  context_profile?: dict,
+  capabilities?: any,
+  prefill?: string,
+  previous_response_id?: string,
+  // Generation.
   max_tokens?: int,
   temperature?: float,
   top_p?: float,
   top_k?: int,
+  logprobs?: bool,
+  top_logprobs?: int,
   stop?: list<string>,
+  stop_at_tool_call?: bool,
   seed?: int,
   frequency_penalty?: float,
   presence_penalty?: float,
-  logprobs?: bool,
-  top_logprobs?: int,
-  response_format?: string,
-  output_format?: string | dict,
-  schema?: any,
-  json_schema?: any,
-  output_schema?: any,
-  output_validation?: string,
+  // Output contract (wrapper-plane retry knobs alongside).
+  output?: OutputSpec,
   schema_retries?: int,
-  schema_stream_abort?: bool,
+  schema_retry_nudge?: bool | string,
   retries?: int,
-  repair?: bool | dict,
   schema_recover?: any,
+  repair?: bool | dict,
+  // Reasoning and modalities.
+  thinking?: bool | "adaptive" | dict,
+  effort?: string,
   reasoning_policy?: string | bool,
-  thinking_policy?: string | bool,
   reasoning_scale?: string,
-  problem_scale?: string,
   reasoning_task?: string,
-  reasoning_effort?: string,
-  thinking?: bool | dict,
   interleaved_thinking?: bool,
   anthropic_beta_features?: string | list<string>,
   vision?: bool,
+  audio?: bool,
+  pdf?: bool,
+  video?: bool,
+  // Tools.
   tools?: any,
+  provider_tools?: list | dict,
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,
   tool_format?: string,
-  provider_tools?: list,
-  hosted_tools?: list,
-  max_tool_calls?: int,
-  previous_response_id?: string,
-  response_store?: bool,
-  responses_store?: bool,
+  // Caching, budgets, transport.
+  cache?: bool,
+  prompt_cache_ttl?: "5m" | "1h",
+  budget?: LlmBudget | float,
+  timeout_ms?: int,
+  idle_timeout_ms?: int,
+  stream?: bool,
+  speed?: "standard" | "fast",
+  // OpenAI Responses surface (requires api_mode: "responses").
   store?: any,
   background?: bool,
   truncation?: string,
   compact?: bool,
   include?: list,
-  budget?: LlmBudget,
-  cache?: bool,
-  prompt_cache_ttl?: "5m" | "1h",
-  fast?: bool,
-  speed?: string,
-  stream?: bool,
-  timeout?: int,
-  timeout_ms?: int,
-  messages?: list,
-  prefill?: string,
-  transcript?: dict,
-  session_id?: string,
-  mock_scope?: string,
-  system?: string,
-  system_preamble?: string,
-  system_prefix?: string,
-  system_context?: string,
-  system_prompt_parts?: list,
-  system_appendix?: string,
-  system_suffix?: string,
-  structural_experiment?: any,
+  max_tool_calls?: int,
+  // Provider escape hatch — namespaced per provider, never silently dropped.
+  provider_options?: dict,
+  // Observability and experiments.
   metadata?: dict,
+  reminders?: any,
+  structural_experiment?: any,
 }
 
 /**
- * Routing and model selection.
- * Sampling and generation.
- * Structured output.
- * Reasoning.
- * Media.
- * Tools.
- * OpenAI Responses surface.
- * Cost, caching, and transport.
- * Conversation state and system prompt composition.
- * Diagnostics and experiments.
- */
-fn __llm_call_option_keys() {
-  return [
-    "model",
-    "model_role",
-    "role",
-    "model_tier",
-    "provider",
-    "api_mode",
-    "api",
-    "route_policy",
-    "prefer",
-    "fallback_strategy",
-    "strategy",
-    "fallback_chain",
-    "equivalent_failover",
-    "budget_usd",
-    "routing",
-    "models",
-    "ladder",
-    "system",
-    "messages",
-    "session_id",
-    "mock_scope",
-    "system_preamble",
-    "system_prefix",
-    "system_context",
-    "system_prompt_parts",
-    "system_appendix",
-    "system_suffix",
-    "_system_fragments",
-    "context_profile",
-    "project_context_profile",
-    "caps",
-    "capabilities",
-    "previous_response_id",
-    "max_tokens",
-    "temperature",
-    "top_p",
-    "top_k",
-    "logprobs",
-    "top_logprobs",
-    "stop",
-    "seed",
-    "frequency_penalty",
-    "presence_penalty",
-    "response_format",
-    "output_format",
-    "schema",
-    "json_schema",
-    "output_schema",
-    "output_validation",
-    "schema_retries",
-    "schema_retry_nudge",
-    "schema_stream_abort",
-    "retries",
-    "schema_recover",
-    "repair",
-    "llm_repair",
-    "thinking",
-    "reasoning_policy",
-    "thinking_policy",
-    "reasoning_scale",
-    "problem_scale",
-    "reasoning_task",
-    "task_kind",
-    "task",
-    "reasoning_effort",
-    "interleaved_thinking",
-    "anthropic_beta_features",
-    "vision",
-    "audio",
-    "pdf",
-    "video",
-    "tools",
-    "provider_tools",
-    "hosted_tools",
-    "tool_choice",
-    "tool_search",
-    "tool_format",
-    "cache",
-    "prompt_cache_ttl",
-    "budget",
-    "timeout",
-    "timeout_ms",
-    "idle_timeout",
-    "stream",
-    "fast",
-    "speed",
-    "store",
-    "response_store",
-    "responses_store",
-    "background",
-    "truncation",
-    "compact",
-    "include",
-    "max_tool_calls",
-    "anthropic",
-    "openai",
-    "openrouter",
-    "together",
-    "groq",
-    "deepseek",
-    "fireworks",
-    "huggingface",
-    "local",
-    "mlx",
-    "vllm",
-    "tgi",
-    "dashscope",
-    "gemini",
-    "azure_openai",
-    "bedrock",
-    "ollama",
-    "vertex",
-    "mock",
-    "fake",
-    "prefill",
-    "structural_experiment",
-    "transcript",
-    "reminders",
-    "metadata",
-  ]
-}
-
-/**
- * llm_call_options projects a broader runtime options dict onto the public
- * llm_call option surface.
+ * llm_call_options projects a broader runtime options dict (e.g. the agent
+ * loop's bag) onto the public llm_call option surface plus the `_`-prefixed
+ * host plumbing channels. The accepted-key list comes from the canonical
+ * registry builtin — there is no hand-maintained list in stdlib.
  *
  * @effects: [llm.call]
  * @errors: []
  */
 pub fn llm_call_options(options = nil) {
-  return pick_keys(options ?? {}, __llm_call_option_keys(), {drop_nil: true})
+  const base = options ?? {}
+  let allowed = __llm_call_option_registry().keys
+  for key in keys(base) {
+    if starts_with(key, "_") {
+      allowed = allowed.push(key)
+    }
+  }
+  return pick_keys(base, allowed, {drop_nil: true})
 }
 
 const __LLM_EXPLICIT_ROUTING_KEYS = [
   "routing",
   "models",
   "ladder",
-  "model_ladder",
   "route_policy",
-  "prefer",
   "fallback_chain",
-  "fallback_strategy",
-  "strategy",
 ]
 
 /**

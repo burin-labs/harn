@@ -20,7 +20,9 @@ use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::{infer_binary_op_type, merge_shape_fields};
 use super::super::format::format_type;
-use super::super::schema_inference::schema_type_expr_from_node;
+use super::super::schema_inference::{
+    output_schema_type_expr_from_node, output_validation_is_required,
+};
 use super::super::scope::{builtin_return_type, InferredType, PathNarrowing, TypeScope};
 use super::super::union::{
     intersect_types, narrow_to_single, reference_path_key, reference_path_key_for_subscript,
@@ -335,11 +337,9 @@ impl TypeChecker {
                 Node::StringLiteral(key) | Node::Identifier(key) => key.as_str(),
                 _ => continue,
             };
-            if key == "schema" || key == "output_schema" {
-                data_type = schema_type_expr_from_node(&entry.value, scope);
-            } else if key == "output_validation" {
-                data_required =
-                    matches!(&entry.value.node, Node::StringLiteral(value) if value == "error");
+            if key == "output" {
+                data_type = output_schema_type_expr_from_node(&entry.value, scope);
+                data_required = output_validation_is_required(&entry.value);
             }
         }
         data_type.map(|ty| (ty, data_required))
@@ -726,8 +726,7 @@ impl TypeChecker {
                 // bind T by walking each arg node against the param
                 // TypeExpr, then apply bindings to the declared return
                 // type. Falls through to `builtin_return_type` when no T
-                // can be bound (e.g. llm_call without an output_schema
-                // option).
+                // can be bound (e.g. llm_call without an `output` schema).
                 if let Some(sig) = builtin_signatures::lookup(name).filter(|s| s.is_generic()) {
                     let type_param_names = sig.type_param_names();
                     let bindings =

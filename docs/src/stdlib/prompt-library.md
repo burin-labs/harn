@@ -9,7 +9,7 @@ import "std/prompt_library"
 const library = prompt_library_load("prompts.toml")
 const prompt_library = prompt_library_api(library)
 
-const system_prefix = prompt_library.inject(
+const system_fragment = prompt_library.inject(
   "rust-repo-conventions-v1",
   {crate: "harn-vm"},
 )

@@ -19,6 +19,9 @@ mod routing;
 mod system_prompt;
 mod thinking;
 mod tool_search;
+mod validate;
+
+pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
 #[cfg(test)]
 mod logical_defaults_tests;
@@ -28,6 +31,8 @@ mod output_format_tests;
 mod reminder_render_tests;
 #[cfg(test)]
 mod resolve_timeout_secs_tests;
+#[cfg(test)]
+mod route_policy_cutover_tests;
 #[cfg(test)]
 mod routing_credential_tests;
 #[cfg(test)]

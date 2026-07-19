@@ -23,14 +23,12 @@ pipeline test(task) {
             {model: "mock", provider: "mock", label: "cheap"},
             {model: "mock-strong", provider: "mock", label: "frontier"},
           ],
-          output_schema: {
-            type: "object",
-            required: ["answer"],
-            properties: {answer: {type: "string"}},
+          output: {
+            schema: {type: "object", required: ["answer"], properties: {answer: {type: "string"}}},
+            strict: true,
+            validation: "error",
           },
-          output_validation: "error",
           schema_retries: 1,
-          response_format: "json",
         },
       )
       const attempts = result.routing.attempts

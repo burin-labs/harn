@@ -1,9 +1,9 @@
 # Prompt assembly
 
 Every system prompt Harn sends to a model is the deterministic reduction of an
-ordered list of **fragments**. Host-provided parts (`system_preamble`,
-`system_prefix`, `system_context`, `system_prompt_parts`, `system_appendix`,
-`system_suffix`), the agent's primary system text, capability-gated tool
+ordered list of **fragments**. The public `system` option supplies a string
+or ordered `{content, title?, position?, enabled?}` list. Those fragments, the
+agent's primary system text, capability-gated tool
 guidance, project context profiles, and rendered
 [system reminders](./system-reminders.md) all flow through one reducer. There is
 no parallel string-concatenation path, and there is no place where an
@@ -20,7 +20,7 @@ A fragment is one contributor to the system string:
 
 | field | meaning |
 | --- | --- |
-| `id` | stable identifier, e.g. `host:system_preamble`, `primary:active_skills`, `tool:todo.guidance` |
+| `id` | stable identifier, e.g. `host:system_before`, `primary:active_skills`, `tool:todo.guidance` |
 | `source` | who contributed it (`host:*`, `primary`, `reminder`, `tool:<name>`) |
 | `bucket` | `before` (preamble … primary … reminders) or `after` (appendix/suffix and tail recitations) |
 | `requires_tools` | included only when every named tool is in the active tool set |
@@ -75,8 +75,8 @@ never sent to the provider as part of the tool's schema.
 signals such as Git remotes, language/build files, supplied code-librarian
 signals, and available credential aliases into reducer-ready fragments. Agent
 preflight forwards `context_profile.prompt_fragments` through `_system_fragments`;
-direct `llm_call` and `prompt_explain` users can pass `context_profile` or
-`project_context_profile` in options.
+direct `llm_call` and `prompt_explain` users pass `context_profile` in
+options.
 
 Each profile fragment is capability-gated. For example, a Rust profile fragment
 carries `requires_caps: ["language.rust"]`; `prompt_explain(...)` then records

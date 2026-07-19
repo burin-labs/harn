@@ -21,7 +21,7 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   let opts = agent_loop_options(agent_progress_apply_options(options))
   opts = opts + {tools: agent_lifecycle_tools(opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {
-    opts = opts + {system: system_prompt}
+    opts = opts + {_primary_system: system_prompt}
   }
   const session = agent_session_init(message, system_prompt, opts)
   if session?.done {

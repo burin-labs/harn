@@ -232,7 +232,7 @@ pub fn pre_turn_scope_classifier(opts = nil) {
     const schema = __scope_classifier_schema()
     let llm_opts = {
       model: model,
-      output_schema: schema,
+      output: {schema: schema, strict: true, validation: "error"},
       max_tokens: cfg?.max_tokens ?? 256,
       temperature: cfg?.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
@@ -240,7 +240,7 @@ pub fn pre_turn_scope_classifier(opts = nil) {
     if cfg?.provider != nil {
       llm_opts = llm_opts + {provider: cfg.provider}
     }
-    for key in ["top_p", "seed", "reasoning_effort", "timeout"] {
+    for key in ["top_p", "seed", "effort", "timeout_ms"] {
       if cfg[key] != nil {
         llm_opts[key] = cfg[key]
       }

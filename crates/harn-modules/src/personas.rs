@@ -263,7 +263,7 @@ pub struct PersonaModelPolicy {
     #[serde(default)]
     pub fallback_models: Vec<String>,
     #[serde(default)]
-    pub reasoning_effort: Option<String>,
+    pub effort: Option<String>,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, toml::Value>,
 }

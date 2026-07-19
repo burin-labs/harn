@@ -1,15 +1,14 @@
-use crate::value::VmDictExt;
-
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
 use super::helpers::vm_value_to_json;
 
 mod catalog_projection;
 mod execution_contract;
+mod option_registry;
 use catalog_projection::{
     insert_tool_mode_parity_fields, reasoning_history_wire_field_value, toml_value_to_vm_value,
     tools_value,
@@ -18,6 +17,7 @@ use execution_contract::LLM_EXECUTION_CONTRACT_BUILTIN_DEF;
 
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
+    register_builtin_defs(vm, option_registry::OPTION_REGISTRY_DEFS);
     register_builtin_defs(vm, LLM_CONFIG_DEFS);
 }
 
@@ -236,7 +236,7 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
     Ok(VmValue::dict(out))
 }
 
-/// Apply Harn's provider-aware reasoning_policy/thinking_policy defaults to an llm_call option dict.
+/// Apply Harn's provider-aware reasoning-policy and effort defaults to an `llm_call` option dict.
 #[harn_builtin(
     sig = "llm_apply_reasoning_policy(opts: dict) -> dict",
     category = "llm.config"

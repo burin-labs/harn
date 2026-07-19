@@ -6,7 +6,7 @@ pipeline main() {
     { ->
       const direct = sub_agent_run(
         "Return machine-readable JSON.",
-        {provider: "mock", response_format: "json"},
+        {provider: "mock", output: "json"},
       )
       __io_println(direct?.ok)
       __io_println(direct?.summary == "{\"answer\":\"ok\"}")
@@ -18,7 +18,7 @@ pipeline main() {
     { ->
       const handle = sub_agent_run(
         "Return machine-readable JSON in the background.",
-        {provider: "mock", response_format: "json", background: true},
+        {provider: "mock", output: "json", background: true},
       )
       const done = wait_agent(handle)
       __io_println(done?.status == "completed")

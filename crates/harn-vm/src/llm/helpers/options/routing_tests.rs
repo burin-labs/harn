@@ -428,7 +428,7 @@ fn model_role_config_keys_normalize_like_call_options() {
 fn fast_options(model: &str) -> crate::value::DictMap {
     let mut options = crate::value::DictMap::new();
     options.put_str("model", model);
-    options.insert(crate::value::intern_key("fast"), VmValue::Bool(true));
+    options.put_str("speed", "fast");
     options
 }
 
@@ -517,7 +517,7 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
     policy.put_str("mode", "preference_list");
     policy.put_str("strategy", "cheapest_first");
     policy.insert(
-        crate::value::intern_key("prefer"),
+        crate::value::intern_key("targets"),
         VmValue::List(std::sync::Arc::new(vec![
             VmValue::String(arcstr::ArcStr::from("fast-mid")),
             VmValue::String(arcstr::ArcStr::from("cheap-mid")),
@@ -992,7 +992,7 @@ fn equivalent_failover_rejects_explicit_routing_policy() {
 }
 
 #[test]
-fn equivalent_failover_rejects_prefer_route_owner() {
+fn equivalent_failover_rejects_route_policy_route_owner() {
     install_equivalent_routes();
 
     let err = match extract_with_options(crate::value::DictMap::from_iter([
@@ -1005,17 +1005,15 @@ fn equivalent_failover_rejects_prefer_route_owner() {
             VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
         (
-            crate::value::intern_key("prefer"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("backup-a:backup-a-model"),
-            )])),
+            crate::value::intern_key("route_policy"),
+            VmValue::String("always(backup-a:backup-a-model)".into()),
         ),
         (
             crate::value::intern_key("equivalent_failover"),
             VmValue::Bool(true),
         ),
     ])) {
-        Ok(_) => panic!("prefer + equivalent_failover should fail"),
+        Ok(_) => panic!("route_policy + equivalent_failover should fail"),
         Err(err) => err,
     };
 
@@ -1023,7 +1021,7 @@ fn equivalent_failover_rejects_prefer_route_owner() {
         VmError::Thrown(VmValue::String(message)) => {
             assert!(message.contains("cannot be combined"), "{message}");
         }
-        other => panic!("expected thrown prefer conflict, got {other:?}"),
+        other => panic!("expected thrown route_policy conflict, got {other:?}"),
     }
 
     crate::llm_config::clear_user_overrides();
@@ -1274,10 +1272,10 @@ impl Drop for ScopedEnvVar {
 fn unsupported_capability_options_error_with_provider_matrix_hint() {
     assert_unsupported_local_option("thinking", vec![("thinking", VmValue::Bool(true))]);
     assert_unsupported_local_option(
-        "output_format",
+        "output",
         vec![(
-            "output_format",
-            VmValue::String(arcstr::ArcStr::from("json_object".to_string())),
+            "output",
+            VmValue::String(arcstr::ArcStr::from("json".to_string())),
         )],
     );
     assert_unsupported_local_option(
@@ -1296,9 +1294,9 @@ fn unsupported_capability_options_error_with_provider_matrix_hint() {
     assert_unsupported_local_option("pdf", vec![("pdf", VmValue::Bool(true))]);
     assert_unsupported_local_option("video", vec![("video", VmValue::Bool(true))]);
     assert_unsupported_local_option(
-        "reasoning_effort",
+        "effort",
         vec![(
-            "reasoning_effort",
+            "effort",
             VmValue::String(arcstr::ArcStr::from("high".to_string())),
         )],
     );
@@ -1387,7 +1385,7 @@ fn gpt_5_6_reasoning_tools_auto_route_to_responses() {
                 VmValue::String(arcstr::ArcStr::from("gpt-5.6-terra")),
             ),
             (
-                crate::value::intern_key("reasoning_effort"),
+                crate::value::intern_key("effort"),
                 VmValue::String(arcstr::ArcStr::from(effort)),
             ),
             (crate::value::intern_key("tools"), one_tool_list()),
@@ -1433,7 +1431,7 @@ fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
             VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
         (
-            crate::value::intern_key("reasoning_effort"),
+            crate::value::intern_key("effort"),
             VmValue::String(arcstr::ArcStr::from("high".to_string())),
         ),
     ]);
@@ -1465,7 +1463,7 @@ fn standalone_reasoning_effort_accepts_minimal_when_supported() {
             VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
         (
-            crate::value::intern_key("reasoning_effort"),
+            crate::value::intern_key("effort"),
             VmValue::String(arcstr::ArcStr::from("minimal".to_string())),
         ),
     ]);
@@ -1605,7 +1603,7 @@ fn standalone_reasoning_effort_accepts_none_xhigh_and_max_when_supported() {
                 VmValue::String(arcstr::ArcStr::from("gpt-5.5".to_string())),
             ),
             (
-                crate::value::intern_key("reasoning_effort"),
+                crate::value::intern_key("effort"),
                 VmValue::String(arcstr::ArcStr::from(raw.to_string())),
             ),
         ]);
@@ -1629,7 +1627,7 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
     let _cerebras_key = ScopedEnvVar::set("CEREBRAS_API_KEY", "test-key");
     for (key, value) in [
         (
-            "reasoning_effort",
+            "effort",
             VmValue::String(arcstr::ArcStr::from("none".to_string())),
         ),
         (
@@ -1683,7 +1681,7 @@ fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability(
             VmValue::String(arcstr::ArcStr::from("no-effort-model".to_string())),
         ),
         (
-            crate::value::intern_key("reasoning_effort"),
+            crate::value::intern_key("effort"),
             VmValue::String(arcstr::ArcStr::from("none".to_string())),
         ),
     ]);
@@ -1720,14 +1718,13 @@ thinking_modes = ["effort"]
             VmValue::String(arcstr::ArcStr::from("thinking-effort-only".to_string())),
         ),
         (
-            "reasoning_effort",
+            "effort",
             VmValue::String(arcstr::ArcStr::from("high".to_string())),
         ),
     ]);
 
     assert!(
-        err.to_string()
-            .contains("option `reasoning_effort` is not supported"),
+        err.to_string().contains("option `effort` is not supported"),
         "unexpected error: {err}"
     );
     crate::llm::capabilities::clear_user_overrides();
@@ -1800,8 +1797,7 @@ fn image_content_sets_vision_and_requires_capability() {
         VmValue::Nil,
         bad_options,
     ])
-    .err()
-    .expect("non-vision model should reject image content");
+    .expect_err("non-vision model should reject image content");
     assert!(err.to_string().contains("option `vision` is not supported"));
 
     let url_image = VmValue::dict(crate::value::DictMap::from_iter([
@@ -1847,8 +1843,7 @@ fn image_content_sets_vision_and_requires_capability() {
         VmValue::Nil,
         ollama_options,
     ])
-    .err()
-    .expect("ollama should reject url image content");
+    .expect_err("ollama should reject url image content");
     assert!(err.to_string().contains("requires image base64"));
 }
 
@@ -1931,8 +1926,7 @@ fn pdf_and_audio_content_require_capabilities() {
         VmValue::Nil,
         bad_options,
     ])
-    .err()
-    .expect("non-multimodal model should reject pdf/audio content");
+    .expect_err("non-multimodal model should reject pdf/audio content");
     assert!(err.to_string().contains("option `audio` is not supported"));
 }
 
@@ -2011,7 +2005,6 @@ video_supported = true
         VmValue::Nil,
         bad_options,
     ])
-    .err()
-    .expect("non-video model should reject video content");
+    .expect_err("non-video model should reject video content");
     assert!(err.to_string().contains("option `video` is not supported"));
 }

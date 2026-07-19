@@ -331,7 +331,7 @@ fn schema_typed_llm_call_data_flows_through_generic_wrapper() {
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 fn grade<T>(schema: Schema<T>) -> T {
-  const r = llm_call("Grade this", nil, {output_schema: schema, output_validation: "error"})
+  const r = llm_call("Grade this", nil, {output: {schema: schema, validation: "error"}})
   return r.data
 }
 
@@ -350,7 +350,7 @@ fn schema_typed_llm_call_data_stays_optional_without_error_validation() {
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 fn grade<T>(schema: Schema<T>) -> T {
-  const r = llm_call("Grade this", nil, {output_schema: schema})
+  const r = llm_call("Grade this", nil, {output: schema})
   return r.data
 }
 "#,

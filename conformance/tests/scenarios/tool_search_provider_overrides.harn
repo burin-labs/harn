@@ -59,7 +59,7 @@ pipeline test(task) {
           model: "my-internal-model",
           tools: registry,
           tool_search: {variant: "bm25", mode: "native"},
-          mock: {force_native_tool_search: true},
+          provider_options: {mock: {force_native_tool_search: true}},
         },
       )
       const calls = llm_mock_calls()

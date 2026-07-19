@@ -1486,7 +1486,7 @@ fn test_llm_call_option_literal_flags_probable_typos() {
 }
 
 #[test]
-fn test_llm_call_option_literal_accepts_provider_options() {
+fn test_llm_call_option_literal_accepts_canonical_responses_options() {
     let warns = warnings(
         r#"pipeline t(task) {
   llm_call("prompt", nil, {
@@ -1494,7 +1494,7 @@ fn test_llm_call_option_literal_accepts_provider_options() {
     api_mode: "responses",
     provider_tools: [{type: "web_search_preview"}],
     previous_response_id: "resp_prev",
-    response_store: true,
+    store: true,
     background: false,
     truncation: "auto",
     compact: true,
@@ -1507,28 +1507,20 @@ fn test_llm_call_option_literal_accepts_provider_options() {
 }
 
 #[test]
-fn test_llm_call_option_literal_accepts_runtime_reasoning_and_routing_options() {
+fn test_llm_call_option_literal_accepts_canonical_reasoning_and_routing_options() {
     let warns = warnings(
         r#"pipeline t(task) {
   let profile = {prompt_fragments: [{body: "Use repo context.", requires_caps: ["language.rust"]}], caps: ["language.rust"]}
   llm_call("prompt", nil, {
     provider: "mock",
     model_role: "merge",
-    role: "fast_apply",
     routing: {chain: [{provider: "mock", model: "mock"}]},
     context_profile: profile,
-    project_context_profile: profile,
-    caps: ["language.rust"],
     capabilities: {tools: true},
     reasoning_policy: "off",
-    thinking_policy: "auto",
     reasoning_scale: "small",
-    problem_scale: "large",
     reasoning_task: "code",
-    task_kind: "agent",
-    task: "verify",
     timeout_ms: 250,
-    fast: false,
     speed: "standard",
     video: false,
     reminders: {providers: []}
@@ -1544,7 +1536,7 @@ fn test_llm_call_option_literal_accepts_runtime_reasoning_and_routing_options() 
 }
 
 #[test]
-fn test_structured_llm_options_accept_structured_aliases() {
+fn test_structured_llm_options_accept_canonical_keys() {
     let warns = warnings(
         r#"pipeline t(task) {
   let schema = {type: "object", properties: {answer: {type: "string"}}}
@@ -1553,15 +1545,12 @@ fn test_structured_llm_options_accept_structured_aliases() {
     model_role: "merge",
     retries: 1,
     repair: {enabled: true, model: "mock"},
-    output_validation: "error",
+    effort: "high",
     reasoning_policy: "off",
-    thinking_policy: "auto",
     reasoning_scale: "small",
-    problem_scale: "large",
     reasoning_task: "code",
-    task_kind: "agent",
     timeout_ms: 250,
-    fast: false,
+    speed: "standard",
     video: false
   })
 }"#,

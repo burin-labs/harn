@@ -3,7 +3,7 @@ gpt-4o
 native
 true
 true
-reasoning_effort,prompt_cache
+effort,prompt_cache
 gpt-5.4-preview
 high
 true

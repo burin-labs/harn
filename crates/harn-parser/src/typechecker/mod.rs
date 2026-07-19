@@ -27,7 +27,7 @@ pub fn substitute_type_expr(ty: &TypeExpr, bindings: &BTreeMap<String, TypeExpr>
     TypeChecker::apply_type_bindings(ty, bindings)
 }
 
-use schema_inference::schema_type_expr_from_node;
+use schema_inference::output_schema_type_expr_from_node;
 use scope::TypeScope;
 
 /// An inlay hint produced during type checking.
@@ -444,8 +444,7 @@ impl TypeChecker {
                 Node::StringLiteral(k) | Node::Identifier(k) => k.as_str(),
                 _ => return false,
             };
-            (key == "schema" || key == "output_schema")
-                && schema_type_expr_from_node(&entry.value, scope).is_some()
+            key == "output" && output_schema_type_expr_from_node(&entry.value, scope).is_some()
         })
     }
 
