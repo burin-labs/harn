@@ -35,9 +35,11 @@ const RUN_RECEIPTS_DIR: &str = "receipts";
 const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
 const REGISTRY_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const PROCESS_LIVENESS_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
-const SCHEMA_VERSION: u32 = 2;
-const RUN_RECEIPT_SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
+const RUN_RECEIPT_SCHEMA_VERSION: u32 = 3;
 const WHOLE_MACHINE_RESOURCE_CLASS: &str = "whole-machine";
+/// Coordination domain used when callers do not name one explicitly.
+pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
 
 /// Failures produced while validating or mutating host lease state.
 #[derive(Debug, thiserror::Error)]
@@ -207,18 +209,27 @@ pub struct HostLeaseResourceKey {
     pub machine: String,
     /// Independent exclusive resource class on that machine.
     pub resource_class: HostLeaseResourceClass,
+    #[serde(default = "default_host_lease_domain")]
+    /// Independent capacity-one coordination domain within the resource class.
+    pub domain: String,
 }
 
 impl HostLeaseResourceKey {
     fn normalize(
         machine: &str,
         resource_class: HostLeaseResourceClass,
+        domain: &str,
     ) -> Result<Self, HostLeaseError> {
         Ok(Self {
             machine: normalize_component("host", machine)?,
             resource_class,
+            domain: normalize_domain(domain)?,
         })
     }
+}
+
+fn default_host_lease_domain() -> String {
+    DEFAULT_HOST_LEASE_DOMAIN.to_string()
 }
 
 /// Request to acquire one exclusive host resource.
@@ -230,6 +241,9 @@ pub struct HostLeaseRequest {
     /// Resource class to acquire. Omitted legacy requests remain
     /// whole-machine leases.
     pub resource_class: HostLeaseResourceClass,
+    #[serde(default = "default_host_lease_domain")]
+    /// Independent capacity-one coordination domain within the resource class.
+    pub domain: String,
     #[serde(default)]
     /// Typed, redacted workload identity for supervised executions.
     pub execution_context: Option<HostLeaseExecutionContext>,
@@ -264,6 +278,9 @@ pub struct HostLeaseHandle {
     #[serde(default)]
     /// Resource class held on this host.
     pub resource_class: HostLeaseResourceClass,
+    #[serde(default = "default_host_lease_domain")]
+    /// Independent capacity-one coordination domain held by this authority.
+    pub domain: String,
     #[serde(default)]
     /// Typed, redacted workload identity. Legacy manual leases omit it.
     pub execution_context: Option<HostLeaseExecutionContext>,
@@ -333,6 +350,9 @@ pub struct HostLeaseDeferReceipt {
     #[serde(default)]
     /// Resource class that remains contended.
     pub resource_class: HostLeaseResourceClass,
+    #[serde(default = "default_host_lease_domain")]
+    /// Contended coordination domain.
+    pub domain: String,
     /// Stable machine-readable reason.
     pub deferred_reason: HostLeaseDeferReason,
     /// Observation timestamp in Unix milliseconds.
@@ -368,6 +388,9 @@ pub struct HostLeaseAcquireReceipt {
     pub defer: Option<HostLeaseDeferReceipt>,
     /// True when acquisition first removed an expired or dead-owner row.
     pub recovered_stale_lease: bool,
+    #[serde(default)]
+    /// Exact stale or dead-owner authority removed by this acquisition.
+    pub recovered: Option<HostLeaseHandle>,
 }
 
 /// Current authoritative lease state for one host.
@@ -380,6 +403,9 @@ pub struct HostLeaseState {
     #[serde(default)]
     /// Resource class inspected on this host.
     pub resource_class: HostLeaseResourceClass,
+    #[serde(default = "default_host_lease_domain")]
+    /// Coordination domain inspected on this host.
+    pub domain: String,
     /// Observation timestamp in Unix milliseconds.
     pub observed_at_ms: i64,
     #[serde(default)]
@@ -387,6 +413,9 @@ pub struct HostLeaseState {
     pub active: Option<HostLeaseHandle>,
     /// True when this read removed an expired or dead-owner row.
     pub recovered_stale_lease: bool,
+    #[serde(default)]
+    /// Exact stale or dead-owner authority removed by this observation.
+    pub recovered: Option<HostLeaseHandle>,
 }
 
 /// Versioned result of a token-scoped lease renewal.
@@ -415,6 +444,9 @@ pub struct HostLeaseReleaseReceipt {
     #[serde(default)]
     /// Resource class released on this host.
     pub resource_class: HostLeaseResourceClass,
+    #[serde(default = "default_host_lease_domain")]
+    /// Coordination domain released on this host.
+    pub domain: String,
     /// Token supplied by the caller.
     pub lease_id: String,
     /// Observation timestamp in Unix milliseconds.
@@ -482,7 +514,11 @@ impl HostLeaseStore {
         execution_context: HostLeaseExecutionContext,
         wait_limit_ms: u64,
     ) -> Result<HostLeaseRunReceipt, HostLeaseError> {
-        let resource = HostLeaseResourceKey::normalize(&resource.machine, resource.resource_class)?;
+        let resource = HostLeaseResourceKey::normalize(
+            &resource.machine,
+            resource.resource_class,
+            &resource.domain,
+        )?;
         let receipt = HostLeaseRunReceipt {
             schema_version: RUN_RECEIPT_SCHEMA_VERSION,
             run_id: Uuid::now_v7().to_string(),
@@ -616,11 +652,27 @@ impl HostLeaseStore {
         host: &str,
         resource_class: HostLeaseResourceClass,
     ) -> Result<HostLeaseState, HostLeaseError> {
-        let resource = HostLeaseResourceKey::normalize(host, resource_class)?;
+        self.status_for_domain(host, resource_class, DEFAULT_HOST_LEASE_DOMAIN)
+    }
+
+    /// Inspect one named coordination domain, recovering stale state transactionally.
+    pub fn status_for_domain(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+    ) -> Result<HostLeaseState, HostLeaseError> {
+        let resource = HostLeaseResourceKey::normalize(host, resource_class, domain)?;
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = unix_now_ms()?;
-        self.status_in_transaction(tx, &resource.machine, resource.resource_class, now)
+        self.status_in_transaction(
+            tx,
+            &resource.machine,
+            resource.resource_class,
+            &resource.domain,
+            now,
+        )
     }
 
     /// Renew the active lease only when the token matches.
@@ -641,7 +693,25 @@ impl HostLeaseStore {
         lease_id: &str,
         ttl_ms: u64,
     ) -> Result<HostLeaseRenewReceipt, HostLeaseError> {
-        let resource = HostLeaseResourceKey::normalize(host, resource_class)?;
+        self.renew_for_domain(
+            host,
+            resource_class,
+            DEFAULT_HOST_LEASE_DOMAIN,
+            lease_id,
+            ttl_ms,
+        )
+    }
+
+    /// Renew one named domain only when its token matches.
+    pub fn renew_for_domain(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+        lease_id: &str,
+        ttl_ms: u64,
+    ) -> Result<HostLeaseRenewReceipt, HostLeaseError> {
+        let resource = HostLeaseResourceKey::normalize(host, resource_class, domain)?;
         let lease_id = normalize_component("lease_id", lease_id)?;
         validate_ttl(Some(ttl_ms))?;
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
@@ -651,6 +721,7 @@ impl HostLeaseStore {
             &tx,
             &resource.machine,
             resource.resource_class,
+            &resource.domain,
             now,
             self.process_inspector.as_ref(),
         )?;
@@ -691,16 +762,28 @@ impl HostLeaseStore {
         resource_class: HostLeaseResourceClass,
         lease_id: &str,
     ) -> Result<HostLeaseReleaseReceipt, HostLeaseError> {
-        let resource = HostLeaseResourceKey::normalize(host, resource_class)?;
+        self.release_for_domain(host, resource_class, DEFAULT_HOST_LEASE_DOMAIN, lease_id)
+    }
+
+    /// Release one named domain only when its token matches.
+    pub fn release_for_domain(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+        lease_id: &str,
+    ) -> Result<HostLeaseReleaseReceipt, HostLeaseError> {
+        let resource = HostLeaseResourceKey::normalize(host, resource_class, domain)?;
         let lease_id = normalize_component("lease_id", lease_id)?;
         let conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let released = conn.execute(
             "DELETE FROM host_leases
-             WHERE host = ?1 AND resource_class = ?2 AND lease_id = ?3",
+             WHERE host = ?1 AND resource_class = ?2 AND domain = ?3 AND lease_id = ?4",
             params![
                 &resource.machine,
                 resource.resource_class.as_str(),
-                &lease_id
+                &resource.domain,
+                &lease_id,
             ],
         )? == 1;
         let now = unix_now_ms()?;
@@ -709,6 +792,7 @@ impl HostLeaseStore {
             released,
             host: resource.machine,
             resource_class: resource.resource_class,
+            domain: resource.domain,
             lease_id,
             observed_at_ms: now,
         })
@@ -722,7 +806,9 @@ impl HostLeaseStore {
             LeaseTableLayout::LegacyWholeMachine => migrate_legacy_lease_table(&tx)?,
             LeaseTableLayout::ResourceClassWithoutExecutionContext => {
                 add_execution_context_column(&tx)?;
+                add_domain_key(&tx)?;
             }
+            LeaseTableLayout::CurrentWithoutDomain => add_domain_key(&tx)?,
             LeaseTableLayout::Current => {}
         }
         tx.commit()?;
@@ -750,6 +836,7 @@ impl HostLeaseStore {
                 return Ok(registry_busy_receipt(
                     request.host,
                     request.resource_class,
+                    request.domain,
                     now,
                     started_at.map(|started| duration_ms_u64(started.elapsed())),
                     deadline_at_ms,
@@ -763,10 +850,18 @@ impl HostLeaseStore {
             .unwrap_or(0);
         let host = request.host.clone();
         let resource_class = request.resource_class;
+        let domain = request.domain.clone();
         match self.acquire_in_transaction(tx, request, now, deadline_at_ms, waited_ms) {
-            Err(HostLeaseError::Database(error)) if sqlite_is_busy(&error) => Ok(
-                registry_busy_receipt(host, resource_class, now, Some(waited_ms), deadline_at_ms),
-            ),
+            Err(HostLeaseError::Database(error)) if sqlite_is_busy(&error) => {
+                Ok(registry_busy_receipt(
+                    host,
+                    resource_class,
+                    domain,
+                    now,
+                    Some(waited_ms),
+                    deadline_at_ms,
+                ))
+            }
             result => result,
         }
     }
@@ -805,10 +900,11 @@ impl HostLeaseStore {
                 )),
             })
             .transpose()?;
-        let (active, recovered_stale_lease) = active_handle(
+        let (active, recovered) = active_handle(
             &tx,
             &request.host,
             request.resource_class,
+            &request.domain,
             now,
             self.process_inspector.as_ref(),
         )?;
@@ -816,6 +912,7 @@ impl HostLeaseStore {
             let defer = HostLeaseDeferReceipt {
                 host: request.host,
                 resource_class: request.resource_class,
+                domain: request.domain,
                 deferred_reason: HostLeaseDeferReason::Contended,
                 observed_at_ms: now,
                 next_wake_at_ms: Some(next_lease_wake_at(&active, now, deadline_at_ms)),
@@ -830,7 +927,8 @@ impl HostLeaseStore {
                 waited_ms,
                 handle: None,
                 defer: Some(defer),
-                recovered_stale_lease,
+                recovered_stale_lease: recovered.is_some(),
+                recovered,
             });
         }
 
@@ -838,6 +936,7 @@ impl HostLeaseStore {
             schema_version: SCHEMA_VERSION,
             host: request.host,
             resource_class: request.resource_class,
+            domain: request.domain,
             execution_context: request.execution_context,
             lease_id: Uuid::now_v7().to_string(),
             owner: request.owner,
@@ -861,7 +960,8 @@ impl HostLeaseStore {
             waited_ms,
             handle: Some(handle),
             defer: None,
-            recovered_stale_lease,
+            recovered_stale_lease: recovered.is_some(),
+            recovered,
         })
     }
 
@@ -872,9 +972,20 @@ impl HostLeaseStore {
         resource_class: HostLeaseResourceClass,
         now: i64,
     ) -> Result<HostLeaseState, HostLeaseError> {
+        self.status_at_domain(host, resource_class, DEFAULT_HOST_LEASE_DOMAIN, now)
+    }
+
+    #[cfg(test)]
+    fn status_at_domain(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+        now: i64,
+    ) -> Result<HostLeaseState, HostLeaseError> {
         let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        self.status_in_transaction(tx, host, resource_class, now)
+        self.status_in_transaction(tx, host, resource_class, domain, now)
     }
 
     fn status_in_transaction(
@@ -882,12 +993,14 @@ impl HostLeaseStore {
         tx: Transaction<'_>,
         host: &str,
         resource_class: HostLeaseResourceClass,
+        domain: &str,
         now: i64,
     ) -> Result<HostLeaseState, HostLeaseError> {
-        let (active, recovered_stale_lease) = active_handle(
+        let (active, recovered) = active_handle(
             &tx,
             host,
             resource_class,
+            domain,
             now,
             self.process_inspector.as_ref(),
         )?;
@@ -896,17 +1009,21 @@ impl HostLeaseStore {
             schema_version: SCHEMA_VERSION,
             host: host.to_string(),
             resource_class,
+            domain: domain.to_string(),
             observed_at_ms: now,
             active,
-            recovered_stale_lease,
+            recovered_stale_lease: recovered.is_some(),
+            recovered,
         })
     }
 }
 
 fn normalize_request(mut request: HostLeaseRequest) -> Result<HostLeaseRequest, HostLeaseError> {
-    let resource = HostLeaseResourceKey::normalize(&request.host, request.resource_class)?;
+    let resource =
+        HostLeaseResourceKey::normalize(&request.host, request.resource_class, &request.domain)?;
     request.host = resource.machine;
     request.resource_class = resource.resource_class;
+    request.domain = resource.domain;
     request.owner = normalize_component("owner", &request.owner)?;
     validate_ttl(request.ttl_ms)?;
     if request.ttl_ms.is_none() && request.owner_pid.is_none() {
@@ -926,6 +1043,7 @@ enum LeaseTableLayout {
     Missing,
     LegacyWholeMachine,
     ResourceClassWithoutExecutionContext,
+    CurrentWithoutDomain,
     Current,
 }
 
@@ -941,8 +1059,12 @@ fn lease_table_layout(tx: &Transaction<'_>) -> Result<LeaseTableLayout, HostLeas
     let has_execution_context = columns
         .iter()
         .any(|column| column == "execution_context_json");
-    if has_resource_class && has_execution_context {
+    let has_domain = columns.iter().any(|column| column == "domain");
+    if has_resource_class && has_execution_context && has_domain {
         return Ok(LeaseTableLayout::Current);
+    }
+    if has_resource_class && has_execution_context {
+        return Ok(LeaseTableLayout::CurrentWithoutDomain);
     }
     if has_resource_class {
         return Ok(LeaseTableLayout::ResourceClassWithoutExecutionContext);
@@ -955,6 +1077,7 @@ fn create_current_lease_table(tx: &Transaction<'_>) -> Result<(), HostLeaseError
         "CREATE TABLE host_leases (
             host TEXT NOT NULL,
             resource_class TEXT NOT NULL,
+            domain TEXT NOT NULL,
             lease_id TEXT NOT NULL,
             owner TEXT NOT NULL,
             priority_class TEXT NOT NULL,
@@ -966,37 +1089,22 @@ fn create_current_lease_table(tx: &Transaction<'_>) -> Result<(), HostLeaseError
             reason TEXT,
             metadata_json TEXT NOT NULL,
             execution_context_json TEXT,
-            PRIMARY KEY (host, resource_class)
+            PRIMARY KEY (host, resource_class, domain)
         );",
     )?;
     Ok(())
 }
 
 fn migrate_legacy_lease_table(tx: &Transaction<'_>) -> Result<(), HostLeaseError> {
+    tx.execute_batch("ALTER TABLE host_leases RENAME TO host_leases_v1;")?;
+    create_current_lease_table(tx)?;
     tx.execute_batch(
-        "ALTER TABLE host_leases RENAME TO host_leases_v1;
-         CREATE TABLE host_leases (
-            host TEXT NOT NULL,
-            resource_class TEXT NOT NULL,
-            lease_id TEXT NOT NULL,
-            owner TEXT NOT NULL,
-            priority_class TEXT NOT NULL,
-            acquired_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL,
-            expires_at_ms INTEGER,
-            owner_pid INTEGER,
-            owner_process_identity INTEGER,
-            reason TEXT,
-            metadata_json TEXT NOT NULL,
-            execution_context_json TEXT,
-            PRIMARY KEY (host, resource_class)
-         );
-         INSERT INTO host_leases (
-            host, resource_class, lease_id, owner, priority_class, acquired_at_ms,
+        "INSERT INTO host_leases (
+            host, resource_class, domain, lease_id, owner, priority_class, acquired_at_ms,
             updated_at_ms, expires_at_ms, owner_pid, owner_process_identity, reason, metadata_json,
             execution_context_json
          )
-         SELECT host, 'whole-machine', lease_id, owner, priority_class, acquired_at_ms,
+         SELECT host, 'whole-machine', 'default', lease_id, owner, priority_class, acquired_at_ms,
             updated_at_ms, expires_at_ms, owner_pid, owner_process_identity, reason, metadata_json,
             NULL
          FROM host_leases_v1;
@@ -1007,6 +1115,24 @@ fn migrate_legacy_lease_table(tx: &Transaction<'_>) -> Result<(), HostLeaseError
 
 fn add_execution_context_column(tx: &Transaction<'_>) -> Result<(), HostLeaseError> {
     tx.execute_batch("ALTER TABLE host_leases ADD COLUMN execution_context_json TEXT;")?;
+    Ok(())
+}
+
+fn add_domain_key(tx: &Transaction<'_>) -> Result<(), HostLeaseError> {
+    tx.execute_batch("ALTER TABLE host_leases RENAME TO host_leases_v2;")?;
+    create_current_lease_table(tx)?;
+    tx.execute_batch(
+        "INSERT INTO host_leases (
+            host, resource_class, domain, lease_id, owner, priority_class, acquired_at_ms,
+            updated_at_ms, expires_at_ms, owner_pid, owner_process_identity, reason, metadata_json,
+            execution_context_json
+         )
+         SELECT host, resource_class, 'default', lease_id, owner, priority_class, acquired_at_ms,
+            updated_at_ms, expires_at_ms, owner_pid, owner_process_identity, reason, metadata_json,
+            execution_context_json
+         FROM host_leases_v2;
+         DROP TABLE host_leases_v2;",
+    )?;
     Ok(())
 }
 
@@ -1028,6 +1154,31 @@ fn normalize_component(name: &str, value: &str) -> Result<String, HostLeaseError
     Ok(value.to_string())
 }
 
+fn normalize_domain(value: &str) -> Result<String, HostLeaseError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(HostLeaseError::InvalidRequest(
+            "domain cannot be empty".to_string(),
+        ));
+    }
+    if value.len() > 128 {
+        return Err(HostLeaseError::InvalidRequest(
+            "domain cannot exceed 128 bytes".to_string(),
+        ));
+    }
+    if matches!(value, "." | "..")
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+    {
+        return Err(HostLeaseError::InvalidRequest(
+            "domain may contain only ASCII letters, digits, '.', '_' and '-' and must not be path-like"
+                .to_string(),
+        ));
+    }
+    Ok(value.to_string())
+}
+
 fn validate_ttl(ttl_ms: Option<u64>) -> Result<(), HostLeaseError> {
     if ttl_ms == Some(0) {
         return Err(HostLeaseError::InvalidRequest(
@@ -1041,12 +1192,13 @@ fn active_handle(
     tx: &Transaction<'_>,
     host: &str,
     resource_class: HostLeaseResourceClass,
+    domain: &str,
     now: i64,
     process_inspector: &dyn ProcessInspector,
-) -> Result<(Option<HostLeaseHandle>, bool), HostLeaseError> {
-    let handle = read_handle(tx, host, resource_class)?;
+) -> Result<(Option<HostLeaseHandle>, Option<HostLeaseHandle>), HostLeaseError> {
+    let handle = read_handle(tx, host, resource_class, domain)?;
     let Some(handle) = handle else {
-        return Ok((None, false));
+        return Ok((None, None));
     };
     let expired = handle.expires_at_ms.is_some_and(|expiry| expiry <= now);
     let owner_dead = match (handle.owner_pid, handle.owner_process_identity) {
@@ -1060,12 +1212,12 @@ fn active_handle(
     if expired || owner_dead {
         tx.execute(
             "DELETE FROM host_leases
-             WHERE host = ?1 AND resource_class = ?2 AND lease_id = ?3",
-            params![host, resource_class.as_str(), handle.lease_id],
+             WHERE host = ?1 AND resource_class = ?2 AND domain = ?3 AND lease_id = ?4",
+            params![host, resource_class.as_str(), domain, handle.lease_id],
         )?;
-        return Ok((None, true));
+        return Ok((None, Some(handle)));
     }
-    Ok((Some(handle), false))
+    Ok((Some(handle), None))
 }
 
 fn next_lease_wake_at(active: &HostLeaseHandle, now: i64, deadline_at_ms: Option<i64>) -> i64 {
@@ -1083,6 +1235,7 @@ fn next_lease_wake_at(active: &HostLeaseHandle, now: i64, deadline_at_ms: Option
 fn registry_busy_receipt(
     host: String,
     resource_class: HostLeaseResourceClass,
+    domain: String,
     now: i64,
     waited_ms: Option<u64>,
     deadline_at_ms: Option<i64>,
@@ -1099,6 +1252,7 @@ fn registry_busy_receipt(
         defer: Some(HostLeaseDeferReceipt {
             host,
             resource_class,
+            domain,
             deferred_reason: HostLeaseDeferReason::RegistryBusy,
             observed_at_ms: now,
             next_wake_at_ms: Some(next_wake_at_ms),
@@ -1106,6 +1260,7 @@ fn registry_busy_receipt(
             active: None,
         }),
         recovered_stale_lease: false,
+        recovered: None,
     }
 }
 
@@ -1121,31 +1276,33 @@ fn read_handle(
     tx: &Transaction<'_>,
     host: &str,
     resource_class: HostLeaseResourceClass,
+    domain: &str,
 ) -> Result<Option<HostLeaseHandle>, HostLeaseError> {
     tx.query_row(
-        "SELECT resource_class, lease_id, owner, priority_class, acquired_at_ms, updated_at_ms,
+        "SELECT resource_class, domain, lease_id, owner, priority_class, acquired_at_ms, updated_at_ms,
                 expires_at_ms, owner_pid, owner_process_identity, reason, metadata_json,
                 execution_context_json
-         FROM host_leases WHERE host = ?1 AND resource_class = ?2",
-        params![host, resource_class.as_str()],
+         FROM host_leases WHERE host = ?1 AND resource_class = ?2 AND domain = ?3",
+        params![host, resource_class.as_str(), domain],
         |row| {
-            let priority: String = row.get(3)?;
-            let metadata_json: String = row.get(10)?;
-            let execution_context_json: Option<String> = row.get(11)?;
-            let owner_pid_i64: Option<i64> = row.get(7)?;
-            let owner_identity_i64: Option<i64> = row.get(8)?;
+            let priority: String = row.get(4)?;
+            let metadata_json: String = row.get(11)?;
+            let execution_context_json: Option<String> = row.get(12)?;
+            let owner_pid_i64: Option<i64> = row.get(8)?;
+            let owner_identity_i64: Option<i64> = row.get(9)?;
             Ok((
-                row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
                 priority,
-                row.get::<_, i64>(4)?,
                 row.get::<_, i64>(5)?,
-                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Option<i64>>(7)?,
                 owner_pid_i64,
                 owner_identity_i64,
-                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
                 metadata_json,
                 row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
                 execution_context_json,
             ))
         },
@@ -1164,6 +1321,7 @@ fn read_handle(
             reason,
             metadata_json,
             stored_resource_class,
+            stored_domain,
             execution_context_json,
         )| {
             let owner_pid = owner_pid
@@ -1188,6 +1346,7 @@ fn read_handle(
                 schema_version: SCHEMA_VERSION,
                 host: host.to_string(),
                 resource_class: HostLeaseResourceClass::parse(&stored_resource_class)?,
+                domain: stored_domain,
                 execution_context: execution_context_json
                     .map(|encoded| serde_json::from_str(&encoded))
                     .transpose()?,
@@ -1226,11 +1385,11 @@ fn write_handle(tx: &Transaction<'_>, handle: &HostLeaseHandle) -> Result<(), Ho
         .transpose()?;
     tx.execute(
         "INSERT INTO host_leases (
-            host, resource_class, lease_id, owner, priority_class, acquired_at_ms, updated_at_ms,
+            host, resource_class, domain, lease_id, owner, priority_class, acquired_at_ms, updated_at_ms,
             expires_at_ms, owner_pid, owner_process_identity, reason, metadata_json,
             execution_context_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-         ON CONFLICT(host, resource_class) DO UPDATE SET
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(host, resource_class, domain) DO UPDATE SET
             lease_id = excluded.lease_id,
             owner = excluded.owner,
             priority_class = excluded.priority_class,
@@ -1245,6 +1404,7 @@ fn write_handle(tx: &Transaction<'_>, handle: &HostLeaseHandle) -> Result<(), Ho
         params![
             handle.host,
             handle.resource_class.as_str(),
+            handle.domain,
             handle.lease_id,
             handle.owner,
             handle.priority_class.as_str(),

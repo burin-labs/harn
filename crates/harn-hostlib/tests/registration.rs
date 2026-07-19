@@ -721,7 +721,7 @@ fn stdlib_host_lease_status_reads_empty_active_and_recovered_state() {
 import { host_lease_status } from "std/host_lease"
 
 pipeline default(task) {
-  return host_lease_status("mac-local")
+  return host_lease_status("mac-local", "whole-machine", "release")
 }
 "#;
 
@@ -736,6 +736,7 @@ pipeline default(task) {
         .try_acquire(HostLeaseRequest {
             host: "mac-local".to_string(),
             resource_class: HostLeaseResourceClass::WholeMachine,
+            domain: "release".to_string(),
             execution_context: None,
             owner: "registration-test".to_string(),
             priority_class: HostLeasePriorityClass::Measurement,
@@ -777,6 +778,20 @@ pipeline default(task) {
         recovered.get("recovered_stale_lease"),
         Some(VmValue::Bool(true))
     ));
+    let Some(VmValue::Dict(prior)) = recovered.get("recovered") else {
+        panic!("recovered state must include the stale authority");
+    };
+    assert_eq!(
+        prior.get("owner").map(VmValue::display),
+        Some("registration-test".to_string())
+    );
+    let Some(VmValue::Dict(metadata)) = prior.get("metadata") else {
+        panic!("recovered authority must preserve metadata");
+    };
+    assert_eq!(
+        metadata.get("lane").map(VmValue::display),
+        Some("p7".to_string())
+    );
 }
 
 fn expect_dict(value: VmValue) -> harn_vm::value::DictMap {

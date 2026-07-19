@@ -66,7 +66,7 @@ pub use host_lease::{
     HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
     HostLeaseRunLaunchFailure, HostLeaseRunReceipt, HostLeaseRunReleaseOutcome,
     HostLeaseRunStartFailure, HostLeaseRunState, HostLeaseState, HostLeaseStore,
-    HOST_LEASE_ROOT_ENV,
+    DEFAULT_HOST_LEASE_DOMAIN, HOST_LEASE_ROOT_ENV,
 };
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 

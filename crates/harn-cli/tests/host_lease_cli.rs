@@ -27,9 +27,49 @@ fn host_lease_store_initialization_failure_preserves_json_contract() {
     );
     let envelope: serde_json::Value =
         serde_json::from_str(&output.stdout).expect("failure output is a JSON envelope");
-    assert_eq!(envelope["schemaVersion"], 2);
+    assert_eq!(envelope["schemaVersion"], 3);
     assert_eq!(envelope["ok"], false);
     assert_eq!(envelope["error"]["code"], "host_lease_store");
+}
+
+#[test]
+fn named_lease_domains_are_independent_at_the_cli_boundary() {
+    let temp = TempDir::new().expect("create temp directory");
+    let lease_root = temp.path().join("leases");
+    let lease_root = lease_root.to_string_lossy();
+    let acquire = |domain: &str, owner: &str| {
+        run_harn_e2e(
+            &[
+                "host",
+                "lease",
+                "acquire",
+                "--host",
+                "lease-cli-fixture",
+                "--domain",
+                domain,
+                "--owner",
+                owner,
+                "--json",
+            ],
+            &[(harn_hostlib::HOST_LEASE_ROOT_ENV, lease_root.as_ref())],
+        )
+    };
+
+    let release_acquisition = acquire("release", "release-owner");
+    assert_eq!(
+        release_acquisition.exit_code, 0,
+        "release stderr: {}",
+        release_acquisition.stderr
+    );
+    let release_acquisition: serde_json::Value =
+        serde_json::from_str(&release_acquisition.stdout).expect("release acquisition JSON");
+    assert_eq!(release_acquisition["data"]["handle"]["domain"], "release");
+
+    let build = acquire("build", "build-owner");
+    assert_eq!(build.exit_code, 0, "build stderr: {}", build.stderr);
+    let build: serde_json::Value =
+        serde_json::from_str(&build.stdout).expect("build acquisition JSON");
+    assert_eq!(build["data"]["handle"]["domain"], "build");
 }
 
 #[test]

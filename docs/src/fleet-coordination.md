@@ -152,6 +152,7 @@ const result = with_host_lease(
   {
     owner: "release-audit",
     resource_class: "rust-heavy",
+    domain: "release-audit",
     priority_class: "ci-verify",
     wait_timeout_ms: 20 * 60 * 1000,
   },
@@ -171,6 +172,7 @@ Use the `harn host lease` CLI adapter for non-Harn commands:
 harn host lease acquire \
     --host build-01 \
     --resource-class rust-heavy \
+    --domain release-audit \
     --owner eval-runner \
     --priority-class measurement \
     --no-expiry \
@@ -195,17 +197,31 @@ mid-run.
 `whole-machine` remains the default resource class for existing callers.
 `rust-heavy` is a separate capacity-one class for CPU-, linker-, and
 cache-intensive Cargo work, so independent Rust verification can serialize
-without conflating it with every host-level activity. Inspect and release the
-same resource explicitly:
+without conflating it with every host-level activity. A domain names an
+independent capacity-one lease within a resource class. Use stable, semantic
+domains when one host must serialize several unrelated workflows. The default
+domain preserves the original single-lease behavior. Inspect and release the
+same resource and domain explicitly:
 
 ```bash
-harn host lease status --host build-01 --resource-class rust-heavy --json
+harn host lease status \
+    --host build-01 \
+    --resource-class rust-heavy \
+    --domain release-audit \
+    --json
 harn host lease release \
     --host build-01 \
     --resource-class rust-heavy \
+    --domain release-audit \
     --lease-id "$lease_id" \
     --json
 ```
+
+When an acquire or status operation transactionally removes an expired or
+dead-owner lease, its receipt includes the exact prior handle in `recovered`.
+Callers can make deterministic recovery decisions from its typed identity and
+metadata; the compatibility boolean `recovered_stale_lease` is derived from
+the same evidence.
 
 For Cargo work, use the supervised boundary instead of manually acquiring a
 lease around a launcher process:
