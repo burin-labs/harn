@@ -187,7 +187,6 @@
 1	types/recursive_type_param_annotation.harn	HARN-LNT-049
 1	types/schema_as_type_llm.harn	HARN-LNT-020
 1	types/schema_as_type_narrow_data.harn	HARN-LNT-020
-14	types/schema_runtime_helpers.harn	HARN-LNT-018
 1	types/struct_basic.harn	HARN-LNT-020
 1	types/type_narrowing_early_exit.harn	HARN-LNT-014
 1	types/variance_fn_param_contravariant.harn	HARN-LNT-014
