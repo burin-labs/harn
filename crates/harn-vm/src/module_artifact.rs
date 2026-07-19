@@ -439,4 +439,22 @@ pub fn run() { return Status.Ready() }
         .expect("qualified module parses");
         assert!(needs_imported_enum_candidates(&qualified));
     }
+
+    #[test]
+    fn private_declarations_do_not_expand_module_init() {
+        let artifact = compile_module_artifact_from_source(
+            Path::new("<test>/private-declarations.harn"),
+            r#"
+enum PrivateStatus { Ready }
+struct PrivateConfig { value: int }
+pub fn run() { return PrivateStatus.Ready }
+"#,
+        )
+        .expect("private declarations compile");
+
+        assert!(artifact.init_chunk.is_none());
+        assert!(artifact.functions.contains_key("PrivateConfig"));
+        assert!(!artifact.public_exports.contains_key("PrivateStatus"));
+        assert!(!artifact.public_exports.contains_key("PrivateConfig"));
+    }
 }
