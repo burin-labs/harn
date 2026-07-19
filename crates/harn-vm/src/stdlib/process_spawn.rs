@@ -628,14 +628,14 @@ fn poll_dict(
     stderr: &[u8],
 ) -> VmValue {
     let mut result = BTreeMap::new();
-    result.put_str("handle_id", handle_id.to_string());
+    result.put_str("handle_id", handle_id);
     result.put_str("status", status.as_str());
     result.insert(
         "running".to_string(),
         VmValue::Bool(status == SpawnStatus::Running),
     );
-    result.put_str("command", command.to_string());
-    result.put_str("started_at", started_at.to_string());
+    result.put_str("command", command);
+    result.put_str("started_at", started_at);
     result.insert(
         "pid".to_string(),
         pid.map(|p| VmValue::Int(p as i64)).unwrap_or(VmValue::Nil),
