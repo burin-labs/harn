@@ -759,9 +759,12 @@ async fn connect_stdio_test_script(
 }
 
 async fn install_sampling_mock() {
+    crate::llm::install_cli_llm_mocks(vec![crate::llm::parse_llm_mock_value(
+        &serde_json::json!({"text": "sampled", "provider": "mock", "model": "mock"}),
+    )
+    .expect("sampling mock")]);
     execute_test_harn(
         r#"
-llm_mock({text: "sampled", provider: "mock", model: "mock"})
 host_mock("mcp", "sample", {
   result: {
     action: "accept",
@@ -775,13 +778,8 @@ host_mock("mcp", "sample", {
 }
 
 async fn clear_sampling_mock() {
-    execute_test_harn(
-        r"
-host_mock_clear()
-llm_mock_clear()
-",
-    )
-    .await;
+    crate::llm::clear_cli_llm_mock_mode();
+    execute_test_harn("host_mock_clear()").await;
 }
 
 async fn execute_test_harn(source: &str) {
