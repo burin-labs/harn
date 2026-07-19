@@ -136,6 +136,7 @@ impl MermaidGraph {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 let decision = self.node(format!("if {}", inline_label(condition)));
                 let (then_head, then_tail) = self.emit_branch("then", then_body);

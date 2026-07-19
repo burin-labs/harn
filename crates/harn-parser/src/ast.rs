@@ -194,7 +194,12 @@ pub enum Node {
     IfElse {
         condition: Box<SNode>,
         then_body: Vec<SNode>,
+        /// Source extent of the `then` block, including its braces.
+        then_span: Span,
         else_body: Option<Vec<SNode>>,
+        /// Source extent of a braced `else` block, including its braces.
+        /// `None` identifies the synthetic wrapper used for `else if`.
+        else_span: Option<Span>,
     },
     ForIn {
         pattern: BindingPattern,
@@ -227,11 +232,17 @@ pub enum Node {
     },
     TryCatch {
         body: Vec<SNode>,
+        /// Source extent of the `try` block, including its braces.
+        try_span: Span,
         has_catch: bool,
         error_var: Option<String>,
         error_type: Option<TypeExpr>,
         catch_body: Vec<SNode>,
+        /// Source extent of the `catch` block, including its braces.
+        catch_span: Option<Span>,
         finally_body: Option<Vec<SNode>>,
+        /// Source extent of the `finally` block, including its braces.
+        finally_span: Option<Span>,
     },
     /// Try expression: try { body } — returns Result.Ok(value), an existing Result,
     /// or Result.Err(error).

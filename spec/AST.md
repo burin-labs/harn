@@ -189,11 +189,12 @@ impl Point {
 ### `IfElse`
 
 ```rust
-IfElse { condition: Box<SNode>, then_body: Vec<SNode>, else_body: Option<Vec<SNode>> }
+IfElse { condition: Box<SNode>, then_body: Vec<SNode>, then_span: Span, else_body: Option<Vec<SNode>>, else_span: Option<Span> }
 ```
 
-Conditional execution. An `else if` chain produces a nested `IfElse` inside
-the `else_body`.
+Conditional execution. `then_span` and `else_span` identify the source braces
+of each block. An `else if` chain produces a nested `IfElse` inside the
+`else_body` and leaves the outer `else_span` as `None`.
 
 ```harn
 if x > 0 {
@@ -315,10 +316,11 @@ throw {code: 404, msg: "not found"}
 ### `TryCatch`
 
 ```rust
-TryCatch { body: Vec<SNode>, error_var: Option<String>, error_type: Option<TypeExpr>, catch_body: Vec<SNode>, finally_body: Option<Vec<SNode>> }
+TryCatch { body: Vec<SNode>, try_span: Span, error_var: Option<String>, error_type: Option<TypeExpr>, catch_body: Vec<SNode>, catch_span: Option<Span>, finally_body: Option<Vec<SNode>>, finally_span: Option<Span> }
 ```
 
-Error handling with optional typed catch and finally blocks.
+Error handling with optional typed catch and finally blocks. The optional block
+spans are present exactly when their corresponding blocks are present.
 
 ```harn
 try {

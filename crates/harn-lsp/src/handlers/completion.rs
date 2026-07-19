@@ -532,6 +532,7 @@ where
             condition,
             then_body,
             else_body,
+            ..
         } => {
             visit_node(condition, visitor);
             visit_nodes(then_body, visitor);

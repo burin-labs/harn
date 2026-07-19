@@ -435,6 +435,7 @@ impl LexicalAnalysis {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.walk_node(condition, scopes, inside_nested_callable, owner);
                 self.walk_body(
@@ -1239,11 +1240,14 @@ mod tests {
             20,
             Node::TryCatch {
                 body: Vec::new(),
+                try_span: Span::dummy(),
                 has_catch: true,
                 error_var: Some("pin".to_string()),
                 error_type: None,
                 catch_body: vec![closure(21, Vec::new(), vec![identifier(22, "pin")])],
+                catch_span: Some(Span::dummy()),
                 finally_body: None,
+                finally_span: None,
             },
         );
         let select = node(

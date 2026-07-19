@@ -261,6 +261,7 @@ fn visit_children_for_callables(node: &SNode, callables: &mut Vec<CallableInfo>)
             condition,
             then_body,
             else_body,
+            ..
         } => {
             collect_callables_in_node(condition, callables);
             for stmt in then_body {
@@ -514,6 +515,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             collect_calls(condition, calls);
             collect_calls_in_body(then_body, calls);

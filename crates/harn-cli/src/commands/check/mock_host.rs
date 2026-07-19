@@ -116,6 +116,7 @@ fn collect_mock_host_capabilities_from_node(
             condition,
             then_body,
             else_body,
+            ..
         } => {
             collect_mock_host_capabilities_from_node(
                 condition,

@@ -509,12 +509,19 @@ impl Formatter<'_> {
             Node::IfElse {
                 condition,
                 then_body,
+                then_span,
                 else_body,
+                else_span,
             } => {
                 let cond = self.format_expr(condition, indent);
                 let inner = indent + 1;
                 let mut result = format!("if {cond} {{\n");
-                result.push_str(&self.format_body_string(then_body, inner, node.span.line));
+                result.push_str(&self.format_body_string_bounded(
+                    then_body,
+                    inner,
+                    then_span.line,
+                    Some(then_span.end_line),
+                ));
                 let close = "  ".repeat(indent);
                 if let Some(eb) = else_body {
                     // Render `else if` as a single chain when the else
@@ -527,10 +534,12 @@ impl Formatter<'_> {
                     } else {
                         result.push_str(&close);
                         result.push_str("} else {\n");
-                        result.push_str(&self.format_body_string(
+                        let else_span = else_span.expect("braced else has a block span");
+                        result.push_str(&self.format_body_string_bounded(
                             eb,
                             inner,
-                            Self::block_from_line_after(then_body, node.span.line),
+                            else_span.line,
+                            Some(else_span.end_line),
                         ));
                         result.push_str(&close);
                         result.push('}');
@@ -582,33 +591,45 @@ impl Formatter<'_> {
             }
             Node::TryCatch {
                 body,
+                try_span,
                 has_catch,
                 error_var,
                 error_type,
                 catch_body,
+                catch_span,
                 finally_body,
+                finally_span,
             } => {
                 let inner = indent + 1;
                 let close = "  ".repeat(indent);
                 let mut result = String::from("try {\n");
-                result.push_str(&self.format_body_string(body, inner, node.span.line));
+                result.push_str(&self.format_body_string_bounded(
+                    body,
+                    inner,
+                    try_span.line,
+                    Some(try_span.end_line),
+                ));
                 if *has_catch {
                     let catch_param = format_catch_param(error_var, error_type);
                     result.push_str(&close);
                     result.push_str(&format!("}} catch{catch_param} {{\n"));
-                    result.push_str(&self.format_body_string(
+                    let catch_span = catch_span.expect("catch has a block span");
+                    result.push_str(&self.format_body_string_bounded(
                         catch_body,
                         inner,
-                        Self::block_from_line_after(body, node.span.line),
+                        catch_span.line,
+                        Some(catch_span.end_line),
                     ));
                 }
                 if let Some(fb) = finally_body {
                     result.push_str(&close);
                     result.push_str("} finally {\n");
-                    result.push_str(&self.format_body_string(
+                    let finally_span = finally_span.expect("finally has a block span");
+                    result.push_str(&self.format_body_string_bounded(
                         fb,
                         inner,
-                        Self::block_from_line_after(catch_body, node.span.line),
+                        finally_span.line,
+                        Some(finally_span.end_line),
                     ));
                 }
                 result.push_str(&close);

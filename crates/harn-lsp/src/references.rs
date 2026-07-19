@@ -122,6 +122,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             collect_references(condition, target_name, refs);
             for s in then_body {

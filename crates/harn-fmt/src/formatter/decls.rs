@@ -189,20 +189,14 @@ impl Formatter<'_> {
             Node::IfElse {
                 condition,
                 then_body,
+                then_span,
                 else_body,
+                else_span,
             } => {
                 let cond = self.format_expr(condition, self.indent);
                 self.writeln(&format!("if {cond} {{"));
                 self.indent();
-                self.format_body(
-                    then_body,
-                    node_line,
-                    if else_body.is_some() {
-                        None
-                    } else {
-                        Some(node_end_line)
-                    },
-                );
+                self.format_body(then_body, then_span.line, Some(then_span.end_line));
                 self.dedent();
                 if let Some(eb) = else_body {
                     if eb.len() == 1 {
@@ -215,7 +209,8 @@ impl Formatter<'_> {
                     }
                     self.writeln("} else {");
                     self.indent();
-                    self.format_body(eb, node_line, Some(node_end_line));
+                    let else_span = else_span.expect("braced else has a block span");
+                    self.format_body(eb, else_span.line, Some(else_span.end_line));
                     self.dedent();
                     self.writeln("}");
                 } else {
@@ -253,43 +248,32 @@ impl Formatter<'_> {
             }
             Node::TryCatch {
                 body,
+                try_span,
                 has_catch,
                 error_var,
                 error_type,
                 catch_body,
+                catch_span,
                 finally_body,
+                finally_span,
             } => {
                 self.writeln("try {");
                 self.indent();
-                self.format_body(
-                    body,
-                    node_line,
-                    if *has_catch || finally_body.is_some() {
-                        None
-                    } else {
-                        Some(node_end_line)
-                    },
-                );
+                self.format_body(body, try_span.line, Some(try_span.end_line));
                 self.dedent();
                 if *has_catch {
                     let catch_param = format_catch_param(error_var, error_type);
                     self.writeln(&format!("}} catch{catch_param} {{"));
                     self.indent();
-                    self.format_body(
-                        catch_body,
-                        node_line,
-                        if finally_body.is_some() {
-                            None
-                        } else {
-                            Some(node_end_line)
-                        },
-                    );
+                    let catch_span = catch_span.expect("catch has a block span");
+                    self.format_body(catch_body, catch_span.line, Some(catch_span.end_line));
                     self.dedent();
                 }
                 if let Some(fb) = finally_body {
                     self.writeln("} finally {");
                     self.indent();
-                    self.format_body(fb, node_line, Some(node_end_line));
+                    let finally_span = finally_span.expect("finally has a block span");
+                    self.format_body(fb, finally_span.line, Some(finally_span.end_line));
                     self.dedent();
                 }
                 self.writeln("}");
@@ -622,25 +606,18 @@ impl Formatter<'_> {
 
     /// Like format_node but without writing the leading indent (for else-if chains).
     fn format_node_no_indent(&mut self, node: &SNode) {
-        let line = node.span.line;
         if let Node::IfElse {
             condition,
             then_body,
+            then_span,
             else_body,
+            else_span,
         } = &node.node
         {
             let cond = self.format_expr(condition, self.indent);
             self.output.push_str(&format!("if {cond} {{\n"));
             self.indent();
-            self.format_body(
-                then_body,
-                line,
-                if else_body.is_some() {
-                    None
-                } else {
-                    Some(node.span.end_line)
-                },
-            );
+            self.format_body(then_body, then_span.line, Some(then_span.end_line));
             self.dedent();
             if let Some(eb) = else_body {
                 if eb.len() == 1 {
@@ -653,7 +630,8 @@ impl Formatter<'_> {
                 }
                 self.writeln("} else {");
                 self.indent();
-                self.format_body(eb, line, Some(node.span.end_line));
+                let else_span = else_span.expect("braced else has a block span");
+                self.format_body(eb, else_span.line, Some(else_span.end_line));
                 self.dedent();
                 self.writeln("}");
             } else {

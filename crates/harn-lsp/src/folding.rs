@@ -114,6 +114,7 @@ fn collect_ast_ranges(
             condition,
             then_body,
             else_body,
+            ..
         } => {
             push_span_range(ranges, seen, &node.span, Some(FoldingRangeKind::Region));
             collect_ast_ranges(condition, ranges, seen);

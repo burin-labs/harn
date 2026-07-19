@@ -430,6 +430,7 @@ impl Compiler {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.compile_if_else(condition, then_body, else_body)?;
             }
@@ -704,6 +705,7 @@ impl Compiler {
                 error_type,
                 catch_body,
                 finally_body,
+                ..
             } => {
                 self.compile_try_catch(body, error_var, error_type, catch_body, finally_body)?;
             }

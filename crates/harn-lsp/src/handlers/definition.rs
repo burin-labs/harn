@@ -444,6 +444,7 @@ fn node_children(node: &SNode) -> Vec<&SNode> {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             let mut out = vec![condition.as_ref()];
             out.extend(then_body.iter());

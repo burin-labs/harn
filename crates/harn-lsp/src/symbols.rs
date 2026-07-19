@@ -745,6 +745,7 @@ fn collect_symbols(
             condition,
             then_body,
             else_body,
+            ..
         } => {
             recurse!(condition, scope_span);
             for s in then_body {

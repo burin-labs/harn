@@ -122,6 +122,7 @@ impl CostAnalyzer {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.walk_node(condition);
                 self.walk_nodes(then_body);
