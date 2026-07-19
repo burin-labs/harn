@@ -340,8 +340,8 @@ audit-fmt-harn-tokens:
 # check). Wired into `make all` and exercised by CI.
 test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
-	@$(HARN_CMD) test scripts/tests/
-	@$(HARN_CMD) test experiments/burin-mini/tests/
+	@$(HARN_CMD) test scripts/tests/ --parallel
+	@$(HARN_CMD) test experiments/burin-mini/tests/ --parallel
 	@echo "    Harn script tests OK."
 
 # Agent-loop Harn unit tests (stall detector, loop control, judge verdict,
@@ -415,7 +415,7 @@ release-gate:
 # user-visible capability and prints a per-step status summary.
 release-smoke:
 	CARGO_PROFILE_RELEASE_LTO=thin $(HARN_CARGO_CMD) build --release -p harn-cli --bin harn
-	./scripts/release_smoke.sh
+	target/release/harn run --no-sandbox scripts/release_smoke.harn -- --candidate target/release/harn
 
 # Faster `release-smoke` variant that reuses the debug `harn` binary.
 # Used by the parallel audit lanes in release_gate.sh because the warm
@@ -433,7 +433,7 @@ smoke-audit:
 		fi; \
 		CARGO_PROFILE_DEV_DEBUG=0 $(HARN_CARGO_CMD) build -p harn-cli --bin harn; \
 	fi && \
-	HARN_BINARY="$$harn_binary" ./scripts/release_smoke.sh
+	"$$harn_binary" run --no-sandbox scripts/release_smoke.harn -- --candidate "$$harn_binary"
 
 # Build-verify the portal frontend (TypeScript type check + Vite bundle).
 # The repo-root npm scripts bootstrap portal dependencies when needed so this

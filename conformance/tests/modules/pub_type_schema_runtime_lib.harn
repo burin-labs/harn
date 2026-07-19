@@ -1,1 +1,11 @@
+import { LlmCallerTransport } from "std/agent/caller_transport"
+
 pub type DirectTarget = {name: string, score: int}
+
+type Box<T> = {value: T}
+
+pub type ImportedNested = {transport: LlmCallerTransport}
+
+pub type GenericNested = Box<LlmCallerTransport>
+
+pub type OpenExtras = {name: string, ...dict<string, int>}

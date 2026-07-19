@@ -1,0 +1,118 @@
+import "std/run_artifacts"
+import "std/schema"
+
+type Payload = {count: int}
+
+type Receipt = {id: string, version: int, payload: Payload, mode?: string}
+
+fn receipt_contract(expected_version: int) -> SchemaContract<Receipt> {
+  const shape: Schema<Receipt> = schema_closed_object(
+    {
+      id: schema_field(schema_string()),
+      version: schema_field(schema_int()),
+      payload: schema_field(schema_closed_object({count: schema_field(schema_int())})),
+      mode: schema_default(schema_string(), "audit"),
+    },
+  )
+  const matches_context = validation_rule(
+    "expected_version",
+    fn(value: Receipt) -> list<ValidationIssue> {
+      if value.version == expected_version {
+        return []
+      }
+      return [
+        validation_issue(
+          "receipt.version",
+          "version does not match the expected version",
+          "version",
+        ),
+      ]
+    },
+  )
+  const consistent_fields = validation_rule(
+    "consistent_fields",
+    fn(value: Receipt) -> list<ValidationIssue> {
+      let issues: list<ValidationIssue> = []
+      if !starts_with(value.id, "v" + to_string(value.version) + "-") {
+        issues = issues
+          + [validation_issue("receipt.id_version", "id does not encode version", "id")]
+      }
+      if value.payload.count <= 0 {
+        issues = issues
+          + [
+          validation_issue("receipt.count", "count must be positive", "payload.count"),
+        ]
+      }
+      return issues
+    },
+  )
+  return schema_contract(shape, [matches_context, consistent_fields], true)
+}
+
+pipeline default(task) {
+  const contract = receipt_contract(2)
+  const valid = unwrap(
+    schema_contract_check({id: "v2-ready", version: 2, payload: {count: 1}}, contract),
+  )
+  __io_println(valid.id + ":" + valid.mode)
+  const invalid = unwrap_err(
+    schema_contract_check({id: "wrong", version: 1, payload: {count: 0}}, contract),
+  )
+  __io_println(invalid.kind + ":" + to_string(len(invalid.issues)))
+  __io_println(
+    invalid.issues[0].rule
+      + ":"
+      + invalid.issues[0].code
+      + ","
+      + invalid.issues[1].rule
+      + ":"
+      + invalid.issues[1].code
+      + ","
+      + invalid.issues[2].rule
+      + ":"
+      + invalid.issues[2].code,
+  )
+  const structural = unwrap_err(
+    schema_contract_check({id: "v2-ready", version: "2", payload: {count: 1}}, contract),
+  )
+  __io_println(structural.kind)
+  const broken = schema_contract(
+    contract.schema,
+    [
+      validation_rule(
+        "broken",
+        fn(_value: Receipt) -> list<ValidationIssue> {
+          throw "broken check"
+        },
+      ),
+    ],
+  )
+  const broken_failure = unwrap_err(
+    schema_contract_check({id: "v2-ready", version: 2, payload: {count: 1}}, broken),
+  )
+  __io_println(broken_failure.kind + ":" + broken_failure.issues[0].rule)
+  const root = path_join(harness.fs.temp_dir(), "harn-schema-contract-" + uuid_v7())
+  const run = run_artifacts_open("contract", {root: root, run_id: "run-a"})
+  const written = unwrap(
+    run_artifact_write_json_contract_result(
+      run,
+      "receipt.json",
+      {id: "v2-stored", version: 2, payload: {count: 3}},
+      contract,
+    ),
+  )
+  const reread = unwrap(run_artifact_read_json_contract_result(run, "receipt.json", contract))
+  __io_println(written.mode + ":" + reread.id)
+  const rejected = run_artifact_write_json_contract_result(
+    run,
+    "receipt.json",
+    {id: "bad", version: 2, payload: {count: 3}},
+    contract,
+  )
+  __io_println(
+    unwrap_err(rejected).kind
+      + ":"
+      + run_artifact_read_json_contract(run, "receipt.json", contract).id,
+  )
+  harness.fs.delete(root)
+}

@@ -1155,7 +1155,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
     let policy_machinery_active = agent_session_host::options_request_session_policies(options)
         || crate::orchestration::execution_policy_active()
         || permissions::dynamic_permission_policy_active()
-        || permissions::session_has_grants(&session_id);
+        || permissions::session_has_grants(&session_id)
+        || crate::orchestration::tool_precheck_active();
     let _policy_guard = if policy_machinery_active {
         Some(agent_session_host::install_session_policy_guard(options)?)
     } else {
@@ -1255,6 +1256,49 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 false,
                 None,
                 schema_repair,
+            ));
+        }
+    }
+
+    // Deterministic pre-approval deny seam: consult an embedder-registered
+    // precheck BEFORE the dynamic-permission and approval gates, so a call the
+    // embedder has already decided to refuse is denied straight to the model
+    // without ever emitting a `session/request_permission` prompt for a
+    // predetermined-denied command. The audience-split refusal (model cue plus
+    // optional machine reason / human summary) rides the standard denied
+    // tool-result path. Fail-open: no precheck (or an unreadable verdict)
+    // leaves dispatch byte-identical.
+    if crate::orchestration::tool_precheck_active() {
+        if let Some(precheck_denial) =
+            crate::orchestration::run_tool_precheck(Some(&ctx), &tool_name, &tool_args, &session_id)
+                .await?
+        {
+            let denial = if precheck_denial.retryable {
+                crate::agent_events::ToolDenial::retryable(
+                    crate::agent_events::DenialGate::DeterministicPrecheck,
+                    None,
+                    precheck_denial.model_cue,
+                )
+            } else {
+                crate::agent_events::ToolDenial::terminal(
+                    crate::agent_events::DenialGate::DeterministicPrecheck,
+                    None,
+                    precheck_denial.model_cue,
+                )
+            }
+            .with_audiences(
+                precheck_denial.machine_reason,
+                precheck_denial.human_summary,
+            );
+            return Ok(deny_tool_call_value(
+                &session_id,
+                &tool_name,
+                &tool_id,
+                &tool_args,
+                denial,
+                false,
+                None,
+                None,
             ));
         }
     }

@@ -416,15 +416,20 @@ mod tests {
         // it. Locking the three live serving stacks here makes that explicit.
         reset();
 
-        // llama.cpp (:8001) — the Q4 one-tool native probe was insufficient:
-        // complex edit schemas lose required fields under constrained native
-        // emission, so every Qwen3.6 quant stays on the JSON text channel.
+        // llama.cpp (:8001) — re-promoted to native 2026-07-18 once the server
+        // was confirmed launched with --jinja + the tool chat template (5/5
+        // forced-native on a 13-action edit schema; the json text channel
+        // produced zero parseable write calls in a live session). It now aligns
+        // with its mlx/vLLM siblings (same weights) on native, so a native
+        // request passes through untouched. See harn#5162 for the family-wide
+        // N>=5 follow-up. Ollama below still diverges to json, so this route pair
+        // keeps the serving-stack-awareness thesis intact.
         let llamacpp = validate_tool_format("llamacpp", "qwen3.6-35b-a3b-ud-q4-k-xl", "native");
         assert_eq!(
-            llamacpp.effective, "json",
-            "llama.cpp Qwen3.6 must steer native to the family JSON contract"
+            llamacpp.effective, "native",
+            "llama.cpp Qwen3.6 native route passes a native request through unchanged"
         );
-        assert!(llamacpp.correction.is_some());
+        assert!(llamacpp.correction.is_none());
 
         // Ollama (/v1) — the embedded qwen tool-call parser 500s on text-mode
         // output, so this route is served on the text/json channel: a native

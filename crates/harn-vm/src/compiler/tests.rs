@@ -24,31 +24,34 @@ fn try_compile(source: &str) -> Result<Chunk, CompileError> {
 }
 
 #[test]
-fn public_type_schema_preserves_nested_alias_items() {
+fn public_type_schema_initializer_preserves_generics_and_open_extras() {
     let source = r"
-pub type Item = {id: string, enabled?: bool}
-pub type Manifest = {schema_version: 1, items: list<Item>}
+type Item = {id: string, enabled?: bool}
+type Box<T> = {value: T}
+pub type Manifest = Box<list<Item>>
+pub type Open = {name: string, ...dict<string, int>}
 ";
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().unwrap();
     let mut parser = Parser::new(tokens);
     let program = parser.parse().unwrap();
-    let schemas = Compiler::lower_public_type_schemas(&program);
-    let schema = schemas.get("Manifest").expect("Manifest schema");
-    let rendered = crate::stdlib::json::vm_value_to_json(schema);
-    let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
-    assert_eq!(
-        parsed["properties"]["items"]["items"]["properties"]["id"]["type"], "string",
-        "{rendered}"
-    );
-    assert_eq!(
-        parsed["properties"]["items"]["items"]["properties"]["enabled"]["union"][0]["type"], "bool",
-        "{rendered}"
-    );
-    assert_eq!(
-        parsed["properties"]["items"]["items"]["properties"]["enabled"]["union"][1]["type"], "nil",
-        "{rendered}"
-    );
+    let chunk = Compiler::compile_public_type_schema_initializers(&program, None)
+        .unwrap()
+        .expect("schema initializer");
+    let strings = chunk
+        .constants
+        .iter()
+        .filter_map(|constant| match constant {
+            Constant::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(strings.contains(&"Manifest"), "{strings:?}");
+    assert!(strings.contains(&"value"), "{strings:?}");
+    assert!(strings.contains(&"id"), "{strings:?}");
+    assert!(strings.contains(&"additional_properties"), "{strings:?}");
+    assert!(!strings.contains(&"T"), "{strings:?}");
 }
 
 #[test]

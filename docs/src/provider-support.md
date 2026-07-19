@@ -32,7 +32,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Hunyuan` | OpenAI-compatible chat completions | `hunyuan` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Hyperbolic` | OpenAI-compatible chat completions | `hyperbolic` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Inception` | OpenAI-compatible chat completions | `inception:mercury-2` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
-| `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | no | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
+| `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | none | `medium` | `not_recorded` |
 | `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | yes | yes | `native` / `delimited` | `enabled` | no | No | none | `low` | `not_recorded` |
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | No | none | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | No | none | `medium` | `not_recorded` |
@@ -205,7 +205,7 @@ Notes:
 Caveats:
 
 - Run both provider readiness and tool probes after changing GGUF, context, KV-cache, or chat-template settings.
-- 2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract.
+- 2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation.
 
 Local setup:
 

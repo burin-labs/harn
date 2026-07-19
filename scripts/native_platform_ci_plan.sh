@@ -180,7 +180,7 @@ ci_diff_touches_platform() {
 
 release_control_path() {
   local path="$1"
-  [[ "$path" =~ ^(\.github/release-runner-policy\.json|\.github/workflows/(build-release-binaries|release-smoke)\.yml|scripts/(release_runner_matrix|release_smoke|smoke_installed_binary)\.sh)$ ]]
+  [[ "$path" =~ ^(\.github/release-runner-policy\.json|\.github/workflows/(build-release-binaries|release-smoke)\.yml|scripts/release_smoke\.harn|scripts/(release_runner_matrix|smoke_installed_binary)\.sh)$ ]]
 }
 
 release_control_diff_mentions_platform() {

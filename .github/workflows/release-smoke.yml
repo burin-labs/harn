@@ -292,5 +292,7 @@ jobs:
         timeout-minutes: 10
         env:
           HARN_BINARY: ${{ steps.runtime.outputs.harn_binary }}
-          HARN_RELEASE_SMOKE_STEP_TIMEOUT_SECONDS: "120"
-        run: ./scripts/release_smoke.sh
+        run: >-
+          "$HARN_BINARY" run --no-sandbox scripts/release_smoke.harn --
+          --candidate "$HARN_BINARY"
+          --step-timeout-ms 120000

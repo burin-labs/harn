@@ -1,7 +1,7 @@
 # harn-release-smoke
 
 Cross-platform release smoke fixtures exercised by
-[`scripts/release_smoke.sh`](../../scripts/release_smoke.sh) and the
+[`scripts/release_smoke.harn`](../../scripts/release_smoke.harn) and the
 [`release-smoke` CI matrix](../../.github/workflows/release-smoke.yml).
 
 The package itself is intentionally minimal. The smoke driver checks

@@ -160,35 +160,37 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # llama.cpp / llama-server speaks OpenAI-compat but is a separate provider
-# entry from Ollama. Broader Qwen/Devstral routes remain on the text-tool
-# contract until their exact runtime/model/template combinations are probed.
+# entry from Ollama. The qwen3.6 route below is native (probe-confirmed, see
+# tool_mode_parity_notes); the broader `*qwen3*` and devstral routes remain on
+# the text-tool contract until their exact runtime/model/template combinations
+# are probed.
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
-native_tools = false
-# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same
-# RESOLVED format as the ollama qwen3.6 sibling above. (Pinned explicitly rather
-# than left to inherit because the `llamacpp-qwen3.6` alias / catalogued routes
-# trip the catalog invariant that every catalogued model/alias rule set
-# native_tools + preferred_tool_format.) json's call opener is a ```tool fence,
-# NOT the reserved <tool_call> token, so it sidesteps the opener-repetition
-# collapse that forced the old heredoc pin (see reserved_tool_call_token below)
-# AND root-cause-fixes heredoc's `<<EOF` -> `line 0: <<` content leak
-# (local-qwen3.6 json swept a clean 1.0/1.0/1.0 emission bench). To pin heredoc,
-# set `preferred_tool_format = "text"`.
-preferred_tool_format = "json"
+native_tools = true
+# Native (provider message.tool_calls) is the trusted channel for this route,
+# matching the mlx and local-vLLM `*qwen3.6*` siblings (SAME weights + chat
+# template, shared equivalence_group). llama.cpp exposes native function calling
+# on /v1/chat/completions when launched with `--jinja` + the model's tool chat
+# template; server_parser stays "none" because those tool_calls flow through the
+# standard openai_compat normalizer (no server-side grammar). The 2026-07-17
+# demotion to the json text channel predated confirmation that the serving
+# config actually applied the tool template — see tool_mode_parity_notes.
+preferred_tool_format = "native"
 structured_output = "native"
-# A single-tool probe must not promote one quant above its family. The 2026-07-17
-# Burin dogfood trace showed constrained native emission omitting required fields
-# from a 13-action edit schema, despite the old Q4 one-tool native smoke. Keep
-# every llama.cpp Qwen3.6 variant on the measurable JSON text channel until a
-# receipted forced-format family sweep proves otherwise.
-tool_mode_parity = "text_only"
-tool_mode_parity_notes = "2026-07-17 dogfood: llama.cpp Qwen3.6 native emitted semantically incomplete 13-action edit calls after a one-tool Q4 probe had promoted the quant. Family JSON text tooling is the safe contract."
+# text_unreliable: the text channel is the demonstrably-failing one for complex
+# writes on this route (a full agent session produced ZERO parseable
+# write-shaped calls over the json text grammar), while forced-native selects
+# correct actions with all required fields. This steers errant text pins back to
+# native and marks native as the trusted channel (parity_forbids_text), without
+# forbidding native the way the old `text_only` value did.
+tool_mode_parity = "text_unreliable"
+tool_mode_parity_notes = "2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation."
 # Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
 # tokens; reusing them as text-format delimiters collapses the agent loop into
 # opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).
-# Kept ON: the remap still applies whenever a heredoc `text` pin re-selects the
-# tagged format; json's ```tool fence already sidesteps the reserved token.
+# Kept ON alongside native (matching the mlx sibling): the remap guards the
+# text-channel fallback whenever a heredoc `text` pin re-selects the tagged
+# format; native message.tool_calls never touch the reserved token.
 reserved_tool_call_token = true
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }

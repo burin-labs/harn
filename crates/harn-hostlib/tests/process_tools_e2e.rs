@@ -654,9 +654,9 @@ fn real_run_command_interrupt_kills_the_whole_process_group() {
 
 #[test]
 fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
-    // A child that ignores SIGTERM (and keeps respawning short sleeps so the
-    // shell itself is the survivor) must be SIGKILLed once the grace period
-    // elapses.
+    // A child that ignores SIGTERM must be SIGKILLed once the grace period
+    // elapses. Keep the fixture to one process so cleanup observes a stable
+    // process group while it performs its final survivor sweep.
     let temp = tempfile::tempdir().expect("ready fifo tempdir");
     let ready_path = temp.path().join("ready.fifo");
     let status = std::process::Command::new("mkfifo")
@@ -682,7 +682,7 @@ fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
                 vstr("sh"),
                 vstr("-c"),
                 vstr(&format!(
-                    "trap '' TERM; printf ready > {ready_path_arg}; while :; do sleep 0.2; done"
+                    "trap '' TERM; printf ready > {ready_path_arg}; exec sleep 30"
                 )),
             ]),
         );

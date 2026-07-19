@@ -6,6 +6,151 @@
  * @effects: []
  * @errors: []
  */
+pub import {
+  SchemaContract,
+  SchemaContractFailure,
+  ValidationIssue,
+  ValidationRule,
+} from "std/schema/contracts"
+
+fn __validation_schema_issue(raw: unknown) -> ValidationIssue {
+  if type_of(raw) != "dict" {
+    return {code: "schema.invalid", message: to_string(raw), metadata: {schema_issue: raw}}
+  }
+  let issue: ValidationIssue = {
+    code: to_string(raw?.code ?? "schema.invalid"),
+    message: to_string(raw?.message ?? raw),
+    metadata: {schema_issue: raw},
+  }
+  if raw?.path != nil {
+    issue = issue + {path: to_string(raw.path)}
+  }
+  return issue
+}
+
+fn __validation_schema_issues(found: list<unknown>) -> list<ValidationIssue> {
+  let issues: list<ValidationIssue> = []
+  for raw in found {
+    issues = issues + [__validation_schema_issue(raw)]
+  }
+  return issues
+}
+
+/**
+ * Build one named validation rule. Return an empty issue list on success.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn validation_rule<T>(
+  name: string,
+  check: fn(T) -> list<ValidationIssue>,
+) -> ValidationRule<T> {
+  const clean_name = trim(name)
+  if clean_name == "" {
+    throw "std/schema: validation rule name is required"
+  }
+  return {name: clean_name, check: check}
+}
+
+/**
+ * Build one stable issue returned by a validation rule.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn validation_issue(
+  code: string,
+  message: string,
+  path: string? = nil,
+  metadata: dict? = nil,
+) -> ValidationIssue {
+  const clean_code = trim(code)
+  const clean_message = trim(message)
+  if clean_code == "" || clean_message == "" {
+    throw "std/schema: validation issue code and message are required"
+  }
+  let issue: ValidationIssue = {code: clean_code, message: clean_message}
+  if path != nil {
+    issue = issue + {path: path}
+  }
+  if metadata != nil {
+    issue = issue + {metadata: metadata}
+  }
+  return issue
+}
+
+/**
+ * Bind a structural schema to ordered deterministic validation rules.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_contract<T>(
+  schema: Schema<T>,
+  rules: list<ValidationRule<T>>,
+  apply_defaults: bool = false,
+) -> SchemaContract<T> {
+  return {schema: schema, rules: rules, apply_defaults: apply_defaults}
+}
+
+/**
+ * Structurally validate a value, then collect every rule issue in order. The
+ * function never throws: a broken rule becomes a `rule_error` failure.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_contract_check<T>(
+  value: unknown,
+  contract: SchemaContract<T>,
+) -> Result<T, SchemaContractFailure> {
+  const report = schema_report(value, contract.schema, contract.apply_defaults)
+  if !report.ok {
+    const failure: SchemaContractFailure = {
+      kind: "schema_invalid",
+      detail: report.message,
+      issues: __validation_schema_issues(report.issues),
+    }
+    return Err(failure)
+  }
+  const validated: T = report.value
+  let issues: list<ValidationIssue> = []
+  for rule in contract.rules {
+    const checked = try {
+      rule.check(validated)
+    }
+    if !is_ok(checked) {
+      const message = to_string(unwrap_err(checked)?.message ?? unwrap_err(checked))
+      const failure: SchemaContractFailure = {
+        kind: "rule_error",
+        detail: "validation rule '" + rule.name + "' failed: " + message,
+        issues: [{code: "rule.error", message: message, rule: rule.name}],
+      }
+      return Err(failure)
+    }
+    for issue in unwrap(checked) {
+      issues = issues
+        + [
+        if issue.rule == nil {
+          issue + {rule: rule.name}
+        } else {
+          issue
+        },
+      ]
+    }
+  }
+  if len(issues) > 0 {
+    const failure: SchemaContractFailure = {
+      kind: "rule_failed",
+      detail: to_string(len(issues)) + " validation issue(s)",
+      issues: issues,
+    }
+    return Err(failure)
+  }
+  return Ok(validated)
+}
+
 pub fn schema_any() {
   return {type: "any"}
 }
@@ -39,7 +184,7 @@ pub fn schema_enum(values) {
 }
 
 pub fn schema_list(item_schema = nil, options = nil) {
-  let out = {type: "list"}
+  let out: dict = {type: "list"}
   if item_schema != nil {
     out = out + {items: item_schema}
   }
@@ -54,7 +199,7 @@ pub fn schema_array(item_schema = nil, options = nil) {
 }
 
 pub fn schema_dict(value_schema = nil, options = nil) {
-  let out = {type: "dict"}
+  let out: dict = {type: "dict"}
   if value_schema != nil {
     out = out + {additional_properties: value_schema}
   }
@@ -80,7 +225,7 @@ pub fn schema_object(fields, options = nil) {
       required = required + [entry.key]
     }
   }
-  let out = {type: "dict", properties: properties}
+  let out: dict = {type: "dict", properties: properties}
   if len(required) > 0 {
     out = out + {required: required}
   }
@@ -255,9 +400,9 @@ pub fn parse_json_typed_report<T>(text: string, schema: Schema<T>, apply_default
 pub fn parse_json_typed<T>(
   text: string,
   schema: Schema<T>,
-  fallback: T = nil,
+  fallback: T? = nil,
   apply_defaults = false,
-) -> T {
+) -> T? {
   const report = parse_json_typed_report(text, schema, apply_defaults)
   if report.ok {
     return report.value

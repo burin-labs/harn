@@ -413,8 +413,8 @@ const cfg: Config = {model: "gpt-4", max_tokens: 100}
 ```
 
 A type alias can also drive schema validation for structured LLM output
-and runtime guards. `schema_of(T)` lowers an alias to a JSON-Schema
-dict at compile time:
+and runtime guards. `schema_of(T)` materializes an alias as a JSON-Schema
+dict:
 
 ```harn
 type GraderOut = {
@@ -544,6 +544,12 @@ applies when the alias identifier appears as:
 - The schema argument of `schema_is`, `schema_expect`, `schema_parse`,
   `schema_check`, `schema_report`, `is_type`, `json_validate`.
 - The value of an `output_schema:` entry in an `llm_call` options dict.
+
+Public aliases keep the same reflection behavior when imported from a file or
+embedded standard-library module. Materialization resolves nested imported
+aliases, applied generic aliases, optional fields, and open-record tails in the
+module environment before ordinary module initialization. A consumer-owned
+alias may therefore embed an imported alias without changing its schema.
 
 For aliases not known at compile time (e.g. `let T = schema_of(Foo)`
 or dynamic construction), passthrough through the runtime `schema_of`

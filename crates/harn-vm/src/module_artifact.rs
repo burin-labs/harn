@@ -35,6 +35,9 @@ pub struct ModuleImportSpec {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleArtifact {
     pub imports: Vec<ModuleImportSpec>,
+    /// Cached bytecode that materializes exported type aliases after imports
+    /// are bound and before value initialization runs.
+    pub type_schema_init_chunk: Option<CachedChunk>,
     pub init_chunk: Option<CachedChunk>,
     pub functions: BTreeMap<String, CachedCompiledFunction>,
     pub public_names: HashSet<String>,
@@ -49,12 +52,6 @@ pub struct ModuleArtifact {
     /// may still name them in selective imports. Public structs are excluded:
     /// they export a real constructor through [`functions`](Self::functions).
     pub public_type_names: HashSet<String>,
-    /// JSON-Schema lowering (serialized as canonical JSON text) for each
-    /// `pub type` alias whose body can be expressed as a schema. The loader
-    /// binds the imported name to this dict so expression-position uses such
-    /// as `output_schema: ImportedAlias` see the same value a local alias
-    /// lowers to at compile time. Subset of [`public_type_names`](Self::public_type_names).
-    pub public_type_schemas: BTreeMap<String, String>,
 }
 
 impl ModuleArtifact {
@@ -66,6 +63,9 @@ impl ModuleArtifact {
     /// the load boundary instead of duplicating otherwise-identical artifacts.
     pub(crate) fn bind_source_file(&mut self, source_path: &Path) {
         let source_file = source_path.display().to_string();
+        if let Some(chunk) = &mut self.type_schema_init_chunk {
+            bind_chunk_source_file(chunk, &source_file);
+        }
         if let Some(chunk) = &mut self.init_chunk {
             bind_chunk_source_file(chunk, &source_file);
         }
@@ -129,7 +129,7 @@ pub fn compile_module_artifact(
         None
     } else {
         let mut compiler = crate::Compiler::new();
-        compiler.collect_type_aliases(program);
+        compiler.seed_module_catalog(program);
         Some(
             compiler
                 .compile(&init_nodes)
@@ -223,7 +223,7 @@ pub fn compile_module_artifact(
         };
 
         let mut compiler = crate::Compiler::new();
-        compiler.collect_type_aliases(program);
+        compiler.seed_module_catalog(program);
         let func_chunk = compiler
             .compile_fn_body(type_params, params, body, module_source_file.clone())
             .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
@@ -233,19 +233,19 @@ pub fn compile_module_artifact(
         }
     }
 
-    let public_type_schemas = crate::Compiler::lower_public_type_schemas(program)
-        .into_iter()
-        .map(|(name, schema)| (name, crate::stdlib::json::vm_value_to_json(&schema)))
-        .collect();
+    let type_schema_init_chunk =
+        crate::Compiler::compile_public_type_schema_initializers(program, module_source_file)
+            .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
+            .map(|chunk| chunk.freeze_for_cache());
 
     Ok(ModuleArtifact {
         imports,
+        type_schema_init_chunk,
         init_chunk,
         functions,
         public_names,
         public_value_names,
         public_type_names,
-        public_type_schemas,
     })
 }
 
@@ -336,7 +336,7 @@ const ITEM_SCHEMA: Schema<Item> = schema_of(Item)
     }
 
     #[test]
-    fn type_only_modules_export_schemas_without_init_bytecode() {
+    fn type_only_modules_use_a_separate_schema_initializer() {
         let source = r"
 pub type UserShape = {name: string, active?: bool}
 pub type UserList = list<UserShape>
@@ -352,7 +352,23 @@ pub type UserList = list<UserShape>
         );
         assert!(artifact.public_type_names.contains("UserShape"));
         assert!(artifact.public_type_names.contains("UserList"));
-        assert!(artifact.public_type_schemas.contains_key("UserShape"));
-        assert!(artifact.public_type_schemas.contains_key("UserList"));
+        assert!(artifact.type_schema_init_chunk.is_some());
+    }
+
+    #[test]
+    fn schema_initializer_keeps_imported_alias_lookup_and_source() {
+        let source = r#"
+import { External } from "./external"
+pub type Wrapped = {value: External}
+"#;
+        let source_path = Path::new("<test>/wrapped.harn");
+        let artifact =
+            compile_module_artifact_from_source(source_path, source).expect("module compiles");
+        let chunk = artifact.type_schema_init_chunk.expect("schema initializer");
+        assert_eq!(chunk.source_file.as_deref(), Some("<test>/wrapped.harn"));
+        assert!(chunk
+            .constants
+            .iter()
+            .any(|constant| matches!(constant, Constant::String(value) if value == "External")));
     }
 }

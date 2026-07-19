@@ -250,6 +250,62 @@ pub fn decide() -> Decision {
 }
 
 #[test]
+fn imported_public_fn_constructs_home_module_enum() {
+    // Regression for harn#5062: an imported `pub fn` that constructs its own
+    // module's enum variant must build the variant at runtime, matching what
+    // `harn check` already accepts. Before the fix the imported body was
+    // recompiled without seeding the module's enum catalog, so the enum name
+    // lowered to a bare variable load and threw "Undefined variable" here.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let types = temp.path().join("types.harn");
+    let consumer = temp.path().join("consumer.harn");
+    std::fs::write(
+        &types,
+        "struct Inner { n: int }\npub enum Verdict { Pass(Inner) Fail(int) }\npub fn mk_pass(n: int) -> Verdict { return Verdict.Pass(Inner {n: n}) }\n",
+    )
+    .expect("write type module");
+    std::fs::write(
+        &consumer,
+        r#"
+import { mk_pass } from "./types"
+
+pub fn build() -> Verdict {
+  return mk_pass(7)
+}
+"#,
+    )
+    .expect("write consumer module");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let exports = vm
+            .load_module_exports(&consumer)
+            .await
+            .expect("consumer module loads");
+        let build = exports.get("build").expect("build export");
+        let result = vm
+            .call_closure_pub(build, &[])
+            .await
+            .expect("imported enum constructor executes without Undefined variable");
+
+        let VmValue::EnumVariant(variant) = result else {
+            panic!("expected enum variant, got {result:?}");
+        };
+        assert!(
+            variant.is_variant("Verdict", "Pass"),
+            "expected Verdict.Pass, got {}.{}",
+            variant.enum_name.as_str(),
+            variant.variant.as_str()
+        );
+    });
+}
+
+#[test]
 fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
     let _guard = cache_test_guard();
     reset_stdlib_module_artifact_cache();

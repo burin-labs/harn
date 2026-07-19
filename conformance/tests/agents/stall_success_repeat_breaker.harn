@@ -1,0 +1,64 @@
+import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
+
+/**
+ * harn#5249: repeated-identical-SUCCESS circuit-breaker. The failure-oriented
+ * conditions (`repeated_error`, `stuck_same_diagnostic`) never fire on a loop of
+ * repeated SUCCESSFUL commands, and `repeated_same_observation` requires a
+ * BYTE-IDENTICAL observation — which timing jitter in a passing command's output
+ * defeats — so a model re-running an already-green verify command loops
+ * invisibly to wall-clock timeout. `repeated_success` closes that gap: it counts
+ * the same action succeeding again with a VARYING observation and NO intervening
+ * mutating action, and rides the existing feedback + hard-stop ladder.
+ */
+fn ok_dispatch(output) {
+  return [{tool_name: "run", ok: true, output: output}]
+}
+
+fn observe(config, state, prev_dispatch, made_edit) {
+  return agent_stall_observe_tool_calls(
+    "success-repeat",
+    [{name: "run", arguments: {cmd: "cargo test"}}],
+    1,
+    config,
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    made_edit,
+  )
+}
+
+pipeline default() {
+  const cfg = {enabled: true, repeat_success: 3, repeat_same_observation: 4}
+  // ---- (a) varying-output success repeats trip repeated_success at streak 3 ----
+  const s = agent_stall_initial_state()
+  const a1 = observe(cfg, s, ok_dispatch("test result: ok. finished in 0.01s"), false)
+  assert(a1.warning == nil, "a1: no trip on first success")
+  const a2 = observe(cfg, a1.state, ok_dispatch("test result: ok. finished in 0.02s"), false)
+  assert(a2.warning == nil, "a2: no trip at streak 2")
+  const a3 = observe(cfg, a2.state, ok_dispatch("test result: ok. finished in 0.03s"), false)
+  assert(a3.warning != nil, "a3: trips at streak 3")
+  assert(a3.warning.pattern == "repeated_success", "a3: pattern is repeated_success")
+  assert(a3.warning.count == 3, "a3: fires at the configured K=3")
+  // ---- (b) an intervening edit resets the streak (the mutation guard) ----
+  const e = agent_stall_initial_state()
+  const e1 = observe(cfg, e, ok_dispatch("test result: ok. finished in 0.01s"), false)
+  const e2 = observe(cfg, e1.state, ok_dispatch("test result: ok. finished in 0.02s"), true)
+  const e3 = observe(cfg, e2.state, ok_dispatch("test result: ok. finished in 0.03s"), false)
+  assert(e3.warning == nil, "b: an edit between runs resets the success streak — no false trip")
+  // ---- (c) byte-identical repeats still trip repeated_same_observation at 4,
+  //          not repeated_success (no regression, no double-classification) ----
+  const b = agent_stall_initial_state()
+  const b1 = observe(cfg, b, ok_dispatch("identical output"), false)
+  const b2 = observe(cfg, b1.state, ok_dispatch("identical output"), false)
+  const b3 = observe(cfg, b2.state, ok_dispatch("identical output"), false)
+  assert(b3.warning == nil, "c: byte-identical does not trip repeated_success early")
+  const b4 = observe(cfg, b3.state, ok_dispatch("identical output"), false)
+  assert(b4.warning != nil, "c: byte-identical still trips at 4")
+  assert(
+    b4.warning.pattern == "repeated_same_observation",
+    "c: byte-identical stays repeated_same_observation, not repeated_success",
+  )
+  log("stall success-repeat breaker ok")
+}
