@@ -7,3 +7,8 @@ dict
 [label]
 true
 false
+bool
+bool
+int
+true
+false

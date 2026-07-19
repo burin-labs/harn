@@ -19,25 +19,27 @@ const DEFAULT_MAX_ENTRIES: usize = 512;
 /// Immutable runtime form of one compiled module artifact.
 pub(crate) struct PreparedModuleArtifact {
     pub(crate) imports: Vec<ModuleImportSpec>,
+    pub(crate) type_schema_init_chunk: Option<Arc<Chunk>>,
     pub(crate) init_chunk: Option<Arc<Chunk>>,
     pub(crate) functions: BTreeMap<String, Arc<CompiledFunction>>,
     pub(crate) public_names: std::collections::HashSet<String>,
     pub(crate) public_value_names: std::collections::HashSet<String>,
     pub(crate) public_type_names: std::collections::HashSet<String>,
-    pub(crate) public_type_schemas: BTreeMap<String, String>,
 }
 
 impl PreparedModuleArtifact {
     pub(crate) fn from_cached(artifact: ModuleArtifact) -> Self {
         let ModuleArtifact {
             imports,
+            type_schema_init_chunk,
             init_chunk,
             functions,
             public_names,
             public_value_names,
             public_type_names,
-            public_type_schemas,
         } = artifact;
+        let type_schema_init_chunk =
+            type_schema_init_chunk.map(|chunk| Arc::new(Chunk::from_cached(chunk)));
         let init_chunk = init_chunk.map(|chunk| Arc::new(Chunk::from_cached(chunk)));
         let functions = functions
             .into_iter()
@@ -45,12 +47,12 @@ impl PreparedModuleArtifact {
             .collect();
         Self {
             imports,
+            type_schema_init_chunk,
             init_chunk,
             functions,
             public_names,
             public_value_names,
             public_type_names,
-            public_type_schemas,
         }
     }
 }
@@ -197,12 +199,12 @@ mod tests {
     fn empty_artifact() -> Arc<PreparedModuleArtifact> {
         Arc::new(PreparedModuleArtifact::from_cached(ModuleArtifact {
             imports: Vec::new(),
+            type_schema_init_chunk: None,
             init_chunk: None,
             functions: BTreeMap::new(),
             public_names: Default::default(),
             public_value_names: Default::default(),
             public_type_names: Default::default(),
-            public_type_schemas: BTreeMap::new(),
         }))
     }
 
@@ -274,6 +276,12 @@ pub fn answer(items: list<string>) {
             .as_ptr();
         let selected_name = artifact.imports[0].selected_names.as_ref().unwrap()[0].as_ptr();
         let init_code = artifact.init_chunk.as_ref().unwrap().code.as_ptr();
+        let schema_init_code = artifact
+            .type_schema_init_chunk
+            .as_ref()
+            .unwrap()
+            .code
+            .as_ptr();
         let (function_key, function) = artifact.functions.first_key_value().unwrap();
         let function_key = function_key.as_ptr();
         let function_name = function.name.as_ptr();
@@ -285,10 +293,6 @@ pub fn answer(items: list<string>) {
         let public_name = artifact.public_names.get("answer").unwrap().as_ptr();
         let public_value_name = artifact.public_value_names.get("value").unwrap().as_ptr();
         let public_type_name = artifact.public_type_names.get("Result").unwrap().as_ptr();
-        let (schema_name, schema) = artifact.public_type_schemas.first_key_value().unwrap();
-        let schema_name = schema_name.as_ptr();
-        let schema = schema.as_ptr();
-
         let hydrated = PreparedModuleArtifact::from_cached(artifact);
 
         assert_eq!(hydrated.imports.as_ptr(), imports);
@@ -308,6 +312,15 @@ pub fn answer(items: list<string>) {
         assert_eq!(
             hydrated.init_chunk.as_ref().unwrap().code.as_ptr(),
             init_code
+        );
+        assert_eq!(
+            hydrated
+                .type_schema_init_chunk
+                .as_ref()
+                .unwrap()
+                .code
+                .as_ptr(),
+            schema_init_code
         );
         let (hydrated_function_key, hydrated_function) =
             hydrated.functions.first_key_value().unwrap();
@@ -339,9 +352,5 @@ pub fn answer(items: list<string>) {
             hydrated.public_type_names.get("Result").unwrap().as_ptr(),
             public_type_name
         );
-        let (hydrated_schema_name, hydrated_schema) =
-            hydrated.public_type_schemas.first_key_value().unwrap();
-        assert_eq!(hydrated_schema_name.as_ptr(), schema_name);
-        assert_eq!(hydrated_schema.as_ptr(), schema);
     }
 }

@@ -379,11 +379,10 @@ fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::Bool(schema::schema_is_value(&args[0], &args[1])?))
 }
 
-// `schema_of(T)` is primarily a compile-time intrinsic: the compiler
-// rewrites `schema_of(TypeAlias)` to the alias's JSON-Schema dict
-// constant. This runtime fallback accepts an already-built schema dict
-// and returns it unchanged, keeping `schema_of` useful in pipelines
-// that pass schemas around at runtime (e.g. `let s = schema_of(T); ...`).
+// The compiler rewrites `schema_of(TypeAlias)` to a JSON-Schema expression.
+// This runtime fallback accepts an already-built schema dict and returns it
+// unchanged, keeping `schema_of` useful in pipelines that pass schemas around
+// at runtime (e.g. `let s = schema_of(T); ...`).
 #[harn_builtin(sig = "schema_of(type_alias: any) -> dict", category = "json")]
 fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 1, "schema_of")?;

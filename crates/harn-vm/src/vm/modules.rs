@@ -445,7 +445,7 @@ impl Vm {
 
         let module_state: crate::value::ModuleState = {
             let mut init_env = self.env.clone();
-            if let Some(init_chunk) = &artifact.init_chunk {
+            if artifact.type_schema_init_chunk.is_some() || artifact.init_chunk.is_some() {
                 let saved_env = std::mem::replace(&mut self.env, init_env);
                 let saved_frames = std::mem::take(&mut self.frames);
                 let saved_handlers = std::mem::take(&mut self.exception_handlers);
@@ -462,7 +462,16 @@ impl Vm {
                 // so module loading is invisible to the step-tracking
                 // surface.
                 let active_context = crate::step_runtime::take_active_context();
-                let init_result = self.run_chunk(Arc::clone(init_chunk)).await;
+                let init_result: Result<(), VmError> = async {
+                    if let Some(chunk) = &artifact.type_schema_init_chunk {
+                        self.run_chunk(Arc::clone(chunk)).await?;
+                    }
+                    if let Some(chunk) = &artifact.init_chunk {
+                        self.run_chunk(Arc::clone(chunk)).await?;
+                    }
+                    Ok(())
+                }
+                .await;
                 crate::step_runtime::restore_active_context(active_context);
                 init_env = std::mem::replace(&mut self.env, saved_env);
                 self.frames = saved_frames;
@@ -495,14 +504,13 @@ impl Vm {
             }
         }
         let mut public_type_names = artifact.public_type_names.clone();
-        let mut public_type_schemas: BTreeMap<String, VmValue> = artifact
-            .public_type_schemas
-            .iter()
-            .filter_map(|(name, json)| {
-                let parsed = serde_json::from_str::<serde_json::Value>(json).ok()?;
-                Some((name.clone(), crate::schema::json_to_vm_value(&parsed)))
-            })
-            .collect();
+        let mut public_type_schemas: BTreeMap<String, VmValue> = {
+            let state = module_state.lock();
+            public_type_names
+                .iter()
+                .filter_map(|name| state.get(name).map(|schema| (name.clone(), schema)))
+                .collect()
+        };
 
         for (name, compiled) in &artifact.functions {
             let closure = Arc::new(VmClosure {

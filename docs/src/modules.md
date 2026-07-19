@@ -1765,9 +1765,11 @@ fn describe(t: SmartTarget) -> string {
 }
 ```
 
-Type aliases are erased at runtime — the imported name carries no value,
-but the type checker resolves it across the module boundary. A type alias
-without `pub` stays module-private; importing it is an error.
+Type annotations are erased from ordinary values, but an imported public alias
+materializes a schema when used with `schema_of`, a schema guard, or a
+schema-valued option. Reflection resolves nested imports and behaves the same
+for filesystem and embedded standard-library modules. A type alias without
+`pub` stays module-private; importing it is an error.
 
 ### Public re-exports
 
