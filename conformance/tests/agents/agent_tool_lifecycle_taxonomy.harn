@@ -24,6 +24,7 @@ pipeline test() {
   assert_eq(agent_tool_lifecycle_error_category("intra_turn_resource_fail_fast"), "rejected_loop")
   assert_eq(agent_tool_lifecycle_error_category("scope_violation"), "permission_denied")
   assert_eq(agent_tool_lifecycle_error_category("validator_failure"), "schema_validation")
+  assert_eq(agent_tool_lifecycle_error_category("invalid_arguments"), "schema_validation")
   assert_eq(agent_tool_lifecycle_error_category("overloaded"), "network")
   assert_eq(agent_tool_lifecycle_error_category("tool_middleware_exception"), "tool_error")
   assert_eq(agent_tool_lifecycle_error_category("circuit_open"), "host_bridge_error")
