@@ -41,7 +41,8 @@ chmod +x "$fake_bin/cargo"
 
 unset HARN_BIN
 
-CARGO_TARGET_DIR="$target_dir" \
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   GITHUB_ENV="$github_env" \
   PATH="$fake_bin:$PATH" \
