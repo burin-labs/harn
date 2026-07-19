@@ -974,3 +974,217 @@ async fn serve_mcp_http_exposes_script_registered_surface() {
     child.wait().unwrap();
     handle.join().unwrap();
 }
+
+// The registered-surface fixture mirrors
+// `conformance/helpers/mcp_http_elicit_server.harn` — the surface the flaky
+// loopback elicitation scenario exercises. (`mcp_elicit` is only available
+// to handlers registered via `mcp_tools`.)
+fn write_elicit_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+pipeline default() {
+  mcp_server_metadata(
+    {
+      name: "harn-http-elicit-race-test",
+      version: "1.0.0",
+      instructions: "Use the ask tool to exercise client elicitation.",
+    },
+  )
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "ask",
+    "Ask the client for deployment input",
+    {
+      parameters: {prompt: "string"},
+      handler: { args ->
+        const response = mcp_elicit(
+          {
+            message: args.prompt ?? "Choose environment",
+            requestedSchema: {
+              type: "object",
+              properties: {env: {type: "string"}, confirm: {type: "boolean"}},
+              required: ["env", "confirm"],
+            },
+          },
+        )
+        const content = response.content ?? {}
+        return to_string(response.action ?? "") + ":" + to_string(content.env ?? "") + ":"
+          + to_string(content.confirm ?? "")
+      },
+    },
+  )
+  mcp_tools(tools)
+}
+"#,
+    )
+    .unwrap();
+}
+
+/// Read the session GET/SSE stream until a JSON message satisfying
+/// `predicate` arrives. The stream is infinite (keep-alives), so parse
+/// incrementally instead of buffering the whole body.
+async fn read_stream_until<F>(response: reqwest::Response, predicate: F) -> JsonValue
+where
+    F: Fn(&JsonValue) -> bool,
+{
+    use futures::StreamExt as _;
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let deadline = Instant::now() + PROCESS_READY_TIMEOUT;
+    while Instant::now() < deadline {
+        let chunk = match tokio::time::timeout(Duration::from_secs(5), stream.next()).await {
+            Err(_) => continue,
+            Ok(None) | Ok(Some(Err(_))) => break,
+            Ok(Some(Ok(chunk))) => chunk,
+        };
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+        for line in buffer.clone().lines() {
+            if let Some(data) = line.strip_prefix("data: ") {
+                if let Ok(msg) = serde_json::from_str::<JsonValue>(data) {
+                    if predicate(&msg) {
+                        return msg;
+                    }
+                }
+            }
+        }
+    }
+    panic!("timed out waiting for a matching stream message; got: {buffer}");
+}
+
+// Regression for the POST-vs-GET session race: a `tools/call` that needs
+// elicitation arrives BEFORE the client opens its GET event stream. The
+// session bus must queue the `elicitation/create` until the stream
+// registers instead of failing the call because no stream existed at the
+// moment the POST was processed.
+#[tokio::test(flavor = "current_thread")]
+async fn serve_mcp_http_elicits_when_tools_call_beats_the_get_stream() {
+    let _guard = lock_harn_serve_mcp_tests();
+    let temp = TempDir::new().unwrap();
+    write_elicit_fixture(&temp);
+
+    let mut child = harn_e2e_command()
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("--transport")
+        .arg("http")
+        .arg("--bind")
+        .arg("127.0.0.1:0")
+        .arg("server.harn")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let (rx, handle) = mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let url = wait_for_http_listener(&mut child, &rx);
+    let client = reqwest::Client::new();
+
+    let init = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "http-elicit-race-test", "version": "1.0.0" }
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(init.status().is_success());
+    let session_id = init
+        .headers()
+        .get("mcp-session-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    // Fire the eliciting tools/call FIRST — no GET stream exists yet.
+    // On the racy implementation this failed immediately with "no client
+    // connection"; the fix queues the elicitation until the stream opens.
+    let call_task = tokio::spawn({
+        let client = client.clone();
+        let url = url.clone();
+        let session_id = session_id.clone();
+        async move {
+            let response = client
+                .post(&url)
+                .header("Accept", "application/json, text/event-stream")
+                .header("mcp-session-id", &session_id)
+                .json(&json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "ask",
+                        "arguments": { "prompt": "Choose deploy target" }
+                    }
+                }))
+                .send()
+                .await
+                .unwrap();
+            response.text().await.unwrap()
+        }
+    });
+
+    // Give the POST a comfortable head start so the old ordering bug is
+    // exercised deterministically, then open the GET stream late.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let stream_response = client
+        .get(&url)
+        .header("Accept", "text/event-stream")
+        .header("mcp-session-id", &session_id)
+        .send()
+        .await
+        .unwrap();
+    assert!(stream_response.status().is_success());
+
+    let elicitation = read_stream_until(stream_response, |msg| {
+        msg.get("method").and_then(JsonValue::as_str) == Some("elicitation/create")
+    })
+    .await;
+    let elicitation_id = elicitation["id"].clone();
+    assert_eq!(
+        elicitation["params"]["message"],
+        json!("Choose deploy target")
+    );
+
+    // Reply to the elicitation by POSTing the JSON-RPC response back.
+    let reply = client
+        .post(&url)
+        .header("Accept", "application/json, text/event-stream")
+        .header("mcp-session-id", &session_id)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": elicitation_id,
+            "result": { "action": "accept", "content": { "env": "staging", "confirm": true } }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), reqwest::StatusCode::ACCEPTED);
+
+    let call_body = call_task.await.unwrap();
+    let call_messages = parse_http_messages(&call_body);
+    let call_result = call_messages
+        .iter()
+        .find(|msg| msg["id"] == json!(2))
+        .unwrap_or_else(|| panic!("no tools/call response in: {call_body}"));
+    let text = call_result["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("unexpected tools/call response: {call_result}"));
+    assert_eq!(text, "accept:staging:true");
+
+    child.kill().unwrap();
+    child.wait().unwrap();
+    handle.join().unwrap();
+}
