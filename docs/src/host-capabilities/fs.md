@@ -31,6 +31,7 @@ surface.
 | `harness.fs.walk(path, options?)` | `walk_dir(path, options?)` | `workspace.list` |
 | `harness.fs.glob(pattern, base_or_options?, options?)` | `glob(pattern, base_or_options?, options?)` | `workspace.list` |
 | `harness.fs.find_text(root, pattern, options?)` | `find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
+| `harness.fs.find_evidence(roots, patterns, options?)` | `find_evidence(roots, patterns, options?)` | `workspace.list` + `workspace.read_text` for every root |
 
 `harness.fs.read_text_result(path)` returns a closed structured I/O failure
 with stable `kind` values such as `not_found`, `permission_denied`,
@@ -70,6 +71,16 @@ fixed-string by default for lint/source-guard workloads; pass
 explicit overrides. Count mode is capped by `max_matches` (default 1000).
 Summary modes can set `parallel: true` and optional `threads` for a parallel
 walker.
+
+`harness.fs.find_evidence(roots, patterns, options?)` and its ambient builtin
+accept labeled `{id, path}` roots
+and labeled `{id, text}` literals. It walks each root once, matches all literals
+with one matcher, and returns deterministic path-relative hits plus settled
+per-root failures and match-budget receipts. Root paths are not copied into the
+receipt. Its `case_insensitive` option folds ASCII letters. Set `long_running`
+or `background` for the standard cancellable operation handle. Import
+`search_evidence` or `search_evidence_background` from `std/fs` for typed Harn
+options and results.
 
 For direct CLI runs, `harn run --write-root <path>` adds an external writable
 root to the same sandbox policy used for the primary workspace. Prefer it over

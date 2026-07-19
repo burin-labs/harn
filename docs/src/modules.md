@@ -974,6 +974,10 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | `relative_path(root, path)` | Return a slash-normalized path relative to `root` when possible |
 | `is_file(path)` / `is_dir(path)` | Return type-aware existence checks |
 | `file_size(path)` | Return file size in bytes, or `nil` when unavailable |
+| `search_evidence(roots, patterns, options?)` | Walk each labeled root once, match every labeled literal with one multi-pattern matcher, and return deterministic path-relative hits plus per-root settlement and truncation receipts |
+| `search_evidence_background(roots, patterns, options?)` | Run the same search through the cancellable long-running operation lifecycle |
+
+Evidence search's optional case-insensitive mode folds ASCII letters.
 
 `StructuredReadFailure` contains `{kind, format, path, detail, line?, column?}`. Its closed
 `kind` union is
@@ -992,6 +996,13 @@ write_json(path, {status: "ok"}, {pretty: true})
 log(read_json(path).status)
 log(relative_path(temp_dir(), path))
 ```
+
+Evidence results expose caller labels rather than root paths, so persisted
+reports can stay stable and avoid machine-local checkout paths. Hits are sorted
+by root ID, pattern ID, relative path, line, and column regardless of `threads`.
+One missing or unreadable root yields a partial receipt without discarding other
+roots. `max_matches` is global; `max_matches_per_root` prevents one root from
+consuming unbounded memory before deterministic global truncation.
 
 ### std/run_artifacts
 
