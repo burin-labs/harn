@@ -10,6 +10,8 @@ use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 
+use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, TargetArch};
+
 use super::{
     policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
@@ -72,7 +74,9 @@ impl SandboxBackend for Backend {
 
 struct ProcessProfile {
     landlock: Option<LandlockProfile>,
-    allowed_syscalls: Vec<libc::c_long>,
+    /// Pre-compiled seccomp program. Built before fork so `pre_exec` only has
+    /// to install it — see [`compile_seccomp_program`].
+    seccomp: BpfProgram,
 }
 
 struct LandlockProfile {
@@ -104,7 +108,7 @@ fn profile_setup(
     // than racing the pre_exec callback.
     Ok(ProcessProfile {
         landlock: landlock_profile(policy, profile)?,
-        allowed_syscalls: allowed_syscalls(policy),
+        seccomp: compile_seccomp_program(&allowed_syscalls(policy))?,
     })
 }
 
@@ -114,7 +118,12 @@ fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {
     }
     // Once seccomp is default-deny, the child should not retain sandbox-setup
     // powers. Install Landlock first, then drop to the runtime syscall ceiling.
-    install_seccomp_filter(&profile.allowed_syscalls)?;
+    //
+    // `apply_filter` sets `PR_SET_NO_NEW_PRIVS` and issues `SYS_seccomp`
+    // against the already-compiled program: no allocation, so it is safe on
+    // the `pre_exec` side of the fork.
+    seccompiler::apply_filter(&profile.seccomp)
+        .map_err(|err| io::Error::other(format!("failed to install the seccomp filter: {err}")))?;
     Ok(())
 }
 
@@ -310,68 +319,85 @@ fn install_landlock_ruleset(profile: &LandlockProfile) -> io::Result<()> {
     Ok(())
 }
 
-fn install_seccomp_filter(allowed_syscalls: &[libc::c_long]) -> io::Result<()> {
-    unsafe {
-        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    let mut filter = seccomp_allowlist_filter(allowed_syscalls);
-    let mut program = libc::sock_fprog {
-        len: filter.len() as u16,
-        filter: filter.as_mut_ptr(),
-    };
-    unsafe {
-        if libc::prctl(
-            libc::PR_SET_SECCOMP,
-            libc::SECCOMP_MODE_FILTER,
-            &raw mut program,
-            0,
-            0,
-        ) != 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
+/// Compile the syscall allowlist into a BPF program.
+///
+/// Runs before fork, in `profile_setup` — deliberately, on two counts:
+///
+/// * Compilation allocates, and `pre_exec` may only call async-signal-safe
+///   functions. Building here leaves the child with nothing but two
+///   allocation-free syscalls to make.
+/// * A malformed policy surfaces as an ordinary `VmError` at spawn time
+///   rather than as an opaque `pre_exec` failure.
+///
+/// `seccompiler` prefixes every program with an architecture check: it loads
+/// `seccomp_data.arch` and returns `SECCOMP_RET_KILL_PROCESS` unless the
+/// caller's ABI matches `target_arch`. That prologue is what makes the
+/// allowlist sound.
+///
+/// Without it, a filter that matches on the syscall number alone is only as
+/// strong as the ABI the caller chooses. An x86-64 process can re-enter the
+/// kernel through the i386 compat gate with `int $0x80`, where the same
+/// numbers name different syscalls — so every allowlisted number silently
+/// grants whatever i386 assigns it. Concretely, for the allowlist in
+/// [`allowed_syscalls`]: number 26 is `msync`, which we permit, and i386
+/// number 26 is `ptrace`, which we deliberately withhold (see
+/// `allowlist_excludes_process_introspection_and_io_uring`). The exclusion
+/// held only for callers that agreed to use the ABI we expected.
+fn compile_seccomp_program(allowed_syscalls: &[libc::c_long]) -> Result<BpfProgram, VmError> {
+    // `c_long` is already `i64` on every target `target_arch()` accepts —
+    // they are all LP64 — so the syscall numbers need no conversion.
+    let rules = allowed_syscalls
+        .iter()
+        .map(|syscall| (*syscall, Vec::new()))
+        .collect();
+
+    // Denials return EPERM rather than killing: a child that trips the
+    // ceiling should fail the individual call the way a permission error
+    // would, not die without explanation. Architecture mismatches are the
+    // exception and seccompiler always kills on those — a foreign ABI is
+    // evidence of evasion, not of an ordinary denied operation.
+    let filter = SeccompFilter::new(
+        rules,
+        SeccompAction::Errno(libc::EPERM as u32),
+        SeccompAction::Allow,
+        target_arch(),
+    )
+    .map_err(|err| sandbox_rejection(format!("failed to build the seccomp filter: {err}")))?;
+
+    BpfProgram::try_from(filter)
+        .map_err(|err| sandbox_rejection(format!("failed to compile the seccomp filter: {err}")))
 }
 
-fn seccomp_allowlist_filter(allowed_syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
-    let mut filter = Vec::with_capacity(allowed_syscalls.len() * 2 + 2);
-    filter.push(bpf_stmt(
-        (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
-        0,
-    ));
-    for syscall in allowed_syscalls {
-        filter.push(bpf_jump(
-            (libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K) as u16,
-            *syscall as u32,
-            0,
-            1,
-        ));
-        filter.push(bpf_stmt(
-            (libc::BPF_RET | libc::BPF_K) as u16,
-            libc::SECCOMP_RET_ALLOW,
-        ));
+/// The ABI this binary was built for, and therefore the only one the child is
+/// permitted to enter the kernel through.
+///
+/// Deliberately exhaustive over what `seccompiler` supports: a Linux target it
+/// does not know is a target we cannot confine, and failing the build says so
+/// far more usefully than silently shipping an unfiltered sandbox.
+const fn target_arch() -> TargetArch {
+    #[cfg(target_arch = "x86_64")]
+    {
+        TargetArch::x86_64
     }
-    filter.push(bpf_stmt(
-        (libc::BPF_RET | libc::BPF_K) as u16,
-        libc::SECCOMP_RET_ERRNO | libc::EPERM as u32,
-    ));
-    filter
-}
-
-fn bpf_stmt(code: u16, k: u32) -> libc::sock_filter {
-    libc::sock_filter {
-        code,
-        jt: 0,
-        jf: 0,
-        k,
+    #[cfg(target_arch = "aarch64")]
+    {
+        TargetArch::aarch64
     }
-}
-
-fn bpf_jump(code: u16, k: u32, jt: u8, jf: u8) -> libc::sock_filter {
-    libc::sock_filter { code, jt, jf, k }
+    #[cfg(target_arch = "riscv64")]
+    {
+        TargetArch::riscv64
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "riscv64"
+    )))]
+    {
+        compile_error!(
+            "the Linux sandbox backend has no seccomp target architecture for this platform; \
+             seccompiler supports x86_64, aarch64, and riscv64"
+        )
+    }
 }
 
 fn allowed_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
@@ -920,7 +946,8 @@ mod tests {
 
     #[test]
     fn seccomp_filter_is_default_deny_allowlist() {
-        let filter = seccomp_allowlist_filter(&[libc::SYS_read, libc::SYS_write]);
+        let filter = compile_seccomp_program(&[libc::SYS_read, libc::SYS_write])
+            .expect("compile the probe filter");
         assert_eq!(
             filter.last().map(|entry| entry.k),
             Some(libc::SECCOMP_RET_ERRNO | libc::EPERM as u32),
@@ -931,6 +958,42 @@ mod tests {
                 .iter()
                 .any(|entry| entry.k == libc::SECCOMP_RET_ALLOW),
             "allowlisted syscalls must jump to an allow action",
+        );
+    }
+
+    /// The filter must reject foreign ABIs before it ever looks at a syscall
+    /// number. `msync` stands in for the general hazard: we allow number 26,
+    /// and i386 number 26 is `ptrace` — which
+    /// `allowlist_excludes_process_introspection_and_io_uring` asserts we
+    /// withhold. Without the arch gate that exclusion is reachable anyway,
+    /// through `int $0x80`.
+    #[test]
+    fn seccomp_filter_validates_architecture_before_syscall_number() {
+        let filter = compile_seccomp_program(&[libc::SYS_msync]).expect("compile the probe filter");
+
+        let arch_load = filter.first().expect("filter must not be empty");
+        assert_eq!(
+            arch_load.code,
+            (libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16,
+            "the first instruction must be an absolute word load",
+        );
+        assert_eq!(
+            arch_load.k, 4,
+            "the first load must read seccomp_data.arch (offset 4), not .nr (offset 0)",
+        );
+
+        assert_eq!(
+            filter.get(2).map(|entry| entry.k),
+            Some(libc::SECCOMP_RET_KILL_PROCESS),
+            "an architecture mismatch must kill the process, never return EPERM: \
+             EPERM would let a caller probe the whole syscall space for free",
+        );
+
+        // Only after the arch gate may the program consult the syscall number.
+        assert_eq!(
+            filter.get(3).map(|entry| (entry.code, entry.k)),
+            Some(((libc::BPF_LD | libc::BPF_W | libc::BPF_ABS) as u16, 0)),
+            "the syscall number load must follow the architecture check",
         );
     }
 
