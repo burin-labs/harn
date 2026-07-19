@@ -708,6 +708,14 @@ class ACPError(_HarnDataclass):
 class HarnACPPromptErrorData(_HarnDataclass):
     schema: ACPPromptErrorSchema
     terminalClass: AgentTerminalClass
+    category: Optional[str] = None
+    kind: Optional[str] = None
+    reason: Optional[str] = None
+    code: Optional[str] = None
+    retryable: Optional[bool] = None
+    retryAfterMs: Optional[int] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 @dataclass

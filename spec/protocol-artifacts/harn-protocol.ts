@@ -427,6 +427,14 @@ export interface ACPError {
 export interface HarnACPPromptErrorData {
   schema: typeof ACP_PROMPT_ERROR_DATA_SCHEMA
   terminalClass: AgentTerminalClass
+  category?: string
+  kind?: string
+  reason?: string
+  code?: string
+  retryable?: boolean
+  retryAfterMs?: number
+  provider?: string
+  model?: string
 }
 
 export interface ACPNotification {

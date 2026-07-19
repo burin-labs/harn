@@ -51,7 +51,7 @@ impl AcpServer {
         );
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
         if let Err(message) = self.sync_session_root_from_workspace_anchor(&session_id) {
-            self.send_prompt_error(&session_id, id, &message);
+            self.send_prompt_error(id, &message);
             return;
         }
         let (cwd, project_root, capability_profile) = match self.sessions.get(&session_id) {
@@ -92,7 +92,7 @@ impl AcpServer {
                 Ok(src) => (src, Some(full_path)),
                 Err(e) => {
                     let message = format!("Failed to read pipeline {}: {e}", full_path.display());
-                    self.send_prompt_error(&session_id, id, &message);
+                    self.send_prompt_error(id, &message);
                     return;
                 }
             }
@@ -105,7 +105,6 @@ impl AcpServer {
             // which would fail with a generic "Compilation error" later.
             if parse_slash_invocation(&prompt_text).is_some() {
                 self.send_prompt_error(
-                    &session_id,
                     id,
                     "Slash commands require `--pipeline <file>`; the agent is running in inline mode.",
                 );
@@ -214,7 +213,7 @@ impl AcpServer {
                 if let Err(error) = self.clear_active_prompt_transport(&session_id).await {
                     formatted.push_str(&format!("; failed to persist agent events: {error}"));
                 }
-                self.send_prompt_error(&session_id, id, &formatted);
+                self.send_prompt_error(id, &formatted);
                 return;
             }
         };
@@ -253,7 +252,7 @@ impl AcpServer {
                 if let Err(error) = self.clear_active_prompt_transport(&session_id).await {
                     message.push_str(&format!("; failed to persist agent events: {error}"));
                 }
-                self.send_prompt_error(&session_id, id, &message);
+                self.send_prompt_error(id, &message);
                 return;
             }
         };
@@ -299,7 +298,6 @@ impl AcpServer {
                 }
                 if let Some(error) = sink_flush_error {
                     self.send_prompt_error(
-                        &sid,
                         &id_owned,
                         &format!(
                             "Failed to persist agent events before prompt completion: {error}"
@@ -349,13 +347,15 @@ impl AcpServer {
                     );
                     return;
                 }
+                let terminal_class = e.terminal_class;
+                let facts = e.facts;
                 let message = match sink_flush_error {
                     Some(error) => {
                         format!("{}; failed to persist agent events: {error}", e.message)
                     }
                     None => e.message,
                 };
-                self.send_prompt_error_with_class(&sid, &id_owned, &message, e.terminal_class);
+                self.send_prompt_failure(&id_owned, &message, terminal_class, facts);
             }
         }
     }

@@ -463,6 +463,14 @@ public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
 public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var schema: HarnACPPromptErrorSchema
     public var terminalClass: HarnAgentTerminalClass
+    public var category: String?
+    public var kind: String?
+    public var reason: String?
+    public var code: String?
+    public var retryable: Bool?
+    public var retryAfterMs: Int?
+    public var provider: String?
+    public var model: String?
 }
 
 public enum HarnToolCallReceiptStatus: String, Codable, Sendable, CaseIterable {
