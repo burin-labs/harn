@@ -56,13 +56,12 @@ pub struct ModuleArtifact {
     pub public_exports: BTreeMap<String, DefKind>,
     /// Public declarations whose runtime value is produced by replaying
     /// [`init_chunk`](Self::init_chunk), rather than the precompiled function
-    /// table. This includes bindings, structs, enums, tools, skills, and eval
-    /// packs.
+    /// table. This includes bindings, enums, tools, skills, and eval packs.
     pub public_value_names: HashSet<String>,
-    /// Names of erased public type declarations (`type`, `enum`, and
-    /// `interface`). They carry no runtime value of their own, but importers
-    /// may still name them in selective imports. Public structs are excluded:
-    /// they export a real constructor through [`functions`](Self::functions).
+    /// Names of erased public type declarations (`type` and `interface`). They
+    /// carry no runtime value of their own, but importers may still name them
+    /// in selective imports. Public structs and enums are excluded because
+    /// they export runtime constructors/namespaces.
     pub public_type_names: HashSet<String>,
 }
 
@@ -305,13 +304,16 @@ fn imported_enum_candidates_for_program(
     }
     let source_hash = *blake3::hash(source.as_bytes()).as_bytes();
     let cache_key = harn_modules::canonical_path(source_path);
-    if let Some((_cached_hash, candidates)) = imported_enum_cache()
-        .lock()
-        .expect("imported enum cache lock poisoned")
-        .get(&cache_key)
-        .filter(|(cached_hash, _)| *cached_hash == source_hash)
-    {
-        return candidates.clone();
+    let cacheable = is_immutable_stdlib_path(source_path);
+    if cacheable {
+        if let Some((_cached_hash, candidates)) = imported_enum_cache()
+            .lock()
+            .expect("imported enum cache lock poisoned")
+            .get(&cache_key)
+            .filter(|(cached_hash, _)| *cached_hash == source_hash)
+        {
+            return candidates.clone();
+        }
     }
 
     // A graph walk is needed to resolve wildcard and re-exported enums, but
@@ -319,6 +321,9 @@ fn imported_enum_candidates_for_program(
     // projections at once so loading a large stdlib does not rebuild the same
     // reachable graph once per module artifact.
     let graph = harn_modules::build_with_source(source_path, source);
+    if !cacheable {
+        return sorted_imported_enum_candidates(&graph, source_path);
+    }
     let mut projections = Vec::new();
     for path in graph.module_paths() {
         let module_source = if path == cache_key {
@@ -329,12 +334,7 @@ fn imported_enum_candidates_for_program(
         let Some(module_source) = module_source else {
             continue;
         };
-        let mut candidates = graph
-            .imported_names_by_kind_for_file(&path, DefKind::Enum)
-            .unwrap_or_default()
-            .into_iter()
-            .collect::<Vec<_>>();
-        candidates.sort_unstable();
+        let candidates = sorted_imported_enum_candidates(&graph, &path);
         projections.push((
             path,
             (
@@ -347,13 +347,33 @@ fn imported_enum_candidates_for_program(
         .lock()
         .expect("imported enum cache lock poisoned");
     for (path, projection) in projections {
-        cache.insert(path, projection);
+        if is_immutable_stdlib_path(&path) {
+            cache.insert(path, projection);
+        }
     }
     cache
         .get(&cache_key)
         .filter(|(cached_hash, _)| *cached_hash == source_hash)
         .map(|(_, candidates)| candidates.clone())
         .unwrap_or_default()
+}
+
+fn sorted_imported_enum_candidates(
+    graph: &harn_modules::ModuleGraph,
+    source_path: &Path,
+) -> Vec<String> {
+    let mut candidates = graph
+        .imported_names_by_kind_for_file(source_path, DefKind::Enum)
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    candidates.sort_unstable();
+    candidates
+}
+
+fn is_immutable_stdlib_path(path: &Path) -> bool {
+    path.to_str()
+        .is_some_and(|path| path.starts_with("<stdlib>/") || path.starts_with("<std>/"))
 }
 
 fn needs_imported_enum_candidates(program: &[harn_parser::SNode]) -> bool {
