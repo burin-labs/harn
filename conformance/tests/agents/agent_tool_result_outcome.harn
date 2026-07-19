@@ -40,13 +40,23 @@ pipeline test() {
   const clean = agent_tool_result_outcome({status: "ok", product_error: false})
   assert_eq(clean.kind, "ok")
   assert_eq(agent_tool_result_is_ok(clean), true)
-  // Edit-outcome spine, from a known value and an unrecognized one.
-  const rejected = agent_tool_result_outcome({ok: false, edit_outcome: "rejected_not_applied"})
-  assert_eq(rejected.edit_outcome, "rejected_not_applied")
-  const stamped_ok = agent_tool_result_outcome({ok: true, edit_outcome: "applied_clean"})
-  assert_eq(stamped_ok.edit_outcome, "applied_clean")
-  const future_edit = agent_tool_result_outcome({ok: true, edit_outcome: "future_edit_status"})
-  assert_eq(future_edit.edit_outcome, "unknown")
+  // Edit-status spine, read from the flat `edit_status` field.
+  const rejected = agent_tool_result_outcome({ok: false, edit_status: "rejected_not_applied"})
+  assert_eq(rejected.edit_status, "rejected_not_applied")
+  const stamped_ok = agent_tool_result_outcome({ok: true, edit_status: "applied_clean"})
+  assert_eq(stamped_ok.edit_status, "applied_clean")
+  const future_edit = agent_tool_result_outcome({ok: true, edit_status: "future_edit_status"})
+  assert_eq(future_edit.edit_status, "unknown")
+  // A host that stamps the status inside its `edit_outcome` record is read via
+  // the nested `edit_outcome.edit_status`, so both vocabularies resolve.
+  const nested_status = agent_tool_result_outcome(
+    {
+      ok: true,
+      edit_outcome: {schema: "burin.tool_edit_outcome.v1", edit_status: "applied_still_failing"},
+    },
+  )
+  assert_eq(nested_status.edit_status, "applied_still_failing")
+  assert_eq(nested_status.from_structured, true)
   // Diagnostics count, flat and nested.
   const flat = agent_tool_result_outcome({ok: false, diagnostics_error_count: 3})
   assert_eq(flat.diagnostics_error_count, 3)
@@ -59,7 +69,7 @@ pipeline test() {
   const unstamped = agent_tool_result_outcome({status: "ok"})
   assert_eq(unstamped.kind, "ok")
   assert_eq(unstamped.product_error, nil)
-  assert_eq(unstamped.edit_outcome, "unknown")
+  assert_eq(unstamped.edit_status, "unknown")
   // An envelope with only prose keys and no structured field is honestly unknown.
   const prose_only = agent_tool_result_outcome({rendered_result: "Error: something", observation: "Error: something"})
   assert_eq(prose_only.kind, "unknown")
