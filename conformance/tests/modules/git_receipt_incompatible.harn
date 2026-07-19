@@ -1,0 +1,9 @@
+import { GitStatusReceipt, git_ls_remote } from "std/git"
+
+fn wrong_receipt(remote: string) -> GitStatusReceipt {
+  return git_ls_remote(remote)
+}
+
+pipeline default() {
+  __io_println(wrong_receipt("origin").success)
+}
