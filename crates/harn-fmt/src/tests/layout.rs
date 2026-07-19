@@ -6,7 +6,7 @@
 //! wrapping args at the wrong depth, and measuring a prefix instead of a line.
 
 use super::assert_roundtrip;
-use crate::{format_source, LINE_WIDTH_DEFAULT};
+use crate::{format_source, format_source_opts, FmtOptions, LINE_WIDTH_DEFAULT};
 
 fn formatted(source: &str) -> String {
     format_source(source).unwrap()
@@ -88,6 +88,27 @@ fn wrapped_chain_indents_args_inside_the_method_that_owns_them() {
     assert!(
         arg_col > call_col,
         "argument at col {arg_col} must be deeper than the call at col {call_col} that owns it:\n{out}"
+    );
+}
+
+/// An attached chain still starts after the enclosing block's indentation.
+/// The argument layout must count those known columns, not measure the
+/// receiver as though it started at column zero.
+#[test]
+fn nested_unwrapped_chain_counts_indent_at_width_twenty() {
+    let source = "fn t() {\n  if true {\n    values.add(a, b, c)\n  }\n}\n";
+    let out = format_source_opts(
+        source,
+        &FmtOptions {
+            line_width: 20,
+            ..FmtOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        out,
+        "fn t() {\n  if true {\n    values.add(\n      a,\n      b,\n      c,\n    )\n  }\n}\n"
     );
 }
 

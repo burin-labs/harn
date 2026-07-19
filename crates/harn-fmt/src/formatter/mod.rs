@@ -348,7 +348,7 @@ impl<'a> Formatter<'a> {
         if wraps {
             (indent + 1) * 2 + head_len
         } else {
-            last_line_width(obj) + head_len
+            indent * 2 + last_line_width(obj) + head_len
         }
     }
 
