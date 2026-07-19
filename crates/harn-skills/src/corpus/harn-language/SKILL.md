@@ -22,6 +22,8 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
   visible under sandbox policy; avoid composing `.harn/tmp` paths by hand.
 - Use typed `std/fs` conditional replacement for shared state or artifacts
   that must not overwrite a newer observation; branch on the closed receipt.
+- Use bounded `std/jsonl` pages for file-backed logs and transcripts. Apply a
+  `SchemaContract<T>` when consumers need typed records and named rules.
 - For connector credentials, read canonical ids such as
   `provider/access-token` through `harness.secrets` from a package script; the
   runner scopes the default provider from the nearest `harn.toml`.

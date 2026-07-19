@@ -107,6 +107,42 @@ impl OverlayFs {
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string()))
     }
 
+    pub(crate) fn bounded_override(
+        &self,
+        path: &Path,
+        offset: u64,
+        limit: usize,
+    ) -> Option<std::io::Result<(Vec<u8>, u64)>> {
+        if !self.within_root(path) {
+            return None;
+        }
+        let key = self.key(path);
+        let layer = self.layer.lock().expect("overlay layer poisoned");
+        match layer.get(&key) {
+            Some(OverlayEntry::File(bytes)) => {
+                let length = bytes.len() as u64;
+                if offset > length {
+                    return Some(Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("byte offset {offset} exceeds file length {length}"),
+                    )));
+                }
+                let start = offset as usize;
+                let end = start.saturating_add(limit).min(bytes.len());
+                Some(Ok((bytes[start..end].to_vec(), length)))
+            }
+            Some(OverlayEntry::Deleted) => Some(Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("overlay: {} was deleted", key.display()),
+            ))),
+            Some(OverlayEntry::Directory) => Some(Err(std::io::Error::new(
+                std::io::ErrorKind::IsADirectory,
+                format!("overlay: {} is a directory", key.display()),
+            ))),
+            None => None,
+        }
+    }
+
     pub fn write(&self, path: &Path, contents: &[u8]) -> std::io::Result<()> {
         if !self.within_root(path) {
             // Mirror the production scoped-write contract (`mkdir -p`): a

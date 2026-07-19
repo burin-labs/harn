@@ -1011,6 +1011,7 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | Function | Description |
 |---|---|
 | `ensure_parent_dir(path)` | Create the parent directory for a file path when needed |
+| `read_lines_page_result(path, options?)` | Read a bounded page of complete UTF-8 lines and return a byte-and-line cursor or typed filesystem failure |
 | `read_json(path)` | Read required JSON, throwing `StructuredReadFailure` for absent, unreadable, malformed, or over-depth input |
 | `read_json_result(path)` | Read JSON as `Result<unknown, StructuredReadFailure>` without erasing failure kind, path, or parser location |
 | `read_json_typed<T>(path, schema: Schema<T>, apply_defaults?) -> T` | Read required JSON and validate it against a schema, throwing the typed read or schema failure |
@@ -1057,6 +1058,50 @@ by root ID, pattern ID, relative path, line, and column regardless of `threads`.
 One missing or unreadable root yields a partial receipt without discarding other
 roots. `max_matches` is global; `max_matches_per_root` prevents one root from
 consuming unbounded memory before deterministic global truncation.
+
+### std/jsonl
+
+Use bounded pages for logs, transcripts, and other JSONL files that may be
+large or actively growing. A page cursor contains the exact byte offset and
+next physical line number, so callers can persist it and resume without
+rescanning earlier records.
+
+| Function | Description |
+|---|---|
+| `read_jsonl_page_result(path, options?)` | Read at most `max_records` physical lines and `max_bytes`, preserving malformed rows as per-record issues |
+| `read_jsonl_page(path, options?)` | Throwing filesystem-failure form of the bounded raw reader |
+| `read_jsonl_contract_page_result<T>(path, contract, options?)` | Apply structural schema validation and named rules to each parsed record, preserving all record failures |
+| `read_jsonl_contract_page<T>(path, contract, options?)` | Throwing filesystem-failure form of the bounded contract reader |
+| `fold_jsonl_file(path, initial, reducer, options?)` | Fold a file without materializing its complete contents |
+| `read_jsonl(path, options?)` | Compatibility helper that materializes records while reading the file in bounded pages |
+| `parse_jsonl(text, options?)` / `fold_jsonl(text, initial, reducer, options?)` | Process JSONL already held in memory |
+| `write_jsonl(path, items)` / `append_jsonl(path, item)` | Replace or append JSONL output |
+
+Contract pages distinguish malformed JSON, invalid structure, violated rules,
+and broken rule implementations as `malformed`, `schema_invalid`,
+`rule_failed`, and `rule_error`. Record issues retain the source line, byte
+offset, and raw text. A line larger than `max_bytes` fails the page with
+`file_too_large`; it is never returned partially.
+
+```harn
+import { read_jsonl_contract_page_result } from "std/jsonl"
+import { schema_contract } from "std/schema"
+
+const contract = schema_contract(schema_of(Event), [])
+let cursor = {offset: 0, line: 1}
+while true {
+  const page = unwrap(
+    read_jsonl_contract_page_result("events.jsonl", contract, {cursor: cursor}),
+  )
+  for record in page.records {
+    handle(record.value)
+  }
+  if page.done {
+    break
+  }
+  cursor = page.next_cursor
+}
+```
 
 ### std/run_artifacts
 

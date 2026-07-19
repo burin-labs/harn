@@ -14,6 +14,7 @@ use crate::vm::Vm;
 mod conditional_replace;
 mod find_evidence;
 mod find_text;
+mod line_page;
 
 thread_local! {
     static FILE_TEXT_CACHE: RefCell<BTreeMap<PathBuf, FileTextCacheEntry>> = const { RefCell::new(BTreeMap::new()) };
@@ -47,6 +48,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &STAT_BUILTIN_DEF,
     &MOVE_FILE_BUILTIN_DEF,
     &READ_LINES_BUILTIN_DEF,
+    &line_page::READ_LINES_PAGE_RESULT_BUILTIN_DEF,
     &WALK_DIR_BUILTIN_DEF,
     &GLOB_BUILTIN_DEF,
     &find_text::FIND_TEXT_BUILTIN_DEF,
