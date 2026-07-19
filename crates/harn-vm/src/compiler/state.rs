@@ -28,6 +28,21 @@ impl Compiler {
         Self::with_options(CompilerOptions::from_env())
     }
 
+    /// Seed syntax-sensitive import metadata before compiling a source file.
+    ///
+    /// The parser intentionally keeps `Color.Ready(value)` ambiguous: it can
+    /// be a method call or an enum constructor. The module graph resolves
+    /// that ambiguity for imported enums, including wildcard imports, so
+    /// callers that compile a file outside the module-artifact path can pass
+    /// the same public export contract here.
+    pub fn with_imported_enum_candidates(
+        mut self,
+        candidates: impl IntoIterator<Item = String>,
+    ) -> Self {
+        self.add_imported_enum_candidates(candidates);
+        self
+    }
+
     /// Populate every module-level compiler catalog needed by declarations
     /// compiled outside the entry pipeline. Module artifacts use this same
     /// preparation as ordinary program compilation so imported functions see
@@ -48,6 +63,13 @@ impl Compiler {
         self.seed_module_captured_idents(program);
     }
 
+    pub(crate) fn add_imported_enum_candidates(
+        &mut self,
+        candidates: impl IntoIterator<Item = String>,
+    ) {
+        self.imported_enum_candidates.extend(candidates);
+    }
+
     /// Compile only the declarations that form a module's initialization
     /// chunk, using the complete source program for compiler context. The
     /// caller supplies a filtered list so function and pipeline closures are
@@ -56,8 +78,10 @@ impl Compiler {
         mut self,
         context: &[SNode],
         init_nodes: &[SNode],
+        imported_enum_candidates: &[String],
     ) -> Result<Chunk, CompileError> {
         self.prepare_module_context(context);
+        self.add_imported_enum_candidates(imported_enum_candidates.iter().cloned());
         self.compile_top_level_declarations(init_nodes)?;
         self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);

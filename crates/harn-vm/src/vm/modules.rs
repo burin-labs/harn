@@ -549,7 +549,7 @@ impl Vm {
                 }
             }
         }
-        let mut public_type_names = artifact.public_type_names.clone();
+        let public_type_names = artifact.public_type_names.clone();
         let mut public_type_schemas: BTreeMap<String, VmValue> = {
             let state = module_state.lock();
             public_type_names

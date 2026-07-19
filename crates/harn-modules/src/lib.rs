@@ -594,6 +594,44 @@ impl ModuleGraph {
         Some(names)
     }
 
+    /// Collect imported names of one declaration kind from a module's public
+    /// imports. This preserves the target module's export boundary across
+    /// selective, wildcard, and re-exported imports while giving compilers
+    /// the narrow semantic metadata needed for syntax-sensitive lowering.
+    pub fn imported_names_by_kind_for_file(
+        &self,
+        file: &Path,
+        kind: DefKind,
+    ) -> Option<HashSet<String>> {
+        let file = normalize_path(file);
+        let module = self.modules.get(&file)?;
+        if module.has_unresolved_wildcard_import || module.has_unresolved_selective_import {
+            return None;
+        }
+
+        let mut names = HashSet::new();
+        for import in &module.imports {
+            let import_path = import.path.as_ref()?;
+            let imported_names: Vec<String> = match &import.selective_names {
+                Some(selective) => selective.iter().cloned().collect(),
+                None => self
+                    .modules
+                    .get(import_path)
+                    .or_else(|| self.modules.get(&normalize_path(import_path)))?
+                    .exports
+                    .iter()
+                    .cloned()
+                    .collect(),
+            };
+            for name in imported_names {
+                if self.exported_kind(import_path, &name) == Some(kind) {
+                    names.insert(name);
+                }
+            }
+        }
+        Some(names)
+    }
+
     /// Collect type / struct / enum / interface declarations made visible to
     /// `file` by its imports. Returns `None` when any import is unresolved so
     /// callers can fall back to conservative behavior.

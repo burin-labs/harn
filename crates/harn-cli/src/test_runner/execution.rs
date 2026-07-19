@@ -67,7 +67,9 @@ pub(super) async fn execute_case(
     let total_start = Instant::now();
 
     let compile_start = Instant::now();
-    let compiler = harn_vm::Compiler::new();
+    let compiler = crate::compiler_with_imported_enum_candidates(
+        case.imported_enum_candidates.iter().cloned(),
+    );
     let chunk = match if case.bindings.is_empty() {
         compiler.compile_named(&case.program, &case.pipeline_name)
     } else {

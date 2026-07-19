@@ -269,7 +269,12 @@ pub(crate) fn check_file_report_inner(
     // compile-error cascade. The compiler takes the same `&program` `run`
     // does (imports are AST nodes), so this introduces no new false positives.
     if !has_error {
-        if let Err(compile_err) = harn_vm::Compiler::new().compile(&program) {
+        let imported_enums = module_graph
+            .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)
+            .unwrap_or_default();
+        if let Err(compile_err) =
+            crate::compiler_with_imported_enum_candidates(imported_enums).compile(&program)
+        {
             has_error = true;
             diagnostic_count += 1;
             let code = harn_parser::diagnostic_codes::Code::CompilerError;

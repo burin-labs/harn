@@ -5,6 +5,7 @@ mod bootstrap;
 pub mod cli;
 mod cli_bytecode;
 pub mod commands;
+mod compiler_context;
 #[doc(hidden)]
 pub mod dispatch;
 pub mod env_guard;
@@ -22,6 +23,10 @@ pub mod test_timing;
 #[doc(hidden)]
 pub mod tests;
 mod typecheck_imports;
+pub(crate) use compiler_context::{
+    compiler_for_source, compiler_with_imported_enum_candidates,
+    ensure_builtin_signatures_installed, imported_enum_candidates_for_source,
+};
 pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
 
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
@@ -43,23 +48,6 @@ use runtime::{build_cli_runtime, cli_runtime_mode, CliRuntimeMode};
 
 pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
 static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
-
-/// Install the macro-emitted builtin signature slice into the
-/// `harn_parser` registry the first time any harn-cli entry point parses
-/// or typechecks a script.
-///
-/// Every code path that drives the parser — `run()`, `execute_run()`,
-/// `parse_source_file()`, `analyze_file()`, every test harness — funnels
-/// through this single helper so the registry is always populated by the
-/// time the typechecker reads it. `install_builtin_signatures` is
-/// idempotent on identical `&'static` slices, so repeat calls are
-/// cheap (a `OnceLock::set` that no-ops after the first success).
-///
-/// Tests cannot rely on `run()` having executed, so they must reach the
-/// parser via one of these entry points (which always do call this).
-pub(crate) fn ensure_builtin_signatures_installed() {
-    harn_parser::install_builtin_signatures(harn_vm::stdlib::all_builtin_signatures());
-}
 
 #[cfg(feature = "hostlib")]
 pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
@@ -2588,7 +2576,10 @@ async fn execute_with_skill_dirs_and_optional_harness(
         }
     }
 
-    let chunk = harn_vm::Compiler::new()
+    let compiler = source_path
+        .map(|path| compiler_for_source(path, source))
+        .unwrap_or_default();
+    let chunk = compiler
         .compile(&program)
         .map_err(|e| ExecError::new(ExecStage::Compile, e.to_string()))?;
 

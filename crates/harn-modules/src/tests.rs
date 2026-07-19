@@ -139,6 +139,13 @@ fn exported_kind_matches_public_declaration_contract() {
         Some(DefKind::Struct)
     );
     assert_eq!(graph.exported_kind(&facade, "State"), Some(DefKind::Enum));
+
+    let wildcard_consumer = write_file(root, "wildcard_consumer.harn", "import \"./facade\"\n");
+    let wildcard_graph = build(std::slice::from_ref(&wildcard_consumer));
+    let imported_enums = wildcard_graph
+        .imported_names_by_kind_for_file(&wildcard_consumer, DefKind::Enum)
+        .expect("wildcard imports resolve");
+    assert_eq!(imported_enums, HashSet::from(["State".to_string()]));
 }
 
 #[test]

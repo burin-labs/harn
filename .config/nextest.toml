@@ -142,13 +142,18 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 # `harn` debug binary as a subprocess. See the `[test-groups]` block
 # above for rationale.
 #
-# harn-cli also contains hundreds of fast parser/unit tests in the same
-# binary as subprocess-heavy integration tests. Under full workspace fan-out
-# on macOS, nextest can attribute delayed captured-output teardown to an
-# arbitrary fast test after libtest has already reported success. Keep the
-# leak wait bounded so real runaway tests still finish the suite, but treat
-# this package's leaked-handle signal as diagnostic until the upstream
-# nextest/libtest attribution is precise enough to gate on.
+# harn-cli also contains hundreds of fast parser/unit tests alongside
+# subprocess-heavy integration tests. Under full workspace fan-out on macOS,
+# nextest can attribute delayed captured-output teardown to an arbitrary fast
+# test after libtest has already reported success. Keep the leak wait bounded
+# so real runaway tests still finish the suite, but treat the package's
+# leaked-handle signal as diagnostic until upstream nextest/libtest attribution
+# is precise enough to gate on. The library target needs this independently of
+# the integration-test concurrency cap because it contains in-process tests.
+[[profile.default.overrides]]
+filter = "package(harn-cli) and kind(lib)"
+leak-timeout = { period = "10s", result = "pass" }
+
 [[profile.default.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
@@ -170,6 +175,10 @@ test-group = "harn-windows-sandbox"
 [[profile.default.overrides]]
 filter = 'package(harn-hostlib) and test(/host_discovered_test_plan_issues_pass|filtered_discovered_test_plan_cannot_issue_pass|overlapping_top_level_vms_issue_only_their_own_receipts/)'
 test-group = "harn-nested-cargo"
+
+[[profile.ci.overrides]]
+filter = "package(harn-cli) and kind(lib)"
+leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and kind(test)"
@@ -215,6 +224,10 @@ slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
 [[profile.flake-detection.overrides]]
 filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
+[[profile.flake-detection.overrides]]
+filter = "package(harn-cli) and kind(lib)"
+leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.flake-detection.overrides]]
 filter = "package(harn-cli) and kind(test)"

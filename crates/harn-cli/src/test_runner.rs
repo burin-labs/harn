@@ -170,6 +170,9 @@ struct TestCase {
     pipeline_name: String,
     source: Arc<String>,
     program: Arc<Vec<SNode>>,
+    /// Public enum names imported by this file, computed once during
+    /// discovery and shared by all parameterized cases from the file.
+    imported_enum_candidates: Arc<Vec<String>>,
     /// Optional serial group — tests with the same group never run
     /// concurrently with each other, even if workers are idle. Used for
     /// shared fixtures.
@@ -453,7 +456,8 @@ async fn run_test_file_with_session_impl(
     let source = Arc::new(source);
     let program = Arc::new(program);
 
-    let cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
+    let mut cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
+    seed_imported_enum_candidates(path, &source, &mut cases);
     let skill_contexts = PreparedSkillContexts::prepare(&cases, cli_skill_dirs);
 
     let mut results = Vec::with_capacity(cases.len());
@@ -659,8 +663,9 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
         let source = Arc::new(source);
         let program = Arc::new(program);
         match extract_cases_from_program(file, &source, &program, filter, workers) {
-            Ok(file_cases) => {
+            Ok(mut file_cases) => {
                 if !file_cases.is_empty() {
+                    seed_imported_enum_candidates(file, &source, &mut file_cases);
                     files_with_tests += 1;
                     cases.extend(file_cases);
                 }
@@ -717,6 +722,7 @@ fn extract_cases_from_program(
                 pipeline_name: meta.name,
                 source: Arc::clone(source),
                 program: Arc::clone(program),
+                imported_enum_candidates: Arc::new(Vec::new()),
                 serial_group: meta.serial_group,
                 weight,
                 bindings: Vec::new(),
@@ -733,6 +739,7 @@ fn extract_cases_from_program(
                     pipeline_name: meta.name.clone(),
                     source: Arc::clone(source),
                     program: Arc::clone(program),
+                    imported_enum_candidates: Arc::new(Vec::new()),
                     serial_group: meta.serial_group.clone(),
                     weight,
                     bindings: meta.params.iter().cloned().zip(row.args).collect(),
@@ -741,6 +748,22 @@ fn extract_cases_from_program(
         }
     }
     Ok(cases)
+}
+
+fn seed_imported_enum_candidates(file: &Path, source: &str, cases: &mut [TestCase]) {
+    if cases.is_empty() {
+        return;
+    }
+    let mut candidates = harn_modules::build_with_source(file, source)
+        .imported_names_by_kind_for_file(file, harn_modules::DefKind::Enum)
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    candidates.sort_unstable();
+    let candidates = Arc::new(candidates);
+    for case in cases {
+        case.imported_enum_candidates = Arc::clone(&candidates);
+    }
 }
 
 struct PipelineMeta {

@@ -91,7 +91,7 @@ fn acquire_blocks_second_owner_until_release() {
 }
 
 #[test]
-fn immediate_transaction_allows_one_race_winner() {
+fn immediate_transaction_allows_at_most_one_race_winner() {
     let temp = TempDir::new().unwrap();
     let store = Arc::new(store(&temp));
     let worker_count = 12;
@@ -105,31 +105,41 @@ fn immediate_transaction_allows_one_race_winner() {
                 store
                     .try_acquire(request(&format!("worker-{index}")))
                     .unwrap()
-                    .status
             })
         })
         .collect::<Vec<_>>();
-    let statuses = workers
+    let receipts = workers
         .into_iter()
         .map(|worker| worker.join().unwrap())
         .collect::<Vec<_>>();
-    let initial_winners = statuses
+    let acquired = receipts
         .iter()
-        .filter(|status| **status == HostLeaseAcquireStatus::Acquired)
+        .filter(|receipt| receipt.status == HostLeaseAcquireStatus::Acquired)
         .count();
-    assert!(
-        initial_winners <= 1,
-        "at most one race winner: {statuses:?}"
-    );
+    assert!(acquired <= 1);
+    assert!(receipts.iter().all(|receipt| {
+        receipt.status == HostLeaseAcquireStatus::Acquired
+            || matches!(
+                receipt.defer.as_ref().map(|defer| defer.deferred_reason),
+                Some(HostLeaseDeferReason::Contended) | Some(HostLeaseDeferReason::RegistryBusy)
+            )
+    }));
 
-    // `try_acquire` deliberately reports a transient SQLite writer conflict as
-    // a typed deferral. If every thread observes that conflict, a serialized
-    // retry must still make progress once the race has drained.
-    if initial_winners == 0 {
-        assert_eq!(
-            store.try_acquire(request("recovery")).unwrap().status,
-            HostLeaseAcquireStatus::Acquired
-        );
+    let recovery = store.try_acquire(request("recovery")).unwrap();
+    assert_eq!(
+        acquired + usize::from(recovery.status == HostLeaseAcquireStatus::Acquired),
+        1
+    );
+    if acquired == 0 {
+        assert_eq!(recovery.status, HostLeaseAcquireStatus::Acquired);
+    } else {
+        assert_eq!(recovery.status, HostLeaseAcquireStatus::Deferred);
+    }
+    if recovery.status == HostLeaseAcquireStatus::Deferred {
+        assert!(matches!(
+            recovery.defer.as_ref().map(|defer| defer.deferred_reason),
+            Some(HostLeaseDeferReason::Contended)
+        ));
     }
 }
 

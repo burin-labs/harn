@@ -200,7 +200,7 @@ fn run_plan_source_inner(source: &str, plan_path: &Path) -> Result<JsonValue, St
         }
     }
 
-    let chunk = harn_vm::Compiler::new()
+    let chunk = crate::compiler_for_source(plan_path, source)
         .compile(&program)
         .map_err(|error| format!("counterfactual plan compile error: {error}"))?;
 

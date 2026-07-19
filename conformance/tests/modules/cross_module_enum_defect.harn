@@ -1,8 +1,10 @@
 // Regression coverage for public enum construction across a module boundary.
 // The imported function constructs the enum using its private payload type;
 // both `harn check` and runtime execution must agree that the public enum is
-// available to importers.
-import { CrossModuleEnum, make_cross_module_enum } from "cross_module_enum_defect_lib"
+// available to importers. Keep this as a wildcard import: selective imports
+// and module artifacts exercise the same contract in focused unit tests, while
+// the conformance runner verifies the ordinary entry-compilation path.
+import "cross_module_enum_defect_lib"
 
 pipeline default() {
   const direct = CrossModuleEnum.Other(7)

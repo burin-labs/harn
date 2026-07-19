@@ -79,31 +79,6 @@ impl Compiler {
         }
     }
 
-    /// Seed the full module type catalog into this compiler: enum names and
-    /// variant owners (including the built-in `Result`), struct field layouts,
-    /// interface method sets, and type aliases.
-    ///
-    /// Every path that compiles a module-scoped body must seed the same
-    /// catalog so catalog-dependent lowerings resolve identically no matter
-    /// which module later calls the compiled body: the top-level program
-    /// (`compile`), pipeline callables (`compile_pipeline_callable`), and the
-    /// per-function and `init` chunks emitted for imported modules
-    /// (`compile_module_artifact`). The most visible dependent lowering is
-    /// `EnumName.Variant(...)` construction, which only becomes a `BuildEnum`
-    /// op when the enum is in `enum_names`. Without this seed an imported
-    /// function body recompiled in a fresh, catalog-less compiler lowers enum
-    /// construction to a bare variable load of the enum name and crashes at
-    /// runtime with "Undefined variable" even though `check` passes (harn#5062).
-    pub(crate) fn seed_module_catalog(&mut self, program: &[SNode]) {
-        self.collect_module_enum_catalog(program);
-        if self.enum_names.insert("Result".to_string()) {
-            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
-        }
-        Self::collect_struct_layouts(program, &mut self.struct_layouts);
-        Self::collect_interface_methods(program, &mut self.interface_methods);
-        self.collect_type_aliases(program);
-    }
-
     /// Seed the built-in `Result` enum's variants into the owner map.
     pub(super) fn seed_builtin_variant_owners(
         owners: &mut std::collections::HashMap<String, Vec<String>>,
