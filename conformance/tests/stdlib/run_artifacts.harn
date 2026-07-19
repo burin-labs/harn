@@ -2,6 +2,8 @@ import "std/run_artifacts"
 
 type Facts = {status: string, count?: int}
 
+type WrongFacts = {status: string, count: string}
+
 pipeline test(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-run-artifacts-" + uuid_v7())
   const open_options: RunArtifactsOpenOptions = {root: root, run_id: "run-a"}
@@ -16,6 +18,40 @@ pipeline test(task) {
   const facts = run_artifact_read_json_typed(run, "facts.json", schema_of(Facts))
   __io_println(facts.status)
   __io_println(facts.count)
+  run_artifact_write_json_typed(run, "typed.json", {status: "before", count: 1}, schema_of(Facts))
+  const rejected_write = try {
+    run_artifact_write_json_typed(
+      run,
+      "typed.json",
+      {status: "invalid", count: "not-an-int"},
+      schema_of(Facts),
+    )
+  }
+  __io_println(!is_ok(rejected_write))
+  __io_println(run_artifact_read_json_typed(run, "typed.json", schema_of(Facts)).status)
+  const typed_result = run_artifact_read_json_typed_result(run, "typed.json", schema_of(Facts))
+  __io_println(unwrap(typed_result).count)
+  const invalid_typed_result = run_artifact_read_json_typed_result(
+    run,
+    "typed.json",
+    schema_of(WrongFacts),
+  )
+  __io_println(unwrap_err(invalid_typed_result).kind)
+  const concurrent_writes = parallel each [1, 2, 3, 4, 5, 6, 7, 8] with {
+    max_concurrent: 8,
+  } { writer ->
+    return run_artifact_write_json_typed(
+      run,
+      "shared.json",
+      {status: "writer", count: writer},
+      schema_of(Facts),
+    )
+  }
+  const shared = run_artifact_read_json_typed(run, "shared.json", schema_of(Facts))
+  __io_println(
+    len(concurrent_writes) == 8 && shared.status == "writer" && shared.count >= 1
+      && shared.count <= 8,
+  )
   const missing = run_artifact_read_json_result(run, "missing.json")
   __io_println(unwrap_err(missing).kind)
   harness.fs.write_text(run_artifact_path(run, "bad.json"), "{bad")

@@ -1043,8 +1043,10 @@ support boundary.
 | `run_artifacts_list(kind, options?)` | List recent run directories newest-first with `{root?, namespace?, limit?}` |
 | `run_artifact_path(run, name)` | Resolve a relative artifact path inside `run.dir`, rejecting absolute paths and `..` traversal |
 | `run_artifact_write_json(run, name, value, options?)` | Write JSON through `std/fs.write_json` conventions |
+| `run_artifact_write_json_typed<T>(run, name, value, schema, options?)` | Validate and atomically replace JSON, leaving the prior artifact unchanged on contract failure |
 | `run_artifact_read_json(run, name)` | Read a required JSON artifact through `std/fs.read_json` |
-| `run_artifact_read_json_typed<T>(run, name, schema)` | Read required JSON and validate the consumer-owned artifact shape |
+| `run_artifact_read_json_typed<T>(run, name, schema, apply_defaults?)` | Read required JSON and validate the consumer-owned artifact shape |
+| `run_artifact_read_json_typed_result<T>(run, name, schema, apply_defaults?)` | Read optional JSON as a typed Result that preserves read and schema failure details |
 | `run_artifact_read_json_result(run, name)` | Read an optional JSON artifact while preserving typed failure detail |
 | `run_artifact_write_text(run, name, text, options?)` | Write text with parent-directory and trailing-newline behavior |
 | `run_artifact_read_text(run, name, fallback?)` | Read text with a fallback for missing or unreadable files |
@@ -1120,6 +1122,10 @@ compact recovery context:
 | `command_failure_text(result, options?)` | Render a compact failure block with status, exit code, and capped stdout/stderr |
 | `command_result_ok(stdout?, extra?)` | Build a normalized success result for tests and harness adapters |
 | `command_result_fail(exit_code?, stderr?, extra?)` | Build a normalized failure result for tests and harness adapters |
+
+`CommandResult` names the common normalized result fields, while
+`CommandStepReceipt` names the portable command-step fields used by durable
+audit and recovery artifacts. Both preserve additional adapter-owned fields.
 
 `spec` is either an argv list, such as `["git", "status", "--short"]`, or a
 dict with `argv`, `cwd`, `env`, `env_mode`, `stdin`, `timeout_ms`, `capture`,
