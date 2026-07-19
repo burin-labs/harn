@@ -106,7 +106,10 @@ pub fn search_evidence(
   patterns: list<EvidencePattern>,
   options: EvidenceOptions = {},
 ) -> EvidenceReceipt {
-  return schema_expect(harness.fs.find_evidence(roots, patterns, options), schema_of(EvidenceReceipt))
+  return schema_expect(
+    harness.fs.find_evidence(roots, patterns, options),
+    schema_of(EvidenceReceipt),
+  )
 }
 
 /**
