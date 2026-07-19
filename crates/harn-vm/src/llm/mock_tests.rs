@@ -97,6 +97,30 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
 }
 
 #[test]
+fn offthread_mock_call_keeps_the_callers_logical_context() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        reset_llm_mock_state();
+        push_llm_mock(text_mock("logical mock"));
+        let opts = crate::llm::api::options::base_opts("mock");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let result = crate::llm::api::vm_call_llm_full_streaming_offthread(&opts, tx)
+            .await
+            .expect("off-thread mock call");
+
+        assert_eq!(result.text, "logical mock");
+        assert_eq!(get_llm_mock_calls().len(), 1);
+        assert_eq!(get_llm_mock_receipts().len(), 1);
+        reset_llm_mock_state();
+    });
+}
+
+#[test]
 fn inline_mock_scope_survives_a_deterministic_executor_thread_hop() {
     reset_llm_mock_state();
     let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(

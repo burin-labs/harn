@@ -531,6 +531,11 @@ pub(crate) fn scope_ambient<F: Future>(scope: AmbientExecutionScope, inner: F) -
     }
 }
 
+/// Preserve the caller's complete logical execution scope in a spawned task.
+pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
+    scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), inner)
+}
+
 /// Restores the outer scope (and saves the task's own scope back) on drop, so
 /// the thread-locals are left correct even if the inner poll panics.
 struct RestoreGuard<'a> {

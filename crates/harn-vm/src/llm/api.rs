@@ -245,11 +245,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
     }
     request.emit_reminder_lifecycle();
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
-    // Provider I/O leaves the caller's LocalSet. Carry the complete logical
-    // execution scope into that task so inline mocks, policy, attribution, and
-    // runtime overlays follow the call across scheduler threads.
-    let ambient = crate::orchestration::AmbientExecutionScope::capture_for_inline_subtask();
-    let provider_call = async move {
+    let result = tokio::task::spawn(crate::orchestration::scope_inline_subtask(async move {
         if let Some(context) = raw_capture_context {
             crate::llm::agent_observe::with_raw_provider_capture_context(context, async {
                 vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
@@ -258,15 +254,14 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
         } else {
             vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
         }
-    };
-    let result = tokio::task::spawn(crate::orchestration::scope_ambient(ambient, provider_call))
-        .await
-        .map_err(|join_err| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "llm_call background task failed: {join_err}"
-            ))))
-        })?
-        .map_err(OffthreadLlmError::into_vm_error)?;
+    }))
+    .await
+    .map_err(|join_err| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "llm_call background task failed: {join_err}"
+        ))))
+    })?
+    .map_err(OffthreadLlmError::into_vm_error)?;
     super::cost::record_llm_usage_for_provider(
         &result.provider,
         &result.model,
@@ -1132,35 +1127,6 @@ mod tests {
                 request.contains("anthropic-beta: interleaved-thinking-2025-05-14\r\n"),
                 "{request}"
             );
-        });
-    }
-
-    #[test]
-    fn offthread_mock_call_keeps_the_callers_logical_context() {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .worker_threads(2)
-            .build()
-            .expect("runtime");
-
-        runtime.block_on(async {
-            crate::llm::mock::reset_llm_mock_state();
-            let mock = crate::llm::parse_llm_mock_value(&serde_json::json!({
-                "text": "logical mock",
-            }))
-            .expect("mock fixture");
-            crate::llm::mock::push_llm_mock(mock);
-
-            let opts = base_opts("mock");
-            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-            let result = vm_call_llm_full_streaming_offthread(&opts, tx)
-                .await
-                .expect("off-thread mock call");
-
-            assert_eq!(result.text, "logical mock");
-            assert_eq!(crate::llm::mock::get_llm_mock_calls().len(), 1);
-            assert_eq!(crate::llm::mock::get_llm_mock_receipts().len(), 1);
-            crate::llm::mock::reset_llm_mock_state();
         });
     }
 
