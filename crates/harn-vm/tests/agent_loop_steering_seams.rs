@@ -43,7 +43,17 @@ use harn_vm::value::VmError;
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
+    let session_store_root = tempfile::tempdir().map_err(|e| e.to_string())?;
+    // The scenarios intentionally reuse readable session IDs across tests;
+    // isolate their durable journal so repeated local runs cannot rehydrate
+    // an earlier transcript and change the message counts under test.
+    let session_store_root_path = session_store_root
+        .path()
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let source = source.replace("__HARN_TEST_SESSION_STORE_ROOT__", &session_store_root_path);
+    let chunk = harn_vm::compile_source(&source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -147,6 +157,7 @@ pipeline main(task) {{
       provider: "mock",
       tools: tools,
       tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
       max_iterations: 4,
       loop_until_done: true,
       session_id: "{session_id}",
@@ -291,6 +302,7 @@ pipeline main(task) {{
     nil,
     {{
       provider: "mock",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
       max_iterations: 2,
       loop_until_done: true,
       session_id: "{session_id}",
@@ -451,6 +463,7 @@ pipeline main(task) {{
       provider: "mock",
       tools: tools,
       tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
       max_iterations: 4,
       loop_until_done: true,
       session_id: "{session_id}",
