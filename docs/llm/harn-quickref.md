@@ -292,7 +292,14 @@ when you only need one synchronous subprocess capture record:
 `{exit_code, stdout, stderr, duration_ms, success, timed_out}`.
 
 ```harn,ignore
-import { command_json, command_json_step, command_try } from "std/command"
+import { command_cancel, command_json, command_json_step, command_run, command_try, command_wait_for_output } from "std/command"
+
+const server = command_run(["my-server", "--port", "8080"], {background: true})
+defer { command_cancel(server, {wait_result_ms: 5000}) }
+const ready = command_wait_for_output(server, "listening on 8080", {timeout_ms: 10000})
+if !ready.matched {
+  throw "server readiness failed: " + ready.status
+}
 
 const repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
   capture: {max_inline_bytes: 65536},
@@ -324,6 +331,10 @@ const fallback = command_try(
 - `command_try(attempts, opts?)` is only for ordered equivalent probes. It adds
   `fallback_index`, `fallback_total`, and per-attempt summaries; it is not a
   retry system or provider framework.
+- `command_wait_for_output(handle, pattern, opts?)` parks on background output,
+  exit, or timeout without polling. Use `source: "stdout" | "stderr" |
+  "combined"`, `regex: true`, and `from_offset` when needed. A match reports
+  byte offsets and leaves teardown to `command_cancel`.
 
 ## Time, sleep, monotonic clock
 

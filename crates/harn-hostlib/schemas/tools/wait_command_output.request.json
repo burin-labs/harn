@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/wait_command_output.request.json",
+  "title": "tools.wait_command_output request",
+  "type": "object",
+  "properties": {
+    "handle_id": { "type": "string", "minLength": 1 },
+    "pattern": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "enum": ["stdout", "stderr", "combined"] },
+    "regex": { "type": "boolean" },
+    "from_offset": { "type": "integer", "minimum": 0 },
+    "timeout_ms": { "type": "integer", "minimum": 0 },
+    "session_id": { "type": "string" }
+  },
+  "required": ["handle_id", "pattern"],
+  "additionalProperties": false
+}
