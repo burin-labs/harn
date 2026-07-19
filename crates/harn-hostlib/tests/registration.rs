@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard};
 
 #[cfg(feature = "terminal-session")]
 use harn_hostlib::terminal_session::TerminalSessionCapability;
@@ -781,6 +781,81 @@ pipeline default(task) {
 "#;
     let state = expect_dict(execute_harn(cancelled).expect("cancelled scope"));
     assert!(matches!(state.get("active"), Some(VmValue::Nil)));
+}
+
+#[test]
+fn parallel_named_host_lease_scopes_release_before_reacquire() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    for iteration in 0..16 {
+        let start = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..2)
+                .map(|worker| {
+                    let start = Arc::clone(&start);
+                    scope.spawn(move || {
+                        let domain = format!("parallel-{iteration}-{worker}");
+                        let first = if worker == 0 {
+                            format!(
+                                r#"
+  const first = with_host_lease(
+    {{host: "mac-local", owner: "first-{worker}", resource_class: "rust-heavy", domain: "{domain}", wait_timeout_ms: 5000}},
+    {{ _ -> "first" }},
+  ).status
+"#
+                            )
+                        } else {
+                            format!(
+                                r#"
+  let first = nil
+  try {{
+    with_host_lease(
+      {{host: "mac-local", owner: "first-{worker}", resource_class: "rust-heavy", domain: "{domain}", wait_timeout_ms: 5000}},
+      {{ _ -> throw "fixture failure" }},
+    )
+  }} catch (error) {{
+    first = error
+  }}
+"#
+                            )
+                        };
+                        let source = format!(
+                            r#"
+import {{ with_host_lease }} from "std/host_lease"
+
+pipeline default(task) {{
+{first}
+  const second = with_host_lease(
+    {{host: "mac-local", owner: "second-{worker}", resource_class: "rust-heavy", domain: "{domain}"}},
+    {{ _ -> "second" }},
+  )
+  return {{first: first, second: second.status}}
+}}
+"#
+                        );
+                        start.wait();
+                        execute_harn(&source)
+                    })
+                })
+                .collect();
+            for (index, worker) in workers.into_iter().enumerate() {
+                let result = expect_dict(worker.join().unwrap().unwrap());
+                assert_eq!(
+                    result.get("first").map(VmValue::display).as_deref(),
+                    Some(if index == 0 {
+                        "completed"
+                    } else {
+                        "fixture failure"
+                    })
+                );
+                assert_eq!(
+                    result.get("second").map(VmValue::display).as_deref(),
+                    Some("completed")
+                );
+            }
+        });
+    }
 }
 
 #[test]
