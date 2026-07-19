@@ -42,6 +42,7 @@ fn denial_gate_serializes_as_snake_case() {
         (DenialGate::ApprovalUnavailable, "approval_unavailable"),
         (DenialGate::HostRejected, "host_rejected"),
         (DenialGate::HookDeny, "hook_deny"),
+        (DenialGate::DeterministicPrecheck, "deterministic_precheck"),
         (DenialGate::Unknown, "unknown"),
     ];
     assert_eq!(pairs.len(), DenialGate::ALL.len());

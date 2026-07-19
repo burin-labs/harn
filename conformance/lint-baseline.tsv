@@ -35,6 +35,9 @@
 2	agents/suspend_nested.harn	HARN-LNT-014
 5	agents/thrash_hard_stop_recovery.harn	HARN-LNT-018
 1	agents/tool_call_paradigm.harn	HARN-LNT-049
+7	agents/tool_precheck.harn	HARN-LNT-025
+1	agents/tool_precheck.harn	HARN-LNT-032
+2	agents/tool_precheck.harn	HARN-LNT-049
 1	agents/worker_retriggerable.harn	HARN-LNT-014
 1	agents/worker_retriggerable.harn	HARN-LNT-018
 3	agents/workflow_executor_agent_loop.harn	HARN-LNT-018
