@@ -1376,7 +1376,8 @@ fn test_parses_providers_matrix_args() {
         "--output",
         "tmp/provider-matrix.md",
         "--check",
-        "--stdout",
+        "--empirical",
+        "tmp/parity.toml",
         "--filter",
         "native_tools",
     ]) else {
@@ -1387,7 +1388,6 @@ fn test_parses_providers_matrix_args() {
         std::path::PathBuf::from("tmp/provider-matrix.md")
     );
     assert!(args.check);
-    assert!(args.stdout);
     assert_eq!(args.filter.as_deref(), Some("native_tools"));
 }
 

@@ -329,7 +329,13 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
             return 2;
         }
     };
-    let matrix = build_matrix(&fixtures, &models, &tool_formats, args.max_runs);
+    let matrix = build_matrix(
+        &fixtures,
+        &models,
+        &tool_formats,
+        args.max_runs,
+        args.replicates,
+    );
     if matrix.is_empty() {
         eprintln!("error: no coding-agent benchmark runs selected");
         return 2;
@@ -337,8 +343,16 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
 
     let mut reports = Vec::new();
     let mut had_error = false;
-    for (fixture, selector, tool_format) in matrix {
-        let report = run_matrix_entry(&args, &output_dir, fixture, selector, tool_format).await;
+    for (fixture, selector, tool_format, replicate) in matrix {
+        let report = run_matrix_entry(
+            &args,
+            &output_dir,
+            fixture,
+            selector,
+            tool_format,
+            replicate,
+        )
+        .await;
         if !report.passed && !report.skipped {
             had_error = true;
         }
@@ -559,17 +573,25 @@ fn build_matrix(
     models: &[ModelSelector],
     tool_formats: &[String],
     max_runs: Option<usize>,
-) -> Vec<(EvalPackCase, ModelSelector, String)> {
-    if max_runs == Some(0) {
+    replicates: usize,
+) -> Vec<(EvalPackCase, ModelSelector, String, usize)> {
+    if max_runs == Some(0) || replicates == 0 {
         return Vec::new();
     }
     let mut matrix = Vec::new();
     for fixture in fixtures {
         for selector in models {
             for tool_format in tool_formats {
-                matrix.push((fixture.clone(), selector.clone(), tool_format.clone()));
-                if max_runs.is_some_and(|limit| matrix.len() >= limit) {
-                    return matrix;
+                for replicate in 1..=replicates {
+                    matrix.push((
+                        fixture.clone(),
+                        selector.clone(),
+                        tool_format.clone(),
+                        replicate,
+                    ));
+                    if max_runs.is_some_and(|limit| matrix.len() >= limit) {
+                        return matrix;
+                    }
                 }
             }
         }
@@ -817,98 +839,112 @@ fn compare_formats(runs: &[RunReport]) -> Vec<FormatComparison> {
     }
     let mut out = Vec::new();
     for group in grouped.values() {
-        let Some(first) = group.first() else {
-            continue;
-        };
-        let native = group
+        let native_runs = group
             .iter()
-            .find(|run| run.tool_format == "native")
-            .copied();
-        let text = group.iter().find(|run| run.tool_format == "text").copied();
-        if native.is_none() && text.is_none() {
-            continue;
-        }
-        let pair = native.zip(text);
-        let mut divergence_reasons = Vec::new();
-        if let Some((native, text)) = pair {
-            if native.status != text.status {
-                divergence_reasons.push(format!(
-                    "status differs: native={} text={}",
-                    native.status, text.status
-                ));
-            }
-            if native.passed != text.passed {
-                divergence_reasons.push(format!(
-                    "pass result differs: native={} text={}",
-                    native.passed, text.passed
-                ));
-            }
-            if native.verification_success != text.verification_success {
-                divergence_reasons.push(format!(
-                    "verifier result differs: native={} text={}",
-                    native.verification_success, text.verification_success
-                ));
-            }
-            if native.tool_sequence != text.tool_sequence {
-                divergence_reasons.push(format!(
-                    "tool sequence differs: native=[{}] text=[{}]",
-                    native.tool_sequence.join(", "),
-                    text.tool_sequence.join(", ")
-                ));
-            }
-            if native.rejected_tool_calls != text.rejected_tool_calls {
-                divergence_reasons.push(format!(
-                    "rejected tool-call recovery differs: native={} text={}",
-                    native.rejected_tool_calls, text.rejected_tool_calls
-                ));
-            }
-        }
-        let evidence_paths = [native, text]
-            .into_iter()
-            .flatten()
-            .map(|run| run.transcript_events_path.clone())
+            .filter(|run| run.tool_format == "native")
+            .copied()
             .collect::<Vec<_>>();
-        out.push(FormatComparison {
-            fixture_id: first.fixture_id.clone(),
-            selector: first.selector.clone(),
-            native_run_id: native.map(|run| run.run_id.clone()),
-            text_run_id: text.map(|run| run.run_id.clone()),
-            native_evidence_path: native.map(|run| run.transcript_events_path.clone()),
-            text_evidence_path: text.map(|run| run.transcript_events_path.clone()),
-            native_status: native.map(|run| run.status.clone()),
-            text_status: text.map(|run| run.status.clone()),
-            native_passed: native.map(|run| run.passed),
-            text_passed: text.map(|run| run.passed),
-            native_tool_call_count: native.map(|run| run.tool_calls),
-            text_tool_call_count: text.map(|run| run.tool_calls),
-            native_rejected_tool_call_count: native.map(|run| run.rejected_tool_calls),
-            text_rejected_tool_call_count: text.map(|run| run.rejected_tool_calls),
-            verifier_match: pair
-                .map(|(native, text)| native.verification_success == text.verification_success),
-            tool_sequence_match: pair
-                .map(|(native, text)| native.tool_sequence == text.tool_sequence),
-            rejected_tool_call_delta_text_minus_native: pair.map(|(native, text)| {
-                text.rejected_tool_calls as i64 - native.rejected_tool_calls as i64
-            }),
-            token_delta_text_minus_native: pair.map(|(native, text)| {
-                (text.input_tokens + text.output_tokens)
-                    - (native.input_tokens + native.output_tokens)
-            }),
-            iteration_delta_text_minus_native: pair
-                .map(|(native, text)| text.iterations - native.iterations),
-            equivalent: pair.map(|(native, text)| {
-                native.status == text.status
-                    && native.passed == text.passed
-                    && native.skipped == text.skipped
-                    && native.verification_success == text.verification_success
-                    && native.tool_sequence == text.tool_sequence
-                    && native.rejected_tool_calls == text.rejected_tool_calls
-            }),
-            divergence_reasons,
-            evidence_paths,
-        });
+        let text_runs = group
+            .iter()
+            .filter(|run| run.tool_format == "text")
+            .copied()
+            .collect::<Vec<_>>();
+        // Matrix construction preserves replicate order within each format, so
+        // index-pairing compares the same fixture trial across native and text.
+        for index in 0..native_runs.len().max(text_runs.len()) {
+            if let Some(comparison) = compare_format_pair(
+                native_runs.get(index).copied(),
+                text_runs.get(index).copied(),
+            ) {
+                out.push(comparison);
+            }
+        }
     }
     out
+}
+
+fn compare_format_pair(
+    native: Option<&RunReport>,
+    text: Option<&RunReport>,
+) -> Option<FormatComparison> {
+    let first = native.or(text)?;
+    let pair = native.zip(text);
+    let mut divergence_reasons = Vec::new();
+    if let Some((native, text)) = pair {
+        if native.status != text.status {
+            divergence_reasons.push(format!(
+                "status differs: native={} text={}",
+                native.status, text.status
+            ));
+        }
+        if native.passed != text.passed {
+            divergence_reasons.push(format!(
+                "pass result differs: native={} text={}",
+                native.passed, text.passed
+            ));
+        }
+        if native.verification_success != text.verification_success {
+            divergence_reasons.push(format!(
+                "verifier result differs: native={} text={}",
+                native.verification_success, text.verification_success
+            ));
+        }
+        if native.tool_sequence != text.tool_sequence {
+            divergence_reasons.push(format!(
+                "tool sequence differs: native=[{}] text=[{}]",
+                native.tool_sequence.join(", "),
+                text.tool_sequence.join(", ")
+            ));
+        }
+        if native.rejected_tool_calls != text.rejected_tool_calls {
+            divergence_reasons.push(format!(
+                "rejected tool-call recovery differs: native={} text={}",
+                native.rejected_tool_calls, text.rejected_tool_calls
+            ));
+        }
+    }
+    let evidence_paths = [native, text]
+        .into_iter()
+        .flatten()
+        .map(|run| run.transcript_events_path.clone())
+        .collect::<Vec<_>>();
+    Some(FormatComparison {
+        fixture_id: first.fixture_id.clone(),
+        selector: first.selector.clone(),
+        native_run_id: native.map(|run| run.run_id.clone()),
+        text_run_id: text.map(|run| run.run_id.clone()),
+        native_evidence_path: native.map(|run| run.transcript_events_path.clone()),
+        text_evidence_path: text.map(|run| run.transcript_events_path.clone()),
+        native_status: native.map(|run| run.status.clone()),
+        text_status: text.map(|run| run.status.clone()),
+        native_passed: native.map(|run| run.passed),
+        text_passed: text.map(|run| run.passed),
+        native_tool_call_count: native.map(|run| run.tool_calls),
+        text_tool_call_count: text.map(|run| run.tool_calls),
+        native_rejected_tool_call_count: native.map(|run| run.rejected_tool_calls),
+        text_rejected_tool_call_count: text.map(|run| run.rejected_tool_calls),
+        verifier_match: pair
+            .map(|(native, text)| native.verification_success == text.verification_success),
+        tool_sequence_match: pair.map(|(native, text)| native.tool_sequence == text.tool_sequence),
+        rejected_tool_call_delta_text_minus_native: pair.map(|(native, text)| {
+            text.rejected_tool_calls as i64 - native.rejected_tool_calls as i64
+        }),
+        token_delta_text_minus_native: pair.map(|(native, text)| {
+            (text.input_tokens + text.output_tokens) - (native.input_tokens + native.output_tokens)
+        }),
+        iteration_delta_text_minus_native: pair
+            .map(|(native, text)| text.iterations - native.iterations),
+        equivalent: pair.map(|(native, text)| {
+            native.status == text.status
+                && native.passed == text.passed
+                && native.skipped == text.skipped
+                && native.verification_success == text.verification_success
+                && native.tool_sequence == text.tool_sequence
+                && native.rejected_tool_calls == text.rejected_tool_calls
+        }),
+        divergence_reasons,
+        evidence_paths,
+    })
 }
 
 fn build_parity_by_pair(comparisons: &[FormatComparison]) -> Vec<ToolModeParityPairSummary> {
@@ -1056,13 +1092,22 @@ fn write_json_artifacts(output_dir: &Path, summary: &EvalSummary) -> Result<(), 
             .filter_map(parity_fixture_input)
             .collect::<Vec<_>>(),
     );
+    let mut parity_report_counts = BTreeMap::<String, usize>::new();
     for report in &parity_reports {
-        let path = parity_dir
-            .join(sanitize_id(&format!(
-                "{}__{}:{}",
-                report.fixture_id, report.provider, report.model
-            )))
-            .join("parity.json");
+        let key = sanitize_id(&format!(
+            "{}__{}:{}",
+            report.fixture_id, report.provider, report.model
+        ));
+        let occurrence = parity_report_counts
+            .entry(key.clone())
+            .and_modify(|count| *count += 1)
+            .or_insert(1);
+        let directory = if *occurrence == 1 {
+            key
+        } else {
+            format!("{key}__r{occurrence}")
+        };
+        let path = parity_dir.join(directory).join("parity.json");
         tool_mode_parity::write_fixture_report(&path, report)?;
     }
     let overlay = tool_mode_parity::build_overlay(
@@ -1221,12 +1266,19 @@ fn tool_call_sequence(value: Option<&JsonValue>) -> Option<Vec<String>> {
     (!sequence.is_empty()).then_some(sequence)
 }
 
-fn run_id_for(fixture: &EvalPackCase, selector: &ModelSelector, tool_format: &str) -> String {
+fn run_id_for(
+    fixture: &EvalPackCase,
+    selector: &ModelSelector,
+    tool_format: &str,
+    replicate: usize,
+) -> String {
+    let suffix = (replicate > 1).then(|| format!("__r{replicate}"));
     sanitize_id(&format!(
-        "{}__{}__{}",
+        "{}__{}__{}{}",
         fixture_id(fixture),
         selector_label(selector),
-        tool_format
+        tool_format,
+        suffix.as_deref().unwrap_or_default()
     ))
 }
 

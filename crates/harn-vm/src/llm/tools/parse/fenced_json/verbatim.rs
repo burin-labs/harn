@@ -25,7 +25,7 @@
 //! count-anchored `<<TAG:N`). For each such argument the matching heredoc body
 //! trails the JSON header:
 //!
-//! ```text
+//! ````text
 //! ```tool
 //! { "name": "edit", "args": { "path": "x.zig", "old_string": "ANCHOR",
 //!   "new_string": "<<NEW:921" } }
@@ -33,7 +33,7 @@
 //! ...921 raw lines: ``` fences, <<EOF, </tool>, the tag itself, CRLF...
 //! NEW
 //! ```
-//! ```
+//! ````
 //!
 //! The declaration is in-JSON (a valid string value) and the count `:N` makes the
 //! close collision-proof: a bare `NEW` line, a ```` ``` ````, or any other byte

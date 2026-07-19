@@ -91,6 +91,12 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
     public let cacheTypeKArg: String?
     public let cacheTypeVArg: String?
     public let cacheRamArg: String?
+    public let chatTemplateKwargsArg: String?
+    public let jinjaArg: String?
+    public let reasoningArg: String?
+    public let reasoningFormatArg: String?
+    public let flashAttnArg: String?
+    public let metricsArg: String?
     public let enableLoraArg: String?
     public let loraModulesArg: String?
     public let loraModulesValueFormat: String?
@@ -119,6 +125,12 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
         case cacheTypeKArg = "cache_type_k_arg"
         case cacheTypeVArg = "cache_type_v_arg"
         case cacheRamArg = "cache_ram_arg"
+        case chatTemplateKwargsArg = "chat_template_kwargs_arg"
+        case jinjaArg = "jinja_arg"
+        case reasoningArg = "reasoning_arg"
+        case reasoningFormatArg = "reasoning_format_arg"
+        case flashAttnArg = "flash_attn_arg"
+        case metricsArg = "metrics_arg"
         case enableLoraArg = "enable_lora_arg"
         case loraModulesArg = "lora_modules_arg"
         case loraModulesValueFormat = "lora_modules_value_format"

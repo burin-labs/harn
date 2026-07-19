@@ -137,6 +137,7 @@ mod tests {
             max_local_models: 2,
             keep_local_after_run: false,
             max_runs: None,
+            replicates: 1,
             max_iterations: 8,
             python: "python3".to_string(),
             fail_on_unauthorized: false,

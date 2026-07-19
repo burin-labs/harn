@@ -147,6 +147,25 @@ pub struct LocalRuntimeDef {
     pub cache_type_v_arg: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_ram_arg: Option<String>,
+    /// Argument that accepts a JSON object configuring the runtime's chat
+    /// template parser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template_kwargs_arg: Option<String>,
+    /// Flag that enables the runtime's Jinja chat-template parser.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jinja_arg: Option<String>,
+    /// Argument that selects the runtime's reasoning mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_arg: Option<String>,
+    /// Argument that selects the runtime's reasoning extraction format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_format_arg: Option<String>,
+    /// Argument that selects the runtime's flash-attention mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flash_attn_arg: Option<String>,
+    /// Flag that enables the runtime's metrics endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics_arg: Option<String>,
     /// Flag that enables adapter-aware serving for LoRA-capable runtimes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_lora_arg: Option<String>,

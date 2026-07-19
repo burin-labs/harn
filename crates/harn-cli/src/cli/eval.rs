@@ -11,6 +11,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand, ValueEnum};
 
+const MAX_CODING_AGENT_REPLICATES: usize = 16;
+
 #[derive(Debug, Args)]
 #[command(args_conflicts_with_subcommands = true)]
 pub struct EvalArgs {
@@ -149,6 +151,9 @@ pub struct EvalCodingAgentArgs {
     /// Stop after N matrix entries, useful for cost-capped smoke runs.
     #[arg(long = "max-runs")]
     pub max_runs: Option<usize>,
+    /// Number of independent trials for each fixture/model/tool-format cell.
+    #[arg(long = "replicates", default_value_t = 1, value_parser = parse_replicates)]
+    pub replicates: usize,
     /// Maximum repair-agent loop iterations per run.
     #[arg(long = "max-iterations", default_value_t = 8)]
     pub max_iterations: usize,
@@ -202,6 +207,16 @@ pub struct EvalCodingAgentArgs {
     /// surfaced (harn#2318).
     #[arg(long = "baseline-comparison-against")]
     pub baseline_comparison_against: Option<PathBuf>,
+}
+
+fn parse_replicates(raw: &str) -> Result<usize, String> {
+    let value = raw
+        .parse::<usize>()
+        .map_err(|_| "replicates must be a positive integer".to_string())?;
+    (1..=MAX_CODING_AGENT_REPLICATES)
+        .contains(&value)
+        .then_some(value)
+        .ok_or_else(|| format!("replicates must be between 1 and {MAX_CODING_AGENT_REPLICATES}"))
 }
 
 #[derive(Debug, Args)]

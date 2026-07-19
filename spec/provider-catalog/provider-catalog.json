@@ -700,6 +700,12 @@
         "cache_type_k_arg": "--cache-type-k",
         "cache_type_v_arg": "--cache-type-v",
         "cache_ram_arg": "--cache-ram",
+        "chat_template_kwargs_arg": "--chat-template-kwargs",
+        "jinja_arg": "--jinja",
+        "reasoning_arg": "--reasoning",
+        "reasoning_format_arg": "--reasoning-format",
+        "flash_attn_arg": "--flash-attn",
+        "metrics_arg": "--metrics",
         "default_args": [
           "--jinja",
           "--reasoning",
@@ -9189,11 +9195,11 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "text_unreliable",
-        "parity_notes": "2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation.",
+        "preferred_format": "json",
+        "parity": "text_only",
+        "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9279,11 +9285,11 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "text_unreliable",
-        "parity_notes": "2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation.",
+        "preferred_format": "json",
+        "parity": "text_only",
+        "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9345,11 +9351,11 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "text_unreliable",
-        "parity_notes": "2026-07-18 evidence, llama.cpp server-cuda launched with --jinja + the model's tool chat template (the 2026-07-17 demotion trace, PR #4981 / commit 44cbe875d, predates confirmation that the serving config applied the tool template; this rule keeps server_parser=none): (a) 5/5 forced-native trials on a 13-action enum edit schema — the demotion's exact concern — selected the correct action per intent (append/replace_range/create/insert_after/rename_symbol) with all required fields (action, path) present, well-formed arguments, and finish_reason=tool_calls in every trial; (b) a live agent session produced ZERO parseable write-shaped calls over the json text channel (done-judge cap exhausted), while forced-native on the same task produced parseable edit + run calls immediately and converged past writes; (c) the mlx and local-vLLM siblings of the same weights/template are already native_tools=true (the mlx note cites the llama.cpp Q4 quant native-validated 2026-06-05, pre-demotion). Operator-authorized promotion (2026-07-18) ahead of the full receipted forced-format family sweep; harn#5162 remains the follow-up for family-wide N>=5 confirmation.",
+        "preferred_format": "json",
+        "parity": "text_only",
+        "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -25246,7 +25252,6 @@
       "label": "Qwen3.6 35B (llama.cpp)",
       "family": "qwen",
       "capabilities": [
-        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -25264,7 +25269,6 @@
       "label": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
-        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",
@@ -25282,7 +25286,6 @@
       "label": "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
       "family": "qwen",
       "capabilities": [
-        "native_tools",
         "prefers_markdown_scaffolding",
         "streaming",
         "structured_output",

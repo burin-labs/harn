@@ -494,12 +494,14 @@ fn matrix_max_runs_bounds_fixture_model_tool_product() {
     };
     let selectors = vec![selector];
     let tool_formats = vec!["native".to_string(), "text".to_string()];
-    let matrix = build_matrix(&fixtures, &selectors, &tool_formats, Some(3));
+    let matrix = build_matrix(&fixtures, &selectors, &tool_formats, Some(3), 1);
     assert_eq!(matrix.len(), 3);
     assert_eq!(
         matrix
             .iter()
-            .map(|(fixture, _selector, tool_format)| (fixture_id(fixture), tool_format.as_str()))
+            .map(|(fixture, _selector, tool_format, _replicate)| {
+                (fixture_id(fixture), tool_format.as_str())
+            })
             .collect::<Vec<_>>(),
         vec![
             ("python-add", "native"),
@@ -508,8 +510,15 @@ fn matrix_max_runs_bounds_fixture_model_tool_product() {
         ],
     );
 
-    let empty = build_matrix(&fixtures, &selectors, &tool_formats, Some(0));
+    let empty = build_matrix(&fixtures, &selectors, &tool_formats, Some(0), 1);
     assert!(empty.is_empty());
+
+    let replicated = build_matrix(&fixtures, &selectors, &tool_formats, None, 2);
+    assert_eq!(replicated.len(), fixtures.len() * tool_formats.len() * 2);
+    assert_eq!(replicated[0].3, 1);
+    assert_eq!(replicated[1].3, 2);
+    assert_eq!(replicated[2].2, "text");
+    assert_eq!(replicated[2].3, 1);
 }
 
 #[test]

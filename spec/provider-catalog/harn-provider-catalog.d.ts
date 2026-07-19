@@ -52,6 +52,12 @@ export interface HarnLocalRuntime {
   cache_type_k_arg?: string
   cache_type_v_arg?: string
   cache_ram_arg?: string
+  chat_template_kwargs_arg?: string
+  jinja_arg?: string
+  reasoning_arg?: string
+  reasoning_format_arg?: string
+  flash_attn_arg?: string
+  metrics_arg?: string
   enable_lora_arg?: string
   lora_modules_arg?: string
   lora_modules_value_format?: "name_path" | "json_with_base_model"
