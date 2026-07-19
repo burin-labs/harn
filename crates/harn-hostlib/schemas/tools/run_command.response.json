@@ -33,6 +33,21 @@
     "stderr_path": { "type": "string" },
     "line_count": { "type": "integer", "minimum": 0 },
     "byte_count": { "type": "integer", "minimum": 0 },
+    "output_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic combined-output byte offset carried on running snapshots; the agent loop pages only the delta since its last digest from here."
+    },
+    "stderr_byte_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cumulative stderr bytes on running snapshots; the loop derives the first-stderr decision trigger from this crossing zero."
+    },
+    "silence_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Milliseconds since the last output chunk (or since spawn if none) on running snapshots, for byte-stall detection."
+    },
     "output_sha256": { "type": "string" },
     "sandbox": {
       "type": "object",

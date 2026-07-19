@@ -48,6 +48,7 @@ mod file_io;
 mod git;
 pub(crate) mod inspect_test_results;
 mod lang;
+mod list_handles;
 pub mod long_running;
 mod manage_packages;
 mod outline;
@@ -162,6 +163,12 @@ impl HostlibCapability for ToolsCapability {
             cancel_handle::NAME,
             "cancel_handle",
             cancel_handle::handle,
+        );
+        registry.register_gated_fn(
+            "tools",
+            list_handles::NAME,
+            "list_handles",
+            list_handles::handle,
         );
         registry.register_gated_fn(
             "tools",

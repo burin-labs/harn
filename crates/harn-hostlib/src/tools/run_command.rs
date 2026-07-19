@@ -146,6 +146,15 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .map_err(sandbox_scope_error_to_hostlib)?;
     if background || background_after_ms.is_some() {
         let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
+        // Auto-conversion (a `background_after_ms` inline window) means the caller
+        // is waiting on the command -> awaited. A bare `background`/detach with no
+        // inline window is the fire-and-forget service idiom -> service. The agent
+        // loop owns transitions (e.g. `release_command`) after spawn.
+        let lease = if background_after_ms.is_some() {
+            super::long_running::LeaseTag::Awaited
+        } else {
+            super::long_running::LeaseTag::Service
+        };
         let info = super::long_running::spawn_long_running_with_options(
             NAME,
             program,
@@ -161,6 +170,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 progress_max_interval: progress_max_interval_ms.map(Duration::from_millis),
                 progress_max_inline_bytes,
                 snapshot_binding,
+                lease,
             },
         )?;
         if let Some(wait_ms) = background_after_ms.filter(|wait_ms| *wait_ms > 0) {
@@ -301,6 +311,20 @@ fn initial_background_snapshot(
     response.insert(
         harn_vm::value::intern_key("byte_count"),
         VmValue::Int(byte_count as i64),
+    );
+    // Seed the loop's per-handle delta cursor and stall/first-stderr detectors on
+    // the conversion snapshot, matching the ongoing progress-thread payloads.
+    response.insert(
+        harn_vm::value::intern_key("output_offset"),
+        VmValue::Int(byte_count as i64),
+    );
+    response.insert(
+        harn_vm::value::intern_key("stderr_byte_count"),
+        VmValue::Int(stderr.len() as i64),
+    );
+    response.insert(
+        harn_vm::value::intern_key("silence_ms"),
+        VmValue::Int(if byte_count > 0 { 0 } else { wait_ms as i64 }),
     );
     response.insert(
         harn_vm::value::intern_key("line_count"),
