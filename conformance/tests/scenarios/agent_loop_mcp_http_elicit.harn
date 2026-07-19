@@ -29,7 +29,9 @@ pipeline default() {
     [
       {
         text: "Calling MCP elicitation tool.",
-        tool_calls: [{id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}}],
+        tool_calls: [
+          {id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}},
+        ],
       },
       llm_text("<done>##DONE##</done>"),
     ],
@@ -44,7 +46,10 @@ pipeline default() {
       const calls = host_mock_calls()
       const successful = result?.tools.successful[0]
       const tool_name_parts = split(successful, "__")
-      const response = regex_captures("(accept):(staging):(true)", json_stringify(llm_mock_calls()[1].messages))
+      const response = regex_captures(
+        "(accept):(staging):(true)",
+        json_stringify(llm_mock_calls()[1].messages),
+      )
       require len(response) == 1, "completed MCP tool result carries the elicitation response"
       process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
       __io_println(successful)
