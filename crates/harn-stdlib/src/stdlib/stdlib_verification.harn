@@ -131,4 +131,3 @@ pub type VerificationDiagnosticDelta = dict
 pub type VerificationGateInput = dict
 // Keep public verification aliases on this facade for the same type-checker
 // compatibility boundary as the agent option and stall facades.
-

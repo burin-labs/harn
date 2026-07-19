@@ -142,20 +142,28 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     const streak = stall_state.same_diagnostic_streak
     const long_stall = predicates.long_stall
       && streak >= config.verify_state_streak
-      && stall_state.verify_turns_since_advance >= config.verify_state_stall_turns
+      && stall_state.verify_turns_since_advance
+      >= config
+      .verify_state_stall_turns
     // Hard-recurrence trips on EITHER a consecutive same-diagnostic streak OR the
     // TOTAL (non-consecutive) occurrences of the CURRENT failure signature across
     // the run. The total counter catches interleaved churn (the same dead API /
     // error re-proposed N times with off-signature failures churning between, so
     // the consecutive streak keeps resetting and never trips). Both predicates
     // share `verify_state_recurrence_hard`.
-    const sig_total = to_int((stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0)
+    const sig_total = to_int(
+      (stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0,
+    )
       ?? 0
     const hard_recurrence = predicates.hard_recurrence
       && (streak >= config.verify_state_recurrence_hard
-      || sig_total >= config.verify_state_recurrence_hard)
+      || sig_total
+      >= config
+      .verify_state_recurrence_hard)
     const write_axis = predicates.write_axis
-      && stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
+      && stall_state.verify_turns_since_advance
+      >= config
+      .no_verifier_progress_limit
       && stall_state.verify_wrote_since_advance
     return long_stall || hard_recurrence || write_axis
   }
@@ -166,7 +174,9 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     return false
   }
   return stall_state.same_diagnostic_streak >= config.no_net_progress_extend_after
-    || stall_state.failing_verify_turns >= config.no_net_progress_hard_cap_after
+    || stall_state
+    .failing_verify_turns
+    >= config.no_net_progress_hard_cap_after
 }
 
 /**
@@ -195,7 +205,8 @@ pub fn agent_stall_verified_write_satisfied(raw_config, stall_state: AgentStallS
  */
 pub fn agent_stall_repeated_verified_pass(raw_config, stall_state: AgentStallState) -> bool {
   return agent_stall_verified_write_satisfied(raw_config, stall_state)
-    && stall_state.last_outcome_kind == "ok"
+    && stall_state.last_outcome_kind
+    == "ok"
     && stall_state.same_observation_streak >= 2
 }
 

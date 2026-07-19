@@ -109,10 +109,16 @@ pub fn __normalize_iteration_budget(opts) {
   } else {
     max_cap
   }
-  const initial = __positive_int_budget_field(user_budget?.initial, initial_default, "iteration_budget.initial")
+  const initial = __positive_int_budget_field(
+    user_budget?.initial,
+    initial_default,
+    "iteration_budget.initial",
+  )
   if initial > max_cap {
     throw "agent_loop: `iteration_budget.initial` must be less than or equal to `iteration_budget.max`; got initial="
-      + to_string(initial)
+      + to_string(
+      initial,
+    )
       + ", max="
       + to_string(max_cap)
   }
@@ -124,7 +130,9 @@ pub fn __normalize_iteration_budget(opts) {
   const expose_decisions = if user_budget?.expose_decisions != nil {
     if type_of(user_budget.expose_decisions) != "bool" {
       throw "agent_loop: `iteration_budget.expose_decisions` must be a bool; got "
-        + type_of(user_budget.expose_decisions)
+        + type_of(
+        user_budget.expose_decisions,
+      )
     }
     user_budget.expose_decisions
   } else {
@@ -136,8 +144,16 @@ pub fn __normalize_iteration_budget(opts) {
     max: max_cap,
     extend_by: extend_by,
     expose_decisions: expose_decisions,
-    wall_clock_ms: __positive_int_budget_field(user_budget?.wall_clock_ms, nil, "iteration_budget.wall_clock_ms"),
-    total_cost_usd: __positive_float_budget_field(user_budget?.total_cost_usd, nil, "iteration_budget.total_cost_usd"),
+    wall_clock_ms: __positive_int_budget_field(
+      user_budget?.wall_clock_ms,
+      nil,
+      "iteration_budget.wall_clock_ms",
+    ),
+    total_cost_usd: __positive_float_budget_field(
+      user_budget?.total_cost_usd,
+      nil,
+      "iteration_budget.total_cost_usd",
+    ),
     consecutive_failures: __normalize_consecutive_failure_budget(user_budget?.consecutive_failures),
   }
 }
@@ -221,7 +237,10 @@ pub fn agent_loop_options(options = nil) {
   opts = __with_project_context_profile(opts)
   opts = agent_refresh_tool_format_for_route(opts)
   if !__has_key(opts, "tool_format")
-    && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
+    && (opts?.tools == nil
+    || __client_tool_search_requested(
+    opts?.tool_search,
+  )) {
     opts = opts + {tool_format: __fallback_tool_format(), _tool_format_source: "fallback"}
   }
   if (opts?.loop_until_done ?? false) && !__has_key(opts, "done_sentinel") {
@@ -235,14 +254,19 @@ pub fn agent_loop_options(options = nil) {
     }
   }
   if __has_key(opts, "done_judge") && __judge_enabled(opts?.done_judge)
-    && !__has_key(opts, "done_sentinel")
+    && !__has_key(
+    opts,
+    "done_sentinel",
+  )
     && !__native_tools_complete_naturally(opts) {
     opts = opts + {done_sentinel: "##DONE##"}
   }
   if __has_key(opts, "verify_completion_judge") {
     if __judge_enabled(opts?.verify_completion_judge) {
       opts = opts
-        + {verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge, opts)}
+        + {
+        verify_completion_judge: __completion_judge_defaults(opts?.verify_completion_judge, opts),
+      }
     } else {
       opts = opts + {verify_completion_judge: nil}
     }
@@ -503,7 +527,11 @@ pub fn __stack_sanitize_result(options, policy = nil) {
   let stripped = []
   const mode = __stack_sanitize_mode(policy)
   if mode == "healthcheck" || mode == "preflight" || mode == "probe" {
-    const deliberation = __stack_strip_option_keys(out, stripped, ["reasoning_effort", "thinking", "effort"])
+    const deliberation = __stack_strip_option_keys(
+      out,
+      stripped,
+      ["reasoning_effort", "thinking", "effort"],
+    )
     out = deliberation.options
     stripped = deliberation.stripped
   }
@@ -555,7 +583,12 @@ pub fn __stack_configured_model_options(cfg, prefixes) {
     [cfg?.model, user?.model, __stack_first_env(prefixes, "MODEL"), defaults?.model],
   )
   const model_role = __stack_first_non_empty(
-    [cfg?.model_role, user?.model_role, __stack_first_env(prefixes, "MODEL_ROLE"), defaults?.model_role],
+    [
+      cfg?.model_role,
+      user?.model_role,
+      __stack_first_env(prefixes, "MODEL_ROLE"),
+      defaults?.model_role,
+    ],
   )
   const task = __stack_first_non_empty(
     [cfg?.task, user?.task, __stack_first_env(prefixes, "TASK"), defaults?.task],

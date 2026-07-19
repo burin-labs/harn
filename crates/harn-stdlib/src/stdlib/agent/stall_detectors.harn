@@ -205,7 +205,10 @@ pub fn token_runaway_post_turn(config: dict) {
   return { payload ->
     const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
     const totals = agent_session_totals(session_id)
-    const obs = {making_progress: token_runaway_made_progress(payload), tokens: to_float(totals?.input_tokens ?? 0)}
+    const obs = {
+      making_progress: token_runaway_made_progress(payload),
+      tokens: to_float(totals?.input_tokens ?? 0),
+    }
     const decision = token_runaway_decision(config, obs)
     if decision.action != "abort" {
       nil
@@ -227,7 +230,9 @@ pub fn token_runaway_post_turn(config: dict) {
       agent_emit_event(session_id, "agent_loop_stall_warning", warning)
       {
         message: "Token-runaway detector: output has grown well past this task's typical size ("
-          + to_string(to_int(obs.tokens))
+          + to_string(
+          to_int(obs.tokens),
+        )
           + " input tokens vs a ~"
           + to_string(to_int(decision.cap))
           + " ceiling) without landing verified progress. Stop and report the blocker instead of generating more.",

@@ -69,13 +69,17 @@ pub fn __autocontinue_max_continuations(llm_opts) {
  */
 pub fn __autocontinue_raised_cap(current, llm_opts) {
   const base = if type_of(llm_opts?.truncation_auto_continue_base) == "int"
-    && llm_opts.truncation_auto_continue_base > 0 {
+    && llm_opts
+    .truncation_auto_continue_base
+    > 0 {
     llm_opts.truncation_auto_continue_base
   } else {
     16384
   }
   const ceiling = if type_of(llm_opts?.truncation_auto_continue_ceiling) == "int"
-    && llm_opts.truncation_auto_continue_ceiling > 0 {
+    && llm_opts
+    .truncation_auto_continue_ceiling
+    > 0 {
     llm_opts.truncation_auto_continue_ceiling
   } else {
     32768
@@ -190,7 +194,10 @@ pub fn __invoke_llm_with_autocontinue(
     )
     cap = raised
     const retry_opts = retry_llm_opts
-      + {max_tokens: raised, _truncation_auto_continue_attempt: attempts}
+      + {
+      max_tokens: raised,
+      _truncation_auto_continue_attempt: attempts,
+    }
     call = agent_invoke_llm(message, turn_system, retry_opts)
   }
   return call

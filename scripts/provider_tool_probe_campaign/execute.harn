@@ -127,7 +127,10 @@ pub fn __auth_readiness(routes: list<ProviderToolProbeRoute>, env: dict, env_sou
       missing_by_provider = __increment_key(missing_by_provider, route.provider)
       missing_env_candidates_by_provider = missing_env_candidates_by_provider
         + {
-        [route.provider]: __merge_unique_strings(missing_env_candidates_by_provider[route.provider] ?? [], missing),
+        [route.provider]: __merge_unique_strings(
+          missing_env_candidates_by_provider[route.provider] ?? [],
+          missing,
+        ),
       }
     }
   }
@@ -192,8 +195,15 @@ pub fn __run_tool_probe(
     repeat,
     timeout_secs,
   )
-  const artifact_path = provider_tool_probe_campaign_artifact_path(route, behavior, mode, output_dir)
-  const child = harness.process.spawn_captured({cmd: harn_bin, args: command[1:len(command)], env: env})
+  const artifact_path = provider_tool_probe_campaign_artifact_path(
+    route,
+    behavior,
+    mode,
+    output_dir,
+  )
+  const child = harness.process.spawn_captured(
+    {cmd: harn_bin, args: command[1:len(command)], env: env},
+  )
   const stdout = child.stdout ?? ""
   if trim(stdout) != "" {
     harness.fs.write_text(artifact_path, stdout)

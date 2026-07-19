@@ -21,7 +21,9 @@ pub fn __turn_made_edit(dispatch, tools) -> bool {
   for name in __tool_names_by_status(dispatch, true) {
     const entry = __tool_registry_entry(tools, name)
     const annotations = agent_tool_entry_annotations(entry)
-    const kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
+    const kind = lowercase(
+      to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""),
+    )
     if contains(__REPAIR_EDIT_KINDS, kind) {
       return true
     }
@@ -233,7 +235,8 @@ pub fn __next_progress_count(made_progress, turns_since_progress) {
 pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false) {
   const action = if has_tools {
     "Emit exactly one well-formed " + paradigm.call_noun + " now, or state your final answer "
-      + paradigm.final_answer
+      + paradigm
+      .final_answer
       + " and stop."
   } else {
     "Make concrete progress in your reply now, or state your final answer and stop."
@@ -351,13 +354,29 @@ pub fn __agent_loop_budget_exhaustion(
   const aggregates = __agent_loop_budget_aggregates(session_id, totals, loop_start_ms)
   if budget?.wall_clock_ms != nil && aggregates.wall_clock_ms >= budget.wall_clock_ms {
     return aggregates
-      + {exhausted: true, kind: "wall_clock", iteration: iteration, max_iterations: max_iterations}
+      + {
+      exhausted: true,
+      kind: "wall_clock",
+      iteration: iteration,
+      max_iterations: max_iterations,
+    }
   }
   if budget?.total_cost_usd != nil && aggregates.cost_usd >= budget.total_cost_usd {
     return aggregates
-      + {exhausted: true, kind: "total_cost", iteration: iteration, max_iterations: max_iterations}
+      + {
+      exhausted: true,
+      kind: "total_cost",
+      iteration: iteration,
+      max_iterations: max_iterations,
+    }
   }
-  return aggregates + {exhausted: false, kind: "", iteration: iteration, max_iterations: max_iterations}
+  return aggregates
+    + {
+    exhausted: false,
+    kind: "",
+    iteration: iteration,
+    max_iterations: max_iterations,
+  }
 }
 
 pub fn __agent_loop_emit_budget_exhausted(session_id, exhaustion) {
@@ -426,16 +445,19 @@ pub fn __agent_loop_failure_matches_kind(error, wanted) {
   const status = to_int(error?.status ?? error?.status_code ?? 0) ?? 0
   if wanted == "transient" {
     return kind == "transient" || category == "transient_network" || category == "timeout"
-      || reason == "timeout"
+      || reason
+      == "timeout"
   }
   if wanted == "rate_limit" {
     return kind == "rate_limit" || category == "rate_limit" || category == "rate_limited"
-      || reason == "rate_limit"
+      || reason
+      == "rate_limit"
       || status == 429
   }
   if wanted == "provider_5xx" {
     return kind == "provider_5xx" || category == "server_error" || category == "overloaded"
-      || reason == "server_error"
+      || reason
+      == "server_error"
       || (status >= 500 && status < 600)
   }
   return category == wanted || reason == wanted || kind == wanted
@@ -473,7 +495,10 @@ pub fn __agent_loop_is_escalation_transport_failure(error) {
     return true
   }
   return __agent_loop_failure_matches_kind(error, "transient")
-    || __agent_loop_failure_matches_kind(error, "rate_limit")
+    || __agent_loop_failure_matches_kind(
+    error,
+    "rate_limit",
+  )
     || __agent_loop_failure_matches_kind(error, "provider_5xx")
 }
 
@@ -565,10 +590,17 @@ pub fn __agent_loop_emit_provider_error(
  */
 pub fn __agent_loop_checkpoint_modes(kind) {
   if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
-    return {immediate: true, finish_step: false, audit_only: false, inbox: false, typed_delivery: nil}
+    return {
+      immediate: true,
+      finish_step: false,
+      audit_only: false,
+      inbox: false,
+      typed_delivery: nil,
+    }
   }
   if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START
-    || kind == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
+    || kind
+    == __AGENT_LOOP_CHECKPOINT_POST_TOOL_DISPATCH
     || kind == "iteration_end" {
     const typed_delivery = if kind == __AGENT_LOOP_CHECKPOINT_ITERATION_START {
       __AGENT_LOOP_HOST_INJECTION_TURN_BOUNDARY
@@ -586,12 +618,30 @@ pub fn __agent_loop_checkpoint_modes(kind) {
     }
   }
   if kind == "pre_compact" || kind == "post_compact" {
-    return {immediate: false, finish_step: false, audit_only: false, inbox: true, typed_delivery: nil}
+    return {
+      immediate: false,
+      finish_step: false,
+      audit_only: false,
+      inbox: true,
+      typed_delivery: nil,
+    }
   }
   if kind == "loop_exit" {
-    return {immediate: false, finish_step: false, audit_only: true, inbox: false, typed_delivery: nil}
+    return {
+      immediate: false,
+      finish_step: false,
+      audit_only: true,
+      inbox: false,
+      typed_delivery: nil,
+    }
   }
-  return {immediate: false, finish_step: false, audit_only: false, inbox: false, typed_delivery: nil}
+  return {
+    immediate: false,
+    finish_step: false,
+    audit_only: false,
+    inbox: false,
+    typed_delivery: nil,
+  }
 }
 
 /**

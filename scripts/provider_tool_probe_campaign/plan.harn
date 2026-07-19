@@ -173,7 +173,8 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
           continue
         }
         if behavior.runner == "provider_tool_probe" && max_probes > 0
-          && executable_units_selected >= max_probes {
+          && executable_units_selected
+          >= max_probes {
           probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
           continue
         }
@@ -182,7 +183,10 @@ pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
           executable_units_selected = executable_units_selected + 1
         }
         for format in behavior.tool_formats {
-          cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
+          cells = cells
+            + [
+            __planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs),
+          ]
         }
       }
     }

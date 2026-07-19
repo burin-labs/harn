@@ -169,7 +169,9 @@ fn __tool_format_is_text_channel(format) {
 fn __validate_explicit_tool_format(value) {
   if __valid_tool_format(value) == nil {
     throw "agent_loop: `tool_format` must be one of native, text, json, auto (or omitted); got "
-      + to_string(value)
+      + to_string(
+      value,
+    )
   }
 }
 
@@ -339,7 +341,9 @@ pub fn agent_tool_format_override_warning_text(event) {
   const parity = payload?.catalog_parity ?? "unknown"
   const override_reason = trim(to_string(payload?.override_reason ?? ""))
   const needs_reason = (parity == "native_unreliable" && requested == "native")
-    || (parity == "text_unreliable" && requested == "text")
+    || (parity
+    == "text_unreliable"
+    && requested == "text")
   let line = "warning: tool_format override: "
     + provider
     + ":"
@@ -383,7 +387,8 @@ fn __capability_gap_event(pair, requested, fallback) {
     model: pair.model,
     requested_tool_format: requested,
     fallback_tool_format: fallback,
-    message: "No preferred_tool_format recommendation for provider/model; using fallback tool_format.",
+    message:
+      "No preferred_tool_format recommendation for provider/model; using fallback tool_format.",
   }
 }
 
@@ -416,7 +421,13 @@ pub fn agent_tool_format_resolution(options = nil) {
     }
     const override_reason = __optional_text(opts?.tool_format_override_reason)
     __validate_tool_format_parity(pair, explicit, parity, override_reason)
-    const override_event = __tool_format_override_event(pair, explicit, preferred, parity, override_reason)
+    const override_event = __tool_format_override_event(
+      pair,
+      explicit,
+      preferred,
+      parity,
+      override_reason,
+    )
     // Parity steering must match the wire. The Rust `extract_llm_options`
     // capability gate silently rewrites a tool-bearing request whose channel
     // the route's `tool_mode_parity` forbids (e.g. `native` on a
@@ -430,7 +441,10 @@ pub fn agent_tool_format_resolution(options = nil) {
     // `tool_format_override_reason` opts out (the author is forcing a known-risky
     // channel deliberately, and the Rust gate is bypassed in mock/replay too).
     const steered = if override_reason == nil
-      && __parity_conflicts_with_requested(__catalog_parity(parity), explicit) {
+      && __parity_conflicts_with_requested(
+      __catalog_parity(parity),
+      explicit,
+    ) {
       __steer_tool_format(__catalog_parity(parity), preferred)
     } else {
       nil
@@ -486,7 +500,12 @@ pub fn agent_tool_format_resolution(options = nil) {
       tool_format_override_event: nil,
     }
   }
-  return {tool_format: nil, source: "unresolved", capability_gap_event: nil, tool_format_override_event: nil}
+  return {
+    tool_format: nil,
+    source: "unresolved",
+    capability_gap_event: nil,
+    tool_format_override_event: nil,
+  }
 }
 
 // Mirror the Rust gate's target selection: prefer the route's declared

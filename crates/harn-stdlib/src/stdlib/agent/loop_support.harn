@@ -66,7 +66,11 @@ pub import {
   agent_stall_repeated_verified_pass,
   agent_stall_verified_write_satisfied,
 } from "std/agent/stall"
-pub import { agent_stance_apply, agent_stance_post_turn, agent_stance_prepare } from "std/agent/stance"
+pub import {
+  agent_stance_apply,
+  agent_stance_post_turn,
+  agent_stance_prepare,
+} from "std/agent/stance"
 pub import {
   agent_emit_event,
   agent_record_native_tool_fallback,
@@ -178,9 +182,13 @@ pub fn __agent_loop_enable_equivalent_failover(
   const has_primary = primary_provider != "" || primary_model != ""
   const has_current = provider != "" || model != ""
   const partial_route_patch = (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
-    && !(loop_opts?._agent_loop_last_llm_route_patch_complete ?? false)
+    && !(loop_opts
+    ?._agent_loop_last_llm_route_patch_complete
+    ?? false)
   const changed_partial_route = has_primary && has_current
-    && (provider != primary_provider || model != primary_model)
+    && (provider != primary_provider
+    || model
+    != primary_model)
     && partial_route_patch
   return llm_enable_equivalent_failover(llm_opts, changed_partial_route)
 }

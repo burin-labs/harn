@@ -246,7 +246,8 @@ pub fn __verification_warm_state_name(row, id: string) -> string {
 
 pub fn __verification_warm_state_probe(row) {
   const mode = __verification_warm_state_mode(row) ?? {}
-  const probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe ?? mode?.readiness_probe
+  const probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe
+    ?? mode?.readiness_probe
     ?? mode?.probe
     ?? row?.readyProbe
     ?? row?.ready_probe
@@ -303,7 +304,8 @@ pub fn __verification_warm_state_teardown_spec(row) {
 
 pub fn __verification_warm_state_probe_options(row, opts) {
   const mode = __verification_warm_state_mode(row) ?? {}
-  const probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe ?? mode?.readiness_probe
+  const probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe
+    ?? mode?.readiness_probe
     ?? mode?.probe
     ?? row?.readyProbe
     ?? row?.ready_probe
@@ -312,7 +314,10 @@ pub fn __verification_warm_state_probe_options(row, opts) {
     ?? row?.probe
     ?? {}
   return (opts?.command_options ?? {})
-    + (probe?.command_options ?? mode?.command_options ?? row?.command_options ?? {})
+    + (probe?.command_options ?? mode?.command_options
+    ?? row
+    ?.command_options
+    ?? {})
 }
 
 pub fn __verification_warm_state_start_options(row, opts) {
@@ -328,7 +333,10 @@ pub fn __verification_warm_state_start_options(row, opts) {
     ?? row?.spawn_command
     ?? {}
   return (opts?.command_options ?? {})
-    + (start?.command_options ?? mode?.command_options ?? row?.command_options ?? {})
+    + (start?.command_options ?? mode?.command_options
+    ?? row
+    ?.command_options
+    ?? {})
 }
 
 pub fn __verification_warm_state_teardown_options(row, opts) {
@@ -343,14 +351,18 @@ pub fn __verification_warm_state_teardown_options(row, opts) {
     ?? row?.stop_command
     ?? {}
   return (opts?.command_options ?? {})
-    + (stop?.command_options ?? mode?.command_options ?? row?.command_options ?? {})
+    + (stop?.command_options ?? mode?.command_options
+    ?? row
+    ?.command_options
+    ?? {})
 }
 
 pub fn __verification_warm_state_cache_identity(row, opts) -> dict {
   const mode = __verification_warm_state_mode(row) ?? {}
   return (opts?.cache_identity ?? {})
     + (row?.cacheIdentity ?? row?.cache_identity ?? {})
-    + (mode?.cacheIdentity ?? mode?.cache_identity ?? {})
+    + (mode?.cacheIdentity ?? mode?.cache_identity
+    ?? {})
 }
 
 pub fn __verification_warm_state_expected_delta_ms(row, mode) {
@@ -364,8 +376,12 @@ pub fn __verification_warm_state_expected_delta_ms(row, mode) {
 
 pub fn __verification_warm_state_timings(row, mode) {
   const timings = row?.timings ?? mode?.timings ?? {}
-  const warm_ms = to_int(mode?.warmMs ?? mode?.warm_ms ?? timings?.warmMs?.p95 ?? timings?.warm_ms?.p95)
-  const cold_ms = to_int(mode?.coldMs ?? mode?.cold_ms ?? timings?.coldMs?.p95 ?? timings?.cold_ms?.p95)
+  const warm_ms = to_int(
+    mode?.warmMs ?? mode?.warm_ms ?? timings?.warmMs?.p95 ?? timings?.warm_ms?.p95,
+  )
+  const cold_ms = to_int(
+    mode?.coldMs ?? mode?.cold_ms ?? timings?.coldMs?.p95 ?? timings?.cold_ms?.p95,
+  )
   return {warm_ms: warm_ms, cold_ms: cold_ms}
 }
 
@@ -490,13 +506,21 @@ pub fn __verification_delta_normalization(options) -> dict {
     strip_patterns: [],
   }
     + __verification_delta_config_dict(row?.signatureNormalization)
-    + __verification_delta_config_dict(row?.signature_normalization)
+    + __verification_delta_config_dict(
+    row?.signature_normalization,
+  )
     + __verification_delta_config_dict(row?.diagnosticDelta)
-    + __verification_delta_config_dict(row?.diagnostic_delta)
+    + __verification_delta_config_dict(
+    row?.diagnostic_delta,
+  )
     + __verification_delta_config_dict(check?.signatureNormalization)
-    + __verification_delta_config_dict(check?.signature_normalization)
+    + __verification_delta_config_dict(
+    check?.signature_normalization,
+  )
     + __verification_delta_config_dict(check?.diagnosticDelta)
-    + __verification_delta_config_dict(check?.diagnostic_delta)
+    + __verification_delta_config_dict(
+    check?.diagnostic_delta,
+  )
     + direct
 }
 
@@ -526,7 +550,9 @@ pub fn __verification_delta_status(value) -> string {
   if direct != "" {
     return direct
   }
-  return lowercase(trim(to_string(value?.classification?.status ?? value?.diagnostic?.status ?? "")))
+  return lowercase(
+    trim(to_string(value?.classification?.status ?? value?.diagnostic?.status ?? "")),
+  )
 }
 
 pub fn __verification_delta_feeds_gates(value) -> bool {
@@ -763,7 +789,8 @@ pub fn __verification_delta_info(value, cfg: dict) -> dict {
   const direct_count = __verification_delta_direct_count(value)
   const count = direct_count ?? len(normalized)
   const has_collection = __verification_delta_has_collection(value)
-  const failed = len(normalized) > 0 || (!has_collection && __verification_delta_explicit_failure(value))
+  const failed = len(normalized) > 0
+    || (!has_collection && __verification_delta_explicit_failure(value))
   return {
     count: count,
     explicit_success: __verification_delta_explicit_success(value),
@@ -880,7 +907,8 @@ pub fn __verification_gate_unclassified(value) -> dict {
     feedsGates: feeds_gates,
     feeds_gates: feeds_gates,
     advisory: !feeds_gates,
-    reason: feeds_gates ? "current file hashes unavailable; preserving diagnostic gate status" : "diagnostic status does not feed gates",
+    reason:
+      feeds_gates ? "current file hashes unavailable; preserving diagnostic gate status" : "diagnostic status does not feed gates",
   }
 }
 

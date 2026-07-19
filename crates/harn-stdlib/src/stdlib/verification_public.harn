@@ -54,7 +54,15 @@ pub fn verification_affected_targets(
     const spec = __verification_adapter_spec(row, paths, opts)
     if spec == nil {
       adapter_facts = adapter_facts
-        + [{id: adapter_id, parser_id: parser_id, status: "not_configured", ok: false, target_count: 0}]
+        + [
+        {
+          id: adapter_id,
+          parser_id: parser_id,
+          status: "not_configured",
+          ok: false,
+          target_count: 0,
+        },
+      ]
       index = index + 1
       continue
     }
@@ -190,7 +198,12 @@ pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadde
 pub fn verification_hud_model(state: dict, options = nil) -> dict {
   const opts = __verification_opts(options)
   if type_of(state) != "dict" {
-    return {schema: "harn.verification.hud_model.v1", visible: false, reason: "missing_state", lines: []}
+    return {
+      schema: "harn.verification.hud_model.v1",
+      visible: false,
+      reason: "missing_state",
+      lines: [],
+    }
   }
   const now_ms = to_int(opts?.now_ms ?? state?.now_ms ?? harness.clock.now_ms()) ?? 0
   const started_ms = to_int(state?.started_ms ?? now_ms) ?? now_ms
@@ -198,13 +211,22 @@ pub fn verification_hud_model(state: dict, options = nil) -> dict {
   const dir = trim(to_string(opts?.dir ?? state?.dir ?? "."))
   const query = __verification_hud_query(state, opts)
   const plan_options = __verification_hud_plan_options(dir, opts)
-  const next_plan = verification_ladder_plan(query, plan_options + {limit: to_int(opts?.next_limit ?? 1) ?? 1})
-  const next_check = len(next_plan.selected) > 0 ? __verification_hud_entry(next_plan.selected[0]) : nil
+  const next_plan = verification_ladder_plan(
+    query,
+    plan_options + {limit: to_int(opts?.next_limit ?? 1) ?? 1},
+  )
+  const next_check =
+    len(next_plan.selected) > 0 ? __verification_hud_entry(next_plan.selected[0]) : nil
   const full_options = plan_options
-    + {min_rung: opts?.full_min_rung ?? "R4", max_rung: opts?.full_max_rung ?? "R5", limit: 1}
+    + {
+    min_rung: opts?.full_min_rung ?? "R4",
+    max_rung: opts?.full_max_rung ?? "R5",
+    limit: 1,
+  }
     + (opts?.full_plan_options ?? {})
   const full_plan = verification_ladder_plan(query, full_options)
-  const full_check = len(full_plan.selected) > 0 ? __verification_hud_entry(full_plan.selected[0]) : nil
+  const full_check =
+    len(full_plan.selected) > 0 ? __verification_hud_entry(full_plan.selected[0]) : nil
   const current_hashes = __verification_snapshot_map(
     opts?.current_hashes ?? opts?.current_snapshot ?? state?.current_hashes
       ?? state?.current_snapshot
@@ -298,7 +320,10 @@ pub fn verification_diagnostic_delta(
   const current_gate_signatures = __verification_delta_gate_signatures(current_info)
   const removed = __verification_delta_set_minus(previous_gate_signatures, current_gate_signatures)
   const added = __verification_delta_set_minus(current_gate_signatures, previous_gate_signatures)
-  const persisted = __verification_delta_set_intersection(previous_gate_signatures, current_gate_signatures)
+  const persisted = __verification_delta_set_intersection(
+    previous_gate_signatures,
+    current_gate_signatures,
+  )
   if !current_info.feedsGates {
     return __verification_delta_result(
       "advisory",
@@ -312,7 +337,10 @@ pub fn verification_diagnostic_delta(
       "current_diagnostic_does_not_feed_gates",
     )
   }
-  const current_clear = current_info.explicit_success || (current_info.has_collection && current_info.count == 0)
+  const current_clear = current_info.explicit_success
+    || (current_info.has_collection
+    && current_info.count
+    == 0)
   if current_clear {
     return __verification_delta_result(
       "cleared",
@@ -454,14 +482,24 @@ pub fn verification_gate_input(
   const opts = __verification_opts(options)
   const hashes_available = __verification_gate_hashes_available(current_hashes)
   const hashes = __verification_gate_hashes(current_hashes)
-  const previous_classification = __verification_gate_classification(previous, hashes, hashes_available)
-  const current_classification = __verification_gate_classification(current, hashes, hashes_available)
+  const previous_classification = __verification_gate_classification(
+    previous,
+    hashes,
+    hashes_available,
+  )
+  const current_classification = __verification_gate_classification(
+    current,
+    hashes,
+    hashes_available,
+  )
   const previous_delta = __verification_gate_delta_value(previous, previous_classification)
   const current_delta = __verification_gate_delta_value(current, current_classification)
   const delta = verification_diagnostic_delta(previous_delta, current_delta, opts)
   const status = __verification_gate_status(delta, current_classification)
   const feeds_gates = current_classification?.feedsGates ? true : false
-  const gate_bearing_failure = feeds_gates && len(delta?.current?.signatures ?? []) > 0 && status != "cleared"
+  const gate_bearing_failure = feeds_gates && len(delta?.current?.signatures ?? []) > 0
+    && status
+    != "cleared"
   return {
     schema: "harn.verification.gate_input.v1",
     status: status,
@@ -570,7 +608,10 @@ pub fn verification_run_check(row_id: string, spec, options = nil) -> Verificati
   }
   const captured = __verification_capture_snapshot(opts)
   const result = command_run(spec, opts?.command_options)
-  const observation = verification_observation_from_command_result(result, opts + {snapshot: captured.snapshot})
+  const observation = verification_observation_from_command_result(
+    result,
+    opts + {snapshot: captured.snapshot},
+  )
   let row = nil
   if opts?.record != false {
     row = verification_profile_record_run(row_id, observation, opts?.dir)
@@ -668,7 +709,10 @@ pub fn verification_toolchain_facts(
     }
     const ok = result != nil && __verification_result_ok(result)
     const raw_version = result == nil ? "" : __verification_toolchain_raw_version(result)
-    const version = ok ? regex_first_capture(__verification_toolchain_version_pattern(row, opts), raw_version) : nil
+    const version = ok ? regex_first_capture(
+      __verification_toolchain_version_pattern(row, opts),
+      raw_version,
+    ) : nil
     const exit_code = result == nil ? nil : __verification_exit(result, {})
     const probe = {
       status: result?.status ?? "not_configured",
@@ -761,7 +805,10 @@ pub fn verification_start_warm_state(
       row: row,
     }
   }
-  const started = command_run(spec, __verification_warm_state_start_options(row, opts) + {background: true})
+  const started = command_run(
+    spec,
+    __verification_warm_state_start_options(row, opts) + {background: true},
+  )
   const fact = __verification_warm_state_first_fact(row, opts)
   const fact_warm = fact?.warm ?? false
   return {

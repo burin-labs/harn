@@ -181,4 +181,3 @@ fn main(harness: Harness) {
   }
   return nil
 }
-

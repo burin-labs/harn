@@ -476,9 +476,15 @@ pub fn __internal_verdict_object(value) -> bool {
     return false
   }
   const completion = contains(["done", "continue"], verdict)
-    && __dict_has_any(value, ["reasoning", "reason", "next_step", "nextStep"])
+    && __dict_has_any(
+    value,
+    ["reasoning", "reason", "next_step", "nextStep"],
+  )
   const judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
-    && __dict_has_any(value, ["critique", "confidence", "category", "error"])
+    && __dict_has_any(
+    value,
+    ["critique", "confidence", "category", "error"],
+  )
   if !(completion || judged) {
     return false
   }
@@ -717,7 +723,9 @@ pub fn __parse_feedback_annotation_enabled(value) -> bool {
 pub fn __parse_feedback_tool_is_structural(entry) -> bool {
   const annotations = __parse_feedback_tool_annotations(entry)
   return __parse_feedback_annotation_enabled(annotations?.structural)
-    || __parse_feedback_annotation_enabled(annotations?.agent_lifecycle)
+    || __parse_feedback_annotation_enabled(
+    annotations?.agent_lifecycle,
+  )
 }
 
 pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
@@ -756,7 +764,9 @@ pub fn __parse_feedback_has_non_structural_tools(turn_opts) -> bool {
  */
 pub fn __parse_feedback_protocol_violations(parsed, turn_opts) {
   if agent_tool_call_paradigm(turn_opts).kind != "text"
-    || !__parse_feedback_has_non_structural_tools(turn_opts) {
+    || !__parse_feedback_has_non_structural_tools(
+    turn_opts,
+  ) {
     return []
   }
   return parsed?.protocol_violations ?? []

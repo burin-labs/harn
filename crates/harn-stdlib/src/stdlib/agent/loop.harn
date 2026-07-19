@@ -44,4 +44,3 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   opts = agent_stance_prepare(session, message, opts)
   return __agent_loop_run(message, session, opts)
 }
-

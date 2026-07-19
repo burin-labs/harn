@@ -138,7 +138,11 @@ pub fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_i
     if __agent_error_must_propagate(err) {
       throw err
     }
-    __agent_input_guardrail_fail_open(err, nil, {session_id: session.session_id, iteration: iteration})
+    __agent_input_guardrail_fail_open(
+      err,
+      nil,
+      {session_id: session.session_id, iteration: iteration},
+    )
   } else {
     __agent_input_guardrail_normalize(
       unwrap(outcome),
@@ -189,10 +193,18 @@ pub fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
         0,
         text,
       )
-        + {dispatch_skipped: true, skip_reason: "input_guardrail_tripwire", input_guardrail_verdict: verdict},
+        + {
+        dispatch_skipped: true,
+        skip_reason: "input_guardrail_tripwire",
+        input_guardrail_verdict: verdict,
+      },
     },
   )
-  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  let _ = __agent_loop_checkpoint(
+    session.session_id,
+    "iteration_end",
+    {iteration: iteration_index + 1},
+  )
   return text
 }
 
@@ -262,7 +274,9 @@ pub fn __scope_classifier_alert_body(verdict, session) {
   const anchor = verdict?.workspace_anchor ?? agent_session_workspace_anchor(session.session_id)
   const primary = to_string(anchor?.primary ?? "(none)")
   return "<scope-alert>\nThe latest user turn appears outside the current workspace anchor. "
-    + to_string(verdict?.evidence ?? "")
+    + to_string(
+    verdict?.evidence ?? "",
+  )
     + "\n\nCurrent anchor: "
     + primary
     + "\nMounted roots:\n"
@@ -341,7 +355,11 @@ pub fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {
       },
     },
   )
-  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  let _ = __agent_loop_checkpoint(
+    session.session_id,
+    "iteration_end",
+    {iteration: iteration_index + 1},
+  )
   return text
 }
 
@@ -394,7 +412,8 @@ pub fn __agent_loop_wrapup_response_protocol_tail(opts) {
  * appends this — a wrap-up that claims "I completed the task" on a failed run is
  * the exact failure this guards against.
  */
-pub const __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY: string = "The run's terminal outcome is already decided and is stated as fact in this instruction and the context above; narrate it truthfully and do NOT re-judge it or claim success on a run that did not succeed."
+pub const __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY: string =
+  "The run's terminal outcome is already decided and is stated as fact in this instruction and the context above; narrate it truthfully and do NOT re-judge it or claim success on a run that did not succeed."
 
 /**
  * The wrap-up directive for a terminal turn.
@@ -456,7 +475,11 @@ pub fn __agent_loop_effective_wrapup_context(opts, final_status, stop_reason) {
     {}
   }
   return host_context
-    + {terminal_kind: final_status, final_status: final_status, stop_reason: stop_reason ?? ""}
+    + {
+    terminal_kind: final_status,
+    final_status: final_status,
+    stop_reason: stop_reason ?? "",
+  }
 }
 
 /**
@@ -717,7 +740,11 @@ pub fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reas
     parts = parts.push(directive)
     join(parts, "\n\n")
   }
-  const wrapup_context = __agent_loop_effective_wrapup_context(wrapup_opts, final_status, stop_reason)
+  const wrapup_context = __agent_loop_effective_wrapup_context(
+    wrapup_opts,
+    final_status,
+    stop_reason,
+  )
   const turn_messages = if host_wrapup {
     turn_prompt.messages.push(
       {role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)},
@@ -844,7 +871,9 @@ pub fn __agent_loop_output_schema_value(text, schema) {
 pub fn __agent_loop_output_schema_repair_prompt(schema, text) {
   return "Your previous final answer did not satisfy the required output schema.\n"
     + "Reply with ONLY a JSON value that validates against this JSON Schema:\n\n"
-    + json_stringify_pretty(schema)
+    + json_stringify_pretty(
+    schema,
+  )
     + "\n\nYour previous final answer was:\n\n"
     + text
 }
@@ -898,5 +927,10 @@ pub fn __agent_loop_apply_output_schema(final_result, opts, session, message, it
   const repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
   const second = __agent_loop_output_schema_value(repaired_text, schema)
   return final_result
-    + {text: repaired_text, visible_text: repaired_text, output: second.value, output_valid: second.ok}
+    + {
+    text: repaired_text,
+    visible_text: repaired_text,
+    output: second.value,
+    output_valid: second.ok,
+  }
 }

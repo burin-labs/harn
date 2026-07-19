@@ -34,7 +34,11 @@ pub fn __live_cells(
           probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
           continue
         }
-        const ready_provider_probe = behavior.runner == "provider_tool_probe" && len(__missing_env_keys(route, env)) == 0
+        const ready_provider_probe = behavior.runner == "provider_tool_probe"
+          && len(
+          __missing_env_keys(route, env),
+        )
+          == 0
         if ready_provider_probe && max_probes > 0 && executable_units_selected >= max_probes {
           probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
           continue
@@ -42,7 +46,10 @@ pub fn __live_cells(
         probe_units_selected = probe_units_selected + 1
         if behavior.runner != "provider_tool_probe" {
           for format in behavior.tool_formats {
-            cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
+            cells = cells
+              + [
+              __planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs),
+            ]
           }
           continue
         }
@@ -50,7 +57,17 @@ pub fn __live_cells(
           executable_units_selected = executable_units_selected + 1
         }
         cells = cells
-          + __run_tool_probe(harness, route, behavior, mode, harn_bin, env, repeat, timeout_secs, output_dir)
+          + __run_tool_probe(
+          harness,
+          route,
+          behavior,
+          mode,
+          harn_bin,
+          env,
+          repeat,
+          timeout_secs,
+          output_dir,
+        )
       }
     }
   }
@@ -80,11 +97,15 @@ pub fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
 pub fn __runner_summary(cells: list<ProviderToolProbeCell>) -> dict {
   let summary: dict = {}
   for cell in cells {
-    const current = summary[cell.runner] ?? {total: 0, pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
+    const current = summary[cell.runner]
+      ?? {total: 0, pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
     summary = summary
       + {
       [cell.runner]: current
-        + {total: (current.total ?? 0) + 1, [cell.status]: (current[cell.status] ?? 0) + 1},
+        + {
+        total: (current.total ?? 0) + 1,
+        [cell.status]: (current[cell.status] ?? 0) + 1,
+      },
     }
   }
   return summary
@@ -106,7 +127,10 @@ pub fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
       executable_cells_by_provider = __increment_key(executable_cells_by_provider, cell.provider)
       if cell.tool_format == "native" {
         executable_commands = executable_commands + 1
-        executable_commands_by_provider = __increment_key(executable_commands_by_provider, cell.provider)
+        executable_commands_by_provider = __increment_key(
+          executable_commands_by_provider,
+          cell.provider,
+        )
       }
     } else {
       missing_runner = missing_runner + 1

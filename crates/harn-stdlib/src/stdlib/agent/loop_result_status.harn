@@ -11,16 +11,22 @@ pub fn __dispatch_results_list(dispatch) {
 pub const __PRODUCT_ERROR_WRITE_TOOL_NAMES = ["edit", "scaffold", "run_codemod", "write"]
 
 pub fn __tool_result_write_product_tool(result) -> bool {
-  const name = lowercase(trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")))
+  const name = lowercase(
+    trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")),
+  )
   return contains(__PRODUCT_ERROR_WRITE_TOOL_NAMES, name)
 }
 
 pub fn __tool_result_dispatch_rejection_text(lower: string) -> bool {
   return lower.contains("\"error\":\"invalid_arguments\"")
-    || lower.contains("\"error\": \"invalid_arguments\"")
+    || lower.contains(
+    "\"error\": \"invalid_arguments\"",
+  )
     || lower.contains("error: invalid_arguments")
     || lower.contains("\"error\":\"permission_denied\"")
-    || lower.contains("\"error\": \"permission_denied\"")
+    || lower.contains(
+    "\"error\": \"permission_denied\"",
+  )
     || lower.contains("error: permission_denied")
 }
 

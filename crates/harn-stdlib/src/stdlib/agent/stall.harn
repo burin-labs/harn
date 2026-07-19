@@ -47,4 +47,3 @@ pub type DetectorSpec = {
     stddev?: float,
   },
 }
-

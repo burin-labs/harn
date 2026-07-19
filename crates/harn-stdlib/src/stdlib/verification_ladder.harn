@@ -55,7 +55,8 @@ pub fn __verification_rung_bound(value, fallback: int) -> int {
 }
 
 pub fn __verification_resource_class(row, check) -> string {
-  const raw = check?.resourceClass ?? check?.resource_class ?? row?.resourceClass ?? row?.resource_class
+  const raw = check?.resourceClass ?? check?.resource_class ?? row?.resourceClass
+    ?? row?.resource_class
     ?? "moderate"
   const value = lowercase(trim(to_string(raw)))
   return value == "" ? "moderate" : value
@@ -90,7 +91,9 @@ pub fn __verification_lower_string_list(value) -> list<string> {
 }
 
 pub fn __verification_resource_allowed(resource: string, opts) -> bool {
-  const allowed = __verification_lower_string_list(opts?.resource_classes ?? opts?.allowed_resource_classes)
+  const allowed = __verification_lower_string_list(
+    opts?.resource_classes ?? opts?.allowed_resource_classes,
+  )
   if len(allowed) == 0 {
     return true
   }
@@ -187,7 +190,10 @@ pub fn __verification_ladder_candidate(profile_match, opts) {
     return {entry: nil, skip: __verification_skip(row_id, "resource_class_filtered", profile_match)}
   }
   if opts?.allow_stale_prone == false
-    && (check?.staleProne ?? check?.stale_prone ?? row?.staleProne ?? row?.stale_prone ?? false) {
+    && (check?.staleProne ?? check?.stale_prone ?? row?.staleProne
+    ?? row
+    ?.stale_prone
+    ?? false) {
     return {entry: nil, skip: __verification_skip(row_id, "stale_prone_filtered", profile_match)}
   }
   const command = __verification_row_command(row, check)
@@ -199,7 +205,13 @@ pub fn __verification_ladder_candidate(profile_match, opts) {
   const p95_ms = __verification_row_p95_ms(row, opts, timing_kind)
   const specificity = to_int(profile_match?.specificity) ?? 0
   const index = to_int(profile_match?.index) ?? 0
-  const sort_key = [rung_rank, __verification_resource_rank(resource), p95_ms, 0 - specificity, index]
+  const sort_key = [
+    rung_rank,
+    __verification_resource_rank(resource),
+    p95_ms,
+    0 - specificity,
+    index,
+  ]
   return {
     entry: {
       row_id: row_id,
@@ -329,7 +341,8 @@ pub fn __verification_hud_last_check(state, current_hashes, now_ms: int) {
   if type_of(last) != "dict" {
     return nil
   }
-  const at_ms = to_int(last?.at_ms ?? last?.atMs ?? last?.ended_ms ?? last?.started_ms ?? now_ms) ?? now_ms
+  const at_ms = to_int(last?.at_ms ?? last?.atMs ?? last?.ended_ms ?? last?.started_ms ?? now_ms)
+    ?? now_ms
   const age_ms = now_ms - at_ms
   const snapshot = last?.bound_snapshot ?? last?.boundSnapshot ?? last?.snapshot
   const freshness = if type_of(snapshot) == "dict" && type_of(current_hashes) == "dict" {

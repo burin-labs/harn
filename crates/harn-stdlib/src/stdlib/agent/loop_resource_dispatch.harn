@@ -68,7 +68,9 @@ pub fn __intra_turn_failure_signature(result) {
   }
   const name = to_string(result?.tool_name ?? result?.name ?? "")
   const args = result?.arguments ?? {}
-  const failure_text = to_string(result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "")
+  const failure_text = to_string(
+    result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "",
+  )
   return sha256(json_stringify({name: name, args: args, failure: failure_text}))
 }
 
@@ -91,7 +93,15 @@ pub fn __intra_turn_call_signature(call) {
   return sha256(json_stringify({name: name, args: args}))
 }
 
-pub const __INTRA_TURN_RESOURCE_MUTATING_KINDS = ["edit", "write", "scaffold", "delete", "move", "mutation", "mutate"]
+pub const __INTRA_TURN_RESOURCE_MUTATING_KINDS = [
+  "edit",
+  "write",
+  "scaffold",
+  "delete",
+  "move",
+  "mutation",
+  "mutate",
+]
 
 pub fn __intra_turn_call_args(call) {
   const raw = call?.arguments ?? call?.tool_args
@@ -109,20 +119,24 @@ pub fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
   if type_of(annotations) != "dict" {
     return false
   }
-  const kind = __intra_turn_annotation_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  const kind = __intra_turn_annotation_text(
+    annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind,
+  )
   if contains(__INTRA_TURN_RESOURCE_MUTATING_KINDS, kind) {
     return true
   }
   const side_effect = __intra_turn_annotation_text(
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations?.sideEffect,
+      ?? annotations
+      ?.sideEffect,
   )
   if side_effect == "workspace_write" {
     return true
   }
   const mutation = __intra_turn_annotation_text(
     annotations?.mutation_classification ?? annotations?.mutationClassification
-      ?? annotations?.mutation,
+      ?? annotations
+      ?.mutation,
   )
   return mutation == "workspace_write"
 }
@@ -131,7 +145,9 @@ pub fn __intra_turn_annotation_path_params(annotations) {
   if type_of(annotations) != "dict" {
     return []
   }
-  const direct = annotations?.path_params ?? annotations?.pathParams ?? annotations?.resource_path_params
+  const direct = annotations?.path_params ?? annotations?.pathParams
+    ?? annotations
+    ?.resource_path_params
     ?? annotations?.resourcePathParams
   if type_of(direct) == "list" {
     return direct
@@ -155,7 +171,8 @@ pub fn __intra_turn_annotation_dependency_key_params(annotations) {
     return []
   }
   const direct = annotations?.dependency_key_params ?? annotations?.dependencyKeyParams
-    ?? annotations?.resource_dependency_params
+    ?? annotations
+    ?.resource_dependency_params
     ?? annotations?.resourceDependencyParams
     ?? annotations?.resource_key_params
     ?? annotations?.resourceKeyParams
@@ -167,7 +184,8 @@ pub fn __intra_turn_annotation_dependency_key_params(annotations) {
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   const params = schema?.dependency_key_params ?? schema?.dependencyKeyParams
-    ?? schema?.resource_dependency_params
+    ?? schema
+    ?.resource_dependency_params
     ?? schema?.resourceDependencyParams
     ?? schema?.resource_key_params
     ?? schema?.resourceKeyParams
@@ -186,7 +204,8 @@ pub fn __intra_turn_annotation_dependency_range_params(annotations) {
     return []
   }
   const direct = annotations?.dependency_range_params ?? annotations?.dependencyRangeParams
-    ?? annotations?.resource_dependency_ranges
+    ?? annotations
+    ?.resource_dependency_ranges
     ?? annotations?.resourceDependencyRanges
     ?? annotations?.resource_range_params
     ?? annotations?.resourceRangeParams
@@ -198,7 +217,8 @@ pub fn __intra_turn_annotation_dependency_range_params(annotations) {
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   const params = schema?.dependency_range_params ?? schema?.dependencyRangeParams
-    ?? schema?.resource_dependency_ranges
+    ?? schema
+    ?.resource_dependency_ranges
     ?? schema?.resourceDependencyRanges
     ?? schema?.resource_range_params
     ?? schema?.resourceRangeParams
@@ -217,7 +237,9 @@ pub fn __intra_turn_annotation_arg_aliases(annotations) {
     return {}
   }
   const schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
-  const aliases = schema?.arg_aliases ?? schema?.argAliases ?? annotations?.arg_aliases ?? annotations?.argAliases
+  const aliases = schema?.arg_aliases ?? schema?.argAliases ?? annotations?.arg_aliases
+    ?? annotations
+    ?.argAliases
     ?? {}
   if type_of(aliases) == "dict" {
     return aliases
@@ -285,10 +307,14 @@ pub fn __intra_turn_dependency_range_param_names(spec) {
     return nil
   }
   const start_name = trim(
-    to_string(spec?.start ?? spec?.start_param ?? spec?.startParam ?? spec?.from ?? spec?.begin ?? ""),
+    to_string(
+      spec?.start ?? spec?.start_param ?? spec?.startParam ?? spec?.from ?? spec?.begin ?? "",
+    ),
   )
   const end_name = trim(
-    to_string(spec?.end ?? spec?.end_param ?? spec?.endParam ?? spec?.to ?? spec?.stop ?? start_name),
+    to_string(
+      spec?.end ?? spec?.end_param ?? spec?.endParam ?? spec?.to ?? spec?.stop ?? start_name,
+    ),
   )
   if start_name == "" {
     return nil
@@ -455,7 +481,11 @@ pub fn __intra_turn_intersects(keys, failed_keys) -> bool {
 
 pub fn __intra_turn_ranges_overlap(current, failed) -> bool {
   return to_string(current?.resource_key ?? "") == to_string(failed?.resource_key ?? "")
-    && (to_int(current?.start) ?? 0) <= (to_int(failed?.end) ?? -1)
+    && (to_int(
+    current?.start,
+  )
+    ?? 0)
+    <= (to_int(failed?.end) ?? -1)
     && (to_int(failed?.start) ?? 0) <= (to_int(current?.end) ?? -1)
 }
 
@@ -471,7 +501,10 @@ pub fn __intra_turn_range_intersects(current_ranges, failed_ranges) -> bool {
 }
 
 pub fn __intra_turn_guard_intersects(current_guard, failed_guard) -> bool {
-  if !__intra_turn_intersects(current_guard?.resource_keys ?? [], failed_guard?.resource_keys ?? []) {
+  if !__intra_turn_intersects(
+    current_guard?.resource_keys ?? [],
+    failed_guard?.resource_keys ?? [],
+  ) {
     return false
   }
   const target_ranges = current_guard?.target_ranges ?? []
@@ -663,7 +696,13 @@ pub fn __intra_turn_resource_blocked_result(
   skipped_suffix_count,
 ) {
   const name = to_string(call?.name ?? call?.tool_name ?? "")
-  const receipt = __intra_turn_partial_apply_receipt(call, current_guard, blocking_guard, index, skipped_suffix_count)
+  const receipt = __intra_turn_partial_apply_receipt(
+    call,
+    current_guard,
+    blocking_guard,
+    index,
+    skipped_suffix_count,
+  )
   const keys = receipt.resource_keys
   const rendered_keys = join(keys, ", ")
   const observation = "[skipped dependent `" + name + "` call from this turn]\n"
@@ -695,7 +734,11 @@ pub fn __intra_turn_resource_blocked_result(
     tool_name: name,
     tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
     arguments: call?.arguments ?? {},
-    result: {message: observation, partial_apply: receipt, next_expected_action: receipt.next_expected_action},
+    result: {
+      message: observation,
+      partial_apply: receipt,
+      next_expected_action: receipt.next_expected_action,
+    },
     receipt_kind: "intra_turn_same_resource_partial_apply",
     partial_apply: receipt,
     next_expected_action: receipt.next_expected_action,
@@ -829,7 +872,12 @@ pub fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
   }
   const caller = turn_opts?._tool_caller
-  const raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
+  const raw_dispatch = __dispatch_tool_calls_with_middleware(
+    tool_calls,
+    tools,
+    dispatch_options,
+    cap,
+  )
   const audit_flushes = __collect_audit_flushes(raw_dispatch)
   const dispatch = __strip_internal_dispatch(raw_dispatch)
   agent_session_record_tool_results(session_id, dispatch)
@@ -854,7 +902,11 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   // declaration order still match.
   const resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
   const keyed_mutating_batch = resource_fail_fast
-    && __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options)
+    && __intra_turn_has_keyed_mutating_calls(
+    tool_calls,
+    tools,
+    options,
+  )
   if cap <= 1 || len(tool_calls) <= 1 || keyed_mutating_batch {
     // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
     // of consecutive byte-identical FAILING results. Once that streak reaches
@@ -880,9 +932,18 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       } else {
         nil
       }
-      const blocking_guard = __intra_turn_first_blocking_guard(resource_guard, failed_resource_guards)
+      const blocking_guard = __intra_turn_first_blocking_guard(
+        resource_guard,
+        failed_resource_guards,
+      )
       if blocking_guard != nil {
-        const skipped_suffix_count = __intra_turn_dependent_suffix_count(tool_calls, tools, options, index, blocking_guard)
+        const skipped_suffix_count = __intra_turn_dependent_suffix_count(
+          tool_calls,
+          tools,
+          options,
+          index,
+          blocking_guard,
+        )
         const blocked = __intra_turn_resource_blocked_result(
           call,
           resource_guard,
@@ -895,7 +956,8 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         continue
       }
       if fanout_cap > 0 && capped_call_signature != nil
-        && __intra_turn_call_signature(call) == capped_call_signature {
+        && __intra_turn_call_signature(call)
+        == capped_call_signature {
         // Same failing call as the one that tripped the cap — skip dispatch.
         if !collapsed_emitted {
           const collapsed = __intra_turn_collapsed_result(call, capped_sample)
@@ -913,7 +975,9 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       // independent later edit to the same file is NOT stale and may run.
       // Unknown still poisons, preserving today's conservative behavior.
       if resource_guard != nil && !__tool_result_ok(result)
-        && __intra_turn_failure_poisons_resource(result) {
+        && __intra_turn_failure_poisons_resource(
+        result,
+      ) {
         failed_resource_guards = failed_resource_guards.push(
           __intra_turn_failed_guard_record(call, index, resource_guard, result),
         )

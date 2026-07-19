@@ -79,7 +79,9 @@ pub fn __context_profile_disabled(opts) {
 
 pub fn __with_project_context_profile(opts) {
   if __has_key(opts, "context_profile") || __has_key(opts, "project_context_profile")
-    || __context_profile_disabled(opts) {
+    || __context_profile_disabled(
+    opts,
+  ) {
     return opts
   }
   const resolved = try {
@@ -175,7 +177,9 @@ pub fn __validate_judge_cadence(label, value) {
     return
   }
   throw "agent_loop: `" + label + ".when` must be \"always\", \"stalled\", a closure, or nil; got "
-    + to_string(when)
+    + to_string(
+    when,
+  )
 }
 
 pub fn __validate_done_judge_cadence(value) {
@@ -233,16 +237,24 @@ pub fn __normalize_consecutive_failure_budget(value) {
   }
   if type_of(value) != "dict" {
     throw "agent_loop: `iteration_budget.consecutive_failures` must be a dict or nil; got "
-      + type_of(value)
+      + type_of(
+      value,
+    )
   }
   if value?.max == nil {
     throw "agent_loop: `iteration_budget.consecutive_failures.max` is required"
   }
-  const max_count = __positive_int_budget_field(value?.max, nil, "iteration_budget.consecutive_failures.max")
+  const max_count = __positive_int_budget_field(
+    value?.max,
+    nil,
+    "iteration_budget.consecutive_failures.max",
+  )
   const kinds = value?.kinds ?? ["transient", "rate_limit", "provider_5xx"]
   if type_of(kinds) != "list" {
     throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must be a list of strings; got "
-      + type_of(kinds)
+      + type_of(
+      kinds,
+    )
   }
   if len(kinds) == 0 {
     throw "agent_loop: `iteration_budget.consecutive_failures.kinds` must not be empty"
@@ -334,16 +346,23 @@ pub fn __validate_missing_tool_call_recovery(value) {
     return
   }
   if type_of(value) != "dict" {
-    throw "agent_loop: `missing_tool_call_recovery` must be a bool, dict, or nil; got " + type_of(value)
+    throw "agent_loop: `missing_tool_call_recovery` must be a bool, dict, or nil; got "
+      + type_of(
+      value,
+    )
   }
   if value?.enabled != nil && type_of(value.enabled) != "bool" {
     throw "agent_loop: `missing_tool_call_recovery.enabled` must be a bool or nil; got "
-      + type_of(value.enabled)
+      + type_of(
+      value.enabled,
+    )
   }
   const classifier = value?.classifier
   if classifier != nil && type_of(classifier) != "closure" {
     throw "agent_loop: `missing_tool_call_recovery.classifier` must be a closure or nil; got "
-      + type_of(classifier)
+      + type_of(
+      classifier,
+    )
   }
 }
 
@@ -401,7 +420,14 @@ pub fn __tool_surface_safe_defaults() {
     mode: "safe",
     hard_keep: __default_tool_surface_hard_keep(),
     prune_classes: ["read_only"],
-    keep_classes: ["mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    keep_classes: [
+      "mutating",
+      "approval",
+      "session_control",
+      "progress",
+      "result_polling",
+      "unknown",
+    ],
     unknown_tool_policy: "keep",
   }
 }
@@ -412,7 +438,15 @@ pub fn __tool_surface_aggressive_defaults() {
     window_turns: 5,
     mode: "aggressive",
     hard_keep: __default_tool_surface_hard_keep(),
-    prune_classes: ["read_only", "mutating", "approval", "session_control", "progress", "result_polling", "unknown"],
+    prune_classes: [
+      "read_only",
+      "mutating",
+      "approval",
+      "session_control",
+      "progress",
+      "result_polling",
+      "unknown",
+    ],
     keep_classes: [],
     unknown_tool_policy: "prune",
   }
@@ -570,7 +604,8 @@ pub fn __validate_agent_loop_completion_options(opts) {
 
 pub fn __is_transcript_projection_policy(policy) {
   return policy == "raw" || policy == "clean_tool_repair" || policy == "squash_failed_calls"
-    || policy == "summary_prefix"
+    || policy
+    == "summary_prefix"
     || policy == "reachability_gc"
     || policy == "context_gc"
     || policy == "tool_result_gc"
@@ -600,7 +635,8 @@ pub fn __validate_transcript_projection(value) {
     return
   }
   if type_of(value) != "dict" {
-    throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(value)
+    throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got "
+      + type_of(value)
   }
   const policy = value?.policy ?? "raw"
   if type_of(policy) != "string" {
@@ -691,7 +727,10 @@ pub fn __with_resolved_tool_format(opts, resolution) {
     return opts
   }
   let next = opts
-    + {tool_format: resolution.tool_format, _tool_format_source: resolution?.source ?? "unresolved"}
+    + {
+    tool_format: resolution.tool_format,
+    _tool_format_source: resolution?.source ?? "unresolved",
+  }
   if resolution?.capability_gap_event != nil {
     next = next + {_tool_format_capability_gap: resolution.capability_gap_event}
   }
@@ -707,7 +746,9 @@ pub fn __auto_tool_format_source(value) {
 }
 
 pub fn __clear_tool_format_resolution(opts) {
-  return opts.remove("tool_format").remove("_tool_format_source").remove("_tool_format_capability_gap")
+  return opts.remove("tool_format").remove("_tool_format_source").remove(
+    "_tool_format_capability_gap",
+  )
     .remove("_tool_format_override")
 }
 /**

@@ -180,7 +180,15 @@ pub type AgentLoopOptions = {
   fallback_strategy?: string,
   strategy?: string,
   equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
-  models?: list<string | {provider?: string, model?: string, options?: dict, label?: string, family?: string, capabilities?: list}>,
+  models?: list<string \
+    | {
+    provider?: string,
+    model?: string,
+    options?: dict,
+    label?: string,
+    family?: string,
+    capabilities?: list,
+  }>,
   ladder?: string,
   api_mode?: string,
   max_tokens?: int,
@@ -361,5 +369,22 @@ pub type AgentLoopOptions = {
  *
  * Rust twin: none — presets are stdlib-owned option packs.
  */
-pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: any, telemetry?: any, rate_limit?: bool | dict, dry_run?: bool | dict, handoff_sink?: any, cheap_caller?: any, frontier_caller?: any, escalate_predicate?: any, logging_sink?: any, logging_options?: dict, llm_options?: dict, persona?: any, task_kind?: string, judge?: bool | JudgeConfig, model_ladder?: list<string>}
-
+pub type AgentPresetOptions = AgentLoopOptions \
+  & {
+  consent?: any,
+  audit_sink?: any,
+  telemetry?: any,
+  rate_limit?: bool | dict,
+  dry_run?: bool | dict,
+  handoff_sink?: any,
+  cheap_caller?: any,
+  frontier_caller?: any,
+  escalate_predicate?: any,
+  logging_sink?: any,
+  logging_options?: dict,
+  llm_options?: dict,
+  persona?: any,
+  task_kind?: string,
+  judge?: bool | JudgeConfig,
+  model_ladder?: list<string>,
+}
