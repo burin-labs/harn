@@ -1,6 +1,6 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Barrier, OnceLock};
 use std::thread;
 
 use tempfile::TempDir;
@@ -757,11 +757,50 @@ fn registry_write_contention_returns_a_typed_defer_receipt() {
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .unwrap();
 
-    let receipt = store.try_acquire(request("codex-0")).unwrap();
+    let receipt = store
+        .try_acquire_once_with_registry_timeout(request("codex-0"), None, None, Duration::ZERO)
+        .unwrap();
     assert_eq!(receipt.status, HostLeaseAcquireStatus::Deferred);
     let defer = receipt.defer.unwrap();
     assert_eq!(defer.deferred_reason, HostLeaseDeferReason::RegistryBusy);
     assert!(defer.active.is_none());
+}
+
+static BUSY_HANDLER_BARRIERS: OnceLock<(Barrier, Barrier)> = OnceLock::new();
+static BUSY_HANDLER_OBSERVED: AtomicBool = AtomicBool::new(false);
+
+fn release_registry_writer_after_busy_observed(_attempts: i32) -> bool {
+    if !BUSY_HANDLER_OBSERVED.swap(true, Ordering::SeqCst) {
+        let barriers = BUSY_HANDLER_BARRIERS.get().expect("busy barriers");
+        barriers.0.wait();
+        barriers.1.wait();
+    }
+    true
+}
+
+#[test]
+fn immediate_acquire_waits_for_internal_registry_writer() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut blocker = store.connection(SQLITE_MUTATION_BUSY_TIMEOUT).unwrap();
+    let transaction = blocker
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
+    BUSY_HANDLER_BARRIERS
+        .set((Barrier::new(2), Barrier::new(2)))
+        .expect("one deterministic busy-handler test");
+    let store = store.with_busy_handler(release_registry_writer_after_busy_observed);
+
+    let acquisition = thread::spawn(move || store.try_acquire(request("codex-0")).unwrap());
+    let barriers = BUSY_HANDLER_BARRIERS.get().unwrap();
+    barriers.0.wait();
+    drop(transaction);
+    barriers.1.wait();
+
+    assert_eq!(
+        acquisition.join().unwrap().status,
+        HostLeaseAcquireStatus::Acquired
+    );
 }
 
 #[test]

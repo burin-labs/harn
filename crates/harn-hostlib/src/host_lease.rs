@@ -479,6 +479,8 @@ pub struct HostLeaseStore {
     root: PathBuf,
     db_path: PathBuf,
     process_inspector: Arc<dyn ProcessInspector>,
+    #[cfg(test)]
+    busy_handler: Option<fn(i32) -> bool>,
 }
 
 impl HostLeaseStore {
@@ -515,6 +517,8 @@ impl HostLeaseStore {
             db_path: root.join(LEASE_DB_FILE),
             root,
             process_inspector,
+            #[cfg(test)]
+            busy_handler: None,
         };
         store.initialize()?;
         Ok(store)
@@ -902,8 +906,21 @@ impl HostLeaseStore {
 
     fn connection(&self, busy_timeout: Duration) -> Result<Connection, HostLeaseError> {
         let conn = Connection::open(&self.db_path)?;
+        #[cfg(test)]
+        if !busy_timeout.is_zero() {
+            if let Some(handler) = self.busy_handler {
+                conn.busy_handler(Some(handler))?;
+                return Ok(conn);
+            }
+        }
         conn.busy_timeout(busy_timeout)?;
         Ok(conn)
+    }
+
+    #[cfg(test)]
+    fn with_busy_handler(mut self, handler: fn(i32) -> bool) -> Self {
+        self.busy_handler = Some(handler);
+        self
     }
 
     fn try_acquire_once(
@@ -912,8 +929,28 @@ impl HostLeaseStore {
         started_at: Option<Instant>,
         deadline_at_ms: Option<i64>,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        self.try_acquire_once_with_registry_timeout(
+            request,
+            started_at,
+            deadline_at_ms,
+            SQLITE_MUTATION_BUSY_TIMEOUT,
+        )
+    }
+
+    fn try_acquire_once_with_registry_timeout(
+        &self,
+        request: HostLeaseRequest,
+        started_at: Option<Instant>,
+        deadline_at_ms: Option<i64>,
+        registry_timeout: Duration,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         let request = normalize_request(request)?;
-        let mut conn = self.connection(Duration::ZERO)?;
+        // `try_acquire` is immediate with respect to lease availability, not
+        // SQLite's internal writer serialization. Distinct named domains are
+        // independent resources even though their rows share one registry;
+        // give that registry the same bounded mutation window as release and
+        // status before reporting a typed `RegistryBusy` deferral.
+        let mut conn = self.connection(registry_timeout)?;
         let tx = match conn.transaction_with_behavior(TransactionBehavior::Immediate) {
             Ok(tx) => tx,
             Err(error) if sqlite_is_busy(&error) => {
