@@ -76,6 +76,7 @@ import {
   agent_session_drain_feedback,
   agent_session_drain_host_injections,
   agent_session_finalize,
+  agent_session_flush,
   agent_session_init,
   agent_session_inject_feedback,
   agent_session_messages,
@@ -251,11 +252,9 @@ fn __autocontinue_should_continue(call, turn_opts) {
 
 /**
  * Call the LLM, and on a length-truncated turn with an incomplete tool call,
- * AUTO-CONTINUE by re-issuing with a raised output cap (bounded). Returns the
- * same `{ok, value, ...}` shape `agent_invoke_llm` returns; callers consume the
- * final (hopefully complete) result and run their normal parse/stall/dispatch
- * accounting on it. Falls back to the last truncated result once the cap is
- * exhausted, so the existing parse-guidance path still fires.
+ * AUTO-CONTINUE with a bounded raised output cap, then return the same
+ * `{ok, value, ...}` shape callers already parse and account for. Falls back
+ * to the truncated result at the cap so existing parse guidance still fires.
  */
 fn __invoke_llm_with_autocontinue(
   message,
@@ -266,6 +265,7 @@ fn __invoke_llm_with_autocontinue(
   iteration_index,
 ) {
   const retry_llm_opts = llm_clear_one_shot_prefill(llm_opts)
+  agent_session_flush(session_id)
   let call = agent_invoke_llm(message, turn_system, llm_opts)
   const max_continuations = __autocontinue_max_continuations(llm_opts)
   let attempts = 0

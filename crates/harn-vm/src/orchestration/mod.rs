@@ -79,6 +79,8 @@ mod replay_bench;
 pub use replay_bench::*;
 
 mod policy;
+#[cfg(test)]
+pub(crate) use policy::swap_execution_policy_stack;
 pub use policy::*;
 
 mod ambient_scope;

@@ -117,7 +117,7 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/llm/agent_observe.rs"
+path = "src/llm/agent_observe/transcript_ambient.rs"
 statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_TOOL_SCHEMAS_HASH", "TRANSCRIPT_DIR_STACK"]
 category = "logical_task"
 plan = "task_local_or_explicit"

@@ -115,6 +115,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_agent_session_push_bridge_injection",
     "__host_agent_session_push_user_message",
     "__host_agent_session_revoke_reminder",
+    "__host_agent_session_flush",
     "__host_agent_session_finalize",
     "__host_agent_session_init",
     "__host_agent_session_inject_feedback",

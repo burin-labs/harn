@@ -59,7 +59,6 @@
 //! and track the last `system_prompt`, the last `tool_schemas`, and every
 //! `message` up to (but not including) the matching `provider_call_request`.
 
-use std::cell::RefCell;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,15 +76,13 @@ use super::agent_tools::next_call_id;
 
 mod raw_tool_receipts;
 mod served_context_receipts;
+mod transcript_ambient;
 
-thread_local! {
-    /// Last-emitted hash for the current transcript's system prompt and
-    /// tool schemas. Used to dedup identical payloads across turns so we
-    /// write them once per stage instead of once per request.
-    static LAST_SYSTEM_PROMPT_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static LAST_TOOL_SCHEMAS_HASH: RefCell<Option<u64>> = const { RefCell::new(None) };
-    static TRANSCRIPT_DIR_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-}
+use transcript_ambient::{current_transcript_dir, system_prompt_changed, tool_schemas_changed};
+pub(crate) use transcript_ambient::{
+    pop_llm_transcript_dir, push_llm_transcript_dir, swap_llm_transcript_ambient,
+    LlmTranscriptAmbient,
+};
 
 tokio::task_local! {
     static RAW_PROVIDER_CAPTURE_CONTEXT: RawProviderCaptureContext;
@@ -120,36 +117,6 @@ where
 
 pub(crate) fn current_raw_provider_capture_context() -> Option<RawProviderCaptureContext> {
     RAW_PROVIDER_CAPTURE_CONTEXT.try_with(Clone::clone).ok()
-}
-
-fn reset_transcript_dedup() {
-    LAST_SYSTEM_PROMPT_HASH.with(|hash| *hash.borrow_mut() = None);
-    LAST_TOOL_SCHEMAS_HASH.with(|hash| *hash.borrow_mut() = None);
-}
-
-pub(super) fn push_llm_transcript_dir(dir: &str) {
-    if dir.trim().is_empty() {
-        return;
-    }
-    TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow_mut().push(dir.to_string()));
-    reset_transcript_dedup();
-}
-
-pub(super) fn pop_llm_transcript_dir() {
-    TRANSCRIPT_DIR_STACK.with(|stack| {
-        stack.borrow_mut().pop();
-    });
-    reset_transcript_dedup();
-}
-
-fn current_transcript_dir() -> Option<String> {
-    let stacked = TRANSCRIPT_DIR_STACK.with(|stack| stack.borrow().last().cloned());
-    if stacked.is_some() {
-        return stacked;
-    }
-    std::env::var("HARN_LLM_TRANSCRIPT_DIR")
-        .ok()
-        .filter(|d| !d.is_empty())
 }
 
 fn hash_str(value: &str) -> u64 {
@@ -1480,15 +1447,7 @@ fn emit_system_prompt_if_changed(system: Option<&str>) {
     let content = system.unwrap_or("");
     let current = hash_str(content);
     let content_hash = served_context_receipts::stable_redacted_string_hash(content);
-    let changed = LAST_SYSTEM_PROMPT_HASH.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if slot.as_ref() == Some(&current) {
-            false
-        } else {
-            *slot = Some(current);
-            true
-        }
-    });
+    let changed = system_prompt_changed(current);
     if !changed {
         return;
     }
@@ -1506,15 +1465,7 @@ fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSchema]) {
     let value = serde_json::to_value(schemas).unwrap_or(serde_json::Value::Null);
     let current = hash_json(&value);
     let content_hash = served_context_receipts::stable_redacted_json_hash(&value);
-    let changed = LAST_TOOL_SCHEMAS_HASH.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if slot.as_ref() == Some(&current) {
-            false
-        } else {
-            *slot = Some(current);
-            true
-        }
-    });
+    let changed = tool_schemas_changed(current);
     if !changed {
         return;
     }
