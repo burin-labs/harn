@@ -481,8 +481,10 @@ jobs:
     needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
-    # Cache reuse is an optimization, not a correctness dependency. Leave enough
-    # headroom for a cold build followed by the full environment-neutral suite.
+    # GitHub-hosted fallback runners need about 10 minutes for a cold compile
+    # before the 10k-test nextest suite starts. Cache reuse is an optimization,
+    # not a correctness dependency, so leave enough headroom for a fully cold
+    # build followed by the complete environment-neutral suite.
     timeout-minutes: 30
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only

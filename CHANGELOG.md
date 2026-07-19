@@ -9,6 +9,16 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Changed
+
+- **Background command readiness is event-driven (#5270).** `std/command`
+  can wait for a literal or regex in stdout, stderr, or combined output and
+  return deterministic byte offsets plus the latest normalized command state.
+  Output, exit, timeout, and caller cancellation race without polling artifact
+  files or sleeping in the wrapper.
+
 ## v0.10.28
 
 ### Changed

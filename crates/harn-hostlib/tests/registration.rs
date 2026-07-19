@@ -451,6 +451,12 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_enable",
         ]
     );
+    assert!(
+        registry
+            .find_async("hostlib_tools_wait_command_output")
+            .is_some(),
+        "event-driven output wait must be registered as async"
+    );
 
     // All implemented tools must refuse to run before
     // `hostlib_enable("tools:deterministic")`. We check each entry so newly
@@ -1178,6 +1184,20 @@ fn every_registered_builtin_has_request_and_response_schemas() {
     let registry = registry.with(TerminalSessionCapability::new());
 
     for entry in registry.builtins().iter() {
+        assert!(
+            schemas::lookup(entry.module, entry.method, schemas::SchemaKind::Request).is_some(),
+            "missing request schema for {}.{}",
+            entry.module,
+            entry.method
+        );
+        assert!(
+            schemas::lookup(entry.module, entry.method, schemas::SchemaKind::Response).is_some(),
+            "missing response schema for {}.{}",
+            entry.module,
+            entry.method
+        );
+    }
+    for entry in registry.builtins().iter_async() {
         assert!(
             schemas::lookup(entry.module, entry.method, schemas::SchemaKind::Request).is_some(),
             "missing request schema for {}.{}",

@@ -91,7 +91,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(builder.build())
 }
 
-fn drain_matching_result(session_id: &str, handle_id: &str) -> Option<VmValue> {
+pub(crate) fn drain_matching_result(session_id: &str, handle_id: &str) -> Option<VmValue> {
     let entries = harn_vm::orchestration::agent_inbox::drain(session_id);
     let mut kept = Vec::new();
     let mut selected = None;
