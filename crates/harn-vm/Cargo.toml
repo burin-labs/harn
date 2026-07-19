@@ -58,7 +58,7 @@ harn-modules = { path = "../harn-modules", version = "=0.10.23" }
 harn-parser = { path = "../harn-parser", version = "=0.10.23" }
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.23" }
 async-trait = "0.1"
-bincode = { version = "2.0", features = ["serde"] }
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 # Persistent (immutable, structurally shared) collections backing VmValue's
 # Dict/List payloads. Copy-on-write mutation becomes an O(log n) path copy
 # instead of an O(n) BTreeMap/Vec deep clone, which is the dominant allocation
