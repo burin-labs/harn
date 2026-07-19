@@ -366,6 +366,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/orchestration/tool_precheck.rs"
+statics = ["TOOL_PRECHECK_STACK", "TOOL_PRECHECK_DEPTH"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/redact/mod.rs"
 statics = ["REDACTION_POLICY_STACK"]
 category = "logical_task"
