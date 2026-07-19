@@ -270,7 +270,7 @@ fn delta_gate_suppresses_no_change_rung() {
             assert!(!task.is_finished(), "hold must park at t=0");
             // Reach the first 30s rung with zero new output, then let the woken loop
             // re-decide and re-park.
-            paused.advance(Duration::from_millis(30_000));
+            paused.advance(Duration::from_secs(30));
             yield_times(8).await;
             assert!(
                 !task.is_finished(),
