@@ -218,7 +218,24 @@ pub(crate) fn validate_exports_for_publish(
         if let Err(error) = parse_harn_source(&content) {
             push_error(errors, &field, format!("failed to parse export: {error}"));
         }
-        let symbols = extract_api_symbols(&content);
+        let graph = harn_modules::build(std::slice::from_ref(&path));
+        for conflict in graph.re_export_conflicts(&path) {
+            let sources = conflict
+                .sources
+                .iter()
+                .map(|source| source.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            push_error(
+                errors,
+                &field,
+                format!(
+                    "re-export conflict: '{}' is exported by multiple sources: {sources}",
+                    conflict.name
+                ),
+            );
+        }
+        let symbols = extract_api_symbols_for_module(&path, &graph);
         if symbols.is_empty() {
             push_warning(
                 warnings,
@@ -675,6 +692,45 @@ pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
             })
         })
         .collect()
+}
+
+/// Extract the complete public surface of `path`, including symbols forwarded
+/// through selective, wildcard, or transitive `pub import` declarations.
+///
+/// Local declarations retain source order for backward-compatible docs. A
+/// facade's forwarded declarations follow in deterministic name order, using
+/// the original declaration's signature and HarnDoc rather than synthesizing
+/// pass-through metadata at the import site.
+pub(crate) fn extract_api_symbols_for_module(
+    path: &Path,
+    graph: &harn_modules::ModuleGraph,
+) -> Vec<PackageApiSymbol> {
+    let source = harn_modules::read_module_source(path).unwrap_or_default();
+    let mut symbols = extract_api_symbols(&source);
+    let local_names = symbols
+        .iter()
+        .map(|symbol| symbol.name.clone())
+        .collect::<HashSet<_>>();
+    let mut origin_symbols = HashMap::<PathBuf, Vec<PackageApiSymbol>>::new();
+    for name in graph.exports_for_module(path) {
+        if local_names.contains(&name) {
+            continue;
+        }
+        let Some(definition) = graph.export_definition_of(path, &name) else {
+            continue;
+        };
+        let candidates = origin_symbols
+            .entry(definition.file)
+            .or_insert_with_key(|file| {
+                harn_modules::read_module_source(file)
+                    .map(|source| extract_api_symbols(&source))
+                    .unwrap_or_default()
+            });
+        if let Some(symbol) = candidates.iter().find(|symbol| symbol.name == name) {
+            symbols.push(symbol.clone());
+        }
+    }
+    symbols
 }
 
 fn next_code_token(tokens: &[harn_lexer::Token], start: usize) -> Option<usize> {

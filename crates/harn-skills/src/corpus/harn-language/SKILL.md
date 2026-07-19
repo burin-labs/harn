@@ -68,6 +68,8 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - When touching module resolution, inspect `crates/harn-modules`.
 - Cross-file checks should use the same module graph as the CLI.
 - Public symbols should remain discoverable by editor tooling.
+- Use curated `pub import` facades for stable package surfaces; package checks
+  and API docs follow re-exports to the original declaration.
 - Avoid duplicate import spellings for the same file.
 - Prefer canonical relative paths in fixtures.
 - Add a cycle regression when changing import traversal.

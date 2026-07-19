@@ -14,6 +14,121 @@ fn package_check_accepts_publishable_package() {
 }
 
 #[test]
+fn package_check_resolves_transitive_public_re_exports() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_publishable_package(tmp.path());
+    fs::write(
+        tmp.path().join("lib/main.harn"),
+        r#"/** Local package entry. */
+pub fn local() -> string { return "local" }
+
+pub import { Config, greet } from "./middle"
+pub import "./middle"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("lib/middle.harn"),
+        "pub import \"./implementation\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("lib/implementation.harn"),
+        r#"/** Name passed to greet. */
+pub type Config = string
+
+/** Return a greeting from the implementation module. */
+pub fn greet(name: Config) -> string { return "hi " + name }
+"#,
+    )
+    .unwrap();
+
+    let report = check_package_impl(Some(tmp.path())).unwrap();
+
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    let symbols = &report.exports[0].symbols;
+    assert_eq!(
+        symbols
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["local", "Config", "greet"]
+    );
+    assert_eq!(symbols[1].docs.as_deref(), Some("Name passed to greet."));
+    assert_eq!(symbols[1].signature, "pub type Config = string");
+    assert_eq!(
+        symbols[2].docs.as_deref(),
+        Some("Return a greeting from the implementation module.")
+    );
+    assert_eq!(symbols[2].signature, "pub fn greet(name: Config) -> string");
+    assert!(!report
+        .warnings
+        .iter()
+        .any(|warning| warning.message.contains("no public symbols")));
+}
+
+#[test]
+fn package_docs_render_forwarded_origin_metadata() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_publishable_package(tmp.path());
+    fs::write(
+        tmp.path().join("lib/main.harn"),
+        "pub import { greet } from \"./implementation\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("lib/implementation.harn"),
+        "/** Return the implementation greeting. */\npub fn greet(name: string) -> string { return \"hi \" + name }\n",
+    )
+    .unwrap();
+
+    let docs_path = generate_package_docs_impl(Some(tmp.path()), None, false).unwrap();
+    let docs = fs::read_to_string(docs_path).unwrap();
+
+    assert!(docs.contains("### fn `greet`"), "{docs}");
+    assert!(
+        docs.contains("Return the implementation greeting."),
+        "{docs}"
+    );
+    assert!(
+        docs.contains("pub fn greet(name: string) -> string"),
+        "{docs}"
+    );
+}
+
+#[test]
+fn package_check_reports_public_re_export_conflicts() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_publishable_package(tmp.path());
+    fs::write(
+        tmp.path().join("lib/main.harn"),
+        "pub import { shared } from \"./a\"\npub import { shared } from \"./b\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("lib/a.harn"),
+        "/** First definition. */\npub fn shared() -> string { return \"a\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("lib/b.harn"),
+        "/** Second definition. */\npub fn shared() -> string { return \"b\" }\n",
+    )
+    .unwrap();
+
+    let report = check_package_impl(Some(tmp.path())).unwrap();
+    let errors = report
+        .errors
+        .iter()
+        .map(|error| error.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(errors.contains("re-export conflict"), "{errors}");
+    assert!(errors.contains("'shared'"), "{errors}");
+}
+
+#[test]
 fn package_check_accepts_contribution_only_package() {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir_all(tmp.path().join("docs")).unwrap();

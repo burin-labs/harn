@@ -571,11 +571,37 @@ fn pub_import_chain_resolves_definition_to_origin() {
         .definition_of(&entry, "deep")
         .expect("definition_of should follow chain");
     assert!(def.file.ends_with("inner.harn"));
+    let exported = graph
+        .export_definition_of(&outer, "deep")
+        .expect("export definition should follow the public chain");
+    assert!(exported.file.ends_with("inner.harn"));
 
     let imported = graph
         .imported_names_for_file(&entry)
         .expect("entry should resolve");
     assert!(imported.contains("deep"));
+}
+
+#[test]
+fn export_definition_ignores_private_local_shadow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(root, "origin.harn", "pub fn shared() { 1 }\n");
+    let facade = write_file(
+        root,
+        "facade.harn",
+        "fn shared() { 0 }\npub import { shared } from \"./origin\"\n",
+    );
+
+    let graph = build(std::slice::from_ref(&facade));
+    let visible = graph
+        .definition_of(&facade, "shared")
+        .expect("ordinary lookup prefers the local declaration");
+    assert!(visible.file.ends_with("facade.harn"));
+    let exported = graph
+        .export_definition_of(&facade, "shared")
+        .expect("export lookup follows the public import");
+    assert!(exported.file.ends_with("origin.harn"));
 }
 
 #[test]
