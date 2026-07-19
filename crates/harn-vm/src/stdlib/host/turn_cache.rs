@@ -1,12 +1,11 @@
 //! Per-turn memoization of turn-stable host capability reads.
 //!
-//! Context assembly reads a handful of host capabilities — dominated by
-//! `runtime.pipeline_input` — many times per agent-loop iteration. harn#5190
-//! measured ~20 identical `runtime.pipeline_input` round-trips per turn, a cost
+//! Context assembly reads `runtime.pipeline_input` many times per agent-loop
+//! iteration — harn#5190 measured ~20 identical round-trips per turn, a cost
 //! that grows as hosts deliver more data through that channel. This module
 //! front-runs the thread-local `HOST_CALL_BRIDGE` with a per-turn memo so those
 //! reads collapse to one host round-trip per turn, leaving every call site
-//! unchanged.
+//! unchanged. The allowlist ([`is_turn_stable`]) is deliberately narrow.
 //!
 //! The memoized value is stable only *within* a turn: the host re-projects
 //! `runtime.pipeline_input` each turn (e.g. so a mid-session model switch is
@@ -32,20 +31,25 @@ thread_local! {
 /// single agent-loop iteration: pure, side-effect-free reads that project the
 /// current turn's host input.
 ///
-/// Membership is an explicit allowlist because the default is NOT to cache: a
-/// write (`runtime.set_result`, `runtime.record_run`), an interactive prompt,
-/// or any capability whose value can change *within* a turn must never be
-/// served stale. Every entry is a no-argument read the host recomputes per
-/// turn, not per call, so memoizing it for the turn is transparent to callers.
+/// Membership is an explicit allowlist, and the bar for adding an entry is a
+/// producer-side citation that no host mutates the value *within* a turn — not
+/// merely that it "looks stable." The default is NOT to cache, so a write, an
+/// interactive prompt, or any value a host can change mid-turn is never served
+/// stale.
+///
+/// Only `runtime.pipeline_input` qualifies today: every Burin host recomputes it
+/// per turn from per-turn-stable inputs (model selection, task, dry-run), so a
+/// mid-turn re-read never diverges. Deliberately excluded after auditing the
+/// producers:
+/// - `session.active_roots` — the IDE host serves it live from the mutable
+///   workspace root set (also used live for path validation), so a user adding
+///   a root mid-turn would be served stale within the turn.
+/// - `runtime.task` / `runtime.dry_run` / `runtime.approved_plan` — not served
+///   as standalone host ops by the Burin hosts at all; their values ride inside
+///   `pipeline_input` (already cached here), so caching the standalone op buys
+///   nothing.
 fn is_turn_stable(capability: &str, operation: &str) -> bool {
-    matches!(
-        (capability, operation),
-        ("runtime", "pipeline_input")
-            | ("runtime", "task")
-            | ("runtime", "dry_run")
-            | ("runtime", "approved_plan")
-            | ("session", "active_roots")
-    )
+    matches!((capability, operation), ("runtime", "pipeline_input"))
 }
 
 /// Cache key for a turn-stable host call. Keyed on capability, operation, and a
