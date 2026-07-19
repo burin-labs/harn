@@ -69,7 +69,7 @@ tool call.
 | `post_turn` | After a model/tool turn is recorded, before post-turn control logic decides whether to continue | Advisory |
 | `permission_asked` | When the dynamic permission policy needs to escalate | `{decision: "allow"\|"deny", reason}` short-circuits the policy |
 | `permission_replied` | After the dynamic permission policy decides | Advisory |
-| `file_edited` | After `write_file` / `append_file` / `append_file_locked` / `write_file_bytes` / `notify_file_edited` queues an edit. Drained at each agent-loop turn boundary | Advisory |
+| `file_edited` | After a standard filesystem mutation or `notify_file_edited` queues an edit. Drained at each agent-loop turn boundary | Advisory |
 | `session_error` | Before `session_end` when the loop ended with an error status or terminal error | Advisory |
 | `session_idle` | Each time the daemon-mode agent loop enters its `wake_interval_ms` wait between turns | Advisory |
 | `pre_finish` | Just before the pipeline's `on_finish` callback runs (or before pipeline return when no callback is registered) | Advisory |

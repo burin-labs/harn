@@ -9,11 +9,12 @@
 //!
 //! 1. Create the parent directory if needed.
 //! 2. Write to a sibling `.<name>.<uuid>.tmp` file.
-//! 3. `fsync` the temp file.
-//! 4. `rename` the temp file over the destination (atomic on POSIX, atomic
-//!    overwrite on Windows since Rust 1.5+).
-//! 5. Best-effort `fsync` the parent directory so the rename survives a
-//!    power loss on filesystems that decouple the dirent from the inode.
+//! 3. Flush userspace buffers and, when requested, `fsync` the temp file.
+//! 4. Replace the destination atomically (`rename` on POSIX and
+//!    `MoveFileExW(REPLACE_EXISTING)` on Windows).
+//! 5. When requested, best-effort `fsync` the parent directory so the rename
+//!    survives a power loss on filesystems that decouple the dirent from the
+//!    inode.
 //!
 //! On any failure between (2) and (4), the temp file is removed so that
 //! repeated retries don't leak `.tmp` siblings.
@@ -22,9 +23,65 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+thread_local! {
+    static TEST_FAILURE_STAGE: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn fail_test_stage(stage: &'static str) -> io::Result<()> {
+    if TEST_FAILURE_STAGE.with(|value| value.get()) == Some(stage) {
+        return Err(io::Error::other(format!("injected {stage} failure")));
+    }
+    Ok(())
+}
+
+#[cfg(not(test))]
+#[inline]
+fn fail_test_stage(_stage: &'static str) -> io::Result<()> {
+    Ok(())
+}
+
+/// Durability requested for an atomic namespace replacement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AtomicWriteDurability {
+    /// Readers never observe a partial payload. No storage flush is promised.
+    Namespace,
+    /// Flush the payload before replacement and request persistence of the
+    /// namespace update. Filesystems and hardware may still have weaker
+    /// guarantees than the operating-system call reports.
+    Flush,
+}
+
+/// Storage-flush work completed by an atomic write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AtomicWriteReceipt {
+    /// The complete payload was flushed before replacement.
+    pub file_synced: bool,
+    /// Persistence of the namespace replacement was confirmed.
+    pub namespace_synced: bool,
+}
+
 /// Atomically write `bytes` to `path`.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     atomic_write_with(path, |writer| writer.write_all(bytes))
+}
+
+/// Atomically write `bytes` with an explicit durability request.
+pub fn atomic_write_with_durability(
+    path: &Path,
+    bytes: &[u8],
+    durability: AtomicWriteDurability,
+) -> io::Result<AtomicWriteReceipt> {
+    atomic_write_stream_with_durability(path, durability, |writer| writer.write_all(bytes))
+}
+
+pub(crate) fn atomic_write_with_durability_unlocked(
+    path: &Path,
+    bytes: &[u8],
+    durability: AtomicWriteDurability,
+) -> io::Result<AtomicWriteReceipt> {
+    atomic_write_stream_with_durability_unlocked(path, durability, |writer| writer.write_all(bytes))
 }
 
 /// Atomically write the destination at `path` by streaming through a
@@ -38,49 +95,138 @@ pub fn atomic_write_with<F>(path: &Path, write_fn: F) -> io::Result<()>
 where
     F: FnOnce(&mut BufWriter<File>) -> io::Result<()>,
 {
-    let tmp = TempFile::create(path)?;
-    let result = write_and_finalize(&tmp, write_fn);
+    atomic_write_stream_with_durability(path, AtomicWriteDurability::Flush, write_fn).map(|_| ())
+}
+
+fn atomic_write_stream_with_durability<F>(
+    path: &Path,
+    durability: AtomicWriteDurability,
+    write_fn: F,
+) -> io::Result<AtomicWriteReceipt>
+where
+    F: FnOnce(&mut BufWriter<File>) -> io::Result<()>,
+{
+    // Windows refuses a replace while another writer is replacing the same
+    // destination. Use the same canonical, cross-process lock as conditional
+    // replacement instead of retrying on a timing-dependent access error.
+    #[cfg(windows)]
+    let _lock = crate::conditional_replace::acquire_lock(path)?;
+
+    atomic_write_stream_with_durability_unlocked(path, durability, write_fn)
+}
+
+fn atomic_write_stream_with_durability_unlocked<F>(
+    path: &Path,
+    durability: AtomicWriteDurability,
+    write_fn: F,
+) -> io::Result<AtomicWriteReceipt>
+where
+    F: FnOnce(&mut BufWriter<File>) -> io::Result<()>,
+{
+    let mut tmp = TempFile::create(path)?;
+    let result = write_and_finalize(&mut tmp, durability, write_fn);
     if let Err(err) = result {
         let _ = std::fs::remove_file(&tmp.path);
         return Err(err);
     }
-    if let Err(err) = std::fs::rename(&tmp.path, path) {
+    if let Err(err) = fail_test_stage("replace") {
         let _ = std::fs::remove_file(&tmp.path);
         return Err(err);
     }
-    sync_parent_dir(path);
-    Ok(())
+    let replace_synced = match replace_temp_file(&tmp.path, path, durability) {
+        Ok(synced) => synced,
+        Err(err) => {
+            let _ = std::fs::remove_file(&tmp.path);
+            return Err(err);
+        }
+    };
+    let namespace_synced = match durability {
+        AtomicWriteDurability::Namespace => false,
+        AtomicWriteDurability::Flush => replace_synced || sync_parent_dir(path),
+    };
+    Ok(AtomicWriteReceipt {
+        file_synced: durability == AtomicWriteDurability::Flush,
+        namespace_synced,
+    })
 }
 
-fn write_and_finalize<F>(tmp: &TempFile, write_fn: F) -> io::Result<()>
+fn write_and_finalize<F>(
+    tmp: &mut TempFile,
+    durability: AtomicWriteDurability,
+    write_fn: F,
+) -> io::Result<()>
 where
     F: FnOnce(&mut BufWriter<File>) -> io::Result<()>,
 {
-    let file = tmp.file.try_clone()?;
+    let file = tmp
+        .file
+        .take()
+        .ok_or_else(|| io::Error::other("atomic_io: temporary file handle was already consumed"))?;
     let mut buf = BufWriter::new(file);
     write_fn(&mut buf)?;
+    fail_test_stage("flush")?;
     buf.flush()?;
     let inner = buf.into_inner().map_err(|err| err.into_error())?;
-    inner.sync_all()?;
+    if durability == AtomicWriteDurability::Flush {
+        inner.sync_all()?;
+    }
     Ok(())
 }
 
-fn sync_parent_dir(path: &Path) {
+#[cfg(not(windows))]
+fn replace_temp_file(
+    temp: &Path,
+    destination: &Path,
+    _durability: AtomicWriteDurability,
+) -> io::Result<bool> {
+    std::fs::rename(temp, destination)?;
+    Ok(false)
+}
+
+#[cfg(windows)]
+fn replace_temp_file(
+    temp: &Path,
+    destination: &Path,
+    durability: AtomicWriteDurability,
+) -> io::Result<bool> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let mut temp_wide: Vec<u16> = temp.as_os_str().encode_wide().collect();
+    temp_wide.push(0);
+    let mut destination_wide: Vec<u16> = destination.as_os_str().encode_wide().collect();
+    destination_wide.push(0);
+    let mut flags = MOVEFILE_REPLACE_EXISTING;
+    if durability == AtomicWriteDurability::Flush {
+        flags |= MOVEFILE_WRITE_THROUGH;
+    }
+    // SAFETY: both paths are NUL-terminated UTF-16 buffers that remain alive
+    // for the duration of the call.
+    if unsafe { MoveFileExW(temp_wide.as_ptr(), destination_wide.as_ptr(), flags) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(durability == AtomicWriteDurability::Flush)
+}
+
+fn sync_parent_dir(path: &Path) -> bool {
     if let Some(parent) = path.parent() {
         if parent.as_os_str().is_empty() {
-            return;
+            return false;
         }
         if let Ok(dir) = OpenOptions::new().read(true).open(parent) {
-            let _ = dir.sync_all();
+            return dir.sync_all().is_ok();
         }
     }
+    false
 }
 
 /// Owns the temp file path + handle so callers can rely on RAII for
 /// cleanup if they bail out mid-write.
 struct TempFile {
     path: PathBuf,
-    file: File,
+    file: Option<File>,
 }
 
 impl TempFile {
@@ -110,9 +256,16 @@ impl TempFile {
             .create_new(true)
             .write(true)
             .open(&tmp_path)?;
+        if let Ok(metadata) = std::fs::metadata(target) {
+            if let Err(error) = file.set_permissions(metadata.permissions()) {
+                drop(file);
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(error);
+            }
+        }
         Ok(Self {
             path: tmp_path,
-            file,
+            file: Some(file),
         })
     }
 }
@@ -164,9 +317,14 @@ mod tests {
     fn streaming_writer_cleans_up_on_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
-        let err = atomic_write_with(&path, |_| Err(io::Error::other("nope"))).unwrap_err();
+        std::fs::write(&path, b"old").unwrap();
+        let err = atomic_write_with(&path, |writer| {
+            writer.write_all(b"partial")?;
+            Err(io::Error::other("nope"))
+        })
+        .unwrap_err();
         assert_eq!(err.to_string(), "nope");
-        assert!(!path.exists(), "destination should not exist after failure");
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
         // No leftover .tmp siblings.
         let leftover: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
@@ -176,6 +334,43 @@ mod tests {
         assert!(
             leftover.is_empty(),
             "tmp file should be cleaned up on error"
+        );
+    }
+
+    #[test]
+    fn flush_and_replace_failures_preserve_destination_and_clean_up() {
+        for stage in ["flush", "replace"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("state.json");
+            std::fs::write(&path, b"old").unwrap();
+            TEST_FAILURE_STAGE.with(|value| value.set(Some(stage)));
+            let error = atomic_write(&path, b"new").unwrap_err();
+            TEST_FAILURE_STAGE.with(|value| value.set(None));
+
+            assert_eq!(error.to_string(), format!("injected {stage} failure"));
+            assert_eq!(std::fs::read(&path).unwrap(), b"old");
+            let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+                .collect();
+            assert!(leftovers.is_empty(), "{stage} left a temp file");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        std::fs::write(&path, b"old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        atomic_write(&path, b"new").unwrap();
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o640
         );
     }
 

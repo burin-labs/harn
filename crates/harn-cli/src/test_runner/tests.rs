@@ -979,7 +979,7 @@ pipeline test_b_has_fresh_store(task) {
 
 #[cfg(feature = "hostlib")]
 #[tokio::test]
-async fn user_tests_scope_safe_text_patch_locks_to_case_state() {
+async fn user_tests_scope_conditional_replacement_locks_to_case_state() {
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_safe_text_patch.harn",

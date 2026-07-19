@@ -112,8 +112,10 @@ pub(super) async fn execute_case(
                 .map_err(|error| format!("failed to create test state directory: {error}"))?;
             let state_root = test_state.path().join(".harn");
             #[cfg(feature = "hostlib")]
-            let _safe_text_patch_lock_root =
-                harn_hostlib::fs::scope_safe_text_patch_lock_root(state_root.join("fs-cas-locks"));
+            let _conditional_replace_lock_root =
+                harn_hostlib::fs::scope_conditional_replace_lock_root(
+                    state_root.join("fs-cas-locks"),
+                );
             let source_dir = source_parent.to_string_lossy().into_owned();
             install_user_test_event_log_if_unset();
             let pipeline_name = case

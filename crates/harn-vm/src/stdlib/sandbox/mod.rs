@@ -61,11 +61,16 @@ mod macos;
 mod openbsd;
 mod paths;
 mod policy;
+mod replace;
 #[cfg(target_os = "windows")]
 mod windows;
 
 pub(crate) use locked_append::AppendLockOptions;
 pub(crate) use policy::allows_network as policy_allows_network;
+pub(crate) use replace::{
+    atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
+    read_for_replace_scoped_at_open,
+};
 
 const HANDLER_SANDBOX_ENV: &str = "HARN_HANDLER_SANDBOX";
 #[cfg(any(unix, windows))]
@@ -426,17 +431,6 @@ pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> R
         .map_err(|violation| sandbox_rejection(violation.message(builtin)))
 }
 
-pub(crate) fn atomic_write_scoped_at_open(
-    builtin: &str,
-    path: &Path,
-    contents: &[u8],
-) -> io::Result<()> {
-    let Some(target) = scoped_mutation_target(builtin, path, FsAccess::Write)? else {
-        return atomic_write_unscoped(path, contents);
-    };
-    atomic_write_scoped_target(&target, contents)
-}
-
 pub(crate) fn append_scoped_at_open(builtin: &str, path: &Path, contents: &[u8]) -> io::Result<()> {
     let Some(target) = scoped_mutation_target(builtin, path, FsAccess::Write)? else {
         return append_unscoped(path, contents);
@@ -563,35 +557,6 @@ fn scoped_mutation_target(
     }))
 }
 
-fn atomic_write_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
-    let dir = parent.unwrap_or_else(|| Path::new("."));
-    // Restore the pre-hardening `mkdir -p` contract for content-producing
-    // writes: an unrestricted (no active sandbox scope) write into a
-    // not-yet-created directory recreates its ancestor chain, matching the
-    // scoped path's `ensure_parent_dirs_scoped`.
-    if let Some(parent) = parent {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp_path = dir.join(scoped_tmp_name(path));
-    let write_result = (|| -> io::Result<()> {
-        let mut file = std::fs::File::create(&tmp_path)?;
-        file.write_all(contents)?;
-        file.flush()?;
-        file.sync_all()?;
-        Ok(())
-    })();
-    if let Err(err) = write_result {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    if let Err(err) = std::fs::rename(&tmp_path, path) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(err);
-    }
-    Ok(())
-}
-
 fn append_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
     // Match the `append_file` contract: appending to a new log in a
     // not-yet-created directory recreates the parent chain.
@@ -605,71 +570,9 @@ fn append_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
         .and_then(|mut file| file.write_all(contents))
 }
 
-fn scoped_tmp_name(path: &Path) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let file_name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "file".to_string());
-    format!(".{file_name}.harn-tmp.{}.{counter}", std::process::id())
-}
-
-#[cfg(unix)]
-fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-
-    // Content-producing writes recreate their parent chain (`mkdir -p`),
-    // restoring the pre-hardening `write_file`/`http_download` contract that
-    // downstream `.harn` relies on. The creation stays inside the scope root
-    // and reuses the same symlink-safe parent-fd walk as the write itself.
-    let (parent, file_name) = ensure_parent_dirs_scoped(target)?;
-    let tmp_name = scoped_tmp_name(Path::new(&file_name));
-    let mut file = openat_file(
-        parent.as_raw_fd(),
-        &tmp_name,
-        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-        0o666,
-    )?;
-    let write_result = (|| -> io::Result<()> {
-        file.write_all(contents)?;
-        file.flush()?;
-        file.sync_all()?;
-        Ok(())
-    })();
-    if let Err(err) = write_result {
-        let _ = unlinkat_name(parent.as_raw_fd(), &tmp_name, 0);
-        return Err(err);
-    }
-    if let Err(err) = renameat_name(
-        parent.as_raw_fd(),
-        &tmp_name,
-        parent.as_raw_fd(),
-        &file_name,
-    ) {
-        let _ = unlinkat_name(parent.as_raw_fd(), &tmp_name, 0);
-        return Err(err);
-    }
-    sync_dir_fd(parent.as_raw_fd());
-    Ok(())
-}
-
-#[cfg(windows)]
-fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
-    let (parent, file_name) = win_scoped_parent(target, true)?;
-    let full = parent.join(&file_name);
-    win_reject_reparse_leaf(&full)?;
-    atomic_write_unscoped(&full, contents)
-}
-
-#[cfg(all(not(unix), not(windows)))]
-fn atomic_write_scoped_target(target: &ScopedMutationTarget, contents: &[u8]) -> io::Result<()> {
-    let full = target.root.join(&target.relative);
-    if let Some(parent) = full.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)?;
-    }
-    atomic_write_unscoped(&full, contents)
+#[cfg(test)]
+fn shared_atomic_write_unscoped(path: &Path, contents: &[u8]) -> io::Result<()> {
+    crate::atomic_io::atomic_write(path, contents)
 }
 
 #[cfg(unix)]
@@ -1054,8 +957,8 @@ fn unlinkat_name(parent_fd: libc::c_int, name: &str, flags: libc::c_int) -> io::
 }
 
 #[cfg(unix)]
-fn sync_dir_fd(fd: libc::c_int) {
-    let _ = unsafe { libc::fsync(fd) };
+fn sync_dir_fd(fd: libc::c_int) -> bool {
+    (unsafe { libc::fsync(fd) }) == 0
 }
 
 #[cfg(unix)]

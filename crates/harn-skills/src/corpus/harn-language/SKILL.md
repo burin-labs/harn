@@ -20,6 +20,8 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
   route side effects through `harness.*`.
 - Use `harness.fs.mkdtemp_in_workspace(prefix?)` for scratch files that must be
   visible under sandbox policy; avoid composing `.harn/tmp` paths by hand.
+- Use typed `std/fs` conditional replacement for shared state or artifacts
+  that must not overwrite a newer observation; branch on the closed receipt.
 - For connector credentials, read canonical ids such as
   `provider/access-token` through `harness.secrets` from a package script; the
   runner scopes the default provider from the nearest `harn.toml`.

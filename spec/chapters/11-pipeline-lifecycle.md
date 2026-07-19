@@ -62,7 +62,7 @@ Capability sub-handles are exposed by field access on the harness:
 | `harness.stdio` | `HarnessStdio` | `print`, `println`, `eprint`, `eprintln`, `read_line`, `prompt` |
 | `harness.term` | `HarnessTerm` | `width`, `height`, `read_password` |
 | `harness.clock` | `HarnessClock` | `now_ms`, `timestamp`, `monotonic_ms`, `elapsed`, `sleep_ms` |
-| `harness.fs` | `HarnessFs` | `read_text`, `write_text`, `append_text`, `exists`, `list_dir` |
+| `harness.fs` | `HarnessFs` | `read_text`, `write_text`, `replace_text`, `append`, `exists`, `list_dir` |
 | `harness.env` | `HarnessEnv` | `get`, `set`, `unset`, `list` |
 | `harness.random` | `HarnessRandom` | `gen_u64`, `uuid`, `bytes` |
 | `harness.net` | `HarnessNet` | `get`, `post` |
@@ -181,4 +181,3 @@ Every lifecycle decision is reproducible on a replay:
 The user-facing reference is `docs/src/pipeline-lifecycle.md`; the
 stdlib reference is `docs/src/stdlib/lifecycle.md`; runnable patterns
 live in `docs/src/cookbooks/lifecycle.md`.
-

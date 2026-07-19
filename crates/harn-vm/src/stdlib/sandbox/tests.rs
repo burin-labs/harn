@@ -1,6 +1,8 @@
 use super::*;
 use crate::orchestration::{pop_execution_policy, push_execution_policy};
 
+mod path_contracts;
+
 #[test]
 fn missing_create_path_normalizes_against_existing_parent() {
     let dir = tempfile::tempdir().unwrap();
@@ -188,6 +190,10 @@ fn empty_workspace_roots_prefer_project_root_env_over_execution_root() {
 
 #[test]
 fn empty_workspace_roots_default_to_execution_root_for_process_cwd() {
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::env::remove_var("HARN_PROJECT_ROOT");
     let dir = tempfile::tempdir().unwrap();
     crate::stdlib::process::set_thread_execution_context(Some(
         crate::orchestration::RunExecutionRecord {
@@ -396,7 +402,7 @@ fn scoped_atomic_write_rejects_parent_swapped_to_symlink_after_policy_match() {
 
     std::fs::remove_dir(&safe_parent).unwrap();
     std::os::unix::fs::symlink(outside.path(), &safe_parent).unwrap();
-    let error = atomic_write_scoped_target(&target, b"escape").unwrap_err();
+    let error = replace::atomic_write_scoped_target(&target, b"escape").unwrap_err();
     pop_execution_policy();
 
     assert!(
@@ -423,7 +429,7 @@ fn scoped_write_creates_missing_parent_dirs() {
     let target = scoped_mutation_target("write_file", &path, FsAccess::Write)
         .unwrap()
         .expect("restricted policy yields scoped target");
-    let result = atomic_write_scoped_target(&target, b"{\"plan\":\"Redis-backed\"}");
+    let result = replace::atomic_write_scoped_target(&target, b"{\"plan\":\"Redis-backed\"}");
     pop_execution_policy();
 
     assert!(
@@ -573,6 +579,7 @@ fn scoped_walk_refuses_junction_intermediate_component() {
 fn scoped_walk_forbids_raw_path_filesystem_calls() {
     let src = include_str!("mod.rs");
     let locked_append_src = include_str!("locked_append.rs");
+    let replace_src = include_str!("replace.rs");
     // The tests live in a sibling module, so `mod.rs` is production-only.
     let production = src;
 
@@ -631,7 +638,6 @@ fn scoped_walk_forbids_raw_path_filesystem_calls() {
         "fn create_dir_scoped_target(",
         // content-open fns: this is where #4210's "carry the parent fd into
         // the write, never re-resolve the path" contract must hold.
-        "fn atomic_write_scoped_target(",
         "fn append_scoped_target(",
         "fn copy_scoped_target(",
         "fn rename_scoped_targets(",
@@ -643,6 +649,13 @@ fn scoped_walk_forbids_raw_path_filesystem_calls() {
                 "{sig} must not use raw `{needle}`; stay on the fd-carried *at path"
             );
         }
+    }
+    let body = fn_body(replace_src, "pub(super) fn atomic_replace_scoped_target(");
+    for needle in FORBIDDEN {
+        assert!(
+            !body.contains(needle),
+            "atomic_replace_scoped_target must not use raw `{needle}`; stay on the fd-carried *at path"
+        );
     }
     let body = fn_body(
         locked_append_src,
@@ -658,7 +671,7 @@ fn scoped_walk_forbids_raw_path_filesystem_calls() {
     // Every scoped *leaf* open must carry O_NOFOLLOW so it cannot follow a
     // swapped-in leaf symlink. Skip the `openat_file` wrapper definition
     // (its flags arrive as a parameter); only the call sites carry literals.
-    for haystack in [production, locked_append_src] {
+    for haystack in [production, locked_append_src, replace_src] {
         for (idx, _) in haystack.match_indices("openat_file(") {
             if haystack[..idx].ends_with("fn ") {
                 continue;
@@ -802,12 +815,12 @@ fn scoped_parent_autocreate_refuses_file_as_intermediate_component() {
 #[test]
 fn unscoped_write_creates_missing_parent_dirs() {
     // With no active sandbox scope (`scoped_mutation_target` returns None),
-    // writes flow through `atomic_write_unscoped`. That path must honor the
-    // same `mkdir -p` contract, otherwise a trusted-context write (CLI
-    // scripts, `harn run`, conformance) into a fresh directory fails.
+    // Unscoped writes use the shared atomic writer. It must honor the same
+    // `mkdir -p` contract, otherwise a trusted-context write into a fresh
+    // directory fails.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("x/y/z/plan.json");
-    atomic_write_unscoped(&path, b"{\"plan\":\"Redis-backed\"}").unwrap();
+    shared_atomic_write_unscoped(&path, b"{\"plan\":\"Redis-backed\"}").unwrap();
     assert_eq!(
         std::fs::read(&path).unwrap(),
         b"{\"plan\":\"Redis-backed\"}".to_vec()
@@ -843,7 +856,7 @@ fn scoped_write_parent_autocreate_refuses_symlinked_intermediate() {
     // target outside `workspace_roots`) or, for a symlink swapped in after
     // resolution, the auto-create walk itself (`O_NOFOLLOW` on each level).
     let escaped = match scoped_mutation_target("write_file", &path, FsAccess::Write) {
-        Ok(Some(target)) => atomic_write_scoped_target(&target, b"escape").is_ok(),
+        Ok(Some(target)) => replace::atomic_write_scoped_target(&target, b"escape").is_ok(),
         Ok(None) | Err(_) => false,
     };
     pop_execution_policy();
@@ -1277,73 +1290,6 @@ fn standard_io_device_files_allowed_under_restricted_profile() {
     );
 
     pop_execution_policy();
-}
-
-#[test]
-fn is_standard_io_device_matches_only_known_streams() {
-    assert!(is_standard_io_device_for_access(
-        Path::new("/dev/stdin"),
-        FsAccess::Read
-    ));
-    assert!(!is_standard_io_device_for_access(
-        Path::new("/dev/stdin"),
-        FsAccess::Write
-    ));
-    assert!(is_standard_io_device_for_access(
-        Path::new("/dev/stdout"),
-        FsAccess::Write
-    ));
-    assert!(is_standard_io_device_for_access(
-        Path::new("/dev/stderr"),
-        FsAccess::Write
-    ));
-    assert!(is_standard_io_device_for_access(
-        Path::new("/dev/null"),
-        FsAccess::Write
-    ));
-    assert!(is_standard_io_device_for_access(
-        Path::new("/dev/fd/0"),
-        FsAccess::Read
-    ));
-    assert!(is_standard_io_device_for_access(
-        Path::new("/dev/fd/12"),
-        FsAccess::Write
-    ));
-    assert!(!is_standard_io_device_for_access(
-        Path::new("/dev/null"),
-        FsAccess::Delete
-    ));
-    assert!(!is_standard_io_device_for_access(
-        Path::new("/dev/fd/"),
-        FsAccess::Write
-    ));
-    assert!(!is_standard_io_device_for_access(
-        Path::new("/dev/fd/1a"),
-        FsAccess::Write
-    ));
-    assert!(!is_standard_io_device_for_access(
-        Path::new("/dev/stdoutx"),
-        FsAccess::Write
-    ));
-    assert!(!is_standard_io_device_for_access(
-        Path::new("/dev/random"),
-        FsAccess::Read
-    ));
-    assert!(!is_standard_io_device_for_access(
-        Path::new("/tmp/dev/null"),
-        FsAccess::Write
-    ));
-}
-
-#[test]
-fn path_within_root_accepts_root_and_children() {
-    let root = Path::new("/tmp/harn-root");
-    assert!(path_is_within(root, root));
-    assert!(path_is_within(Path::new("/tmp/harn-root/file"), root));
-    assert!(!path_is_within(
-        Path::new("/tmp/harn-root-other/file"),
-        root
-    ));
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
