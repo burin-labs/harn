@@ -1164,6 +1164,102 @@ fn run_command_background_after_survives_foreground_timeout() {
     );
 }
 
+// Command-ledger Phase 1: `list_handles` is the loop's liveness/reconciliation
+// query. An auto-converted (`background_after_ms`) command is an `awaited` lease
+// and is listed until it exits and its waiter drains it.
+#[test]
+fn list_handles_reports_live_awaited_handle_and_clears_on_exit() {
+    let session_id = unique_session_id("test-list-handles-awaited");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background_after_ms".into(), VmValue::Int(50));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let handle_id = require_str(&resp, "handle_id");
+
+    let listed = require_dict(call("hostlib_tools_list_handles", dict()).unwrap());
+    let handles = require_list(&listed, "handles");
+    assert_eq!(handles.len(), 1, "the awaited handle must be listed");
+    let row = as_dict(&handles[0]);
+    assert_eq!(require_str(&row, "handle_id"), handle_id);
+    assert_eq!(require_str(&row, "lease"), "awaited");
+    assert!(!require_str(&row, "command_or_op_descriptor").is_empty());
+    assert!(!require_str(&row, "started_at").is_empty());
+
+    let completion_rx =
+        register_completion_notifier(&handle_id).expect("handle should still be live");
+    controller.append_stdout(b"done\n");
+    controller.complete_with(ExitStatus::from_code(0));
+    completion_rx.recv().expect("waiter completion never fired");
+
+    let after = require_dict(call("hostlib_tools_list_handles", dict()).unwrap());
+    assert_eq!(
+        require_list(&after, "handles").len(),
+        0,
+        "a completed-and-drained handle must leave the live list",
+    );
+}
+
+// A bare `background: true` (detach) with no inline window is the fire-and-forget
+// service idiom -> `service` lease, distinguishable in `list_handles`.
+#[test]
+fn run_command_detach_registers_service_lease() {
+    let session_id = unique_session_id("test-list-handles-service");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "10"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let handle_id = require_str(&resp, "handle_id");
+
+    let listed = require_dict(call("hostlib_tools_list_handles", dict()).unwrap());
+    let handles = require_list(&listed, "handles");
+    assert_eq!(handles.len(), 1);
+    let row = as_dict(&handles[0]);
+    assert_eq!(require_str(&row, "handle_id"), handle_id);
+    assert_eq!(
+        require_str(&row, "lease"),
+        "service",
+        "a bare detach is a fire-and-forget service lease",
+    );
+
+    let mut cancel = dict();
+    cancel.insert("handle_id".into(), vstr(&handle_id));
+    let _ = call("hostlib_tools_cancel_handle", cancel);
+}
+
+// The conversion snapshot seeds the loop's per-handle delta cursor and the
+// stall / first-stderr decision triggers.
+#[test]
+fn background_after_snapshot_carries_delta_and_stall_fields() {
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "test-snapshot-delta-fields",
+    ));
+    let mut config = MockProcessConfig::running();
+    config.stdout = b"building\n".to_vec();
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["cargo", "build"]));
+    req.insert("background_after_ms".into(), VmValue::Int(50));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "status"), "running");
+    assert_eq!(
+        require_int(&resp, "output_offset"),
+        require_int(&resp, "byte_count"),
+        "output_offset seeds the loop's delta cursor from the current byte count",
+    );
+    assert_eq!(require_int(&resp, "stderr_byte_count"), 0);
+    assert!(require_int(&resp, "silence_ms") >= 0);
+}
+
 #[test]
 fn run_command_background_after_requeues_unrelated_feedback_without_restamping() {
     let session_id = unique_session_id("test-run-command-background-after-requeue");

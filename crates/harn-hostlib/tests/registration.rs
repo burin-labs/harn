@@ -445,6 +445,7 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_inspect_test_results",
             "hostlib_tools_manage_packages",
             "hostlib_tools_cancel_handle",
+            "hostlib_tools_list_handles",
             "hostlib_tools_toolchain_facts",
             // Per-session opt-in builtin.
             "hostlib_enable",
@@ -471,6 +472,7 @@ fn tools_capability_registers_documented_methods() {
         "hostlib_tools_inspect_test_results",
         "hostlib_tools_manage_packages",
         "hostlib_tools_cancel_handle",
+        "hostlib_tools_list_handles",
         "hostlib_tools_toolchain_facts",
     ];
     for name in gated_methods {

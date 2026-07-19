@@ -42,6 +42,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
+use harn_vm::VmDictExt;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -145,6 +146,10 @@ fn kill_and_publish(killer: &dyn ProcessKiller, cancellation: &mut CancellationS
 struct OutputState {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    /// Wall-clock instant of the most recent stdout/stderr chunk, used to derive
+    /// `silence_ms` on progress snapshots (the byte-stall decision trigger).
+    /// `None` until the first byte of output arrives.
+    last_output_at: Option<std::time::Instant>,
 }
 
 /// Shared state for a single in-flight child process.
@@ -166,6 +171,13 @@ struct HandleEntry {
     result_txs: Vec<std::sync::mpsc::SyncSender<VmValue>>,
     /// Opaque verification snapshot binding provided by the caller.
     snapshot_binding: Option<harn_vm::value::DictMap>,
+    /// Spawn-time lease tag surfaced by `list_handles` (loop owns transitions).
+    lease: LeaseTag,
+    /// Human-readable command display, so `list_handles` can render a ledger
+    /// digest without the caller re-deriving it.
+    command_display: String,
+    /// RFC 3339 spawn timestamp, for `list_handles` elapsed reporting.
+    started_at: String,
 }
 
 #[derive(Default)]
@@ -233,6 +245,30 @@ pub(crate) struct LongRunningSpawnOptions {
     pub(crate) progress_max_interval: Option<Duration>,
     pub(crate) progress_max_inline_bytes: usize,
     pub(crate) snapshot_binding: Option<harn_vm::value::DictMap>,
+    /// Initial lease classification recorded on the handle entry for
+    /// `list_handles` reporting. `"awaited"` (the loop schedules decision
+    /// re-entries and waits on it) or `"service"` (detached; runs until the
+    /// session-end reaper). The loop owns transitions after spawn; this is only
+    /// the spawn-time tag.
+    pub(crate) lease: LeaseTag,
+}
+
+/// Spawn-time lease classification stored on a handle entry. The agent loop's
+/// ledger owns lease transitions (e.g. `release_command` awaited -> service);
+/// this tag is the initial value surfaced by `list_handles`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LeaseTag {
+    Awaited,
+    Service,
+}
+
+impl LeaseTag {
+    fn as_str(self) -> &'static str {
+        match self {
+            LeaseTag::Awaited => "awaited",
+            LeaseTag::Service => "service",
+        }
+    }
 }
 
 struct WaiterContext {
@@ -323,6 +359,7 @@ pub fn spawn_long_running(
             progress_max_interval: None,
             progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
             snapshot_binding: None,
+            lease: LeaseTag::Awaited,
         },
     )
 }
@@ -383,6 +420,9 @@ pub(crate) fn spawn_long_running_with_options(
                 completion_tx: None,
                 result_txs: Vec::new(),
                 snapshot_binding: options.snapshot_binding.clone(),
+                lease: options.lease,
+                command_display: command_display.clone(),
+                started_at: started_at.clone(),
             },
         );
     }
@@ -694,6 +734,7 @@ fn spawn_output_drain(
                 } else {
                     state.stderr.extend_from_slice(chunk);
                 }
+                state.last_output_at = Some(std::time::Instant::now());
             }
         }
     })
@@ -724,12 +765,16 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 break;
             }
             current = next_progress_interval(current, context.max_interval);
-            let (stdout, stderr) = {
+            let (stdout, stderr, last_output_at) = {
                 let state = context
                     .output_state
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner());
-                (state.stdout.clone(), state.stderr.clone())
+                (
+                    state.stdout.clone(),
+                    state.stderr.clone(),
+                    state.last_output_at,
+                )
             };
             let capture = CaptureConfig {
                 max_inline_bytes: context.max_inline_bytes,
@@ -737,6 +782,12 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
             };
             let (inline_stdout, inline_stderr) = proc::inline_output(&stdout, &stderr, capture);
             let byte_count = stdout.len().saturating_add(stderr.len());
+            // Milliseconds since the last output chunk (or since spawn if the
+            // command has produced nothing yet). The loop reads this to detect a
+            // byte-stall and to escalate a silent hang toward the ceiling.
+            let silence_ms = last_output_at
+                .map(|instant| instant.elapsed().as_millis() as i64)
+                .unwrap_or_else(|| context.started.elapsed().as_millis() as i64);
             let mut payload = serde_json::json!({
                 "command_id": &context.command_id,
                 "handle_id": &context.handle_id,
@@ -753,6 +804,15 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "stdout_path": to_agent_path(&context.stdout_path),
                 "stderr_path": to_agent_path(&context.stderr_path),
                 "byte_count": byte_count as i64,
+                // Monotonic combined-output offset the loop passes to
+                // `read_command_output` to page only the delta since its last
+                // digest (never re-paying for the cumulative tail).
+                "output_offset": byte_count as i64,
+                // Loop derives the "first stderr after a clean run" decision
+                // trigger from this count crossing zero; kept loop-side so all
+                // event-edge detection lives in one place (spec §1.4).
+                "stderr_byte_count": stderr.len() as i64,
+                "silence_ms": silence_ms,
                 "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
                 "process_group_id": context.process_group_id,
             });
@@ -883,6 +943,37 @@ pub(crate) fn wait_for_result(handle_id: &str, timeout: Duration) -> Option<VmVa
         rx
     };
     rx.recv_timeout(timeout).ok()
+}
+
+/// Live handles for `session_id`, for the agent loop's ledger reconciliation and
+/// digest rendering. Each row carries the spawn-time lease tag, command display,
+/// and start timestamp; scheduling and lease transitions live in the loop. An
+/// entry disappears from this list the instant its waiter thread removes it on
+/// process exit, so a completed-and-drained command is never reported as live.
+pub(crate) fn list_session_handles(session_id: &str) -> VmValue {
+    let store = HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned");
+    let handles: Vec<VmValue> = store
+        .entries
+        .iter()
+        .filter(|(_id, entry)| entry.session_id == session_id)
+        .map(|(id, entry)| {
+            let mut row = harn_vm::value::DictMap::new();
+            row.put_str("handle_id", id.clone());
+            row.put_str("session_id", entry.session_id.clone());
+            row.put_str("lease", entry.lease.as_str());
+            row.put_str("command_or_op_descriptor", entry.command_display.clone());
+            row.put_str("started_at", entry.started_at.clone());
+            VmValue::dict(row)
+        })
+        .collect();
+    let mut response = harn_vm::value::DictMap::new();
+    response.insert(
+        harn_vm::value::intern_key("handles"),
+        VmValue::List(Arc::new(handles)),
+    );
+    VmValue::dict(response)
 }
 
 /// Tuple shape used by `cancel_session_handles` to drain entries while
