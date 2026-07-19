@@ -169,7 +169,7 @@ if ! grep -Fq "FAIL: conformance shard(s) 2:44 failed" "$tmp_root/conformance-fa
   cat "$tmp_root/conformance-fail.out" >&2
   exit 1
 fi
-if ! grep -Fq "FAIL: one or more audit gates failed" "$tmp_root/audit-fail.out"; then
+if ! grep -Fq "=== FAILED: audit gates ===" "$tmp_root/audit-fail.out"; then
   echo "audit_gates did not report the failing audit fanout" >&2
   cat "$tmp_root/audit-fail.out" >&2
   exit 1
