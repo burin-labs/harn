@@ -1283,6 +1283,8 @@ operations that should not require a generic shell or `run_command` tool.
 | `git_switch(branch, repo?, options?)` | Switch to a branch/ref, with optional `create`, `force_create`, `detach`, or `discard_changes` |
 | `git_pull_ff_only(repo?, remote?, branch?, options?)` | Run `git pull --ff-only` with optional quiet/prune flags |
 | `git_fetch(remote?, repo?, refspecs?)` | Fetch from an existing remote using the receipt-producing `git.fetch` builtin |
+| `git_checkout_sync(options)` | Apply an exact-ref checkout transaction with explicit dirty-tree policy and a typed aggregate receipt |
+| `git_checkout_plan(options)` | Return the canonical labeled argv plan consumed by execution and fixture runners |
 | `git_tool_catalog(options?)` | Return searchable metadata for available git operations |
 | `git_find_tool(query, options?)` | Rank git operations for a natural-language query with a deterministic lexical scorer |
 | `git_run_tool(operation, args?, options?)` | Dispatch one catalogued git operation by id; mutating operations require `include_mutations: true` |
@@ -1296,6 +1298,35 @@ operations that should not require a generic shell or `run_command` tool.
 harnesses can expose just the git operations a model should be allowed to call.
 Pass `defer_loading`, `namespace`, or `tool_config` to make the generated tools
 participate in the existing Tool Vault / `tool_search` flow.
+
+Automation that must normalize a checkout should use `git_checkout_sync`
+instead of maintaining separate command labels and execution branches. The
+transaction fetches only the requested base ref, creates a missing local base
+from that fetched remote-tracking ref, fast-forwards without a second broad
+fetch, and verifies the final branch and clean-tree postconditions.
+
+```harn,ignore
+import { git_checkout_sync } from "std/git"
+
+const receipt = git_checkout_sync({
+  repo: repo_root,
+  remote: "origin",
+  base_branch: "main",
+  dirty_policy: "stash",
+  stash_name: "release-preflight-" + run_id,
+})
+if !receipt.success {
+  throw receipt.failure_kind + ": " + receipt.recovery
+}
+```
+
+Use `dirty_policy: "refuse"` when mutation must stop on local evidence,
+`"preserve"` for cleanup that should leave a dirty checkout untouched, or
+`"stash"` with a stable name to continue while retaining manual recovery.
+Stashes are deliberately not popped automatically: a later failure cannot
+silently mix preserved changes into a different checkout state. Tests can pass
+`runner: fn(step) { ... }`; the callback receives the same `kind`, `label`, and
+`argv` values used by production.
 
 ```harn,ignore
 import { git_tools } from "std/git"
