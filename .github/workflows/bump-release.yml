@@ -25,9 +25,9 @@ on:
           already-published crate (e.g. harn-cli) now depends on. Sets
           HARN_BOOTSTRAP_NEW_CRATES=1, which skips the publish dry-run
           and audit package checks for downstream crates that need it on
-          crates.io. The real publish on finalize uses
-          `cargo publish --workspace` which orders intra-workspace deps
-          correctly. See harn#609.
+          crates.io. The real publish on finalize resumes the remaining
+          dependency DAG and waits for newly uploaded dependencies to
+          become selectable. See harn#609.
         type: boolean
         default: false
       skip_dry_run:

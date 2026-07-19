@@ -14,6 +14,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | Script | Wired into | Notes |
 | --- | --- | --- |
 | `check_receipt_struct_duplication.harn` | `make check-receipt-structs` | Workspace `.rs` scan + brace matching. |
+| `publish.harn` | `release_gate.sh` + release workflows | Typed, resumable crates.io dependency-DAG publication; `publish.sh` remains a four-line launcher. |
 | `sync_tree_sitter_keywords.harn` | `make {gen,check}-tree-sitter-keywords` | Lexer↔grammar keyword set sync (`--write`). |
 | `check_diagnostic_codes.harn` | `make lint-diagnostic-codes` | Registry + struct-literal/`Code::` scan; uses `regex_captures` `.line`/`.start`. |
 | `check_docs_links.harn` | `make check-docs-links` | Markdown local-link resolver; `..` resolved at `fs.exists` time. |
@@ -85,7 +86,7 @@ These drive `cargo`, `git`, codesigning, and release plumbing. They are
 idiomatic shell glue around external build tools; porting offers little and
 risks release/build reliability:
 
-`release_ship.sh`, `release_gate.sh`, `release_smoke.sh`, `publish.sh`,
+`release_ship.sh`, `release_gate.sh`, `release_smoke.sh`,
 `verify_crate_packages.sh`, `dev_setup.sh`, `sign_local_macos.sh`,
 `generate_sdk_clients.sh`, `prune_stale_targets.sh`, `bench_*.sh`,
 `smoke_installed_binary.sh`, `stress_subprocess_tests.sh`,

@@ -46,10 +46,9 @@ fn assert_throws_contains(body, fragment: string) -> nil {
 
 @test
 pipeline test_publish_plan_filters_private_packages_and_orders_dependencies(task) {
-  assert_eq(
-    publish_plan_rows(META),
-    ["version\t1.2.3", "crate\talpha", "crate\tbeta", "crate\tgamma"],
-  )
+  const packages = publish_plan_packages_from_metadata(META)
+  assert_eq(publish_plan_version(packages), "1.2.3")
+  assert_eq(publish_plan_order(packages), ["alpha", "beta", "gamma"])
 }
 
 @test
