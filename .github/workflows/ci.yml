@@ -347,10 +347,11 @@ jobs:
 
   # The compile-bearing Linux Rust lanes are intentionally one matrix job with
   # fail-fast enabled: if any required Rust lane fails, GitHub cancels the
-  # sibling Rust lane that is still queued or running. The test row is the one
-  # behavior build producer: it compiles the suite once on persistent storage,
-  # runs the environment-neutral tests there, and publishes only the small
-  # security/CLI payload that must execute on GitHub Ubuntu.
+  # sibling Rust lane that is still queued or running. The behavior row is the
+  # one producer: it compiles the suite once on persistent storage and
+  # publishes only the small security/CLI payload that must execute on GitHub
+  # Ubuntu. Execution-only proof consumers fan out after that immutable
+  # producer succeeds.
   rust-builds:
     name: ${{ matrix.name }}
     needs: changes
@@ -387,8 +388,8 @@ jobs:
             cache_key: workspace-lint
             fetch_depth: 1
             rust_components: clippy
-          - kind: test
-            name: Rust test
+          - kind: behavior
+            name: Behavior build
             runner: blacksmith-8vcpu-ubuntu-2404
             cache_key: workspace-behavior
             fetch_depth: 1
@@ -426,7 +427,7 @@ jobs:
           shared-key: ${{ matrix.cache_key }}
           cache-bin: false
       - name: Install cargo-nextest
-        if: matrix.kind == 'test'
+        if: matrix.kind == 'behavior'
         uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
         with:
           tool: nextest@0.9.132
@@ -443,31 +444,16 @@ jobs:
           RUN_PROMPT_PROSE_RATCHET: ${{ needs.changes.outputs.prompt_prose }}
         run: ./scripts/ci/run_rust_lint_lane.sh
       - name: Build portable behavior payload
-        if: matrix.kind == 'test'
+        id: release-audit-behavior-build
+        if: matrix.kind == 'behavior'
         env:
           CARGO_BUILD_JOBS: "4"
         run: >-
           ./scripts/ci/behavior_artifact.sh build
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$GITHUB_SHA"
-      # Blacksmith already proved that the full suite has exactly one
-      # incompatible case on its kernel: the Landlock escape test. Run every
-      # other default-suite test against the just-built graph here, then run
-      # that one security proof from the archived harn-vm binary on GitHub
-      # Ubuntu below. No test is skipped without an owning execution lane.
-      - name: Run full environment-neutral test suite
-        id: release-audit-rust-test
-        if: matrix.kind == 'test'
-        env:
-          CARGO_BUILD_JOBS: "4"
-          HARN_LLM_CALLS_DISABLED: "1"
-          NEXTEST_PROFILE: ci
-        run: >-
-          scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --workspace --profile ci
-          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
       - name: Upload portable behavior payload
-        if: matrix.kind == 'test'
+        if: matrix.kind == 'behavior'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           path: ${{ runner.temp }}/harn-behavior.tar.zst
@@ -482,6 +468,63 @@ jobs:
       # #3593). Shutting the server down gracefully here leaves no orphan for
       # the cleanup phase to kill. `if: always()` so it runs even when a gate
       # failed; `|| true` so teardown can never itself fail the job.
+      - name: Summarize and stop sccache
+        if: always()
+        run: ./scripts/ci/finalize_sccache.sh
+
+  # Keep the full environment-neutral Rust suite on a dedicated consumer so
+  # Ubuntu proof lanes can start as soon as the producer has published the
+  # exact behavior payload. The producer's workspace-behavior cache is safe to
+  # reuse because this job waits for the complete rust-builds matrix.
+  rust-test:
+    name: Rust test
+    needs: [changes, rust-builds]
+    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: 12
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      SCCACHE_CACHE_SIZE: 15G
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/free-disk-space
+      - name: Install mold linker
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: mold
+          check-command: mold
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/sccache
+        with:
+          cache-key: workspace-behavior
+          sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+      - uses: ./.github/actions/rust-cache
+        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        continue-on-error: true
+        with:
+          shared-key: workspace-behavior
+          cache-bin: false
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
+        with:
+          tool: nextest@0.9.132
+      # Landlock is the one environment-specific proof owned by rust-security;
+      # every other default-suite test remains required here.
+      - name: Run full environment-neutral test suite
+        id: release-audit-rust-test
+        env:
+          CARGO_BUILD_JOBS: "4"
+          HARN_LLM_CALLS_DISABLED: "1"
+          NEXTEST_PROFILE: ci
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --workspace --profile ci
+          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
       - name: Summarize and stop sccache
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
@@ -530,9 +573,9 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          # Changelog history is a runtime audit input; compilation already
-          # happened once in rust-builds.
-          fetch-depth: 0
+          # The changelog-history audit runs in audit-scripts; this lane only
+          # needs the checked-out tree and the exact producer payload.
+          fetch-depth: 1
       - name: Download portable behavior payload
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1153,7 +1196,7 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, rust-security, harn-audit, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs: [runner-availability, changes, fmt, package-audit, lint-md, rust-builds, rust-test, rust-security, harn-audit, audit-scripts, windows-plan, windows, windows-cross-check, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         env:
@@ -1208,6 +1251,17 @@ jobs:
           if [ "$rust_builds_result" != "success" ] && [ "$rust_builds_result" != "skipped" ]; then
             echo "::error::Rust build group failed."
             exit 1
+          fi
+
+          rust_test_result="${{ needs['rust-test'].result }}"
+          echo "Rust test: $rust_test_result"
+          if [ "$rust_test_result" != "success" ]; then
+            if [ "$rust_test_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+              :
+            else
+              echo "::error::Rust test failed or skipped while Rust proof was required."
+              exit 1
+            fi
           fi
 
           rust_security_result="${{ needs['rust-security'].result }}"

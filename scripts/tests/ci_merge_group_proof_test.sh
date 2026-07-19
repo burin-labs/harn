@@ -45,12 +45,23 @@ write_response() {
 }
 
 successful_jobs="$tmp_root/successful-jobs.json"
-printf '%s\n' '{"total_count":8,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Package audit","status":"completed","conclusion":"success"},{"name":"Rust lint","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Rust security proof","status":"completed","conclusion":"success"},{"name":"Harn conformance + audit","status":"completed","conclusion":"success"},{"name":"Audit scripts","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
+printf '%s\n' '{"total_count":9,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Package audit","status":"completed","conclusion":"success"},{"name":"Rust lint","status":"completed","conclusion":"success"},{"name":"Behavior build","status":"completed","conclusion":"success"},{"name":"Rust test","status":"completed","conclusion":"success"},{"name":"Rust security proof","status":"completed","conclusion":"success"},{"name":"Harn conformance + audit","status":"completed","conclusion":"success"},{"name":"Audit scripts","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"}]}' > "$successful_jobs"
 
 success_response="$tmp_root/success.json"
 write_response "$success_response" "[{\"id\":123,\"head_sha\":\"$sha\",\"path\":\".github/workflows/ci.yml\",\"event\":\"merge_group\",\"status\":\"completed\",\"conclusion\":\"success\"}]"
 [[ "$(run_proof "$success_response" "$successful_jobs")" == "true" ]] \
   || { echo "exact successful merge-group proof was not accepted" >&2; exit 1; }
+
+missing_harn_jobs="$tmp_root/missing-harn-jobs.json"
+jq 'del(.jobs[] | select(.name == "Harn conformance + audit")) | .total_count = 8' \
+  "$successful_jobs" > "$missing_harn_jobs"
+[[ "$(run_proof "$success_response" "$missing_harn_jobs")" == "false" ]] \
+  || { echo "merge-group proof accepted missing Harn authority" >&2; exit 1; }
+
+invalid_contract="$tmp_root/invalid-contract.json"
+printf '%s\n' '{}' > "$invalid_contract"
+[[ "$(RELEASE_AUDIT_CONTRACT_PATH="$invalid_contract" run_proof "$success_response" "$successful_jobs")" == "false" ]] \
+  || { echo "merge-group proof accepted an invalid owning contract" >&2; exit 1; }
 
 pruned_jobs="$tmp_root/pruned-jobs.json"
 printf '%s\n' '{"total_count":2,"jobs":[{"name":"Format check","status":"completed","conclusion":"success"},{"name":"Windows cross-compile check","status":"completed","conclusion":"success"}]}' > "$pruned_jobs"
