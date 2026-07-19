@@ -205,6 +205,35 @@ fn package_pack_skips_generated_docs_dist() {
 }
 
 #[test]
+fn package_pack_excludes_linked_worktree_and_nested_harn_runtime_state() {
+    let package = tempfile::tempdir().unwrap();
+    let artifact_parent = tempfile::tempdir().unwrap();
+    let artifact = artifact_parent.path().join("artifact");
+    write_publishable_package(package.path());
+    fs::write(
+        package.path().join(".git"),
+        "gitdir: ../worktrees/package\n",
+    )
+    .unwrap();
+    fs::write(package.path().join(".harn-version"), "0.10.0\n").unwrap();
+    fs::create_dir_all(package.path().join("tests/.harn-tmp/case")).unwrap();
+    fs::write(
+        package.path().join("tests/.harn-tmp/case/runtime.txt"),
+        "transient\n",
+    )
+    .unwrap();
+
+    let pack = pack_package_impl(Some(package.path()), Some(&artifact), false).unwrap();
+
+    assert!(pack.files.contains(&".harn-version".to_string()));
+    assert!(!pack.files.iter().any(|path| path == ".git"));
+    assert!(!pack.files.iter().any(|path| path.contains(".harn-tmp")));
+    assert!(artifact.join(".harn-version").is_file());
+    assert!(!artifact.join(".git").exists());
+    assert!(!artifact.join("tests/.harn-tmp").exists());
+}
+
+#[test]
 fn publish_dry_run_builds_tag_command_and_index_diff() {
     let tmp = tempfile::tempdir().unwrap();
     write_publishable_package(tmp.path());

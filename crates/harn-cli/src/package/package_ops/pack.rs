@@ -100,36 +100,32 @@ pub(crate) fn collect_package_files_inner(
         if file_type.is_symlink() {
             continue;
         }
+        let rel = path
+            .strip_prefix(root)
+            .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
+        if should_skip_package_entry(rel, file_type.is_dir()) {
+            continue;
+        }
         if file_type.is_dir() {
-            let rel = path
-                .strip_prefix(root)
-                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
-            if should_skip_package_dir(rel) {
-                continue;
-            }
             collect_package_files_inner(root, &path, out)?;
         } else if file_type.is_file() {
-            let rel = path
-                .strip_prefix(root)
-                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?
-                .to_string_lossy()
-                .replace('\\', "/");
+            let rel = rel.to_string_lossy().replace('\\', "/");
             out.push(rel);
         }
     }
     Ok(())
 }
 
-pub(crate) fn should_skip_package_dir(rel: &Path) -> bool {
-    if rel == Path::new("docs").join("dist") {
+pub(crate) fn should_skip_package_entry(rel: &Path, is_dir: bool) -> bool {
+    if is_dir && rel == Path::new("docs").join("dist") {
         return true;
     }
-    rel.components().any(|component| {
-        matches!(
-            component.as_os_str().to_str(),
-            Some(".git" | ".harn" | "target" | "node_modules")
-        )
-    })
+    let Some(name) = rel.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name == ".git"
+        || name == ".harn"
+        || (is_dir && (name.starts_with(".harn-") || matches!(name, "target" | "node_modules")))
 }
 
 pub(crate) fn default_artifact_dir(ctx: &ManifestContext, report: &PackageCheckReport) -> PathBuf {
