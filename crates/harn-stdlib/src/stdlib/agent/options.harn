@@ -159,26 +159,21 @@ pub type JudgeConfig = {
  * retain structural checking. The parity test pins it as a superset of
  * `LlmCallOptions`.
  *
- * NOTE ON `output_schema`: unlike on `llm_call`, this is a TERMINAL-answer
- * contract, not a per-turn one. The loop deliberately does NOT force each
- * mid-loop turn into structured mode (that fights tool-calling); instead it
- * validates the FINAL answer against this JSON Schema at finalize, re-asks
- * ONCE through the `llm_caller` seam if the answer is off-shape, and surfaces
- * the parsed value on `run.output` with `run.output_valid` recording whether
- * validation passed. See `docs/src/llm/agent_loop.md` and
- * `__agent_loop_apply_output_schema` in `agent/loop.harn`. For strict
- * one-shot structured extraction, use `llm_call_structured` directly.
+ * On `agent_loop`, `output` is the terminal-answer contract. Ordinary turns
+ * omit it so tool calling stays unconstrained. At finalization the loop parses
+ * `output: "json"` or validates the schema form, then makes one repair call
+ * through the configured `llm_caller` if needed. The parsed value is returned
+ * as `run.output`; `run.output_valid` reports whether the contract passed. For
+ * one-shot extraction, use `llm_call_structured`.
  */
 pub type AgentLoopOptions = {
   provider?: string,
   model?: string,
   model_role?: string,
   model_tier?: string,
-  route_policy?: string,
-  prefer?: string | list<string>,
-  fallback_chain?: list<string>,
-  fallback_strategy?: string,
-  strategy?: string,
+  route_policy?: string | dict,
+  fallback_chain?: string | list<string>,
+  routing?: dict,
   equivalent_failover?: bool | {enabled?: bool, max_routes?: int, on_no_dispatch?: bool},
   models?: list<string \
     | {
@@ -195,74 +190,64 @@ pub type AgentLoopOptions = {
   temperature?: float,
   top_p?: float,
   top_k?: int,
-  stop?: list<string>,
+  stop?: string | list<string>,
   seed?: int,
   frequency_penalty?: float,
   presence_penalty?: float,
   logprobs?: bool,
   top_logprobs?: int,
-  response_format?: string,
-  output_format?: string | dict,
-  schema?: any,
-  json_schema?: any,
-  output_schema?: any,
-  output_validation?: string,
+  stop_at_tool_call?: bool,
+  output?: "text" | "json" | dict,
   schema_retries?: int,
-  schema_stream_abort?: bool,
+  schema_retry_nudge?: bool | string,
   retries?: int,
   repair?: bool | dict,
   schema_recover?: any,
   reasoning_policy?: string | bool,
-  thinking_policy?: string | bool,
   reasoning_scale?: string,
-  problem_scale?: string,
   reasoning_task?: string,
-  reasoning_effort?: string,
-  thinking?: bool | dict,
+  effort?: string,
+  thinking?: bool | "adaptive" | dict,
   interleaved_thinking?: bool,
   anthropic_beta_features?: string | list<string>,
   vision?: bool,
-  tools?: any,
+  audio?: bool,
+  pdf?: bool,
+  video?: bool,
+  tools?: list | dict,
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,
   tool_format?: string,
-  provider_tools?: list,
-  hosted_tools?: list,
+  provider_tools?: list | dict,
+  provider_options?: dict,
   max_tool_calls?: int,
   previous_response_id?: string,
-  response_store?: bool,
-  responses_store?: bool,
-  store?: any,
+  store?: bool | dict,
   background?: bool,
   truncation?: string,
   compact?: bool,
   include?: list,
-  budget?: {
+  budget?: float \
+    | {
     max_cost_usd?: float,
     max_input_tokens?: int,
     max_output_tokens?: int,
     total_budget_usd?: float,
   },
-  cache?: bool,
+  cache?: bool | dict,
   prompt_cache_ttl?: "5m" | "1h",
-  fast?: bool,
-  speed?: string,
+  speed?: "standard" | "fast",
   stream?: bool,
-  timeout?: int,
   timeout_ms?: int,
+  idle_timeout_ms?: int,
   messages?: list,
-  prefill?: string,
   history?: list,
-  transcript?: dict,
+  prefill?: string,
   session_id?: string,
   mock_scope?: string,
-  system?: string,
-  system_preamble?: string,
-  system_prefix?: string,
-  system_context?: string,
-  system_prompt_parts?: list,
-  system_appendix?: string,
-  system_suffix?: string,
+  context_profile?: dict,
+  capabilities?: any,
+  system?: string | list,
   structural_experiment?: any,
   metadata?: dict,
   profile?: string,
@@ -365,7 +350,7 @@ pub type AgentLoopOptions = {
  * presets in `std/agent/presets`: any agent_loop option, plus the opt-in
  * captain layer dependencies, the `retry` transport-retry control
  * (`false` to opt out of the baked default, or a `with_retry` config
- * dict), and `model_ladder` (overrides the kind's fill-nil model ladder).
+ * dict). Routing overrides use the canonical `models` or `ladder` keys.
  *
  * Rust twin: none — presets are stdlib-owned option packs.
  */
@@ -384,7 +369,5 @@ pub type AgentPresetOptions = AgentLoopOptions \
   logging_options?: dict,
   llm_options?: dict,
   persona?: any,
-  task_kind?: string,
   judge?: bool | JudgeConfig,
-  model_ladder?: list<string>,
 }

@@ -1918,7 +1918,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `llm_healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
-| `llm_apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` / `thinking_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `reasoning_effort` |
+| `llm_apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `effort` |
 | `llm_rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool/dict | Set (`{rpm: N, tpm: N, input_tpm: N, output_tpm: N, concurrency: N}`), query legacy RPM, query rich details with `{details: true}`, or clear (`{rpm: 0}`) per-provider rate limits |
 | `llm_providers()` | — | list | List all configured provider names |
 | `harness.llm.providers()` | — | list | Per-provider availability + credential snapshot: `[{name, available, credential_status}, ...]`. `credential_status` is one of `"ok"`, `"missing"`, `"not_required"`, `"deferred"` |
@@ -2214,7 +2214,7 @@ distinguish new failure modes.
 | `transient_network` | Network-level transient failure — connection reset, DNS hiccup, partial stream. Retryable but not provider-status-coded |
 | `resource_busy` | A shared local resource is temporarily unavailable, such as a contended database write lock |
 | `schema_validation` | LLM output failed schema validation. Retryable via `schema_retries` |
-| `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy `output_schema`. Consumes one `schema_retries` slot; see `schema_stream_abort` |
+| `schema_stream_aborted` | A streaming response was aborted because the partial content could not satisfy the `output` schema. Consumes one `schema_retries` slot; configure with `output.stream_abort` |
 | `tool_error` | Tool execution failed |
 | `tool_rejected` | The host refused the tool — not permitted, or not in the allowlist |
 | `egress_blocked` | Outbound network egress was blocked by policy |
@@ -3147,7 +3147,7 @@ Options mirror `agent_loop` where relevant (`provider`, `model`, `tools`,
 - `reminder_propagation: [...]` to explicitly seed inherited system reminders;
   when omitted, pending parent reminders are filtered by their `propagate`
   policy and inherited automatically
-- `response_format: "json"` to parse structured child JSON into `data` from the
+- `output: "json"` to parse structured child JSON into `data` from the
   final successful transcript when possible
 - `returns: {schema: ...}` to validate that structured child JSON against a
   schema

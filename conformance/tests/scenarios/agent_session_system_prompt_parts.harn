@@ -1,4 +1,4 @@
-import { system_preamble, with_system_prompt_parts } from "std/llm/prompts"
+import { system_before, with_system_fragments } from "std/llm/prompts"
 import { with_llm_script } from "std/testing"
 
 fn occurrences(text, needle) {
@@ -16,10 +16,7 @@ pipeline default() {
       const direct = llm_call(
         "direct prompt",
         "Direct base.",
-        {
-          provider: "mock",
-          system_preamble: system_preamble("Direct preamble.", {label: "Direct contract"}),
-        },
+        {provider: "mock", system: [system_before("Direct preamble.", {title: "Direct contract"})]},
       )
       __io_println(len(transcript_messages(direct.transcript)))
       __io_println(len(events_by_kind(direct.transcript, "system_prompt")))
@@ -34,10 +31,10 @@ pipeline default() {
       // Durable session journals outlive a fixture process; isolate the
       // continuation scenario from prior runs with a fresh id.
       const sid = "system-prompt-continuation-session-" + uuid()
-      const opts = with_system_prompt_parts(
+      const opts = with_system_fragments(
         {provider: "mock", session_id: sid, max_iterations: 1, auto_context_profile: false},
         [
-          system_preamble("Persistent contract.", {label: "Session contract"}),
+          system_before("Persistent contract.", {title: "Session contract"}),
           {content: "disabled", enabled: false},
         ],
       )

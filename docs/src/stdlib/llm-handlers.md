@@ -158,7 +158,7 @@ import {compose, with_logging, with_retry} from "std/llm/handlers"
 
 const route = agent_model_options({
   role: "planner",
-  defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
+  defaults: {provider: "anthropic", model: "claude-sonnet-5", reasoning_task: "agent"},
 })
 const caller = compose([with_retry({max_attempts: 3}), with_logging({})])(default_llm_caller())
 const result = agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
@@ -168,8 +168,7 @@ const result = agent_loop(task, system, route.options + {loop_until_done: true, 
 environment prefixes (`HARN_AGENT_PLANNER_*`, `HARN_LLM_PLANNER_*`,
 `HARN_PLANNER_*`), then shared `HARN_AGENT_*` / `HARN_LLM_*`, then defaults. If
 a model is present it calls `pack_for(...)`, resolves `tool_format: "auto"`,
-and strips unsupported provider-specific keys such as `reasoning_effort` or
-prompt-cache hints before the call reaches a provider
+and strips unsupported reasoning or prompt-cache fields before the call reaches a provider
 (`agent_sanitize_model_options` exposes the stripping step directly).
 
 ### Persona-shaped example: cost moat substrate
@@ -210,7 +209,7 @@ const router = with_routing({
   default: cheap,
   routes: [
     {name: "frontier",
-     when: { call -> call?.opts?.task_kind == "judge" || (call?.opts?.escalate ?? false) },
+     when: { call -> call?.opts?.reasoning_task == "judge" || (call?.opts?.escalate ?? false) },
      caller: frontier},
   ],
 })
@@ -446,35 +445,33 @@ opts always win.
 Layering (low → high):
 
 1. `resolved_options(opts)` — runtime catalog defaults
-2. effort patch (per family)
-3. thinking patch (per family; explicit caller intent wins)
+2. reasoning-scale calibration (per family)
+3. reasoning-policy lowering, skipped when `thinking` or `effort` is pinned
 4. task overlay (only fills unset fields)
-5. `recommend_max_output_tokens(...)` if a prompt was provided and
-   max_tokens hasn't been set yet
-6. user opts — highest precedence
+5. `recommend_max_output_tokens(...)` when a prompt has no output limit
+6. canonical user options — highest precedence
 
 | Function | Signature | Description |
 |---|---|---|
-| `pack_for(opts)` | `(dict) -> dict` | Required: `opts.model`. Optional: `provider`, `task ∈ {"chat","agent","refine","judge","summarize","code","json"}` (default `"chat"`), `thinking ∈ {"off","low","medium","high","auto"}` (default `"auto"`), `effort ∈ {"fast","balanced","quality","auto"}` (default `"balanced"`), plus any other `llm_call` keys. |
-| `llm_apply_reasoning_policy(opts)` | `(dict) -> dict` | Applies Harn's provider-aware `reasoning_policy` / `thinking_policy` abstraction to an option dict. Used by `agent_loop`; direct callers can use it before `llm_call` when they want the same calibration. Explicit `thinking` and `reasoning_effort` win. |
-| `pack_chat(model, opts?)` | `(string, dict?) -> dict` | Convenience wrapper for `task: "chat"`. |
-| `pack_agent(model, opts?)` | `(string, dict?) -> dict` | `task: "agent"`. |
-| `pack_refine(model, opts?)` | `(string, dict?) -> dict` | `task: "refine"`. |
-| `pack_judge(model, opts?)` | `(string, dict?) -> dict` | `task: "judge"` (sets `output_format: {kind: "json_schema"}`, `temperature: 0.0`, `schema_retries: 2`). |
-| `pack_summarize(model, opts?)` | `(string, dict?) -> dict` | `task: "summarize"`. |
-| `pack_code(model, opts?)` | `(string, dict?) -> dict` | `task: "code"`. |
-| `pack_json(model, opts?)` | `(string, dict?) -> dict` | `task: "json"` (sets `output_format: {kind: "json_object"}`). |
+| `pack_for(opts)` | `(dict) -> dict` | Requires `model`; accepts the canonical `llm_call` surface. `reasoning_policy`, `reasoning_scale`, and `reasoning_task` control provider-neutral calibration. Direct `thinking` or `effort` pins the low-level setting and bypasses policy lowering. |
+| `llm_apply_reasoning_policy(opts)` | `(dict) -> dict` | Applies Harn's provider-aware `reasoning_policy` to an option dict. Used by `agent_loop`; direct callers can use it before `llm_call` when they want the same calibration. Explicit `thinking` and `effort` win. |
+| `pack_chat(model, opts?)` | `(string, dict?) -> dict` | Convenience wrapper for `reasoning_task: "chat"`. |
+| `pack_agent(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "agent"`. |
+| `pack_refine(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "refine"`. |
+| `pack_judge(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "judge"` (sets a strict schema `output`, `temperature: 0.0`, and `schema_retries: 2`). |
+| `pack_summarize(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "summarize"`. |
+| `pack_code(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "code"`. |
+| `pack_json(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "json"` (sets `output: "json"`). |
 
 Calibrated families: Anthropic Sonnet/Opus/Haiku 4.x, OpenAI
 GPT-5/5.5/5.6/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
 
 ### Edge cases
 
-- **Opus 4.7 + manual `thinking`**: stripped + warns
-  `pack_thinking_stripped` (Opus 4.7 returns 400 server-side on manual
-  budgets).
-- **Ollama Qwen3 + `thinking: "off"`**: relies on the runtime's
-  capability-driven `/no_think` injection; the pack does not duplicate.
+- **Opus 4.7 + explicit policy**: the pack omits a manual budget; capability
+  lowering selects adaptive thinking. A direct `thinking` pin bypasses the pack.
+- **Ollama Qwen3 + `reasoning_policy: "off"`**: the runtime performs the
+  capability-driven `/no_think` lowering; the pack does not duplicate it.
 - **`provider: "auto"` unresolvable**: minimal pack.
 
 ### Example
@@ -483,8 +480,8 @@ GPT-5/5.5/5.6/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
 import {pack_agent} from "std/llm/defaults"
 
 const opts = pack_agent("claude-sonnet-5", {
-  thinking: "medium",
-  effort: "quality",
+  reasoning_policy: "high",
+  reasoning_scale: "large",
 })
 agent_loop(task, system, opts + {loop_until_done: true})
 ```
@@ -563,7 +560,7 @@ shadow the builtins.
 import {complementary_reviewer, family_of, has_capability, lineage_of} from "std/llm/catalog"
 
 if has_capability(model, "thinking") {
-  // safe to set `thinking: "medium"` in opts
+  // This route can honor a provider-neutral reasoning policy.
 }
 
 const fam = family_of(model)       // e.g. "anthropic-claude"

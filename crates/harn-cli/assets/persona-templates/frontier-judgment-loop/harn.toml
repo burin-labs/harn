@@ -14,4 +14,4 @@ autonomy_tier = "suggest"
 receipt_policy = "required"
 triggers = ["manual.review_requested"]
 budget = { daily_usd = 5.0, run_usd = 0.25, frontier_escalations = 2, max_tokens = 24000, max_runtime_seconds = 300 }
-model_policy = { default_model = "mock", escalation_model = "mock", fallback_models = ["mock"], reasoning_effort = "medium" }
+model_policy = { default_model = "mock", escalation_model = "mock", fallback_models = ["mock"], effort = "medium" }

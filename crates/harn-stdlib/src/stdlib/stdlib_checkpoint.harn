@@ -28,6 +28,7 @@
 // On first run all three stages execute. On a resumed run (after a crash),
 // completed stages are skipped automatically.
 import { agent_emit_event } from "std/agent/state"
+import { llm_call_options } from "std/llm/options"
 
 /**
  * checkpoint_stage.
@@ -176,7 +177,7 @@ fn __typed_checkpoint_options(options) {
   if opts?.system != nil && llm_opts?.system == nil {
     llm_opts = llm_opts + {system: opts.system}
   }
-  return llm_opts
+  return llm_call_options(llm_opts)
 }
 
 fn __typed_checkpoint_string_list(value) {

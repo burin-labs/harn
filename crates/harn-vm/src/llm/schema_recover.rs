@@ -19,7 +19,7 @@
 //!    recovered this way — nested objects are too unreliable.
 //! 4. **LLM repair** (`stage: "llm_repair"`, optional) — Single-shot
 //!    `llm_call` with the malformed text and schema in the prompt,
-//!    asking for valid JSON. Disabled with `{llm_repair: false}` or
+//!    asking for valid JSON. Disabled with `{repair: false}` or
 //!    when no LLM provider is configured. Repair runs with
 //!    `schema_retries: 0` to fail fast; cost amplification is the
 //!    caller's problem if they want more.
@@ -39,7 +39,7 @@
 //! Unlike `llm_call_structured_result`, this helper takes already-
 //! produced text rather than running a fresh structured call. The
 //! intended use is downstream of an `llm_call(...)` that returned
-//! prose or that used `output_validation: "off"`, when the caller
+//! prose or that used `output: "text"`, when the caller
 //! wants to recover the schema-shaped payload after the fact.
 
 use crate::value::VmDictExt;
@@ -490,7 +490,7 @@ fn parse_llm_repair_config(opts: &Option<crate::value::DictMap>) -> LlmRepairCon
             overrides: crate::value::DictMap::new(),
         };
     };
-    let raw = opts.get("llm_repair");
+    let raw = opts.get("repair");
     match raw {
         None => LlmRepairConfig {
             enabled: true,
@@ -607,32 +607,19 @@ fn merge_repair_options(
     // cost and the outer recovery cascade has already done what it
     // can. Set explicitly rather than relying on defaults.
     merged.insert(crate::value::intern_key("schema_retries"), VmValue::Int(0));
-    // Strip schema_recover-specific keys so they don't leak into
-    // `extract_llm_options` as unknown provider params.
-    merged.remove("llm_repair");
+    // Strip schema_recover controls before the repair request reaches the
+    // canonical llm_call option gate.
+    merged.remove("repair");
     merged.remove("apply_defaults");
-    // Install the schema on the call so providers can use their
-    // native JSON-mode and so the schema-retry loop's validation runs.
-    merged.insert(crate::value::intern_key("output_schema"), schema.clone());
-    merged.insert(crate::value::intern_key("json_schema"), schema.clone());
-    merged
-        .entry(crate::value::intern_key("output_format"))
-        .or_insert_with(|| {
-            let mut fmt = crate::value::DictMap::new();
-            fmt.put_str("kind", "json_schema");
-            fmt.insert(crate::value::intern_key("schema"), schema.clone());
-            fmt.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
-            VmValue::dict(fmt)
-        });
-    merged
-        .entry(crate::value::intern_key("output_validation"))
-        .or_insert(VmValue::String(arcstr::ArcStr::from("error")));
-    merged
-        .entry(crate::value::intern_key("response_format"))
-        .or_insert(VmValue::String(arcstr::ArcStr::from("json")));
     for (k, v) in overrides {
         merged.insert(k.clone(), v.clone());
     }
+    // The schema argument owns the repair call's output contract.
+    let mut output = crate::value::DictMap::new();
+    output.insert(crate::value::intern_key("schema"), schema.clone());
+    output.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
+    output.put_str("validation", "error");
+    merged.insert(crate::value::intern_key("output"), VmValue::dict(output));
     merged
 }
 
@@ -850,7 +837,7 @@ mod tests {
     #[test]
     fn parse_repair_config_disable_via_bool() {
         let mut opts = crate::value::DictMap::new();
-        opts.insert(crate::value::intern_key("llm_repair"), VmValue::Bool(false));
+        opts.insert(crate::value::intern_key("repair"), VmValue::Bool(false));
         let cfg = parse_llm_repair_config(&Some(opts));
         assert!(!cfg.enabled);
     }
@@ -867,10 +854,7 @@ mod tests {
         repair.put_str("model", "local:fix");
         repair.insert(crate::value::intern_key("max_tokens"), VmValue::Int(400));
         let mut opts = crate::value::DictMap::new();
-        opts.insert(
-            crate::value::intern_key("llm_repair"),
-            VmValue::dict(repair),
-        );
+        opts.insert(crate::value::intern_key("repair"), VmValue::dict(repair));
         let cfg = parse_llm_repair_config(&Some(opts));
         assert!(cfg.enabled);
         assert_eq!(
@@ -888,7 +872,7 @@ mod tests {
         let schema = person_schema();
         let mut base = crate::value::DictMap::new();
         base.insert(crate::value::intern_key("schema_retries"), VmValue::Int(7));
-        base.insert(crate::value::intern_key("llm_repair"), VmValue::Bool(true));
+        base.insert(crate::value::intern_key("repair"), VmValue::Bool(true));
         base.insert(
             crate::value::intern_key("apply_defaults"),
             VmValue::Bool(true),
@@ -898,12 +882,14 @@ mod tests {
             merged.get("schema_retries").and_then(VmValue::as_int),
             Some(0)
         );
-        assert!(merged.contains_key("output_schema"));
-        assert!(!merged.contains_key("llm_repair"));
+        assert!(merged.contains_key("output"));
+        assert!(!merged.contains_key("repair"));
         assert!(!merged.contains_key("apply_defaults"));
         assert_eq!(
             merged
-                .get("output_validation")
+                .get("output")
+                .and_then(VmValue::as_dict)
+                .and_then(|output| output.get("validation"))
                 .map(VmValue::display)
                 .as_deref(),
             Some("error")
@@ -996,7 +982,7 @@ mod tests {
     async fn schema_recover_failure_when_repair_disabled_and_unrecoverable() {
         let schema = person_schema();
         let mut opts = crate::value::DictMap::new();
-        opts.insert(crate::value::intern_key("llm_repair"), VmValue::Bool(false));
+        opts.insert(crate::value::intern_key("repair"), VmValue::Bool(false));
         let args = vec![
             VmValue::String(arcstr::ArcStr::from("nothing useful here at all")),
             schema,

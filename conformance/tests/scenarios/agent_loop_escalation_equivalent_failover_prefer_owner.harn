@@ -70,7 +70,11 @@ pipeline default() {
           llm_options: {
             provider: "anthropic",
             model: "claude-sonnet-4-6",
-            prefer: ["anthropic:claude-sonnet-4-6", "together:deepseek-v4-pro"],
+            route_policy: {
+              mode: "preference_list",
+              targets: ["anthropic:claude-sonnet-4-6", "together:deepseek-v4-pro"],
+              strategy: "prefer_order",
+            },
           },
         }
       }

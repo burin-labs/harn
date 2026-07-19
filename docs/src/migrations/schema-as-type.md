@@ -1,10 +1,10 @@
-# Migration — schema-as-type (`type` aliases drive `output_schema`)
+# Migration — schema-as-type (`type` aliases drive `output`)
 
 Prior to this change, Harn had two parallel representations for
 structured LLM output:
 
 1. **Harn-native types** — `type Foo = {verdict: string, ...}`.
-2. **Raw JSON-Schema dicts** — passed as `output_schema: {type: "dict",
+2. **Raw JSON-Schema dicts** — passed as `output: {type: "dict",
    properties: {...}, required: [...]}` to `llm_call`, and consumed by
    `schema_is`, `schema_expect`, `schema_parse`, and friends.
 
@@ -36,7 +36,7 @@ const grader_schema = {
 
 const r = llm_call(prompt, nil, {
   model: routing.model,
-  output_schema: grader_schema,
+  output: grader_schema,
   schema_retries: 2,
 })
 
@@ -55,7 +55,7 @@ type GraderOut = {
 
 const r = llm_call(prompt, nil, {
   model: routing.model,
-  output_schema: GraderOut,   // compiled to the JSON-Schema dict
+  output: GraderOut,          // compiled to the JSON-Schema dict
   schema_retries: 2,
 })
 
@@ -82,7 +82,7 @@ if schema_is(r.data, GraderOut) {
 
 ## Staying with raw schema dicts
 
-Nothing forces you to migrate. `output_schema: dict_literal` still
+Nothing forces you to migrate. `output: dict_literal` still
 works and is still the right tool when you need schema features Harn's
 type grammar does not yet express (regex `pattern`, `min_length`,
 numeric `min`/`max`, `const`, nested `$ref`, etc.). You can mix:
@@ -91,7 +91,7 @@ numeric `min`/`max`, `const`, nested `$ref`, etc.). You can mix:
 type Name = {first: string, last: string}
 
 const r = llm_call(prompt, nil, {
-  output_schema: {
+  output: {
     type: "dict",
     properties: {
       name: schema_of(Name),       // alias → schema dict
@@ -112,7 +112,7 @@ const r = llm_call(prompt, nil, {
   `dict<string, V>`, literal-string/int unions, functions, nested aliases,
   applied generic aliases, and open-record tails. Imported aliases may be used
   directly or embedded in a consumer-owned alias.
-- `response.data` of `llm_call(..., {output_schema: T})` is not yet
+- `response.data` of `llm_call(..., {output: T})` is not yet
   automatically narrowed to `T` by the type checker. Use
   `if schema_is(r.data, T) { ... }` in the interim — the narrowing
   there is exact.

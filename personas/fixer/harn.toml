@@ -24,6 +24,6 @@ context_packs = []
 evals = []
 owner = "platform"
 budget = { daily_usd = 4.0, frontier_escalations = 1, max_tokens = 40000, max_runtime_seconds = 300 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], effort = "medium" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["flow-v0"] }
 package_source = { package = "harn-fixer-persona", path = "personas/fixer" }

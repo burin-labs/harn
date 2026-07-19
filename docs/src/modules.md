@@ -355,16 +355,15 @@ Prompt helpers for deterministic system prompt composition:
 
 | Function | Description |
 |---|---|
-| `system_prompt_part(content, options?)` | Build a labeled, enableable system prompt fragment for `system_prompt_parts` |
-| `system_preamble(content, options?)` | Build a fragment positioned before the call/session system prompt |
-| `system_appendix(content, options?)` | Build a fragment positioned after the call/session system prompt |
-| `with_system_prompt_parts(options, parts)` | Return `options` with one or more normalized `system_prompt_parts` appended |
+| `system_prompt_part(content, options?)` | Build a labeled, enableable fragment for the `system` list |
+| `system_before(content, options?)` | Build a fragment positioned before the call/session system prompt |
+| `system_after(content, options?)` | Build a fragment positioned after the call/session system prompt |
+| `with_system_fragments(options, parts)` | Return `options` with normalized fragments appended to `system` |
 | `system_prelude(opts)` | Build a structured system prompt from persona, constraints, tools, output contract, examples, and tone |
 | `tool_use_prelude(tools, format)` | Render a deterministic tool-use prelude for non-`agent_loop` callers |
 
-`llm_call` and `agent_loop` also accept raw option keys
-`system_preamble`, `system_context`, `system_prompt_parts`,
-`system_appendix`, `system_prefix`, and `system_suffix`. For persistent
+`llm_call` and `agent_loop` accept one `system` option: a string or an
+ordered list of `{content, title?, position?, enabled?}` fragments. For persistent
 agent sessions, Harn records the composed session-level system prompt once in
 transcript metadata, emits one leading fingerprint event, and sends the
 synthesized provider system field on each model request without adding repeated
@@ -1603,7 +1602,7 @@ Model-option resolution helpers (moved here from the removed
 | Function | Description |
 |---|---|
 | `agent_model_options(config?)` | Resolve explicit options, role/env provider-model overrides, model-aware option packs, tool format, and capability cleanup |
-| `agent_sanitize_model_options(options?, policy?)` | Strip unsupported provider-specific keys such as `reasoning_effort` and prompt-cache hints; `{mode: "healthcheck"}` also drops deliberate-reasoning knobs for probes |
+| `agent_sanitize_model_options(options?, policy?)` | Strip unsupported reasoning and prompt-cache fields before provider dispatch; `{mode: "healthcheck"}` also drops deliberate-reasoning knobs for probes |
 
 ### std/agent/stream
 

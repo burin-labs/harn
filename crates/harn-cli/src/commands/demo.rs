@@ -295,11 +295,11 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         id: "pub-type-exports",
-        title: "`pub type` shares one alias across modules, annotations, and output_schema",
+        title: "`pub type` shares one alias across modules, annotations, and output",
         description: "Export a type alias from one module and consume it from another: the \
                       imported alias drives a plain annotation, an exhaustive `match` over its \
                       literal union, and schema-as-type on `llm_call` \
-                      (`output_schema: GradeReport`) — the compiler lowers the exported alias to \
+                      (`output: GradeReport`) — the compiler lowers the exported alias to \
                       JSON Schema and the validated result narrows back to it. Before `pub type`, \
                       every consumer re-declared shared wire shapes because aliases were \
                       module-private. Offline — the single LLM call replays from the bundled \

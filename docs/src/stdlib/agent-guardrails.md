@@ -53,7 +53,6 @@ route override, normal Harn provider resolution applies.
 | `confidence_threshold` | `0.0` | Minimum confidence required for a positive tripwire |
 | `provider` / `model` | provider defaults | Route for the structured LLM classifier |
 | `policy` / `system` | built-in prompt | Policy text for the structured LLM classifier |
-| `output_schema` | built-in verdict schema | Custom structured-output schema |
 | `max_tokens` | `256` | Classifier output cap |
 | `temperature` | `0.0` | Classifier sampling temperature |
 | `fail_open` | `true` | When the classifier errors, allow the main loop and emit an error verdict |

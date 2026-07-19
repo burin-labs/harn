@@ -15,10 +15,8 @@ pipeline default() {
         nil,
         {
           provider: "mock",
-          output_schema: GraderOut,
-          output_validation: "error",
+          output: {schema: GraderOut, strict: true, validation: "error"},
           schema_retries: 2,
-          response_format: "json",
         },
       )
       __io_println(r.data.verdict)

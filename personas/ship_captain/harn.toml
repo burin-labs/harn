@@ -26,6 +26,6 @@ context_packs = ["flow_substrate", "repo_policy", "predicate_receipts"]
 evals = ["slice_quality", "false_ship_rate", "coverage_fidelity", "latency_pr_to_merge"]
 owner = "platform"
 budget = { daily_usd = 6.0, frontier_escalations = 1, max_tokens = 50000, max_runtime_seconds = 300 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], effort = "medium" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["flow-phase-0"] }
 package_source = { package = "harn-ship-captain-persona", path = "personas/ship_captain" }

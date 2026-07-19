@@ -141,8 +141,8 @@ pub fn __agent_loop_project_final_result(result, message, session, state) -> dic
   if suspend_result != nil {
     final_result = final_result + suspend_result
   }
-  if terminated_ok && opts?.output_schema != nil {
-    final_result = __agent_loop_apply_output_schema(
+  if terminated_ok && __agent_loop_has_terminal_output_contract(opts) {
+    final_result = __agent_loop_apply_output_contract(
       final_result,
       opts,
       session,

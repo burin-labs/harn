@@ -52,7 +52,7 @@ const __PRESET_PACK_KEYS = [
   "completion_gate",
   "fallback_chain",
   "lane_policy",
-  "model_ladder",
+  "models",
   "overlay_policy",
   "pin_policy",
   "provider",
@@ -141,8 +141,8 @@ fn __validate_pin_policy(kind, pin_policy) {
  * promoted to fill-nil data rows. Captains carry longer timeouts and larger
  * budgets by design.
  *
- * `model_ladder` is a plain `list<string>` fallback chain by design. The
- * named `[model_ladders.*]` catalog rows (providers.toml + catalog_sources/
+ * `models` is normalized to canonical ladder-step records so each rung owns
+ * its provider. The named `[model_ladders.*]` catalog rows (providers.toml + catalog_sources/
  * 62-ladders) have since landed, resolved via a `ladder: "<name>"` option on
  * `llm_call`; packs intentionally do NOT reference them by name so a pack row
  * stays self-contained and takes no hard dependency on catalog ladder names.
@@ -163,7 +163,7 @@ fn __builtin_preset_specs() {
       family: "generic",
       pack: {
         budget: {total_budget_usd: 5.0},
-        model_ladder: frontier_ladder,
+        models: frontier_ladder,
         provider: "anthropic",
         timeout_ms: 120000,
       },
@@ -172,7 +172,7 @@ fn __builtin_preset_specs() {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 25.0},
-        model_ladder: frontier_ladder,
+        models: frontier_ladder,
         pin_policy: captain_pins,
         provider: "anthropic",
         timeout_ms: 300000,
@@ -182,7 +182,7 @@ fn __builtin_preset_specs() {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 15.0},
-        model_ladder: frontier_ladder,
+        models: frontier_ladder,
         pin_policy: captain_pins,
         provider: "anthropic",
         timeout_ms: 180000,
@@ -192,7 +192,7 @@ fn __builtin_preset_specs() {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 25.0},
-        model_ladder: frontier_ladder,
+        models: frontier_ladder,
         pin_policy: captain_pins,
         provider: "anthropic",
         timeout_ms: 300000,
@@ -226,7 +226,7 @@ fn __builtin_preset_specs() {
             {default: true, name: "general"},
           ],
         },
-        model_ladder: frontier_ladder,
+        models: frontier_ladder,
         provider: "anthropic",
         timeout_ms: 180000,
       },
@@ -235,7 +235,7 @@ fn __builtin_preset_specs() {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 15.0},
-        model_ladder: frontier_ladder,
+        models: frontier_ladder,
         // Mirrors `std/agent/overlays::default_overlay_rows()`'s `agent` row
         // inline (see the lane_policy comment above on why presets.harn
         // avoids importing the sibling module).
@@ -260,7 +260,7 @@ fn __builtin_preset_specs() {
       family: "generic",
       pack: {
         budget: {total_budget_usd: 1.0},
-        model_ladder: cheap_ladder,
+        models: cheap_ladder,
         provider: "openai",
         timeout_ms: 60000,
       },
@@ -269,7 +269,7 @@ fn __builtin_preset_specs() {
       family: "generic",
       pack: {
         budget: {total_budget_usd: 1.0},
-        model_ladder: cheap_ladder,
+        models: cheap_ladder,
         provider: "openai",
         timeout_ms: 60000,
       },
@@ -301,7 +301,7 @@ fn __preset_registry() {
  * `{family?: "generic" | "captain", pack?: dict}`: `family` selects the
  * behavior template (captains additionally compose the opt-in tool/LLM
  * middleware layers), and `pack` supplies fill-nil option defaults
- * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `model_ladder`,
+ * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `models`,
  * `completion_gate`, `lane_policy`, `overlay_policy`, `pin_policy`) that fill
  * ONLY nil/absent keys. The spec shape is validated; an invalid family or
  * unknown pack key throws. Returns the normalized kind string.
@@ -365,32 +365,28 @@ fn __preset_kind(value) {
 }
 
 fn __caller_set_low_level_reasoning(opts) {
-  if __has_key(opts, "thinking") || __has_key(opts, "reasoning_effort") {
+  if __has_key(opts, "thinking") || __has_key(opts, "effort") {
     return true
   }
   const llm_overrides = opts?.llm_options
-  if type_of(llm_overrides) == "dict"
+  return type_of(llm_overrides) == "dict"
     && (contains(llm_overrides.keys(), "thinking")
     || contains(
     llm_overrides.keys(),
-    "reasoning_effort",
-  )) {
-    return true
-  }
-  return false
+    "effort",
+  ))
 }
 
 fn __caller_set_reasoning_policy(opts) {
-  return __has_key(opts, "reasoning_policy") || __has_key(opts, "thinking_policy")
+  return __has_key(opts, "reasoning_policy")
 }
 
 fn __caller_set_reasoning_scale(opts) {
-  return __has_key(opts, "reasoning_scale") || __has_key(opts, "problem_scale")
+  return __has_key(opts, "reasoning_scale")
 }
 
 fn __caller_set_reasoning_task(opts) {
-  return __has_key(opts, "reasoning_task") || __has_key(opts, "task_kind")
-    || __has_key(opts, "task")
+  return __has_key(opts, "reasoning_task")
 }
 
 fn __reasoning_task_for_kind(kind) {
@@ -761,23 +757,11 @@ fn __apply_captain_llm_caller(opts, kind) {
 // -------------------------------------------------------------------------------------------------
 
 fn __preset_route_keys() {
-  return [
-    "fallback_chain",
-    "fallback_strategy",
-    "ladder",
-    "model",
-    "model_ladder",
-    "models",
-    "prefer",
-    "provider",
-    "route_policy",
-    "routing",
-    "strategy",
-  ]
+  return ["fallback_chain", "ladder", "model", "models", "provider", "route_policy", "routing"]
 }
 
 fn __preset_pack_route_keys() {
-  return ["fallback_chain", "model_ladder", "provider"]
+  return ["fallback_chain", "models", "provider"]
 }
 
 fn __preset_has_route_owner(opts) {
@@ -798,42 +782,33 @@ fn __preset_has_route_owner(opts) {
   return false
 }
 
-fn __preset_has_ladder_owner(opts) {
-  return __has_non_nil_key(opts, "models")
-    || __has_non_nil_key(opts, "ladder")
-    || __has_non_nil_key(opts, "model_ladder")
-}
-
-fn __preset_single_model_ladder(opts) {
-  if opts?.model == nil {
-    return nil
+fn __preset_model_steps(models, provider) {
+  let steps = []
+  for model in models ?? [] {
+    if type_of(model) == "dict" || provider == nil {
+      steps = steps.push(model)
+    } else {
+      steps = steps.push({model: model, provider: provider})
+    }
   }
-  if opts?.provider != nil {
-    return [{provider: opts.provider, model: opts.model}]
-  }
-  return [opts.model]
+  return steps
 }
 
 fn __apply_preset_route_pack(opts, pack) {
+  // Routing is one ownership group. A caller-owned provider, model, ladder,
+  // or policy suppresses every route default from the preset.
   if __preset_has_route_owner(opts) {
-    if __preset_has_ladder_owner(opts) {
-      return opts
-    }
-    const single = __preset_single_model_ladder(opts)
-    if single != nil {
-      return opts + {model_ladder: single}
-    }
     return opts
   }
   let resolved = opts
-  if resolved?.fallback_chain == nil && pack?.fallback_chain != nil {
+  if pack?.fallback_chain != nil {
     resolved = resolved + {fallback_chain: pack.fallback_chain}
   }
-  if resolved?.provider == nil && pack?.provider != nil {
-    resolved = resolved + {provider: pack.provider}
+  if pack?.models != nil {
+    return resolved + {models: __preset_model_steps(pack.models, pack?.provider)}
   }
-  if !__preset_has_ladder_owner(resolved) && pack?.model_ladder != nil {
-    resolved = resolved + {model_ladder: pack.model_ladder}
+  if pack?.provider != nil {
+    resolved = resolved + {provider: pack.provider}
   }
   return resolved
 }

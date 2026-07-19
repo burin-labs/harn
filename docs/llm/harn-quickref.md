@@ -1152,47 +1152,44 @@ provider-native `stop_reason`. The full contract is `LlmResponse` from
 
 ### `llm_call` options
 
-Typed shape: `LlmCallOptions` from `std/llm/options`. Prefer
-`let opts: LlmCallOptions = {...}` (or the `llm_options({...})`
-constructor, which rejects unknown keys at check time) over bare dict
-literals; `agent_loop` options extend this shape as `AgentLoopOptions`
-from `std/agent/options`.
+Typed shape: `LlmCallOptions` from `std/llm/options`. Prefer an annotated
+binding or `llm_options({...})`. One runtime registry validates direct calls,
+streams, and agent-loop dispatch; unknown and removed keys are errors.
 
-| Option | Type | Default | Notes |
-|---|---|---|---|
-| `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
-| `model` | string | (inferred) | Use catalog aliases such as `local-gemma4-e4b` for OpenAI-compatible local servers; use `ollama:gemma4:e4b` for Ollama. |
-| `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal routing. Explicit options win. `model_role: "merge"` / `"fast_apply"` also reads `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
-| `mock_scope` | string | `"default"` | Logical purpose bucket used only by deterministic mock-fixture replay. V1 fixtures match it before optional `default` fallback; real providers ignore it. |
-| `max_tokens` | int | 16384 | |
-| `temperature` | float | provider default | |
-| `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |
-| `top_logprobs` | int | nil | Request top alternative token log probabilities where supported. |
-| `tools` | list | nil | Registered tool schemas. |
-| `reasoning_policy` / `thinking_policy` | string \| bool | nil | Provider-aware reasoning policy for direct calls. Values: `auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; `none`, `disabled`, `no_think`, and `nothink` alias to `off`. Explicit `thinking` or `reasoning_effort` wins. |
-| `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
-| `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize`. |
-| `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. `thinking: false` on Qwen3 routes auto-prepends `/no_think` to the system message (capability-driven; no per-template knowledge needed in scripts). |
-| `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
-| `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |
-| `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` / `"hybrid"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex" \| "hybrid", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "hybrid" \| closure \| {handler}, always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
-| `api_mode` | string | provider/model default | OpenAI only: set `"responses"` to use Harn's native OpenAI Responses path. GPT-5.6 automatically uses Responses when native function tools and enabled reasoning are combined because Chat Completions rejects that combination. Generic OpenAI-compatible providers stay on chat completions. |
-| `provider_tools` / `hosted_tools` | list | nil | OpenAI Responses only. Provider-hosted tools such as `{type: "web_search"}`, `{type: "file_search", ...}`, or `{type: "mcp", server_label, server_url, require_approval}`. |
-| `previous_response_id`, `response_store`, `background`, `truncation`, `compact`, `include`, `max_tool_calls` | mixed | nil | OpenAI Responses conversation-state, persistence, background, provider truncation/compaction, standalone `/responses/compact`, metadata expansion, and provider-executed tool limit controls. A bool `store` is accepted for direct raw Responses calls, but cache handlers reserve `store: {backend...}` for cache configuration. |
-| `output_format` | dict \| string | `{kind: "text"}` | Provider-agnostic output shape. Dicts: `{kind: "json_schema", schema: {...}, strict: true}`, `{kind: "json_object"}`, `{kind: "text"}`. Strings: `"json_schema"`, `"json_object"`/`"json"`, `"text"`. |
-| `response_format` | string | nil | Legacy alias. `"json"` maps to `output_format: {kind: "json_object"}` unless `json_schema`/`schema` is also supplied, in which case it maps to `kind: "json_schema"`. |
-| `json_schema` | dict | nil | Legacy alias for `output_format.schema` and `output_schema`. Prefer `output_format`. |
-| `output_schema` | `Schema<T>` (dict \| type-alias) | nil | JSON-schema-shaped dict, or a top-level `type T = ...` alias (compiler lowers to the schema dict). The generic parameter `T` flows into the narrowed `r.data: T`. Validated after parse. |
-| `output_validation` | string | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
-| `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective user turn. Each retry is a single-turn correction — the invalid response is NOT persisted; the original messages are replayed with one appended user-role correction citing the validation errors + schema. Works alongside `output_validation: "error"`. |
-| `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = bare retry — replays the original messages unchanged, no correction appended. |
-| `schema_stream_abort` | bool | `true` when `output_schema` is set | While streaming, feed each visible text delta through an incremental JSON validator. The moment the partial response can no longer satisfy `output_schema`, the provider stream is aborted, a `schema_stream_aborted` transcript event fires, and the abort consumes one `schema_retries` slot — the retry replays the prompt with a corrective nudge that cites the failing JSON path and reason. Opt out with `false` to wait for the whole malformed response (post-hoc validator still runs). |
-| `llm_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping the per-turn `llm_call`. See "Composable LLM callers" below. |
-| `tool_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping every tool dispatch. Signature `fn(call, next) -> result_dict`. See "Composable tool middleware" below. |
-| `max_concurrent_tools` | int | 1 | (`agent_loop` only) When a planner emits N tool calls in one turn, dispatch siblings concurrently capped at this count. Results inject in source order regardless of completion order. Middleware-backed dispatch uses a fresh caller chain per sibling, so `audit.layers` histories never cross-talk. With `with_audit_log`, each receipt carries an `emit_order` field so consumers can sort completion-ordered events back to source order. |
-| `prefetch_next_turn` | bool | false | (`agent_loop` only) Start the next planner turn as soon as tool results have been recorded, before non-result audit sinks such as local receipt writes or custom receipt callbacks finish. Background audit flushes are drained before the loop returns. |
-| `progress_tool` | bool \| dict | false | (`agent_loop` only) Expose an opt-in progress-reporting tool. `true` installs `agent_progress`; dict form may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive entries as canonical `plan` updates; A2A clients receive non-terminal `working` status updates; message-only reports surface as Harn progress narration. |
-| `stream` | bool | true | SSE streaming transport. |
+| Concern | Canonical options |
+|---|---|
+| Route | `provider`, `model`, `model_role`, `model_tier`, `api_mode`, `route_policy`, `fallback_chain`, `routing`, `equivalent_failover`, `models`, `ladder` |
+| Conversation | `system`, `messages`, `session_id`, `mock_scope`, `context_profile`, `capabilities`, `prefill`, `previous_response_id` |
+| Generation | `max_tokens`, `temperature`, `top_p`, `top_k`, `logprobs`, `top_logprobs`, `stop`, `stop_at_tool_call`, `seed`, `frequency_penalty`, `presence_penalty` |
+| Output | `output`, `schema_retries`, `schema_retry_nudge`, `retries`, `schema_recover`, `repair` |
+| Reasoning | `thinking`, `effort`, `reasoning_policy`, `reasoning_scale`, `reasoning_task`, `interleaved_thinking`, `anthropic_beta_features` |
+| Modalities | `vision`, `audio`, `pdf`, `video` |
+| Tools | `tools`, `provider_tools`, `tool_choice`, `tool_search`, `tool_format` |
+| Transport | `cache`, `prompt_cache_ttl`, `budget`, `timeout_ms`, `idle_timeout_ms`, `stream`, `speed` |
+| OpenAI Responses | `store`, `background`, `truncation`, `compact`, `include`, `max_tool_calls` |
+| Extension | `provider_options`, `metadata`, `reminders`, `structural_experiment` |
+
+The `output` forms are:
+
+```harn
+{output: "text"}                                      // default
+{output: "json"}                                      // parse JSON
+{output: Verdict}                                     // validate Schema<Verdict>
+{output: {schema: Verdict, strict: true, validation: "error", stream_abort: true}}
+```
+
+`system` is either a string or an ordered fragment list. Fragments use
+`{content, title?, position?: "before"|"after", enabled?}`; build them with
+`system_before`, `system_after`, and `with_system_fragments` from
+`std/llm/prompts`.
+
+Provider-specific request fields live only below
+`provider_options: {<provider>: {...}}`. Use `effort` for reasoning intent,
+`speed: "fast"` for accelerated serving, and millisecond integers in
+`timeout_ms` / `idle_timeout_ms`.
+
+See the [complete option reference](../src/llm/llm_call.md#options-dict) and
+the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
 
 Provider auto-resolution precedence:
 
@@ -1216,7 +1213,7 @@ const r = llm_call(prompt, sys, {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
-  output_format: {kind: "json_schema", schema: schema, strict: true},
+  output: {schema: schema, strict: true, validation: "error"},
   provider_tools: [
     {type: "web_search"},
     {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
@@ -1634,8 +1631,7 @@ Known-key validation in `skill_define`: `description`, `when_to_use`,
 Structured output with automatic retry — prefer
 `llm_call_structured(prompt, schema, options?)`, which returns the
 validated data directly (no `.data` unwrap) and forces the schema
-defaults (`output_format: {kind: "json_schema", schema, strict: true}`,
-`output_validation: "error"`,
+defaults (`output: {schema, strict: true, validation: "error"}` and
 `schema_retries: 3`). Throws on exhausted retries or transport
 failure:
 
@@ -1719,7 +1715,7 @@ error_category, attempts, stage, repaired}` envelope shape:
 | `parsed` | Raw text is valid JSON that schema-validates. | Cheapest path; always tried first. |
 | `extracted` | JSON is wrapped in markdown fences or surrounded by prose. | Uses the same balanced-brace lifter as `json_extract`. |
 | `regex` | Model produced YAML-ish / unquoted `key: value` lines. | Only top-level scalar fields (string/int/number/boolean) are recovered — nested objects fall through. |
-| `llm_repair` | Earlier stages failed and `llm_repair` is enabled (default). | Single shot, `schema_retries: 0`. Set `{llm_repair: false}` for fully deterministic recovery. |
+| `llm_repair` | Earlier stages failed and `repair` is enabled (default). | Single shot, `schema_retries: 0`. Set `{repair: false}` for fully deterministic recovery. `llm_repair` is the reported stage name, not an option key. |
 
 ```harn
 const raw = llm_call(prompt, sys, {provider: "auto"}).text
@@ -1734,13 +1730,13 @@ if r.ok {
 Use it as a drop-in replacement for hand-rolled `normalize_*()`
 chains downstream of `llm_call(...)` / Ollama prose responses, or
 when you want a deterministic local recovery pass before paying for
-a structured re-call. The `llm_repair` block accepts the same
+a structured re-call. The `repair` block accepts the same
 overrides as `llm_call_structured_result`'s `repair`:
 
 ```harn
 const r = schema_recover(raw, schema, {
   apply_defaults: true,            // schema defaults during validation
-  llm_repair: {
+  repair: {
     enabled: true,
     model: "cheapest_over_quality(low)",
     max_tokens: 600,
@@ -1762,10 +1758,8 @@ trace) alongside the parsed data, call `llm_call` directly:
 const r = llm_call(prompt, sys, {
   provider: "auto",
   model: "local-gemma4-e4b",
-  output_schema: schema,
-  output_validation: "error",
+  output: {schema: schema, strict: true, validation: "error"},
   schema_retries: 2,
-  output_format: {kind: "json_schema", schema: schema, strict: true},
 })
 log(r.data.verdict)
 log(r.usage.input_tokens)
@@ -1816,10 +1810,8 @@ const outcome = parallel settle paths with { max_concurrent: 4 } { path ->
   llm_call(read_file(path), GRADER_SYSTEM, {
     provider: "auto",
     model: "local-gemma4-e4b",
-    output_schema: grader_schema,
-    output_validation: "error",
+    output: {schema: grader_schema, strict: true, validation: "error"},
     schema_retries: 2,
-    output_format: {kind: "json_schema", schema: grader_schema, strict: true},
   })
 }
 ```
@@ -2138,11 +2130,10 @@ enough to enable the interleaved-thinking beta header for the whole loop.
 
 When using `agent_preset(kind, options)`, preset pack rows fill only absent
 keys. Model routing is grouped: any explicit route at top level or under
-`llm_options` (`provider`, `model`, `models`, `ladder`, `model_ladder`,
-`routing`, or related policy keys) prevents the preset from mixing in its
-built-in provider or model ladder. Supplying both top-level `provider` and
-`model` without a ladder exposes a single-step `model_ladder` for downstream
-policy code.
+`llm_options` (`provider`, `model`, `models`, `ladder`, `routing`, or related
+policy keys) suppresses the entire built-in route. Preset ladders use canonical
+model-step records with a provider on each rung. A caller's direct `provider`
+plus `model` remains a direct route and is not mixed with `models`.
 
 Profiles preload common loop budgets and retry counts. Explicit keys
 override the profile:
@@ -3942,8 +3933,8 @@ const data = r.response.data
 // When the call is a JSON-against-schema extraction, prefer
 // `llm_call_structured` / `*_safe` instead: `.data` is
 // pre-unwrapped and the schema-validated-JSON options are forced
-// by default (no boilerplate `output_validation` / `schema_retries`
-// / `output_format` keys at each callsite).
+// by default (no repeated `output: {schema, validation: "error"}`
+// or `schema_retries` boilerplate at each callsite).
 const verdict = llm_call_structured(user_prompt, schema, {provider: "auto"})
 // ...or non-throwing:
 const r = llm_call_structured_safe(user_prompt, schema, {provider: "auto"})
@@ -4201,8 +4192,8 @@ registered provider). `provider` is inferred from the model id (or the call's
 base provider) when omitted, and model aliases resolve normally. Per-step
 `options` accept the scalar generation/transport knobs `temperature`,
 `max_tokens`, `top_p`, `top_k`, `seed`, `frequency_penalty`,
-`presence_penalty`, `timeout_ms`, and `fast`; structural options (tools,
-schema, thinking) belong on the base call and an unsupported per-step key is
+`presence_penalty`, `timeout_ms`, and `speed`; structural options (tools,
+output, thinking) belong on the base call and an unsupported per-step key is
 rejected up front.
 
 Composition rules:
@@ -4216,7 +4207,7 @@ Composition rules:
 - **One attempt per rung by default.** The ladder itself does a single attempt
   per step. Wrap the whole call with `with_retry` (the caller-seam middleware)
   if you want per-attempt transport retries around the entire ladder pass.
-- **Schema retries re-ask the same rung.** With `output_schema` /
+- **Schema retries re-ask the same rung.** With an `output` schema or
   `llm_call_structured*`, a schema failure re-asks the SAME step's model via
   the existing `schema_retries` mechanism — it does not escalate the ladder.
 - **`models:` + `ladder:`, `models:`/`ladder:` + explicit `model:`/`provider:`,
@@ -4801,7 +4792,7 @@ for entry in drain_audit() {
 - Small / local models benefit heavily from:
   1. Wrapping judge input in `<transcript_to_grade>...</transcript_to_grade>`.
   2. Forcing canonical start tokens (`Start with VERDICT:`).
-  3. `output_validation: "error"` + `schema_retries: 2`.
+  3. `output: {schema: schema, validation: "error"}` + `schema_retries: 2`.
   4. Generous `maxLength` / `maxItems` bounds in the schema.
 
 ## Prompt templates (`.harn.prompt` / `.prompt`)

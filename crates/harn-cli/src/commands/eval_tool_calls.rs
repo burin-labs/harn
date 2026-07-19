@@ -658,8 +658,7 @@ fn binder_script(
     {{\n\
       provider: {provider_lit},\n\
       model: {model_lit},\n\
-      output_format: {{kind: \"json_schema\", schema: schema, strict: true}},\n\
-      output_validation: \"warn\",\n\
+      output: {{schema: schema, strict: true, validation: \"warn\"}},\n\
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\
@@ -689,8 +688,7 @@ fn predicate_judge_script(
     {{\n\
       provider: {provider_lit},\n\
       model: {model_lit},\n\
-      output_format: {{kind: \"json_schema\", schema: schema, strict: true}},\n\
-      output_validation: \"warn\",\n\
+      output: {{schema: schema, strict: true, validation: \"warn\"}},\n\
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\

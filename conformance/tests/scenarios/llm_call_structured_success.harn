@@ -3,7 +3,7 @@ import { llm_text, with_llm_script } from "std/testing"
 /**
  * `llm_call_structured(prompt, schema, options?)` returns the
  * validated data directly — no `.data` unwrap. The helper forces
- * `response_format: "json"`, `output_validation: "error"`, and
+ * a strict canonical `output` contract and
  * `schema_retries: 3` unless the caller overrides them.
  */
 pipeline default() {

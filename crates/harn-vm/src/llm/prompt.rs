@@ -1,8 +1,8 @@
 //! Unified prompt-fragment assembly.
 //!
 //! A system prompt is the deterministic reduction of an ordered list of
-//! [`PromptFragment`]s. Host-provided system-prompt parts (`system_preamble`,
-//! `system_prefix`, …), the agent's per-turn "primary" system text, rendered
+//! [`PromptFragment`]s. Host-provided system fragments (the `system` option's
+//! list form), the agent's per-turn "primary" system text, rendered
 //! system reminders, and capability-gated tool guidance all flow through the
 //! same model and the same [`assemble`] reducer. There is no parallel
 //! string-concatenation path: this module is the single source of truth for
@@ -44,7 +44,7 @@ impl FragmentBucket {
 /// reminder pipeline). `assemble` trims the body and skips empty fragments.
 #[derive(Clone, Debug)]
 pub struct PromptFragment {
-    /// Stable, unique-ish identifier, e.g. `host:system_preamble`,
+    /// Stable, unique-ish identifier, e.g. `host:system[0]`,
     /// `primary`, `reminder`, `tool:todo.guidance`.
     pub id: String,
     /// Who contributed it, for provenance grouping (`host:*`, `primary`,

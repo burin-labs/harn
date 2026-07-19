@@ -75,7 +75,7 @@ pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
 pub(super) fn model_role_option(options: &Option<crate::value::DictMap>) -> Option<String> {
     options
         .as_ref()
-        .and_then(|opts| opts.get("model_role").or_else(|| opts.get("role")))
+        .and_then(|opts| opts.get("model_role"))
         .filter(|value| !matches!(value, VmValue::Nil | VmValue::Bool(false)))
         .map(VmValue::display)
         .map(|value| value.trim().to_string())

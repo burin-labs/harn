@@ -246,44 +246,42 @@ fn compaction_policy_matches_compaction_policy() {
     );
 }
 
-/// `LlmCallOptions` has no single Rust struct twin (llm_call options are
-/// extracted key-by-key), so its runtime twin is the accepted-key list
-/// `__llm_call_option_keys()` co-located in the same file: every alias key
-/// must be accepted by the runtime projection.
+/// The typed `LlmCallOptions` alias must mirror the canonical option
+/// registry EXACTLY — both directions. The registry
+/// (`harn_builtin_meta::llm_options::LLM_CALL_OPTION_FIELDS`) drives the
+/// runtime unknown-key gate, the typechecker shape, and the stdlib
+/// allowlist builtin; the Harn alias is the one hand-written mirror, so a
+/// drift in either direction is a bug.
 #[test]
-fn llm_call_options_keys_are_accepted_by_runtime_projection() {
-    let source = llm_options_harn();
-    let alias_keys = harn_alias_keys(source, "LlmCallOptions");
-    let fn_start = source
-        .find("fn __llm_call_option_keys()")
-        .expect("__llm_call_option_keys present");
-    let after_fn = &source[fn_start..];
-    let open = after_fn.find('[').expect("key list opens");
-    let close = after_fn.find(']').expect("key list closes");
-    let accepted: BTreeSet<String> = after_fn[open + 1..close]
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim().trim_end_matches(',');
-            let inner = trimmed.strip_prefix('"')?.strip_suffix('"')?;
-            Some(inner.to_string())
-        })
-        .collect();
-    let unknown: Vec<&String> = alias_keys
+fn llm_call_options_alias_matches_registry_bidirectionally() {
+    let alias_keys = harn_alias_keys(llm_options_harn(), "LlmCallOptions");
+    let registry: BTreeSet<String> = harn_builtin_meta::llm_options::LLM_CALL_OPTION_FIELDS
         .iter()
-        .filter(|k| !accepted.contains(*k))
+        .map(|field| field.name.to_string())
         .collect();
+    let alias_only: Vec<&String> = alias_keys.difference(&registry).collect();
+    let registry_only: Vec<&String> = registry.difference(&alias_keys).collect();
     assert!(
-        unknown.is_empty(),
-        "LlmCallOptions declares keys the runtime projection does not accept (add them to __llm_call_option_keys or drop them from the alias): {unknown:?}"
+        alias_only.is_empty() && registry_only.is_empty(),
+        "LlmCallOptions alias and the canonical registry drifted \
+         (alias-only: {alias_only:?}, registry-only: {registry_only:?}) — \
+         fix crates/harn-stdlib/src/stdlib/llm/options.harn or \
+         crates/harn-builtin-meta/src/llm_options.rs"
     );
 }
 
-/// The deprecated retry knobs must stay OUT of the typed alias: the typed
-/// path is the clean path (`with_retry` from std/llm/handlers replaces
-/// them).
+/// Removed keys must stay out of the typed alias, and the removal table
+/// itself must stay disjoint from the registry (a key cannot be both).
 #[test]
-fn llm_call_options_excludes_deprecated_keys() {
+fn llm_call_options_excludes_removed_keys() {
     let alias_keys = harn_alias_keys(llm_options_harn(), "LlmCallOptions");
+    for entry in harn_builtin_meta::llm_options::LLM_REMOVED_OPTIONS {
+        assert!(
+            !alias_keys.contains(entry.key),
+            "`{}` was removed and must not join the typed LlmCallOptions surface",
+            entry.key
+        );
+    }
     for deprecated in ["llm_retries", "llm_backoff_ms"] {
         assert!(
             !alias_keys.contains(deprecated),

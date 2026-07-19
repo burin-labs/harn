@@ -851,12 +851,19 @@ fn parse_ladder_step_overrides(
     match value {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Dict(dict)) => {
-            for key in dict.keys() {
+            for (key, value) in dict.iter() {
                 if !LADDER_STEP_OVERRIDE_KEYS.contains(&key.as_str()) {
                     return Err(runtime_error(format!(
                         "llm_call: `models:`[{idx}].options key {key:?} is not a supported \
                          per-step override; supported keys are {LADDER_STEP_OVERRIDE_KEYS:?}. \
                          Put structural options (tools, schema, thinking) on the base call."
+                    )));
+                }
+                if key.as_str() == "speed"
+                    && !matches!(value, VmValue::String(v) if matches!(v.as_str(), "standard" | "fast"))
+                {
+                    return Err(runtime_error(format!(
+                        "llm_call: `models:`[{idx}].options.speed must be \"standard\" or \"fast\""
                     )));
                 }
             }
@@ -890,6 +897,13 @@ fn catalog_step_overrides(
                  supported per-step override; supported keys are {LADDER_STEP_OVERRIDE_KEYS:?}. \
                  Put structural options (tools, schema, thinking) on the base call."
             )));
+        }
+        if key == "speed"
+            && !matches!(value, toml::Value::String(v) if matches!(v.as_str(), "standard" | "fast"))
+        {
+            return Err(runtime_error(format!(
+        "model ladder {ladder_name:?} step {idx}: options.speed must be \"standard\" or \"fast\""
+    )));
         }
         // toml::Value -> serde_json::Value -> VmValue reuses the canonical
         // JSON bridge (numbers/bools/strings map cleanly for the scalar
@@ -1209,7 +1223,7 @@ const LADDER_STEP_OVERRIDE_KEYS: &[&str] = &[
     "frequency_penalty",
     "presence_penalty",
     "timeout_ms",
-    "fast",
+    "speed",
 ];
 
 mod execution;

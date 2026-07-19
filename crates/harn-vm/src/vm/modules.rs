@@ -57,7 +57,7 @@ pub(crate) struct LoadedModule {
     pub(crate) public_type_names: HashSet<String>,
     /// Decoded JSON-Schema dict for each `pub type` alias that lowers to a
     /// schema. Importers bind the alias name to this value so
-    /// expression-position uses (`output_schema: ImportedAlias`) work.
+    /// expression-position uses (`output: ImportedAlias`) work.
     pub(crate) public_type_schemas: BTreeMap<String, VmValue>,
     /// Guard under which this filesystem module and its transitive closure were
     /// instantiated. A guarded execution cannot reuse an unguarded module even
@@ -661,7 +661,7 @@ impl Vm {
             // `pub type` aliases are erased at runtime: the import is valid
             // (the type checker consumed it). When the alias lowers to a JSON
             // schema, bind the name to that dict so expression-position uses
-            // (`output_schema: ImportedAlias`, `schema_is(x, ImportedAlias)`)
+            // (`output: ImportedAlias`, `schema_is(x, ImportedAlias)`)
             // behave like a locally declared alias; otherwise bind nothing.
             if loaded.public_type_names.contains(&name) && !loaded.functions.contains_key(&name) {
                 if let Some(schema) = loaded.public_type_schemas.get(&name) {

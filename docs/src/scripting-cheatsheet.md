@@ -268,10 +268,8 @@ both support `$1`, `$2`, `${name}` backrefs from the `regex` crate.
 const r = llm_call(prompt, system, {
   provider: "auto",        // infers from model prefix
   model: "local-gemma4-e4b",
-  output_schema: schema,
-  output_validation: "error",
-  schema_retries: 2,       // retry with corrective nudge on schema mismatch
-  response_format: "json",
+output: {schema: schema, validation: "error", stream_abort: true},
+schema_retries: 2,       // retry with corrective nudge on schema mismatch
 })
 log(r.text)            // the public answer (preferred for "the answer")
 log(r.data.verdict)    // parsed structured output
@@ -282,9 +280,11 @@ Key options:
 | Option | Default | Notes |
 |---|---|---|
 | `provider` | `"auto"` | `"auto"` infers from model prefix (`local:` / `/` / `claude-*` / `gpt-*` / `:`). |
-| `schema_retries` | `1` | Re-prompt on `output_schema` validation failure. Retries run regardless of final `output_validation`; `"error"` controls whether exhausted validation failures throw. |
+| `output` | `"text"` | `"json"`, a schema, or `{schema, strict?, validation?, stream_abort?}`. |
+| `schema_retries` | `1` | Re-prompt after an `output` schema mismatch. |
 | `schema_retry_nudge` | auto | String (verbatim), `true` (auto), or `false` (bare retry). |
-| `output_validation` | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |
+| `effort` | provider default | Provider-neutral reasoning intent such as `low`, `medium`, or `high`. |
+| `timeout_ms` | provider default | Whole-call timeout in milliseconds. |
 
 See `docs/src/llm-and-agents.md` for the overview, or
 `docs/src/llm/agent_loop.md` for `agent_loop`, tool dispatch, and the full

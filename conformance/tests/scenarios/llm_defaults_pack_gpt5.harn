@@ -1,11 +1,10 @@
-// pack_for(gpt-5, thinking="high") translates to reasoning_effort: "high".
+// pack_for(gpt-5, reasoning_policy="high") translates to effort: "high".
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
-  const r = pack_for({model: "gpt-5", thinking: "high"})
+  const r = pack_for({model: "gpt-5", reasoning_policy: "high"})
   assert_eq(r.provider, "openai")
-  // Effort patch sets reasoning_effort="medium" first, but the thinking
-  // patch is layered second and overrides it to "high".
-  assert_eq(r.reasoning_effort, "high")
+  // The policy patch overrides medium scale calibration.
+  assert_eq(r.effort, "high")
   log("llm_defaults_pack_gpt5 passed")
 }

@@ -3,6 +3,15 @@ import { agent_emit_event } from "std/agent/state"
 import { with_retry } from "std/llm/handlers"
 import { llm_call_options } from "std/llm/options"
 
+fn __dispatch_reject_removed_options(options) {
+  const removed = __llm_call_option_registry().removed
+  for key in keys(options ?? {}) {
+    if removed[key] != nil {
+      throw "agent_loop: option `" + key + "` was removed — " + removed[key]
+    }
+  }
+}
+
 fn __dispatch_messages_include_tool_result(messages) {
   if type_of(messages) != "list" {
     return false
@@ -122,7 +131,9 @@ fn __dispatch_default(message, turn_system, llm_opts) {
  * @api_stability: experimental
  */
 pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
+  __dispatch_reject_removed_options(llm_opts)
   __dispatch_emit_call_start(llm_opts)
+  const call_opts = llm_call_options(llm_opts)
   const caller = llm_opts?._llm_caller
   if caller == nil {
     const retry_cfg = llm_opts?._llm_retry
@@ -135,7 +146,7 @@ pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
         {
           prompt: message,
           system: turn_system,
-          opts: llm_opts,
+          opts: call_opts,
           turn: {
             iteration: llm_opts?._iteration ?? 0,
             session_id: llm_opts?.session_id ?? "",
@@ -144,12 +155,12 @@ pub fn agent_invoke_llm(message, turn_system, llm_opts) -> dict {
         },
       )
     }
-    return __dispatch_default(message, turn_system, llm_opts)
+    return __dispatch_default(message, turn_system, call_opts)
   }
   const call = {
     prompt: message,
     system: turn_system,
-    opts: llm_opts,
+    opts: call_opts,
     turn: {
       iteration: llm_opts?._iteration ?? 0,
       session_id: llm_opts?.session_id ?? "",

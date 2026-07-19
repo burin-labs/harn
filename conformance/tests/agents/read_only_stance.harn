@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_stance_default_consent_check } from "std/agent/stance"
 import { with_llm_script } from "std/testing"
 
 fn has_tool(tools, name) {
@@ -208,6 +209,21 @@ pipeline default() {
         { event -> event.phase },
       )
       __io_println(contains(policy_phases, "write_access_denied"))
+    },
+  )
+  with_llm_script(
+    [{text: "{\"consent\":\"express\",\"reasoning\":\"user approved\"}"}],
+    { ->
+      const session = agent_session_open("read-only-stance-default-consent-" + uuid())
+      agent_session_reset(session)
+      agent_session_inject(session, {role: "user", content: "please make the change"})
+      const verdict = agent_stance_default_consent_check(
+        "the user requested an edit",
+        session,
+        {provider: "mock"},
+      )
+      __io_println(verdict.verdict)
+      __io_println(verdict.consent)
     },
   )
 }

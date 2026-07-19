@@ -6,13 +6,13 @@ pipeline default() {
       role: "release",
       env_prefixes: ["HARN_RELEASE", "HARN_PLANNER"],
       defaults: {provider: "mock", model: "gpt-5.4-preview"},
-      options: {reasoning_effort: "high", prompt_cache: true, tool_format: "auto"},
+      options: {effort: "high", prompt_cache: true, tool_format: "auto"},
     },
   )
   __io_println(env_route.provider)
   __io_println(env_route.model)
   __io_println(env_route.tool_format)
-  __io_println(env_route.options.reasoning_effort == nil)
+  __io_println(env_route.options.effort == nil)
   __io_println(env_route.options.prompt_cache == nil)
   __io_println(join(env_route.stripped, ","))
   const explicit = agent_model_options(
@@ -21,20 +21,15 @@ pipeline default() {
       env_prefixes: ["HARN_RELEASE"],
       provider: "mock",
       model: "gpt-5.4-preview",
-      options: {reasoning_effort: "high", tool_format: "auto"},
+      options: {effort: "high", tool_format: "auto"},
     },
   )
   __io_println(explicit.model)
-  __io_println(explicit.options.reasoning_effort)
+  __io_println(explicit.options.effort)
   const sanitized = agent_sanitize_model_options(
-    {
-      provider: "mock",
-      model: "gpt-4o",
-      reasoning_effort: "high",
-      cache_control: {type: "ephemeral"},
-    },
+    {provider: "mock", model: "gpt-4o", effort: "high", cache_control: {type: "ephemeral"}},
   )
-  __io_println(sanitized.reasoning_effort == nil)
+  __io_println(sanitized.effort == nil)
   __io_println(sanitized.cache_control == nil)
   const direct_thinking = agent_sanitize_model_options(
     {
@@ -60,13 +55,13 @@ pipeline default() {
     {
       provider: "cerebras",
       model: "gpt-oss-120b",
-      reasoning_effort: "low",
+      effort: "low",
       thinking: {type: "enabled"},
       prompt_cache: true,
     },
     {mode: "healthcheck"},
   )
-  __io_println(healthcheck.reasoning_effort == nil)
+  __io_println(healthcheck.effort == nil)
   __io_println(healthcheck.thinking == nil)
   __io_println(healthcheck.prompt_cache == nil)
 }

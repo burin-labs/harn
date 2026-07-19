@@ -107,7 +107,7 @@ accounting lives under `usage`. The typed contract is
 | `raw_text` | string | Pre-projection parser source, with protocol tags intact |
 | `visible_text` | string | Sanitized human-visible assistant output |
 | `canonical_text` | string | Canonical replay form of a tagged-protocol response (present only for tagged responses) |
-| `data` | any | Parsed JSON (when `response_format: "json"`) |
+| `data` | any | Parsed and optionally schema-validated value when `output` requests JSON |
 | `thinking` | string | Reasoning trace (when `thinking` is enabled) |
 | `thinking_summary` | string | Provider-supplied summary of the reasoning trace, when available |
 | `stop_reason` | string | Provider-native stop vocabulary (`"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"`), kept for forensics — prefer `outcome` |
@@ -170,130 +170,205 @@ so callers do not re-implement them: `llm_response_is_empty`,
 
 ### Options dict
 
-Build options through the typed structural alias `LlmCallOptions` (from
-`std/llm/options`) — either annotate a binding
-(`let opts: LlmCallOptions = {...}`) or pass a literal through the
-`llm_options({...})` constructor so unknown keys are rejected at check
-time. A raw dict still executes unchanged; the typed path is the
-documented one, and the `unnormalized-options` lint nudges agent-loop
-call sites toward it.
+This section is reference material. For a step-by-step upgrade from older
+spellings, see [Migrating to 0.10](../migrations/v0.10.md#llm-call-options).
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, `"gemini"`, and `"local"` |
-| `model` | string | varies by provider | Model identifier |
-| `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal provider/model/routing resolution. Explicit call options win. The `merge`/`fast_apply` roles also read `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
-| `mock_scope` | string | `"default"` | Logical purpose bucket used only by deterministic mock-fixture replay. V1 fixtures match this scope first and may fall through to `default` only when `strictScopes` is false. Real providers ignore it. |
-| `models` | list | nil | Inline model ladder (`ModelLadder`): a cheap-first fallback tried in order. Entries are model strings or `{provider?, model?, options?, label?}` steps. Advances to the next rung **only on route failures** (429/5xx/timeout/circuit-open, including an empty generation after its bounded same-route retry), never on schema-validation failures (those re-ask the same rung). Mutually exclusive with `ladder`, with explicit `model`/`provider`, and with `routing`. See [Model ladders](../docs/llm/harn-quickref.md#model-ladders-models--ladder). |
-| `ladder` | string | nil | Name of a catalog ladder declared under `[model_ladders.<name>]`. Same cheap-first, advance-on-transport-failure semantics as `models`; mutually exclusive with the same options. |
-| `route_policy` | string | nil | Select a catalog-backed route policy such as `cheapest_over_quality(mid)`. Preference alternatives lower to the canonical routing executor. |
-| `fallback_chain` | list | nil | Ordered provider ids tried after the selected route fails. Executes in the same routing chain as preference alternatives and provider-configured fallbacks. |
-| `equivalent_failover` | bool/dict | nil | Build a catalog-backed chain of equivalent models, trying credentialed same-provider equivalents before cross-provider routes. Mutually exclusive with other route owners. `max_routes` bounds alternatives; `on_no_dispatch` also advances on a verifier-detected missing dispatch. |
-| `max_tokens` | int | `16384` | Maximum tokens in the response |
-| `temperature` | float | provider default | Sampling temperature (0.0-2.0) |
-| `top_p` | float | nil | Nucleus sampling |
-| `top_k` | int | nil | Top-K sampling (Anthropic/Ollama only) |
-| `stop` | list | nil | Stop sequences |
-| `seed` | int | nil | Reproducibility seed (OpenAI/Ollama) |
-| `frequency_penalty` | float | nil | Frequency penalty (OpenAI only) |
-| `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
-| `logprobs` | bool | `false` | Request token log probabilities when the selected provider route supports them |
-| `top_logprobs` | int | nil | Request top alternative token log probabilities where supported |
-| `response_format` | string | `"text"` | `"text"` or `"json"`; with `output_schema`/`json_schema`, `"json"` selects schema-validated JSON rather than loose JSON-object mode |
-| `output_format` | string/dict | `{kind: "text"}` | Provider-neutral output shape: `"text"`, `"json_object"`, or `{kind: "json_schema", schema, strict?}` |
-| `schema` / `json_schema` / `output_schema` | dict | nil | JSON Schema, OpenAPI Schema Object, canonical Harn schema dict, or `Schema<T>` type alias for structured output |
-| `output_validation` | string | `"off"` | `"error"` throws after exhausted schema retries; `"warn"` logs and returns the final envelope; `"off"` returns the final envelope without a warning |
-| `schema_retries` | int | `1` | Re-prompt on schema validation failure with a corrective user message. Applies to direct and `routing_policy` calls. |
-| `schema_stream_abort` | bool | inferred | Defaults to `true` when `output_schema` is set. Aborts impossible streaming JSON early and consumes one `schema_retries` slot. |
-| `reasoning_policy` / `thinking_policy` | string/bool | nil | Provider-aware reasoning policy. Values: `auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; `none`, `disabled`, and `no_think` alias to `off`. Harn lowers this to the selected route's native thinking shape. Explicit `thinking` or `reasoning_effort` wins. |
-| `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
-| `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize`. |
-| `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "none" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"}`. On Anthropic Opus models that declare interleaved-thinking support, `{mode: "enabled"}` also sends `anthropic-beta: interleaved-thinking-2025-05-14`. When `thinking: false` is set on a model whose chat template uses an in-prompt directive (Qwen3's `/no_think`), Harn auto-prepends the directive to the system message — `thinking: false` works uniformly across providers without scripts needing to know per-template prompt syntax. |
-| `interleaved_thinking` | bool | `false` | Add Anthropic's `interleaved-thinking-2025-05-14` beta header for this call. `thinking: true` enables it automatically on supported Anthropic Opus models. |
-| `anthropic_beta_features` | string/list | nil | Extra Anthropic beta feature names to pass in the comma-separated `anthropic-beta` header on Anthropic-style routes. |
-| `vision` | bool | inferred | Require image-input support. Image content blocks set this implicitly; `vision: true` fails before transport unless the selected provider/model declares `vision_supported`. |
-| `tools` | list | nil | Tool definitions |
-| `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
-| `tool_search` | bool/string/dict | nil | Progressive tool disclosure. See [Tool Vault](./tools.md#tool-vault) |
-| `api_mode` | string | provider/model default | OpenAI only: set `"responses"` to use Harn's native OpenAI Responses path. GPT-5.6 automatically uses Responses when native function tools and enabled reasoning are combined because Chat Completions rejects that combination. Generic OpenAI-compatible providers stay on chat completions. |
-| `provider_tools` / `hosted_tools` | list | nil | OpenAI Responses only. Pass provider-hosted tools such as `{type: "web_search"}`, `{type: "file_search", ...}`, or `{type: "mcp", server_label, server_url, require_approval}`. Harn records provider-native IDs and normalized metadata but does not execute these tools locally. |
-| `previous_response_id` | string | nil | OpenAI Responses conversation-state link. Use only when provider-side state is desired instead of replaying the full Harn transcript. |
-| `response_store` / `responses_store` | bool | provider default | OpenAI Responses persistence flag. A bool `store` is also accepted for direct raw Responses calls, but cache handlers reserve `store: {backend...}` for cache storage configuration. |
-| `background` | bool | provider default | OpenAI Responses background-mode flag. |
-| `truncation` | string | provider default | OpenAI Responses provider-side truncation/compaction policy such as `"auto"`. |
-| `compact` | bool | `false` | OpenAI Responses standalone compaction. When `true`, Harn posts the request to `/responses/compact` and returns provider compaction items in `result.blocks`. |
-| `include` | list | nil | OpenAI Responses metadata expansions to request. |
-| `max_tool_calls` | int | nil | OpenAI Responses provider-executed tool-call limit. |
-| `budget` | dict | nil | Pre-flight LLM budget envelope. Supports `max_cost_usd`, `max_input_tokens`, `max_output_tokens`, and `total_budget_usd` |
-| `cache` | bool | provider capability default | Enable provider-side prompt caching for routes that support it. Defaults on for cache-capable routes and off otherwise. |
-| `prompt_cache_ttl` | `"5m"` or `"1h"` | provider default | Optional provider-side prompt-cache TTL. Anthropic uses `5m` by default; `1h` requests the extended cache when the route advertises that TTL in `prompt_cache_ttls`. |
-| `fast` | bool | `false` | Opt into the model's accelerated-serving serving tier. Maps to the `fast` entry in the catalog's `serving_tiers` array (`speed` for Anthropic, `service_tier` for OpenAI) and injects the Anthropic beta header when required. Rejected for models with no usable `fast` serving tier. Billed at the tier's premium pricing only when the provider confirms it served fast (`result.usage.served_fast`). `speed: "fast"` is accepted as an alias. |
-| `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
-| `timeout` | int | `120` | Request timeout in seconds. `timeout_ms` accepted as an alias and rounded up to whole seconds (HTTP transports take `Duration::from_secs`); sub-second budgets must be enforced at the caller. |
-| `messages` | list | nil | Full message list (overrides prompt) |
-| `structural_experiment` | string/dict/closure | nil | Prompt-structure transform applied immediately before the provider call. Built-ins: `prompt_order_permutation(seed: N)`, `doubled_prompt`, `chain_of_draft`, `inverted_system`. Env: `HARN_STRUCTURAL_EXPERIMENT` |
-| `transcript` | dict | nil | Continue from a previous transcript; prompt is appended as the next user turn |
-| `model_tier` | string | nil | Resolve a configured tier alias such as `"small"`, `"mid"`, or `"frontier"` |
-
-> **Removed in 0.10.** The per-call transient-retry options `llm_retries` and
-> `llm_backoff_ms` are gone — `llm_call` is now fail-fast on transient provider
-> errors, and retry policy is composed on the caller seam with `with_retry` from
-> `std/llm/handlers`. See [Migrating to 0.10](../migrations/v0.10.md).
-
-The `cache` option above enables provider-side prompt caching when a provider
-supports it. It does not memoize full LLM responses. For Harn-owned response
-caching, import `with_cache` from `std/llm/handlers`:
-
-Model roles are ordinary option defaults, so they compose with the
-existing routing layer instead of bypassing it:
-
-```toml
-[model_roles.merge]
-provider = "ollama"
-model = "devstral-small-2"
-temperature = 0.0
-route_policy = "manual"
-```
+`LlmCallOptions` in `std/llm/options` is the checked authoring surface. Annotate
+a binding or use `llm_options({...})`:
 
 ```harn
-import { LlmCallOptions } from "std/llm/options"
+import { LlmCallOptions, llm_options } from "std/llm/options"
+import { system_before } from "std/llm/prompts"
 
-const merge_opts: LlmCallOptions = {model_role: "merge", output_schema: schema}
-const merged = llm_call(prompt, sys, merge_opts)
-```
-
-```harn
-import { with_cache } from "std/llm/handlers"
-
-const result = with_cache("Summarize this file", nil, {
-  provider: "anthropic",
-  model: "claude-haiku-4-5",
-  store: {backend: "sqlite", namespace: "summaries"},
-  ttl: "10m",
-  max_entries: 256,
+const opts: LlmCallOptions = llm_options({
+  provider: "openai",
+  model: "gpt-5.4",
+  system: [system_before("Return a compact result.")],
+  output: {
+    schema: {type: "object", properties: {answer: {type: "string"}}, required: ["answer"]},
+    strict: true,
+    validation: "error",
+  },
+  effort: "high",
+  timeout_ms: 120000,
 })
 ```
 
-`with_cache` returns the same envelope as `llm_call`. Its key is
-content-addressed as `sha256:` over canonical JSON for `{prompt, system,
-provider, model, temperature, top_p, max_tokens}` after defaults resolve. The
-default store is sqlite under Harn state, namespace `llm.with_cache`, TTL 10
-minutes, and LRU size 256. Use `store: {backend: "fs", namespace, path?}` for
-one-file-per-entry storage. Calls with `tools` bypass the cache by default;
-set `skip_when` to a bool or predicate closure to override that policy.
+The runtime applies the same registry to typed values, literals, computed
+dicts, direct calls, streams, and agent-loop dispatch. An unknown key is an
+error with a nearest-name suggestion. A removed spelling is an error with its
+replacement. Keys beginning with `_` are reserved for internal host plumbing.
 
-Provider-specific overrides can be passed as sub-dicts (provider-named
-keys ride alongside the typed alias):
+#### Routing
+
+| Key | Type | Meaning |
+|---|---|---|
+| `model` | string | Model selector. |
+| `model_role` | string | Fill missing route fields from `[model_roles.<name>]`. Explicit options win. |
+| `model_tier` | string | Resolve a configured tier such as `small`, `mid`, or `frontier`. |
+| `provider` | string | Provider id, or `auto` for model-based resolution. |
+| `api_mode` | `chat_completions` \| `responses` | OpenAI API family. |
+| `route_policy` | string \| dict | Catalog-backed route policy. |
+| `fallback_chain` | string \| list | Ordered provider fallbacks. |
+| `routing` | dict | Explicit routing policy object. |
+| `equivalent_failover` | bool \| dict | Build a capability-equivalent failover chain. |
+| `models` | list | Inline cheap-first `ModelLadder`; advances only on route failures. |
+| `ladder` | string | Named `[model_ladders.<name>]` catalog ladder. |
+
+`models`, `ladder`, explicit `model`/`provider`, and `routing` are competing
+route owners. Do not combine them.
+
+#### Conversation
+
+| Key | Type | Meaning |
+|---|---|---|
+| `system` | string \| list | System text or ordered `SystemFragment` values. |
+| `messages` | list | Full canonical message history; supersedes the positional prompt. |
+| `session_id` | string | Continue a session opened with `agent_session_open`. |
+| `mock_scope` | string | Deterministic mock-fixture scope; real providers ignore it. |
+| `context_profile` | dict | Context-selection profile. |
+| `capabilities` | any | Explicit required capabilities. |
+| `prefill` | string | Assistant prefill where the route supports it. |
+| `previous_response_id` | string | OpenAI Responses conversation-state link. |
+
+Each system fragment has `{content, title?, position?: "before"|"after",
+enabled?}`. Use `system_before`, `system_after`, and `with_system_fragments`
+from `std/llm/prompts` when composing fragments.
+
+#### Generation
+
+| Key | Type | Meaning |
+|---|---|---|
+| `max_tokens` | int | Maximum generated tokens. |
+| `temperature` | float | Sampling temperature. |
+| `top_p` | float | Nucleus-sampling cutoff. |
+| `top_k` | int | Top-k sampling cutoff where supported. |
+| `logprobs` | bool | Request token log probabilities. |
+| `top_logprobs` | int | Number of alternative token probabilities. |
+| `stop` | string \| list | Stop sequence or sequences. |
+| `stop_at_tool_call` | bool | End the call after the first tool call. |
+| `seed` | int | Reproducibility seed where supported. |
+| `frequency_penalty` | float | Frequency penalty where supported. |
+| `presence_penalty` | float | Presence penalty where supported. |
+
+#### Output contract and recovery
+
+| Key | Type | Meaning |
+|---|---|---|
+| `output` | `OutputSpec` | `"text"`, `"json"`, a schema value/type, or `{schema, strict?, validation?, stream_abort?}`. |
+| `schema_retries` | int | Bounded corrective retries after schema failure. |
+| `schema_retry_nudge` | bool \| string | Automatic, disabled, or caller-supplied corrective prompt. |
+| `retries` | int | Wrapper-level bounded call retries. |
+| `schema_recover` | bool | Attempt deterministic extraction before repair. |
+| `repair` | bool \| dict | Enable or configure LLM-assisted schema repair. |
+
+`output: "json"` parses JSON without a schema. A schema value validates and
+narrows `result.data`; the config form controls strict provider transport,
+post-parse validation, and early stream abort in one place:
 
 ```harn
-import { LlmCallOptions } from "std/llm/options"
+type Verdict = {pass: bool, reason: string}
 
-const opts: LlmCallOptions = {
-  provider: "ollama",
-  ollama: {num_ctx: 32768},
-}
-const result = llm_call("hello", nil, opts)
+const result = llm_call(prompt, nil, {
+  output: {schema: Verdict, strict: true, validation: "error", stream_abort: true},
+  schema_retries: 1,
+})
 ```
+
+#### Reasoning and modalities
+
+| Key | Type | Meaning |
+|---|---|---|
+| `thinking` | bool \| `adaptive` \| dict | Explicit provider reasoning mechanism. |
+| `effort` | string | Provider-neutral reasoning intent. |
+| `reasoning_policy` | bool \| string | Policy that resolves an effort from task and scale. |
+| `reasoning_scale` | string | `small`, `medium`, or `large` policy hint. |
+| `reasoning_task` | string | `chat`, `agent`, `code`, `verify`, or `summarize` policy hint. |
+| `interleaved_thinking` | bool | Request Anthropic interleaved thinking where supported. |
+| `anthropic_beta_features` | string \| list | Additional Anthropic beta feature names. |
+| `vision` | bool | Require image-input support. |
+| `audio` | bool | Require audio-input support. |
+| `pdf` | bool | Require PDF-input support. |
+| `video` | bool | Require video-input support. |
+
+Use `effort` for intent. Use `thinking` only when a caller needs to choose the
+provider mechanism or budget explicitly. Provider capabilities decide how
+intent is lowered.
+
+#### Tools
+
+| Key | Type | Meaning |
+|---|---|---|
+| `tools` | list \| dict | Harn-executed tool definitions. |
+| `provider_tools` | list \| dict | Provider-executed tools or remote MCP connectors. |
+| `tool_choice` | string \| dict | Automatic, disabled, required, or named tool selection. |
+| `tool_search` | bool \| string \| dict | Progressive tool disclosure. |
+| `tool_format` | string | Tool-call wire format override. |
+
+Harn executes, approves, and audits `tools`. The provider executes
+`provider_tools`; Harn records their blocks but never dispatches them locally.
+
+#### Cache, budget, and transport
+
+| Key | Type | Meaning |
+|---|---|---|
+| `cache` | bool \| dict | Provider prompt caching or wrapper cache policy. |
+| `prompt_cache_ttl` | `5m` \| `1h` | Requested provider prompt-cache TTL. |
+| `budget` | number \| `LlmBudget` | Maximum cost or token envelope. |
+| `timeout_ms` | int | Whole-call timeout in milliseconds. |
+| `idle_timeout_ms` | int | Streaming idle timeout in milliseconds. |
+| `stream` | bool | Enable streaming transport. |
+| `speed` | string | Serving intent: `standard` or `fast`. |
+
+`speed: "fast"` is admitted only when the selected route advertises a usable
+fast tier. Premium pricing applies only when provider telemetry confirms that
+tier. `cache` does not memoize full responses; use `with_cache` from
+`std/llm/handlers` for Harn-owned response caching.
+
+#### OpenAI Responses
+
+These keys require `provider: "openai"` and `api_mode: "responses"`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `store` | bool \| dict | Provider persistence, or a wrapper cache store config at the wrapper seam. |
+| `background` | bool | Run the response in provider background mode. |
+| `truncation` | string | Provider-side truncation or compaction policy. |
+| `compact` | bool | Use the standalone `/responses/compact` endpoint. |
+| `include` | list | Provider metadata expansions. |
+| `max_tool_calls` | int | Provider-executed tool-call limit. |
+
+#### Provider options and observability
+
+| Key | Type | Meaning |
+|---|---|---|
+| `provider_options` | dict | Namespaced provider escape hatch: `{openai: {...}, ollama: {...}}`. |
+| `metadata` | dict | Caller metadata for wrappers and telemetry. |
+| `reminders` | any | Reminder injection config. |
+| `structural_experiment` | any | Final prompt-structure transform. |
+
+Provider-specific fields are legal only below `provider_options`. They are
+never accepted as top-level provider names:
+
+```harn
+const result = llm_call("hello", nil, {
+  provider: "ollama",
+  provider_options: {ollama: {num_ctx: 32768}},
+})
+```
+
+Model roles are ordinary defaults and compose with the same routing path:
+
+```harn
+const merged = llm_call(prompt, nil, {
+  model_role: "merge",
+  output: schema,
+})
+```
+
+Removed option names are not compatibility aliases. `harn check` and the
+runtime report the canonical replacement, so stale computed dicts cannot be
+silently projected away.
 
 ### OpenAI Responses mode
 
@@ -308,7 +383,7 @@ const opts: LlmCallOptions = {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
-  output_format: {kind: "json_schema", schema: summary_schema, strict: true},
+  output: {schema: summary_schema, strict: true, validation: "error"},
   provider_tools: [
     {type: "web_search"},
     {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
@@ -387,7 +462,7 @@ The validated `data` payload, typed as `T` when the schema is a
 `Schema<T>`. Throws on exhausted schema retries or transport
 failure — callers can assume the return matches the schema.
 
-The `{response_format: "json", output_validation: "error",
+The `{output: {schema, strict: true, validation: "error"},
 schema_retries: 3}` defaults are applied unless the caller
 overrides them in `options`.
 
@@ -474,8 +549,8 @@ Repair-pass semantics:
 ### When to use which helper
 
 - Product code that needs just the parsed payload: prefer
-  `llm_call_structured`. It removes the `output_validation`,
-  `schema_retries`, `response_format`, and `.data` noise from every
+  `llm_call_structured`. It removes the `output`, `schema_retries`,
+  and `.data` boilerplate from every
   callsite.
 - Code that also needs token counts, transcript, thinking traces, or
   to pass a pre-built transcript: call `llm_call` directly and read

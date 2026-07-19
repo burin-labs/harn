@@ -4,6 +4,8 @@
  * std/llm/prompts - system-prompt builders for non-agent_loop callers.
  * Deterministic-by-design so callers benefit from prompt caching.
  */
+import { SystemFragment } from "std/llm/options"
+
 fn __tone_voice(tone) {
   if tone == "terse" {
     return "Voice: terse and direct. Skip pleasantries; keep responses brief."
@@ -83,12 +85,12 @@ pub fn system_prompt_part(content, options = nil) {
 }
 
 /**
- * system_preamble.
+ * system_before.
  *
  * @effects: []
  * @errors: []
  */
-pub fn system_preamble(content, options = nil) {
+pub fn system_before(content, options = nil) -> SystemFragment {
   const opts = if type_of(options) == "dict" {
     options
   } else {
@@ -98,12 +100,12 @@ pub fn system_preamble(content, options = nil) {
 }
 
 /**
- * system_appendix.
+ * system_after.
  *
  * @effects: []
  * @errors: []
  */
-pub fn system_appendix(content, options = nil) {
+pub fn system_after(content, options = nil) -> SystemFragment {
   const opts = if type_of(options) == "dict" {
     options
   } else {
@@ -113,23 +115,22 @@ pub fn system_appendix(content, options = nil) {
 }
 
 /**
- * with_system_prompt_parts.
+ * with_system_fragments.
  *
  * @effects: []
  * @errors: []
  */
-pub fn with_system_prompt_parts(options, parts) {
+pub fn with_system_fragments(options, parts) -> dict {
   const opts = if type_of(options) == "dict" {
     options
   } else {
     {}
   }
-  const existing = __prompt_part_list(opts?.system_prompt_parts)
   let normalized = []
-  for part in __prompt_part_list(parts) {
+  for part in __prompt_part_list(opts?.system) + __prompt_part_list(parts) {
     normalized = normalized.push(__normalize_system_prompt_part(part))
   }
-  return opts + {system_prompt_parts: existing + normalized}
+  return opts + {system: normalized}
 }
 
 /**

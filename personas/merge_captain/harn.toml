@@ -35,6 +35,6 @@ context_packs = ["repo_policy", "merge_policy", "release_policy", "merge_captain
 evals = ["merge_captain_smoke"]
 owner = "platform"
 budget = { daily_usd = 12.0, frontier_escalations = 2, max_tokens = 80000, max_runtime_seconds = 900 }
-model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
+model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], effort = "medium" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["merge-captain-v1"] }
 package_source = { package = "harn-merge-captain-persona", path = "personas/merge_captain" }

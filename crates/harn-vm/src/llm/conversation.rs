@@ -6,14 +6,15 @@ use harn_parser::diagnostic_codes::Code;
 
 use super::helpers::{
     emit_reminder_lifecycle_event, extract_llm_options, is_transcript_value, new_transcript_with,
-    new_transcript_with_events, normalize_transcript_asset, reminder_from_event,
-    reminder_lifecycle_payload, transcript_asset_list, transcript_drain_decision_event_from_value,
-    transcript_event, transcript_id, transcript_message_list, transcript_reminder_event,
-    transcript_reminder_event_from_value, transcript_resumption_event_from_value,
-    transcript_summary_text, transcript_suspension_event_from_value, vm_add_role_message,
-    vm_message_value, vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource,
-    SystemReminder, REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND,
-    REMINDER_INJECTED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
+    new_transcript_with_events, normalize_transcript_asset, project_llm_options,
+    reminder_from_event, reminder_lifecycle_payload, transcript_asset_list,
+    transcript_drain_decision_event_from_value, transcript_event, transcript_id,
+    transcript_message_list, transcript_reminder_event, transcript_reminder_event_from_value,
+    transcript_resumption_event_from_value, transcript_summary_text,
+    transcript_suspension_event_from_value, vm_add_role_message, vm_message_value,
+    vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder,
+    REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND, REMINDER_INJECTED_EVENT_KIND,
+    SYSTEM_REMINDER_EVENT_KIND,
 };
 
 pub(crate) const INJECT_REMINDER_KEYS: &[&str] = &[
@@ -382,10 +383,16 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
 
     vm.register_async_builtin("transcript_summarize", |_ctx, args| async move {
         let transcript = require_transcript(&args, "transcript_summarize")?;
+        let llm_options = args
+            .get(1)
+            .and_then(VmValue::as_dict)
+            .map(project_llm_options)
+            .transpose()?
+            .unwrap_or_default();
         let mut opts = extract_llm_options(&[
             VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
-            args.get(1).cloned().unwrap_or(VmValue::Nil),
+            VmValue::dict(llm_options),
         ])?;
         let keep_last = args
             .get(1)

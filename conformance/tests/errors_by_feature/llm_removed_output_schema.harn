@@ -1,0 +1,5 @@
+fn main(harness: Harness) {
+  let opts = {provider: "mock"}
+  opts["output_schema"] = {type: "object"}
+  llm_call("x", nil, opts)
+}

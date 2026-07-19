@@ -1,6 +1,6 @@
 // pack_for({model: "gpt-5", provider: "auto"}) → resolves to provider
-// "openai" via runtime inference. Internal pack control keys are stripped
-// from the final dict; user opts (provider) are echoed by resolved_options.
+// "openai" via runtime inference. Canonical policy keys remain visible in
+// the returned request.
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(task) {
@@ -13,7 +13,7 @@ pipeline test(task) {
   const r = pack_for({model: "gpt-5"})
   assert_eq(r.model, "gpt-5")
   assert_eq(r.provider, "openai")
-  // Effort default (balanced) populates reasoning_effort.
-  assert_eq(r.reasoning_effort, "medium")
+  // Medium scale calibration populates the low-level effort.
+  assert_eq(r.effort, "medium")
   log("llm_defaults_pack_provider_auto passed")
 }

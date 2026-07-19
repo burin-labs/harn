@@ -236,8 +236,8 @@ pub(super) fn apply_ladder_step_overrides(
             opts.timeout = Some(((v as u64) / 1000).max(1));
         }
     }
-    if let Some(VmValue::Bool(v)) = overrides.get("fast") {
-        opts.fast = *v;
+    if let Some(VmValue::String(v)) = overrides.get("speed") {
+        opts.fast = v.as_str() == "fast";
     }
 }
 

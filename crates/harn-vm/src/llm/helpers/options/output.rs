@@ -10,7 +10,10 @@ pub(super) fn provider_overrides_force_native(
     provider: &str,
 ) -> bool {
     let Some(options) = options else { return false };
-    let Some(VmValue::Dict(overrides)) = options.get(provider) else {
+    let Some(VmValue::Dict(namespaced)) = options.get("provider_options") else {
+        return false;
+    };
+    let Some(VmValue::Dict(overrides)) = namespaced.get(provider) else {
         return false;
     };
     matches!(
@@ -31,25 +34,20 @@ pub(super) fn classify_native_shape(
 pub(super) fn parse_api_mode_option(
     options: Option<&crate::value::DictMap>,
 ) -> Result<crate::llm::api::LlmApiMode, VmError> {
-    let Some(raw) = options.and_then(|o| o.get("api_mode").or_else(|| o.get("api"))) else {
+    let Some(raw) = options.and_then(|o| o.get("api_mode")) else {
         return Ok(crate::llm::api::LlmApiMode::ChatCompletions);
     };
     match raw {
         VmValue::Nil => Ok(crate::llm::api::LlmApiMode::ChatCompletions),
-        VmValue::String(value) => {
-            let normalized = value.trim().to_ascii_lowercase().replace('-', "_");
-            match normalized.as_str() {
-                "chat" | "chat_completions" | "chat_completion" | "completions" => {
-                    Ok(crate::llm::api::LlmApiMode::ChatCompletions)
-                }
-                "responses" | "response" => Ok(crate::llm::api::LlmApiMode::Responses),
-                other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
-                        "api_mode: expected \"chat_completions\" or \"responses\", got \"{other}\""
-                    ),
-                )))),
-            }
-        }
+        VmValue::String(value) => match value.as_str() {
+            "chat_completions" => Ok(crate::llm::api::LlmApiMode::ChatCompletions),
+            "responses" => Ok(crate::llm::api::LlmApiMode::Responses),
+            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                format!(
+                    "api_mode: expected \"chat_completions\" or \"responses\", got \"{other}\""
+                ),
+            )))),
+        },
         other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("api_mode: expected a string, got {}", other.type_name()),
         )))),
@@ -69,8 +67,7 @@ pub(super) fn enforce_responses_provider_gate(
 pub(super) fn parse_provider_tools_option(
     options: Option<&crate::value::DictMap>,
 ) -> Result<Vec<serde_json::Value>, VmError> {
-    let Some(raw) = options.and_then(|o| o.get("provider_tools").or_else(|| o.get("hosted_tools")))
-    else {
+    let Some(raw) = options.and_then(|o| o.get("provider_tools")) else {
         return Ok(Vec::new());
     };
     match raw {
@@ -114,12 +111,6 @@ pub(super) fn opt_bool_field(
 pub(super) fn opt_responses_store_field(
     options: Option<&crate::value::DictMap>,
 ) -> Result<Option<bool>, VmError> {
-    if let Some(value) = opt_bool_field(options, "response_store")? {
-        return Ok(Some(value));
-    }
-    if let Some(value) = opt_bool_field(options, "responses_store")? {
-        return Ok(Some(value));
-    }
     match options.and_then(|o| o.get("store")) {
         Some(VmValue::Bool(value)) => Ok(Some(*value)),
         _ => Ok(None),
@@ -159,86 +150,113 @@ pub(super) fn option_is_enabled(options: Option<&crate::value::DictMap>, key: &s
         .is_some_and(|value| value.is_truthy())
 }
 
-pub(super) fn parse_output_format_kind(raw: &str) -> Result<&'static str, VmError> {
-    let normalized = raw.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "text" | "none" | "off" => Ok("text"),
-        "json" | "json_object" => Ok("json_object"),
-        "json_schema" | "schema" => Ok("json_schema"),
-        other => Err(output_format_error(format!(
-            "output_format.kind: expected \"text\" | \"json_object\" | \"json_schema\", got \"{other}\""
-        ))),
-    }
+/// The parsed single `output` contract key.
+///
+/// Grammar (the ONE spelling for structured output):
+/// * absent / nil          -> plain text
+/// * "text"                -> plain text (explicit)
+/// * "json"                -> provider JSON mode, no schema
+/// * <schema dict>         -> schema-constrained output (strict)
+/// * {schema, strict?, validation?, stream_abort?} -> full config form
+///
+/// The config form is recognized by the presence of a `schema` key; any other
+/// dict is treated as the JSON Schema itself.
+pub(super) struct ParsedOutput {
+    pub format: crate::llm::api::OutputFormat,
+    pub validation: Option<String>,
+    /// Explicit `stream_abort` override; `None` defaults to
+    /// "abort when a schema is present".
+    pub stream_abort: Option<bool>,
 }
 
-pub(super) fn parse_output_format_option(
+pub(super) fn parse_output_option(
     options: Option<&crate::value::DictMap>,
-    legacy_response_format: Option<&str>,
-    legacy_json_schema: Option<&serde_json::Value>,
-) -> Result<crate::llm::api::OutputFormat, VmError> {
+) -> Result<ParsedOutput, VmError> {
     use crate::llm::api::OutputFormat;
 
-    let Some(raw) = options.and_then(|o| o.get("output_format")) else {
-        if let Some(schema) = legacy_json_schema {
-            return Ok(OutputFormat::JsonSchema {
-                schema: schema.clone(),
-                strict: true,
-            });
-        }
-        return match legacy_response_format {
-            Some("json") | Some("json_object") => Ok(OutputFormat::JsonObject),
-            Some("text") | None => Ok(OutputFormat::Text),
-            Some(other) => Err(output_format_error(format!(
-                "response_format: expected \"json\", \"json_object\", or \"text\", got \"{other}\""
-            ))),
-        };
+    let text = |validation: Option<String>, stream_abort: Option<bool>| ParsedOutput {
+        format: OutputFormat::Text,
+        validation,
+        stream_abort,
     };
-
+    let Some(raw) = options.and_then(|o| o.get("output")) else {
+        return Ok(text(None, None));
+    };
     match raw {
-        VmValue::Nil => Ok(OutputFormat::Text),
-        VmValue::String(kind) => match parse_output_format_kind(kind)? {
-            "text" => Ok(OutputFormat::Text),
-            "json_object" => Ok(OutputFormat::JsonObject),
-            "json_schema" => {
-                let Some(schema) = legacy_json_schema else {
-                    return Err(output_format_error(
-                        "output_format: kind \"json_schema\" requires a `schema` field",
-                    ));
-                };
-                Ok(OutputFormat::JsonSchema {
-                    schema: schema.clone(),
-                    strict: true,
-                })
-            }
-            _ => unreachable!(),
+        VmValue::Nil => Ok(text(None, None)),
+        VmValue::String(kind) => match kind.as_str() {
+            "text" => Ok(text(None, None)),
+            "json" => Ok(ParsedOutput {
+                format: OutputFormat::JsonObject,
+                validation: None,
+                stream_abort: None,
+            }),
+            other => Err(output_format_error(format!(
+                "output: expected \"text\", \"json\", a schema, or {{schema, ...}}, got \"{other}\""
+            ))),
         },
-        VmValue::Dict(d) => {
-            let kind_raw = d
-                .get("kind")
-                .map(|value| value.display())
-                .unwrap_or_else(|| "text".to_string());
-            match parse_output_format_kind(&kind_raw)? {
-                "text" => Ok(OutputFormat::Text),
-                "json_object" => Ok(OutputFormat::JsonObject),
-                "json_schema" => {
-                    let schema = parse_schema_value(
-                        d.get("schema").or_else(|| d.get("json_schema")),
-                        "output_format.schema",
-                    )?
-                    .ok_or_else(|| {
-                        output_format_error(
-                            "output_format: kind \"json_schema\" requires a `schema` field",
-                        )
-                    })?;
-                    let strict = d.get("strict").map(VmValue::is_truthy).unwrap_or(true);
-                    Ok(OutputFormat::JsonSchema { schema, strict })
+        VmValue::Dict(d) if d.get("schema").is_some() => {
+            let schema = match d.get("schema") {
+                Some(VmValue::Nil) | None => None,
+                other => parse_schema_value(other, "output.schema")?,
+            };
+            let strict = match d.get("strict") {
+                None | Some(VmValue::Nil) => true,
+                Some(VmValue::Bool(value)) => *value,
+                Some(other) => {
+                    return Err(output_format_error(format!(
+                        "output.strict: expected a bool, got {}",
+                        other.type_name()
+                    )))
                 }
-                _ => unreachable!(),
+            };
+            let validation = match d.get("validation") {
+                None | Some(VmValue::Nil) => None,
+                Some(VmValue::String(value)) => Some(value.to_string()),
+                Some(other) => {
+                    return Err(output_format_error(format!(
+                        "output.validation: expected a string, got {}",
+                        other.type_name()
+                    )))
+                }
+            };
+            let stream_abort = match d.get("stream_abort") {
+                None | Some(VmValue::Nil) => None,
+                Some(VmValue::Bool(value)) => Some(*value),
+                Some(other) => {
+                    return Err(output_format_error(format!(
+                        "output.stream_abort: expected a bool, got {}",
+                        other.type_name()
+                    )))
+                }
+            };
+            match schema {
+                Some(schema) => Ok(ParsedOutput {
+                    format: OutputFormat::JsonSchema { schema, strict },
+                    validation,
+                    stream_abort,
+                }),
+                None => Err(output_format_error(
+                    "output: the {schema, ...} form requires a non-nil `schema`",
+                )),
             }
         }
-        _ => Err(output_format_error(
-            "output_format: expected string or dict",
-        )),
+        value @ VmValue::Dict(_) => {
+            let schema =
+                parse_schema_value(Some(value), "output")?.expect("dict schema parses to Some");
+            Ok(ParsedOutput {
+                format: OutputFormat::JsonSchema {
+                    schema,
+                    strict: true,
+                },
+                validation: None,
+                stream_abort: None,
+            })
+        }
+        other => Err(output_format_error(format!(
+            "output: expected \"text\", \"json\", a schema, or {{schema, ...}}, got {}",
+            other.type_name()
+        ))),
     }
 }
 
@@ -257,16 +275,16 @@ pub(super) fn validate_output_format_supported(
             if caps.structured_output.is_some() {
                 Ok(())
             } else {
-                Err(unsupported_option_error("output_format", provider, model))
+                Err(unsupported_option_error("output", provider, model))
             }
         }
         OutputFormat::JsonSchema { .. } => {
             match caps.structured_output.as_deref() {
                 Some("native" | "tool_use" | "format_kw") => Ok(()),
                 Some(other) => Err(output_format_error(format!(
-                    "output_format: provider \"{provider}\" model \"{model}\" declares unsupported structured_output strategy \"{other}\""
+                    "output: provider \"{provider}\" model \"{model}\" declares unsupported structured_output strategy \"{other}\""
                 ))),
-                None => Err(unsupported_option_error("output_format", provider, model)),
+                None => Err(unsupported_option_error("output", provider, model)),
             }
         }
     }

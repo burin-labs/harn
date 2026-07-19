@@ -30,10 +30,10 @@
 # count   37  crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/loop_result_status.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/loop_run.harn
-# count   13  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
+# count   12  crates/harn-stdlib/src/stdlib/agent/loop_support.harn
 # count   29  crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn
 # count   27  crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn
-# count   35  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
+# count   32  crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn
 # count    3  crates/harn-stdlib/src/stdlib/agent/mcp.harn
 # count   11  crates/harn-stdlib/src/stdlib/agent/options_formats.harn
 # count   24  crates/harn-stdlib/src/stdlib/agent/options_public.harn
@@ -91,13 +91,13 @@
 # count    8  crates/harn-stdlib/src/stdlib/llm/defaults.harn
 # count    7  crates/harn-stdlib/src/stdlib/llm/economics.harn
 # count    4  crates/harn-stdlib/src/stdlib/llm/ensemble.harn
-# count   16  crates/harn-stdlib/src/stdlib/llm/handlers.harn
+# count   15  crates/harn-stdlib/src/stdlib/llm/handlers.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/judge.harn
 # count    9  crates/harn-stdlib/src/stdlib/llm/media.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/optimize.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/options.harn
-# count    7  crates/harn-stdlib/src/stdlib/llm/prompts.harn
+# count    4  crates/harn-stdlib/src/stdlib/llm/prompts.harn
 # count    3  crates/harn-stdlib/src/stdlib/llm/refine.harn
 # count   18  crates/harn-stdlib/src/stdlib/llm/safe.harn
 # count    1  crates/harn-stdlib/src/stdlib/llm/scope_classifier.harn
@@ -328,7 +328,6 @@ crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_current_work
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_effective_llm_options
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_enable_equivalent_failover
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_finalize_failed
-crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_has_terminal_schema_contract
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_llm_overrides
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_ordinary_turn_llm_options
 crates/harn-stdlib/src/stdlib/agent/loop_support.harn::__agent_loop_route_options
@@ -393,14 +392,11 @@ crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__next_text_only_cou
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__strip_internal_keys
 crates/harn-stdlib/src/stdlib/agent/loop_turn_options.harn::__sync_tool_search_state
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_active_skill_mcp_specs
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_apply_output_schema
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_effective_wrapup_context
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_emit_thrash_recovery_checkpoint
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_final_wrapup
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_has_host_wrapup_directive
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_monologue_recovery_feedback
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_output_schema_repair_prompt
-crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_output_schema_value
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_pop_structural_veto_turn
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_render_wrapup_context
 crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn::__agent_loop_repeated_observation_recovery_feedback
@@ -849,12 +845,9 @@ crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn::missing_tool_call_clas
 crates/harn-stdlib/src/stdlib/llm/optimize.harn::optimize_prompt
 crates/harn-stdlib/src/stdlib/llm/options.harn::llm_call_options
 crates/harn-stdlib/src/stdlib/llm/prompts.harn::structured_output_preface
-crates/harn-stdlib/src/stdlib/llm/prompts.harn::system_appendix
-crates/harn-stdlib/src/stdlib/llm/prompts.harn::system_preamble
 crates/harn-stdlib/src/stdlib/llm/prompts.harn::system_prelude
 crates/harn-stdlib/src/stdlib/llm/prompts.harn::system_prompt_part
 crates/harn-stdlib/src/stdlib/llm/prompts.harn::tool_use_prelude
-crates/harn-stdlib/src/stdlib/llm/prompts.harn::with_system_prompt_parts
 crates/harn-stdlib/src/stdlib/llm/refine.harn::propose_instructions
 crates/harn-stdlib/src/stdlib/llm/refine.harn::refine_caller
 crates/harn-stdlib/src/stdlib/llm/refine.harn::refine_prompt

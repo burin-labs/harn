@@ -1,0 +1,25 @@
+import { llm_call_options, llm_options } from "std/llm/options"
+import { system_before } from "std/llm/prompts"
+
+fn main(_harness: Harness) {
+  const opts = llm_options(
+    {
+      provider: "mock",
+      output: {schema: {type: "object"}, strict: true, validation: "error", stream_abort: false},
+      system: [system_before("Validate before answering.")],
+      timeout_ms: 5000,
+      idle_timeout_ms: 1000,
+      speed: "fast",
+      effort: "high",
+      provider_options: {mock: {trace_label: "canonical"}},
+    },
+  )
+  const projected = llm_call_options(opts)
+  __io_println(projected.output.validation)
+  __io_println(projected.system[0].position)
+  __io_println(projected.timeout_ms)
+  __io_println(projected.idle_timeout_ms)
+  __io_println(projected.speed)
+  __io_println(projected.effort)
+  __io_println(projected.provider_options.mock.trace_label)
+}

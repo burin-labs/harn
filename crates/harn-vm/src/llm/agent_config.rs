@@ -392,9 +392,9 @@ fn agent_inject_host_event_builtin(
 /// final string plus per-fragment provenance — the audit primitive for
 /// "why is this in the prompt?" and "what changes if tool X is absent?".
 ///
-/// Pass the same `options` dict you would hand `agent_loop` (with `system`,
-/// `system_preamble`/`prefix`/`context`/`parts`/`appendix`/`suffix`, and
-/// `tools`). Returns `{ system, fragments: [{id, source, bucket, included,
+/// Pass the same `options` dict you would hand `agent_loop` (with `system`
+/// as a string or an ordered fragment list `{content, title?, position?}`,
+/// and `tools`). Returns `{ system, fragments: [{id, source, bucket, included,
 /// reason, bytes}], included, excluded }`. Each tool that carries a
 /// `guidance` string contributes a fragment gated on the tool's own presence,
 /// so you can see exactly which capability-gated instructions are active and

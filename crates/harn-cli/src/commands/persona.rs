@@ -728,7 +728,7 @@ fn discoverable_persona_to_json(discovered: &package::DiscoverablePersona) -> se
             "default_model": persona.model_policy.default_model.as_deref(),
             "escalation_model": persona.model_policy.escalation_model.as_deref(),
             "fallback_models": &persona.model_policy.fallback_models,
-            "reasoning_effort": persona.model_policy.reasoning_effort.as_deref(),
+            "effort": persona.model_policy.effort.as_deref(),
         },
         "budget": {
             "daily_usd": persona.budget.daily_usd,

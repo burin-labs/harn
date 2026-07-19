@@ -840,18 +840,14 @@ pub fn __agent_loop_active_skill_mcp_specs(active_skills) {
 }
 
 /**
- * Validate `text` against `schema` (a JSON Schema dict, the same shape
- * `output_schema` carries elsewhere). Reuses the language's own schema
- * validator — `json_extract` (tolerant text→JSON) + `schema_is`
- * (canonicalize + validate, the machinery `llm_call_structured` also uses) —
- * so validation is never reimplemented here. Returns `{ok, value}`: `ok`
- * true only when the extracted value validates; `value` is the best parsed
- * value (nil when nothing parseable was found).
+ * Parse a terminal JSON answer and, when present, validate its schema.
  *
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_output_schema_value(text, schema) {
+pub type AgentLoopOutputContractValue = {ok: bool, value: any?}
+
+pub fn __agent_loop_output_contract_value(text, schema) -> AgentLoopOutputContractValue {
   const parsed = try {
     json_extract(text)
   }
@@ -859,6 +855,9 @@ pub fn __agent_loop_output_schema_value(text, schema) {
     return {ok: false, value: nil}
   }
   const value = unwrap(parsed)
+  if schema == nil {
+    return {ok: true, value: value}
+  }
   const valid = try {
     schema_is(value, schema)
   }
@@ -868,7 +867,12 @@ pub fn __agent_loop_output_schema_value(text, schema) {
   return {ok: true, value: value}
 }
 
-pub fn __agent_loop_output_schema_repair_prompt(schema, text) {
+pub fn __agent_loop_output_contract_repair_prompt(schema, text) -> string {
+  if schema == nil {
+    return "Your previous final answer was not valid JSON.\n"
+      + "Reply with ONLY a valid JSON value.\n\nPrevious answer:\n\n"
+      + text
+  }
   return "Your previous final answer did not satisfy the required output schema.\n"
     + "Reply with ONLY a JSON value that validates against this JSON Schema:\n\n"
     + json_stringify_pretty(
@@ -879,43 +883,31 @@ pub fn __agent_loop_output_schema_repair_prompt(schema, text) {
 }
 
 /**
- * Terminal output-schema gate for `agent_loop`.
- *
- * `output_schema` promises the loop's FINAL answer parses against a schema.
- * The loop deliberately does NOT force every mid-loop turn into structured
- * mode (that fights tool-calling; see `__agent_loop_effective_llm_options`).
- * Instead the terminal answer is validated here. If it already satisfies the
- * schema it is surfaced as-is; otherwise the loop re-asks ONCE — through the
- * same `llm_caller` seam ordinary turns use, so custom callers and test mocks
- * intercept it — for a schema-shaped value, mirroring the repair-once
- * behavior `llm_call_structured` implements. The parsed value lands on
- * `run.output`; `run.output_valid` records whether validation ultimately
- * passed (never throws — a persistently off-shape answer yields
- * `output_valid: false`, not a crash). When the repair turn produces the
- * terminal answer, surface that repaired text so `visible_text` and `output`
- * describe the same final payload.
+ * Apply `agent_loop`'s terminal `output` contract. Intermediate turns omit the
+ * contract so tool calling remains available. A failed terminal parse or
+ * schema check gets one repair call through the same `llm_caller` seam.
  *
  * @effects: [agent]
  * @errors: []
  */
-pub fn __agent_loop_apply_output_schema(final_result, opts, session, message, iteration) {
-  const schema = opts?.output_schema
+pub fn __agent_loop_apply_output_contract(final_result, opts, session, message, iteration) -> dict {
+  const schema = __agent_loop_output_contract(opts)?.schema
   let text = to_string(final_result?.visible_text ?? final_result?.text ?? "")
-  const direct = __agent_loop_output_schema_value(text, schema)
+  const direct = __agent_loop_output_contract_value(text, schema)
   if direct.ok {
     return final_result + {output: direct.value, output_valid: true}
   }
-  const repair_opts = __agent_loop_effective_llm_options(opts + {_output_schema_repair: true})
+  const repair_opts = __agent_loop_effective_llm_options(opts + {_output_contract_repair: true})
     + {
     session_id: session.session_id,
     tools: nil,
     tool_choice: nil,
     tool_format: opts?.tool_format,
     _iteration: iteration + 1,
-    _output_schema_repair: true,
+    _output_contract_repair: true,
   }
   const repair = try {
-    agent_invoke_llm(__agent_loop_output_schema_repair_prompt(schema, text), nil, repair_opts)
+    agent_invoke_llm(__agent_loop_output_contract_repair_prompt(schema, text), nil, repair_opts)
   }
   if is_err(repair) {
     return final_result + {output: direct.value, output_valid: false}
@@ -925,7 +917,7 @@ pub fn __agent_loop_apply_output_schema(final_result, opts, session, message, it
     return final_result + {output: direct.value, output_valid: false}
   }
   const repaired_text = to_string(call?.value?.visible_text ?? call?.value?.text ?? "")
-  const second = __agent_loop_output_schema_value(repaired_text, schema)
+  const second = __agent_loop_output_contract_value(repaired_text, schema)
   return final_result
     + {
     text: repaired_text,

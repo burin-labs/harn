@@ -639,7 +639,7 @@ fn __reasoning_effort_budget(level) {
  * Harn's own reasoning policy to resolve the route's `thinking`, then reads the
  * explicit `budget_tokens` (Anthropic-style numeric budget) or maps the effort
  * level (gpt-oss/Harmony, o-series) to its approximate budget. A caller's
- * explicit `reasoning_effort` is honoured directly since the policy passes such
+ * explicit `effort` is honored directly since the policy passes such
  * opts through untouched.
  */
 fn __structured_reasoning_budget(options) {
@@ -657,11 +657,11 @@ fn __structured_reasoning_budget(options) {
     unwrap(resolved)
   }
   const thinking = safe_resolved?.thinking
-  // Caller set reasoning_effort explicitly -> policy returns opts unchanged
+  // An explicit effort may bypass the thinking projection.
   // (no `thinking`), so fall back to the caller's effort level.
   if type_of(thinking) != "dict" {
-    if opts?.reasoning_effort != nil {
-      const effort = to_string(opts.reasoning_effort)
+    if opts?.effort != nil {
+      const effort = to_string(opts.effort)
       if effort == "off" || effort == "none" || effort == "disabled" {
         return 0
       }

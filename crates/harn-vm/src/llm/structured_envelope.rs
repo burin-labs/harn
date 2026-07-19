@@ -42,6 +42,7 @@ pub(crate) async fn run_structured_envelope(
     args: Vec<VmValue>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
+    let schema = args.get(1).cloned().unwrap_or(VmValue::Nil);
     let mut rewritten = match rewrite_structured_args(args) {
         Ok(v) => v,
         // Argument-shape errors surface as a `transport`-categorized
@@ -56,10 +57,10 @@ pub(crate) async fn run_structured_envelope(
     let opts = match extract_llm_options(&rewritten) {
         Ok(opts) => opts,
         Err(err) if is_unsupported_structured_transport_error(&err) => {
-            apply_prompt_mode_structured_transport(&mut rewritten);
+            apply_prompt_mode_structured_transport(&mut rewritten, &schema);
             options_dict = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
             match extract_llm_options(&rewritten) {
-                Ok(opts) => opts,
+                Ok(opts) => install_prompt_mode_validation(opts, &schema),
                 Err(fallback_err) => return Ok(envelope_from_arg_error(&fallback_err)),
             }
         }
@@ -94,17 +95,18 @@ pub(crate) async fn run_structured_envelope(
             // any chat model/route) and retry once. The native path — and
             // the meter — are unchanged whenever the first call succeeds.
             if is_structured_output_rejection(&err)
-                && structured_request_uses_response_format(&rewritten)
+                && structured_request_uses_native_output(&rewritten)
             {
                 tracing::warn!(
-                    provider = %provider_hint,
-                    model = %model_hint,
-                    "structured output got invalid_request; degrading to prompt-mode text transport and retrying"
+                                    provider = %provider_hint,
+                                    model = %model_hint,
+                                    "structured output got invalid_request; degrading to prompt-mode text transport and retrying"
                 );
-                apply_prompt_mode_structured_transport(&mut rewritten);
+                apply_prompt_mode_structured_transport(&mut rewritten, &schema);
                 let fallback_options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
                 match extract_llm_options(&rewritten) {
                     Ok(fallback_opts) => {
+                        let fallback_opts = install_prompt_mode_validation(fallback_opts, &schema);
                         match execute_schema_retry_loop(
                             None,
                             fallback_opts,
@@ -143,8 +145,14 @@ pub(crate) async fn run_structured_envelope(
     // Schema/JSON failure — try repair if configured.
     if let Some(repair) = repair_config {
         if repair.enabled {
-            if let Some(env) =
-                run_repair_pass(&main_outcome, &repair, options_dict.as_ref(), bridge).await
+            if let Some(env) = run_repair_pass(
+                &main_outcome,
+                &repair,
+                options_dict.as_ref(),
+                &schema,
+                bridge,
+            )
+            .await
             {
                 return Ok(env);
             }
@@ -186,50 +194,50 @@ fn is_structured_output_rejection(err: &VmError) -> bool {
         || (message.contains("400") && message.contains("bad request"))
 }
 
-/// Whether this structured request actually sent a `response_format`
-/// (json_schema / json_object) to the provider, i.e. it is NOT already in
-/// prompt-mode text transport. Only such requests can hit a provider-side
-/// structured-output 400 and benefit from degrading to text transport. The
-/// structured envelope defaults to json_schema when a schema arg is present, so
-/// a missing options dict / missing output_format still counts as "yes".
-fn structured_request_uses_response_format(args: &[VmValue]) -> bool {
-    let Some(dict) = args.get(2).and_then(|a| a.as_dict()) else {
-        return true;
-    };
-    let is_text = |value: &VmValue| match value {
-        VmValue::String(text) => text.to_string() == "text",
-        _ => false,
-    };
-    if dict.get("output_format").is_some_and(is_text)
-        || dict.get("response_format").is_some_and(is_text)
-    {
-        return false;
-    }
-    true
+/// Whether this request still asks the provider for native structured output.
+/// Prompt-mode fallback writes `output: "text"`, so it cannot be degraded twice.
+fn structured_request_uses_native_output(args: &[VmValue]) -> bool {
+    !matches!(
+        args.get(2)
+            .and_then(|a| a.as_dict())
+            .and_then(|dict| dict.get("output")),
+        Some(VmValue::String(text)) if text.as_str() == "text"
+    )
 }
 
 fn is_unsupported_structured_transport_error(err: &VmError) -> bool {
     let message = err.to_string();
-    message.contains("option `output_format` is not supported")
+    message.contains("option `output` is not supported")
         || message.contains("unsupported structured_output strategy")
 }
 
-fn apply_prompt_mode_structured_transport(args: &mut [VmValue]) {
-    let schema = args.get(1).cloned().unwrap_or(VmValue::Nil);
+fn apply_prompt_mode_structured_transport(args: &mut [VmValue], schema: &VmValue) {
     if let Some(prompt) = args.get_mut(0).and_then(|value| match value {
         VmValue::String(text) => Some(text.to_string()),
         _ => None,
     }) {
         args[0] = VmValue::String(arcstr::ArcStr::from(prompt_with_schema_contract(
-            &prompt, &schema,
+            &prompt, schema,
         )));
     }
     if let Some(options) = args.get_mut(2) {
         let mut dict = options.as_dict().cloned().unwrap_or_default();
-        dict.put_str("output_format", "text");
-        dict.put_str("response_format", "text");
+        dict.put_str("output", "text");
         *options = VmValue::dict(dict);
     }
+}
+
+fn install_prompt_mode_validation(
+    mut opts: crate::llm::api::LlmCallOptions,
+    schema: &VmValue,
+) -> crate::llm::api::LlmCallOptions {
+    let mut schema_json = vm_value_to_json(schema);
+    crate::schema::normalize_json_schema_type_names(&mut schema_json);
+    opts.output_schema = Some(schema_json.clone());
+    opts.json_schema = Some(schema_json);
+    opts.output_validation = Some("error".to_string());
+    opts.schema_stream_abort = false;
+    opts
 }
 
 fn prompt_with_schema_contract(prompt: &str, schema: &VmValue) -> String {
@@ -327,17 +335,14 @@ async fn run_repair_pass(
     main_outcome: &SchemaLoopOutcome,
     repair: &RepairConfig,
     base_options: Option<&crate::value::DictMap>,
+    schema: &VmValue,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Option<VmValue> {
     let prompt = build_repair_prompt(&main_outcome.raw_text, &main_outcome.errors);
-    let merged_options = merge_repair_options(base_options, &repair.overrides);
+    let merged_options = merge_repair_options(base_options, &repair.overrides, schema);
     let merged_dict = Some(merged_options.clone());
-    // Repair runs as a single-shot structured call with no further
-    // schema retries — the budget already burned on the main call. The
-    // `extract_llm_options` path reads the same dict we hand to
-    // `execute_schema_retry_loop`, so the repair pass picks up the
-    // caller's `output_schema` (already lifted from the `schema`
-    // positional arg by `rewrite_structured_args`).
+    // Repair is a single canonical structured call. The positional schema
+    // remains authoritative even after prompt-mode fallback.
     let args = vec![
         VmValue::String(arcstr::ArcStr::from(prompt.as_str())),
         // System slot — the prompt carries instructions inline.
@@ -374,6 +379,7 @@ fn build_repair_prompt(raw_text: &str, errors: &[String]) -> String {
 fn merge_repair_options(
     base: Option<&crate::value::DictMap>,
     overrides: &crate::value::DictMap,
+    schema: &VmValue,
 ) -> crate::value::DictMap {
     let mut merged = base.cloned().unwrap_or_default();
     // The repair pass runs a single shot: do not multiply schema
@@ -387,6 +393,11 @@ fn merge_repair_options(
     for (k, v) in overrides {
         merged.insert(k.clone(), v.clone());
     }
+    let mut output = crate::value::DictMap::new();
+    output.insert(crate::value::intern_key("schema"), schema.clone());
+    output.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
+    output.put_str("validation", "error");
+    merged.insert(crate::value::intern_key("output"), VmValue::dict(output));
     merged
 }
 
@@ -764,27 +775,25 @@ mod tests {
     }
 
     #[test]
-    fn response_format_guard_skips_text_mode_requests() {
-        // No options dict: structured envelope defaults to json_schema -> counts.
-        assert!(structured_request_uses_response_format(&[
+    fn native_output_guard_skips_text_mode_requests() {
+        // No options dict means the structured helper still requests native output.
+        assert!(structured_request_uses_native_output(&[
             VmValue::Nil,
             VmValue::Nil
         ]));
-        // Already prompt-mode text transport -> do NOT re-degrade.
         let mut text_opts = crate::value::DictMap::new();
-        text_opts.put_str("output_format", "text");
-        assert!(!structured_request_uses_response_format(&[
+        text_opts.put_str("output", "text");
+        assert!(!structured_request_uses_native_output(&[
             VmValue::Nil,
             VmValue::Nil,
             VmValue::dict(text_opts),
         ]));
-        // json_object still sends a response_format -> degradable.
-        let mut json_object_opts = crate::value::DictMap::new();
-        json_object_opts.put_str("output_format", "json_object");
-        assert!(structured_request_uses_response_format(&[
+        let mut json_opts = crate::value::DictMap::new();
+        json_opts.put_str("output", "json");
+        assert!(structured_request_uses_native_output(&[
             VmValue::Nil,
             VmValue::Nil,
-            VmValue::dict(json_object_opts),
+            VmValue::dict(json_opts),
         ]));
     }
 
@@ -802,7 +811,11 @@ mod tests {
             o.put_str("model", "local:fix");
             o
         };
-        let merged = merge_repair_options(Some(&base), &overrides);
+        let merged = merge_repair_options(
+            Some(&base),
+            &overrides,
+            &VmValue::dict(crate::value::DictMap::new()),
+        );
         assert_eq!(
             merged.get("schema_retries").and_then(VmValue::as_int),
             Some(0)
@@ -867,7 +880,7 @@ mod tests {
         ]));
         let mut args = crate::llm::rewrite_structured_args(vec![
             VmValue::String(arcstr::ArcStr::from("Return a completion verdict.")),
-            schema,
+            schema.clone(),
             options,
         ])
         .unwrap();
@@ -878,8 +891,9 @@ mod tests {
         };
         assert!(is_unsupported_structured_transport_error(&err));
 
-        apply_prompt_mode_structured_transport(&mut args);
+        apply_prompt_mode_structured_transport(&mut args, &schema);
         let opts = extract_llm_options(&args).expect("prompt-mode structured call should parse");
+        let opts = install_prompt_mode_validation(opts, &schema);
         assert!(matches!(
             opts.output_format,
             crate::llm::api::OutputFormat::Text

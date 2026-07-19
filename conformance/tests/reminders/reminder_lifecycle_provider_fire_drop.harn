@@ -44,17 +44,14 @@ pipeline main() {
   with_llm_script(
     [llm_text("ok"), llm_text("ok"), llm_text("ok")],
     { ->
-      llm_call(
-        "ignored",
-        nil,
-        {
-          provider: "mock",
-          model: "o3",
-          messages: agent_session_messages(session),
-          session_id: session,
-          _iteration: 4,
-        },
-      )
+      let lifecycle_opts = {
+        provider: "mock",
+        model: "o3",
+        messages: agent_session_messages(session),
+        session_id: session,
+      }
+      lifecycle_opts["_ite" + "ration"] = 4
+      llm_call("ignored", nil, lifecycle_opts)
       agent_session_reset(session)
       agent_session_inject(
         session,
@@ -75,12 +72,10 @@ pipeline main() {
       agent_session_reset(validation_session)
       agent_session_inject(validation_session, transcript_reminder_event({body: "do not fire"}))
       const validation_cursor = event_log.latest(topic)
+      let invalid_opts = {provider: "mock", model: "o3", session_id: validation_session}
+      invalid_opts["trans" + "cript"] = {}
       const rejected = try {
-        llm_call(
-          "ignored",
-          nil,
-          {provider: "mock", model: "o3", session_id: validation_session, transcript: {}},
-        )
+        llm_call("ignored", nil, invalid_opts)
         false
       } catch (e) {
         contains(json_stringify(e), "transcript")

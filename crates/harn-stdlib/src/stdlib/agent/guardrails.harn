@@ -279,9 +279,9 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
         {classifier_kind: classifier_kind, model: model},
       )
     }
-    let schema = opts?.output_schema ?? __input_guardrail_schema()
+    let schema = opts?.output ?? __input_guardrail_schema()
     let llm_opts = {
-      output_schema: schema,
+      output: {schema: schema, strict: true, validation: "error"},
       max_tokens: opts?.max_tokens ?? 256,
       temperature: opts?.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
@@ -293,7 +293,7 @@ pub fn agent_input_guardrail(classifier = nil, options = nil) {
     if provider != "" {
       llm_opts = llm_opts + {provider: provider}
     }
-    for key in ["top_p", "seed", "reasoning_effort", "timeout"] {
+    for key in ["top_p", "seed", "effort", "timeout_ms"] {
       if opts[key] != nil {
         llm_opts[key] = opts[key]
       }

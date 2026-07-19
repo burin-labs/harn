@@ -149,8 +149,8 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/llm/handlers"` — LLM call-handler middleware
   (with_circuit_breaker)
 - `import "std/llm/prompts"` — deterministic prompt builders and system
-  prompt fragment helpers (system_prompt_part, system_preamble,
-  system_appendix, with_system_prompt_parts, system_prelude)
+  prompt fragment helpers (system_prompt_part, system_before,
+  system_after, with_system_fragments, system_prelude)
 - `import "std/personas/prelude"` — reusable persona orchestration helpers
   (verify_then_act, bounded_loop, cheap_classify_then_escalate,
   parallel_sweep_with_circuit_breaker, with_audit_receipt,

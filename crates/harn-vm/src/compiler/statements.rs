@@ -636,16 +636,6 @@ impl Compiler {
         for (key, value) in options {
             let key_idx = self.string_constant(key);
             self.chunk.emit_u16(Op::Constant, key_idx, self.line);
-            if matches!(
-                key.as_str(),
-                "fallback_strategy" | "strategy" | "quality" | "min_quality"
-            ) {
-                if let Node::Identifier(identifier) = &value.node {
-                    let value_idx = self.string_constant(identifier);
-                    self.chunk.emit_u16(Op::Constant, value_idx, self.line);
-                    continue;
-                }
-            }
             self.compile_node(value)?;
         }
         self.chunk

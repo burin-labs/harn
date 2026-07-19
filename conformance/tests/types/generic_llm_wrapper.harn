@@ -13,7 +13,7 @@ fn grade<T>(prompt: string, schema: Schema<T>) -> T {
   const r = llm_call(
     prompt,
     nil,
-    {provider: "mock", output_schema: schema, output_validation: "error", response_format: "json"},
+    {provider: "mock", output: {schema: schema, strict: true, validation: "error"}},
   )
   return r.data
 }

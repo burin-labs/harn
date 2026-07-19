@@ -204,7 +204,7 @@ fn run_planner(task, workspace_root, profile, facts, round_no, force_ready) {
     planner_prompt(task, workspace_root, profile, facts, round_no, force_ready),
     generator_options(planner_system(force_ready), tool_registry(), [])
       + {
-      response_format: "json",
+      output: "json",
       returns: {schema: planner_schema()},
     },
   )
@@ -233,7 +233,7 @@ fn run_research(workspace_root, profile, question) {
     research_prompt(workspace_root, profile, question),
     generator_options(research_system(), read_search_tools(), question?.tools ?? [])
       + {
-      response_format: "json",
+      output: "json",
       returns: {schema: research_schema()},
       turn_policy: {require_action_or_yield: true, allow_done_sentinel: true},
     },
@@ -394,7 +394,7 @@ fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_res
         + "Return a strict JSON verdict with concise strengths and gaps.",
       verify_tools(),
     )
-      + {response_format: "json"},
+      + {output: "json"},
   )
   if result?.ok {
     const data = result?.data ?? {}

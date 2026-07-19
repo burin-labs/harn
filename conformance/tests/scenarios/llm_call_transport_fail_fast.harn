@@ -33,9 +33,7 @@ pipeline default() {
           nil,
           {
             provider: "mock",
-            response_format: "json",
-            output_schema: schema,
-            output_validation: "error",
+            output: {schema: schema, strict: true, validation: "error"},
             schema_retries: 0,
           },
         )
@@ -54,9 +52,7 @@ pipeline default() {
         nil,
         {
           provider: "mock",
-          response_format: "json",
-          output_schema: schema,
-          output_validation: "error",
+          output: {schema: schema, strict: true, validation: "error"},
           schema_retries: 1,
         },
       )

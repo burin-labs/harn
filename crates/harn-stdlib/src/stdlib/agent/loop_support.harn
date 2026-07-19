@@ -128,34 +128,41 @@ pub fn __agent_loop_llm_overrides(opts) {
   return {}
 }
 
-pub fn __agent_loop_has_terminal_schema_contract(opts) {
-  return opts?.output_schema != nil
+pub type AgentLoopOutputContract = {schema: any?}
+
+pub fn __agent_loop_output_contract(opts) -> AgentLoopOutputContract? {
+  const output = opts?.output
+  if output == nil || output == "text" {
+    return nil
+  }
+  if output == "json" {
+    return {schema: nil}
+  }
+  if type_of(output) == "dict" && output?.schema != nil {
+    return {schema: output.schema}
+  }
+  if type_of(output) == "dict" {
+    return {schema: output}
+  }
+  return nil
+}
+
+pub fn __agent_loop_has_terminal_output_contract(opts) -> bool {
+  return __agent_loop_output_contract(opts) != nil
 }
 
 pub fn __agent_loop_ordinary_turn_llm_options(opts) {
-  // In agent_loop, output_schema is a final-answer contract. If callers also
-  // pass equivalent llm_call schema knobs, keep them off ordinary turns and
-  // re-apply them only for the terminal repair request.
-  if !__agent_loop_has_terminal_schema_contract(opts) {
+  // `output` constrains the final answer, not intermediate tool-calling turns.
+  if !__agent_loop_has_terminal_output_contract(opts) {
     return opts
   }
-  return omit(
-    opts,
-    [
-      "json_schema",
-      "output_format",
-      "output_schema",
-      "response_format",
-      "schema",
-      "schema_stream_abort",
-    ],
-  )
+  return omit(opts, ["output"])
 }
 
 pub fn __agent_loop_effective_llm_options(opts) {
   const base = opts ?? {}
   let merged = agent_merge_llm_options(base, __agent_loop_llm_overrides(base))
-  const call_opts = if merged?._output_schema_repair ?? false {
+  const call_opts = if merged?._output_contract_repair ?? false {
     merged
   } else {
     __agent_loop_ordinary_turn_llm_options(merged)

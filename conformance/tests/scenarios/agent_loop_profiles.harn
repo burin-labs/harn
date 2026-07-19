@@ -11,11 +11,7 @@ pipeline default() {
         {
           provider: "mock",
           profile: "verifier",
-          response_format: "json",
-          json_schema: schema,
-          output_schema: schema,
-          output_format: {kind: "json_schema", schema: schema, strict: true},
-          output_validation: "error",
+          output: {schema: schema, strict: true, validation: "error"},
         },
       )
       __io_println(structured.visible_text)

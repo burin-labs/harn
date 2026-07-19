@@ -1,6 +1,6 @@
 /**
- * Fill-nil pack precedence (item 3): the per-kind pack rows (provider,
- * timeout_ms, budget, model_ladder) fill ONLY nil/absent option keys and NEVER
+ * Fill-nil pack precedence (item 3): per-kind route packs normalize the
+ * provider into each model step; other defaults fill only absent keys and never
  * override explicit caller input. This is the data-over-code default layer —
  * defaults are data rows one lower-priority seam under the caller.
  */
@@ -9,42 +9,45 @@ import { agent_preset, agent_preset_register } from "std/agent/presets"
 pipeline default() {
   // Pack fills absent keys.
   const filled = agent_preset("audit")
-  __io_println(filled.provider)
+  __io_println(filled?.provider == nil)
+  __io_println(filled.models[0].provider)
   __io_println(filled.timeout_ms)
   __io_println(filled.budget.total_budget_usd == 5.0)
-  __io_println(len(filled.model_ladder) > 0)
+  __io_println(len(filled.models) > 0)
   // Caller input wins over the pack at every key.
   const overridden = agent_preset(
     "audit",
     {
-      provider: "mock",
       timeout_ms: 42,
       budget: {total_budget_usd: 9.5},
-      model_ladder: ["only-mine"],
+      models: [{provider: "mock", model: "only-mine"}],
     },
   )
-  __io_println(overridden.provider)
+  __io_println(overridden?.provider == nil)
   __io_println(overridden.timeout_ms)
   __io_println(overridden.budget.total_budget_usd == 9.5)
-  __io_println(overridden.model_ladder[0])
+  __io_println(overridden.models[0].provider)
+  __io_println(overridden.models[0].model)
   // A different kind pulls its own (cheaper) pack.
   const summary = agent_preset("summary")
-  __io_println(summary.provider)
+  __io_println(summary?.provider == nil)
+  __io_println(summary.models[0].provider)
   __io_println(summary.timeout_ms)
   // Routing is an ownership group: a local/configured route must not inherit a
   // conflicting preset provider or model ladder from the role pack.
   const provider_only = agent_preset("audit", {provider: "llamacpp"})
   __io_println(provider_only.provider)
-  __io_println(provider_only?.model_ladder == nil)
+  __io_println(provider_only?.models == nil)
   const configured_pair = agent_preset("audit", {provider: "llamacpp", model: "gemma4-local"})
-  __io_println(configured_pair.model_ladder[0].provider)
-  __io_println(configured_pair.model_ladder[0].model)
+  __io_println(configured_pair.provider)
+  __io_println(configured_pair.model)
+  __io_println(configured_pair?.models == nil)
   const nested_route = agent_preset(
     "audit",
     {llm_options: {provider: "llamacpp", model: "gemma4-local"}},
   )
   __io_println(nested_route?.provider == nil)
-  __io_println(nested_route?.model_ladder == nil)
+  __io_println(nested_route?.models == nil)
   // User-defined route pack rows move as the same group.
   agent_preset_register(
     "route_pack",
@@ -52,18 +55,19 @@ pipeline default() {
       pack: {
         fallback_chain: ["frontier"],
         provider: "anthropic",
-        model_ladder: ["claude-opus-4-8"],
+        models: ["claude-opus-4-8"],
         timeout_ms: 11,
       },
     },
   )
   const defaulted_route_pack = agent_preset("route_pack")
-  __io_println(defaulted_route_pack.provider)
+  __io_println(defaulted_route_pack?.provider == nil)
   __io_println(defaulted_route_pack.fallback_chain[0])
-  __io_println(defaulted_route_pack.model_ladder[0])
+  __io_println(defaulted_route_pack.models[0].provider)
+  __io_println(defaulted_route_pack.models[0].model)
   const local_route_pack = agent_preset("route_pack", {provider: "llamacpp"})
   __io_println(local_route_pack.provider)
   __io_println(local_route_pack?.fallback_chain == nil)
-  __io_println(local_route_pack?.model_ladder == nil)
+  __io_println(local_route_pack?.models == nil)
   __io_println(local_route_pack.timeout_ms)
 }

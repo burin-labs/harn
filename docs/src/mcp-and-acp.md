@@ -1138,7 +1138,7 @@ Lowering examples:
   supports it.
 
 Per-call options still win: `llm_call(..., {thinking: ...})` and
-`llm_call(..., {reasoning_effort: ...})` bypass the session thought pin.
+`llm_call(..., {effort: ...})` bypass the session thought pin.
 `session/fork` carries the parent's thought pin to the child, and later
 changes remain branch-local.
 

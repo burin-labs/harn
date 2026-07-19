@@ -29,7 +29,8 @@ use super::api::{LlmCallOptions, ThinkingConfig};
 use super::capabilities::WireDialect;
 
 /// Where a single resolved dispatch field came from. Carried on
-/// [`LlmCallOptions::dispatch_provenance`], populated by the pipeline resolver
+/// [`LlmCallOptions::dispatch_provenance`], populated from the internal
+/// `_dispatch_provenance` channel by the pipeline resolver
 /// (Burin's smart-escalation / model-selection layers, threaded through the
 /// agent-loop options). `Unknown` is the default when no resolver annotated the
 /// call — e.g. a raw `llm_call(...)` from script context.
@@ -63,7 +64,7 @@ impl DispatchProvenance {
     pub const PIPELINE_INPUT: &'static str = "pipeline_input";
     pub const CATALOG_DEFAULT: &'static str = "catalog_default";
 
-    /// Parse a `dispatch_provenance` option dict supplied by the pipeline
+    /// Parse an internal `_dispatch_provenance` dict supplied by the pipeline
     /// resolver into the typed provenance. Each entry is a per-field origin
     /// string (`operator_pin`, `escalation_override`, `inherited_from_primary`,
     /// ...); absent entries stay `None` and surface as `"unknown"` in the

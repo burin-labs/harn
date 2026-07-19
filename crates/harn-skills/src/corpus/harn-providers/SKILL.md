@@ -28,12 +28,15 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Keep `provider` explicit when behavior depends on a vendor.
 - Use `provider: "auto"` only when capability-based routing is acceptable.
 - Keep `model` optional only when routing policy can choose safely.
-- Preserve `schema` validation behavior.
-- Preserve `schema_retries`.
-- Preserve provider-specific structured-output modes.
-- Preserve tool-call format negotiation.
-- Preserve timeout and cost controls.
-- Preserve prompt scaffolding behavior.
+- Express structured output through `output`: `"json"`, a schema, or
+  `{schema, strict?, validation?, stream_abort?}`.
+- Preserve `schema_retries` and `repair` behavior.
+- Compose system text with the single `system` string-or-fragment-list option.
+- Use `effort` and `speed` for provider-neutral intent.
+- Use `timeout_ms` and `idle_timeout_ms`; both are milliseconds.
+- Put wire-specific fields below `provider_options.<provider>`.
+- Keep provider tool execution distinct with `provider_tools`.
+- Preserve tool-call format negotiation and cost controls.
 - Preserve mock-provider determinism.
 
 ## Capability routing
@@ -42,6 +45,9 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Avoid hardcoding provider quirks in caller code.
 - Capability checks should describe both positive and negative support.
 - JSON schema support is not the same as native JSON support.
+- Keep capability-field names such as `reasoning_effort_supported` distinct
+  from the public call option `effort`; capability data may describe a wire
+  mechanic that callers never spell directly.
 - Vision, PDF, audio, tools, cache, and streaming support vary independently.
 - Prompt scaffolding may differ by provider.
 - Tool prompting may differ by provider.

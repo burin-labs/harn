@@ -94,16 +94,13 @@ fn local_fallback_renders_plain_system_text() {
 
 #[test]
 fn system_text_reminders_are_excluded_from_system_string() {
-    let options = crate::value::DictMap::from_iter([
-        (
-            "system_prompt_parts".to_string(),
-            VmValue::String(arcstr::ArcStr::from("parts")),
-        ),
-        (
-            "system_appendix".to_string(),
-            VmValue::String(arcstr::ArcStr::from("appendix")),
-        ),
-    ]);
+    let options = crate::value::DictMap::from_iter([(
+        "system".to_string(),
+        list(vec![
+            s("parts"),
+            dict(&[("content", s("appendix")), ("position", s("after"))]),
+        ]),
+    )]);
     // A `SystemText` reminder must NOT appear in the assembled `system`
     // string — it is routed to a trailing message instead so the system
     // string stays cache-stable across turns.
@@ -145,14 +142,20 @@ fn list(items: Vec<VmValue>) -> VmValue {
 
 #[test]
 fn full_host_option_ordering_is_faithful() {
-    let options = crate::value::DictMap::from_iter([
-        ("system_preamble".to_string(), s("P")),
-        ("system_prefix".to_string(), s("X")),
-        ("system_context".to_string(), s("C")),
-        ("system_prompt_parts".to_string(), s("parts")),
-        ("system_appendix".to_string(), s("A")),
-        ("system_suffix".to_string(), s("S")),
-    ]);
+    // The single `system` LIST carries all surrounding fragments: the four
+    // "before" fragments in list order, then (after the primary) the two
+    // "after" fragments in list order.
+    let options = crate::value::DictMap::from_iter([(
+        "system".to_string(),
+        list(vec![
+            s("P"),
+            s("X"),
+            s("C"),
+            s("parts"),
+            dict(&[("content", s("A")), ("position", s("after"))]),
+            dict(&[("content", s("S")), ("position", s("after"))]),
+        ]),
+    )]);
     let prompt = compose_system_prompt_with_reminders(
         Some("base".to_string()),
         Some(&options),
@@ -160,10 +163,9 @@ fn full_host_option_ordering_is_faithful() {
     )
     .expect("system prompt")
     .expect("non-empty prompt");
-    // Before bucket in declaration order (preamble, prefix, context,
-    // parts, primary), then After bucket (appendix, suffix). The
-    // `SystemText` reminder ("R") is no longer folded into the system
-    // string — it is appended as a trailing message instead.
+    // Before bucket in list order (P, X, C, parts, primary), then After
+    // bucket (A, S). The `SystemText` reminder ("R") is no longer folded into
+    // the system string — it is appended as a trailing message instead.
     assert_eq!(prompt, "P\n\nX\n\nC\n\nparts\n\nbase\n\nA\n\nS");
     assert!(!prompt.contains('R'));
 }
@@ -174,10 +176,13 @@ fn system_string_is_byte_stable_across_changing_reminder_sets() {
     // the live reminder set. Turn N has no reminders; turn N+1 fires a
     // token-pressure reminder. The assembled `system` string must be
     // byte-identical so the non-Anthropic prefix cache stays warm.
-    let options = crate::value::DictMap::from_iter([
-        ("system_prompt_parts".to_string(), s("parts")),
-        ("system_appendix".to_string(), s("appendix")),
-    ]);
+    let options = crate::value::DictMap::from_iter([(
+        "system".to_string(),
+        list(vec![
+            s("parts"),
+            dict(&[("content", s("appendix")), ("position", s("after"))]),
+        ]),
+    )]);
 
     let turn_n =
         compose_system_prompt_with_reminders(Some("base".to_string()), Some(&options), &[])
@@ -275,10 +280,13 @@ fn multiple_system_text_reminders_coalesce_into_one_trailing_message() {
 }
 
 #[test]
-fn dict_part_position_override_moves_to_after() {
+fn fragment_position_override_moves_to_after() {
     let options = crate::value::DictMap::from_iter([(
-        "system_prompt_parts".to_string(),
-        dict(&[("content", s("moved")), ("position", s("after"))]),
+        "system".to_string(),
+        list(vec![dict(&[
+            ("content", s("moved")),
+            ("position", s("after")),
+        ])]),
     )]);
     let prompt = compose_system_prompt(Some("base".to_string()), Some(&options))
         .expect("system prompt")
@@ -287,10 +295,10 @@ fn dict_part_position_override_moves_to_after() {
 }
 
 #[test]
-fn dict_part_with_title_renders_heading() {
+fn fragment_with_title_renders_heading() {
     let options = crate::value::DictMap::from_iter([(
-        "system_prompt_parts".to_string(),
-        dict(&[("content", s("body")), ("title", s("Title"))]),
+        "system".to_string(),
+        list(vec![dict(&[("content", s("body")), ("title", s("Title"))])]),
     )]);
     let prompt = compose_system_prompt(None, Some(&options))
         .expect("system prompt")
@@ -299,15 +307,65 @@ fn dict_part_with_title_renders_heading() {
 }
 
 #[test]
-fn list_parts_expand_in_declaration_order() {
-    let options = crate::value::DictMap::from_iter([(
-        "system_prompt_parts".to_string(),
-        list(vec![s("one"), s("two")]),
-    )]);
+fn string_fragments_expand_in_list_order() {
+    let options =
+        crate::value::DictMap::from_iter([("system".to_string(), list(vec![s("one"), s("two")]))]);
     let prompt = compose_system_prompt(None, Some(&options))
         .expect("system prompt")
         .expect("non-empty prompt");
     assert_eq!(prompt, "one\n\ntwo");
+}
+
+#[test]
+fn list_form_partitions_before_and_after_around_primary() {
+    // A single `system` list mixing "before" and "after" fragments assembles
+    // as: before fragments in list order, primary, then after fragments in
+    // list order.
+    let options = crate::value::DictMap::from_iter([(
+        "system".to_string(),
+        list(vec![
+            s("head"),
+            dict(&[("content", s("tail")), ("position", s("after"))]),
+            dict(&[("content", s("head2")), ("position", s("before"))]),
+        ]),
+    )]);
+    let prompt = compose_system_prompt(Some("base".to_string()), Some(&options))
+        .expect("system prompt")
+        .expect("non-empty prompt");
+    assert_eq!(prompt, "head\n\nhead2\n\nbase\n\ntail");
+}
+
+#[test]
+fn fragment_dict_alias_key_is_rejected() {
+    // `text` was a legacy alias for `content`; it is now a hard error naming
+    // the canonical fragment shape.
+    let options = crate::value::DictMap::from_iter([(
+        "system".to_string(),
+        list(vec![dict(&[("text", s("body"))])]),
+    )]);
+    let error = compose_system_prompt(None, Some(&options)).unwrap_err();
+    let msg = match error {
+        VmError::Thrown(VmValue::String(s)) => s.to_string(),
+        other => format!("{other:?}"),
+    };
+    assert!(msg.contains("`text` was removed"), "{msg}");
+    assert!(msg.contains("use `content`"), "{msg}");
+    assert!(msg.contains("content: string"), "{msg}");
+}
+
+#[test]
+fn fragment_dict_unknown_key_is_rejected() {
+    let options = crate::value::DictMap::from_iter([(
+        "system".to_string(),
+        list(vec![dict(&[("content", s("body")), ("weight", s("3"))])]),
+    )]);
+    let error = compose_system_prompt(None, Some(&options)).unwrap_err();
+    let msg = match error {
+        VmError::Thrown(VmValue::String(s)) => s.to_string(),
+        other => format!("{other:?}"),
+    };
+    assert!(msg.contains("unknown fragment key `weight`"), "{msg}");
+    assert!(msg.contains("position?: \"before\"|\"after\""), "{msg}");
 }
 
 #[test]
@@ -358,7 +416,7 @@ fn tool_guidance_is_injected_only_when_the_tool_is_present() {
 #[test]
 fn assemble_records_provenance_for_every_fragment() {
     let options = crate::value::DictMap::from_iter([
-        ("system_prompt_parts".to_string(), s("parts")),
+        ("system".to_string(), list(vec![s("parts")])),
         (
             "tools".to_string(),
             list(vec![dict(&[
@@ -370,9 +428,9 @@ fn assemble_records_provenance_for_every_fragment() {
     ]);
     let assembled =
         assemble_system_prompt(Some("base".to_string()), Some(&options), &[]).expect("assembled");
-    // host:system_prompt_parts, primary, tool:todo.guidance — all included.
+    // system[0], primary, tool:todo.guidance — all included.
     let ids: Vec<&str> = assembled.provenance.iter().map(|t| t.id.as_str()).collect();
-    assert!(ids.contains(&"host:system_prompt_parts"));
+    assert!(ids.contains(&"system[0]"));
     assert!(ids.contains(&"primary"));
     assert!(ids.contains(&"tool:todo.guidance"));
     let todo = assembled
@@ -392,8 +450,14 @@ fn fragment(id: &str, body: &str) -> VmValue {
 fn system_fragments_expand_in_place_of_the_single_primary() {
     // The decomposed channel yields the same bytes as the equivalent
     // joined-string primary, while keeping each part individually traced.
+    let host_list = || {
+        list(vec![
+            dict(&[("content", s("X"))]),
+            dict(&[("content", s("A")), ("position", s("after"))]),
+        ])
+    };
     let decomposed = crate::value::DictMap::from_iter([
-        ("system_prefix".to_string(), s("X")),
+        ("system".to_string(), host_list()),
         (
             "_system_fragments".to_string(),
             list(vec![
@@ -402,13 +466,9 @@ fn system_fragments_expand_in_place_of_the_single_primary() {
                 fragment("primary:loop_contract", "Keep going until done."),
             ]),
         ),
-        ("system_appendix".to_string(), s("A")),
     ]);
     let joined = "base\n\n## Active skills\n\nKeep going until done.";
-    let baseline = crate::value::DictMap::from_iter([
-        ("system_prefix".to_string(), s("X")),
-        ("system_appendix".to_string(), s("A")),
-    ]);
+    let baseline = crate::value::DictMap::from_iter([("system".to_string(), host_list())]);
 
     let from_fragments = compose_system_prompt(None, Some(&decomposed))
         .expect("system prompt")
@@ -496,7 +556,13 @@ fn system_fragments_can_target_the_tail_bucket() {
                 ]),
             ]),
         ),
-        ("system_suffix".to_string(), s("host suffix")),
+        (
+            "system".to_string(),
+            list(vec![dict(&[
+                ("content", s("host suffix")),
+                ("position", s("after")),
+            ])]),
+        ),
     ]);
 
     let prompt = compose_system_prompt(None, Some(&options))

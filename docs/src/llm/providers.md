@@ -314,10 +314,10 @@ selected explicitly with
 Responses mode is for OpenAI-native hosted tools, remote MCP connectors,
 previous-response chaining, background jobs, and provider-side
 truncation/compaction controls. Ordinary Harn `tools` still work in this mode
-and Harn executes, approves, and audits them locally. Use `provider_tools` (or
-`hosted_tools`) only when OpenAI should execute the hosted tool or remote MCP
-connector. In that case OpenAI owns per-tool execution and approval according
-to the tool config; Harn records provider-native IDs, normalized
+and Harn executes, approves, and audits them locally. Use `provider_tools` only
+when OpenAI should execute the hosted tool or remote MCP connector. In that case
+OpenAI owns per-tool execution and approval according to the tool config; Harn
+records provider-native IDs, normalized
 `provider_tool_call` blocks, and `provider_response_id`, but it does not
 locally mediate each remote call.
 

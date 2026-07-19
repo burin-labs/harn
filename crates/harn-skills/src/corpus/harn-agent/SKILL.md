@@ -32,6 +32,9 @@ Pair it with [[harn-orchestration]] for workflow design and [[harn-diagnostics]]
 - Persist recovery advice when failure can be resumed.
 - Persist mutation-session metadata when edits happen.
 - Keep handoff artifacts structured.
+- For a structured terminal answer, set the agent's canonical `output`
+  contract. It is applied only at finalization; ordinary tool turns stay
+  unconstrained. Read `run.output` and `run.output_valid`.
 - Avoid prose-only protocols for downstream automation.
 - Bound retries and tool-call loops.
 

@@ -15,7 +15,7 @@
 // "Fill nil at a lower-priority seam, never override explicit input" here
 // means two things, both enforced below:
 //   1. An overlay ONLY ever ADDS a fragment alongside whatever the caller
-//      already set (`agent_options.system`, `system_prefix`, other
+//      already set (`agent_options.system`, other
 //      `context_profile.prompt_fragments` entries, ...) — it never touches
 //      or replaces them.
 //   2. Within the overlay's own content, an explicit `options.overrides`

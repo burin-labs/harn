@@ -1,5 +1,5 @@
 // The goal renders into the OUTBOUND request via the existing system-prompt
-// fragment reducer (with_goal -> with_system_prompt_parts), with no new hook
+// fragment reducer (with_goal -> with_system_fragments), with no new hook
 // surface. A capturing mock caller echoes the assembled system prompt back so we
 // can assert the goal block actually reached the model request.
 import { goal, with_goal } from "std/agent/goal"

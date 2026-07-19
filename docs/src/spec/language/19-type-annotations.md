@@ -431,7 +431,7 @@ const ok = schema_is({verdict: "pass", summary: "x", findings: []}, GraderOut)
 
 const r = llm_call(prompt, nil, {
   provider: "openai",
-  output_schema: GraderOut,     // alias in value position — compiled to schema_of(T)
+  output: GraderOut,            // alias in value position — compiled to schema_of(T)
   schema_retries: 2,
 })
 ```
@@ -459,10 +459,9 @@ const r = llm_call(prompt, nil, {
 ```
 
 System prompt fragments can be supplied without hand-concatenating the
-positional `system` string. `system_preamble`, `system_context`,
-`system_prompt_parts`, `system_appendix`, `system_prefix`, and
-`system_suffix` are normalized into the provider's system/developer
-instruction channel for `llm_call` and `agent_loop`. In persistent
+positional `system` string. The `system` option accepts either a string or an
+ordered list of `{content, title?, position?: "before"|"after", enabled?}`
+fragments for `llm_call` and `agent_loop`. In persistent
 `agent_loop` sessions, the composed session-level system prompt is recorded
 once in transcript metadata and as one leading internal `system_prompt`
 fingerprint event; it is not injected into the replayable message list. A later
@@ -473,11 +472,11 @@ Internal `_system_fragments` entries may set `bucket: "before"` (default) or
 the agent scratchpad.
 
 ```harn
-import { system_preamble, with_system_prompt_parts } from "std/llm/prompts"
+import { system_before, with_system_fragments } from "std/llm/prompts"
 
-const opts = with_system_prompt_parts(
+const opts = with_system_fragments(
   {provider: "anthropic", session_id: "review-42"},
-  [system_preamble("Follow the repository's validation gate before final output.")]
+  [system_before("Follow the repository's validation gate before final output.")]
 )
 const r = agent_loop("Review this change", "You are a code review agent.", opts)
 ```
@@ -489,23 +488,23 @@ budget options; an explicit option on the call wins for the same key.
 
 ```harn
 const r = cost_route {
-  budget_usd: 0.05
-  prefer: ["anthropic:claude-haiku-4-5", "openai:gpt-5.4-mini"]
-  fallback_strategy: cheapest_first
+  budget: {max_cost_usd: 0.05}
+  route_policy: {
+    mode: "preference_list",
+    targets: ["anthropic:claude-haiku-4-5", "openai:gpt-5.4-mini"],
+    strategy: "cheapest_first",
+  }
 
   llm_call(prompt, nil, {max_tokens: 800})
 }
 ```
 
-`budget_usd` is a shorthand for `budget.max_cost_usd`. `prefer` is an ordered
-list of model aliases, model ids, or `provider:model` selectors. The
-`fallback_strategy` value may be `prefer_order`, `cheapest_first`, or
-`fastest_first`; failures on the selected route are retried against the
-remaining preferred routes before provider-level fallbacks are considered.
-Without `prefer`, `fallback_strategy: cheapest_first` and
-`fallback_strategy: fastest_first` lower to the corresponding
-`cheapest_over_quality(quality)` / `fastest_over_quality(quality)` policy,
-using `quality` or `min_quality` when present and `mid` otherwise.
+The block config accepts the same canonical keys as `llm_call`; unknown or
+removed keys are errors. In `preference_list` mode, `targets` is the ordered
+set of model aliases, model ids, or `provider:model` selectors and `strategy`
+selects `prefer_order`, `cheapest_first`, or `fastest_first`. Failures on the
+selected route advance through the remaining targets before provider-level
+fallbacks are considered.
 
 For call sites that want Harn-managed response reuse, `std/llm/handlers`
 exports `with_cache(prompt, system?, options?)`. It returns the same envelope as
@@ -545,7 +544,7 @@ applies when the alias identifier appears as:
 - The argument of `schema_of(T)`.
 - The schema argument of `schema_is`, `schema_expect`, `schema_parse`,
   `schema_check`, `schema_report`, `is_type`, `json_validate`.
-- The value of an `output_schema:` entry in an `llm_call` options dict.
+- The value of an `output:` entry in an `llm_call` options dict.
 
 Public aliases keep the same reflection behavior when imported from a file or
 embedded standard-library module. Materialization resolves nested imported
@@ -562,7 +561,7 @@ builtin keeps existing schema dicts working.
 Schema-driven builtins are typed with proper generics so user-defined
 wrappers pick up the same narrowing.
 
-- `llm_call<T>(prompt, system, options: {output_schema: Schema<T>, ...})
+- `llm_call<T>(prompt, system, options: {output: Schema<T>, ...})
   -> {data: T, text: string, ...}`
 - `llm_completion<T>` has the same signature.
 - `llm_call_structured<T>(prompt, schema: Schema<T>, options?) -> T`
@@ -591,7 +590,7 @@ wrappers pick up the same narrowing.
 - `schema_check<T>(value: unknown, schema: Schema<T>) -> Result<T, string>`
 - `schema_expect<T>(value: unknown, schema: Schema<T>) -> T`
 - `schema_recover<T>(text: string, schema: Schema<T>, options?:
-  {llm_repair?: bool | dict, apply_defaults?: bool,
+  {repair?: bool | dict, apply_defaults?: bool,
   ...llm_call_overrides}) -> {ok: bool, data: T | nil, raw_text:
   string, error: string, error_category: string | nil, attempts: int,
   stage: string, repaired: bool}`. Best-effort recovery of malformed
@@ -601,7 +600,7 @@ wrappers pick up the same narrowing.
   fences) → `regex` (scrape top-level `key: value` lines for scalar
   fields) → `llm_repair` (single-shot `llm_call` with `schema_retries:
   0`). `stage` reports which stage produced the result; `failed` means
-  every stage exhausted. Set `{llm_repair: false}` for a fully
+  every stage exhausted. Set `{repair: false}` for a fully
   deterministic recovery pass with no LLM calls. The LLM repair stage
   accepts the same overrides as `llm_call_structured_result`'s
   `repair`.
@@ -615,8 +614,7 @@ A user-defined wrapper such as
 ```harn,ignore
 fn grade<T>(prompt: string, schema: Schema<T>) -> T {
   const r = llm_call(prompt, nil,
-    {provider: "mock", output_schema: schema, output_validation: "error",
-     response_format: "json"})
+    {provider: "mock", output: {schema: schema, validation: "error"}})
   return r.data
 }
 

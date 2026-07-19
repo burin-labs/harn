@@ -32,14 +32,14 @@ pub(super) fn parse_reasoning_effort(
 pub(super) fn parse_reasoning_effort_option(
     options: Option<&crate::value::DictMap>,
 ) -> Result<Option<crate::llm::api::ReasoningEffort>, VmError> {
-    let Some(raw) = options.and_then(|o| o.get("reasoning_effort")) else {
+    let Some(raw) = options.and_then(|o| o.get("effort")) else {
         return Ok(None);
     };
     match raw {
         VmValue::Nil | VmValue::Bool(false) => Ok(None),
-        VmValue::String(level) => parse_reasoning_effort_field("reasoning_effort", level).map(Some),
+        VmValue::String(level) => parse_reasoning_effort_field("effort", level).map(Some),
         other => Err(thinking_error(format!(
-            "reasoning_effort: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\", got {}",
+            "effort: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\", got {}",
             other.type_name()
         ))),
     }
@@ -47,7 +47,7 @@ pub(super) fn parse_reasoning_effort_option(
 
 #[derive(Clone, Copy)]
 enum ThinkingSource {
-    ReasoningEffort,
+    Effort,
     ReasoningPolicy,
     Thinking,
 }
@@ -55,7 +55,7 @@ enum ThinkingSource {
 impl ThinkingSource {
     fn option_name(self) -> &'static str {
         match self {
-            Self::ReasoningEffort => "reasoning_effort",
+            Self::Effort => "effort",
             Self::ReasoningPolicy => "reasoning_policy",
             Self::Thinking => "thinking",
         }
@@ -131,10 +131,10 @@ fn resolve_thinking_config_with_policy(
     policy: Option<crate::llm::reasoning_policy::ReasoningPolicyApplication>,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
     let explicit_effort = parse_reasoning_effort_option(options)?;
-    let has_reasoning_option = options.is_some_and(|opts| opts.contains_key("reasoning_effort"));
+    let has_effort_option = options.is_some_and(|opts| opts.contains_key("effort"));
     let has_thinking_option = options.is_some_and(|opts| opts.contains_key("thinking"));
     let catalog_effort = if explicit_effort.is_none()
-        && !has_reasoning_option
+        && !has_effort_option
         && !has_thinking_option
         && policy.is_none()
     {
@@ -142,19 +142,19 @@ fn resolve_thinking_config_with_policy(
     } else {
         None
     };
-    let reasoning_effort = explicit_effort.or(catalog_effort);
-    let (thinking, source) = if let Some(level) = reasoning_effort {
+    let effort = explicit_effort.or(catalog_effort);
+    let (thinking, source) = if let Some(level) = effort {
         if options
             .and_then(|opts| opts.get("thinking"))
             .is_some_and(|value| value.is_truthy())
         {
             return Err(thinking_error(
-                "reasoning_effort cannot be combined with a non-disabled thinking option",
+                "effort cannot be combined with a non-disabled thinking option",
             ));
         }
         (
             crate::llm::api::ThinkingConfig::Effort { level },
-            ThinkingSource::ReasoningEffort,
+            ThinkingSource::Effort,
         )
     } else if let Some(application) = policy {
         (application.thinking, ThinkingSource::ReasoningPolicy)
@@ -168,7 +168,7 @@ fn resolve_thinking_config_with_policy(
             if level != crate::llm::api::ReasoningEffort::None
     );
     if enforce_capability_gates
-        && matches!(source, ThinkingSource::ReasoningEffort)
+        && matches!(source, ThinkingSource::Effort)
         && effort_requires_provider_support
         && !caps.reasoning_effort_supported
     {
@@ -216,15 +216,16 @@ pub(super) fn parse_thinking_budget(raw: Option<&VmValue>) -> Result<Option<u32>
 
 /// Parse the script-facing `thinking` option into a provider-agnostic shape.
 ///
-/// New shape:
-///   `{mode: "enabled", budget_tokens: 8000}`
-///   `{mode: "adaptive"}`
-///   `{mode: "effort", level: "high"}`
+/// Author-facing grammar (one spelling per concept — reasoning *level* lives on
+/// the sibling `effort` option, never inside `thinking`):
+///   `true` / `false`         => enabled with provider defaults / disabled
+///   `"adaptive"`             => provider-managed adaptive thinking
+///   `{budget_tokens: N}`     => enabled with an explicit token budget
 ///
-/// Legacy compatibility:
-///   `true` => enabled with provider defaults
-///   `{budget_tokens: N}` => enabled with a budget
-///   `{enabled: false}` / `false` / `nil` => disabled
+/// Internal shape: [`crate::llm::reasoning_policy`] lowers a resolved policy to
+/// the tagged `{mode: "disabled" | "enabled" | "adaptive" | "effort", ...}`
+/// dict and re-feeds it here, so the `mode`-tagged dict is still accepted. It is
+/// the round-trip encoding of a [`ThinkingConfig`], not an author surface.
 pub(super) fn parse_thinking_option(
     options: Option<&crate::value::DictMap>,
 ) -> Result<crate::llm::api::ThinkingConfig, VmError> {
@@ -240,16 +241,11 @@ pub(super) fn parse_thinking_option(
             budget_tokens: None,
         }),
         VmValue::String(s) => match s.as_str() {
-            "disabled" | "off" | "none" => Ok(ThinkingConfig::Disabled),
-            "enabled" | "on" | "true" => Ok(ThinkingConfig::Enabled {
-                budget_tokens: None,
-            }),
             "adaptive" => Ok(ThinkingConfig::Adaptive),
-            "minimal" | "low" | "medium" | "high" | "xhigh" | "max" => Ok(ThinkingConfig::Effort {
-                level: parse_reasoning_effort(s.as_str())?,
-            }),
             other => Err(thinking_error(format!(
-                "thinking: expected bool, dict, or one of \"enabled\" | \"adaptive\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\", got \"{other}\""
+                "thinking: string value \"{other}\" is not accepted — use `thinking: true`/`false`, \
+                 `thinking: \"adaptive\"`, or `thinking: {{budget_tokens: N}}`; for a reasoning-effort \
+                 level use the `effort` option (e.g. `effort: \"high\"`)"
             ))),
         },
         VmValue::Dict(d) => {
@@ -448,4 +444,83 @@ pub(super) fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), 
     Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "anthropic_beta_features: invalid beta feature name `{feature}`; expected ASCII letters, digits, '-' or '_'"
     )))))
+}
+
+#[cfg(test)]
+mod thinking_value_grammar_tests {
+    use super::*;
+
+    fn thinking_options(value: VmValue) -> crate::value::DictMap {
+        let mut opts = crate::value::DictMap::new();
+        opts.insert(crate::value::intern_key("thinking"), value);
+        opts
+    }
+
+    fn thrown_message(err: VmError) -> String {
+        match err {
+            VmError::Thrown(VmValue::String(s)) => s.to_string(),
+            other => panic!("expected a thrown string error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn thinking_effort_level_string_is_rejected_with_actionable_message() {
+        // The reasoning *level* moved to the sibling `effort` option; a bare
+        // effort-level string on `thinking` is no longer a silent synonym.
+        let opts = thinking_options(VmValue::String(arcstr::ArcStr::from("high")));
+        let message = thrown_message(
+            parse_thinking_option(Some(&opts)).expect_err("effort-level string must be rejected"),
+        );
+        assert!(
+            message.contains("string value \"high\" is not accepted"),
+            "{message}"
+        );
+        assert!(message.contains("thinking: \"adaptive\""), "{message}");
+        assert!(message.contains("effort: \"high\""), "{message}");
+    }
+
+    #[test]
+    fn thinking_on_off_synonym_strings_are_rejected() {
+        for raw in ["on", "off", "enabled", "disabled", "none", "true", "false"] {
+            let opts = thinking_options(VmValue::String(arcstr::ArcStr::from(raw)));
+            assert!(
+                parse_thinking_option(Some(&opts)).is_err(),
+                "thinking string {raw:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn thinking_still_accepts_adaptive_bool_and_budget_forms() {
+        let adaptive = thinking_options(VmValue::String(arcstr::ArcStr::from("adaptive")));
+        assert_eq!(
+            parse_thinking_option(Some(&adaptive)).expect("adaptive accepted"),
+            crate::llm::api::ThinkingConfig::Adaptive
+        );
+
+        let enabled = thinking_options(VmValue::Bool(true));
+        assert_eq!(
+            parse_thinking_option(Some(&enabled)).expect("true accepted"),
+            crate::llm::api::ThinkingConfig::Enabled {
+                budget_tokens: None
+            }
+        );
+
+        let disabled = thinking_options(VmValue::Bool(false));
+        assert_eq!(
+            parse_thinking_option(Some(&disabled)).expect("false accepted"),
+            crate::llm::api::ThinkingConfig::Disabled
+        );
+
+        let budget = thinking_options(VmValue::dict(crate::value::DictMap::from_iter([(
+            crate::value::intern_key("budget_tokens"),
+            VmValue::Int(8000),
+        )])));
+        assert_eq!(
+            parse_thinking_option(Some(&budget)).expect("budget accepted"),
+            crate::llm::api::ThinkingConfig::Enabled {
+                budget_tokens: Some(8000)
+            }
+        );
+    }
 }

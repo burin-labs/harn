@@ -3249,6 +3249,7 @@ dependencies = [
 name = "harn-lint"
 version = "0.10.28"
 dependencies = [
+ "harn-builtin-meta",
  "harn-fmt",
  "harn-lexer",
  "harn-modules",

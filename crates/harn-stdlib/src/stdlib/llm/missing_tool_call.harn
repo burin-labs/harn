@@ -14,8 +14,8 @@ type MissingToolCallOptions = {
   classifier?: any,
   top_p?: float,
   seed?: int,
-  reasoning_effort?: string,
-  timeout?: any,
+  effort?: string,
+  timeout_ms?: int,
 }
 
 type MissingToolCallVerdict = {
@@ -314,7 +314,7 @@ pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
     }
     const schema = __missing_tool_call_schema()
     let llm_opts = {
-      output_schema: schema,
+      output: {schema: schema, strict: true, validation: "error"},
       max_tokens: cfg.max_tokens ?? 192,
       temperature: cfg.temperature ?? 0.0,
       session_id: payload?.session_id ?? "",
@@ -325,7 +325,7 @@ pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
     if cfg.provider != nil {
       llm_opts = llm_opts + {provider: cfg.provider}
     }
-    for key in ["top_p", "seed", "reasoning_effort", "timeout"] {
+    for key in ["top_p", "seed", "effort", "timeout_ms"] {
       if cfg[key] != nil {
         llm_opts[key] = cfg[key]
       }

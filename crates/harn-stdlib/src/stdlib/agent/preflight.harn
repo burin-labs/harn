@@ -439,19 +439,9 @@ fn __agent_system_prompt_option_present(value) {
 }
 
 fn __agent_has_system_prompt_options(opts) {
-  return __agent_system_prompt_option_present(opts?.system)
-    || __agent_system_prompt_option_present(
-    opts?.system_preamble,
-  )
-    || __agent_system_prompt_option_present(opts?.system_prefix)
-    || __agent_system_prompt_option_present(
-    opts?.system_context,
-  )
-    || __agent_system_prompt_option_present(opts?.system_prompt_parts)
-    || __agent_system_prompt_option_present(
-    opts?.system_appendix,
-  )
-    || __agent_system_prompt_option_present(opts?.system_suffix)
+  return __agent_system_prompt_option_present(opts?._primary_system)
+    || type_of(opts?.system)
+    == "string"
 }
 
 fn __agent_push_system_fragment(fragments, id, body) {
@@ -519,7 +509,10 @@ fn __agent_context_profile_fragments(opts) {
 }
 
 fn __agent_primary_system_text(session, opts) {
-  if opts?.system != nil && opts.system != "" {
+  if opts?._primary_system != nil && opts._primary_system != "" {
+    return opts._primary_system
+  }
+  if type_of(opts?.system) == "string" && opts.system != "" {
     return opts.system
   }
   if !__agent_has_system_prompt_options(opts) {

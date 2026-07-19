@@ -22,6 +22,12 @@ pub(crate) fn extract_llm_options(
         }
     });
     let explicit_options = args.get(2).and_then(|a| a.as_dict()).cloned();
+    // The unknown-key gate runs on the RAW caller dict, before the context
+    // merge or default injection can add host-owned keys. Removed synonyms
+    // and typos are hard errors here — nothing is silently dropped.
+    if let Some(raw) = explicit_options.as_ref() {
+        super::validate::validate_llm_option_keys(raw)?;
+    }
     // Capture whether the CALLER (not injected defaults) pinned a model /
     // provider before `explicit_options` is consumed by the context merge —
     // needed to reject `models:`/`ladder:` combined with a standalone route.
@@ -156,7 +162,7 @@ pub(crate) fn extract_llm_options(
     // only — emitted verbatim into the `resolved_dispatch` transcript record.
     let dispatch_provenance = options
         .as_ref()
-        .and_then(|o| o.get("dispatch_provenance"))
+        .and_then(|o| o.get("_dispatch_provenance"))
         .and_then(crate::llm::resolved_dispatch::DispatchProvenance::from_vm_value);
     let pending_reminders = pending_reminders_from_session(session_id.as_deref());
     let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
@@ -193,11 +199,14 @@ pub(crate) fn extract_llm_options(
         opt_float(&options, "frequency_penalty").or_else(|| default_float("frequency_penalty"));
     let presence_penalty =
         opt_float(&options, "presence_penalty").or_else(|| default_float("presence_penalty"));
-    let timeout = resolve_timeout_secs(
-        opt_int(&options, "timeout"),
-        opt_int(&options, "timeout_ms"),
-    );
-    let idle_timeout = opt_int(&options, "idle_timeout").map(|t| t as u64);
+    let timeout = resolve_timeout_secs(opt_int(&options, "timeout_ms"));
+    let idle_timeout = opt_int(&options, "idle_timeout_ms").map(|ms| {
+        if ms <= 0 {
+            0
+        } else {
+            (ms as u64).div_ceil(1000)
+        }
+    });
     // Provider-side prompt caching now defaults ON for routes that support
     // it. Marking the stable system+tools+history prefix cacheable discounts
     // the re-sent prefix heavily across multi-turn agent loops and the rubric
@@ -234,8 +243,6 @@ pub(crate) fn extract_llm_options(
                 .map(|v| v != "0" && v.to_lowercase() != "false")
                 .unwrap_or(true)
         });
-    let output_validation = opt_str(&options, "output_validation");
-
     let thinking = resolve_thinking_config(
         options.as_ref(),
         &model_defaults,
@@ -252,58 +259,30 @@ pub(crate) fn extract_llm_options(
         enforce_capability_gates,
     )?;
 
-    let response_format = opt_str(&options, "response_format");
-    let json_schema = parse_schema_value(
-        options
-            .as_ref()
-            .and_then(|o| o.get("json_schema").or_else(|| o.get("schema"))),
-        "json_schema",
-    )?;
-    let output_schema = parse_schema_value(
-        options.as_ref().and_then(|o| {
-            o.get("output_schema")
-                .or_else(|| o.get("json_schema"))
-                .or_else(|| o.get("schema"))
-        }),
-        "output_schema",
-    )?;
-    let output_format = parse_output_format_option(
-        options.as_ref(),
-        response_format.as_deref(),
-        json_schema.as_ref(),
-    )?;
+    // The single `output` contract key. The parsed format is the one
+    // producer of every internal structured-output field: the legacy
+    // response_format / json_schema mirrors are derived here (single
+    // producer) purely for the provider layer, and die with it in W5.
+    let parsed_output = parse_output_option(options.as_ref())?;
+    let output_format = parsed_output.format;
     if enforce_capability_gates {
         validate_output_format_supported(&output_format, &provider, &model, &caps)?;
     }
-    let output_schema = output_schema.or_else(|| output_format.schema().cloned());
-    // `schema_stream_abort` defaults to true whenever a schema is in play,
-    // so callers that expect structured output get the early-abort win
-    // automatically. Explicit `false` opts out and lets the stream run to
-    // completion (relying on `schema_retries` for post-hoc recovery).
-    let schema_stream_abort = match options.as_ref().and_then(|o| o.get("schema_stream_abort")) {
-        Some(VmValue::Bool(value)) => *value,
-        Some(VmValue::Nil) | None => output_schema.is_some(),
-        Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "llm_call: `schema_stream_abort` must be a bool, got {}",
-                    other.type_name()
-                ),
-            ))));
-        }
+    let output_schema = output_format.schema().cloned();
+    let output_validation = parsed_output.validation;
+    let response_format = if output_format.is_structured() {
+        Some("json".to_string())
+    } else {
+        None
     };
-
-    // Reject the deprecated `transcript` option key. Conversation
-    // lifecycle is expressed through `session_id` + the explicit
-    // `agent_session_*` builtins; there is no opaque transcript dict to
-    // pass around anymore.
-    if options.as_ref().and_then(|o| o.get("transcript")).is_some() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "llm_call / agent_loop: the `transcript` option was removed. \
-                 Open or open-and-resume a session with agent_session_open(id) \
-                 and pass `session_id: id` instead.",
-        ))));
-    }
+    let json_schema = output_schema.clone();
+    // Stream-abort defaults to true whenever a schema is in play, so callers
+    // that expect structured output get the early-abort win automatically.
+    // `output: {schema, stream_abort: false}` opts out (relying on
+    // `schema_retries` for post-hoc recovery).
+    let schema_stream_abort = parsed_output
+        .stream_abort
+        .unwrap_or_else(|| output_schema.is_some());
 
     // Message source precedence: options.messages > prompt.
     let messages_val = options.as_ref().and_then(|o| o.get("messages")).cloned();
@@ -626,7 +605,9 @@ pub(crate) fn extract_llm_options(
 
     let provider_overrides = options
         .as_ref()
-        .and_then(|o| o.get(provider.as_str()))
+        .and_then(|o| o.get("provider_options"))
+        .and_then(|v| v.as_dict())
+        .and_then(|namespaced| namespaced.get(provider.as_str()))
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
     let previous_response_id =
@@ -670,17 +651,26 @@ pub(crate) fn extract_llm_options(
         });
     let structural_experiment =
         crate::llm::structural_experiments::parse_structural_experiment_option(options.as_ref())?;
-    let budget = crate::llm::cost::parse_budget_envelope(options.as_ref())?;
+    let budget = crate::llm::cost::parse_budget(options.as_ref())?;
     let reminders = options
         .as_ref()
         .and_then(|o| o.get("reminders"))
         .map(vm_value_to_json);
 
-    // `fast: true` (or the provider-flavored `speed: "fast"`) opts into the
-    // model's catalog-declared `fast` serving tier. The catalog is the source
-    // of truth for the per-provider knob, so we only validate the request is
-    // sane here; the provider body builder reads `serving_tiers[].request`.
-    let fast = opt_bool(&options, "fast") || opt_str(&options, "speed").as_deref() == Some("fast");
+    // `speed` is the serving-tier intent: "standard" (default) or "fast"
+    // (the model's catalog-declared accelerated tier; "flex"/"batch" arrive
+    // with the batch plane). The catalog is the source of truth for the
+    // per-provider knob; the provider body builder reads
+    // `serving_tiers[].request`.
+    let fast = match opt_str(&options, "speed").as_deref() {
+        None | Some("standard") => false,
+        Some("fast") => true,
+        Some(other) => {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                format!("llm_call: `speed` expects \"standard\" or \"fast\", got \"{other}\""),
+            ))));
+        }
+    };
     if fast && enforce_capability_gates {
         match crate::llm::serving_tiers::fast_gate(&model) {
             crate::llm::serving_tiers::ServingTierGate::Usable => {}

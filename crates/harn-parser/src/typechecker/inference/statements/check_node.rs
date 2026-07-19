@@ -1361,14 +1361,7 @@ impl TypeChecker {
             }
 
             Node::CostRoute { options, body } => {
-                for (key, value) in options {
-                    if matches!(
-                        key.as_str(),
-                        "fallback_strategy" | "strategy" | "quality" | "min_quality"
-                    ) && matches!(value.node, Node::Identifier(_))
-                    {
-                        continue;
-                    }
+                for (_, value) in options {
                     self.check_node(value, scope);
                 }
                 let mut route_scope = scope.child();

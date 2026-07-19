@@ -37,6 +37,10 @@ Pair it with [[harn-agent]] for autonomous execution and [[harn-tracing]] for tr
 
 - `agent_loop` drives iterative LLM/tool workflows.
 - `llm_call` and `llm_stream_call` perform direct model calls.
+- Build call options with `LlmCallOptions` or `llm_options({...})`. The same
+  registry validates direct calls, streams, and agent dispatch. Use only
+  `output`, `system`, `effort`, `speed`, `timeout_ms`, and namespaced
+  `provider_options`; removed spellings are errors, not aliases.
 - `models:` / `ladder:` on `llm_call` and `agent_loop` is a cheap-first
   fallback that advances **only on transport-class failures** (429/5xx/timeout),
   never on schema failures; named ladders resolve from catalog `[model_ladders.*]`
@@ -94,7 +98,7 @@ Import the home module instead of re-deriving the behavior inline in a loop body
 - Goal recitation / scratchpad → `std/agent/scratchpad`.
 - Preset packs bundle several of the above → `std/agent/presets` (`agent_preset`);
   the pack keys are `budget`, `completion_gate`, `fallback_chain`, `lane_policy`,
-  `model_ladder`, `overlay_policy`, `provider`, `timeout_ms`.
+  `models`, `overlay_policy`, `provider`, `timeout_ms`.
 
 ## Removed in 0.10 (do not reintroduce)
 
