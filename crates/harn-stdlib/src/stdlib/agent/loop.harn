@@ -3660,21 +3660,111 @@ fn __agent_loop_pop_structural_veto_turn(session_id) {
  * that no more tool calls are possible, and how to wrap up — honoring the
  * configured `done_sentinel` when present.
  */
-fn __agent_loop_wrapup_directive(opts) {
+/**
+ * The response-protocol tail every wrap-up directive ends with, so the reply
+ * parses as a terminal turn (a bare `<user_response>` when no done-sentinel is
+ * configured, or the `<user_response>` + `<done>SENTINEL</done>` pair when one
+ * is). Factored out so the default directive and a host-supplied directive share
+ * one source of truth for the protocol shape.
+ */
+fn __agent_loop_wrapup_response_protocol_tail(opts) {
   const sentinel = opts?.done_sentinel
-  const base = "You have reached your turn/budget limit and cannot call any more tools. "
-    + "Provide your final answer now: briefly summarize what you accomplished and what you "
-    + "verified. Do not emit any tool call."
   if sentinel == nil || to_string(sentinel) == "" {
-    return base
-      + " End with a concise `<user_response>...</user_response>` containing the final answer."
+    return " End with a concise `<user_response>...</user_response>` containing the final answer."
   }
   const tag = to_string(sentinel)
-  return base
-    + " Emit a concise `<user_response>...</user_response>` with the final answer, then end with "
+  return " Emit a concise `<user_response>...</user_response>` with the final answer, then end with "
     + "`<done>"
     + tag
     + "</done>` exactly, as instructed by the response protocol."
+}
+
+/**
+ * Outcome-authority constraint appended to a HOST-supplied wrap-up directive.
+ *
+ * The terminal outcome (budget/turn exhaustion, stuck, verify-capped) is decided
+ * by the loop and stated to the model as fact; the wrap-up narrates it, it does
+ * NOT re-adjudicate it. A host directive may forget to say so, so the loop always
+ * appends this — a wrap-up that claims "I completed the task" on a failed run is
+ * the exact failure this guards against.
+ */
+const __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY: string = "The run's terminal outcome is already decided and is stated as fact in this instruction and the context above; narrate it truthfully and do NOT re-judge it or claim success on a run that did not succeed."
+
+/**
+ * The wrap-up directive for a terminal turn.
+ *
+ * Default (no `opts.wrapup_directive`): today's generic budget/turn-limit
+ * summary directive, byte-identical to before, injected into the wrap-up SYSTEM
+ * prompt by the caller.
+ *
+ * Host-supplied (`opts.wrapup_directive` non-empty): the host owns the wording
+ * (product-specific sad-path narration, few-shot, language-generic framing). The
+ * loop composes it with the outcome-authority constraint and the shared
+ * response-protocol tail. The caller renders THIS variant as a trailing user
+ * message (keeping the system prompt byte-identical for prefix-cache reuse),
+ * never into the system prompt.
+ */
+fn __agent_loop_wrapup_directive(opts) {
+  const host_directive = trim(to_string(opts?.wrapup_directive ?? ""))
+  const tail = __agent_loop_wrapup_response_protocol_tail(opts)
+  if host_directive != "" {
+    return host_directive + " " + __AGENT_LOOP_WRAPUP_OUTCOME_AUTHORITY + tail
+  }
+  const base = "You have reached your turn/budget limit and cannot call any more tools. "
+    + "Provide your final answer now: briefly summarize what you accomplished and what you "
+    + "verified. Do not emit any tool call."
+  return base + tail
+}
+
+/**
+ * True when the host opted into a product-supplied terminal wrap-up by passing a
+ * non-empty `opts.wrapup_directive`. Gates the trailing-message rendering path,
+ * the structured-context block, and the tools==0 eligibility broadening.
+ */
+fn __agent_loop_has_host_wrapup_directive(opts) {
+  return trim(to_string(opts?.wrapup_directive ?? "")) != ""
+}
+
+/**
+ * The effective wrap-up context: the host's structured `opts.wrapup_context`
+ * (product facts such as files touched with line counts, verification receipts,
+ * veto context) with the loop's own terminal facts merged on top so they are
+ * AUTHORITATIVE — a host context can never override the real terminal kind or
+ * stop reason (the outcome-authority contract). Terminal facts are always
+ * present on the host path even when the host supplies no context, so the model
+ * always learns which terminal it is narrating.
+ */
+fn __agent_loop_effective_wrapup_context(opts, final_status, stop_reason) {
+  const host_context = if type_of(opts?.wrapup_context) == "dict" {
+    opts.wrapup_context
+  } else {
+    {}
+  }
+  return host_context
+    + {terminal_kind: final_status, final_status: final_status, stop_reason: stop_reason ?? ""}
+}
+
+/**
+ * Render an effective wrap-up context dict into a compact, labeled,
+ * language-generic facts block appended after the directive in the trailing
+ * wrap-up message. The loop stays agnostic to the host's key names — it emits
+ * the dict as deterministic JSON so any host's terminal facts reach the model
+ * verbatim while the host's directive explains how to read them. Returns "" only
+ * when serialization fails.
+ */
+fn __agent_loop_render_wrapup_context(context) {
+  if context == nil || type_of(context) != "dict" || len(keys(context)) == 0 {
+    return ""
+  }
+  const rendered = try {
+    json_stringify(context)
+  } catch (e) {
+    ""
+  }
+  if trim(to_string(rendered)) == "" {
+    return ""
+  }
+  return "\n\nTerminal context (authoritative facts):\n" + to_string(rendered)
 }
 
 /**
@@ -3881,15 +3971,38 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     transcript_projection: opts?.transcript_projection,
   }
   const turn_prompt = __agent_loop_build_turn_prompt(session, wrapup_opts, iteration)
-  let turn_system_parts = []
-  if trim(turn_prompt.system ?? "") != "" {
-    turn_system_parts = turn_system_parts.push(turn_prompt.system)
+  const host_wrapup = __agent_loop_has_host_wrapup_directive(wrapup_opts)
+  // System prompt + message array. A host-supplied directive is delivered as a
+  // trailing user message and the system prompt is left byte-identical to the
+  // loop's turns, so the whole system+history prefix is reused verbatim by the
+  // provider prompt cache / local KV cache — the wrap-up pays only for the one
+  // appended instruction. The default (no host directive) keeps today's exact
+  // behavior: the generic directive rides in the system prompt.
+  const base_system = if trim(turn_prompt.system ?? "") != "" {
+    turn_prompt.system
+  } else {
+    ""
   }
-  turn_system_parts = turn_system_parts.push(directive)
-  const turn_system = join(turn_system_parts, "\n\n")
+  const turn_system = if host_wrapup {
+    base_system
+  } else {
+    let parts = []
+    if base_system != "" {
+      parts = parts.push(base_system)
+    }
+    parts = parts.push(directive)
+    join(parts, "\n\n")
+  }
+  const wrapup_context = __agent_loop_effective_wrapup_context(wrapup_opts, final_status, stop_reason)
+  const turn_messages = if host_wrapup {
+    turn_prompt.messages
+      .push({role: "user", content: directive + __agent_loop_render_wrapup_context(wrapup_context)})
+  } else {
+    turn_prompt.messages
+  }
   const llm_opts = __agent_loop_effective_llm_options(wrapup_opts)
     + {
-    messages: turn_prompt.messages,
+    messages: turn_messages,
     session_id: session.session_id,
     tool_format: wrapup_opts?.tool_format,
     tools: nil,
@@ -3924,6 +4037,8 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
         iteration: iteration,
         tool_count: len(wrapup_tool_calls),
         tool_names: __agent_loop_tool_call_names(wrapup_tool_calls),
+        host_directive: host_wrapup,
+        terminal_kind: final_status,
       },
     )
   }
@@ -3937,7 +4052,13 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
     agent_emit_event(
       session.session_id,
       "final_wrapup",
-      {final_status: final_status, stop_reason: stop_reason ?? "", iteration: iteration},
+      {
+        final_status: final_status,
+        stop_reason: stop_reason ?? "",
+        iteration: iteration,
+        host_directive: host_wrapup,
+        terminal_kind: final_status,
+      },
     )
   }
   return true
@@ -5336,10 +5457,15 @@ fn __agent_loop_run(message, session, initial_opts) {
       budget_decisions = __agent_loop_record_budget_stop(budget_decisions, iteration, current_max, terminal_exhaustion.kind)
     }
     const wrapup_enabled = opts?.final_wrapup ?? true
+    // A no-tool terminal normally skips wrap-up (nothing to summarize), but a
+    // host that supplied its own directive is explicitly asking for sad-path
+    // coverage — including the zero-write terminals where the user is most owed
+    // a truthful closing message — so honor it even at last_tool_count == 0.
+    const wrapup_tools_ok = last_tool_count > 0 || __agent_loop_has_host_wrapup_directive(opts)
     if wrapup_enabled
       && suspend_result == nil
       && terminal_error == nil
-      && last_tool_count > 0
+      && wrapup_tools_ok
       && __agent_loop_wrapup_eligible_status(final_status) {
       let _ = try {
         __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, iteration)
