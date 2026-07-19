@@ -357,6 +357,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             let mut children = vec![condition.as_ref()];
             children.extend(then_body.iter());

@@ -551,6 +551,7 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             children.push(condition.as_ref());
             children.extend(then_body.iter());

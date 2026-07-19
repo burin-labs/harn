@@ -642,6 +642,7 @@ fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             collect_called_functions_node(condition, calls);
             collect_many(then_body, calls);

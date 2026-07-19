@@ -374,11 +374,11 @@ impl TypeChecker {
                     }
                 }
             }
-
             Node::IfElse {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.check_node(condition, scope);
                 let refs = self.extract_refinements_with_lint(condition, scope);

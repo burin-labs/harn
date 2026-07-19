@@ -917,6 +917,75 @@ pipeline p(task) {
     }
 
     #[test]
+    fn records_each_braced_control_flow_block_span() {
+        let source = r"fn h() -> int {
+  if a {
+    b()
+  } else {
+    c()
+  }
+  try {
+    work()
+  } catch (err) {
+    recover()
+  } finally {
+    cleanup()
+  }
+  const result = try {
+    work()
+  }
+  return 1
+}
+";
+        let program = parse_source(source).expect("source should parse");
+        let body = match &program[0].node {
+            Node::FnDecl { body, .. } => body,
+            _ => panic!("expected function declaration"),
+        };
+
+        let Node::IfElse {
+            then_span,
+            else_span,
+            ..
+        } = &body[0].node
+        else {
+            panic!("expected if statement");
+        };
+        assert_eq!(&source[then_span.start..then_span.end], "{\n    b()\n  }");
+        assert_eq!(
+            &source[else_span.unwrap().start..else_span.unwrap().end],
+            "{\n    c()\n  }"
+        );
+
+        let Node::TryCatch {
+            try_span,
+            catch_span,
+            finally_span,
+            ..
+        } = &body[1].node
+        else {
+            panic!("expected try/catch statement");
+        };
+        assert_eq!(&source[try_span.start..try_span.end], "{\n    work()\n  }");
+        assert_eq!(
+            &source[catch_span.unwrap().start..catch_span.unwrap().end],
+            "{\n    recover()\n  }"
+        );
+        assert_eq!(
+            &source[finally_span.unwrap().start..finally_span.unwrap().end],
+            "{\n    cleanup()\n  }"
+        );
+
+        let Node::ConstBinding { value, .. } = &body[2].node else {
+            panic!("expected try-expression binding");
+        };
+        let Node::TryExpr { body } = &value.node else {
+            panic!("expected try expression");
+        };
+        assert_eq!(body.len(), 1);
+    }
+
+    #[test]
     fn rejects_same_line_statements_without_separator() {
         let source = r"pipeline p(task) { let x = 1 let y = 2 }";
         let err = parse_source(source).expect_err("missing separator should fail");

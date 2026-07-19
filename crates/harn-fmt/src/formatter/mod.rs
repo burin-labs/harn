@@ -95,17 +95,25 @@ impl<'a> Formatter<'a> {
     /// Trailing same-line comments on each statement are preserved inline, and
     /// standalone comments between statements are claimed here.
     ///
-    /// `block_from_line` is the line the block opens on, so the comments
-    /// leading the FIRST statement can be told apart from the ones that belong
-    /// to whatever precedes the block. Callers with several bodies on one node
-    /// (`try`/`catch`/`finally`, `if`/`else`) may pass the enclosing node's
-    /// line for each: claiming is ordered and idempotent, so each block takes
-    /// only what the blocks before it left behind.
+    /// `block_from_line` is the line the block opens on, so comments leading
+    /// the first statement can be distinguished from comments belonging to
+    /// whatever precedes the block. `block_end_line`, when available, flushes
+    /// comments after the last statement before the block's closing brace.
     pub(super) fn format_body_string(
         &self,
         body: &[SNode],
         indent_level: usize,
         block_from_line: usize,
+    ) -> String {
+        self.format_body_string_bounded(body, indent_level, block_from_line, None)
+    }
+
+    pub(super) fn format_body_string_bounded(
+        &self,
+        body: &[SNode],
+        indent_level: usize,
+        block_from_line: usize,
+        block_end_line: Option<usize>,
     ) -> String {
         let mut out = String::new();
         let indent_str = "  ".repeat(indent_level);
@@ -137,6 +145,15 @@ impl<'a> Formatter<'a> {
                 out.push_str(&trail);
             }
             out.push('\n');
+        }
+        if let Some(end_line) = block_end_line {
+            let range_start = body
+                .iter()
+                .rev()
+                .find(|n| n.span.end_line != 0)
+                .map(|n| n.span.end_line + 1)
+                .unwrap_or(block_from_line + 1);
+            out.push_str(&self.render_comments_in_range(range_start, end_line, indent_level));
         }
         out
     }
@@ -455,14 +472,10 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    /// `block_end_line` is the line of the block's closing brace, when the
-    /// caller can name it. A body that is the LAST thing in its node ends at
-    /// the node's own `end_line`, so those callers pass `Some`; a body with a
-    /// sibling after it (`then_body` before an `else`, a `try` before its
-    /// `catch`) does not, because the AST records no span for the block itself
-    /// — only for the whole node. Passing `None` there is deliberate: the
-    /// alternative, bounding with the node's end, would reach past this block's
-    /// brace and drag the SIBLING branch's comments into it.
+    /// `block_end_line` is the line of the block's closing brace, when the AST
+    /// can identify it. A body with a sibling after it must use its own block
+    /// extent rather than the enclosing node's end, or the sibling's comments
+    /// can be claimed by the preceding block.
     pub(crate) fn format_body(
         &mut self,
         nodes: &[SNode],

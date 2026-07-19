@@ -73,13 +73,11 @@ pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
         &mut visited,
         &mut diagnostics,
     );
-
     scan_import_collisions(&canonical, source, program, &mut diagnostics);
     scan_selective_import_visibility(&canonical, source, module_graph, &mut diagnostics);
     scan_re_export_conflicts(&canonical, source, program, module_graph, &mut diagnostics);
     scan_static_tool_surface_preflight(&canonical, source, program, config, &mut diagnostics);
     scan_effect_inheritance_preflight(&canonical, source, program, &mut diagnostics);
-
     diagnostics
 }
 
@@ -185,7 +183,6 @@ fn source_excluding_spawn_agents(source: &str, body: &[SNode]) -> String {
     if body_end <= body_start {
         return String::new();
     }
-
     let mut out = String::with_capacity(body_end - body_start);
     let mut cursor = body_start;
     for span in spawn_spans {
@@ -259,6 +256,7 @@ fn spawn_site_children(node: &SNode) -> Vec<&SNode> {
             condition,
             then_body,
             else_body,
+            ..
         } => {
             children.push(condition.as_ref());
             children.extend(then_body.iter());
@@ -513,6 +511,7 @@ fn collect_static_tool_surface_from_node(
             condition,
             then_body,
             else_body,
+            ..
         } => {
             collect_static_tool_surface_from_node(
                 condition,
@@ -1280,6 +1279,7 @@ fn scan_node_preflight(
             condition,
             then_body,
             else_body,
+            ..
         } => {
             scan_node_preflight(
                 condition,

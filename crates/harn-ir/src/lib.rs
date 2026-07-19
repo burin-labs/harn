@@ -560,7 +560,6 @@ impl Invariant for ApprovalReachability {
                 }
                 _ => {}
             }
-
             for succ in ir.successors(node_id) {
                 let succ_node = ir.node(succ);
                 let mut next_path = path.clone();
@@ -1403,6 +1402,7 @@ impl<'a> HandlerIrBuilder<'a> {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 let cond_exits = self.build_expr(condition, incoming);
                 let branch =

@@ -401,6 +401,7 @@ impl<'a> EvalCtx<'a> {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 let cond = ctx.eval_node(condition)?;
                 let pick = match cond {

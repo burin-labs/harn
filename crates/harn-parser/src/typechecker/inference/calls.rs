@@ -502,7 +502,6 @@ impl TypeChecker {
                 );
             }
         }
-
         if !has_spread {
             let total = sig.params.len();
             let arity_ok = Self::call_signature_arity_ok(
@@ -1271,6 +1270,7 @@ impl TypeChecker {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.visit_for_deprecation(condition);
                 for s in then_body {

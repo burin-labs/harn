@@ -750,35 +750,80 @@ fn comment_after_the_last_statement_of_a_loop_stays_in_the_loop() {
     );
 }
 
-/// KNOWN DEFECT, pinned deliberately: a body with a SIBLING after it (`then`
-/// before an `else`, `try` before its `catch`) still loses its trailing comment
-/// to that sibling. The tail flush cannot reach here — the boundary is the
-/// `} else {` line, and the AST records a span for the whole `if` node but none
-/// for the individual blocks, so there is no line to bound with. Bounding with
-/// the node's end would sweep the else's OWN leading comments backwards into
-/// the then, trading one misplacement for another.
-///
-/// This is the BLOCK-level half of the comment-eviction class and a different
-/// mechanism from the member-level half #4806 fixed: the statements here do
-/// carry spans, but the block they sit in does not. Tracked as #4890.
-///
-/// This asserts what the formatter does TODAY rather than what it should do, so
-/// the behaviour is visible and a fix has to update a failing test instead of
-/// changing comment placement silently. Invert it — the comment belongs before
-/// `} else {` — once blocks carry spans (#4890).
+/// A block's trailing comments belong before its closing brace, even when a
+/// sibling block follows it. The sibling's leading comments must stay on the
+/// sibling instead of being pulled backward into the preceding block.
 #[test]
-fn comment_after_a_then_branch_is_currently_dragged_into_the_else() {
-    let source = "fn h() -> int {\n  if a {\n    b()\n    // TAIL_THEN\n  } else {\n    c()\n  }\n  return 1\n}\n";
+fn comments_stay_on_their_if_branches() {
+    let source = "fn h() -> int {\n  if a {\n    b()\n    // TAIL_THEN\n  } else {\n    // HEAD_ELSE\n    c()\n  }\n  return 1\n}\n";
     let formatted = format_source(source).unwrap();
-    let comment = formatted
+    let then_stmt = formatted.find("b()").expect("no then statement");
+    let then_comment = formatted
         .find("// TAIL_THEN")
-        .expect("the comment must still exist somewhere, even when misplaced");
+        .expect("then comment vanished");
     let else_kw = formatted.find("} else {").expect("no else");
+    let else_comment = formatted
+        .find("// HEAD_ELSE")
+        .expect("else comment vanished");
+    let else_stmt = formatted.find("c()").expect("no else statement");
     assert!(
-        comment > else_kw,
-        "the then-branch's trailing comment is expected to land in the else until #4806; \
-         if it now stays put, invert this assertion:\n{formatted}"
+        then_stmt < then_comment && then_comment < else_kw,
+        "the then comment escaped its branch:\n{formatted}"
     );
+    assert!(
+        else_kw < else_comment && else_comment < else_stmt,
+        "the else comment was pulled into the then branch:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn comments_stay_on_try_catch_and_finally_branches() {
+    let source = "fn h() -> int {\n  try {\n    work()\n    // TAIL_TRY\n  } catch (err) {\n    // HEAD_CATCH\n    recover()\n    // TAIL_CATCH\n  } finally {\n    // HEAD_FINALLY\n    cleanup()\n  }\n  return 1\n}\n";
+    let formatted = format_source(source).unwrap();
+    let try_comment = formatted.find("// TAIL_TRY").expect("try comment vanished");
+    let catch_kw = formatted.find("} catch").expect("no catch");
+    let catch_head = formatted
+        .find("// HEAD_CATCH")
+        .expect("catch leading comment vanished");
+    let catch_tail = formatted
+        .find("// TAIL_CATCH")
+        .expect("catch trailing comment vanished");
+    let finally_kw = formatted.find("} finally {").expect("no finally");
+    let finally_head = formatted
+        .find("// HEAD_FINALLY")
+        .expect("finally leading comment vanished");
+    assert!(
+        try_comment < catch_kw,
+        "the try comment escaped into catch:\n{formatted}"
+    );
+    assert!(
+        catch_kw < catch_head && catch_head < catch_tail && catch_tail < finally_kw,
+        "catch comments were assigned to the wrong block:\n{formatted}"
+    );
+    assert!(
+        finally_kw < finally_head,
+        "the finally comment escaped into catch:\n{formatted}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn comments_stay_on_if_branches_in_expression_position() {
+    let source = "fn h(flag: bool) -> dict {\n  const result = if flag {\n    {a: 1}\n    // TAIL_THEN_EXPR\n  } else {\n    // HEAD_ELSE_EXPR\n    {a: 2}\n  }\n  return result\n}\n";
+    let formatted = format_source(source).unwrap();
+    let then_comment = formatted
+        .find("// TAIL_THEN_EXPR")
+        .expect("then expression comment vanished");
+    let else_kw = formatted.find("} else {").expect("no else");
+    let else_comment = formatted
+        .find("// HEAD_ELSE_EXPR")
+        .expect("else expression comment vanished");
+    assert!(
+        then_comment < else_kw && else_kw < else_comment,
+        "expression-branch comments crossed the block boundary:\n{formatted}"
+    );
+    assert_roundtrip(source);
 }
 
 // ---------------------------------------------------------------------------

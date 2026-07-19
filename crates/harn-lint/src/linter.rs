@@ -1072,6 +1072,7 @@ impl<'a> Linter<'a> {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 Self::node_calls_cancel_handle(condition)
                     || Self::block_calls_cancel_handle(then_body)
@@ -1333,6 +1334,7 @@ impl<'a> Linter<'a> {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 let state = self.analyze_secret_scan_expr(condition, scanned);
                 let then_state = self.analyze_secret_scan_block(then_body, state);
@@ -1478,7 +1480,6 @@ impl<'a> Linter<'a> {
         if name == "_" {
             return;
         }
-
         if !is_mutable {
             if let Some(scope) = self.scopes.last() {
                 if scope.contains(name) {
@@ -1498,7 +1499,6 @@ impl<'a> Linter<'a> {
                 }
             }
         }
-
         self.warn_if_shadows_outer_scope(name, span);
 
         if let Some(scope) = self.scopes.last_mut() {
@@ -1519,7 +1519,6 @@ impl<'a> Linter<'a> {
         if name == "_" {
             return;
         }
-
         self.warn_if_shadows_outer_scope(name, span);
 
         if let Some(scope) = self.scopes.last_mut() {
@@ -1636,6 +1635,7 @@ impl<'a> Linter<'a> {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.collect_persona_calls_node(persona_name, condition);
                 self.collect_persona_calls(persona_name, then_body);

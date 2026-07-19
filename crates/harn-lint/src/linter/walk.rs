@@ -724,6 +724,7 @@ impl<'a> Linter<'a> {
                 condition,
                 then_body,
                 else_body,
+                ..
             } => {
                 self.lint_node(condition);
                 if let Node::BoolLiteral(value) = &condition.node {

@@ -202,32 +202,41 @@ impl Parser {
         let start = self.current_span();
         self.consume(&TokenKind::If, "if")?;
         let condition = self.parse_expression()?;
-        self.consume(&TokenKind::LBrace, "{")?;
+        let then_open = self.consume(&TokenKind::LBrace, "{")?;
         let then_body = self.parse_block()?;
-        self.consume(&TokenKind::RBrace, "}")?;
+        let then_close = self.consume(&TokenKind::RBrace, "}")?;
+        let then_span = Span::merge(then_open.span, then_close.span);
         self.skip_newlines();
 
-        let else_body = if self.check(&TokenKind::Else) {
+        let (else_body, else_span) = if self.check(&TokenKind::Else) {
             self.advance();
             if self.check(&TokenKind::If) {
-                Some(vec![
-                    self.with_nesting("if/else", |parser| parser.parse_if_else())?
-                ])
+                (
+                    Some(vec![
+                        self.with_nesting("if/else", |parser| parser.parse_if_else())?
+                    ]),
+                    None,
+                )
             } else {
-                self.consume(&TokenKind::LBrace, "{")?;
+                let else_open = self.consume(&TokenKind::LBrace, "{")?;
                 let body = self.parse_block()?;
-                self.consume(&TokenKind::RBrace, "}")?;
-                Some(body)
+                let else_close = self.consume(&TokenKind::RBrace, "}")?;
+                (
+                    Some(body),
+                    Some(Span::merge(else_open.span, else_close.span)),
+                )
             }
         } else {
-            None
+            (None, None)
         };
 
         Ok(spanned(
             Node::IfElse {
                 condition: Box::new(condition),
                 then_body,
+                then_span,
                 else_body,
+                else_span,
             },
             Span::merge(start, self.last_non_newline_span()),
         ))
@@ -592,13 +601,14 @@ impl Parser {
                 Span::merge(start, self.prev_span()),
             ));
         }
-        self.consume(&TokenKind::LBrace, "{")?;
+        let try_open = self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
-        self.consume(&TokenKind::RBrace, "}")?;
+        let try_close = self.consume(&TokenKind::RBrace, "}")?;
+        let try_span = Span::merge(try_open.span, try_close.span);
         self.skip_newlines();
 
         let has_catch = self.check(&TokenKind::Catch);
-        let (error_var, error_type, catch_body) = if has_catch {
+        let (error_var, error_type, catch_body, catch_span) = if has_catch {
             self.advance();
             let (ev, et) = if self.check(&TokenKind::LParen) {
                 self.advance();
@@ -615,24 +625,32 @@ impl Parser {
             } else {
                 (None, None)
             };
-            self.consume(&TokenKind::LBrace, "{")?;
+            let catch_open = self.consume(&TokenKind::LBrace, "{")?;
             let cb = self.parse_block()?;
-            self.consume(&TokenKind::RBrace, "}")?;
-            (ev, et, cb)
+            let catch_close = self.consume(&TokenKind::RBrace, "}")?;
+            (
+                ev,
+                et,
+                cb,
+                Some(Span::merge(catch_open.span, catch_close.span)),
+            )
         } else {
-            (None, None, Vec::new())
+            (None, None, Vec::new(), None)
         };
 
         self.skip_newlines();
 
-        let finally_body = if self.check(&TokenKind::Finally) {
+        let (finally_body, finally_span) = if self.check(&TokenKind::Finally) {
             self.advance();
-            self.consume(&TokenKind::LBrace, "{")?;
+            let finally_open = self.consume(&TokenKind::LBrace, "{")?;
             let fb = self.parse_block()?;
-            self.consume(&TokenKind::RBrace, "}")?;
-            Some(fb)
+            let finally_close = self.consume(&TokenKind::RBrace, "}")?;
+            (
+                Some(fb),
+                Some(Span::merge(finally_open.span, finally_close.span)),
+            )
         } else {
-            None
+            (None, None)
         };
 
         // Bare `try { ... }` with neither catch nor finally is a try-expression returning Result.
@@ -646,11 +664,14 @@ impl Parser {
         Ok(spanned(
             Node::TryCatch {
                 body,
+                try_span,
                 has_catch,
                 error_var,
                 error_type,
                 catch_body,
+                catch_span,
                 finally_body,
+                finally_span,
             },
             Span::merge(start, self.last_non_newline_span()),
         ))
