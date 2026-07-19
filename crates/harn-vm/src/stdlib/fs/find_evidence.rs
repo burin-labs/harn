@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 
-use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 use serde::Serialize;
@@ -95,6 +94,56 @@ struct EvidenceReceipt {
 struct IndexedHit {
     pattern: usize,
     hit: EvidenceHit,
+}
+
+struct LiteralMatcher {
+    buckets: BTreeMap<u8, Vec<usize>>,
+    needles: Vec<Vec<u8>>,
+    case_insensitive: bool,
+}
+
+impl LiteralMatcher {
+    fn new(patterns: &[LabeledPattern], case_insensitive: bool) -> Self {
+        let needles = patterns
+            .iter()
+            .map(|pattern| pattern.text.as_bytes().to_vec())
+            .collect::<Vec<_>>();
+        let mut buckets = BTreeMap::<u8, Vec<usize>>::new();
+        for (index, needle) in needles.iter().enumerate() {
+            let first = if case_insensitive {
+                needle[0].to_ascii_lowercase()
+            } else {
+                needle[0]
+            };
+            buckets.entry(first).or_default().push(index);
+        }
+        Self {
+            buckets,
+            needles,
+            case_insensitive,
+        }
+    }
+
+    fn candidates(&self, byte: u8) -> &[usize] {
+        let first = if self.case_insensitive {
+            byte.to_ascii_lowercase()
+        } else {
+            byte
+        };
+        self.buckets.get(&first).map_or(&[], Vec::as_slice)
+    }
+
+    fn matches_at(&self, pattern: usize, bytes: &[u8], start: usize) -> bool {
+        let needle = &self.needles[pattern];
+        let Some(candidate) = bytes.get(start..start.saturating_add(needle.len())) else {
+            return false;
+        };
+        if self.case_insensitive {
+            candidate.eq_ignore_ascii_case(needle)
+        } else {
+            candidate == needle
+        }
+    }
 }
 
 fn evidence_error(message: impl Into<String>) -> VmError {
@@ -347,7 +396,7 @@ fn failed_root(id: String, patterns: &[LabeledPattern], error: &str) -> RootEvid
 fn scan_root(
     root: &LabeledRoot,
     patterns: &[LabeledPattern],
-    matcher: &AhoCorasick,
+    matcher: &LiteralMatcher,
     options: &EvidenceOptions,
     include: Option<&GlobSet>,
     exclude: Option<&GlobSet>,
@@ -419,21 +468,26 @@ fn scan_root(
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
-        for found in matcher.find_overlapping_iter(&bytes) {
-            if hits.len() >= options.max_matches_per_root {
-                truncated = true;
-                break 'walk;
+        for (start, byte) in bytes.iter().copied().enumerate() {
+            for &pattern in matcher.candidates(byte) {
+                if !matcher.matches_at(pattern, &bytes, start) {
+                    continue;
+                }
+                if hits.len() >= options.max_matches_per_root {
+                    truncated = true;
+                    break 'walk;
+                }
+                let (line, column, text) = line_hit(&bytes, &newlines, start);
+                hits.push(IndexedHit {
+                    pattern,
+                    hit: EvidenceHit {
+                        path: relative.clone(),
+                        line,
+                        column,
+                        text,
+                    },
+                });
             }
-            let (line, column, text) = line_hit(&bytes, &newlines, found.start());
-            hits.push(IndexedHit {
-                pattern: found.pattern().as_usize(),
-                hit: EvidenceHit {
-                    path: relative.clone(),
-                    line,
-                    column,
-                    text,
-                },
-            });
         }
     }
     hits.sort_by(|left, right| {
@@ -513,11 +567,7 @@ fn search_receipt(
     options: EvidenceOptions,
     cancel: &AtomicBool,
 ) -> Result<EvidenceReceipt, VmError> {
-    let matcher = AhoCorasickBuilder::new()
-        .ascii_case_insensitive(options.case_insensitive)
-        .match_kind(MatchKind::Standard)
-        .build(patterns.iter().map(|pattern| pattern.text.as_bytes()))
-        .map_err(|error| evidence_error(format!("find_evidence: invalid patterns: {error}")))?;
+    let matcher = LiteralMatcher::new(&patterns, options.case_insensitive);
     let include = glob_set(&options.include_globs, "include")?;
     let exclude = glob_set(&options.exclude_globs, "exclude")?;
     let roots = Arc::new(roots);
