@@ -135,7 +135,7 @@ pub fn command_wait_normalize(raw) -> CommandWaitOptions {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_new() {
+pub fn command_ledger_new() -> list {
   return []
 }
 
@@ -211,7 +211,7 @@ fn __cl_new_row(result, now_ms, cw) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_ingest(ledger, dispatch_results, now_ms, cw) {
+pub fn command_ledger_ingest(ledger, dispatch_results, now_ms, cw) -> list {
   let out = ledger
   for result in dispatch_results ?? [] {
     if __cl_is_running_handle(result) && __cl_row_index(out, to_string(result.handle_id)) < 0 {
@@ -263,7 +263,7 @@ pub fn command_ledger_should_hold(ledger, tool_call_count) -> bool {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_retire(ledger, handle_id) {
+pub fn command_ledger_retire(ledger, handle_id) -> list {
   let out = []
   for row in ledger {
     if row?.handle_id != handle_id {
@@ -282,7 +282,7 @@ pub fn command_ledger_retire(ledger, handle_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_release(ledger, handle_id) {
+pub fn command_ledger_release(ledger, handle_id) -> list {
   const index = __cl_row_index(ledger, handle_id)
   if index < 0 {
     return ledger
@@ -367,7 +367,7 @@ fn __cl_apply_one(row, snapshot, now_ms, cw) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_apply_updates(ledger, entries, now_ms, cw) {
+pub fn command_ledger_apply_updates(ledger, entries, now_ms, cw) -> list {
   let out = ledger
   for entry in entries ?? [] {
     const snapshot = __cl_parse_snapshot(entry)
@@ -426,7 +426,7 @@ fn __cl_advance_schedule_row(row, now_ms, cw) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_decide(ledger, now_ms, cw) {
+pub fn command_ledger_decide(ledger, now_ms, cw) -> dict {
   let fire = false
   let out = []
   for row in ledger {
@@ -562,14 +562,12 @@ pub fn command_ledger_build_digest(ledger, now_ms, cw) -> string {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_after_digest(ledger, now_ms, cw) {
+pub fn command_ledger_after_digest(ledger, now_ms, cw) -> list {
   let out = []
   for row in ledger {
     if row?.lease != "awaited" {
       out = out.push(row)
-    } else if row.status != "running" {
-      // Terminal awaited row: surfaced once, now retired.
-    } else {
+    } else if row.status == "running" {
       const next_interval = min(
         row.decision_interval_ms * cw.decision_multiplier,
         cw.decision_cap_ms,
@@ -588,6 +586,8 @@ pub fn command_ledger_after_digest(ledger, now_ms, cw) {
         },
       )
     }
+    // A terminal awaited row is dropped here: its completion was surfaced in
+    // this digest exactly once, so it is now retired from the ledger.
   }
   return out
 }
@@ -632,7 +632,7 @@ fn __cl_kill_handle(handle_id) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) {
+pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
   const breaches = __cl_ceiling_breaches(ledger, now_ms, cw)
   if len(breaches) == 0 {
     return {ledger: ledger, breached: false, escalated: false, receipts: []}
@@ -710,7 +710,7 @@ fn __cl_now_ms() -> int {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_hold(session_id, ledger, cw, hold_state) {
+pub fn command_ledger_hold(session_id, ledger, cw, hold_state) -> dict {
   let live = ledger
   let state = if type_of(hold_state) == "dict" {
     hold_state
