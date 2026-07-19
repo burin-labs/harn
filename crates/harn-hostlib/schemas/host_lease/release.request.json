@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/host_lease/release.request.json",
+  "title": "host_lease.release request",
+  "description": "Release one VM-owned host lease guard.",
+  "type": "object",
+  "properties": {"guard": {}},
+  "required": ["guard"],
+  "additionalProperties": false
+}

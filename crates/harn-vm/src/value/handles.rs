@@ -5,6 +5,116 @@ use parking_lot::Mutex;
 
 use super::{VmError, VmValue};
 
+type VmResourceRelease = Box<dyn FnOnce() -> Result<VmValue, String> + Send + 'static>;
+
+struct VmResourceGuardState {
+    release: Option<VmResourceRelease>,
+    result: Option<Result<VmValue, String>>,
+}
+
+/// A host-owned resource whose cleanup is bound to VM value lifetime.
+///
+/// The explicit [`Self::release`] path returns a typed host receipt. If a
+/// script abandons the value through an exception, cancellation, frame
+/// teardown, or VM drop, `Drop` invokes the same idempotent callback and
+/// discards only the unreportable cleanup result.
+pub struct VmResourceGuardHandle {
+    label: Arc<str>,
+    state: Mutex<VmResourceGuardState>,
+}
+
+impl VmResourceGuardHandle {
+    /// Construct a guard and atomically attach its one-shot release callback.
+    pub fn new(
+        label: impl Into<Arc<str>>,
+        release: impl FnOnce() -> Result<VmValue, String> + Send + 'static,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            state: Mutex::new(VmResourceGuardState {
+                release: Some(Box::new(release)),
+                result: None,
+            }),
+        }
+    }
+
+    /// Stable diagnostic label without exposing resource authority.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Release exactly once and replay the first typed result to later calls.
+    pub fn release(&self) -> Result<VmValue, VmError> {
+        let mut state = self.state.lock();
+        if let Some(result) = &state.result {
+            return result.clone().map_err(VmError::Runtime);
+        }
+        let release = state
+            .release
+            .take()
+            .expect("resource guard without callback or cached result");
+        let result = release();
+        state.result = Some(result.clone());
+        result.map_err(VmError::Runtime)
+    }
+
+    /// Whether cleanup has already produced its terminal result.
+    pub fn is_released(&self) -> bool {
+        self.state.lock().result.is_some()
+    }
+}
+
+impl std::fmt::Debug for VmResourceGuardHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VmResourceGuardHandle")
+            .field("label", &self.label)
+            .field("released", &self.is_released())
+            .finish()
+    }
+}
+
+impl Drop for VmResourceGuardHandle {
+    fn drop(&mut self) {
+        let _ = self.release();
+    }
+}
+
+#[cfg(test)]
+mod resource_guard_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    #[test]
+    fn explicit_release_is_replayed_without_repeating_cleanup() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let guard = VmResourceGuardHandle::new("fixture", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(VmValue::string("released"))
+        });
+
+        assert_eq!(guard.release().unwrap().display(), "released");
+        assert_eq!(guard.release().unwrap().display(), "released");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        drop(guard);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn drop_runs_abandoned_resource_cleanup() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&calls);
+        let guard = VmResourceGuardHandle::new("fixture", move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(VmValue::Nil)
+        });
+
+        drop(guard);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}
+
 /// The raw join handle type for spawned tasks.
 pub type VmJoinHandle = tokio::task::JoinHandle<Result<(VmValue, String), VmError>>;
 

@@ -109,9 +109,6 @@ fn harn_string_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-// Only the unix-gated terminal-session live test calls this; carry the same
-// cfg so Windows and feature-lean builds do not trip dead_code.
-#[cfg(all(unix, feature = "terminal-session"))]
 fn assert_response_schema(module: &str, method: &str, value: &VmValue) {
     let schema = schemas::lookup(module, method, schemas::SchemaKind::Response)
         .unwrap_or_else(|| panic!("missing response schema for {module}.{method}"));
@@ -593,15 +590,22 @@ fn install_default_wires_every_module_into_a_vm() {
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 1 host_lease = 81.
-    assert!(registry.builtins().len() >= 81);
+    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 3 host_lease = 83.
+    assert!(registry.builtins().len() >= 83);
 }
 
 #[test]
-fn host_lease_capability_registers_read_only_status() {
+fn host_lease_capability_registers_scoped_lifecycle() {
     let registry = collect_into_registry(HostLeaseCapability);
     let names: Vec<_> = registry.iter().map(|builtin| builtin.name).collect();
-    assert_eq!(names, vec!["hostlib_host_lease_status"]);
+    assert_eq!(
+        names,
+        vec![
+            "hostlib_host_lease_status",
+            "hostlib_host_lease_acquire",
+            "hostlib_host_lease_release",
+        ]
+    );
 
     let entry = registry
         .find("hostlib_host_lease_status")
@@ -624,6 +628,87 @@ fn host_lease_capability_registers_read_only_status() {
         }
         other => panic!("expected invalid host error, got {other:?}"),
     }
+}
+
+#[test]
+fn stdlib_host_lease_scope_releases_on_completion_exception_and_cancellation() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    let completed = r#"
+import { host_lease_status, with_host_lease } from "std/host_lease"
+
+pipeline default(task) {
+  const scope = with_host_lease(
+    {host: "mac-local", owner: "complete-test", resource_class: "rust-heavy"},
+    { handle -> handle.owner },
+  )
+  const state = host_lease_status("mac-local", "rust-heavy")
+  return {scope: scope, state: state}
+}
+"#;
+    let result = expect_dict(execute_harn(completed).expect("completed scope"));
+    let Some(VmValue::Dict(scope)) = result.get("scope") else {
+        panic!("scope result must be a dict");
+    };
+    assert_eq!(
+        scope.get("status").map(VmValue::display),
+        Some("completed".to_string())
+    );
+    assert_response_schema(
+        "host_lease",
+        "acquire",
+        scope.get("acquire").expect("scope acquire receipt"),
+    );
+    assert_response_schema(
+        "host_lease",
+        "release",
+        scope.get("release").expect("scope release receipt"),
+    );
+    let Some(VmValue::Dict(state)) = result.get("state") else {
+        panic!("state must be a dict");
+    };
+    assert!(matches!(state.get("active"), Some(VmValue::Nil)));
+
+    let failed = r#"
+import { host_lease_status, with_host_lease } from "std/host_lease"
+
+pipeline default(task) {
+  try {
+    with_host_lease(
+      {host: "mac-local", owner: "exception-test", resource_class: "rust-heavy"},
+      { _handle -> throw "fixture failure" },
+    )
+  } catch (_error) {
+    return host_lease_status("mac-local", "rust-heavy")
+  }
+}
+"#;
+    let state = expect_dict(execute_harn(failed).expect("failed scope"));
+    assert!(matches!(state.get("active"), Some(VmValue::Nil)));
+
+    let cancelled = r#"
+import { host_lease_status, with_host_lease } from "std/host_lease"
+
+pipeline default(task) {
+  const ready = channel("lease-ready", 1)
+  const blocked = channel("lease-blocked", 1)
+  const worker = spawn {
+    with_host_lease(
+      {host: "mac-local", owner: "cancel-test", resource_class: "rust-heavy"},
+      { _handle ->
+        send(ready, true)
+        receive(blocked)
+      },
+    )
+  }
+  receive(ready)
+  cancel(worker)
+  return host_lease_status("mac-local", "rust-heavy")
+}
+"#;
+    let state = expect_dict(execute_harn(cancelled).expect("cancelled scope"));
+    assert!(matches!(state.get("active"), Some(VmValue::Nil)));
 }
 
 #[test]

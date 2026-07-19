@@ -608,8 +608,8 @@ impl super::super::Vm {
         if name == "cancel" {
             crate::typecheck::validate_builtin_call(name, args, None)?;
             if let Some(VmValue::TaskHandle(id)) = args.first() {
-                if let Some(handle) = self.spawned_tasks.remove(id.as_str()) {
-                    handle.handle.abort();
+                if let Some(task) = self.spawned_tasks.remove(id.as_str()) {
+                    super::call_support::abort_task_and_wait(task).await;
                 }
             }
             self.stack.push(VmValue::Nil);
@@ -662,7 +662,7 @@ impl super::super::Vm {
                             }
                         }
                         _ = &mut timeout => {
-                            handle.abort();
+                            super::call_support::abort_join_and_wait(&mut handle).await;
                             self.stack.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
