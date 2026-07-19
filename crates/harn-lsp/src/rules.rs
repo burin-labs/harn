@@ -16,7 +16,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range, TextEdit, Url};
 
-use crate::helpers::offset_to_position;
+use crate::source_text::SourceText;
 
 const RULE_DIAGNOSTIC_CODE: &str = "HARN-RUL-001";
 const RULE_CONFIG_CODE: &str = "HARN-RUL-CONFIG";
@@ -65,7 +65,7 @@ impl RuleWorkspace {
         &self,
         uri: &Url,
         language_id: &str,
-        source: &str,
+        source: &SourceText,
     ) -> Vec<RuleDiagnostic> {
         if !self.enabled {
             return Vec::new();
@@ -193,7 +193,7 @@ impl RuleDiagnostic {
         }
     }
 
-    fn from_rule(rule: &RuleSpec, diag: harn_rules::Diagnostic, source: &str) -> Self {
+    fn from_rule(rule: &RuleSpec, diag: harn_rules::Diagnostic, source: &SourceText) -> Self {
         let range = rule_span_to_range(&diag.span, source);
         let repair_id = diag.fix.as_ref().map(|_| {
             format!(
@@ -254,7 +254,7 @@ struct RuleSpec {
 }
 
 impl RuleSpec {
-    fn diagnostics(&self, source: &str) -> Vec<RuleDiagnostic> {
+    fn diagnostics(&self, source: &SourceText) -> Vec<RuleDiagnostic> {
         let compiled = match CompiledRule::compile(&self.rule) {
             Ok(compiled) => compiled,
             Err(error) => {
@@ -561,13 +561,10 @@ fn severity_to_lsp(severity: Severity) -> DiagnosticSeverity {
     }
 }
 
-fn rule_span_to_range(span: &harn_rules::Span, source: &str) -> Range {
+fn rule_span_to_range(span: &harn_rules::Span, source: &SourceText) -> Range {
     Range {
-        start: offset_to_position(source, span.start_byte),
-        end: offset_to_position(
-            source,
-            span.end_byte.max(span.start_byte + 1).min(source.len()),
-        ),
+        start: source.position(span.start_byte),
+        end: source.position(span.end_byte.max(span.start_byte + 1).min(source.len())),
     }
 }
 
@@ -637,8 +634,11 @@ regex = "debugger;"
 
         let workspace = RuleWorkspace::from_root(temp.path());
         let uri = Url::from_file_path(temp.path().join("src/main.ts")).unwrap();
-        let diagnostics =
-            workspace.diagnostics_for_document(&uri, "typescript", "function f() { debugger; }\n");
+        let diagnostics = workspace.diagnostics_for_document(
+            &uri,
+            "typescript",
+            &SourceText::new("function f() { debugger; }\n"),
+        );
 
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0].diagnostic;
@@ -686,7 +686,7 @@ regex = "debugger;"
         let diagnostics = workspace.diagnostics_for_document(
             &uri,
             "harn-rule-engine",
-            "function f() { debugger; }\n",
+            &SourceText::new("function f() { debugger; }\n"),
         );
 
         assert_eq!(diagnostics.len(), 1);
@@ -731,7 +731,8 @@ regex = "debugger;"
             },
         );
         let uri = Url::from_file_path(temp.path().join("src/main.ts")).unwrap();
-        let diagnostics = workspace.diagnostics_for_document(&uri, "typescript", "debugger;\n");
+        let diagnostics =
+            workspace.diagnostics_for_document(&uri, "typescript", &SourceText::new("debugger;\n"));
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(

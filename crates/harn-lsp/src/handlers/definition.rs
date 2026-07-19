@@ -13,10 +13,9 @@ use tower_lsp::lsp_types::request::{
 use tower_lsp::lsp_types::*;
 
 use crate::constants::is_builtin;
-use crate::helpers::{
-    lsp_position_to_offset, offset_to_position, span_to_full_range, word_at_position,
-};
+use crate::helpers::{span_to_full_range, word_at_position};
 use crate::references::{find_references, identifier_token_spans_within};
+use crate::source_text::SourceText;
 use crate::symbols::HarnSymbolKind;
 use crate::HarnLsp;
 
@@ -206,8 +205,8 @@ impl HarnLsp {
             for token in &tokens {
                 if let TokenKind::Identifier(ref name) = token.kind {
                     if name == &word {
-                        let start = offset_to_position(&source, token.span.start);
-                        let end = offset_to_position(&source, token.span.end);
+                        let start = source.position(token.span.start);
+                        let end = source.position(token.span.end);
                         let kind = if def_offsets.contains(&token.span.start) {
                             DocumentHighlightKind::WRITE
                         } else {
@@ -328,8 +327,8 @@ impl HarnLsp {
                 .into_iter()
                 .map(|span| TextEdit {
                     range: Range {
-                        start: offset_to_position(&source, span.start),
-                        end: offset_to_position(&source, span.end),
+                        start: source.position(span.start),
+                        end: source.position(span.end),
                     },
                     new_text: new_name.clone(),
                 })
@@ -366,11 +365,11 @@ impl HarnLsp {
 /// resolution.
 fn resolve_prompt_asset_definition(
     uri: &Url,
-    source: &str,
+    source: &SourceText,
     position: Position,
     program: &[SNode],
 ) -> Option<Location> {
-    let offset = lsp_position_to_offset(source, position);
+    let offset = source.offset(position);
     let (template_path, _) = find_render_string_at_offset(program, offset)?;
     let current_path = uri.to_file_path().ok()?;
     let resolved = if let Some(asset_ref) = harn_modules::asset_paths::parse(&template_path) {
@@ -557,7 +556,7 @@ fn resolve_cross_file_definition(uri: &Url, word: &str) -> Option<Location> {
     ) {
         return None;
     }
-    let imported_source = std::fs::read_to_string(&def.file).ok()?;
+    let imported_source = SourceText::new(std::fs::read_to_string(&def.file).ok()?);
     let imported_uri = Url::from_file_path(&def.file).ok()?;
     Some(Location {
         uri: imported_uri,

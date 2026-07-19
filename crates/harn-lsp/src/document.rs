@@ -9,10 +9,14 @@ use crate::helpers::{
     span_to_full_range, span_to_range,
 };
 use crate::rules::{RuleDiagnostic, RuleWorkspace};
+use crate::source_text::SourceText;
 use crate::symbols::{build_symbol_table, SymbolInfo};
 
 pub(crate) struct DocumentState {
-    pub(crate) source: String,
+    /// The document text and the line index positions resolve against. Both
+    /// are replaced together on every version bump, so a position conversion
+    /// can never consult an index built for older text.
+    pub(crate) source: SourceText,
     pub(crate) language_id: String,
     analysis: AnalysisDatabase,
     source_id: SourceId,
@@ -52,7 +56,7 @@ impl DocumentState {
         let source_id = SourceId::new("document");
         analysis.set_source(source_id.clone(), source.clone(), SourceVersion(1));
         Self {
-            source,
+            source: SourceText::new(source),
             language_id,
             analysis,
             source_id,
@@ -70,10 +74,10 @@ impl DocumentState {
     }
 
     pub(crate) fn update_source(&mut self, source: String) {
-        self.source = source;
         self.version = SourceVersion(self.version.0 + 1);
         self.analysis
-            .set_source(self.source_id.clone(), self.source.clone(), self.version);
+            .set_source(self.source_id.clone(), source.clone(), self.version);
+        self.source = SourceText::new(source);
         self.dirty = true;
     }
 

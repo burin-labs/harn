@@ -5,9 +5,8 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::constants::{builtin_doc, builtin_signature, keyword_doc};
-use crate::helpers::{
-    is_member_access, lsp_position_to_offset, offset_to_position, word_span_at_position,
-};
+use crate::helpers::{is_member_access, word_span_at_position};
+use crate::source_text::SourceText;
 use crate::symbols::{
     format_flow_attributes_block, format_shape_expanded, format_union_shapes_expanded,
     HarnSymbolKind, SymbolInfo,
@@ -29,7 +28,7 @@ pub(crate) enum HoverTarget {
 /// Resolve the word under the cursor. `None` means nothing is known about it,
 /// which is the honest answer for an unresolved member access.
 pub(crate) fn resolve_hover_target(
-    source: &str,
+    source: &SourceText,
     symbols: &[SymbolInfo],
     position: Position,
 ) -> Option<HoverTarget> {
@@ -52,7 +51,7 @@ pub(crate) fn resolve_hover_target(
 
     // Prefer the innermost scope that contains the cursor position so that
     // shadowed bindings resolve to the closest definition.
-    let cursor_offset = lsp_position_to_offset(source, position);
+    let cursor_offset = source.offset(position);
     let mut best: Option<&SymbolInfo> = None;
     for sym in symbols {
         if sym.name != word {
@@ -101,9 +100,9 @@ pub(crate) fn resolve_hover_target(
     best.map(|sym| HoverTarget::Symbol(Box::new(sym.clone())))
 }
 
-fn line_prefix_at_position(source: &str, position: Position) -> Option<&str> {
-    let offset = lsp_position_to_offset(source, position);
-    if offset == source.len() && offset_to_position(source, offset).line < position.line {
+fn line_prefix_at_position(source: &SourceText, position: Position) -> Option<&str> {
+    let offset = source.offset(position);
+    if offset == source.len() && source.position(offset).line < position.line {
         return None;
     }
     let line_start = source[..offset]
@@ -375,13 +374,13 @@ mod tests {
 
     #[test]
     fn signature_prefix_uses_utf16_position_without_slicing_mid_char() {
-        let source = "éé(log(";
-        let prefix = line_prefix_at_position(source, Position::new(0, 7)).unwrap();
-        assert_eq!(prefix, source);
+        let source = SourceText::new("éé(log(");
+        let prefix = line_prefix_at_position(&source, Position::new(0, 7)).unwrap();
+        assert_eq!(prefix, source.as_str());
     }
 
     #[test]
     fn signature_prefix_rejects_out_of_range_line() {
-        assert!(line_prefix_at_position("log(", Position::new(4, 0)).is_none());
+        assert!(line_prefix_at_position(&SourceText::new("log("), Position::new(4, 0)).is_none());
     }
 }

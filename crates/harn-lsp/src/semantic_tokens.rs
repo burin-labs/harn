@@ -2,7 +2,7 @@ use harn_lexer::{Span, Token, TokenKind};
 use tower_lsp::lsp_types::*;
 
 use crate::constants::{is_builtin, TYPE_NAMES};
-use crate::helpers::{offset_to_position, utf16_len};
+use crate::source_text::{utf16_len, SourceText};
 use crate::symbols::{HarnSymbolKind, SymbolInfo};
 
 /// Indices into the semantic token legend's token types array.
@@ -167,7 +167,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
 pub(crate) fn build_semantic_tokens(
     tokens: &[Token],
     symbols: &[SymbolInfo],
-    source: &str,
+    source: &SourceText,
 ) -> Vec<SemanticToken> {
     let mut result = Vec::new();
     let mut prev_line: u32 = 0;
@@ -220,7 +220,7 @@ pub(crate) fn build_semantic_tokens(
         };
 
         // LSP semantic tokens use 0-based UTF-16 line/column positions.
-        let start_position = offset_to_position(source, token.span.start);
+        let start_position = source.position(token.span.start);
         let line = start_position.line;
         let start_char = start_position.character;
 
@@ -417,7 +417,7 @@ mod tests {
         let source = "const mood = \"😀\"\n";
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize_with_comments().unwrap();
-        let semantic = build_semantic_tokens(&tokens, &[], source);
+        let semantic = build_semantic_tokens(&tokens, &[], &SourceText::new(source));
         let string_token = semantic
             .iter()
             .find(|token| token.token_type == sem::STRING)

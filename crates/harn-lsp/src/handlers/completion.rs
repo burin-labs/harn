@@ -9,9 +9,9 @@ use crate::constants::{
     builtin_details, builtin_doc, keyword_doc, DICT_METHODS, KEYWORDS, LIST_METHODS, STRING_METHODS,
 };
 use crate::helpers::{
-    char_before_position, infer_dot_receiver_name, infer_dot_receiver_type, lsp_position_to_offset,
-    position_in_span,
+    char_before_position, infer_dot_receiver_name, infer_dot_receiver_type, position_in_span,
 };
+use crate::source_text::SourceText;
 use crate::symbols::{EnumVariantInfo, HarnSymbolKind, SymbolInfo};
 use crate::HarnLsp;
 
@@ -182,7 +182,7 @@ fn resolve_kind_of(item: &CompletionItem) -> Option<ResolveKind> {
 }
 
 pub(super) fn dot_completion_items(
-    source: &str,
+    source: &SourceText,
     position: Position,
     symbols: &[SymbolInfo],
 ) -> Vec<CompletionItem> {
@@ -329,11 +329,11 @@ fn enum_variants(symbols: &[SymbolInfo], type_name: &str) -> Option<Vec<EnumVari
 /// caller then falls through to the normal completion list).
 pub(super) fn discriminator_value_completions(
     ast: &[harn_parser::SNode],
-    source: &str,
+    source: &SourceText,
     position: Position,
     symbols: &[SymbolInfo],
 ) -> Option<Vec<CompletionItem>> {
-    let cursor_offset = lsp_position_to_offset(source, position);
+    let cursor_offset = source.offset(position);
     let match_node = find_innermost_match_at(ast, cursor_offset)?;
     let harn_parser::Node::MatchExpr { value, arms } = &match_node.node else {
         return None;

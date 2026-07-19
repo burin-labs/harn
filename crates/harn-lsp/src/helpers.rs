@@ -5,6 +5,7 @@ use harn_parser::{diagnostic, ParserError, Repair, RepairSafety, TypeExpr};
 use serde_json::{Map, Value};
 use tower_lsp::lsp_types::*;
 
+use crate::source_text::SourceText;
 use crate::symbols::SymbolInfo;
 
 /// Serialize a [`Repair`] into the JSON envelope that rides on
@@ -140,15 +141,15 @@ pub(crate) fn span_to_range(span: &Span) -> Range {
 }
 
 /// Convert a Span to an LSP Range using byte offsets for accurate end position.
-pub(crate) fn span_to_full_range(span: &Span, source: &str) -> Range {
+pub(crate) fn span_to_full_range(span: &Span, source: &SourceText) -> Range {
     Range {
-        start: offset_to_position(source, span.start),
-        end: offset_to_position(source, span.end.max(span.start + 1).min(source.len())),
+        start: source.position(span.start),
+        end: source.position(span.end.max(span.start + 1).min(source.len())),
     }
 }
 
 /// Check whether a 0-based LSP Position falls within a 1-based Span.
-pub(crate) fn position_in_span(pos: &Position, span: &Span, source: &str) -> bool {
+pub(crate) fn position_in_span(pos: &Position, span: &Span, source: &SourceText) -> bool {
     let r = span_to_full_range(span, source);
     if pos.line < r.start.line || pos.line > r.end.line {
         return false;
@@ -162,72 +163,8 @@ pub(crate) fn position_in_span(pos: &Position, span: &Span, source: &str) -> boo
     true
 }
 
-/// Convert a 0-based LSP Position to a byte offset in the source string.
-pub(crate) fn lsp_position_to_offset(source: &str, pos: Position) -> usize {
-    let Some((line_start, line_end)) = line_byte_range(source, pos.line as usize) else {
-        return source.len();
-    };
-    line_start + utf16_col_to_byte(&source[line_start..line_end], pos.character)
-}
-
-/// Convert a byte offset in `source` to a 0-based LSP Position.
-pub(crate) fn offset_to_position(source: &str, offset: usize) -> Position {
-    let offset = offset.min(source.len());
-    let mut line = 0u32;
-    let mut line_start = 0usize;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            let col = utf16_len(&source[line_start..offset]);
-            return Position::new(line, col);
-        }
-        if ch == '\n' {
-            line += 1;
-            line_start = i + ch.len_utf8();
-        }
-    }
-    Position::new(line, utf16_len(&source[line_start..offset]))
-}
-
-pub(crate) fn utf16_len(text: &str) -> u32 {
-    text.encode_utf16().count() as u32
-}
-
-fn line_byte_range(source: &str, line: usize) -> Option<(usize, usize)> {
-    let mut current_line = 0usize;
-    let mut line_start = 0usize;
-    for (idx, ch) in source.char_indices() {
-        if ch == '\n' {
-            if current_line == line {
-                return Some((line_start, idx));
-            }
-            current_line += 1;
-            line_start = idx + ch.len_utf8();
-        }
-    }
-    if current_line == line {
-        Some((line_start, source.len()))
-    } else {
-        None
-    }
-}
-
-fn utf16_col_to_byte(line: &str, character: u32) -> usize {
-    let mut units = 0u32;
-    for (idx, ch) in line.char_indices() {
-        let width = ch.len_utf16() as u32;
-        if units + width > character {
-            return idx;
-        }
-        units += width;
-        if units == character {
-            return idx + ch.len_utf8();
-        }
-    }
-    line.len()
-}
-
 /// Get the word at a given position.
-pub(crate) fn word_at_position(source: &str, position: Position) -> Option<String> {
+pub(crate) fn word_at_position(source: &SourceText, position: Position) -> Option<String> {
     word_span_at_position(source, position).map(|(word, _)| word)
 }
 
@@ -237,9 +174,12 @@ pub(crate) fn word_at_position(source: &str, position: Position) -> Option<Strin
 /// rather than what precedes the cursor. `char_before_position` answers the
 /// latter, which is the wrong question for hover: a hover cursor lands *inside*
 /// a word (`ex|it`), so the character before it is just the previous letter.
-pub(crate) fn word_span_at_position(source: &str, position: Position) -> Option<(String, usize)> {
-    let offset = lsp_position_to_offset(source, position);
-    let (line_start, line_end) = line_byte_range(source, position.line as usize)?;
+pub(crate) fn word_span_at_position(
+    source: &SourceText,
+    position: Position,
+) -> Option<(String, usize)> {
+    let offset = source.offset(position);
+    let (line_start, line_end) = source.line_range(position.line)?;
     if offset < line_start || offset > line_end {
         return None;
     }
@@ -292,18 +232,18 @@ pub(crate) fn is_member_access(source: &str, word_start: usize) -> bool {
 }
 
 /// Check if cursor is right after a `.` (for method completion).
-pub(crate) fn char_before_position(source: &str, position: Position) -> Option<char> {
-    let offset = lsp_position_to_offset(source, position);
-    let (line_start, _) = line_byte_range(source, position.line as usize)?;
+pub(crate) fn char_before_position(source: &SourceText, position: Position) -> Option<char> {
+    let offset = source.offset(position);
+    let (line_start, _) = source.line_range(position.line)?;
     if offset <= line_start {
         return None;
     }
     source[..offset].chars().next_back()
 }
 
-fn dot_receiver_identifier(source: &str, position: Position) -> Option<String> {
-    let offset = lsp_position_to_offset(source, position);
-    let (line_start, line_end) = line_byte_range(source, position.line as usize)?;
+fn dot_receiver_identifier(source: &SourceText, position: Position) -> Option<String> {
+    let offset = source.offset(position);
+    let (line_start, line_end) = source.line_range(position.line)?;
     if offset <= line_start {
         return None;
     }
@@ -357,18 +297,18 @@ fn previous_char_boundary(text: &str, index: usize) -> usize {
         .map_or(0, |(idx, _)| idx)
 }
 
-pub(crate) fn infer_dot_receiver_name(source: &str, position: Position) -> Option<String> {
+pub(crate) fn infer_dot_receiver_name(source: &SourceText, position: Position) -> Option<String> {
     dot_receiver_identifier(source, position)
 }
 
 /// Try to figure out what type the expression before `.` is.
 pub(crate) fn infer_dot_receiver_type(
-    source: &str,
+    source: &SourceText,
     position: Position,
     symbols: &[SymbolInfo],
 ) -> Option<TypeExpr> {
-    let offset = lsp_position_to_offset(source, position);
-    let (line_start, line_end) = line_byte_range(source, position.line as usize)?;
+    let offset = source.offset(position);
+    let (line_start, line_end) = source.line_range(position.line)?;
     if offset <= line_start {
         return None;
     }
@@ -523,28 +463,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lsp_offsets_use_utf16_columns() {
-        let source = "let 😀name = \"é\"\nnext";
-        let name_offset = source.find("name").unwrap();
-        assert_eq!(
-            lsp_position_to_offset(source, Position::new(0, 6)),
-            name_offset
-        );
-        assert_eq!(offset_to_position(source, name_offset), Position::new(0, 6));
-    }
-
-    #[test]
     fn word_at_position_handles_non_ascii_prefix() {
-        let source = "let café = 1";
+        let source = SourceText::new("let café = 1");
         assert_eq!(
-            word_at_position(source, Position::new(0, 6)).as_deref(),
+            word_at_position(&source, Position::new(0, 6)).as_deref(),
             Some("café")
         );
     }
 
     #[test]
     fn span_range_uses_utf16_length() {
-        let source = "let mood = \"😀\"";
+        let source = SourceText::new("let mood = \"😀\"");
         let start = source.find("\"😀\"").unwrap();
         let end = start + "\"😀\"".len();
         let range = span_to_full_range(
@@ -555,7 +484,7 @@ mod tests {
                 column: 12,
                 end_line: 1,
             },
-            source,
+            &source,
         );
         assert_eq!(range.start, Position::new(0, 11));
         assert_eq!(range.end, Position::new(0, 15));
