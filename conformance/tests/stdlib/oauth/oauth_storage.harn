@@ -202,8 +202,7 @@ fn exercise_namespace(harness: Harness) {
   require_token("namespace.file", s.get("ns"), "ns-tok")
   s.delete("ns")
   const inner = memory()
-  const cs = ns
-    .custom(
+  const cs = ns.custom(
     {
       get: { key -> inner.get(key) },
       set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },

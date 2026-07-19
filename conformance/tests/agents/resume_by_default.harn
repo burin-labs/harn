@@ -33,8 +33,7 @@ pipeline default() {
       const parent_verify_audits = lifecycle_audit_log_take()
       harness.stdio.println("parent_verify_mechanism=" + parent_verify.mechanism)
       harness.stdio.println("parent_verify_kind=" + parent_verify_audits[0].kind)
-      const local_verify = RB
-        .local_runtime(
+      const local_verify = RB.local_runtime(
         harness,
         {handle: "v-2", reason: "verify", conditions: {trigger: {kind: "x"}}},
       )

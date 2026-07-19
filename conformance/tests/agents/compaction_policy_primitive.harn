@@ -11,8 +11,9 @@
 pipeline test(task) {
   const session = agent_session_open("compaction-policy-primitive")
   // Register a session-specific policy.
-  const snapshot = compaction
-    .policy({session_id: session, strategy: "summarize-then-prune", max_tokens: 1, keep_last: 1})
+  const snapshot = compaction.policy(
+    {session_id: session, strategy: "summarize-then-prune", max_tokens: 1, keep_last: 1},
+  )
   __io_println(snapshot["strategy"] == "summarize-then-prune")
   __io_println(snapshot["max_tokens"] == 1)
   // Empty session — check should defer.
@@ -40,8 +41,7 @@ pipeline test(task) {
   __io_println(primed_decision["engine_strategy"] == "llm")
   // compaction.run with a plan override forcing a custom strategy avoids
   // needing an LLM round-trip during conformance.
-  const outcome = compaction
-    .run(
+  const outcome = compaction.run(
     session,
     {
       strategy: "custom",

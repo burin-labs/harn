@@ -163,8 +163,9 @@ fn resolve_harn_bin() -> string {
     return env_bin
   }
   let target_dir = ""
-  const meta = harness.process
-    .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
+  const meta = harness.process.spawn_captured(
+    {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
+  )
   if meta.success {
     const parsed = try {
       json_parse(meta.stdout)
@@ -182,8 +183,7 @@ fn resolve_harn_bin() -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process
-      .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
+    const build = harness.process.spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
     if !build.success {
       __io_eprint(build.stderr)
       throw "cargo build -p harn-cli failed"
@@ -202,8 +202,7 @@ pipeline main(task) {
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the snippet scratch directory lives there (removed afterward) rather
    * than under the system temp dir the bash version used. */
-  const mk = harness.process
-    .spawn_captured({cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
+  const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
   if !mk.success {
     __io_eprintln("error: could not create temp directory")
     exit(1)

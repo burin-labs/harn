@@ -53,7 +53,9 @@ fn __load_cases(harness: Harness, path: string, max_cases) {
   const raw = try {
     harness.fs.read_text(path)
   } catch (e) {
-    harness.stdio.eprintln("error: failed to read scope-triage dataset " + path + ": " + to_string(e))
+    harness.stdio.eprintln(
+      "error: failed to read scope-triage dataset " + path + ": " + to_string(e),
+    )
     return nil
   }
   const decoded = try {
@@ -408,8 +410,7 @@ fn main(harness: Harness) -> int {
   harness.fs.write_text(path_join(resolved_output, "summary.json"), json_stringify_pretty(report))
   harness.fs.write_text(path_join(resolved_output, "per_case.jsonl"), __jsonl(reports))
   harness.fs.write_text(path_join(resolved_output, "summary.md"), __markdown(report))
-  harness.stdio
-    .eprintln(
+  harness.stdio.eprintln(
     "wrote "
       + path_join(resolved_output, "summary.json")
       + ", "

@@ -669,7 +669,12 @@ pub fn has_mock_time(text: string) -> bool {
  * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
  * followed by the pre-formatted `hint_lines`; returns the violation count.
  */
-fn report_pattern(files: list, skip: fn(string) -> bool, pattern: string, hint_lines: list<string>) -> int {
+fn report_pattern(
+  files: list,
+  skip: fn(string) -> bool,
+  pattern: string,
+  hint_lines: list<string>,
+) -> int {
   let count = 0
   for f in files {
     if skip(f.rel) {

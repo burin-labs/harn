@@ -888,8 +888,7 @@ fn __prelude_persona_candidate(group, opts) {
       pass: true,
       compared_traces: group.count,
       failures: [],
-      traces: group.examples
-        .map(
+      traces: group.examples.map(
         { example -> return {trace_id: example.trace_id, pass: true, details: ["exact input/output/downstream recurrence"]} },
       ),
     },

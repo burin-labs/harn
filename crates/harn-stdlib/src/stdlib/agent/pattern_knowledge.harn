@@ -233,9 +233,7 @@ fn pl_memory_records(kind: string = "", options = nil) -> list {
 }
 
 fn pl_record_values(kind: string, options = nil) -> list {
-  return pl_memory_records(kind, options)
-    .map({ record -> record?.value ?? {} })
-    .filter(
+  return pl_memory_records(kind, options).map({ record -> record?.value ?? {} }).filter(
     { value -> value?.schema == PATTERN_SCHEMA && (value?.record_kind ?? value?.kind) == kind },
   )
     .to_list()
@@ -531,7 +529,13 @@ fn pl_render_skill_body(
   return join(lines + [""], "\n")
 }
 
-fn pl_make_prompt_proposal(id: string, key: string, observations: list, existing: dict, now: string) -> dict {
+fn pl_make_prompt_proposal(
+  id: string,
+  key: string,
+  observations: list,
+  existing: dict,
+  now: string,
+) -> dict {
   const words = key.split("-")
   const title = pl_title_from_words(words)
   const description = "Reusable guidance learned from " + to_string(len(observations)) + " similar prompts."
@@ -562,7 +566,13 @@ fn pl_make_prompt_proposal(id: string, key: string, observations: list, existing
   }
 }
 
-fn pl_make_tool_proposal(id: string, key: string, observations: list, existing: dict, now: string) -> dict {
+fn pl_make_tool_proposal(
+  id: string,
+  key: string,
+  observations: list,
+  existing: dict,
+  now: string,
+) -> dict {
   const sequence = key.split("-")
   const title = "Repeated " + join(sequence, " -> ") + " workflow"
   const description = "Reusable guidance learned from " + to_string(len(observations))
@@ -794,8 +804,9 @@ pub fn pattern_learning_refresh(options = nil) -> list {
  */
 pub fn pattern_learning_pending(options = nil) -> list {
   pattern_learning_ensure_migrated(options)
-  return pl_record_values("pending", options)
-    .sort_by({ item -> to_string(999999 - (item?.support ?? 0)) + ":" + item.id })
+  return pl_record_values("pending", options).sort_by(
+    { item -> to_string(999999 - (item?.support ?? 0)) + ":" + item.id },
+  )
 }
 
 /**
@@ -933,7 +944,12 @@ pub fn pattern_learning_skill_matches(query: string, limit: int = 3, options = n
  * @errors: []
  * @api_stability: experimental
  */
-pub fn pattern_learning_context(session_id: string, message: string, limit: int = 3, options = nil) -> dict {
+pub fn pattern_learning_context(
+  session_id: string,
+  message: string,
+  limit: int = 3,
+  options = nil,
+) -> dict {
   return try {
     pattern_learning_context_inner(session_id, message, limit, options)
   } catch (e) {
@@ -956,7 +972,9 @@ fn pattern_learning_context_inner(
   let lines = ["<learned_context>"]
   if len(matches) > 0 {
     const loaded = join(
-      matches.map({ candidate -> candidate.learned_skill.name + " (" + to_string(candidate.score) + ")" }),
+      matches.map(
+        { candidate -> candidate.learned_skill.name + " (" + to_string(candidate.score) + ")" },
+      ),
       ", ",
     )
     lines = lines

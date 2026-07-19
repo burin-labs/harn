@@ -68,7 +68,9 @@ fn main(harness: Harness) -> int {
     && materialized.pass
     && fired.pass
   if !valid {
-    harness.stdio.eprintln("persona prompt eval artifact did not prove the full compile-to-fire path")
+    harness.stdio.eprintln(
+      "persona prompt eval artifact did not prove the full compile-to-fire path",
+    )
     return 1
   }
   return 0

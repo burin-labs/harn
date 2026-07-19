@@ -390,8 +390,7 @@ fn __render_github(surface_config: dict, ctx: DisclosureContext, config: Disclos
 fn __public_principals(ctx: DisclosureContext) -> list<dict> {
   let principals = []
   for principal in ctx.principals {
-    principals = principals
-      .push(
+    principals = principals.push(
       {
         subject: principal.subject,
         kind: principal.kind,
@@ -635,6 +634,10 @@ pub fn git_trailers(chain, options: DisclosureGitTrailerOptions = {}) -> string 
  * @effects: [fs-read, env-read]
  * @errors: [TypeError, ValueError]
  */
-pub fn append_git_trailers(message: string, chain, options: DisclosureGitTrailerOptions = {}) -> string {
+pub fn append_git_trailers(
+  message: string,
+  chain,
+  options: DisclosureGitTrailerOptions = {},
+) -> string {
   return __append_trailer_block(message, git_trailers(chain, options))
 }

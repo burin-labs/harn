@@ -8,16 +8,16 @@ pipeline main() {
       {role: "assistant", content: "four"},
     ],
   )
-  const with_reminder = transcript
-    .inject_reminder(
+  const with_reminder = transcript.inject_reminder(
     base,
     {body: "expire at compaction boundary", dedupe_key: "ttl", ttl_turns: 1, preserve_on_compact: true},
   ).transcript
   const cursor = event_log.latest(topic)
   const compacted = transcript_compact(with_reminder, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   const reminders = transcript_events_by_kind(compacted, "system_reminder")
-  const stream = event_log
-    .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder.expired"})
+  const stream = event_log.subscribe(
+    {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder.expired"},
+  )
   const logged = stream.next().value
   __io_println(len(reminders))
   __io_println(logged.kind)

@@ -399,7 +399,9 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
     opts,
   )
   if match_kind == "structural" || match_kind == "line" {
-    return result.merge({whitespace_explanation: edit_explain_whitespace_difference(old_text, candidate.text)})
+    return result.merge(
+      {whitespace_explanation: edit_explain_whitespace_difference(old_text, candidate.text)},
+    )
   }
   return result
 }
@@ -1050,8 +1052,7 @@ pub fn edit_insert_at_anchor(params) {
  */
 pub fn edit_batch_apply(params) {
   const payload = hostlib_ast_batch_apply(params ?? {}) ?? {}
-  return payload
-    .merge(
+  return payload.merge(
     {
       ok: (payload?.summary?.files_failed ?? 1) == 0,
       provenance: {module: "std/edit", helper: "edit_batch_apply", caller: params?.provenance},

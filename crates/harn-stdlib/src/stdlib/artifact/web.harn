@@ -193,11 +193,10 @@ pub fn web_artifact_text_fallback(html, options = nil) {
   const without_styles = regex_replace("(?is)<style\\b[^>]*>.*?</style>", " ", without_scripts)
   const without_head = regex_replace("(?is)<head\\b[^>]*>.*?</head>", " ", without_styles)
   const without_tags = regex_replace("(?is)<[^>]+>", " ", without_head)
-  const decoded = without_tags
-    .replace("&nbsp;", " ")
-    .replace("&amp;", "&")
-    .replace("&lt;", "<")
-    .replace("&gt;", ">")
+  const decoded = without_tags.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace(
+    "&gt;",
+    ">",
+  )
     .replace("&quot;", "\"")
     .replace("&#39;", "'")
   const fallback = trim(regex_replace("\\s+", " ", decoded))

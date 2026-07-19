@@ -526,8 +526,7 @@ fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
   if !__refresh_needed(observed, now_s, reason, observed_token) {
     return observed
   }
-  return cfg.storage
-    .with_refresh_lock(
+  return cfg.storage.with_refresh_lock(
     cfg.storage_key,
     { ->
       const stored = cfg.storage.get(cfg.storage_key)
@@ -706,7 +705,12 @@ fn __require_token_exchange_capability(cfg) {
   return capability
 }
 
-fn __validate_token_exchange(capability, subject_token_type, actor_token_type, requested_token_type) {
+fn __validate_token_exchange(
+  capability,
+  subject_token_type,
+  actor_token_type,
+  requested_token_type,
+) {
   if !__list_allows(capability?.subject_token_types, subject_token_type) {
     throw "std/oauth/client: subject_token_type `" + subject_token_type + "` is not supported by "
       + capability.id

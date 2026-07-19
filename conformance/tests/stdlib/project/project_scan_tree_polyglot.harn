@@ -7,8 +7,7 @@ pipeline test(task) {
   harness.fs.write_text("polyglot_tree/frontend/package-lock.json", "{}\n")
   harness.fs.write_text("polyglot_tree/frontend/tsconfig.json", "{ }\n")
   harness.fs.write_text("polyglot_tree/frontend/src/app.tsx", "export const App = () => null\n")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     "polyglot_tree/backend/Cargo.toml",
     "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n",
   )

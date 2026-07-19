@@ -60,7 +60,9 @@ pipeline default() {
       )
       __io_println(agent_session_system_prompt(sid)?.contains("Persistent contract."))
       __io_println(
-        resumed_without_prompt.transcript.metadata.system_prompt.content.contains("Persistent contract."),
+        resumed_without_prompt.transcript.metadata.system_prompt.content.contains(
+          "Persistent contract.",
+        ),
       )
     },
   )

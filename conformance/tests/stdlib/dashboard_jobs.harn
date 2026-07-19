@@ -56,7 +56,9 @@ pipeline default() {
   )
   __io_println(cloud.status)
   __io_println(len(view.receipts))
-  const stream = event_log.subscribe({topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1})
+  const stream = event_log.subscribe(
+    {topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1},
+  )
   const logged = stream.next().value
   __io_println(logged.kind)
   __io_println(logged.payload.job_id)

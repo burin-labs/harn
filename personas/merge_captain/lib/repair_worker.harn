@@ -271,8 +271,7 @@ pub fn invoke_for_ci_failure(args) {
     prior_state: args.prior_state ?? "discovered",
     classification_reason: args.classification_reason ?? "",
   }
-  const failing = (observation.failed_required_checks ?? [])
-    .map({ name -> {name: name, conclusion: "failure"} })
+  const failing = (observation.failed_required_checks ?? []).map({ name -> {name: name, conclusion: "failure"} })
   const bundle = build(
     {
       kind: "ci_failure",

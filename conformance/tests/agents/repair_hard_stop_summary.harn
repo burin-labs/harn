@@ -76,11 +76,13 @@ pipeline default() {
       __io_println(cf?.class)
       __io_println(contains(to_string(cf?.snippet ?? ""), "FATAL: linker error in module X"))
       __io_println(cf?.same_diagnostic_streak)
-      const decisions = events_of(captured.events, "loop_control_decision")
-        .filter({ d -> d.reason == "thrash_hard_stop" })
+      const decisions = events_of(captured.events, "loop_control_decision").filter(
+        { d -> d.reason == "thrash_hard_stop" },
+      )
       __io_println(len(decisions))
-      const stalls = events_of(captured.events, "agent_loop_stall_warning")
-        .filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
+      const stalls = events_of(captured.events, "agent_loop_stall_warning").filter(
+        { s -> s.warning.pattern == "stuck_same_diagnostic" },
+      )
       __io_println(
         contains(to_string(stalls[0].warning?.diagnostic_snippet ?? ""), "FATAL: linker error in module X"),
       )

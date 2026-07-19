@@ -2,10 +2,8 @@ pipeline test(task) {
   log(stream.collect(stream.map([], { x -> x })))
   log(stream.collect(stream.filter([1], { x -> x == 1 })))
   log(
-    stream
-      .collect(
-      stream
-        .tap(
+    stream.collect(
+      stream.tap(
         [],
         { x ->
           throw "tap should not run"
@@ -34,8 +32,7 @@ pipeline test(task) {
   const winner_channel = channel("winner", 1)
   send(winner_channel, "winner")
   log(stream.first(stream.race(slow_channel, winner_channel)))
-  const source_error = stream
-    .map(
+  const source_error = stream.map(
     [1, 2],
     { x ->
       if x == 2 {

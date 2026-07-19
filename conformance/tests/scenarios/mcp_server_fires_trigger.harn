@@ -4,13 +4,11 @@ pipeline default() {
   const root = path_join(harness.fs.temp_dir(), "harn-mcp-fire-" + uuid())
   harness.fs.mkdir(root)
   const log_path = path_join(root, "trigger.log")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"cron-ok\"\nkind = \"cron\"\nprovider = \"cron\"\nschedule = \"* * * * *\"\nmatch = { events = [\"cron.tick\"] }\nhandler = \"handlers::on_ok\"\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\nlet log_path = \""
       + log_path

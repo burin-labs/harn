@@ -181,8 +181,7 @@ pub fn run_timing_rows(samples: list) -> list {
 fn table_rows(rows: list) -> list {
   let out = []
   for row in rows ?? [] {
-    out = out
-      .push(
+    out = out.push(
       {
         workflow: row.label,
         minutes: format_float_2(row.minutes),
@@ -276,8 +275,7 @@ fn main(_harness: Harness) {
     if has_billing_usage_items(billing) {
       harness.stdio.println(json_stringify_pretty(billing))
     } else {
-      harness.stdio
-        .println(
+      harness.stdio.println(
         json_stringify(
           {
             error: "billing usage endpoint unavailable; rerun without --json for the run-timing fallback table",
@@ -288,13 +286,13 @@ fn main(_harness: Harness) {
     return nil
   }
   if has_billing_usage_items(billing) {
-    harness.stdio
-      .println("GitHub Actions spend report for org \"${org}\" (source: billing usage report)")
+    harness.stdio.println(
+      "GitHub Actions spend report for org \"${org}\" (source: billing usage report)",
+    )
     harness.stdio.println(render_spend_table(billing_usage_rows(billing, requested_repos)))
   } else {
     harness.stdio.println("GitHub Actions spend report for org \"${org}\"")
-    harness.stdio
-      .eprintln(
+    harness.stdio.eprintln(
       "(billing usage endpoint unavailable or unauthorized; falling back to run /timing minutes)",
     )
     harness.stdio.println(render_spend_table(collect_run_timing_rows(org, repos, runs_per_repo)))

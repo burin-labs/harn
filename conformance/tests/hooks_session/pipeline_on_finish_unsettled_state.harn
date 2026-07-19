@@ -11,10 +11,10 @@ pipeline default() {
       const helper_state = unsettled_state(harness)
       const direct_counts = harness.counts(state)
       const helper_counts = counts(helper_state)
-      harness.stdio
-        .println("empty=" + to_string(harness.is_empty(state)) + "/" + to_string(is_empty(state)))
-      harness.stdio
-        .println(
+      harness.stdio.println(
+        "empty=" + to_string(harness.is_empty(state)) + "/" + to_string(is_empty(state)),
+      )
+      harness.stdio.println(
         "counts=" + to_string(direct_counts.suspended) + "," + to_string(helper_counts.queued)
           + ","
           + to_string(helper_counts.partial)

@@ -221,8 +221,7 @@ pipeline default() {
   const paired_entry = paired.schema_transform(tools.tools[0])
   __io_println(contains(paired_entry.parameters.properties.keys(), "_nl_intent"))
   const _ = mock_time(0)
-  const r7 = paired
-    .caller(
+  const r7 = paired.caller(
     envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
     next,
   )

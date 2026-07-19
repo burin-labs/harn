@@ -4,8 +4,7 @@ pipeline default() {
   const o = obs()
   o.reset()
   o.configure({backend: o.Backend.test()})
-  const result = o
-    .span(
+  const result = o.span(
     "plan_review",
     {pr_number: 1915},
     { ->

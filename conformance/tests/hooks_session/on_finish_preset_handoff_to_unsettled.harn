@@ -18,8 +18,7 @@ pipeline default() {
       harness.stdio.println("result_status=" + result.status)
       harness.stdio.println("target=" + result.envelope.target_pipeline)
       harness.stdio.println("priority=" + result.envelope.payload.priority)
-      harness.stdio
-        .println(
+      harness.stdio.println(
         "envelopes_in_unsettled="
           + to_string(len(harness.unsettled_state().partial_handoffs)),
       )

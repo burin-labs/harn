@@ -81,7 +81,11 @@ fn add_filter(filters: list<string>, filter: string) -> list<string> {
   return filters + [filter]
 }
 
-pub fn filter_for_path(raw_path: string, packages: list<WorkspacePackage>, root: string) -> string? {
+pub fn filter_for_path(
+  raw_path: string,
+  packages: list<WorkspacePackage>,
+  root: string,
+) -> string? {
   const path = normalize_input_path(raw_path)
   if path == "" || !path.ends_with(".rs") {
     return nil
@@ -121,7 +125,11 @@ pub fn filter_for_path(raw_path: string, packages: list<WorkspacePackage>, root:
   return nil
 }
 
-pub fn nextest_filter_for_paths(paths: list<string>, packages: list<WorkspacePackage>, root: string) -> string {
+pub fn nextest_filter_for_paths(
+  paths: list<string>,
+  packages: list<WorkspacePackage>,
+  root: string,
+) -> string {
   let filters: list<string> = []
   for path in paths {
     const filter = filter_for_path(path, packages, root)
@@ -146,8 +154,7 @@ fn arg_spec() {
 
 fn main(harness: Harness) {
   if help_requested(argv) {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "usage: harn run scripts/nextest_filters_from_paths.harn -- [--root PATH] [file ...]",
     )
     return nil

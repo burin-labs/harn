@@ -129,8 +129,7 @@ pub fn host_calls() {
  * @errors: []
  */
 pub fn host_calls_for(cap: string, op: string) {
-  return host_mock_calls()
-    .filter({ call -> return call?.capability == cap && call?.operation == op })
+  return host_mock_calls().filter({ call -> return call?.capability == cap && call?.operation == op })
 }
 
 /**

@@ -39,8 +39,9 @@ pipeline test(task) {
         {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-replay-" + unique}},
       )
       const replay: DispatchHandle = trigger_replay(fire.event_id)
-      const evaluated = trigger_inspect_lifecycle("predicate.evaluated")
-        .filter({ entry -> entry?.headers?.trigger_id == handle.id })
+      const evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
+        { entry -> entry?.headers?.trigger_id == handle.id },
+      )
       __io_println(fire.status == "dispatched" && replay.status == "dispatched")
       __io_println(len(llm_mock_calls()) == 1)
       __io_println(len(evaluated) == 2)

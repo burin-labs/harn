@@ -131,7 +131,11 @@ pub fn sibling_dep_errors_from_text_with_context(
   return errors
 }
 
-pub fn sibling_dep_errors_from_text(path: string, text: string, workspace_version: string) -> list<string> {
+pub fn sibling_dep_errors_from_text(
+  path: string,
+  text: string,
+  workspace_version: string,
+) -> list<string> {
   return sibling_dep_errors_from_text_with_context(path, text, workspace_version, [], true)
 }
 

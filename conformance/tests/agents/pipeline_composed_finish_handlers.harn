@@ -32,7 +32,9 @@ pipeline default() {
       const result = chained(harness, return_value)
       const audits = lifecycle_audit_log_take()
       harness.stdio.println("audit_count=" + to_string(len(audits)))
-      harness.stdio.println("kind_order=" + audits[0].kind + "," + audits[1].kind + "," + audits[2].kind)
+      harness.stdio.println(
+        "kind_order=" + audits[0].kind + "," + audits[1].kind + "," + audits[2].kind,
+      )
       harness.stdio.println("log_value=" + to_string(audits[0].payload.value))
       harness.stdio.println("drain_reason=" + audits[1].payload.reason)
       harness.stdio.println("audit_value=" + to_string(audits[2].payload.value))

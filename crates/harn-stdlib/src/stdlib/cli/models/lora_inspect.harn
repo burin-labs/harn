@@ -48,21 +48,18 @@ fn __render_human(harness: Harness, report: dict) {
   const provider = safe_string(base["provider"], "")
   harness.stdio.println(adapter_name + " -> " + base_id + " via " + provider)
   harness.stdio.println("  adapter: " + safe_string(adapter["input"], ""))
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  base match: "
       + __base_match_label(safe_string(compatibility["base_model_match"], "unknown")),
   )
   harness.stdio.println("  tool format: " + safe_string(base["tool_format"], ""))
-  harness.stdio
-    .println("  request model: " + safe_string(launch["request_model"], adapter_name))
+  harness.stdio.println("  request model: " + safe_string(launch["request_model"], adapter_name))
   const native_tools = if safe_bool(tool_calling["native_tools"], false) {
     "yes"
   } else {
     "no"
   }
-  harness.stdio
-    .println(
+  harness.stdio.println(
     "  native tools: "
       + native_tools
       + ", preferred: "
@@ -80,8 +77,7 @@ fn __render_human(harness: Harness, report: dict) {
   }
   const modules_to_save = safe_list(adapter["modules_to_save"])
   if len(modules_to_save) > 0 {
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
     )
   } else {
@@ -103,8 +99,7 @@ fn __render_human(harness: Harness, report: dict) {
     harness.stdio.println("  contract: " + nonempty_string(contract["contract_id"], "<missing>"))
     harness.stdio.println("  contract manifest: " + contract_manifest)
     harness.stdio.println("  contract status: " + safe_string(contract["status"], "unknown"))
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  adapter contract id: "
         + nonempty_string(contract["adapter_contract_id"], "<missing>"),
     )
@@ -134,8 +129,7 @@ fn __render_human(harness: Harness, report: dict) {
     } else {
       "mismatch"
     }
-    harness.stdio
-      .println(
+    harness.stdio.println(
       "  contract route: base="
         + __base_match_label(safe_string(contract["base_model_match"], "unknown"))
         + " provider="
@@ -184,8 +178,9 @@ fn __render_json(report: dict) -> string {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON not set by dispatch shim")
+    harness.stdio.eprintln(
+      "internal error: HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON not set by dispatch shim",
+    )
     return 70
   }
   const report = try {

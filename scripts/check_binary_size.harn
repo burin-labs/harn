@@ -44,7 +44,8 @@ Environment:
   CARGO_TARGET_DIR        Cargo target directory
   HARN_BIN                Default harn binary path
   HARN_RELEASE_TARGET     Default Cargo target triple
-""".trim()
+"""
+    .trim()
 }
 
 /**
@@ -155,7 +156,12 @@ pub fn default_bin_path(target_dir: string, target: string) -> string {
 }
 
 /** The size-report block (printed to stdout and written to binary-size.txt). */
-pub fn report_lines(harn_bin: string, target: string, actual_bytes: int, budget_bytes: int) -> list<string> {
+pub fn report_lines(
+  harn_bin: string,
+  target: string,
+  actual_bytes: int,
+  budget_bytes: int,
+) -> list<string> {
   return [
     "harn binary size",
     "================",
@@ -246,8 +252,7 @@ pipeline main(task) {
   const budget_bytes = budget_bytes_of(budget_mb)
   if opts.build_release {
     const strip = env_or("CARGO_PROFILE_RELEASE_STRIP", "symbols")
-    const build = harness.process
-      .spawn_captured(
+    const build = harness.process.spawn_captured(
       {
         cmd: "cargo",
         args: ["build", "--release", "-p", "harn-cli", "--bin", "harn"] + target_args,
@@ -288,8 +293,7 @@ pipeline main(task) {
      * binary whose size we checked so the script is safe to run before a
      * packaging step. The scratch dir lives in the workspace (the runtime
      * sandbox only permits writes inside the workspace root). */
-    const mk = harness.process
-      .spawn_captured({cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]})
+    const mk = harness.process.spawn_captured({cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]})
     if !mk.success {
       __io_eprintln("error: could not create temp directory")
       return 1

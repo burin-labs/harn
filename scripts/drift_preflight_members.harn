@@ -49,15 +49,18 @@ fn main(harness: Harness) {
   const parsed = unwrap(parsed_result).options
   const tier = trim(parsed?.tier ?? "")
   if tier != "source" && tier != "binary" {
-    harness.stdio
-      .eprintln("usage: harn run scripts/drift_preflight_members.harn -- --tier source|binary")
+    harness.stdio.eprintln(
+      "usage: harn run scripts/drift_preflight_members.harn -- --tier source|binary",
+    )
     exit(2)
   }
   const registry = toml_parse(harness.fs.read_text(REGISTRY))
   const dispatch = registry?.preflight?.dispatch ?? {}
   const members = members_for_tier(dispatch, tier)
   if members.count == 0 {
-    harness.stdio.eprintln("error: no `${tier}`-tier drift checks in ${REGISTRY} [preflight.dispatch]")
+    harness.stdio.eprintln(
+      "error: no `${tier}`-tier drift checks in ${REGISTRY} [preflight.dispatch]",
+    )
     exit(1)
   }
   harness.stdio.println(join(members, " "))

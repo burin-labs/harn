@@ -217,8 +217,9 @@ fn __render_regression(envelope: dict) -> dict {
 fn main(harness: Harness) -> int {
   const raw = harness.env.get_or("HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON", "")
   if raw == "" {
-    harness.stdio
-      .eprintln("internal error: HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON not set by dispatch shim")
+    harness.stdio.eprintln(
+      "internal error: HARN_EVAL_TOOL_CALLS_PAYLOAD_JSON not set by dispatch shim",
+    )
     return 70
   }
   const envelope = try {

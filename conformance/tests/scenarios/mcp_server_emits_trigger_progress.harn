@@ -3,13 +3,11 @@ import "../_common"
 pipeline default() {
   const root = path_join(harness.fs.temp_dir(), "harn-mcp-progress-" + uuid())
   harness.fs.mkdir(root)
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"cron-ok\"\nkind = \"cron\"\nprovider = \"cron\"\nschedule = \"* * * * *\"\nmatch = { events = [\"cron.tick\"] }\nhandler = \"handlers::on_ok\"\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_ok(event: TriggerEvent) -> dict {\n  return {kind: event.kind, event_id: event.id}\n}\n",
   )

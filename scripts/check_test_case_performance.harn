@@ -252,8 +252,9 @@ fn harn_argv() -> list<string> {
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? ""]
   }
-  const metadata = harness.process
-    .spawn_captured({cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]})
+  const metadata = harness.process.spawn_captured(
+    {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
+  )
   if !metadata.success {
     throw "cargo metadata failed while resolving the measured harn binary"
   }
@@ -292,19 +293,16 @@ fn materialize_suite(root: string, index: int) -> string {
   }
   harness.fs.write_text(path_join(generation_root, "harn.lock"), lock_body)
   harness.fs.write_text(path_join(generation_root, "lease.lock"), "")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(generation_root, "generation.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\nlock_digest = \"${sha256(lock_body)}\"\n",
   )
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(state, "package-current.toml"),
     "schema_version = 1\ngeneration = \"${generation}\"\n",
   )
   harness.fs.write_text(path_join(state, "package-generation.lock"), "")
-  harness.fs
-    .write_text(
+  harness.fs.write_text(
     path_join(suite, "support.harn"),
     "pub fn helper(value: int) -> int { return value + 1 }\n",
   )
@@ -378,8 +376,7 @@ fn run_parallel(root: string, platform: string, test_files: list<string>) -> dic
     const status = int_number(harness.fs.read_text(status_path).trim())
     const diagnose = parse_diagnose_output(stderr)
     const timing = parse_time_output(stderr)
-    harness.process
-      .spawn_captured(
+    harness.process.spawn_captured(
       {cmd: "rm", args: ["-rf", path_join(run_root, "home"), path_join(run_root, "cache")]},
     )
     if status != 0 {
@@ -440,7 +437,9 @@ pipeline main(task) {
   }
   const loaded = load_platform_baseline(harness.fs.read_text(BASELINES), platform)
   if !loaded.ok {
-    harness.stdio.eprintln("error: ${loaded.error}; use the JSON above to record an honest baseline")
+    harness.stdio.eprintln(
+      "error: ${loaded.error}; use the JSON above to record an honest baseline",
+    )
     return 1
   }
   const verdict = evaluate_metrics(metrics, loaded.baseline)

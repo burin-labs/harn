@@ -320,8 +320,7 @@ fn __scratchpad_message_refs(messages, limit) {
     const msg = values[index]
     const excerpt = __scratchpad_excerpt(msg?.content ?? msg?.text ?? "", 200)
     if excerpt != "" {
-      refs = refs
-        .push(
+      refs = refs.push(
         {id: "turn:" + to_string(index + 1), kind: to_string(msg?.role ?? "message"), label: excerpt},
       )
     }

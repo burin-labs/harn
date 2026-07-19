@@ -175,7 +175,9 @@ fn __table_markdown_row(cells, cols, widths) -> string {
   let out = []
   let i = 0
   while i < len(cols) {
-    out = out.push(__table_markdown_escape(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left")))
+    out = out.push(
+      __table_markdown_escape(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left")),
+    )
     i += 1
   }
   return "| " + join(out, " | ") + " |"

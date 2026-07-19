@@ -106,7 +106,9 @@ fn __persona_blueprint_error(
   return report + {errors: report.errors + [{code: code, path: path, message: message}]}
 }
 
-fn __persona_blueprint_finalize(report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+fn __persona_blueprint_finalize(
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintValidationReport {
   return report + {valid: len(report.errors) == 0}
 }
 
@@ -143,7 +145,11 @@ fn __persona_blueprint_cron_fields(cron) -> list<string> {
   return regex_split(trim(cron ?? ""), "\\s+").filter({ field -> field != "" }).to_list()
 }
 
-fn __persona_blueprint_validate_cron(blueprint, providers, report: PersonaBlueprintValidationReport) -> PersonaBlueprintValidationReport {
+fn __persona_blueprint_validate_cron(
+  blueprint,
+  providers,
+  report: PersonaBlueprintValidationReport,
+) -> PersonaBlueprintValidationReport {
   let out = report
   const source = blueprint.cron
   if len(__persona_blueprint_cron_fields(source.cron)) != 5 || !is_valid_cron(source.cron) {
