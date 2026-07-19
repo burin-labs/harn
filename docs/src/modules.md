@@ -1326,6 +1326,16 @@ operations that should not require a generic shell or `run_command` tool.
 | `git_tools(registry?, options?)` | Build an agent tool registry from selected granular git helpers |
 | `git_toolbox_tools(registry?, options?)` | Build a compact `find_git_tool` / `run_git_tool` registry for small/local models |
 
+Receipt-producing helpers export their canonical contracts, including
+`GitReceipt`, the operation-specific `GitStatusReceipt`,
+`GitLsRemoteReceipt`, `GitFetchReceipt`, `GitPushReceipt`, worktree receipts,
+and their typed `data` records. The receipt `schema` and each specialized
+`operation`/`action` literal are stable discriminants. Core audit fields and
+operation data are stable for durable orchestration; `command_policy`,
+`approval`, captured output text, and new status/category values are diagnostic
+and may grow additively. Compose adapters with these aliases instead of copying
+their record shapes or widening them to `dict`.
+
 `git_tools(...)` defaults to read-only helpers (`git_status`,
 `git_current_branch`, `git_log`, `git_diff`, `git_branch_list`, and
 `git_remote_list`). Mutating helpers such as `git_switch` and

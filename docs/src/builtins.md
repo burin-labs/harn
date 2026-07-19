@@ -1671,6 +1671,13 @@ local command helpers (`git_run`, `git_current_branch`, `git_log`,
 `git_remote_list`) run `git` through argv-mode `process.exec` with ambient git
 environment overrides removed.
 
+The facade exports `GitReceipt` plus operation-specific receipt and `data`
+aliases for repository discovery, status, conflicts, diffs, merge bases, tags,
+descriptions, remote refs, fetch, rebase, push, and worktree mutations. Their
+versioned schema and operation literals are stable orchestration
+discriminants; diagnostic policy/approval/output details may expand
+additively.
+
 `git_tools(registry?, options?)` builds a selected tool registry from those
 functions. It defaults to read-only git inspection helpers and only exposes
 checkout-changing helpers such as `git_switch` or `git_pull_ff_only` when they
