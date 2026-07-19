@@ -125,6 +125,66 @@ impl OverlayFs {
         Ok(())
     }
 
+    fn read_for_replace(&self, builtin: &str, path: &Path) -> std::io::Result<Vec<u8>> {
+        if !self.within_root(path) {
+            return crate::stdlib::sandbox::read_for_replace_scoped_at_open(builtin, path);
+        }
+        let key = self.key(path);
+        let layer = self.layer.lock().expect("overlay layer poisoned");
+        match layer.get(&key) {
+            Some(OverlayEntry::File(bytes)) => return Ok(bytes.clone()),
+            Some(OverlayEntry::Deleted) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("overlay: {} was deleted", key.display()),
+                ));
+            }
+            Some(OverlayEntry::Directory) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::IsADirectory,
+                    format!("overlay: {} is a directory", key.display()),
+                ));
+            }
+            None => {}
+        }
+        drop(layer);
+        crate::stdlib::sandbox::read_for_replace_scoped_at_open(builtin, path)
+    }
+
+    fn replace(
+        &self,
+        builtin: &str,
+        path: &Path,
+        contents: &[u8],
+        durability: crate::atomic_io::AtomicWriteDurability,
+        create_parents: bool,
+    ) -> std::io::Result<crate::atomic_io::AtomicWriteReceipt> {
+        if !self.within_root(path) {
+            return crate::stdlib::sandbox::atomic_replace_scoped_at_open_unlocked(
+                builtin,
+                path,
+                contents,
+                durability,
+                create_parents,
+            );
+        }
+        if !create_parents {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() && !self.exists(parent) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("parent directory for '{}' does not exist", path.display()),
+                    ));
+                }
+            }
+        }
+        self.write(path, contents)?;
+        Ok(crate::atomic_io::AtomicWriteReceipt {
+            file_synced: false,
+            namespace_synced: false,
+        })
+    }
+
     pub fn append(&self, path: &Path, contents: &[u8]) -> std::io::Result<()> {
         if !self.within_root(path) {
             // Match the scoped `append_file` contract: create the parent chain
@@ -633,7 +693,7 @@ pub mod helpers {
     pub fn write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         let result = match active_overlay() {
             Some(overlay) => overlay.write(path, contents),
-            None => atomic_write(path, contents),
+            None => crate::atomic_io::atomic_write(path, contents),
         };
         if result.is_ok() {
             record_file_write(path, contents);
@@ -652,64 +712,50 @@ pub mod helpers {
         result
     }
 
-    /// Crash-safe replacement for `std::fs::write`.
-    ///
-    /// `std::fs::write` opens the destination with `O_CREAT|O_TRUNC`, so it
-    /// truncates an existing file to zero length *before* any byte is
-    /// written. Any failure between that truncation and the completion of
-    /// `write_all` (ENOSPC/EDQUOT, a failing/network fs returning EIO, or the
-    /// process being killed mid-write) leaves the original content destroyed
-    /// and unrecoverable, while the caller assumes the prior content survived.
-    ///
-    /// Instead we write the full contents into a sibling temp file, flush it,
-    /// and atomically `rename` it over the destination. On POSIX `rename` is
-    /// atomic and never leaves a half-written destination; if anything fails
-    /// before the rename, the original file is untouched. The temp file is
-    /// created in the destination's own directory so the rename stays within a
-    /// single filesystem (a cross-device rename would fail with EXDEV).
-    fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-        use std::io::Write;
-
-        let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
-        let dir = parent.unwrap_or_else(|| Path::new("."));
-
-        // Unique, hidden sibling temp name. Including the pid and an atomic
-        // counter keeps concurrent writers from colliding on the same temp
-        // path.
-        let counter = {
-            use std::sync::atomic::{AtomicU64, Ordering};
-            static COUNTER: AtomicU64 = AtomicU64::new(0);
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        };
-        let file_name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let tmp_name = format!(".{file_name}.harn-tmp.{}.{counter}", std::process::id());
-        let tmp_path = dir.join(tmp_name);
-
-        // Write the full contents to the temp file, then fsync so the bytes
-        // are durable before we swap it into place.
-        let write_result = (|| -> std::io::Result<()> {
-            let mut file = std::fs::File::create(&tmp_path)?;
-            file.write_all(contents)?;
-            file.flush()?;
-            file.sync_all()?;
-            Ok(())
-        })();
-        if let Err(err) = write_result {
-            // Best-effort cleanup; the destination was never touched.
-            let _ = std::fs::remove_file(&tmp_path);
-            return Err(err);
+    pub fn replace_scoped(
+        builtin: &str,
+        path: &Path,
+        contents: &[u8],
+        options: &crate::conditional_replace::ConditionalReplaceOptions,
+    ) -> std::io::Result<crate::conditional_replace::ConditionalReplaceReceipt> {
+        let receipt = match active_overlay() {
+            Some(overlay) => crate::conditional_replace::conditional_replace_with_io(
+                path,
+                contents,
+                options,
+                |candidate| overlay.read_for_replace(builtin, candidate),
+                |candidate, bytes, durability, create_parents| {
+                    overlay.replace(builtin, candidate, bytes, durability, create_parents)
+                },
+                || {},
+            ),
+            None => crate::conditional_replace::conditional_replace_with_io(
+                path,
+                contents,
+                options,
+                |candidate| {
+                    crate::stdlib::sandbox::read_for_replace_scoped_at_open(builtin, candidate)
+                },
+                |candidate, bytes, durability, create_parents| {
+                    crate::stdlib::sandbox::atomic_replace_scoped_at_open_unlocked(
+                        builtin,
+                        candidate,
+                        bytes,
+                        durability,
+                        create_parents,
+                    )
+                },
+                || {},
+            ),
+        }?;
+        if matches!(
+            receipt.status,
+            crate::conditional_replace::ConditionalReplaceStatus::Created
+                | crate::conditional_replace::ConditionalReplaceStatus::Replaced
+        ) {
+            record_file_write(path, contents);
         }
-
-        // Atomically replace the destination. On failure, clean up the temp
-        // file and leave the original intact.
-        if let Err(err) = std::fs::rename(&tmp_path, path) {
-            let _ = std::fs::remove_file(&tmp_path);
-            return Err(err);
-        }
-        Ok(())
+        Ok(receipt)
     }
 
     pub fn append(path: &Path, contents: &[u8]) -> std::io::Result<()> {

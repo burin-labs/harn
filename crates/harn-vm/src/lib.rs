@@ -41,6 +41,7 @@ pub mod checkpoint;
 mod chunk;
 mod compiler;
 pub mod composition;
+pub mod conditional_replace;
 pub mod config;
 pub mod connectors;
 pub mod corrections;

@@ -320,7 +320,16 @@ fn direct_call_capabilities(call: &harn_ir::CallSemantics) -> BTreeSet<String> {
         "file_exists" | "path_status" | "stat" => {
             capabilities.insert("workspace.exists".to_string());
         }
-        "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "mkdtemp" | "copy_file"
+        "write_file"
+        | "write_file_bytes"
+        | "replace_file"
+        | "replace_file_result"
+        | "replace_file_bytes"
+        | "replace_file_bytes_result"
+        | "append_file"
+        | "mkdir"
+        | "mkdtemp"
+        | "copy_file"
         | "move_file" => {
             capabilities.insert("workspace.write_text".to_string());
         }

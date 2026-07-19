@@ -226,6 +226,10 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         // fs writes
         "write_file"
         | "write_file_bytes"
+        | "replace_file"
+        | "replace_file_result"
+        | "replace_file_bytes"
+        | "replace_file_bytes_result"
         | "append_file"
         | "append_file_locked"
         | "mkdir"

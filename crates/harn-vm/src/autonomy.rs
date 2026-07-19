@@ -218,6 +218,10 @@ pub fn side_effect_action_for_builtin(name: &str) -> Option<SideEffectAction> {
         &[
             "write_file",
             "write_file_bytes",
+            "replace_file",
+            "replace_file_result",
+            "replace_file_bytes",
+            "replace_file_bytes_result",
             "append_file",
             "append_file_locked",
         ],

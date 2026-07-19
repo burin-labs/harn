@@ -13,6 +13,10 @@ surface.
 | `harness.fs.read_bytes(path)` | `read_file_bytes(path)` | `workspace.read_text` |
 | `harness.fs.write_text(path, content)` | `write_file(path, content)` | `workspace.write_text` |
 | `harness.fs.write_bytes(path, content)` | `write_file_bytes(path, content)` | `workspace.write_text` |
+| `harness.fs.replace_text(path, content, options?)` | `replace_file(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.replace_text_result(path, content, options?)` | `replace_file_result(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.replace_bytes(path, content, options?)` | `replace_file_bytes(path, content, options?)` | `workspace.write_text` |
+| `harness.fs.replace_bytes_result(path, content, options?)` | `replace_file_bytes_result(path, content, options?)` | `workspace.write_text` |
 | `harness.fs.exists(path)` | `file_exists(path)` | `workspace.exists` |
 | `harness.fs.status(path, access?)` | `path_status(path, access?)` | `workspace.exists` |
 | `harness.fs.delete(path)` | `delete_file(path)` | `workspace.delete` |
@@ -37,6 +41,19 @@ surface.
 with stable `kind` values such as `not_found`, `permission_denied`,
 `invalid_data`, and `sandbox_denied`. Branch on `kind`; keep `message` for
 diagnostics rather than parsing its prose.
+
+The replacement methods update a complete file only when the optional
+`expected_sha256` lease still matches. They return `created`, `replaced`,
+`no_op`, or `stale`; stale is a successful receipt and never writes. Digests
+use lowercase `sha256:<64 hex digits>`. `create`, `overwrite`, and
+`create_parents` default to true. Symlink destinations are rejected.
+
+The default `namespace` durability means readers cannot observe a partial
+payload. `{durability: "flush"}` also requests a payload and namespace flush;
+`file_synced` and `namespace_synced` report what the operating system
+completed. These fields do not claim stronger guarantees than the filesystem
+or storage hardware provides. Import the typed `replace_text[_result]` and
+`replace_bytes[_result]` wrappers from `std/fs` for application code.
 
 `harness.fs.workspace_temp_dir()` returns a workspace-local scratch directory,
 creating it lazily. Sandboxed runs place the directory inside the active

@@ -459,23 +459,7 @@ fn registry_path(state_dir: &Path) -> PathBuf {
 }
 
 fn write_file_replace(path: &Path, contents: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let tmp_path = dir.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("registry"),
-        uuid::Uuid::now_v7()
-    ));
-    std::fs::write(&tmp_path, contents)?;
-    #[cfg(windows)]
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-    std::fs::rename(&tmp_path, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp_path);
-    })?;
-    Ok(())
+    crate::atomic_io::atomic_write(path, contents)
 }
 
 fn generate_api_key(id: &str) -> String {

@@ -33,6 +33,22 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     // File system
     ("read_file", "read_file(path) -> string"),
     ("write_file", "write_file(path, content) -> nil"),
+    (
+        "replace_file",
+        "replace_file(path, content, options?) -> dict",
+    ),
+    (
+        "replace_file_result",
+        "replace_file_result(path, content, options?) -> Result<dict, dict>",
+    ),
+    (
+        "replace_file_bytes",
+        "replace_file_bytes(path, content, options?) -> dict",
+    ),
+    (
+        "replace_file_bytes_result",
+        "replace_file_bytes_result(path, content, options?) -> Result<dict, dict>",
+    ),
     ("file_exists", "file_exists(path) -> bool"),
     ("path_status", "path_status(path, access?) -> dict"),
     ("delete_file", "delete_file(path) -> nil"),
@@ -877,6 +893,10 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "sleep" => "**sleep(ms)** → nil — Async sleep for milliseconds",
         "read_file" => "**read_file(path)** → string — Read file contents",
         "write_file" => "**write_file(path, content)** → nil — Write string to file",
+        "replace_file" => "**replace_file(path, content, options?)** → receipt — Atomically replace text under an optional observed SHA-256 lease",
+        "replace_file_result" => "**replace_file_result(path, content, options?)** → Result<receipt, failure> — Non-throwing conditional text replacement",
+        "replace_file_bytes" => "**replace_file_bytes(path, content, options?)** → receipt — Conditional byte replacement",
+        "replace_file_bytes_result" => "**replace_file_bytes_result(path, content, options?)** → Result<receipt, failure> — Non-throwing conditional byte replacement",
         "exit" => "**exit(code)** — Terminate process with exit code",
         "regex_match" => "**regex_match(pattern, text, flags?)** → list | nil — Find all non-overlapping regex matches. Optional flags: `i`, `m`, `s`, `x`.",
         "regex_replace" => {

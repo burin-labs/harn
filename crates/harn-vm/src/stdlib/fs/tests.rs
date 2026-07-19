@@ -51,6 +51,100 @@ fn result_error(value: &VmValue) -> &VmValue {
     }
 }
 
+fn result_value(value: &VmValue) -> &VmValue {
+    match value {
+        VmValue::EnumVariant(result) if result.is_variant("Result", "Ok") => result
+            .fields
+            .first()
+            .expect("Result.Ok must contain a value"),
+        other => panic!("expected Result.Ok, got {other:?}"),
+    }
+}
+
+#[test]
+fn conditional_text_replacement_returns_closed_receipts() {
+    let dir = tempfile::tempdir().unwrap();
+    let _locks =
+        crate::conditional_replace::scope_conditional_replace_lock_root(dir.path().join("locks"));
+    let path = dir.path().join("state.txt");
+    let path_arg = path.to_string_lossy().into_owned();
+    let mut vm = vm();
+
+    let created = call(&mut vm, "replace_file", vec![s(&path_arg), s("one")]).unwrap();
+    assert_eq!(field(&created, "status").display(), "created");
+    assert_eq!(field(&created, "durability").display(), "namespace");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "one");
+
+    let expected = field(&created, "after_sha256").display();
+    std::fs::write(&path, b"external").unwrap();
+    let stale_result = call(
+        &mut vm,
+        "replace_file_result",
+        vec![
+            s(&path_arg),
+            s("two"),
+            dict(vec![("expected_sha256", s(&expected))]),
+        ],
+    )
+    .unwrap();
+    let stale = result_value(&stale_result);
+    assert_eq!(field(stale, "status").display(), "stale");
+    assert_eq!(field(stale, "bytes_written").display(), "0");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "external");
+}
+
+#[test]
+fn conditional_byte_replacement_is_hermetic_under_overlay() {
+    let dir = tempfile::tempdir().unwrap();
+    let _locks =
+        crate::conditional_replace::scope_conditional_replace_lock_root(dir.path().join("locks"));
+    let overlay = Arc::new(crate::testbench::overlay_fs::OverlayFs::rooted_at(
+        dir.path(),
+    ));
+    let _guard = crate::testbench::overlay_fs::install_overlay(overlay);
+    let path = dir.path().join("state.bin");
+    let path_arg = path.to_string_lossy().into_owned();
+    let mut vm = vm();
+
+    let receipt = call(
+        &mut vm,
+        "replace_file_bytes",
+        vec![s(&path_arg), VmValue::Bytes(Arc::new(vec![0, 1, 2, 255]))],
+    )
+    .unwrap();
+    assert_eq!(field(&receipt, "status").display(), "created");
+    assert!(!path.exists());
+    let VmValue::Bytes(bytes) = call(&mut vm, "read_file_bytes", vec![s(&path_arg)]).unwrap()
+    else {
+        panic!("read_file_bytes must return bytes");
+    };
+    assert_eq!(bytes.as_slice(), &[0, 1, 2, 255]);
+}
+
+#[test]
+fn conditional_replacement_rejects_invalid_policy_options() {
+    let dir = tempfile::tempdir().unwrap();
+    let _locks =
+        crate::conditional_replace::scope_conditional_replace_lock_root(dir.path().join("locks"));
+    let path = dir.path().join("state.txt");
+    let mut vm = vm();
+    let result = call(
+        &mut vm,
+        "replace_file_result",
+        vec![
+            s(&path.to_string_lossy()),
+            s("new"),
+            dict(vec![("durability", s("eventually"))]),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        field(result_error(&result), "kind").display(),
+        "invalid_input"
+    );
+    assert!(!path.exists());
+}
+
 #[test]
 fn append_file_locked_creates_parent_dirs_and_honors_advisory_lock() {
     let dir = tempfile::tempdir().unwrap();

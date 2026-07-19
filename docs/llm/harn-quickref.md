@@ -2916,6 +2916,13 @@ plain terminal.
 
 ### Filesystem extras
 
+- Import `replace_text[_result]` or `replace_bytes[_result]` from `std/fs` when
+  publishing complete state under an observed SHA-256 lease. Receipts are
+  `created`, `replaced`, `no_op`, or `stale`; stale never mutates the file.
+- `harness.fs.replace_text[_result]` and `replace_bytes[_result]` are the
+  capability-aware primitives. Options make create, overwrite, parent
+  creation, and `namespace`/`flush` durability explicit. Symlink destinations
+  fail closed.
 - `glob(pattern, base?)` → list of matching paths. Pattern is matched
   against forward-slash paths relative to `base` (defaults to script
   source dir); `**` glob is supported.
@@ -3839,7 +3846,7 @@ register_session_hook("file_edited", { event ->
 })
 ```
 
-`write_file` / `append_file` / `append_file_locked` / `write_file_bytes` queue automatically;
+Successful standard filesystem mutations queue automatically;
 hooks fire at the next agent-loop turn boundary. Call
 `notify_file_edited(path, metadata?)` to explicitly emit one.
 For background context refresh/librarian jobs, import

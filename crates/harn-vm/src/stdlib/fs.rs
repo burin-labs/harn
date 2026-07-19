@@ -11,6 +11,7 @@ use crate::testbench::overlay_fs::helpers as overlay;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+mod conditional_replace;
 mod find_evidence;
 mod find_text;
 
@@ -26,6 +27,10 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &READ_FILE_BYTES_BUILTIN_DEF,
     &WRITE_FILE_BUILTIN_DEF,
     &WRITE_FILE_BYTES_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_RESULT_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_BYTES_BUILTIN_DEF,
+    &conditional_replace::REPLACE_FILE_BYTES_RESULT_BUILTIN_DEF,
     &FILE_EXISTS_BUILTIN_DEF,
     &PATH_STATUS_BUILTIN_DEF,
     &DELETE_FILE_BUILTIN_DEF,

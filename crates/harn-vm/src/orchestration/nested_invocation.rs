@@ -410,6 +410,25 @@ const BUILTIN_CAPABILITIES: &[(&str, &str, &str, &str)] = &[
         "write_text",
         "workspace_write",
     ),
+    ("replace_file", "workspace", "write_text", "workspace_write"),
+    (
+        "replace_file_result",
+        "workspace",
+        "write_text",
+        "workspace_write",
+    ),
+    (
+        "replace_file_bytes",
+        "workspace",
+        "write_text",
+        "workspace_write",
+    ),
+    (
+        "replace_file_bytes_result",
+        "workspace",
+        "write_text",
+        "workspace_write",
+    ),
     ("append_file", "workspace", "write_text", "workspace_write"),
     (
         "append_file_locked",

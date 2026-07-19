@@ -9,6 +9,59 @@ import {
 
 type WriteDataOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
 
+pub type FileReplaceStatus = "created" | "replaced" | "no_op" | "stale"
+
+pub type FileReplaceDurability = "namespace" | "flush"
+
+pub type FileReplaceOptions = {
+  expected_sha256?: string,
+  create?: bool,
+  overwrite?: bool,
+  create_parents?: bool,
+  durability?: FileReplaceDurability,
+}
+
+pub type FileReplaceReceipt = {
+  status: FileReplaceStatus,
+  before_exists: bool,
+  before_sha256: string,
+  after_sha256: string,
+  expected_sha256?: string,
+  bytes_written: int,
+  durability: FileReplaceDurability,
+  file_synced: bool,
+  namespace_synced: bool,
+}
+
+pub type FsFailure = {
+  error: "io_error",
+  kind: "not_found" \
+    | "permission_denied" \
+    | "already_exists" \
+    | "storage_full" \
+    | "quota_exceeded" \
+    | "file_too_large" \
+    | "read_only_filesystem" \
+    | "not_a_directory" \
+    | "is_a_directory" \
+    | "directory_not_empty" \
+    | "crosses_devices" \
+    | "too_many_links" \
+    | "invalid_input" \
+    | "invalid_data" \
+    | "timed_out" \
+    | "interrupted" \
+    | "unexpected_eof" \
+    | "would_block" \
+    | "out_of_memory" \
+    | "resource_busy" \
+    | "executable_file_busy" \
+    | "sandbox_denied" \
+    | "other",
+  message: string,
+  category?: string,
+}
+
 pub type StructuredDataFormat = "json" | "yaml" | "toml"
 
 pub type StructuredReadFailureKind = "absent" | "unreadable" | "malformed" | "recursion_limit"
@@ -288,6 +341,76 @@ pub fn ensure_parent_dir(path: string) {
       harness.fs.mkdir(parent)
     }
   }
+}
+
+fn __fs_replace_result(result) -> Result<FileReplaceReceipt, FsFailure> {
+  if is_ok(result) {
+    return Ok(schema_expect(unwrap(result), schema_of(FileReplaceReceipt)))
+  }
+  return Err(schema_expect(unwrap_err(result), schema_of(FsFailure)))
+}
+
+/**
+ * Atomically replace a complete UTF-8 file when its observed digest still
+ * matches. A stale lease is a successful `stale` receipt and never mutates the
+ * destination.
+ *
+ * `namespace` durability prevents partial reads. Request `flush` when the
+ * caller also needs the operating system's best available storage flush; the
+ * receipt reports which flushes completed.
+ *
+ * @effects: [fs.write]
+ * @errors: [FsFailure]
+ */
+pub fn replace_text(
+  path: string,
+  content: string,
+  options: FileReplaceOptions = {},
+) -> FileReplaceReceipt {
+  return __fs_require_result(replace_text_result(path, content, options))
+}
+
+/**
+ * Result form of `replace_text`.
+ *
+ * @effects: [fs.write]
+ * @errors: []
+ */
+pub fn replace_text_result(
+  path: string,
+  content: string,
+  options: FileReplaceOptions = {},
+) -> Result<FileReplaceReceipt, FsFailure> {
+  return __fs_replace_result(harness.fs.replace_text_result(path, content, options))
+}
+
+/**
+ * Atomically replace a complete byte file when its observed digest still
+ * matches.
+ *
+ * @effects: [fs.write]
+ * @errors: [FsFailure]
+ */
+pub fn replace_bytes(
+  path: string,
+  content: bytes,
+  options: FileReplaceOptions = {},
+) -> FileReplaceReceipt {
+  return __fs_require_result(replace_bytes_result(path, content, options))
+}
+
+/**
+ * Result form of `replace_bytes`.
+ *
+ * @effects: [fs.write]
+ * @errors: []
+ */
+pub fn replace_bytes_result(
+  path: string,
+  content: bytes,
+  options: FileReplaceOptions = {},
+) -> Result<FileReplaceReceipt, FsFailure> {
+  return __fs_replace_result(harness.fs.replace_bytes_result(path, content, options))
 }
 
 /**
