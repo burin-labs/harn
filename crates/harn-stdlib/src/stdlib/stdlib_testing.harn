@@ -299,6 +299,88 @@ fn __testing_is_callable(value) -> bool {
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
+pub type ScriptedArgvStep<T> = {argv: list<string>, result: T}
+
+pub type ScriptedArgv<T> = {
+  run: fn(list<string>) -> T,
+  calls: fn() -> list<list<string>>,
+  remaining: fn() -> list<list<string>>,
+  assert_consumed: fn() -> nil,
+}
+
+/**
+ * Build one typed `scripted_argv` step.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn argv_step<T>(argv: list<string>, result: T) -> ScriptedArgvStep<T> {
+  return {argv: argv, result: result}
+}
+
+fn __testing_argv_remaining<T>(
+  entries: list<ScriptedArgvStep<T>>,
+  cursor: int,
+) -> list<list<string>> {
+  let out = []
+  let index = cursor
+  while index < len(entries) {
+    const entry = entries[index]
+    if entry != nil {
+      out = out.push(entry.argv)
+    }
+    index = index + 1
+  }
+  return out
+}
+
+/**
+ * Build a strict in-process adapter for code that accepts an argv command
+ * runner. Entries are consumed in order. Every attempted argv is recorded;
+ * an out-of-order or extra command throws without consuming the expected
+ * entry. Call `assert_consumed()` after the behavior under test to reject
+ * missing commands.
+ *
+ * @effects: []
+ * @errors: [unexpected_command, unconsumed_commands]
+ * @example: const commands = scripted_argv<dict>([argv_step(["tool", "status"], {ok: true})])
+ */
+pub fn scripted_argv<T>(entries: list<ScriptedArgvStep<T>>) -> ScriptedArgv<T> {
+  let cursor = 0
+  let calls = []
+  return {
+    run: fn(argv) {
+      calls = calls.push(argv)
+      if cursor >= len(entries) {
+        throw "scripted_argv: unexpected command after script was consumed: " + to_string(argv)
+      }
+      const expected = entries[cursor]
+      if expected == nil {
+        throw "scripted_argv: internal cursor invariant failed"
+      }
+      if argv != expected.argv {
+        throw "scripted_argv: unexpected command "
+          + to_string(argv)
+          + "; expected "
+          + to_string(expected.argv)
+      }
+      cursor = cursor + 1
+      return expected.result
+    },
+    calls: fn() { return calls },
+    remaining: fn() { return __testing_argv_remaining(entries, cursor) },
+    assert_consumed: fn() {
+      const remaining = __testing_argv_remaining(entries, cursor)
+      require len(remaining) == 0,
+        "scripted_argv: expected every command to be consumed; remaining: "
+        + to_string(
+        remaining,
+      )
+      return nil
+    },
+  }
+}
+
 fn __testing_step_event_record(ctx) {
   let record = {
     event: ctx?.event,

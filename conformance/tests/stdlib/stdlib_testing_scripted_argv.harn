@@ -1,0 +1,28 @@
+import { argv_step, assert_error_contains, scripted_argv } from "std/testing"
+
+pipeline test_scripted_argv(task) {
+  const commands = scripted_argv<dict>(
+    [
+      argv_step(["tool", "status"], {success: true, stdout: "ready"}),
+      argv_step(["tool", "apply", "--fast"], {success: true, stdout: "updated"}),
+    ],
+  )
+  assert_eq(commands.calls(), [])
+  assert_eq(commands.remaining(), [["tool", "status"], ["tool", "apply", "--fast"]])
+  assert_eq(commands.run(["tool", "status"]).stdout, "ready")
+  assert_eq(commands.calls(), [["tool", "status"]])
+  assert_eq(commands.remaining(), [["tool", "apply", "--fast"]])
+  assert_eq(commands.run(["tool", "apply", "--fast"]).stdout, "updated")
+  commands.assert_consumed()
+  const out_of_order = scripted_argv<int>([argv_step(["first"], 1), argv_step(["second"], 2)])
+  assert_error_contains({ -> out_of_order.run(["second"]) }, "expected [first]")
+  assert_eq(out_of_order.calls(), [["second"]])
+  assert_eq(out_of_order.remaining(), [["first"], ["second"]])
+  const extra = scripted_argv<string>([argv_step(["once"], "done")])
+  assert_eq(extra.run(["once"]), "done")
+  assert_error_contains({ -> extra.run(["twice"]) }, "after script was consumed")
+  assert_eq(extra.calls(), [["once"], ["twice"]])
+  const incomplete = scripted_argv<bool>([argv_step(["required"], true)])
+  assert_error_contains(incomplete.assert_consumed, "remaining: [[required]]")
+  __io_println("ok")
+}
