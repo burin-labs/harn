@@ -107,7 +107,6 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
   "conformance/tests/concurrency/supervisor_one_for_one.harn",
   "conformance/tests/concurrency/supervisor_restart_cap.harn",
   "conformance/tests/concurrency/supervisor_restart_window.harn",
-  "conformance/tests/scenarios/agent_loop_mcp_http_elicit.harn",
   "conformance/tests/scenarios/agent_loop_mcp_servers.harn",
   "conformance/tests/scenarios/orchestrator_hot_reload_add.harn",
   "conformance/tests/scenarios/orchestrator_hot_reload_modify_inflight.harn",
