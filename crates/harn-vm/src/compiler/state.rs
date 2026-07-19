@@ -289,13 +289,7 @@ impl Compiler {
     pub fn compile(mut self, program: &[SNode]) -> Result<Chunk, CompileError> {
         // Pre-scan so we can recognize EnumName.Variant as enum construction
         // even when the enum is declared inside a pipeline.
-        self.collect_module_enum_catalog(program);
-        if self.enum_names.insert("Result".to_string()) {
-            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
-        }
-        Self::collect_struct_layouts(program, &mut self.struct_layouts);
-        Self::collect_interface_methods(program, &mut self.interface_methods);
-        self.collect_type_aliases(program);
+        self.seed_module_catalog(program);
         // Box module-level mutable `let`s that a top-level or pipeline-body
         // closure captures (harn#4479). Nested `fn`/closure/`tool` bodies reseed
         // their own capture set when compiled, so this only governs the
