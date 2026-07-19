@@ -1071,6 +1071,63 @@ fn run_command_background_after_returns_progress_snapshot() {
     }
 }
 
+// Vacuity guard for the whole background-command feature: a command that
+// converts to background must ESCAPE the foreground `timeout_ms` kill. The same
+// `force_timeout` + short `timeout_ms` shape that kills a blocking exec in
+// `run_command_kills_child_when_timeout_elapses` must instead survive here,
+// because `background_after_ms` routes to the background branch, which never
+// applies `timeout_ms`. Without this, the whole mechanism is vacuous for the
+// headline case (a longer-than-expected command dying at the timeout).
+#[test]
+fn run_command_background_after_survives_foreground_timeout() {
+    let session_id = unique_session_id("test-run-command-background-survives-timeout");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+    let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
+    let config = MockProcessConfig {
+        force_timeout: true,
+        ..MockProcessConfig::running()
+    };
+    let (_spawner, controller, _guard) = install_mock_with(config);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "30"]));
+    // The exact short foreground timeout that kills in the blocking-exec test...
+    req.insert("timeout_ms".into(), VmValue::Int(150));
+    // ...but background_after_ms hands back a running handle instead of a kill.
+    req.insert("background_after_ms".into(), VmValue::Int(50));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(
+        require_str(&resp, "status"),
+        "running",
+        "background_after must return a running handle, not a timeout kill",
+    );
+    assert!(
+        !controller.was_killed(),
+        "a backgrounded command must NOT be killed by the foreground timeout_ms",
+    );
+    let handle_id = require_str(&resp, "handle_id");
+
+    // The command completes well after the foreground timeout would have fired;
+    // the handle drains a normal exit-0 result through the session inbox.
+    let completion_rx =
+        register_completion_notifier(&handle_id).expect("handle should still be live");
+    controller.append_stdout(b"done-after-timeout\n");
+    controller.complete_with(ExitStatus::from_code(0));
+    completion_rx.recv().expect("waiter completion never fired");
+
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    wait_req.insert("timeout_ms".into(), VmValue::Int(0));
+    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    assert_eq!(require_str(&waited, "status"), "completed");
+    assert_eq!(require_int(&waited, "exit_code"), 0);
+    assert!(
+        require_str(&waited, "stdout").contains("done-after-timeout"),
+        "waited result must carry the post-timeout output",
+    );
+}
+
 #[test]
 fn run_command_background_after_requeues_unrelated_feedback_without_restamping() {
     let session_id = unique_session_id("test-run-command-background-after-requeue");

@@ -65,7 +65,12 @@
     "progress_interval_ms": {
       "type": "integer",
       "minimum": 0,
-      "description": "When the command runs in the background, publish progress feedback at this interval."
+      "description": "When the command runs in the background, publish the first progress feedback after this delay. It is the base of an exponential backoff schedule: the interval doubles after each snapshot up to progress_max_interval_ms."
+    },
+    "progress_max_interval_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Ceiling for the progress backoff schedule seeded by progress_interval_ms. Progress starts frequent and thins out for a long-running command, capped here. Defaults to 30000ms; clamped to be at least progress_interval_ms."
     },
     "progress_max_inline_bytes": {
       "type": "integer",
