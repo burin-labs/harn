@@ -1,0 +1,282 @@
+import "./catalog"
+import "./execute"
+import "./plan"
+import "./types"
+
+const SCHEMA_VERSION = "harn.provider_tool_probe_campaign.v8"
+
+pub fn __live_cells(
+  harness: Harness,
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  harn_bin: string,
+  env: dict,
+  repeat: int,
+  timeout_secs: int,
+  output_dir: string,
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+) -> dict {
+  let cells: list<ProviderToolProbeCell> = []
+  let probe_units_total = 0
+  let probe_units_selected = 0
+  let probe_units_excluded_by_shard = 0
+  let probe_units_excluded_by_cap = 0
+  let executable_units_selected = 0
+  for route in routes {
+    for behavior in behaviors {
+      for mode in behavior.modes {
+        const ordinal = probe_units_total
+        probe_units_total = probe_units_total + 1
+        if !__campaign_slice_selects_unit(ordinal, shard_count, shard_index) {
+          probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
+          continue
+        }
+        const ready_provider_probe = behavior.runner == "provider_tool_probe" && len(__missing_env_keys(route, env)) == 0
+        if ready_provider_probe && max_probes > 0 && executable_units_selected >= max_probes {
+          probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
+          continue
+        }
+        probe_units_selected = probe_units_selected + 1
+        if behavior.runner != "provider_tool_probe" {
+          for format in behavior.tool_formats {
+            cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
+          }
+          continue
+        }
+        if ready_provider_probe {
+          executable_units_selected = executable_units_selected + 1
+        }
+        cells = cells
+          + __run_tool_probe(harness, route, behavior, mode, harn_bin, env, repeat, timeout_secs, output_dir)
+      }
+    }
+  }
+  return {
+    cells: cells,
+    slice: __campaign_slice_receipt(
+      shard_count,
+      shard_index,
+      max_probes,
+      probe_units_total,
+      probe_units_selected,
+      executable_units_selected,
+      probe_units_excluded_by_shard,
+      probe_units_excluded_by_cap,
+    ),
+  }
+}
+
+pub fn __campaign_slice_selects_unit(ordinal: int, shard_count: int, shard_index: int) -> bool {
+  if shard_count <= 1 {
+    return true
+  }
+  return ordinal % shard_count == shard_index
+}
+
+pub fn __campaign_slice_receipt(
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+  probe_units_total: int,
+  probe_units_selected: int,
+  executable_units_selected: int,
+  probe_units_excluded_by_shard: int,
+  probe_units_excluded_by_cap: int,
+) -> dict {
+  return {
+    shard_count: shard_count,
+    shard_index: shard_index,
+    max_probes: max_probes,
+    probe_units_total: probe_units_total,
+    probe_units_selected: probe_units_selected,
+    executable_units_selected: executable_units_selected,
+    probe_units_excluded_by_shard: probe_units_excluded_by_shard,
+    probe_units_excluded_by_cap: probe_units_excluded_by_cap,
+  }
+}
+
+pub fn __summary(cells: list<ProviderToolProbeCell>) -> dict {
+  let summary: dict = {pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
+  for cell in cells {
+    summary = summary + {[cell.status]: (summary[cell.status] ?? 0) + 1}
+  }
+  return summary
+}
+
+pub fn __runner_summary(cells: list<ProviderToolProbeCell>) -> dict {
+  let summary: dict = {}
+  for cell in cells {
+    const current = summary[cell.runner] ?? {total: 0, pass: 0, fail: 0, error: 0, skip: 0, planned: 0}
+    summary = summary
+      + {
+      [cell.runner]: current
+        + {total: (current.total ?? 0) + 1, [cell.status]: (current[cell.status] ?? 0) + 1},
+    }
+  }
+  return summary
+}
+
+pub fn __increment_key(counts: dict, key: string) -> dict {
+  return counts + {[key]: (counts[key] ?? 0) + 1}
+}
+
+pub fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
+  let executable_cells = 0
+  let executable_commands = 0
+  let missing_runner = 0
+  let missing_runner_by_behavior: dict = {}
+  let executable_cells_by_provider: dict = {}
+  let executable_commands_by_provider: dict = {}
+  for cell in cells {
+    if cell.status != "planned" {
+      continue
+    }
+    if cell.runner == "provider_tool_probe" {
+      executable_cells = executable_cells + 1
+      executable_cells_by_provider = __increment_key(executable_cells_by_provider, cell.provider)
+      if cell.tool_format == "native" {
+        executable_commands = executable_commands + 1
+        executable_commands_by_provider = __increment_key(executable_commands_by_provider, cell.provider)
+      }
+    } else {
+      missing_runner = missing_runner + 1
+      missing_runner_by_behavior = __increment_key(missing_runner_by_behavior, cell.behavior)
+    }
+  }
+  return {
+    executable_cells: executable_cells,
+    executable_commands: executable_commands,
+    missing_runner: missing_runner,
+    missing_runner_by_behavior: missing_runner_by_behavior,
+    executable_cells_by_provider: executable_cells_by_provider,
+    executable_commands_by_provider: executable_commands_by_provider,
+  }
+}
+
+pub fn __estimated_spend(live: bool, cells: list<ProviderToolProbeCell>, repeat: int) -> dict {
+  let executable_probe_count = 0
+  for cell in cells {
+    if cell.runner != "provider_tool_probe" || cell.tool_format != "native" {
+      continue
+    }
+    if !live && cell.status == "planned" {
+      executable_probe_count = executable_probe_count + repeat
+    } else if live && (cell.status == "pass" || cell.status == "fail" || cell.status == "error") {
+      executable_probe_count = executable_probe_count + repeat
+    }
+  }
+  const base = {
+    cap_usd: 10.0,
+    estimated_usd_known: false,
+    actual_usd_known: !live,
+    accounting: if live {
+      "live campaign spend is unknown until per-probe usage receipts are priced and aggregated"
+    } else {
+      "dry run; no provider calls"
+    },
+    executable_probe_count: executable_probe_count,
+  }
+  if live {
+    return base + {unpriced_probe_count: executable_probe_count}
+  }
+  return base + {estimated_usd: 0.0, actual_usd: 0.0, estimated_usd_known: true}
+}
+
+pub fn provider_tool_probe_campaign_report(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  cells: list<ProviderToolProbeCell>,
+  live: bool,
+  include_expensive: bool,
+  output_dir: string,
+  repeat: int,
+  env: dict,
+  env_source: dict,
+  runtime: ProviderToolProbeRuntimeReceipt,
+  catalog: ProviderToolProbeCatalogReceipt,
+  campaign_slice: dict = {},
+) -> ProviderToolProbeCampaignReport {
+  return {
+    schema_version: SCHEMA_VERSION,
+    runtime: runtime,
+    catalog: catalog,
+    live: live,
+    include_expensive: include_expensive,
+    route_count: len(routes),
+    behavior_count: len(behaviors),
+    cell_count: len(cells),
+    summary: __summary(cells),
+    runner_summary: __runner_summary(cells),
+    executable_gap: __executable_gap(cells),
+    auth_readiness: __auth_readiness(routes, env, env_source),
+    spend: __estimated_spend(live, cells, repeat),
+    campaign_slice: campaign_slice,
+    routes: routes,
+    behaviors: behaviors,
+    cells: cells,
+    artifacts: {
+      report_json: path_join(output_dir, "report.json"),
+      report_markdown: path_join(output_dir, "report.md"),
+    },
+  }
+}
+
+pub fn __markdown_escape(text: string) -> string {
+  return replace(text, "|", "\\|")
+}
+
+pub fn __markdown_status(status: string) -> string {
+  if status == "pass" {
+    return "PASS"
+  }
+  if status == "fail" {
+    return "FAIL"
+  }
+  if status == "error" {
+    return "ERROR"
+  }
+  if status == "skip" {
+    return "SKIP"
+  }
+  return "PLANNED"
+}
+
+pub fn provider_tool_probe_campaign_markdown(report: ProviderToolProbeCampaignReport) -> string {
+  let out = "# Provider Tool-Probe Campaign\n\n"
+  out = out + "- Schema: `" + report.schema_version + "`\n"
+  out = out + "- Target runtime: `" + json_stringify(report.runtime) + "`\n"
+  out = out + "- Target catalog: `" + json_stringify(report.catalog) + "`\n"
+  out = out + "- Live: " + to_string(report.live) + "\n"
+  out = out + "- Include expensive defaults: " + to_string(report.include_expensive) + "\n"
+  out = out + "- Routes: " + to_string(report.route_count) + "\n"
+  out = out + "- Behaviors: " + to_string(report.behavior_count) + "\n"
+  out = out + "- Cells: " + to_string(report.cell_count) + "\n"
+  out = out + "- Summary: `" + json_stringify(report.summary) + "`\n"
+  out = out + "- Runner summary: `" + json_stringify(report.runner_summary) + "`\n"
+  out = out + "- Executable gap: `" + json_stringify(report.executable_gap) + "`\n"
+  out = out + "- Auth readiness: `" + json_stringify(report.auth_readiness) + "`\n"
+  out = out + "- Campaign slice: `" + json_stringify(report.campaign_slice) + "`\n"
+  out = out + "- Spend: `" + json_stringify(report.spend) + "`\n\n"
+  out = out + "| Status | Provider | Model | Behavior | Mode | Tool format | Reason |\n"
+  out = out + "| --- | --- | --- | --- | --- | --- | --- |\n"
+  for cell in report.cells {
+    out = out + "| "
+      + __markdown_status(cell.status)
+      + " | "
+      + cell.provider
+      + " | `"
+      + cell.model
+      + "` | "
+      + cell.behavior
+      + " | "
+      + cell.mode
+      + " | "
+      + cell.tool_format
+      + " | "
+      + __markdown_escape(cell.reason)
+      + " |\n"
+  }
+  return out
+}

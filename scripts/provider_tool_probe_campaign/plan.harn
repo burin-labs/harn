@@ -1,0 +1,202 @@
+import "./catalog"
+import "./types"
+
+pub fn __provider_catalog_claim(route: ProviderToolProbeRoute) -> dict {
+  const caps = provider_capabilities(route.provider, route.model)
+  return {
+    tools: caps?.tools,
+    native_tools: caps?.native_tools,
+    text_tool_wire_format_supported: caps?.text_tool_wire_format_supported,
+    preferred_tool_format: caps?.preferred_tool_format,
+    tool_mode_parity: caps?.tool_mode_parity,
+    message_wire_format: caps?.message_wire_format,
+    native_tool_wire_format: caps?.native_tool_wire_format,
+    requires_tool_result_adjacency: caps?.requires_tool_result_adjacency,
+    stop_supported: caps?.stop_supported,
+    presence_penalty_supported: caps?.presence_penalty_supported,
+    frequency_penalty_supported: caps?.frequency_penalty_supported,
+    temperature_supported: caps?.temperature_supported,
+    top_p_supported: caps?.top_p_supported,
+  }
+}
+
+pub fn __tool_probe_command(
+  harn_bin: string,
+  route: ProviderToolProbeRoute,
+  mode: string,
+  probe_case: string,
+  repeat: int,
+  timeout_secs: int,
+) -> list<string> {
+  return [
+    harn_bin,
+    "provider",
+    "tool-probe",
+    route.provider,
+    "--model",
+    route.model,
+    "--mode",
+    mode,
+    "--case",
+    probe_case,
+    "--repeat",
+    to_string(repeat),
+    "--timeout-secs",
+    to_string(timeout_secs),
+    "--json",
+  ]
+}
+
+pub fn __cell_id(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  format: string,
+) -> string {
+  return route.id + "/" + behavior.id + "/" + mode + "/" + format
+}
+
+pub fn __base_cell(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  format: string,
+  status: string,
+  reason: string,
+  observed: dict,
+) -> ProviderToolProbeCell {
+  return {
+    id: __cell_id(route, behavior, mode, format),
+    provider: route.provider,
+    model: route.model,
+    route_id: route.id,
+    behavior: behavior.id,
+    category: behavior.category,
+    mode: mode,
+    tool_format: format,
+    runner: behavior.runner,
+    status: status,
+    reason: reason,
+    observed: observed,
+    catalog: __provider_catalog_claim(route) + {route_metadata: route.metadata},
+  }
+}
+
+pub fn __planned_cell(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  format: string,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+) -> ProviderToolProbeCell {
+  const cell = __base_cell(
+    route,
+    behavior,
+    mode,
+    format,
+    "planned",
+    if behavior.runner == "provider_tool_probe" {
+      "dry run; pass --live to execute harn provider tool-probe for the executable transport cells"
+    } else {
+      "behavior case is declared in the campaign matrix but does not yet have an executable runner"
+    },
+    {},
+  )
+  if behavior.runner == "provider_tool_probe" {
+    return cell
+      + {
+      command: __tool_probe_command(
+        harn_bin,
+        route,
+        mode,
+        to_string(behavior.probe_case ?? "single_tool_call"),
+        repeat,
+        timeout_secs,
+      ),
+    }
+  }
+  return cell
+}
+
+pub fn provider_tool_probe_campaign_planned_cells(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+) -> list<ProviderToolProbeCell> {
+  return provider_tool_probe_campaign_planned_cells_with_options(routes, behaviors, "harn", 1, 60)
+}
+
+pub fn provider_tool_probe_campaign_planned_cells_with_options(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+) -> list<ProviderToolProbeCell> {
+  return provider_tool_probe_campaign_planned_cells_sliced_with_options(
+    routes,
+    behaviors,
+    harn_bin,
+    repeat,
+    timeout_secs,
+    1,
+    0,
+    0,
+  ).cells
+}
+
+pub fn provider_tool_probe_campaign_planned_cells_sliced_with_options(
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  harn_bin: string,
+  repeat: int,
+  timeout_secs: int,
+  shard_count: int,
+  shard_index: int,
+  max_probes: int,
+) -> dict {
+  let cells: list<ProviderToolProbeCell> = []
+  let probe_units_total = 0
+  let probe_units_selected = 0
+  let probe_units_excluded_by_shard = 0
+  let probe_units_excluded_by_cap = 0
+  let executable_units_selected = 0
+  for route in routes {
+    for behavior in behaviors {
+      for mode in behavior.modes {
+        const ordinal = probe_units_total
+        probe_units_total = probe_units_total + 1
+        if !__campaign_slice_selects_unit(ordinal, shard_count, shard_index) {
+          probe_units_excluded_by_shard = probe_units_excluded_by_shard + 1
+          continue
+        }
+        if behavior.runner == "provider_tool_probe" && max_probes > 0
+          && executable_units_selected >= max_probes {
+          probe_units_excluded_by_cap = probe_units_excluded_by_cap + 1
+          continue
+        }
+        probe_units_selected = probe_units_selected + 1
+        if behavior.runner == "provider_tool_probe" {
+          executable_units_selected = executable_units_selected + 1
+        }
+        for format in behavior.tool_formats {
+          cells = cells + [__planned_cell(route, behavior, mode, format, harn_bin, repeat, timeout_secs)]
+        }
+      }
+    }
+  }
+  return {
+    cells: cells,
+    slice: __campaign_slice_receipt(
+      shard_count,
+      shard_index,
+      max_probes,
+      probe_units_total,
+      probe_units_selected,
+      executable_units_selected,
+      probe_units_excluded_by_shard,
+      probe_units_excluded_by_cap,
+    ),
+  }
+}

@@ -1,0 +1,110 @@
+pub type ProviderToolProbeRoute = {
+  id: string,
+  provider: string,
+  model: string,
+  env_keys: list<string>,
+  local: bool,
+  cheap: bool,
+  metadata: dict,
+}
+
+pub type ProviderToolProbeBehavior = {
+  id: string,
+  category: string,
+  description: string,
+  runner: string,
+  probe_case?: string,
+  modes: list<string>,
+  tool_formats: list<string>,
+  cheap: bool,
+}
+
+pub type ProviderToolProbeRuntimeStatus = "verified" | "unavailable" | "invalid"
+
+pub type ProviderToolProbeRuntimeReceipt = {
+  schema_version: "harn.provider_tool_probe_runtime.v1",
+  command: list<string>,
+  status: ProviderToolProbeRuntimeStatus,
+  exit_code: int,
+  version: string,
+  reason: string,
+}
+
+pub type ProviderToolProbeCatalogStatus = "verified" | "unavailable" | "invalid"
+
+pub type ProviderToolProbeCatalogReceipt = {
+  schema_version: "harn.provider_tool_probe_catalog.v1",
+  command: list<string>,
+  command_env: dict,
+  status: ProviderToolProbeCatalogStatus,
+  exit_code: int,
+  providers_config: string,
+  catalog_sha256: string,
+  provider_count: int,
+  model_count: int,
+  route_count: int,
+  reason: string,
+}
+
+pub type ProviderToolProbeCell = {
+  id: string,
+  provider: string,
+  model: string,
+  route_id: string,
+  behavior: string,
+  category: string,
+  mode: string,
+  tool_format: string,
+  runner: string,
+  status: string,
+  reason: string,
+  command?: list<string>,
+  artifact_path?: string,
+  observed: dict,
+  catalog: dict,
+}
+
+pub type ProviderToolProbeCampaignReport = {
+  schema_version: "harn.provider_tool_probe_campaign.v8",
+  runtime: ProviderToolProbeRuntimeReceipt,
+  catalog: ProviderToolProbeCatalogReceipt,
+  live: bool,
+  include_expensive: bool,
+  route_count: int,
+  behavior_count: int,
+  cell_count: int,
+  summary: dict,
+  runner_summary: dict,
+  executable_gap: dict,
+  auth_readiness: dict,
+  spend: dict,
+  campaign_slice: dict,
+  routes: list<ProviderToolProbeRoute>,
+  behaviors: list<ProviderToolProbeBehavior>,
+  cells: list<ProviderToolProbeCell>,
+  artifacts: dict,
+}
+
+pub fn provider_tool_probe_campaign_providers_config(
+  explicit: string,
+  configured: string,
+  inherited: string,
+) -> string {
+  const requested = trim(explicit)
+  if requested != "" {
+    return requested
+  }
+  const campaign_config = trim(configured)
+  if campaign_config != "" {
+    return campaign_config
+  }
+  return trim(inherited)
+}
+
+pub fn provider_tool_probe_campaign_command_env(providers_config: string) -> dict {
+  const path = trim(providers_config)
+  if path == "" {
+    return {}
+  }
+  return {HARN_PROVIDERS_CONFIG: path}
+}

@@ -1,0 +1,244 @@
+import "./catalog"
+import "./plan"
+import "./types"
+
+pub fn __safe_status(value) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return "unknown"
+}
+
+pub fn __status_from_probe(value) -> string {
+  const status = __safe_status(value)
+  if status == "pass" {
+    return "pass"
+  }
+  if status == "fail" {
+    return "fail"
+  }
+  return "skip"
+}
+
+pub fn __probe_status_for_format(report: dict, mode: string, format: string) -> string {
+  const tool_calling = report?.tool_calling ?? {}
+  if format == "native" && mode == "streaming" {
+    return __safe_status(tool_calling?.streaming_native)
+  }
+  if format == "native" {
+    return __safe_status(tool_calling?.native)
+  }
+  if format == "json" && mode == "non-streaming" {
+    return __safe_status(tool_calling?.text)
+  }
+  return "unknown"
+}
+
+pub fn __probe_cell(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  format: string,
+  report: dict,
+  artifact_path: string,
+  command: list<string>,
+) -> ProviderToolProbeCell {
+  const status_value = __probe_status_for_format(report, mode, format)
+  const status = __status_from_probe(status_value)
+  const reason = if format == "text/tagged" {
+    "legacy tagged text runner is declared but not yet separated from the current JSON text-channel probe"
+  } else if format == "json" && mode == "streaming" {
+    "provider tool-probe does not currently produce a streaming JSON text-channel verdict"
+  } else if status == "pass" {
+    "provider tool-probe reported pass at the Harn parse/dispatch boundary"
+  } else if status == "fail" {
+    report?.tool_calling?.failure_reason ?? "provider tool-probe reported fail"
+  } else {
+    "provider tool-probe did not produce a verdict for this format/mode"
+  }
+  return __base_cell(
+    route,
+    behavior,
+    mode,
+    format,
+    if format == "text/tagged" || (format == "json" && mode == "streaming") {
+      "planned"
+    } else {
+      status
+    },
+    reason,
+    {
+      tool_calling: report?.tool_calling ?? {},
+      case_count: len(report?.cases ?? []),
+      schema_version: report?.schema_version,
+    },
+  )
+    + {artifact_path: artifact_path, command: command}
+}
+
+pub fn __missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
+  if len(route.env_keys) == 0 {
+    return []
+  }
+  for key in route.env_keys {
+    if trim(to_string(env[key] ?? "")) != "" {
+      return []
+    }
+  }
+  return route.env_keys
+}
+
+pub fn provider_tool_probe_campaign_missing_env_keys(route: ProviderToolProbeRoute, env: dict) -> list<string> {
+  return __missing_env_keys(route, env)
+}
+
+pub fn __merge_unique_strings(left: list<string>, right: list<string>) -> list<string> {
+  let out = left
+  for value in right {
+    out = __append_unique_string(out, value)
+  }
+  return out
+}
+
+pub fn __auth_readiness(routes: list<ProviderToolProbeRoute>, env: dict, env_source: dict) -> dict {
+  let ready_routes = 0
+  let missing_auth_routes = 0
+  let local_routes = 0
+  let hosted_routes = 0
+  let ready_by_provider: dict = {}
+  let missing_by_provider: dict = {}
+  let missing_env_candidates_by_provider: dict = {}
+  for route in routes {
+    if route.local {
+      local_routes = local_routes + 1
+    } else {
+      hosted_routes = hosted_routes + 1
+    }
+    const missing = __missing_env_keys(route, env)
+    if len(missing) == 0 {
+      ready_routes = ready_routes + 1
+      ready_by_provider = __increment_key(ready_by_provider, route.provider)
+    } else {
+      missing_auth_routes = missing_auth_routes + 1
+      missing_by_provider = __increment_key(missing_by_provider, route.provider)
+      missing_env_candidates_by_provider = missing_env_candidates_by_provider
+        + {
+        [route.provider]: __merge_unique_strings(missing_env_candidates_by_provider[route.provider] ?? [], missing),
+      }
+    }
+  }
+  return {
+    env_checked: env_source.checked ?? false,
+    env_source: env_source,
+    route_count: len(routes),
+    ready_routes: ready_routes,
+    missing_auth_routes: missing_auth_routes,
+    local_routes: local_routes,
+    hosted_routes: hosted_routes,
+    ready_by_provider: ready_by_provider,
+    missing_by_provider: missing_by_provider,
+    missing_env_candidates_by_provider: missing_env_candidates_by_provider,
+  }
+}
+
+pub fn __skipped_cells_for_missing_env(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  missing: list<string>,
+) -> list<ProviderToolProbeCell> {
+  let cells: list<ProviderToolProbeCell> = []
+  for format in behavior.tool_formats {
+    cells = cells
+      + [
+      __base_cell(
+        route,
+        behavior,
+        mode,
+        format,
+        "skip",
+        "missing provider environment key; set one of: " + join(missing, ", "),
+        {missing_env_keys: missing, any_env_key_satisfies_route: true},
+      ),
+    ]
+  }
+  return cells
+}
+
+pub fn __run_tool_probe(
+  harness: Harness,
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  harn_bin: string,
+  env: dict,
+  repeat: int,
+  timeout_secs: int,
+  output_dir: string,
+) -> list<ProviderToolProbeCell> {
+  const missing = __missing_env_keys(route, env)
+  if len(missing) > 0 {
+    return __skipped_cells_for_missing_env(route, behavior, mode, missing)
+  }
+  const command = __tool_probe_command(
+    harn_bin,
+    route,
+    mode,
+    to_string(behavior.probe_case ?? "single_tool_call"),
+    repeat,
+    timeout_secs,
+  )
+  const artifact_path = provider_tool_probe_campaign_artifact_path(route, behavior, mode, output_dir)
+  const child = harness.process.spawn_captured({cmd: harn_bin, args: command[1:len(command)], env: env})
+  const stdout = child.stdout ?? ""
+  if trim(stdout) != "" {
+    harness.fs.write_text(artifact_path, stdout)
+  }
+  const parsed = try {
+    json_parse(stdout)
+  } catch (_) {
+    nil
+  }
+  if parsed == nil {
+    let cells: list<ProviderToolProbeCell> = []
+    for format in behavior.tool_formats {
+      cells = cells
+        + [
+        __base_cell(
+          route,
+          behavior,
+          mode,
+          format,
+          "error",
+          if trim(stdout) == "" {
+            trim(child.stderr ?? "provider tool-probe failed before producing JSON")
+          } else {
+            "provider tool-probe produced non-JSON stdout"
+          },
+          {exit_code: child.exit_code, stderr: trim(child.stderr ?? "")},
+        )
+          + {command: command},
+      ]
+    }
+    return cells
+  }
+  let cells: list<ProviderToolProbeCell> = []
+  for format in behavior.tool_formats {
+    cells = cells + [__probe_cell(route, behavior, mode, format, parsed, artifact_path, command)]
+  }
+  return cells
+}
+
+pub fn provider_tool_probe_campaign_artifact_path(
+  route: ProviderToolProbeRoute,
+  behavior: ProviderToolProbeBehavior,
+  mode: string,
+  output_dir: string,
+) -> string {
+  const probe_case = __slug(to_string(behavior.probe_case ?? "single_tool_call"))
+  return path_join(
+    output_dir,
+    "tool-probe-" + route.id + "-" + __slug(behavior.id) + "-" + probe_case + "-" + __slug(mode)
+      + ".json",
+  )
+}
