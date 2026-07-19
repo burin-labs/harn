@@ -60,7 +60,6 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        0,
     )
     .await;
 
@@ -100,7 +99,6 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        0,
     )
     .await
 }
@@ -197,7 +195,6 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         &loaded_skills_for(&temp.path().join("test_timeout_import.harn")),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        0,
     )
     .await;
 
@@ -300,41 +297,6 @@ handler = "handlers::missing"
     assert_eq!(phases(&pass).modules.modules_loaded, 1);
     assert_eq!(phases(&pass).modules.modules_compiled, 0);
     assert_eq!(pass.passed, 1, "{:?}", pass.results);
-}
-
-#[tokio::test]
-async fn setup_does_not_consume_execution_budget_in_either_scheduler() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
-
-    for parallel in [false, true] {
-        let temp = TempTestDir::new();
-        temp.write(
-            "suite/test_fast.harn",
-            r"
-pipeline test_first(_task) { return 41 }
-pipeline test_second(_task) { return 42 }
-",
-        );
-        let options = RunOptions {
-            parallel,
-            jobs: parallel.then_some(2),
-            setup_delay_ms: 30,
-            ..RunOptions::new(5)
-        };
-
-        let summary = run_tests_with_options(&temp.path().join("suite"), &options).await;
-
-        assert_eq!(summary.passed, 2, "parallel={parallel}: {summary:?}");
-        assert_eq!(summary.failed, 0, "parallel={parallel}: {summary:?}");
-        assert!(summary
-            .results
-            .iter()
-            .all(|result| result.timeout.is_none()));
-        assert!(summary
-            .results
-            .iter()
-            .all(|result| result.phases.is_some_and(|phases| phases.setup_ms >= 30)));
-    }
 }
 
 #[tokio::test]

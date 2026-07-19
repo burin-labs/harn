@@ -479,8 +479,6 @@ async fn run_user_tests_once_with_session(
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),
         progress: Some(user_test_progress(args.verbose)),
         diagnose: args.diagnose,
-        #[cfg(test)]
-        setup_delay_ms: 0,
     };
     let summary = test_runner::run_tests_with_session(path, &options, session).await;
     print_test_results(

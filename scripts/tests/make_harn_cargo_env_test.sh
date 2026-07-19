@@ -275,6 +275,20 @@ do
   fi
 done
 
+for variable in \
+  HARN_EGRESS_ALLOW \
+  HARN_EGRESS_DENY \
+  HARN_EGRESS_DEFAULT \
+  HARN_EGRESS_BLOCK_PRIVATE \
+  HARN_EGRESS_ALLOW_LOOPBACK
+do
+  if ! grep -Fq -- "-u $variable" "$make_targets"; then
+    echo "Makefile Rust test targets did not clear ambient $variable" >&2
+    cat "$make_targets" >&2
+    exit 1
+  fi
+done
+
 fake_harn="$tmp_root/fake harn"
 touch "$fake_harn"
 chmod +x "$fake_harn"
