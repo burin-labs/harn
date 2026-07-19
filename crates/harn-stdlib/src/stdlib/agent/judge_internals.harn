@@ -62,6 +62,13 @@ pub fn __judge_run_checkpoint(
   schema,
 ) {
   const base = opts?.llm_options ?? {}
+  const mock_scope = if checkpoint_name == "agent.completion_judge" {
+    "completion.judge"
+  } else if checkpoint_name == "agent.step_judge" {
+    "step.judge"
+  } else {
+    "default"
+  }
   const llm_opts = __judge_apply_llm_overrides(
     base
       + {
@@ -70,6 +77,7 @@ pub fn __judge_run_checkpoint(
       output_schema: schema,
       session_id: payload.session_id,
       system: system,
+      mock_scope: base?.mock_scope ?? mock_scope,
     },
     judge_cfg,
   )

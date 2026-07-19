@@ -174,3 +174,6 @@ Provider-specific endpoint, auth, readiness, and local-server notes are in
 The `mock` provider and `llm_mock(...)` queue deterministic text, tool-call, and
 error responses without API keys. See
 [mock LLM responses](./llm/llm_call.md#testing-with-mock-llm-responses).
+Agent turns and built-in auxiliary calls carry Harn-owned mock purposes (for
+example `agent.main`, `completion.judge`, and `agent.input_guardrail`) so a
+single versioned fixture cannot be consumed by the wrong call site.

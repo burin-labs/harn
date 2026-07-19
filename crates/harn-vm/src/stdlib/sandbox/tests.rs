@@ -1239,7 +1239,6 @@ fn standard_io_device_files_allowed_under_restricted_profile() {
             check_fs_path_scope(Path::new(device), FsAccess::Write).is_ok(),
             "write to standard device {device} must be allowed"
         );
-        // Reads of the same devices are likewise allowed.
         assert!(
             check_fs_path_scope(Path::new(device), FsAccess::Read).is_ok(),
             "read of standard device {device} must be allowed"

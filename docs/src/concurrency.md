@@ -814,5 +814,7 @@ const _actor = supervisor_start({
 wait reasons, active leases, next restart times, and aggregate metrics.
 `supervisor_events(handle)` returns lifecycle events, and
 `runtime_context().debug.supervisors` exposes supervisor state to tools.
+`supervisor_wait(handle)` awaits the supervisor's terminal lifecycle transition
+and returns its final state without polling.
 `supervisor_stop(handle, timeout?)` requests cooperative cancellation and then
 force-aborts children that do not drain before the timeout.
