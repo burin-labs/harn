@@ -16,6 +16,7 @@
 #![cfg(unix)]
 
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use harn_hostlib::tools::ToolsCapability;
@@ -34,6 +35,15 @@ fn lock_env() -> MutexGuard<'static, ()> {
     ENV_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn unique_session_id(prefix: &str) -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "{prefix}-{}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn registry() -> BuiltinRegistry {
@@ -696,6 +706,9 @@ fn real_run_command_background_child_survives_interrupt() {
     // `background: true` is the fire-and-forget escape hatch: its child is
     // owned by the long-running handle store (killed via `cancel_handle` or
     // the agent-session-end hook), NOT by the invoking scope's cancellation.
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
+        "process-tools-background",
+    ));
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let _guard = harn_vm::op_interrupt::install(Some(cancel), None);
 
@@ -708,8 +721,8 @@ fn real_run_command_background_child_survives_interrupt() {
     let handle_id = require_str(&resp, "handle_id");
 
     // Even with the interrupt already requested, the background child stays
-    // alive for a comfortable observation window.
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    // alive because background handles are owned by the session, not the
+    // invoking scope.
     assert!(
         unix_process_exists(pid),
         "background child {pid} must survive scope interrupts"
@@ -725,10 +738,6 @@ fn real_run_command_background_child_survives_interrupt() {
     assert_eq!(require_str(&result, "status"), "killed");
     let cleanup = require_nested_dict(&result, "process_cleanup");
     assert_eq!(require_int(&cleanup, "root_pid"), pid);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while unix_process_exists(pid) && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
     assert!(!unix_process_exists(pid), "cancel_handle must reap {pid}");
 }
 
