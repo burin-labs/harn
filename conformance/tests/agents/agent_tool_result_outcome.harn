@@ -29,7 +29,9 @@ pipeline test() {
   assert_eq(invalid.kind, "error")
   assert_eq(invalid.error_category, "schema_validation")
   // A typed error_category wins over the raw code.
-  const categorized = agent_tool_result_outcome({error_category: "timeout", error: "permission_denied"})
+  const categorized = agent_tool_result_outcome(
+    {error_category: "timeout", error: "permission_denied"},
+  )
   assert_eq(categorized.error_category, "timeout")
   // Product-level rejection carried on a transport-successful result.
   const product = agent_tool_result_outcome({status: "ok", product_error: true})
@@ -71,7 +73,9 @@ pipeline test() {
   assert_eq(unstamped.product_error, nil)
   assert_eq(unstamped.edit_status, "unknown")
   // An envelope with only prose keys and no structured field is honestly unknown.
-  const prose_only = agent_tool_result_outcome({rendered_result: "Error: something", observation: "Error: something"})
+  const prose_only = agent_tool_result_outcome(
+    {rendered_result: "Error: something", observation: "Error: something"},
+  )
   assert_eq(prose_only.kind, "unknown")
   assert_eq(prose_only.from_structured, false)
   assert_eq(agent_tool_result_is_ok(prose_only), nil)

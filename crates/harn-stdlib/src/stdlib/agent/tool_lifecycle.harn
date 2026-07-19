@@ -102,7 +102,11 @@ pub fn agent_tool_mutation_status(raw: any) -> AgentToolMutationStatus {
 
 pub type AgentToolResultOutcomeKind = "ok" | "error" | "unknown"
 
-pub type AgentEditOutcomeStatus = "none" | "rejected_not_applied" | "applied_clean" | "applied_still_failing" | "unknown"
+pub type AgentEditOutcomeStatus = "none" \
+  | "rejected_not_applied" \
+  | "applied_clean" \
+  | "applied_still_failing" \
+  | "unknown"
 
 /**
  * A tool result classified from its STRUCTURED envelope alone.
@@ -132,7 +136,13 @@ pub type AgentToolResultOutcome = {
   from_structured: bool,
 }
 
-const AGENT_EDIT_OUTCOME_STATUSES = ["none", "rejected_not_applied", "applied_clean", "applied_still_failing", "unknown"]
+const AGENT_EDIT_OUTCOME_STATUSES = [
+  "none",
+  "rejected_not_applied",
+  "applied_clean",
+  "applied_still_failing",
+  "unknown",
+]
 
 fn __agent_tool_result_transport_kind(result) -> AgentToolResultOutcomeKind? {
   if result?.ok != nil {
