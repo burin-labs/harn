@@ -19,6 +19,46 @@ const ACTIVATION_RECEIPT_SCHEMA_VERSION: u32 = 2;
 const ACTIVATION_DIR: &str = ".harn/personas";
 const ACTIVATION_FILE: &str = "activations.json";
 const ACTIVATION_LOCK_FILE: &str = "activations.lock";
+const PROJECT_MUTATION_LOCK_FILE: &str = ".harn/project-mutation.lock";
+
+pub(crate) struct ProjectMutationLock {
+    _file: File,
+}
+
+pub(crate) fn acquire_project_mutation_lock(
+    project_root: &Path,
+) -> Result<ProjectMutationLock, PersonaActivationError> {
+    let lock_path = project_root.join(PROJECT_MUTATION_LOCK_FILE);
+    fs::create_dir_all(lock_path.parent().unwrap_or(project_root))
+        .map_err(|source| io_error("create", &lock_path, source))?;
+    let file = open_lock_file(&lock_path)?;
+    #[cfg(test)]
+    project_mutation_lock_test_probe::before_lock();
+    file.lock_exclusive()
+        .map_err(|source| io_error("lock", &lock_path, source))?;
+    Ok(ProjectMutationLock { _file: file })
+}
+
+#[cfg(test)]
+pub(crate) mod project_mutation_lock_test_probe {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static BEFORE_LOCK: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
+    }
+
+    pub(crate) fn install(hook: impl FnOnce() + 'static) {
+        BEFORE_LOCK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+    }
+
+    pub(super) fn before_lock() {
+        BEFORE_LOCK.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().take() {
+                hook();
+            }
+        });
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum PersonaActivationError {
@@ -39,6 +79,8 @@ pub enum PersonaActivationError {
     },
     #[error("activated persona '{persona_id}' is stale: {reason}; reactivate it before use")]
     StaleActivation { persona_id: String, reason: String },
+    #[error("activation '{persona_id}' changed while a failed apply was rolling back")]
+    RollbackConflict { persona_id: String },
     #[error("invalid persona attenuation: {0}")]
     InvalidAttenuation(String),
     #[error(
@@ -205,40 +247,78 @@ pub fn activate_persona(
     attenuation: &PersonaAttenuation,
     now_ms: i64,
 ) -> Result<PersonaActivationReceipt, PersonaActivationError> {
+    activate_persona_with_previous(manifest, persona_id, attenuation, now_ms)
+        .map(|(receipt, _)| receipt)
+}
+
+pub(crate) fn activate_persona_with_previous(
+    manifest: Option<&Path>,
+    persona_id: &str,
+    attenuation: &PersonaAttenuation,
+    now_ms: i64,
+) -> Result<(PersonaActivationReceipt, Option<PersonaActivationRecord>), PersonaActivationError> {
+    let root = load_root_persona_catalog(manifest).map_err(PersonaActivationError::Catalog)?;
+    let mutation_lock = acquire_project_mutation_lock(&root.manifest_dir)?;
+    activate_persona_with_previous_locked(manifest, persona_id, attenuation, now_ms, &mutation_lock)
+}
+
+pub(crate) fn activate_persona_with_previous_locked(
+    manifest: Option<&Path>,
+    persona_id: &str,
+    attenuation: &PersonaAttenuation,
+    now_ms: i64,
+    _mutation_lock: &ProjectMutationLock,
+) -> Result<(PersonaActivationReceipt, Option<PersonaActivationRecord>), PersonaActivationError> {
     let root = load_root_persona_catalog(manifest).map_err(PersonaActivationError::Catalog)?;
     let discovered = resolve_discoverable_persona_in_root(&root, persona_id)
         .map_err(PersonaActivationError::Catalog)?;
     let candidate = activation_record(&discovered, attenuation, now_ms)?;
     let ledger_path = activation_ledger_path(&root.manifest_dir);
     let candidate_id = candidate.persona_id.clone();
-    let (changed, activation) = mutate_activation_ledger(&root.manifest_dir, |ledger| {
-        if let Some(existing) = ledger.activations.get(&candidate_id) {
-            let mut comparable = candidate.clone();
-            comparable.activated_at_ms = existing.activated_at_ms;
-            if &comparable == existing {
-                return (false, Some(existing.clone()));
+    let (changed, (activation, previous)) =
+        mutate_activation_ledger(&root.manifest_dir, |ledger| {
+            let previous = ledger.activations.get(&candidate_id).cloned();
+            if let Some(existing) = ledger.activations.get(&candidate_id) {
+                let mut comparable = candidate.clone();
+                comparable.activated_at_ms = existing.activated_at_ms;
+                if &comparable == existing {
+                    return (false, (Some(existing.clone()), previous));
+                }
             }
-        }
-        ledger
-            .activations
-            .insert(candidate_id.clone(), candidate.clone());
-        (true, Some(candidate))
-    })?;
-    Ok(PersonaActivationReceipt {
-        schema_version: ACTIVATION_RECEIPT_SCHEMA_VERSION,
-        action: PersonaActivationAction::Activate,
-        persona_id: candidate_id,
-        changed,
-        occurred_at_ms: now_ms,
-        ledger_path: ledger_path.display().to_string(),
-        activation,
-    })
+            ledger
+                .activations
+                .insert(candidate_id.clone(), candidate.clone());
+            (true, (Some(candidate), previous))
+        })?;
+    Ok((
+        PersonaActivationReceipt {
+            schema_version: ACTIVATION_RECEIPT_SCHEMA_VERSION,
+            action: PersonaActivationAction::Activate,
+            persona_id: candidate_id,
+            changed,
+            occurred_at_ms: now_ms,
+            ledger_path: ledger_path.display().to_string(),
+            activation,
+        },
+        previous,
+    ))
 }
 
 pub fn deactivate_persona(
     manifest: Option<&Path>,
     persona_id: &str,
     now_ms: i64,
+) -> Result<PersonaActivationReceipt, PersonaActivationError> {
+    let root = load_root_persona_catalog(manifest).map_err(PersonaActivationError::Catalog)?;
+    let mutation_lock = acquire_project_mutation_lock(&root.manifest_dir)?;
+    deactivate_persona_locked(manifest, persona_id, now_ms, &mutation_lock)
+}
+
+fn deactivate_persona_locked(
+    manifest: Option<&Path>,
+    persona_id: &str,
+    now_ms: i64,
+    _mutation_lock: &ProjectMutationLock,
 ) -> Result<PersonaActivationReceipt, PersonaActivationError> {
     let root = load_root_persona_catalog(manifest).map_err(PersonaActivationError::Catalog)?;
     let ledger_path = activation_ledger_path(&root.manifest_dir);
@@ -255,6 +335,58 @@ pub fn deactivate_persona(
         ledger_path: ledger_path.display().to_string(),
         activation,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn restore_persona_activation(
+    manifest: Option<&Path>,
+    expected: &PersonaActivationRecord,
+    previous: Option<PersonaActivationRecord>,
+) -> Result<(), PersonaActivationError> {
+    let root = load_root_persona_catalog(manifest).map_err(PersonaActivationError::Catalog)?;
+    let mutation_lock = acquire_project_mutation_lock(&root.manifest_dir)?;
+    restore_persona_activation_locked(manifest, expected, previous, &mutation_lock)
+}
+
+pub(crate) fn restore_persona_activation_locked(
+    manifest: Option<&Path>,
+    expected: &PersonaActivationRecord,
+    previous: Option<PersonaActivationRecord>,
+    _mutation_lock: &ProjectMutationLock,
+) -> Result<(), PersonaActivationError> {
+    let root = load_root_persona_catalog(manifest).map_err(PersonaActivationError::Catalog)?;
+    let persona_id = expected.persona_id.clone();
+    if previous
+        .as_ref()
+        .is_some_and(|activation| activation.persona_id != persona_id)
+    {
+        return Err(PersonaActivationError::InvalidLedger {
+            path: activation_ledger_path(&root.manifest_dir)
+                .display()
+                .to_string(),
+            message: format!("rollback record does not match activation '{persona_id}'"),
+        });
+    }
+    let (_, restored) = mutate_activation_ledger(&root.manifest_dir, |ledger| {
+        if ledger.activations.get(&persona_id) != Some(expected) {
+            return (
+                false,
+                Err(PersonaActivationError::RollbackConflict {
+                    persona_id: persona_id.clone(),
+                }),
+            );
+        }
+        match previous {
+            Some(previous) => {
+                ledger.activations.insert(persona_id, previous);
+            }
+            None => {
+                ledger.activations.remove(&persona_id);
+            }
+        }
+        (true, Ok(()))
+    })?;
+    restored
 }
 
 pub fn list_persona_activations(

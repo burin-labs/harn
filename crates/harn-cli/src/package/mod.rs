@@ -35,6 +35,7 @@ mod generations;
 mod lockfile;
 mod manifest;
 mod maturity;
+mod mutation;
 mod package_ops;
 mod persona_activation;
 mod persona_runtime;
@@ -60,6 +61,7 @@ pub use maturity::{
     AuditCode, AuditFinding, AuditReport, AuditSeverity, OutdatedEntry, OutdatedReport,
     OutdatedStatus,
 };
+pub(crate) use mutation::*;
 pub use package_ops::*;
 pub use persona_activation::*;
 pub(crate) use persona_runtime::*;

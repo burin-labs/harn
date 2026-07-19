@@ -61,12 +61,33 @@ pub async fn scaffold_persona_package(
 async fn materialize_persona(
     args: &PersonaMaterializeArgs,
 ) -> Result<PersonaScaffoldResult, String> {
+    materialize_persona_at(args, &args.output_root, false).await
+}
+
+pub(super) async fn materialize_persona_for_apply(
+    args: &PersonaMaterializeArgs,
+    output_root: &Path,
+) -> Result<PersonaScaffoldResult, String> {
+    materialize_persona_at(args, output_root, true).await
+}
+
+async fn materialize_persona_at(
+    args: &PersonaMaterializeArgs,
+    output_root: &Path,
+    reuse_identical: bool,
+) -> Result<PersonaScaffoldResult, String> {
     let lowering = match (&args.blueprint, &args.compile_receipt) {
         (Some(blueprint), None) => persona_prompt::compile_blueprint_path(blueprint).await?,
         (None, Some(receipt)) => persona_prompt::compile_reviewed_receipt_path(receipt).await?,
         _ => return Err("exactly one persona materialization input is required".to_string()),
     };
-    materialize_prompt_compiled_lowering(lowering, &args.output_root, args.force).await
+    materialize_prompt_compiled_lowering_with_reuse(
+        lowering,
+        output_root,
+        args.force,
+        reuse_identical,
+    )
+    .await
 }
 
 pub async fn materialize_persona_package(
@@ -83,10 +104,19 @@ pub(super) async fn materialize_prompt_compiled_lowering(
     output_root: &Path,
     force: bool,
 ) -> Result<PersonaScaffoldResult, String> {
+    materialize_prompt_compiled_lowering_with_reuse(lowering, output_root, force, false).await
+}
+
+async fn materialize_prompt_compiled_lowering_with_reuse(
+    lowering: PromptCompiledPersonaLowering,
+    output_root: &Path,
+    force: bool,
+    reuse_identical: bool,
+) -> Result<PersonaScaffoldResult, String> {
     let name = normalize_name(&lowering.persona.name)?;
     let template = parse_template_kind(&lowering.template)?;
     let target_root = output_root.join(&name);
-    if target_root.exists() && !force {
+    if target_root.exists() && !force && !reuse_identical {
         return Err(format!(
             "{} already exists; pass --force to replace it after validation",
             target_root.display()
@@ -96,6 +126,19 @@ pub(super) async fn materialize_prompt_compiled_lowering(
     let mut prepared = prepare_persona_package(output_root, &name, template)?;
     apply_prompt_compiled_overlay(&mut prepared, &lowering)?;
     validate_prepared_persona(&prepared, &name).await?;
+    if target_root.exists() && !force {
+        let staged_hash = crate::package::compute_content_hash(prepared.staging.path())
+            .map_err(|error| error.to_string())?;
+        let existing_hash = crate::package::compute_content_hash(&target_root)
+            .map_err(|error| error.to_string())?;
+        if staged_hash == existing_hash {
+            return Ok(scaffold_result(&prepared.relative_files, target_root));
+        }
+        return Err(format!(
+            "{} already exists with different content; pass --force to replace it after validation",
+            target_root.display()
+        ));
+    }
     publish_prepared_persona(prepared, target_root, force)
 }
 
@@ -317,14 +360,18 @@ fn publish_prepared_persona(
         let _ = fs::remove_dir_all(&staged_root);
         return Err(error);
     }
+    Ok(scaffold_result(&relative_files, target_root))
+}
+
+fn scaffold_result(relative_files: &[PathBuf], target_root: PathBuf) -> PersonaScaffoldResult {
     let files = relative_files
-        .into_iter()
+        .iter()
         .map(|relative| target_root.join(relative))
         .collect();
-    Ok(PersonaScaffoldResult {
+    PersonaScaffoldResult {
         root: target_root,
         files,
-    })
+    }
 }
 
 fn publish_staged_persona(staged: &Path, target: &Path, force: bool) -> Result<(), String> {
@@ -798,66 +845,14 @@ mod tests {
 
     use super::*;
 
-    fn reviewed_compile_receipt() -> serde_json::Value {
-        serde_json::json!({
-            "schema_version": "harn.persona.prompt_compile.v1",
-            "ok": true,
-            "prompt_digest": "sha256:prompt",
-            "catalog_digest": "sha256:catalog",
-            "checkpoint": {
-                "status": "accepted",
-                "attempts": 1,
-                "repaired": false,
-                "provider": "mock",
-                "model": "mock",
-            },
-            "usage": {
-                "input_tokens": 11,
-                "output_tokens": 7,
-                "total_tokens": 18,
-                "realized_cost_usd": 0.0,
-            },
-            "blueprint": {
-                "schema_version": "1",
-                "name": "accepted_prompt_watch",
-                "description": "Watches accepted prompt receipts.",
-                "goal": "Prove the accepted receipt enters the canonical transaction.",
-                "template": "deterministic-sweeper",
-                "cron": {"cron": "0 9 * * *", "timezone": "UTC"},
-            },
-            "lowering": {
-                "profile": "prompt_compiled_v1",
-                "template": "deterministic-sweeper",
-                "persona": {
-                    "name": "accepted_prompt_watch",
-                    "description": "Watches accepted prompt receipts.",
-                    "goal": "Prove the accepted receipt enters the canonical transaction.",
-                },
-                "policy": {
-                    "autonomy_tier": "suggest",
-                    "receipt_policy": "required",
-                },
-                "triggers": [{
-                    "id": "accepted_prompt_watch-cron",
-                    "kind": "cron",
-                    "provider": "cron",
-                    "events": ["cron.tick"],
-                    "secrets": {},
-                    "schedule": "0 9 * * *",
-                    "timezone": "UTC",
-                    "handler": "persona://accepted_prompt_watch",
-                }],
-            },
-            "error": null,
-        })
-    }
-
     fn materialize_args(receipt: PathBuf, output_root: PathBuf) -> PersonaMaterializeArgs {
         PersonaMaterializeArgs {
             blueprint: None,
             compile_receipt: Some(receipt),
             output_root,
             force: false,
+            activate: false,
+            json: false,
         }
     }
 
@@ -957,7 +952,11 @@ mod tests {
     async fn accepted_reviewed_receipt_revalidates_then_enters_the_strict_transaction() {
         let temp = tempfile::tempdir().unwrap();
         let receipt_path = temp.path().join("reviewed-receipt.json");
-        fs::write(&receipt_path, reviewed_compile_receipt().to_string()).unwrap();
+        fs::write(
+            &receipt_path,
+            crate::commands::persona_test_support::reviewed_compile_receipt().to_string(),
+        )
+        .unwrap();
         let output_root = temp.path().join("personas");
 
         let result = materialize_persona(&materialize_args(receipt_path, output_root))
@@ -991,22 +990,25 @@ mod tests {
         let cases_root = temp.path().join("cases");
         fs::create_dir_all(&cases_root).unwrap();
 
-        let mut wrong_version = reviewed_compile_receipt();
+        let mut wrong_version = crate::commands::persona_test_support::reviewed_compile_receipt();
         wrong_version["schema_version"] = serde_json::json!("harn.persona.prompt_compile.v2");
-        let mut failed = reviewed_compile_receipt();
+        let mut failed = crate::commands::persona_test_support::reviewed_compile_receipt();
         failed["ok"] = serde_json::json!(false);
         failed["checkpoint"]["status"] = serde_json::json!("validator_rejected");
         failed["error"] = serde_json::json!({"code": "rejected", "message": "not accepted"});
-        let mut missing_blueprint = reviewed_compile_receipt();
+        let mut missing_blueprint =
+            crate::commands::persona_test_support::reviewed_compile_receipt();
         missing_blueprint
             .as_object_mut()
             .unwrap()
             .remove("blueprint");
-        let mut missing_lowering = reviewed_compile_receipt();
+        let mut missing_lowering =
+            crate::commands::persona_test_support::reviewed_compile_receipt();
         missing_lowering.as_object_mut().unwrap().remove("lowering");
-        let mut drifted_lowering = reviewed_compile_receipt();
+        let mut drifted_lowering =
+            crate::commands::persona_test_support::reviewed_compile_receipt();
         drifted_lowering["lowering"]["triggers"][0]["schedule"] = serde_json::json!("0 10 * * *");
-        let mut invalid_catalog = reviewed_compile_receipt();
+        let mut invalid_catalog = crate::commands::persona_test_support::reviewed_compile_receipt();
         invalid_catalog["blueprint"]
             .as_object_mut()
             .unwrap()
