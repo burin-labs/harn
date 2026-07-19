@@ -6,7 +6,7 @@
  * previously-divergent handlers path, which used to drop `error` on the budget
  * branch.
  */
-import { default_llm_caller } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
 import { safe_call } from "std/llm/safe"
 import { with_llm_mocks } from "std/testing"
 

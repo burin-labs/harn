@@ -5,7 +5,9 @@
 use super::*;
 use crate::agent_events::{AgentEvent, AgentEventSink};
 use crate::llm::api::LlmRequestPayload;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 
 fn text_mock(text: &str) -> LlmMock {
     LlmMock {
@@ -92,6 +94,164 @@ fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
     assert_eq!(recordings.len(), 1);
     assert_eq!(recordings[0].text, "cross-thread record");
     clear_cli_llm_mock_mode();
+}
+
+#[test]
+fn offthread_mock_call_keeps_the_callers_logical_context() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        reset_llm_mock_state();
+        push_llm_mock(text_mock("logical mock"));
+        let opts = crate::llm::api::options::base_opts("mock");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let result = crate::llm::api::vm_call_llm_full_streaming_offthread(&opts, tx)
+            .await
+            .expect("off-thread mock call");
+
+        assert_eq!(result.text, "logical mock");
+        assert_eq!(get_llm_mock_calls().len(), 1);
+        assert_eq!(get_llm_mock_receipts().len(), 1);
+        reset_llm_mock_state();
+    });
+}
+
+#[test]
+fn inline_mock_scope_survives_a_deterministic_executor_thread_hop() {
+    reset_llm_mock_state();
+    let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
+        crate::observability::execution_scope::mint_execution_scope(),
+        LlmMockContext::default(),
+    );
+    let mut first_poll = true;
+    let inner = std::future::poll_fn(move |cx| {
+        if first_poll {
+            first_poll = false;
+            push_llm_mock_scope();
+            push_llm_mock(text_mock("thread-hop"));
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+
+        let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("mock"));
+        let result = mock_llm_response(&request).expect("mock after thread hop");
+        let calls = get_llm_mock_calls().len();
+        let receipts = get_llm_mock_receipts().len();
+        let popped = pop_llm_mock_scope();
+        Poll::Ready((
+            result.text,
+            calls,
+            receipts,
+            popped,
+            builtin_llm_mock_active(),
+        ))
+    });
+    let mut scoped = Box::pin(crate::orchestration::scope_ambient(ambient, inner));
+    let waker = futures::task::noop_waker();
+    let mut cx = std::task::Context::from_waker(&waker);
+    assert!(matches!(scoped.as_mut().poll(&mut cx), Poll::Pending));
+
+    let observed = std::thread::spawn(move || {
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        match scoped.as_mut().poll(&mut cx) {
+            Poll::Ready(observed) => observed,
+            Poll::Pending => panic!("second poll must complete"),
+        }
+    })
+    .join()
+    .expect("executor thread");
+
+    assert_eq!(observed, ("thread-hop".to_string(), 1, 1, true, false));
+    assert!(!builtin_llm_mock_active(), "scope must not leak to caller");
+}
+
+fn fixture_script(prompt: &str) -> crate::Chunk {
+    crate::compile_source(&format!(
+        r#"
+yield_now()
+const response = llm_call("{prompt}", nil, {{provider: "mock"}})
+__io_println(response.text)
+__io_println(len(llm_mock_calls()))
+"#
+    ))
+    .expect("compile fixture script")
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn concurrent_vms_isolate_inline_queues_and_call_logs() {
+    let alpha = crate::compile_source(
+        r#"
+llm_mock({text: "alpha"})
+yield_now()
+const response = llm_call("alpha prompt", nil, {provider: "mock"})
+__io_println(response.text)
+__io_println(len(llm_mock_calls()))
+"#,
+    )
+    .expect("compile alpha");
+    let beta = crate::compile_source(
+        r#"
+llm_mock({text: "beta"})
+yield_now()
+const response = llm_call("beta prompt", nil, {provider: "mock"})
+__io_println(response.text)
+__io_println(len(llm_mock_calls()))
+"#,
+    )
+    .expect("compile beta");
+    let mut alpha_vm = crate::Vm::new();
+    let mut beta_vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut alpha_vm);
+    crate::register_vm_stdlib(&mut beta_vm);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (alpha_result, beta_result) =
+                tokio::join!(alpha_vm.execute(&alpha), beta_vm.execute(&beta));
+            alpha_result.expect("alpha VM");
+            beta_result.expect("beta VM");
+        })
+        .await;
+
+    assert_eq!(alpha_vm.output(), "alpha\n1\n");
+    assert_eq!(beta_vm.output(), "beta\n1\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn concurrent_vms_keep_distinct_cli_fixture_leases() {
+    reset_llm_mock_state();
+    install_cli_llm_mocks(vec![text_mock("cli-alpha")]);
+    let mut alpha_vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut alpha_vm);
+
+    install_cli_llm_mocks(vec![text_mock("cli-beta")]);
+    let mut beta_vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut beta_vm);
+    clear_cli_llm_mock_mode();
+
+    let alpha = fixture_script("alpha fixture");
+    let beta = fixture_script("beta fixture");
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (alpha_result, beta_result) =
+                tokio::join!(alpha_vm.execute(&alpha), beta_vm.execute(&beta));
+            alpha_result.expect("alpha CLI fixture");
+            beta_result.expect("beta CLI fixture");
+        })
+        .await;
+
+    assert_eq!(alpha_vm.output(), "cli-alpha\n1\n");
+    assert_eq!(beta_vm.output(), "cli-beta\n1\n");
+    drop(alpha_vm);
+    drop(beta_vm);
+    assert!(cli_llm_mock_scopes().is_empty());
 }
 
 #[test]

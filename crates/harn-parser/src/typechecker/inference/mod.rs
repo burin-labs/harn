@@ -18,6 +18,7 @@ mod decls;
 mod entry;
 mod expressions;
 mod flow;
+mod generic_bindings;
 mod hitl;
 mod statements;
 mod subtyping;

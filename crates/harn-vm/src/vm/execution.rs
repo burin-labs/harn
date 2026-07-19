@@ -104,8 +104,10 @@ impl Vm {
         self.ensure_execution_available()?;
         let registry = self.pool_registry.clone();
         let owner = crate::observability::execution_scope::mint_execution_scope();
-        let ambient =
-            crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(owner);
+        let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
+            owner,
+            self.llm_mock_context.clone(),
+        );
         let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_scoped(chunk).await
         });

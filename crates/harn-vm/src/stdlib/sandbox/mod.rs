@@ -1925,6 +1925,19 @@ fn sandbox_denial_error(summary: String, detail: &str, policy: &CapabilityPolicy
             category: ErrorCategory::Environment,
         };
     }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(path) = toolchain_cache_default_named_in_denial(policy, detail) {
+        return VmError::CategorizedError {
+            message: format!(
+                "{summary}; the sandbox denied writing '{}', a well-known developer-toolchain \
+                 cache outside the active profile — a host environment/config gap, not the \
+                 agent's code defect. Enable the DeveloperToolchains preset, grant it with \
+                 process_sandbox.write_roots, or relocate the cache into the workspace",
+                path.display()
+            ),
+            category: ErrorCategory::Environment,
+        };
+    }
     sandbox_rejection(sandbox_process_violation_message(summary))
 }
 
@@ -1994,6 +2007,30 @@ fn toolchain_cache_gap_named_in_denial(
     _detail: &str,
 ) -> Option<(String, PathBuf)> {
     None
+}
+
+/// Fallback for toolchain caches that use their DEFAULT location (no env var
+/// set), which [`toolchain_cache_gap_named_in_denial`] cannot see. If the denial
+/// evidence names a well-known cache-write default (`~/Library/Caches/go-build`,
+/// `~/.cargo/registry`, …) that is NOT inside the active jail — i.e. the
+/// `DeveloperToolchains` preset is off or does not reach this policy — return the
+/// path so the caller reclassifies to [`ErrorCategory::Environment`] instead of a
+/// bare `ToolRejected`. When the preset IS active the cache is a jail root, so
+/// the guard suppresses this and a genuine policy refusal stays `ToolRejected`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn toolchain_cache_default_named_in_denial(
+    policy: &CapabilityPolicy,
+    detail: &str,
+) -> Option<PathBuf> {
+    let home = sandbox_user_home_dir()?;
+    let detail = detail.to_ascii_lowercase();
+    let jail = coverage_jail_roots(policy);
+    developer_toolchain_cache_write_roots_for_home(&home)
+        .into_iter()
+        .find(|root| {
+            detail.contains(&root.to_string_lossy().to_ascii_lowercase())
+                && !jail.iter().any(|jail_root| path_is_within(root, jail_root))
+        })
 }
 
 /// Helper for backends that can't attach confinement at all (macOS
@@ -2322,6 +2359,14 @@ pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec
         "Library/Caches/go-build", // Go build cache (GOCACHE, macOS default)
         ".cache/go-build",         // Go build cache (GOCACHE, Linux default)
         "go/pkg/mod",              // Go module cache (GOMODCACHE default)
+        // Go env config (GOENV). `go` rewrites `go/env` on first use (e.g. to
+        // record GOTOOLCHAIN); when its parent is not writable the toolchain
+        // fails with `writing go env config: ... operation not permitted`. The
+        // macOS default is `~/Library/Application Support/go/env`
+        // (`os.UserConfigDir()/go`). The Linux default `~/.config/go/env` sits
+        // under the read-only `.config` package-manager root, so granting it
+        // needs a nested carve-out and is tracked separately.
+        "Library/Application Support/go", // Go env config dir (GOENV, macOS default)
         // Cargo registry + git caches. `cargo fetch`/`cargo build` unpack crate
         // sources into `registry/src`, download tarballs into `registry/cache`,
         // refresh the index under `registry/index`, and check out git deps under

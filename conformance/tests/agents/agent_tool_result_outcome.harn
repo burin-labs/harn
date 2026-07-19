@@ -1,0 +1,83 @@
+import { agent_tool_result_is_ok, agent_tool_result_outcome } from "std/agent/tool_lifecycle"
+
+pipeline test() {
+  // A non-dict envelope carries no structured signal at all.
+  const missing = agent_tool_result_outcome(nil)
+  assert_eq(missing.kind, "unknown")
+  assert_eq(missing.from_structured, false)
+  assert_eq(agent_tool_result_is_ok(missing), nil)
+  // Transport success, expressed each of the three structured ways.
+  for ok_result in [{ok: true}, {success: true}, {status: "success"}] {
+    const outcome = agent_tool_result_outcome(ok_result)
+    assert_eq(outcome.kind, "ok")
+    assert_eq(outcome.from_structured, true)
+    assert_eq(agent_tool_result_is_ok(outcome), true)
+  }
+  // Transport failure.
+  for err_result in [{ok: false}, {success: false}, {status: "error"}, {status: "failed"}] {
+    const outcome = agent_tool_result_outcome(err_result)
+    assert_eq(outcome.kind, "error")
+    assert_eq(agent_tool_result_is_ok(outcome), false)
+  }
+  // Dispatch rejection: the rejection code is already a structured field, so the
+  // typed category is read, not sniffed from the rendered envelope.
+  const denied = agent_tool_result_outcome({error: "permission_denied", status: "ok"})
+  assert_eq(denied.kind, "error")
+  assert_eq(denied.error_category, "permission_denied")
+  assert_eq(agent_tool_result_is_ok(denied), false)
+  const invalid = agent_tool_result_outcome({error: "invalid_arguments"})
+  assert_eq(invalid.kind, "error")
+  assert_eq(invalid.error_category, "schema_validation")
+  // A typed error_category wins over the raw code.
+  const categorized = agent_tool_result_outcome(
+    {error_category: "timeout", error: "permission_denied"},
+  )
+  assert_eq(categorized.error_category, "timeout")
+  // Product-level rejection carried on a transport-successful result.
+  const product = agent_tool_result_outcome({status: "ok", product_error: true})
+  assert_eq(product.kind, "error")
+  assert_eq(product.product_error, true)
+  assert_eq(agent_tool_result_is_ok(product), false)
+  // A producer that stamps product_error: false is trusted as clean.
+  const clean = agent_tool_result_outcome({status: "ok", product_error: false})
+  assert_eq(clean.kind, "ok")
+  assert_eq(agent_tool_result_is_ok(clean), true)
+  // Edit-status spine, read from the flat `edit_status` field.
+  const rejected = agent_tool_result_outcome({ok: false, edit_status: "rejected_not_applied"})
+  assert_eq(rejected.edit_status, "rejected_not_applied")
+  const stamped_ok = agent_tool_result_outcome({ok: true, edit_status: "applied_clean"})
+  assert_eq(stamped_ok.edit_status, "applied_clean")
+  const future_edit = agent_tool_result_outcome({ok: true, edit_status: "future_edit_status"})
+  assert_eq(future_edit.edit_status, "unknown")
+  // A host that stamps the status inside its `edit_outcome` record is read via
+  // the nested `edit_outcome.edit_status`, so both vocabularies resolve.
+  const nested_status = agent_tool_result_outcome(
+    {
+      ok: true,
+      edit_outcome: {schema: "burin.tool_edit_outcome.v1", edit_status: "applied_still_failing"},
+    },
+  )
+  assert_eq(nested_status.edit_status, "applied_still_failing")
+  assert_eq(nested_status.from_structured, true)
+  // Diagnostics count, flat and nested.
+  const flat = agent_tool_result_outcome({ok: false, diagnostics_error_count: 3})
+  assert_eq(flat.diagnostics_error_count, 3)
+  const nested = agent_tool_result_outcome({ok: false, diagnostics: {error_count: 2}})
+  assert_eq(nested.diagnostics_error_count, 2)
+  // Transport-successful write tool whose producer has not stamped product_error
+  // yet: the verdict is a structurally honest "ok / product_error unknown", and
+  // a consumer that owns a prose fallback for that dimension keeps it until the
+  // producer guarantees the field.
+  const unstamped = agent_tool_result_outcome({status: "ok"})
+  assert_eq(unstamped.kind, "ok")
+  assert_eq(unstamped.product_error, nil)
+  assert_eq(unstamped.edit_status, "unknown")
+  // An envelope with only prose keys and no structured field is honestly unknown.
+  const prose_only = agent_tool_result_outcome(
+    {rendered_result: "Error: something", observation: "Error: something"},
+  )
+  assert_eq(prose_only.kind, "unknown")
+  assert_eq(prose_only.from_structured, false)
+  assert_eq(agent_tool_result_is_ok(prose_only), nil)
+  log("agent tool result outcome ok")
+}

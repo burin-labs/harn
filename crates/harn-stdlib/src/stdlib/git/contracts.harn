@@ -1,0 +1,163 @@
+pub type GitOutputRef = {kind: string, bytes: int, sha256: string, inline: string, truncated: bool}
+
+pub type GitRepo = {
+  path: string,
+  root: string,
+  git_dir: string,
+  bare: bool,
+  inside_work_tree: bool,
+  input: string,
+}
+
+/** One path-level row returned by `git_status`. */
+pub type GitStatusEntry = {
+  xy: string,
+  index: string,
+  worktree: string,
+  path: string,
+  original_path: string?,
+  conflict_kind: string?,
+}
+
+pub type GitConflict = {path: string, xy: string, kind: string}
+
+pub type GitDiscoverData = {repo: GitRepo}
+
+pub type GitStatusData = {branch: string?, entries: list<GitStatusEntry>, dirty: bool}
+
+pub type GitConflictsData = {conflicts: list<GitConflict>, has_conflicts: bool}
+
+pub type GitDiffData = {diff: string}
+
+pub type GitMergeBaseData = {oid: string}
+
+/** Stable v1 audit envelope shared by receipt-producing git operations. */
+pub type GitReceipt = {
+  schema: "harn-stdlib-git-receipt-v1",
+  receipt_id: string,
+  operation: string,
+  action: string,
+  status: string,
+  success: bool,
+  exit_category: string,
+  exit_code: int,
+  command_args: list<string>,
+  argv: list<string>,
+  working_dir: string,
+  cwd: string,
+  affected_paths: list<string>,
+  agent: string,
+  trace_id: string,
+  autonomy_tier: string,
+  stdout: GitOutputRef,
+  stderr: GitOutputRef,
+  command_policy: dict?,
+  approval: dict?,
+  encoding_error: string?,
+  data: dict?,
+  repo: GitRepo?,
+}
+
+/** Captured result returned by argv-mode git helpers. */
+pub type GitCommandResult = {
+  ok: bool,
+  success: bool,
+  status: string,
+  exit_code: int?,
+  timed_out: bool?,
+  command_id: string?,
+  handle_id: string?,
+  argv: list<string>,
+  command_args: list<string>,
+  cwd: string,
+  stdout: string,
+  stderr: string,
+  combined: string,
+  output_path: string?,
+  stdout_path: string?,
+  stderr_path: string?,
+}
+
+/** Captured branch lookup with normalized detached-head state. */
+pub type GitBranchResult = GitCommandResult & {branch: string, detached: bool}
+
+pub type GitTagListData = {tags: list<string>}
+
+pub type GitDescribeData = {
+  describe: string,
+  tag: string?,
+  distance: int?,
+  sha: string,
+  dirty: bool,
+}
+
+/** One remote ref returned by `git_ls_remote`. */
+pub type GitRemoteRef = {oid: string, ref: string, name: string, peeled: bool}
+
+pub type GitLsRemoteData = {remote: string, refs: list<GitRemoteRef>}
+
+pub type GitDiscoverReceipt = GitReceipt \
+  & {operation: "git.repo.discover", action: "git.repo.discover", data: GitDiscoverData}
+
+pub type GitStatusReceipt = GitReceipt \
+  & {operation: "git.status", action: "git.status", data: GitStatusData}
+
+pub type GitConflictsReceipt = GitReceipt \
+  & {operation: "git.conflicts", action: "git.conflicts", data: GitConflictsData}
+
+pub type GitDiffReceipt = GitReceipt \
+  & {operation: "git.diff", action: "git.diff", data: GitDiffData}
+
+pub type GitMergeBaseReceipt = GitReceipt \
+  & {operation: "git.merge_base", action: "git.merge_base", data: GitMergeBaseData}
+
+pub type GitTagListReceipt = GitReceipt \
+  & {operation: "git.tag_list", action: "git.tag_list", data: GitTagListData}
+
+pub type GitDescribeReceipt = GitReceipt \
+  & {operation: "git.describe", action: "git.describe", data: GitDescribeData}
+
+pub type GitLsRemoteReceipt = GitReceipt \
+  & {operation: "git.ls_remote", action: "git.ls_remote", data: GitLsRemoteData}
+
+/** Data returned instead of an operation result in shadow/suggest mode. */
+pub type GitPlannedData = {planned: bool, argv: list<string>, cwd: string}
+
+pub type GitFetchData = {fetched: bool}
+
+pub type GitRebaseData = {rebased: bool}
+
+pub type GitPushData = {
+  pushed: bool,
+  refspec?: string,
+  ref?: string,
+  expected_oid?: string,
+  actual_oid?: string,
+}
+
+pub type GitWorktreeCreateData = {branch: string, path: string, created: bool}
+
+pub type GitWorktreeRemoveData = {path: string, removed: bool, idempotent?: bool}
+
+pub type GitFetchReceipt = GitReceipt \
+  & {operation: "git.fetch", action: "git.fetch", data: GitFetchData | GitPlannedData}
+
+pub type GitRebaseReceipt = GitReceipt \
+  & {operation: "git.rebase", action: "git.rebase", data: GitRebaseData | GitPlannedData}
+
+pub type GitPushReceipt = GitReceipt \
+  & {operation: "git.push", action: "git.push", data: GitPushData | GitPlannedData}
+
+pub type GitWorktreeCreateReceipt = GitReceipt \
+  & {
+  operation: "git.worktree.create",
+  action: "git.worktree.create",
+  data: GitWorktreeCreateData | GitPlannedData,
+}
+
+pub type GitWorktreeRemoveReceipt = GitReceipt \
+  & {
+  operation: "git.worktree.remove",
+  action: "git.worktree.remove",
+  data: GitWorktreeRemoveData | GitPlannedData,
+}

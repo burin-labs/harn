@@ -341,6 +341,21 @@ Explicit type arguments are erased at runtime. They are checked statically:
 the number of supplied type arguments must match the function declaration, and
 each explicit binding must remain consistent with the concrete argument types.
 
+Inference descends through transparent generic type aliases, including aliases
+nested inside lists, dictionaries, records, callbacks, nullable types, and
+unions. Concrete candidates from multiple values join under the usual union
+rules. An empty collection contributes no candidate, so callers may use an
+explicit type argument when its element type is otherwise ambiguous:
+
+```harn,ignore
+type Step<T> = {value: T}
+
+fn values<T>(steps: list<Step<T>>) -> list<T> { ... }
+
+const inferred: list<int> = values([int_step()])
+const explicit: list<int> = values<int>([])
+```
+
 ### Structural types (shapes)
 
 Dict shape types describe the expected fields of a dict value. The type checker
@@ -553,8 +568,9 @@ wrappers pick up the same narrowing.
   extracted_json: bool, usage: {input_tokens: int, output_tokens: int,
   cost_usd: float | nil,
   cache_read_tokens: int, cache_write_tokens: int,
-  cache_creation_input_tokens: int, cache_hit_ratio: float,
-  cache_savings_usd: float}, model: string, provider: string}`.
+  cache_hit_ratio: float | nil, cache_visibility: string | nil,
+  cache_savings_usd: float, served_fast: bool,
+  provider_telemetry: dict | nil}, model: string, provider: string}`.
   Never throws on transport / schema failures —
   callers dispatch on `ok` / `error_category`. Recognized
   `error_category` values: `transport`-class categories pass through

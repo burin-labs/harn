@@ -396,6 +396,8 @@ pub struct Vm {
     pub(crate) inline_cache_set_by_chunk: HashMap<u64, usize>,
     /// VM-scoped pool registry inherited by child VMs and scoped into Tokio tasks.
     pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
+    /// Inline LLM fixtures and observations shared by this VM execution tree.
+    pub(crate) llm_mock_context: crate::llm::mock::LlmMockContext,
     /// Reader leases opened by package_snapshot_open in this execution tree.
     /// Child VMs share the registry; the final VM drop releases abandoned
     /// leases without touching concurrent executions.
@@ -591,6 +593,7 @@ impl VmBaseline {
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            llm_mock_context: crate::llm::mock::LlmMockContext::for_new_vm(),
             package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
@@ -845,6 +848,7 @@ impl Vm {
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
+            llm_mock_context: crate::llm::mock::LlmMockContext::for_new_vm(),
             package_snapshot_registry: Arc::new(Default::default()),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
@@ -1022,6 +1026,7 @@ impl Vm {
             inline_cache_sets: Vec::new(),
             inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: self.pool_registry.clone(),
+            llm_mock_context: self.llm_mock_context.clone(),
             package_snapshot_registry: self.package_snapshot_registry.clone(),
             wait_for_graph: self.wait_for_graph.clone(),
             held_sync_guards: Vec::new(),

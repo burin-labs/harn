@@ -525,8 +525,7 @@ fn parse_argument_value(value: JsonValue) -> Option<JsonValue> {
 
 fn response_text(response: &JsonValue) -> String {
     response
-        .get("prose")
-        .or_else(|| response.get("text"))
+        .get("text")
         .and_then(JsonValue::as_str)
         .unwrap_or_default()
         .to_string()

@@ -1,0 +1,36 @@
+import {
+  GitCheckoutReceipt,
+  GitFetchReceipt,
+  GitLsRemoteReceipt,
+  GitPushReceipt,
+  GitReceipt,
+  git_fetch,
+  git_ls_remote,
+  git_push,
+} from "std/git"
+
+type GitAdapters = {
+  lookup: fn(string) -> GitLsRemoteReceipt,
+  fetch: fn(string) -> GitFetchReceipt,
+  push: fn(string, string) -> GitPushReceipt,
+  prior_lookup?: GitLsRemoteReceipt,
+  prior_sync?: GitCheckoutReceipt,
+  prior_mutation?: GitReceipt,
+}
+
+fn lookup(remote: string) -> GitLsRemoteReceipt {
+  return git_ls_remote(remote)
+}
+
+fn adapters() -> GitAdapters {
+  return {
+    lookup: lookup,
+    fetch: { repo -> return git_fetch("origin", repo) },
+    push: { remote, refspec -> return git_push(remote, refspec) },
+  }
+}
+
+pipeline default() {
+  const configured: GitAdapters = adapters()
+  __io_println(configured.prior_lookup == nil && configured.prior_sync == nil)
+}

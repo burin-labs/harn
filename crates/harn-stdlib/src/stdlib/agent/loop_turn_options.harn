@@ -282,7 +282,7 @@ pub fn __loop_progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = 
  * @errors: []
  */
 pub fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates = nil) {
-  const telemetry = llm_result?.provider_telemetry ?? {}
+  const telemetry = llm_result?.usage?.provider_telemetry ?? {}
   const thinking = llm_result?.thinking ?? ""
   const thinking_chars = if type_of(thinking) == "string" {
     len(thinking)
@@ -296,8 +296,8 @@ pub fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates
     provider: llm_result?.provider ?? "",
     model: llm_result?.model ?? "",
     response_ms: telemetry?.client_wall_ms ?? 0,
-    input_tokens: llm_result?.input_tokens ?? 0,
-    output_tokens: llm_result?.output_tokens ?? 0,
+    input_tokens: llm_result?.usage?.input_tokens ?? 0,
+    output_tokens: llm_result?.usage?.output_tokens ?? 0,
     thinking_chars: thinking_chars,
   }
     + extra

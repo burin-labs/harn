@@ -1,0 +1,54 @@
+type Receipt = {id: string}
+
+type Verdict = {ok: bool}
+
+type Step<T> = {value: T}
+
+type MaybeStep<T> = {value: T?}
+
+type RefinementCheck<T> = {name: string, validate: fn(T, dict) -> Verdict}
+
+type RefinedSchema<T> = {base: T, refinements: list<RefinementCheck<T>>}
+
+fn int_step() -> Step<int> {
+  return {value: 1}
+}
+
+fn values<T>(_steps: list<Step<T>>) -> list<T> {
+  return []
+}
+
+fn maybe_values<T>(_steps: list<MaybeStep<T>>) -> list<T> {
+  return []
+}
+
+fn validate_receipt(receipt: Receipt, _context: dict) -> Verdict {
+  return {ok: receipt.id != ""}
+}
+
+fn refinement<T>(name: string, validate: fn(T, dict) -> Verdict) -> RefinementCheck<T> {
+  return {name: name, validate: validate}
+}
+
+fn receipt_schema() -> RefinedSchema<Receipt> {
+  return {base: {id: "r-1"}, refinements: [refinement("has-id", validate_receipt)]}
+}
+
+fn artifacts<T>(_contract: RefinedSchema<T>) -> list<T> {
+  return []
+}
+
+fn artifact_groups<T>(_contracts: list<RefinedSchema<T>>) -> list<T> {
+  return []
+}
+
+pipeline test(task) {
+  const ints: list<int> = values([int_step()])
+  const nullable_ints: list<int> = maybe_values([{value: 1}])
+  const receipts: list<Receipt> = artifacts(receipt_schema())
+  const grouped_receipts: list<Receipt> = artifact_groups([receipt_schema()])
+  const explicit_empty: list<int> = values<int>([])
+  __io_println(
+    "nested aliases inferred: ${ints.count + nullable_ints.count + receipts.count + grouped_receipts.count + explicit_empty.count}",
+  )
+}

@@ -81,7 +81,7 @@ code or inside any pipeline.
 described below (`std/text`, `std/json`, `std/math`, `std/collections`, `std/changelog`,
 `std/ansi`, `std/table`, `std/diff`, `std/path`, `std/fs`, `std/os`,
 `std/slug`, `std/edit`, `std/identity`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
-`std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
+`std/llm/envelope`, `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
 `std/agent/fact`, `std/agent/probe`, `std/agent/scratchpad`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
@@ -120,6 +120,7 @@ import "std/experiments"
 import "std/git"
 import "std/json"
 import "std/llm/budget"
+import "std/llm/envelope"
 import "std/llm/prompts"
 import "std/math"
 import "std/monitors"
@@ -752,6 +753,38 @@ Options accept `store: "namespace"` or
 `store: {backend: "sqlite"|"fs", namespace?, path?}`, plus `ttl`,
 `ttl_seconds`, `max_age_seconds`, and `max_entries`.
 
+### std/llm/envelope
+
+The canonical `llm_call` response contract — one rigid snake_case
+envelope with all accounting owned by `usage` and a typed `outcome`
+classification. Import the typed aliases when annotating call sites, and
+the predicates to branch on the outcome without re-deriving it:
+
+| Export | Kind | Description |
+|---|---|---|
+| `LlmResponse` | type | The full `llm_call` response envelope |
+| `LlmUsage` | type | Single owner of all call accounting (tokens, cost, prompt-cache, serving tier) |
+| `LlmOutcome` / `LlmOutcomeKind` | type | Typed `{kind, billed}` classification and its `kind` vocabulary |
+| `LlmToolCall` | type | A dispatchable tool call from the merged channel |
+| `LlmStreamChunk` | type | One streamed chunk from `llm_stream_call` (terminal chunk carries `stop_reason`) |
+| `llm_response_is_empty(response)` | fn | True when the call committed nothing usable (`outcome.kind == "empty"`) |
+| `llm_response_is_billed_empty(response)` | fn | True for the billed-noncommittal class — provider charged tokens and committed nothing usable |
+| `llm_response_is_truncated(response)` | fn | True when generation was cut on an output-token limit |
+
+See [llm_call](llm/llm_call.md#return-value) for the full envelope
+field reference.
+
+### std/llm/caller
+
+The blessed default caller stack (the call plane's front door):
+
+| Function | Description |
+|---|---|
+| `llm_caller(opts?)` | The blessed default caller stack: `with_retry(default_llm_caller(), opts?.retry ?? {})` with typed reserved-status classification and billed-empty re-dispatch |
+| `default_llm_caller()` | The bottom of every middleware composition: one `llm_call` folded into the canonical caller envelope |
+| `LlmCallerRequest` (type) | One request through a caller stack: `{prompt, system?, opts?}` |
+| `LlmCaller` (type) | A composable caller: `fn(LlmCallerRequest) -> dict` — middleware wraps one and returns another |
+
 ### std/llm/handlers
 
 LLM call wrappers and middleware helpers:
@@ -1325,6 +1358,16 @@ operations that should not require a generic shell or `run_command` tool.
 | `git_run_tool(operation, args?, options?)` | Dispatch one catalogued git operation by id; mutating operations require `include_mutations: true` |
 | `git_tools(registry?, options?)` | Build an agent tool registry from selected granular git helpers |
 | `git_toolbox_tools(registry?, options?)` | Build a compact `find_git_tool` / `run_git_tool` registry for small/local models |
+
+Receipt-producing helpers export their canonical contracts, including
+`GitReceipt`, the operation-specific `GitStatusReceipt`,
+`GitLsRemoteReceipt`, `GitFetchReceipt`, `GitPushReceipt`, worktree receipts,
+and their typed `data` records. The receipt `schema` and each specialized
+`operation`/`action` literal are stable discriminants. Core audit fields and
+operation data are stable for durable orchestration; `command_policy`,
+`approval`, captured output text, and new status/category values are diagnostic
+and may grow additively. Compose adapters with these aliases instead of copying
+their record shapes or widening them to `dict`.
 
 `git_tools(...)` defaults to read-only helpers (`git_status`,
 `git_current_branch`, `git_log`, `git_diff`, `git_branch_list`, and

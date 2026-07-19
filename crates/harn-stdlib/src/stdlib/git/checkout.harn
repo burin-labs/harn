@@ -17,7 +17,7 @@ pub type GitCheckoutStepReceipt = GitCheckoutStep \
   & {success: bool, status: string, exit_code: int?, stdout: string, stderr: string}
 
 pub type GitCheckoutReceipt = {
-  schema: string,
+  schema: "harn-stdlib-git-checkout-v1",
   success: bool,
   status: "completed" | "skipped" | "failed",
   skipped: bool,

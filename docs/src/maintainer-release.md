@@ -36,7 +36,12 @@ release PR:
 ./scripts/release_gate.sh full --bump patch --dry-run
 ```
 
-`scripts/publish.sh` remains the crates.io publisher used by the release gate.
+`scripts/publish.sh` is the thin entrypoint for the Harn publisher used by the
+release gate. Live publication probes each crate version, resumes the remaining
+dependency DAG, and waits with bounded backoff before publishing dependents of
+newly uploaded crates. It emits a JSON receipt separating published,
+already-present, waiting, failed, and remaining crates. Dry-run mode continues
+to use Cargo's workspace dry-run because it has no remote recovery state.
 
 ## Release artifacts
 

@@ -54,7 +54,13 @@ pub fn agent_tool_lifecycle_error_category(raw: any) -> AgentToolLifecycleErrorC
     return "permission_denied"
   }
   if contains(
-    ["schema_violation", "schema_stream_aborted", "validator_failure", "repair_failed"],
+    [
+      "schema_violation",
+      "schema_stream_aborted",
+      "validator_failure",
+      "repair_failed",
+      "invalid_arguments",
+    ],
     category,
   ) {
     return "schema_validation"
@@ -92,4 +98,191 @@ pub fn agent_tool_mutation_status(raw: any) -> AgentToolMutationStatus {
     return status
   }
   return "unknown"
+}
+
+pub type AgentToolResultOutcomeKind = "ok" | "error" | "unknown"
+
+pub type AgentEditOutcomeStatus = "none" \
+  | "rejected_not_applied" \
+  | "applied_clean" \
+  | "applied_still_failing" \
+  | "unknown"
+
+/**
+ * A tool result classified from its STRUCTURED envelope alone.
+ *
+ * - `kind`: transport/product disposition (`ok`, `error`, or `unknown` when no
+ *   structured field decided it).
+ * - `error_category`: the typed failure taxonomy, resolved from a producer's
+ *   `error_category` or the raw `error` code; `nil` when the result is not an
+ *   error.
+ * - `product_error`: a host/product-level rejection carried on a
+ *   transport-successful result. `nil` means the producer has not stamped the
+ *   field yet — undeterminable from structure, not "no error".
+ * - `edit_status`: the write/edit disposition spine, read from a producer's flat
+ *   `edit_status` field or a nested `edit_outcome.edit_status`; `unknown` when
+ *   unstamped.
+ * - `diagnostics_error_count`: producer-reported error count; `nil` when absent.
+ * - `from_structured`: whether any structured field decided the verdict. When
+ *   `false`, a result carries no structured signal at all and a consumer that
+ *   still owns a legacy prose fallback must use it.
+ */
+pub type AgentToolResultOutcome = {
+  kind: AgentToolResultOutcomeKind,
+  error_category: AgentToolLifecycleErrorCategory?,
+  product_error: bool?,
+  edit_status: AgentEditOutcomeStatus,
+  diagnostics_error_count: int?,
+  from_structured: bool,
+}
+
+const AGENT_EDIT_OUTCOME_STATUSES = [
+  "none",
+  "rejected_not_applied",
+  "applied_clean",
+  "applied_still_failing",
+  "unknown",
+]
+
+fn __agent_tool_result_transport_kind(result) -> AgentToolResultOutcomeKind? {
+  if result?.ok != nil {
+    return result.ok ? "ok" : "error"
+  }
+  if result?.success != nil {
+    return result.success ? "ok" : "error"
+  }
+  const status = to_string(result?.status ?? "")
+  if status == "ok" || status == "success" {
+    return "ok"
+  }
+  if status == "error" || status == "failed" {
+    return "error"
+  }
+  return nil
+}
+
+fn __agent_tool_result_error_category(result) -> AgentToolLifecycleErrorCategory? {
+  const explicit = agent_tool_lifecycle_error_category(result?.error_category)
+  if explicit != nil {
+    return explicit
+  }
+  return agent_tool_lifecycle_error_category(result?.error)
+}
+
+fn __agent_edit_status_value(raw: any) -> AgentEditOutcomeStatus {
+  const status = to_string(raw ?? "")
+  if contains(AGENT_EDIT_OUTCOME_STATUSES, status) {
+    return status
+  }
+  return "unknown"
+}
+
+fn __agent_tool_result_edit_status(result) -> AgentEditOutcomeStatus? {
+  const flat = result?.edit_status
+  if flat != nil {
+    return __agent_edit_status_value(flat)
+  }
+  const nested = result?.edit_outcome?.edit_status
+  if nested != nil {
+    return __agent_edit_status_value(nested)
+  }
+  return nil
+}
+
+fn __agent_tool_result_product_error(result) -> bool? {
+  const raw = result?.product_error
+  if raw == nil {
+    return nil
+  }
+  return raw ? true : false
+}
+
+fn __agent_tool_result_diagnostics_error_count(result) -> int? {
+  const raw = result?.diagnostics_error_count ?? result?.diagnostics?.error_count
+  if raw == nil {
+    return nil
+  }
+  return to_int(raw)
+}
+
+fn __agent_tool_result_kind(
+  transport_kind: AgentToolResultOutcomeKind?,
+  error_category: AgentToolLifecycleErrorCategory?,
+  product_error: bool?,
+) -> AgentToolResultOutcomeKind {
+  if product_error == true || error_category != nil {
+    return "error"
+  }
+  if transport_kind != nil {
+    return transport_kind
+  }
+  return "unknown"
+}
+
+/**
+ * Classify a dispatched tool result from its STRUCTURED envelope fields only —
+ * transport status (`ok`/`success`/`status`), the typed error code/category,
+ * and any producer-stamped `product_error` / `edit_status` / diagnostics
+ * fields. It never inspects rendered or observation prose. This is the single
+ * contract both the agent loop and host tool-result classifiers converge on;
+ * consumers that still own a legacy prose fallback branch on
+ * `from_structured == false` until every producer stamps the typed fields.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_result_outcome(result: any) -> AgentToolResultOutcome {
+  if type_of(result) != "dict" {
+    return {
+      kind: "unknown",
+      error_category: nil,
+      product_error: nil,
+      edit_status: "unknown",
+      diagnostics_error_count: nil,
+      from_structured: false,
+    }
+  }
+  const transport_kind = __agent_tool_result_transport_kind(result)
+  const error_category = __agent_tool_result_error_category(result)
+  const product_error = __agent_tool_result_product_error(result)
+  const edit_status = __agent_tool_result_edit_status(result)
+  const diagnostics_error_count = __agent_tool_result_diagnostics_error_count(result)
+  const from_structured = transport_kind != nil
+    || error_category != nil
+    || product_error != nil
+    || edit_status != nil
+    || diagnostics_error_count != nil
+  return {
+    kind: __agent_tool_result_kind(transport_kind, error_category, product_error),
+    error_category: error_category,
+    product_error: product_error,
+    edit_status: edit_status ?? "unknown",
+    diagnostics_error_count: diagnostics_error_count,
+    from_structured: from_structured,
+  }
+}
+
+/**
+ * Structured is-ok verdict for scheduling and rejected-tool accounting. Returns
+ * a concrete bool when the envelope carries a structured signal, or `nil` when
+ * it carries none and the caller must consult its own legacy fallback. A
+ * transport-successful write tool whose producer has not yet stamped
+ * `product_error` reports `kind == "ok"` with `product_error == nil`; a consumer
+ * that owns a prose fallback for that specific case should keep it until the
+ * producer guarantees the field.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_result_is_ok(outcome: AgentToolResultOutcome) -> bool? {
+  if outcome.product_error == true {
+    return false
+  }
+  if outcome.kind == "error" {
+    return false
+  }
+  if outcome.kind == "ok" {
+    return true
+  }
+  return nil
 }

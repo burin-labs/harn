@@ -13,7 +13,7 @@ import { agent_session_messages } from "std/agent/state"
 // downstream parser. These are the manual escape hatch for raw text that did
 // NOT flow through the `llm_call` envelope (a hand-assembled string, a cached
 // blob, a provider Harn has not yet catalogued). Harn already strips inline
-// `<think>` reasoning from the envelope's text/prose/visible_text for routes
+// `<think>` reasoning from the envelope's text/visible_text for routes
 // whose capability matrix marks them as inline-reasoning emitters, so envelope
 // consumers do not need these.
 //
@@ -221,11 +221,19 @@ pub fn parse_first_json(text) {
  * Fold the outcome of a `try { llm_call(...) }` into the canonical caller
  * envelope:
  * {ok: true, value: <llm dict>} on success
- * {ok: false, status: <"budget_exhausted" | "exception">, error} on error.
+ * {ok: false, status: <reserved status>, error, retryable?} on error.
+ *
+ * The status comes from the typed error taxonomy `llm_call` throws
+ * (`{kind, reason, category, ...}`), projected onto the reserved status
+ * vocabulary documented in `std/llm/handlers`: `budget_exhausted`,
+ * `rate_limited`, `timeout`, `network`, `provider_5xx`,
+ * `context_window_exceeded`, `auth`, `policy_blocked`, `transient`
+ * (any other transient reason, e.g. `empty_generation`), `provider_error`
+ * (any other terminal reason), or `exception` for unclassified throws.
  *
  * The underlying `error` is ALWAYS attached on the failure paths so budget /
  * exception context is never dropped. Shared by `safe_call` and
- * `std/llm/handlers::default_llm_caller` so the two stay byte-identical.
+ * `std/llm/caller::default_llm_caller` so the two stay byte-identical.
  *
  * @effects: []
  * @errors: []
@@ -235,13 +243,42 @@ pub fn __wrap_llm_result(result) {
     return {ok: true, value: unwrap(result)}
   }
   const err = unwrap_err(result)
-  const reason = if type_of(err) == "dict" {
-    err?.reason ?? ""
+  const info = if type_of(err) == "dict" {
+    err
   } else {
-    ""
+    {}
   }
-  if reason == "budget_exceeded" {
+  const reason = to_string(info?.reason ?? "")
+  const category = to_string(info?.category ?? "")
+  if reason == "budget_exceeded" || category == "budget_exceeded" {
     return {ok: false, status: "budget_exhausted", error: err}
+  }
+  // `llm_call` throws are pre-classified dicts ({kind, reason, category, ...}
+  // from `build_llm_error_dict`); project the typed taxonomy onto the reserved
+  // status vocabulary so no downstream layer ever string-sniffs messages.
+  const status_by_reason = {
+    rate_limit: "rate_limited",
+    timeout: "timeout",
+    network_error: "network",
+    server_error: "provider_5xx",
+    context_overflow: "context_window_exceeded",
+    auth_failure: "auth",
+    content_policy: "policy_blocked",
+  }
+  const mapped = status_by_reason[reason]
+  if mapped != nil {
+    return {ok: false, status: mapped, error: err}
+  }
+  const kind = to_string(info?.kind ?? "")
+  if kind == "transient" {
+    // Covers `empty_generation` and any future transient reason: retried by
+    // default without a dedicated status.
+    return {ok: false, status: "transient", error: err, retryable: true}
+  }
+  if kind == "terminal" {
+    // invalid_request / model_unavailable / unknown terminal classes: not a
+    // caller bug to retry through.
+    return {ok: false, status: "provider_error", error: err, retryable: false}
   }
   return {ok: false, status: "exception", error: err}
 }

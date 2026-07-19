@@ -11,63 +11,20 @@
 // Reserved statuses: "budget_exhausted", "transient", "caller_aborted",
 // "caller_skipped", "exception", "schema_validation", "rate_limited",
 // "timeout", "network", "provider_5xx", "stream_interrupt",
-// "context_window_exceeded", "auth", "policy_blocked", "circuit_open".
+// "context_window_exceeded", "auth", "policy_blocked", "circuit_open",
+// "provider_error" (terminal provider classes; never retried).
 // "context_overflow" is an alias of "context_window_exceeded".
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
+import { llm_response_is_billed_empty } from "std/llm/envelope"
 import { llm_call_options, llm_clear_one_shot_prefill } from "std/llm/options"
-import {
-  __wrap_llm_result,
-  parse_first_json,
-  repair_min_max_tokens,
-  with_case_insensitive_keys,
-} from "std/llm/safe"
+import { parse_first_json, repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
 import { cosine_similarity } from "std/math"
 import { embed } from "std/memory"
 import { get_typed_issues } from "std/schema"
 
-/**
- * default_llm_caller returns a closure with the canonical (call) -> result
- * shape. It mirrors the built-in __default_invoke_llm body in std/agent/loop.
- * Use as the bottom of a middleware composition:
- *
- *     let caller = with_retry(default_llm_caller(), {...})
- *
- * @effects: [llm.call]
- * @errors: []
- */
-pub fn default_llm_caller() {
-  return { call ->
-    const provider = __default_caller_render_context_provider(call)
-    const model = __default_caller_render_context_model(call)
-    const pushed = __push_llm_render_context(provider, model)
-    defer {
-      if pushed {
-        __pop_llm_render_context()
-      }
-    }
-    return __wrap_llm_result(
-      try {
-        llm_call(call.prompt, call.system, llm_call_options(call.opts))
-      },
-    )
-  }
-}
-
-/**
- * Provider/model accessors for the ambient LLM render-context frame
- * published around `default_llm_caller`. Named helpers keep the
- * closure body readable and make the option-shape contract easy to
- * extend (e.g. dispatch on `model_tier` if a future caller wants to
- * publish the context before resolution).
- */
-fn __default_caller_render_context_provider(call) -> string {
-  return to_string(call?.opts?.provider ?? "")
-}
-
-fn __default_caller_render_context_model(call) -> string {
-  return to_string(call?.opts?.model ?? "")
-}
+// The caller stack itself (default_llm_caller, llm_caller) lives in
+// std/llm/caller; this module stays a flat toolbox of middlewares.
 
 // -------------------------------------------------------------------------------------------------
 // shared helpers
@@ -195,7 +152,9 @@ fn __retry_default_predicate(envelope) {
     return false
   }
   if envelope?.ok ?? false {
-    return false
+    // Billed-empty (`outcome: {kind: "empty", billed: true}`) is a transient
+    // provider flake: re-dispatch by default (the S2 billed-noncommittal defense).
+    return llm_response_is_billed_empty(envelope?.value)
   }
   const status = to_string(envelope?.status ?? "")
   const retryable_statuses = [
@@ -218,6 +177,8 @@ fn __retry_default_predicate(envelope) {
     "caller_aborted",
     "caller_skipped",
     "circuit_open",
+    // Terminal provider classes: retrying the same route cannot succeed.
+    "provider_error",
   ]
   if contains(never_retry, status) {
     return false

@@ -496,7 +496,6 @@ pub(super) fn dump_llm_response(
         "cost_usd": result.priced_cost_usd(),
         "cache_read_tokens": result.cache_read_tokens,
         "cache_write_tokens": result.cache_write_tokens,
-        "cache_creation_input_tokens": result.cache_write_tokens,
         "cache_hit_ratio": crate::llm::cost::cache_hit_ratio(
             result.input_tokens,
             result.cache_read_tokens,

@@ -1,5 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
-import { default_llm_caller } from "std/llm/handlers"
+import { default_llm_caller } from "std/llm/caller"
 import { assert_eq, llm_text, llm_tool_call, with_llm_script } from "std/testing"
 
 fn lookup_tools(fail_reads = false, include_writers = true) {

@@ -1,0 +1,17 @@
+type Step<T> = {value: T}
+
+fn int_step() -> Step<int> {
+  return {value: 1}
+}
+
+fn string_step() -> Step<string> {
+  return {value: "one"}
+}
+
+fn values<T>(_steps: list<Step<T>>) -> list<T> {
+  return []
+}
+
+pipeline test(task) {
+  const _: list<bool> = values([int_step(), string_step()])
+}
