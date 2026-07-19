@@ -110,8 +110,15 @@ impl Lexer {
             }
 
             // Backslash immediately before newline joins lines without emitting a Newline token.
-            if ch == '\\' && self.peek() == Some('\n') {
+            // Consume CRLF as one newline so formatter output parses unchanged on Windows checkouts.
+            if ch == '\\'
+                && (self.peek() == Some('\n')
+                    || (self.peek() == Some('\r') && self.source.get(self.pos + 2) == Some(&'\n')))
+            {
                 self.advance();
+                if self.source.get(self.pos) == Some(&'\r') {
+                    self.advance();
+                }
                 self.advance();
                 self.line += 1;
                 self.column = 1;
@@ -1443,6 +1450,37 @@ mod tests {
         assert_eq!(tokens[2].kind, TokenKind::IntLiteral(3));
         // No Newline token between 10 and -: continuation joined them.
         assert_eq!(tokens.len(), 4);
+    }
+
+    #[test]
+    fn test_crlf_backslash_continuation_matches_lf_tokens_and_positions() {
+        let lf = Lexer::new("10 \\\n- 3").tokenize().unwrap();
+        let crlf = Lexer::new("10 \\\r\n- 3").tokenize().unwrap();
+        assert_eq!(
+            lf.iter().map(|token| &token.kind).collect::<Vec<_>>(),
+            crlf.iter().map(|token| &token.kind).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            lf.iter()
+                .map(|token| (token.span.line, token.span.column))
+                .collect::<Vec<_>>(),
+            crlf.iter()
+                .map(|token| (token.span.line, token.span.column))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_crlf_formatter_wrapped_union_tokenizes() {
+        let source = "type Choice = \"one\" \\\r\n  | \"two\" \\\r\n  | \"three\"";
+        let tokens = Lexer::new(source).tokenize().unwrap();
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| token.kind == TokenKind::Bar)
+                .count(),
+            2
+        );
     }
 
     #[test]
