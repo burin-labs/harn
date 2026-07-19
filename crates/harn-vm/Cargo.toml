@@ -166,6 +166,9 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Threading",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+seccompiler = "0.5"
+
 [dev-dependencies]
 criterion = "0.8"
 proptest = "1"
