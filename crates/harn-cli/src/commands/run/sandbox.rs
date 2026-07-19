@@ -134,10 +134,69 @@ pub(super) fn install_run_sandbox_scope(
     // `HARN_EGRESS_BLOCK_PRIVATE=off`.
     let ssrf_guard = Some(harn_vm::egress::require_ssrf_guard_for_host());
 
+    // Disclose caller-declared grants that widened the default sandbox. This is
+    // the narrow-scope counterpart to the `--no-sandbox` banner: a routine run
+    // with no grants stays silent (no alarm fatigue), while a run that opened an
+    // out-of-jail write/read root or subprocess network gets exactly one line
+    // naming the delta. The filesystem, process, and egress defaults stay armed.
+    if let Some(disclosure) = sandbox_grant_disclosure(options) {
+        stderr.push_str(&disclosure);
+    }
+
     RunSandboxScope {
         _execution_policy: execution_policy,
         _egress_policy: egress_policy,
         _ssrf_guard: ssrf_guard,
+    }
+}
+
+/// Render the one-line disclosure naming exactly how caller-declared grants
+/// widened the active sandbox profile, or `None` for an unmodified default run.
+/// Kept separate from the `--no-sandbox` warning so the full escape hatch and a
+/// narrow grant read differently in the terminal.
+pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<String> {
+    if !options.enabled {
+        return None;
+    }
+    let mut deltas: Vec<String> = Vec::new();
+    if !options.write_roots.is_empty() {
+        deltas.push(format!(
+            "extra write root{}: {}",
+            plural_suffix(options.write_roots.len()),
+            display_grant_roots(&options.write_roots),
+        ));
+    }
+    if !options.read_only_roots.is_empty() {
+        deltas.push(format!(
+            "extra read-only root{}: {}",
+            plural_suffix(options.read_only_roots.len()),
+            display_grant_roots(&options.read_only_roots),
+        ));
+    }
+    if options.allow_process_network {
+        deltas.push("subprocess network allowed".to_string());
+    }
+    if deltas.is_empty() {
+        return None;
+    }
+    Some(format!("sandbox active; {}\n", deltas.join("; ")))
+}
+
+/// Normalize each grant path the same way the policy does before rendering it,
+/// so the disclosed path matches the write/read jail the sandbox installed.
+fn display_grant_roots(roots: &[PathBuf]) -> String {
+    roots
+        .iter()
+        .map(|path| normalize_run_workspace_root(path).display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
     }
 }
 
@@ -247,4 +306,59 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         "side_effect_level": side_effect_level,
         "egress": egress,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_run_discloses_nothing() {
+        assert_eq!(
+            sandbox_grant_disclosure(&RunSandboxOptions::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn disabled_sandbox_discloses_nothing() {
+        // `--no-sandbox` carries its own blanket warning; the grant disclosure
+        // never fires for a disabled sandbox even if fields were populated.
+        let mut options = RunSandboxOptions::disabled();
+        options.write_roots = vec![PathBuf::from("/out/coordination")];
+        assert_eq!(sandbox_grant_disclosure(&options), None);
+    }
+
+    #[test]
+    fn single_write_root_names_the_delta() {
+        let options =
+            RunSandboxOptions::default().with_write_roots(vec![PathBuf::from("/out/coordination")]);
+        assert_eq!(
+            sandbox_grant_disclosure(&options).as_deref(),
+            Some("sandbox active; extra write root: /out/coordination\n"),
+        );
+    }
+
+    #[test]
+    fn multiple_grants_join_on_one_line() {
+        let options = RunSandboxOptions::sandboxed(true)
+            .with_write_roots(vec![PathBuf::from("/out/a"), PathBuf::from("/out/b")])
+            .with_read_only_roots(vec![PathBuf::from("/ref/shared")]);
+        assert_eq!(
+            sandbox_grant_disclosure(&options).as_deref(),
+            Some(
+                "sandbox active; extra write roots: /out/a, /out/b; \
+                 extra read-only root: /ref/shared; subprocess network allowed\n"
+            ),
+        );
+    }
+
+    #[test]
+    fn process_network_alone_is_disclosed() {
+        let options = RunSandboxOptions::sandboxed(true);
+        assert_eq!(
+            sandbox_grant_disclosure(&options).as_deref(),
+            Some("sandbox active; subprocess network allowed\n"),
+        );
+    }
 }

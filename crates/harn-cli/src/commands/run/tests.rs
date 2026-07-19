@@ -410,6 +410,58 @@ pipeline main() {{
         std::fs::read_to_string(&target).expect("read generated target"),
         "%PDF-1.4\n"
     );
+    // The grant discloses exactly the delta on one line, and the blanket
+    // `--no-sandbox` warning stays suppressed for a scoped, still-sandboxed run.
+    assert!(
+        outcome.stderr.contains(&format!(
+            "sandbox active; extra write root: {}",
+            write_root.display()
+        )),
+        "granted run should disclose the extra write root: {}",
+        outcome.stderr
+    );
+    assert!(
+        !outcome.stderr.contains("--no-sandbox disables"),
+        "a scoped grant must not print the blanket no-sandbox warning: {}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+#[test]
+fn write_grant_keeps_process_and_egress_defaults_armed() {
+    // A write grant widens the write jail only. It must not raise the
+    // side-effect ceiling (so subprocess network stays denied) and must not
+    // relax the egress posture: the run still requires an explicit egress
+    // policy. This is the policy-level proof that `--write-root` composes with
+    // the defaults instead of loosening them like `--no-sandbox` would.
+    harn_vm::reset_thread_local_state();
+    let workspace = Path::new("/tmp/workspace");
+    let grant = PathBuf::from("/tmp/out/coordination");
+    let policy = default_run_capability_policy(workspace, std::slice::from_ref(&grant), &[], false);
+
+    assert_eq!(policy.side_effect_level.as_deref(), Some("process_exec"));
+    assert_eq!(
+        policy.sandbox_profile,
+        harn_vm::orchestration::SandboxProfile::Worktree
+    );
+    assert!(
+        policy
+            .workspace_roots
+            .iter()
+            .any(|root| root == &grant.display().to_string()),
+        "the write grant should join the workspace write jail: {:?}",
+        policy.workspace_roots
+    );
+
+    harn_vm::orchestration::push_execution_policy(policy);
+    let metadata = run_sandbox_attestation(
+        &RunSandboxOptions::default().with_write_roots(vec![grant.clone()]),
+    );
+    assert_eq!(metadata["run_default_enabled"], true);
+    assert_eq!(metadata["egress"], "explicit_policy_required");
+    assert_eq!(metadata["process_network_requested"], false);
+    assert_eq!(metadata["write_roots"][0], grant.display().to_string());
     harn_vm::reset_thread_local_state();
 }
 

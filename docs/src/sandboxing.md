@@ -16,6 +16,17 @@ raises only the side-effect ceiling and keeps the worktree filesystem
 and process sandbox active. Pass `--no-sandbox` to opt out entirely for
 a single run; the CLI prints a warning when that escape hatch is used.
 
+When a script needs a single out-of-jail path — writing one status file
+to a host-level state directory outside the workspace, or reading a
+sibling reference tree — reach for a scoped grant instead of the
+all-or-nothing `--no-sandbox`. `--write-root <path>` adds a writable
+root and `--read-only-root <path>` adds a read-only root to the active
+profile; both compose with the default filesystem, process, and egress
+sandbox rather than disabling it, and both are rejected when combined
+with `--no-sandbox`. A grant-scoped run discloses exactly the delta on
+one stderr line (for example `sandbox active; extra write root: /path`)
+and skips the blanket `--no-sandbox` warning.
+
 The process-network opt-in is deliberately broader than Harn's egress
 allowlist. `HARN_EGRESS_ALLOW` and `egress_policy(...)` constrain HTTP,
 provider, connector, and other network calls owned by the Harn runtime.
