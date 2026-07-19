@@ -30,6 +30,10 @@ cp "$repo_root/scripts/harn_bin.sh" "$release_tools/harn_bin.sh"
 cp -R "$repo_root/scripts/lib" "$release_tools/lib"
 release_gate="$release_tools/release_gate.sh"
 
+run_without_cargo_overrides() {
+  env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR "$@"
+}
+
 fake_harn_dir="$tmp_root/fake bin"
 mkdir -p "$fake_harn_dir"
 fake_harn="$fake_harn_dir/fake harn"
@@ -63,7 +67,7 @@ env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
-  "$release_gate" notes --version v1.2.3 > "$tmp_root/notes.txt"
+  run_without_cargo_overrides "$release_gate" notes --version v1.2.3 > "$tmp_root/notes.txt"
 
 expected="run scripts/render_release_notes.harn -- --version v1.2.3"
 actual=$(cat "$record")
@@ -92,7 +96,7 @@ env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
-  "$release_gate" audit --validate-only > "$tmp_root/audit-standalone.txt"
+  run_without_cargo_overrides "$release_gate" audit --validate-only > "$tmp_root/audit-standalone.txt"
 
 if ! grep -Fq "audit plan: no_receipt" "$tmp_root/audit-standalone.txt"; then
   echo "standalone release_gate did not start audit plan validation" >&2
@@ -178,7 +182,7 @@ if grep -q "cargo run .*harn" "$tmp_root/make-dry-run.txt"; then
   exit 1
 fi
 
-"$repo_root/scripts/tests/hook_harn_build_env_test.sh"
+run_without_cargo_overrides "$repo_root/scripts/tests/hook_harn_build_env_test.sh"
 
 audit_root="$tmp_root/audit-root"
 mkdir -p \
@@ -373,7 +377,7 @@ run_audit() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$release_gate" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
+    run_without_cargo_overrides "$release_gate" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
     cat "$tmp_root/audit-$label.txt" >&2
     exit 1
   }
@@ -498,7 +502,7 @@ assert_residual_prerequisite_fails() {
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$release_gate" audit --receipt "$receipt" \
+    run_without_cargo_overrides "$release_gate" audit --receipt "$receipt" \
       > "$tmp_root/audit-$label.txt" 2>&1; then
     echo "residual audit passed without required prerequisite: $label" >&2
     exit 1
@@ -542,7 +546,7 @@ assert_residual_lane_failure() {
   local assignment="$2"
   local expected_call="$3"
   : > "$audit_record"
-  if env "$assignment" \
+  if env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR "$assignment" \
     PATH="$fake_tools:$PATH" \
     HARN_RELEASE_ROOT="$audit_root" \
     HARN_BIN="$fake_audit_harn" \
@@ -579,7 +583,7 @@ assert_arg_fails_before_work() {
     HARN_RELEASE_ROOT="$audit_root" \
     TMPDIR="$tmp_root" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    "$@" > "$tmp_root/audit-$label.txt" 2>&1; then
+    run_without_cargo_overrides "$@" > "$tmp_root/audit-$label.txt" 2>&1; then
     echo "invalid audit argument unexpectedly passed: $label" >&2
     exit 1
   fi
@@ -631,7 +635,7 @@ PATH="$fake_tools:$PATH" \
   HARN_PUBLISH_SCRIPT="$fake_publish" \
   TMPDIR="$tmp_root" \
   FAKE_AUDIT_RECORD="$audit_record" \
-  "$release_gate" full --bump patch --dry-run > "$tmp_root/full.txt" 2>&1 || {
+  run_without_cargo_overrides "$release_gate" full --bump patch --dry-run > "$tmp_root/full.txt" 2>&1 || {
   cat "$tmp_root/full.txt" >&2
   exit 1
 }
@@ -681,7 +685,7 @@ if PATH="$fake_tools:$PATH" \
   TMPDIR="$tmp_root" \
   FAKE_AUDIT_RECORD="$audit_record" \
   FAIL_FULL_PREPARE=1 \
-  "$release_gate" full --bump patch --dry-run > "$tmp_root/full-failure.txt" 2>&1; then
+  run_without_cargo_overrides "$release_gate" full --bump patch --dry-run > "$tmp_root/full-failure.txt" 2>&1; then
   echo "release_gate full ignored the injected prepare failure" >&2
   exit 1
 fi
