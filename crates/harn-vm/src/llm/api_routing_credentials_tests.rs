@@ -198,6 +198,126 @@ fn routing_all_uncredentialed_routes_exhaust_with_zero_physical_attempts() {
     });
 }
 
+fn explicit_policy(
+    routes: Vec<crate::value::VmValue>,
+) -> std::sync::Arc<super::routing::RoutingPolicyConfig> {
+    let chain = crate::value::VmValue::List(std::sync::Arc::new(routes));
+    let tagged = super::routing::build_routing_policy(&crate::value::DictMap::from_iter([(
+        crate::value::intern_key("chain"),
+        chain,
+    )]))
+    .expect("explicit routing policy validates");
+    super::routing::extract_routing_policy(Some(&crate::value::DictMap::from_iter([(
+        crate::value::intern_key("routing"),
+        tagged,
+    )])))
+    .expect("routing policy extracts")
+    .expect("routing policy present")
+}
+
+/// F1 + F3 integrated: two routes both fail (sequential failover). The routed
+/// backup produced the terminal error, so the top-level provider/model of the
+/// thrown exhaustion error must name the BACKUP route, not the base/primary
+/// route the session requested.
+#[test]
+fn exhausted_routing_error_names_the_terminal_backup_route_not_the_base() {
+    use super::fake::{install_fake_llm_script, FakeLlmScript, FakeLlmTurn};
+
+    let _guard = super::env_guard();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        let _fake = install_fake_llm_script(
+            FakeLlmScript::new()
+                .push(FakeLlmTurn::error(
+                    crate::value::ErrorCategory::CircuitOpen,
+                    "primary route down",
+                ))
+                .push(FakeLlmTurn::error(
+                    crate::value::ErrorCategory::CircuitOpen,
+                    "backup route down",
+                )),
+        );
+
+        let mut opts = base_opts("fake");
+        opts.model = "primary-model".to_string();
+        opts.stream = false;
+        let policy = explicit_policy(vec![
+            route("fake", "primary-model"),
+            route("fake", "backup-model"),
+        ]);
+
+        let local = tokio::task::LocalSet::new();
+        let error = local
+            .run_until(super::routing::execute_with_routing(
+                &policy, opts, None, None,
+            ))
+            .await
+            .expect_err("both routes failing must exhaust the chain");
+
+        let crate::value::VmError::Thrown(crate::value::VmValue::Dict(fields)) = error else {
+            panic!("expected structured provider exhaustion");
+        };
+        assert_eq!(
+            fields.get("model").map(crate::value::VmValue::display),
+            Some("backup-model".to_string()),
+            "terminal route must name the backup (routed) model, not the base"
+        );
+        assert!(
+            fields.get("no_single_route").is_none(),
+            "a resolved single terminal route must not set the composite flag"
+        );
+    });
+}
+
+/// F4: a single-route call that fails is honest and unchanged — the top-level
+/// provider/model name that one route (which is also the base), with no
+/// composite signal.
+#[test]
+fn single_route_exhaustion_names_the_only_route() {
+    use super::fake::{install_fake_llm_script, FakeLlmScript, FakeLlmTurn};
+
+    let _guard = super::env_guard();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        let _fake = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::error(
+            crate::value::ErrorCategory::CircuitOpen,
+            "only route down",
+        )));
+
+        let mut opts = base_opts("fake");
+        opts.model = "only-model".to_string();
+        opts.stream = false;
+        let policy = explicit_policy(vec![route("fake", "only-model")]);
+
+        let local = tokio::task::LocalSet::new();
+        let error = local
+            .run_until(super::routing::execute_with_routing(
+                &policy, opts, None, None,
+            ))
+            .await
+            .expect_err("the single route failing must exhaust the chain");
+
+        let crate::value::VmError::Thrown(crate::value::VmValue::Dict(fields)) = error else {
+            panic!("expected structured provider exhaustion");
+        };
+        assert_eq!(
+            fields.get("model").map(crate::value::VmValue::display),
+            Some("only-model".to_string())
+        );
+        assert!(fields.get("no_single_route").is_none());
+    });
+}
+
 fn route(provider: &'static str, model: &'static str) -> crate::value::VmValue {
     crate::value::VmValue::dict(crate::value::DictMap::from_iter([
         (
