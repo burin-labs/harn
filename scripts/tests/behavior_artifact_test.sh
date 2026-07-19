@@ -34,7 +34,7 @@ case "$1" in
       exit 2
     fi
     case "$8" in
-      'not test(test_linux_process_sandbox_catches_ten_process_escapes)') kind=neutral ;;
+      'all()') kind=neutral ;;
       'package(harn-vm) and binary(harn_vm)') kind=security ;;
       *) echo "unexpected nextest filter: $8" >&2; exit 2 ;;
     esac

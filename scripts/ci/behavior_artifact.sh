@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly NEXTEST_VERSION="0.9.132"
-readonly NEUTRAL_FILTER='not test(test_linux_process_sandbox_catches_ten_process_escapes)'
+readonly NEUTRAL_FILTER='all()'
 readonly SECURITY_FILTER='package(harn-vm) and binary(harn_vm)'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
