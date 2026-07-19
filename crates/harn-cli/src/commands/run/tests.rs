@@ -169,6 +169,18 @@ pipeline main() {
 }
 
 #[test]
+fn execute_explain_cost_reports_parse_errors() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let script = temp.path().join("invalid.harn");
+    std::fs::write(&script, "pipeline main( {").expect("write script");
+
+    let outcome = execute_explain_cost(&script.to_string_lossy());
+
+    assert_eq!(outcome.exit_code, 1);
+    assert!(outcome.stderr.contains("HARN-PAR-"), "{}", outcome.stderr);
+}
+
+#[test]
 fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
     let project = tempfile::TempDir::new().expect("project");
     let source_parent = project.path().join("scripts");

@@ -80,6 +80,12 @@ pub(crate) fn build_cli_runtime(mode: CliRuntimeMode) -> tokio::runtime::Runtime
     }
 }
 
+pub(crate) fn exit_on_error(exit_code: i32) {
+    if exit_code != 0 {
+        process::exit(exit_code);
+    }
+}
+
 fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
     if let Some(message) = payload.downcast_ref::<String>() {
         Some(message.as_str())
