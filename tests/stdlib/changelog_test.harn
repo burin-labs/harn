@@ -109,7 +109,8 @@ pipeline test_merge_preserves_content_newlines_and_terminal_semantics(task) {
       categories(),
     ),
   )
-  const existing = "# Changelog\r\n\r\n## Unreleased\r\n\r\nOperator preface.\r\n\r\n### Added\r\n\r\n- Authored.\r\n\r\n## v1.0.0\r\n\r\n- Old.\r\n"
+  const existing =
+    "# Changelog\r\n\r\n## Unreleased\r\n\r\nOperator preface.\r\n\r\n### Added\r\n\r\n- Authored.\r\n\r\n## v1.0.0\r\n\r\n- Old.\r\n"
   const merged = unwrap(changelog_merge_unreleased(existing, fragments, categories()))
   assert(merged.changed)
   assert(contains(merged.text, "Operator preface.\r\n\r\n### Added"))
@@ -120,7 +121,9 @@ pipeline test_merge_preserves_content_newlines_and_terminal_semantics(task) {
   const twice = unwrap(changelog_merge_unreleased(merged.text, fragments, categories()))
   assert_eq(twice, {text: merged.text, changed: false})
   const substring_existing = "## Unreleased\n\n### Fixed\n\n- new fix with more detail"
-  const substring_merge = unwrap(changelog_merge_unreleased(substring_existing, "### Fixed\n\n- new fix", categories()))
+  const substring_merge = unwrap(
+    changelog_merge_unreleased(substring_existing, "### Fixed\n\n- new fix", categories()),
+  )
   assert(contains(substring_merge.text, "- new fix with more detail\n\n- new fix"))
   const created = unwrap(changelog_merge_unreleased("# Changelog", fragments, categories()))
   assert_eq(
