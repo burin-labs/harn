@@ -1023,6 +1023,44 @@ mod tests {
     }
 
     #[test]
+    fn extra_write_root_grant_survives_last_match_wins_deny_block() {
+        // A caller-declared out-of-jail write grant (`harn run --write-root
+        // <dir>`) arrives as an extra workspace root beyond the primary. It must
+        // get its own file-write allow that the trailing read-only deny block
+        // never cancels: the deny block iterates ONLY read-only and
+        // package-manager roots, so a write grant that leaked into either list
+        // would be silently un-granted under sandbox-exec's last-match-wins.
+        let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text", "delete"]);
+        policy.workspace_roots = vec!["/ws".to_string(), "/out/coordination".to_string()];
+        // A disjoint read-only root that DOES earn a trailing deny — the control
+        // proving the deny block still fires without touching the write grant.
+        policy.read_only_roots = vec!["/ref/shared".to_string()];
+        let profile = render_profile(&policy);
+
+        assert!(
+            profile.contains("(allow file-write* (subpath \"/out/coordination\"))"),
+            "extra write-root grant should get its own write allow: {profile}"
+        );
+        assert!(
+            !profile.contains("(deny file-write* (subpath \"/out/coordination\"))"),
+            "extra write-root grant must never be re-denied by the deny block: {profile}"
+        );
+        let grant_allow = profile
+            .lines()
+            .position(|line| line == "(allow file-write* (subpath \"/out/coordination\"))")
+            .expect("write allow for the grant");
+        let readonly_deny = profile
+            .lines()
+            .position(|line| line == "(deny file-write* (subpath \"/ref/shared\"))")
+            .expect("deny for the disjoint read-only root");
+        assert!(
+            readonly_deny > grant_allow,
+            "read-only deny must still land after the write allows so the grant \
+             stays writable while the read-only root stays hermetic: {profile}"
+        );
+    }
+
+    #[test]
     fn read_only_root_deny_is_omitted_when_no_workspace_write() {
         // No write capability: there is no broad write allow to neutralize,
         // so no deny rule is emitted (pure read-only profile stays minimal).

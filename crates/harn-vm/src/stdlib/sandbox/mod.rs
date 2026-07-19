@@ -2102,7 +2102,7 @@ fn base_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     policy
         .workspace_roots
         .iter()
-        .map(|root| normalize_for_policy(&resolve_policy_path(root)))
+        .map(|root| render_policy_root(root))
         .collect()
 }
 
@@ -2391,6 +2391,15 @@ fn resolve_policy_path(path: &str) -> PathBuf {
     } else {
         crate::stdlib::process::execution_root_path().join(candidate)
     }
+}
+
+/// Render one configured policy-root string to the exact path the sandbox jails
+/// to — the single transform [`base_workspace_roots`] applies, exposed via
+/// `crate::process_sandbox` so host disclosure and provenance surfaces report
+/// the enforced jail path, not a pre-canonical approximation. Canonicalization
+/// is best-effort for nonexistent paths (lexical fallback) and never panics.
+pub fn render_policy_root(path: &str) -> PathBuf {
+    normalize_for_policy(&resolve_policy_path(path))
 }
 
 fn normalize_for_policy(path: &Path) -> PathBuf {
