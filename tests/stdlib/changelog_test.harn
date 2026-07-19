@@ -41,6 +41,8 @@ pipeline test_category_and_fragment_failures_are_typed(task) {
   assert_eq(unwrap_err(unknown).kind, "unknown_category")
   const empty = changelog_parse_fragment("12.fixed.md", " \n", categories())
   assert_eq(unwrap_err(empty).kind, "empty_body")
+  const invalid_direct = changelog_order_fragments([fragment("", "fixed", "body")], categories())
+  assert_eq(unwrap_err(invalid_direct).kind, "invalid_fragment")
 }
 
 pipeline test_fragment_order_is_natural_and_permutation_invariant(task) {
@@ -117,6 +119,9 @@ pipeline test_merge_preserves_content_newlines_and_terminal_semantics(task) {
   assert(!contains(replace(merged.text, "\r\n", ""), "\n"))
   const twice = unwrap(changelog_merge_unreleased(merged.text, fragments, categories()))
   assert_eq(twice, {text: merged.text, changed: false})
+  const substring_existing = "## Unreleased\n\n### Fixed\n\n- new fix with more detail"
+  const substring_merge = unwrap(changelog_merge_unreleased(substring_existing, "### Fixed\n\n- new fix", categories()))
+  assert(contains(substring_merge.text, "- new fix with more detail\n\n- new fix"))
   const created = unwrap(changelog_merge_unreleased("# Changelog", fragments, categories()))
   assert_eq(
     created.text,

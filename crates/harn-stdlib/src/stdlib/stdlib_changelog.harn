@@ -8,7 +8,7 @@ pub type ChangelogFragment = {id: string, category: string, body: string, file?:
 /** One exact second-level Markdown section. Offsets are UTF-8 byte offsets. */
 pub type ChangelogSection = {heading: string, body: string, start: int, end: int}
 
-pub type ChangelogFailureKind = "invalid_category" | "duplicate_category" | "malformed_filename" | "unknown_category" | "empty_body" | "duplicate_fragment" | "duplicate_heading" | "missing_section"
+pub type ChangelogFailureKind = "invalid_category" | "duplicate_category" | "invalid_fragment" | "malformed_filename" | "unknown_category" | "empty_body" | "duplicate_fragment" | "duplicate_heading" | "missing_section"
 
 /** A deterministic validation or parsing failure. */
 pub type ChangelogFailure = {kind: ChangelogFailureKind, message: string, value?: string}
@@ -41,10 +41,11 @@ pub fn changelog_validate_categories(categories: list<ChangelogCategory>) -> Cha
   for category in categories {
     const slug = trim(category.slug)
     const heading = trim(category.heading)
-    if slug == "" || regex_match("^[a-z][a-z0-9_-]*$", slug) == nil {
+    if slug == "" || category.slug != slug || regex_match("^[a-z][a-z0-9_-]*$", slug) == nil {
       return Err(__changelog_failure("invalid_category", "category slug must be lowercase and non-empty", slug))
     }
-    if heading == "" || contains(heading, "\n") || starts_with(heading, "#") {
+    if heading == "" || category.heading != heading || contains(heading, "\n")
+      || starts_with(heading, "#") {
       return Err(
         __changelog_failure("invalid_category", "category heading must be plain non-empty text", heading),
       )
@@ -170,6 +171,15 @@ pub fn changelog_order_fragments(
   }
   let identities: list<string> = []
   for fragment in fragments {
+    if regex_match("^[A-Za-z0-9_-]+$", fragment.id) == nil {
+      return Err(
+        __changelog_failure(
+          "invalid_fragment",
+          "fragment id must contain only letters, digits, underscore, or hyphen",
+          fragment.id,
+        ),
+      )
+    }
     if __changelog_category(categories, fragment.category) == nil {
       return Err(
         __changelog_failure(
@@ -423,7 +433,8 @@ fn __changelog_parse_subsections(body: string) -> list<dict> {
 fn __changelog_append_unique(current: string, addition: string) -> string {
   const left = trim(current)
   const right = trim(addition)
-  if right == "" || left == right || contains(left, right) {
+  const contains_block = contains("\n\n" + left + "\n\n", "\n\n" + right + "\n\n")
+  if right == "" || left == right || contains_block {
     return left
   }
   return left == "" ? right : left + "\n\n" + right
