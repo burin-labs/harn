@@ -34,6 +34,8 @@ const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assista
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
+const HOST_SESSION_DRAIN_COMMAND_UPDATES: &str = "__host_agent_session_drain_command_updates";
+const HOST_SESSION_AWAIT_INBOX: &str = "__host_agent_session_await_inbox";
 const HOST_SESSION_DRAIN_HOST_INJECTIONS: &str = "__host_agent_session_drain_host_injections";
 const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
 const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_bridge_injection";
@@ -2189,6 +2191,109 @@ fn host_agent_session_drain_feedback_builtin(
     Ok(VmValue::List(std::sync::Arc::new(drained)))
 }
 
+/// Drain the session's queued long-running-command update entries — the
+/// `tool_progress` / `tool_result` pushes the hostlib background waiter emits —
+/// and leave every other inbox entry in place for the normal feedback path.
+///
+/// This is the command ledger's dedicated consumer. Kind-filtering here is the
+/// digest-build boundary, NOT a wake decision: `wait_async` still wakes on ANY
+/// entry (see `host_agent_session_await_inbox`), so a user interrupt or peer
+/// message parked alongside a build still breaks the hold — it simply flows
+/// through `drain_feedback`, never through this drain. Each returned entry is
+/// `{kind, content, sequence, ts_ms}`; `content` is the JSON snapshot string the
+/// ledger parses loop-side (offsets, stderr counts, terminal status), keeping
+/// snapshot parsing in one place (Harn).
+#[harn_builtin(
+    sig = "__host_agent_session_drain_command_updates(session_id: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_session_drain_command_updates_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_DRAIN_COMMAND_UPDATES}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let drained = crate::orchestration::agent_inbox::drain_where(&session_id, |entry| {
+        entry.kind == "tool_progress" || entry.kind == "tool_result"
+    })
+    .into_iter()
+    .map(|entry| {
+        let mut item = crate::value::DictMap::new();
+        item.put_str("kind", entry.kind);
+        item.put_str("content", entry.content);
+        item.insert(
+            crate::value::intern_key("sequence"),
+            VmValue::Int(entry.sequence as i64),
+        );
+        item.insert(crate::value::intern_key("ts_ms"), VmValue::Int(entry.ts_ms));
+        VmValue::dict(item)
+    })
+    .collect::<Vec<_>>();
+    Ok(VmValue::List(std::sync::Arc::new(drained)))
+}
+
+/// Park the calling turn until `session_id` has a queued `agent_inbox` entry OR
+/// `timeout_ms` elapses on the harness clock. Returns `true` when woken by an
+/// entry, `false` on the deadline. This is the command-hold's re-entry
+/// primitive: the loop parks here (zero inference) between decision re-entries.
+///
+/// Determinism: the timeout sleep uses the SAME harness clock the loop reads for
+/// its decision deadlines (a `PausedClock` under `Harness::test`), so one
+/// `advance()` drives both the deadline math and this park — deterministic
+/// replay with no real sleeps. Do NOT drive command-hold tests with `mock_time`:
+/// `MockAwareClock::sleep` returns instantly under a mock, which would make this
+/// park time out immediately and silently break the hold. Use `Harness::test` /
+/// `PausedClock`.
+///
+/// Wake set is deliberately INCLUSIVE: it wakes on ANY queued entry (progress,
+/// terminal, user interrupt, peer message), never a kind-filtered subset. A
+/// future refactor must never narrow the wake condition — kind-filtering belongs
+/// only where the loop BUILDS the digest, never at the wake decision.
+#[harn_builtin(
+    sig = "__host_agent_session_await_inbox(session_id: string, timeout_ms: int) -> bool",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
+async fn host_agent_session_await_inbox(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_AWAIT_INBOX}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let timeout_ms = args.get(1).and_then(value_as_i64).unwrap_or(0).max(0) as u64;
+    // Recover the harness clock the loop already reads for deadline math (a
+    // PausedClock under Harness::test); fall back to a real clock for embedders
+    // without an installed harness. Globals are shared into the child VM.
+    let clock: Arc<dyn harn_clock::Clock> = {
+        let vm = ctx.child_vm();
+        match vm.global("harness") {
+            Some(VmValue::Harness(handle)) => handle.inner().clock().clone(),
+            _ => Arc::new(harn_clock::RealClock::new()),
+        }
+    };
+    let woke = crate::orchestration::agent_inbox::wait_async(
+        &session_id,
+        std::time::Duration::from_millis(timeout_ms),
+        &*clock,
+    )
+    .await;
+    Ok(VmValue::Bool(woke))
+}
+
 /// Drain queued typed host injections for a delivery seam and append them to the
 /// live transcript.
 #[harn_builtin(
@@ -3696,6 +3801,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AGENT_SESSION_PAIR_ORPHANED_TOOL_USE_BUILTIN_DEF,
     &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
     &HOST_AGENT_SESSION_DRAIN_FEEDBACK_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_DRAIN_COMMAND_UPDATES_BUILTIN_DEF,
     &HOST_AGENT_SESSION_DRAIN_HOST_INJECTIONS_BUILTIN_DEF,
     &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
     &HOST_AGENT_TRUNCATED_TOOL_CALL_BUILTIN_DEF,
@@ -3719,6 +3825,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_SKILL_SCORE_DEF,
     &HOST_AUTONOMY_BUDGET_CHECK_DEF,
     &HOST_AGENT_SESSION_DRAIN_BRIDGE_INJECTIONS_DEF,
+    &HOST_AGENT_SESSION_AWAIT_INBOX_DEF,
     &HOST_AGENT_SESSION_PUSH_BRIDGE_INJECTION_DEF,
     &HOST_AGENT_SESSION_PUSH_USER_MESSAGE_DEF,
     &HOST_AGENT_SESSION_PENDING_INJECTIONS_DEF,

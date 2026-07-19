@@ -1,0 +1,298 @@
+// Run: harn test tests/agent/command_ledger_test.harn
+//
+// Deterministic unit tests for the command ledger's PURE decision logic:
+// normalization, row lifecycle, coalescing, the delta gate + event triggers,
+// schedule doubling, digest shape, and post-digest retirement. Every function
+// under test takes `now_ms` explicitly and touches no clock or inbox, so the
+// suite runs with synthetic snapshots and virtual time and zero real sleeps.
+// The park/wake ordering and the full hold orchestration are proven separately
+// by the Rust `agent_inbox` / `command_ledger` PausedClock tests.
+import {
+  command_ledger_after_digest,
+  command_ledger_apply_ceiling,
+  command_ledger_apply_updates,
+  command_ledger_build_digest,
+  command_ledger_decide,
+  command_ledger_has_awaited,
+  command_ledger_ingest,
+  command_ledger_new,
+  command_ledger_release,
+  command_ledger_retire,
+  command_ledger_should_hold,
+  command_wait_normalize,
+} from "std/agent/command_ledger"
+
+fn _running_result(handle, offset) {
+  return {
+    status: "running",
+    handle_id: handle,
+    command_or_op_descriptor: "cargo build --release",
+    output_offset: offset,
+    byte_count: offset,
+    stderr_byte_count: 0,
+    silence_ms: 0,
+    stdout: "compiling",
+  }
+}
+
+fn _progress_entry(handle, offset, silence, stderr_bytes, stdout) {
+  return {
+    kind: "tool_progress",
+    content: json_stringify(
+      {
+        handle_id: handle,
+        status: "running",
+        output_offset: offset,
+        byte_count: offset,
+        silence_ms: silence,
+        stderr_byte_count: stderr_bytes,
+        stdout: stdout,
+        elapsed_ms: 1000,
+      },
+    ),
+  }
+}
+
+fn _terminal_entry(handle, exit_code) {
+  return {
+    kind: "tool_result",
+    content: json_stringify(
+      {
+        handle_id: handle,
+        status: "completed",
+        exit_code: exit_code,
+        duration_ms: 90000,
+        stdout: "done",
+        output_path: "/tmp/out.log",
+      },
+    ),
+  }
+}
+
+fn _row_by_handle(ledger, handle) {
+  for row in ledger {
+    if row?.handle_id == handle {
+      return row
+    }
+  }
+  return nil
+}
+
+// --- normalization (harn#4456: defaults live here, once) --------------------
+pipeline test_command_wait_normalize_defaults(task) {
+  const cw = command_wait_normalize(nil)
+  assert(cw.decision_base_ms == 30000)
+  assert(cw.decision_cap_ms == 300000)
+  assert(cw.max_awaited_wall_ms == 900000)
+  assert(cw.hold_reentry_max_tokens == 96)
+  assert(cw.hold_reentry_budget == 8)
+  assert(cw.auto_resolve == "kill")
+}
+
+pipeline test_command_wait_normalize_overrides(task) {
+  const cw = command_wait_normalize(
+    {decision_base_ms: 5000, auto_resolve: "release", hold_reentry_max_tokens: 256},
+  )
+  assert(cw.decision_base_ms == 5000)
+  assert(cw.auto_resolve == "release")
+  assert(cw.hold_reentry_max_tokens == 256)
+  // A non-positive/blank override falls back to the default, not the literal.
+  const cw2 = command_wait_normalize({decision_base_ms: 0})
+  assert(cw2.decision_base_ms == 30000)
+}
+
+// --- ingest + hold precondition --------------------------------------------
+pipeline test_ingest_creates_awaited_row(task) {
+  const cw = command_wait_normalize(nil)
+  const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  assert(len(ledger) == 1)
+  const row = _row_by_handle(ledger, "hto-1")
+  assert(row.lease == "awaited")
+  assert(row.next_decision_at_ms == 30000)
+  assert(command_ledger_has_awaited(ledger))
+  assert(command_ledger_should_hold(ledger, 0))
+  assert(!command_ledger_should_hold(ledger, 1))
+}
+
+pipeline test_ingest_service_lease_does_not_hold(task) {
+  const cw = command_wait_normalize(nil)
+  const detached = _running_result("hto-svc", 0) + {lease: "service"}
+  const ledger = command_ledger_ingest(command_ledger_new(), [detached], 0, cw)
+  assert(len(ledger) == 1)
+  assert(!command_ledger_has_awaited(ledger))
+  assert(!command_ledger_should_hold(ledger, 0))
+}
+
+pipeline test_ingest_is_idempotent_per_handle(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
+  ledger = command_ledger_ingest(ledger, [_running_result("hto-1", 0)], 5000, cw)
+  assert(len(ledger) == 1)
+}
+
+// --- coalescing + delta cursor ---------------------------------------------
+pipeline test_apply_updates_coalesces_latest_per_handle(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  ledger = command_ledger_apply_updates(
+    ledger,
+    [_progress_entry("hto-1", 200, 0, 0, "step2"), _progress_entry("hto-1", 400, 0, 0, "step4")],
+    1000,
+    cw,
+  )
+  const row = _row_by_handle(ledger, "hto-1")
+  assert(row.output_offset == 400)
+  assert(row.new_output == "step4")
+}
+
+pipeline test_apply_updates_marks_terminal(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  ledger = command_ledger_apply_updates(ledger, [_terminal_entry("hto-1", 0)], 90000, cw)
+  const row = _row_by_handle(ledger, "hto-1")
+  assert(row.status == "completed")
+}
+
+// --- delta gate + event triggers + schedule --------------------------------
+pipeline test_decide_silent_rung_does_not_fire_and_doubles(task) {
+  const cw = command_wait_normalize(nil)
+  const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  // Deadline reached (30s) with NO new output and below the silence floor: no
+  // fire, and the interval doubles to 60s.
+  const decision = command_ledger_decide(ledger, 30000, cw)
+  assert(!decision.fire)
+  const row = _row_by_handle(decision.ledger, "hto-1")
+  assert(row.decision_interval_ms == 60000)
+  assert(row.next_decision_at_ms == 90000)
+}
+
+pipeline test_decide_new_output_at_rung_fires(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  ledger = command_ledger_apply_updates(
+    ledger,
+    [_progress_entry("hto-1", 500, 0, 0, "more")],
+    30000,
+    cw,
+  )
+  const decision = command_ledger_decide(ledger, 30000, cw)
+  assert(decision.fire)
+}
+
+pipeline test_decide_terminal_fires_immediately(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  ledger = command_ledger_apply_updates(ledger, [_terminal_entry("hto-1", 0)], 5000, cw)
+  // Well before the 30s rung, a terminal still fires.
+  const decision = command_ledger_decide(ledger, 5000, cw)
+  assert(decision.fire)
+}
+
+pipeline test_decide_first_stderr_fires(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  ledger = command_ledger_apply_updates(
+    ledger,
+    [_progress_entry("hto-1", 100, 0, 42, "warn")],
+    5000,
+    cw,
+  )
+  const decision = command_ledger_decide(ledger, 5000, cw)
+  assert(decision.fire)
+}
+
+pipeline test_decide_byte_stall_fires(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 100)], 0, cw)
+  // Silence >= 5m stall trigger, no new output, before any rung.
+  ledger = command_ledger_apply_updates(
+    ledger,
+    [_progress_entry("hto-1", 100, 300000, 0, "")],
+    5000,
+    cw,
+  )
+  const decision = command_ledger_decide(ledger, 5000, cw)
+  assert(decision.fire)
+}
+
+// --- digest shape + post-digest retirement ---------------------------------
+pipeline test_build_digest_covers_all_and_uses_delta(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(
+    command_ledger_new(),
+    [_running_result("hto-1", 100), _running_result("hto-2", 100)],
+    0,
+    cw,
+  )
+  ledger = command_ledger_apply_updates(
+    ledger,
+    [_progress_entry("hto-1", 300, 0, 0, "delta-only")],
+    30000,
+    cw,
+  )
+  const digest = command_ledger_build_digest(ledger, 30000, cw)
+  const parsed = json_parse(digest)
+  assert(parsed.kind == "command_status")
+  assert(len(parsed.commands) == 2)
+  // The delta text, never a cumulative tail.
+  assert(parsed.commands[0].new_output == "delta-only")
+}
+
+pipeline test_after_digest_retires_terminal_and_resets_cursor(task) {
+  const cw = command_wait_normalize(nil)
+  let ledger = command_ledger_ingest(
+    command_ledger_new(),
+    [_running_result("hto-1", 100), _running_result("hto-2", 100)],
+    0,
+    cw,
+  )
+  ledger = command_ledger_apply_updates(
+    ledger,
+    [_terminal_entry("hto-1", 0), _progress_entry("hto-2", 500, 0, 0, "run")],
+    90000,
+    cw,
+  )
+  ledger = command_ledger_after_digest(ledger, 90000, cw)
+  // Terminal hto-1 retired; running hto-2 kept with cursor reset + reentry bump.
+  assert(_row_by_handle(ledger, "hto-1") == nil)
+  const row = _row_by_handle(ledger, "hto-2")
+  assert(row.last_digest_offset == 500)
+  assert(row.new_output == "")
+  assert(row.reentries == 1)
+}
+
+// --- lease transitions ------------------------------------------------------
+pipeline test_release_flips_to_service_off_schedule(task) {
+  const cw = command_wait_normalize(nil)
+  const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
+  const released = command_ledger_release(ledger, "hto-1")
+  assert(!command_ledger_has_awaited(released))
+  assert(_row_by_handle(released, "hto-1").lease == "service")
+}
+
+pipeline test_retire_removes_row(task) {
+  const cw = command_wait_normalize(nil)
+  const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
+  assert(len(command_ledger_retire(ledger, "hto-1")) == 0)
+}
+
+// --- ceiling escalation (first breach, before auto-resolve) -----------------
+pipeline test_ceiling_below_wall_does_not_breach(task) {
+  const cw = command_wait_normalize(nil)
+  const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
+  // Just under the 15-minute awaited ceiling: no breach.
+  const applied = command_ledger_apply_ceiling(ledger, 899000, cw, "sess-test")
+  assert(!applied.breached)
+}
+
+pipeline test_ceiling_breach_escalates_once_before_resolving(task) {
+  const cw = command_wait_normalize(nil)
+  const ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
+  // First breach at/after the 15-minute ceiling: escalate once (a decision
+  // re-entry), do NOT yet auto-resolve — the row is marked escalated and kept.
+  const applied = command_ledger_apply_ceiling(ledger, 900000, cw, "sess-test")
+  assert(applied.breached)
+  assert(applied.escalated)
+  assert(_row_by_handle(applied.ledger, "hto-1").escalated)
+  assert(_row_by_handle(applied.ledger, "hto-1").status == "running")
+}
