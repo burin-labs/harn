@@ -12,6 +12,7 @@ use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 mod operation_registry;
+pub(crate) mod turn_cache;
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every
@@ -63,6 +64,7 @@ pub(crate) fn reset_host_state() {
     HOST_MOCKS.with(|mocks| mocks.borrow_mut().clear());
     HOST_MOCK_CALLS.with(|calls| calls.borrow_mut().clear());
     HOST_MOCK_SCOPES.with(|scopes| scopes.borrow_mut().clear());
+    turn_cache::reset();
 }
 
 pub(crate) fn reset_scoped_host_state() {
@@ -743,11 +745,13 @@ thread_local! {
 /// match arms, so embedders can override anything they like (and equally
 /// punt on anything they don't, by returning `Ok(None)`).
 pub fn set_host_call_bridge(bridge: Arc<dyn HostCallBridge>) {
+    turn_cache::reset();
     HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = Some(bridge));
 }
 
 /// Remove the current thread's bridge. Idempotent.
 pub fn clear_host_call_bridge() {
+    turn_cache::reset();
     HOST_CALL_BRIDGE.with(|b| *b.borrow_mut() = None);
 }
 
@@ -901,7 +905,13 @@ pub(crate) async fn dispatch_host_operation_with_ctx(
 
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
     if let Some(bridge) = bridge {
-        if let Some(value) = bridge.dispatch(capability, operation, params)? {
+        // Serve turn-stable reads (e.g. `runtime.pipeline_input`) from the
+        // per-turn memo so context assembly pays one host round-trip per turn
+        // instead of once per shard. harn#5190.
+        let dispatched = turn_cache::cached_or(capability, operation, params, || {
+            bridge.dispatch(capability, operation, params)
+        })?;
+        if let Some(value) = dispatched {
             return Ok(value);
         }
     }

@@ -151,6 +151,15 @@ async fn host_agent_emit_event(
             )))
         }
     };
+    // A new agent-loop iteration begins: drop the per-turn host-capability
+    // memo so turn-stable facts (e.g. `runtime.pipeline_input`, which the host
+    // re-projects each turn for mid-session model switches) are re-read exactly
+    // once this turn instead of being served stale from the prior turn. This is
+    // the canonical turn boundary for both the harn agent loop and embedder
+    // loops that drive it. harn#5190.
+    if event_type == "iteration_start" {
+        crate::stdlib::host::turn_cache::reset();
+    }
     let payload_value = args.get(2).cloned().unwrap_or(VmValue::Nil);
     let payload = super::vm_to_json(&payload_value);
     let event =
