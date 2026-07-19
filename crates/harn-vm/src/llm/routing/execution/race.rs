@@ -23,7 +23,10 @@ pub(super) async fn run_race(
     // Mark the record whose future produced the returned result as the terminal
     // attempt (Succeeded on ok, Failed on err) so the caller attributes the
     // terminal route from the race OUTCOME, never from the outer/base link.
-    fn finalize_terminal(record: &mut RoutingAttempt, res: &Result<crate::llm::api::LlmResult, VmError>) {
+    fn finalize_terminal(
+        record: &mut RoutingAttempt,
+        res: &Result<crate::llm::api::LlmResult, VmError>,
+    ) {
         match res {
             Ok(v) => {
                 record.status = AttemptStatus::Succeeded;
@@ -179,5 +182,150 @@ pub(super) async fn run_race(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod race_terminal_tests {
+    //! `run_race` must attribute the terminal route from the race OUTCOME, not
+    //! from configured order. Records are always returned `[primary, backup]`,
+    //! so a positional read (`attempts.last()`) misnames the terminal route
+    //! whenever the primary produced the result. These tests pin the marker for
+    //! each branch. Determinism comes from a `start_paused` runtime: the fake
+    //! provider's `Stalled` turns and `run_race`'s own timers share one virtual
+    //! clock, so timer ordering is fixed rather than wall-clock racy.
+
+    use super::*;
+    use crate::llm::api::options::base_opts;
+    use crate::llm::fake::{install_fake_llm_script, FakeLlmScript, FakeLlmTurn};
+    use crate::value::ErrorCategory;
+    use std::time::Duration;
+
+    fn link(model: &str) -> ChainLink {
+        ChainLink {
+            provider: "fake".to_string(),
+            model: model.to_string(),
+            timeout_ms: None,
+            label: Some(model.to_string()),
+            region: None,
+            overrides: None,
+        }
+    }
+
+    fn opts(model: &str) -> LlmCallOptions {
+        let mut opts = base_opts("fake");
+        opts.model = model.to_string();
+        opts
+    }
+
+    fn policy() -> std::sync::Arc<RoutingPolicyConfig> {
+        crate::llm::routing::linear_failover_policy(
+            "test".to_string(),
+            vec![link("fake-primary"), link("fake-backup")],
+            false,
+        )
+    }
+
+    fn paused_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .expect("paused runtime")
+    }
+
+    async fn drive(
+        race_after_ms: u64,
+        primary_timeout_ms: u64,
+    ) -> (
+        Result<crate::llm::api::LlmResult, VmError>,
+        Vec<RoutingAttempt>,
+        TerminalRoute,
+    ) {
+        let policy = policy();
+        let primary_link = link("fake-primary");
+        run_race(
+            "test",
+            &policy,
+            0,
+            &primary_link,
+            "fake-primary",
+            &opts("fake-primary"),
+            None,
+            race_after_ms,
+            primary_timeout_ms,
+            "fake-backup".to_string(),
+            opts("fake-backup"),
+        )
+        .await
+    }
+
+    /// F1 (race arm): the backup resolves first with an error while the primary
+    /// is still in flight. The terminal route must name the BACKUP (attempt 2),
+    /// not the primary — even though records stay in `[primary, backup]` order.
+    #[test]
+    fn backup_wins_race_marks_terminal_as_backup() {
+        let runtime = paused_runtime();
+        let _guard = install_fake_llm_script(
+            FakeLlmScript::new()
+                .push(FakeLlmTurn::Stalled(Duration::from_mins(1)))
+                .push(FakeLlmTurn::error(
+                    ErrorCategory::CircuitOpen,
+                    "backup failed first",
+                )),
+        );
+
+        let (result, records, terminal) = runtime.block_on(drive(10, 50));
+
+        assert!(result.is_err(), "backup errored, so the race result is Err");
+        assert_eq!(
+            terminal,
+            TerminalRoute::Attempt(2),
+            "terminal route names the backup attempt"
+        );
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].model, "fake-primary");
+        assert!(matches!(records[0].status, AttemptStatus::RaceLost));
+        assert_eq!(records[1].model, "fake-backup");
+        assert!(matches!(records[1].status, AttemptStatus::Failed));
+    }
+
+    /// F2 (producer): both racers hit the primary deadline. No single route is
+    /// responsible, so the terminal marker is `Composite` and both records fail.
+    #[test]
+    fn dual_deadline_marks_composite() {
+        let runtime = paused_runtime();
+        let _guard = install_fake_llm_script(
+            FakeLlmScript::new()
+                .push(FakeLlmTurn::Stalled(Duration::from_mins(1)))
+                .push(FakeLlmTurn::Stalled(Duration::from_mins(1))),
+        );
+
+        let (result, records, terminal) = runtime.block_on(drive(10, 20));
+
+        assert!(result.is_err(), "an exhausted race returns Err");
+        assert_eq!(terminal, TerminalRoute::Composite);
+        assert_eq!(records.len(), 2);
+        assert!(matches!(records[0].status, AttemptStatus::Failed));
+        assert!(matches!(records[1].status, AttemptStatus::Failed));
+    }
+
+    /// The common primary-terminal case: the primary resolves (here with an
+    /// error) before the race even starts, so the marker names attempt 1.
+    #[test]
+    fn primary_terminal_marks_attempt_one() {
+        let runtime = paused_runtime();
+        let _guard = install_fake_llm_script(FakeLlmScript::new().push(FakeLlmTurn::error(
+            ErrorCategory::CircuitOpen,
+            "primary failed",
+        )));
+
+        let (result, records, terminal) = runtime.block_on(drive(10, 50));
+
+        assert!(result.is_err());
+        assert_eq!(terminal, TerminalRoute::Attempt(1));
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].model, "fake-primary");
+        assert!(matches!(records[0].status, AttemptStatus::Failed));
     }
 }

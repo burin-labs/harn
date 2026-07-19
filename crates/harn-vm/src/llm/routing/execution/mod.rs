@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
 use crate::llm::api::LlmCallOptions;
 use crate::llm::cost::{calculate_cost_for_provider, peek_total_cost};
@@ -433,6 +433,24 @@ fn pending_attempt_record(
     }
 }
 
+/// Resolve the authoritative `(provider, model)` of the route a terminal
+/// marker names. `Attempt(index)` is matched to its [`RoutingAttempt`] by
+/// `index` — never by position, since race records stay in configured order
+/// regardless of which future resolved. `Composite` (no single route is
+/// responsible) yields `None`; callers must not fabricate a route for it.
+fn terminal_route_facts(
+    records: &[RoutingAttempt],
+    terminal: TerminalRoute,
+) -> Option<(String, String)> {
+    match terminal {
+        TerminalRoute::Attempt(index) => records
+            .iter()
+            .find(|record| record.index == index)
+            .map(|record| (record.provider.clone(), record.model.clone())),
+        TerminalRoute::Composite => None,
+    }
+}
+
 /// Extract the text the verifier chain should inspect. Mirrors how
 /// `agent_config::build_llm_call_result` derives the human-visible
 /// answer so the verifier sees the same thing the script will.
@@ -578,6 +596,12 @@ pub(crate) async fn execute_with_routing(
     }
     let mut last_error: Option<VmError> = None;
     let mut last_snapshot: Option<RoutingErrorSnapshot> = None;
+    // The terminal marker for the attempt that produced the last error, tracked
+    // alongside `last_error`/`last_snapshot`. Sourced from the race OUTCOME (or
+    // the single attempt), never from the outer/base link, so the terminal error
+    // names the route that actually failed. Folded into `trace.terminal` before
+    // the exhausted error is built.
+    let mut last_terminal: Option<TerminalRoute> = None;
     let mut terminal_was_failover_eligible = false;
     let mut attempts_used: usize = 0;
     let original_messages = base_opts.messages.clone();
@@ -635,6 +659,7 @@ pub(crate) async fn execute_with_routing(
                     snapshot.clone(),
                 ));
                 last_snapshot = Some(snapshot);
+                last_terminal = Some(TerminalRoute::Attempt(attempt_no));
                 terminal_was_failover_eligible = true;
                 attempts_used += 1;
                 idx += 1;
@@ -662,6 +687,7 @@ pub(crate) async fn execute_with_routing(
                 trace.attempts.extend(local_attempts);
                 last_error = Some(err);
                 last_snapshot = Some(snapshot);
+                last_terminal = Some(TerminalRoute::Attempt(attempt_no));
                 terminal_was_failover_eligible = false;
                 break;
             }
@@ -720,8 +746,13 @@ pub(crate) async fn execute_with_routing(
         };
 
         let raced = race_outcome.is_some();
-        let (result, mut attempt_records, stream_committed) = if let Some(outcome) = race_outcome {
-            (outcome.0, outcome.1, false)
+        // `iter_terminal` marks which route produced THIS iteration's result:
+        // the race outcome's marker when racing (which racer resolved, or
+        // `Composite` when both hit the deadline), else the single attempt.
+        let (result, mut attempt_records, stream_committed, iter_terminal) = if let Some(outcome) =
+            race_outcome
+        {
+            (outcome.0, outcome.1, false, outcome.2)
         } else {
             let (result, stream_committed) = execute_link(&opts, bridge, delta_sink.clone()).await;
             (
@@ -733,6 +764,7 @@ pub(crate) async fn execute_with_routing(
                     start.elapsed(),
                 )],
                 stream_committed,
+                TerminalRoute::Attempt(attempt_no),
             )
         };
         // Each record in `attempt_records` is one chain slot consumed
@@ -805,6 +837,7 @@ pub(crate) async fn execute_with_routing(
                 match outcome {
                     VerifierOutcome::Accept => {
                         trace.selected = success_idx;
+                        trace.terminal = Some(iter_terminal);
                         trace.session_cost_usd = peek_total_cost();
                         return Ok((value, trace));
                     }
@@ -851,6 +884,12 @@ pub(crate) async fn execute_with_routing(
             }
             Err(err) => {
                 let (mut eligible, snapshot) = matches_failover(&policy.failover, &err);
+                // Attribute this failure to the route that actually produced it
+                // (the terminal racer, or the single attempt), not the outer
+                // link — they diverge when a backup lost/won the race.
+                let (terminal_provider, terminal_model) =
+                    terminal_route_facts(&attempt_records, iter_terminal)
+                        .unwrap_or_else(|| (link.provider.clone(), link.model.clone()));
                 if stream_committed {
                     // Public bytes bind this logical call to the current route.
                     // Advancing would concatenate a backup answer after a
@@ -859,12 +898,13 @@ pub(crate) async fn execute_with_routing(
                     let mut meta = serde_json::Map::new();
                     meta.insert("policy".to_string(), json!(policy.label.clone()));
                     meta.insert("attempt".to_string(), json!(attempt_no));
-                    meta.insert("provider".to_string(), json!(link.provider.clone()));
-                    meta.insert("model".to_string(), json!(link.model.clone()));
+                    meta.insert("provider".to_string(), json!(terminal_provider.clone()));
+                    meta.insert("model".to_string(), json!(terminal_model.clone()));
                     meta.insert("reason".to_string(), json!("public_stream_committed"));
                     emit_routing_event(&dispatch, "failover_suppressed", meta);
                 }
                 terminal_was_failover_eligible = eligible;
+                last_terminal = Some(iter_terminal);
                 let failure_category = snapshot.category.clone();
                 if let Some(record) = attempt_records
                     .iter_mut()
@@ -890,7 +930,7 @@ pub(crate) async fn execute_with_routing(
                         crate::llm::trace::emit_agent_event(
                             crate::llm::trace::AgentTraceEvent::ModelsAdvance {
                                 from_index: idx,
-                                from_model: link.model.clone(),
+                                from_model: terminal_model.clone(),
                                 to_model: next_link.model.clone(),
                                 category: failure_category,
                             },
@@ -913,11 +953,18 @@ pub(crate) async fn execute_with_routing(
     if last_error.is_none() {
         if let Some((value, idx)) = last_rejected_candidate {
             trace.selected = Some(idx);
+            trace.terminal = trace
+                .attempts
+                .get(idx)
+                .map(|attempt| TerminalRoute::Attempt(attempt.index));
             trace.session_cost_usd = peek_total_cost();
             return Ok((value, trace));
         }
     }
 
+    // Terminal error path: the route that produced the last error is the
+    // authoritative terminal route (never the outer/base link).
+    trace.terminal = last_terminal;
     let err = last_error.unwrap_or_else(|| {
         runtime_error("routing_policy: chain exhausted with no attempts (empty chain?)".to_string())
     });
@@ -966,13 +1013,42 @@ pub(super) fn provider_exhausted_routing_error(
         "provider routes exhausted after {request_attempt_count} request attempt(s) across {} route(s)",
         trace.attempts.len()
     );
-    provider_exhausted_error(
+    let base = provider_exhausted_error(
         category,
         reason,
         request_attempt_count,
         message,
         trace_to_vm_attempts(trace),
-    )
+    );
+    apply_terminal_route(base, trace)
+}
+
+/// Stamp the authoritative terminal route onto a provider-exhausted error.
+///
+/// `Attempt(index)` adds the top-level `provider`/`model` of the route that
+/// actually produced the terminal failure, so the outer wrapper
+/// (`build_llm_error_dict`) does not backfill the base/requested route and the
+/// error names the route that failed. `Composite` (no single route is
+/// responsible — e.g. both racers hit the deadline) sets `no_single_route` so
+/// the wrapper skips the provider/model fill entirely rather than fabricating
+/// one. With no terminal marker the error is returned unchanged.
+fn apply_terminal_route(err: VmError, trace: &RoutingTrace) -> VmError {
+    let (VmError::Thrown(VmValue::Dict(fields)), Some(terminal)) = (&err, trace.terminal) else {
+        return err;
+    };
+    let mut dict = fields.as_ref().clone();
+    match terminal {
+        TerminalRoute::Attempt(index) => {
+            if let Some(attempt) = trace.attempts.iter().find(|a| a.index == index) {
+                dict.put_str("provider", attempt.provider.clone());
+                dict.put_str("model", attempt.model.clone());
+            }
+        }
+        TerminalRoute::Composite => {
+            dict.put_bool("no_single_route", true);
+        }
+    }
+    VmError::Thrown(VmValue::dict(dict))
 }
 
 pub(super) fn physical_request_attempt_count(trace: &RoutingTrace) -> usize {

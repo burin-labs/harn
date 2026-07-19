@@ -229,6 +229,37 @@ pub struct AcpPromptFailureFacts {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The per-route ledger the routing failure recorded: which provider/model
+    /// each attempt used and how it ended. Empty for a single-route call or any
+    /// non-routing failure. Lets a host render the full failover chain instead
+    /// of just the terminal route.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attempts: Vec<AcpRoutingAttempt>,
+    /// Set when no single route is responsible for the terminal outcome (e.g.
+    /// both racers hit the deadline). It is the machine signal that the absence
+    /// of `provider`/`model` is authoritative, not merely unknown — a host must
+    /// not infer a route from its own model selection.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub route_unknown: bool,
+}
+
+/// One route the routing failure tried, projected from the thrown error's
+/// `attempts` ledger. Only the machine-branchable identity/outcome fields are
+/// carried (no floating-point cost) so the facts stay `Eq`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpRoutingAttempt {
+    pub index: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl AcpPromptFailureFacts {
@@ -258,6 +289,18 @@ impl AcpPromptFailureFacts {
             Some("terminal") => Some(false),
             _ => retry_after_ms.map(|_| true),
         };
+        // `no_single_route` is the routing layer's no-fabrication signal (both
+        // racers hit the deadline). Project it as `routeUnknown` so a host reads
+        // the absent provider/model as authoritative, not merely missing.
+        let route_unknown = object
+            .get("no_single_route")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let attempts = object
+            .get("attempts")
+            .and_then(serde_json::Value::as_array)
+            .map(|items| items.iter().map(AcpRoutingAttempt::from_value).collect())
+            .unwrap_or_default();
         Self {
             category: string_field("category"),
             kind,
@@ -267,6 +310,39 @@ impl AcpPromptFailureFacts {
             retry_after_ms,
             provider: string_field("provider"),
             model: string_field("model"),
+            attempts,
+            route_unknown,
+        }
+    }
+}
+
+impl AcpRoutingAttempt {
+    /// Project one entry of the thrown `attempts` ledger. The nested `error`
+    /// object (when present) carries the per-route category/reason.
+    fn from_value(value: &serde_json::Value) -> Self {
+        let string_field = |key: &str| {
+            value
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        };
+        let error = value.get("error");
+        let error_field = |key: &str| {
+            error
+                .and_then(|err| err.get(key))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        };
+        Self {
+            index: value
+                .get("index")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0),
+            provider: string_field("provider"),
+            model: string_field("model"),
+            status: string_field("status"),
+            category: error_field("category"),
+            reason: error_field("reason"),
         }
     }
 }
@@ -854,6 +930,90 @@ mod tests {
             "reason": "provider_exhausted",
         }));
         assert_eq!(facts.retryable, Some(false));
+    }
+
+    #[test]
+    fn prompt_failure_facts_project_the_routing_attempt_ledger() {
+        // A provider-exhausted routing failure carries the per-route ledger plus
+        // the authoritative terminal provider/model. The facts project both, so
+        // a host can render the full failover chain.
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+            "kind": "terminal",
+            "reason": "provider_exhausted",
+            "provider": "backup-provider",
+            "model": "backup-model",
+            "attempts": [
+                {
+                    "index": 1,
+                    "provider": "primary-provider",
+                    "model": "primary-model",
+                    "status": "failed",
+                    "error": {"category": "circuit_open", "reason": "overloaded"},
+                },
+                {
+                    "index": 2,
+                    "provider": "backup-provider",
+                    "model": "backup-model",
+                    "status": "failed",
+                    "error": {"category": "timeout", "reason": "deadline"},
+                },
+            ],
+        }));
+
+        assert_eq!(facts.provider.as_deref(), Some("backup-provider"));
+        assert!(!facts.route_unknown);
+        assert_eq!(facts.attempts.len(), 2);
+        assert_eq!(facts.attempts[0].index, 1);
+        assert_eq!(
+            facts.attempts[0].provider.as_deref(),
+            Some("primary-provider")
+        );
+        assert_eq!(facts.attempts[0].status.as_deref(), Some("failed"));
+        assert_eq!(facts.attempts[0].category.as_deref(), Some("circuit_open"));
+        assert_eq!(facts.attempts[1].model.as_deref(), Some("backup-model"));
+        assert_eq!(facts.attempts[1].reason.as_deref(), Some("deadline"));
+    }
+
+    #[test]
+    fn composite_failure_projects_route_unknown_with_no_provider() {
+        // No single route is responsible: `no_single_route` becomes `routeUnknown`
+        // and no provider/model is present or fabricated.
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+            "kind": "terminal",
+            "reason": "provider_exhausted",
+            "no_single_route": true,
+            "attempts": [
+                {"index": 1, "provider": "primary-provider", "model": "primary-model", "status": "failed"},
+                {"index": 2, "provider": "backup-provider", "model": "backup-model", "status": "failed"},
+            ],
+        }));
+
+        assert!(facts.route_unknown, "composite failure sets routeUnknown");
+        assert!(
+            facts.provider.is_none(),
+            "composite must not carry a provider"
+        );
+        assert!(facts.model.is_none(), "composite must not carry a model");
+        assert_eq!(facts.attempts.len(), 2);
+    }
+
+    #[test]
+    fn route_unknown_and_attempts_are_omitted_when_absent() {
+        // The additive fields must not appear on a plain single-route failure,
+        // keeping the envelope byte-identical for existing hosts.
+        let facts = AcpPromptFailureFacts::from_thrown(&serde_json::json!({
+            "kind": "terminal",
+            "reason": "timeout",
+            "provider": "acme",
+            "model": "acme-large",
+        }));
+        assert!(facts.attempts.is_empty());
+        assert!(!facts.route_unknown);
+
+        let wire = serde_json::to_value(&facts).expect("serialize");
+        let object = wire.as_object().expect("facts serialize to an object");
+        assert!(!object.contains_key("attempts"));
+        assert!(!object.contains_key("routeUnknown"));
     }
 
     #[test]
