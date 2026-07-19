@@ -1167,6 +1167,6 @@ mod tests {
     fn display_quotes_arguments_containing_shell_metacharacters() {
         let mut command = PlannedCommand::new("flyctl");
         command.arg("a b").arg("it's").arg("plain");
-        assert_eq!(command.display(), r#"flyctl 'a b' 'it'\''s' plain"#);
+        assert_eq!(command.display(), r"flyctl 'a b' 'it'\''s' plain");
     }
 }
