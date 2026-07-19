@@ -86,6 +86,25 @@ else:
     if checkout_ref != "${{ needs.resolve.outputs.tag || github.sha }}":
         failures.append("artifact smoke must check out the release tag, while source smoke keeps github.sha")
 
+run_smoke = None
+for step in smoke.get("steps", []):
+    if step.get("name") == "Run release smoke":
+        run_smoke = str(step.get("run", ""))
+        break
+if run_smoke is None:
+    failures.append("smoke matrix must keep an attributable Run release smoke step")
+else:
+    for required in (
+        '"$HARN_BINARY" run --no-sandbox scripts/release_smoke.harn',
+        '--candidate "$HARN_BINARY"',
+        '--step-timeout-ms 120000',
+    ):
+        if required not in run_smoke:
+            failures.append(f"release smoke must invoke the exact candidate through Harn: {required}")
+    for forbidden in ("release_smoke.sh", "cargo build", "sleep ", "while ", "kill ", "taskkill"):
+        if forbidden in run_smoke:
+            failures.append(f"post-bootstrap release smoke must not own shell lifecycle: {forbidden}")
+
 if failures:
     for failure in failures:
         print(f"release_smoke_workflow_test: {failure}", file=sys.stderr)
