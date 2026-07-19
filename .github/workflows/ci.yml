@@ -309,7 +309,11 @@ jobs:
     # unless the speculative merge diff is a proven docs-only tail.
     if: needs.changes.outputs.package_audit == 'true'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
-    timeout-minutes: 20
+    # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
+    # Hosted `ubuntu-latest` completes this lane in up to ~16m — the prior 20m
+    # budget was calibrated for the faster paid runner and left ~4m of
+    # headroom, one noisy neighbor away from a mid-suite timeout kill.
+    timeout-minutes: 30
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_BASEDIRS: ${{ github.workspace }}
@@ -481,7 +485,14 @@ jobs:
     needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 12
+    # Hang tripwire, not a perf budget. The prior 12m budget was calibrated
+    # for the 8vcpu paid runner; on hosted `ubuntu-latest` the full suite
+    # needs longer, and every post-switch attempt was killed mid-suite at
+    # ~12.3m with tests passing — a timeout kill that presents as an
+    # unexplained external cancellation. Per-test hangs are still terminated
+    # by nextest's own slow-timeout, so a generous job budget only bounds
+    # total runaway, it does not mask hung tests.
+    timeout-minutes: 30
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_BASEDIRS: ${{ github.workspace }}
