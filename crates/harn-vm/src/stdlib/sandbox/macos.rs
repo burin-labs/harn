@@ -549,7 +549,10 @@ mod tests {
         if !Path::new(SANDBOX_EXEC_PATH).exists() {
             return;
         }
-        let cargo_home = tempfile::TempDir::new().expect("temp CARGO_HOME");
+        let home = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .expect("HOME for sandbox policy probe");
+        let cargo_home = tempfile::tempdir_in(home).expect("temp CARGO_HOME");
         // macOS resolves /var/folders through /private/var/folders. Use the
         // canonical spelling for every rule and disable the broad UserTemp
         // grant so only the explicit toolchain-cache root can authorize writes.
