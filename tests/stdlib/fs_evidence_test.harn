@@ -1,0 +1,22 @@
+// Run: harn test tests/stdlib/fs_evidence_test.harn
+import { EvidenceReceipt, search_evidence } from "std/fs"
+import { assert_eq } from "std/testing"
+
+pipeline test_search_evidence_returns_typed_one_pass_receipt(_task) {
+  const roots = [{id: "repo", path: path_join(source_dir(), "../fixtures/fs_evidence")}]
+  const patterns = [{id: "whole", text: "needle"}, {id: "prefix", text: "need"}]
+  const receipt: EvidenceReceipt = search_evidence(roots, patterns, {preset: "source", threads: 2})
+  assert_eq(receipt.schema_version, "harn.fs.evidence.v1")
+  assert_eq(receipt.status, "complete")
+  assert_eq(receipt.files_scanned, 1)
+  assert_eq(receipt.match_count, 4)
+  const root = receipt.roots[0]
+  assert(root != nil)
+  const pattern = root.patterns[0]
+  assert(pattern != nil)
+  const hit = pattern.hits[0]
+  assert(hit != nil)
+  assert_eq(pattern.id, "prefix")
+  assert_eq(hit.path, "source.txt")
+  assert_eq(harness.fs.find_evidence(roots, patterns, {threads: 1}).match_count, 4)
+}

@@ -11,6 +11,7 @@ use crate::testbench::overlay_fs::helpers as overlay;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+mod find_evidence;
 mod find_text;
 
 thread_local! {
@@ -44,6 +45,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &WALK_DIR_BUILTIN_DEF,
     &GLOB_BUILTIN_DEF,
     &find_text::FIND_TEXT_BUILTIN_DEF,
+    &find_evidence::FIND_EVIDENCE_BUILTIN_DEF,
 ];
 
 #[derive(Clone)]

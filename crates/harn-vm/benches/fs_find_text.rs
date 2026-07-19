@@ -38,6 +38,47 @@ pipeline default(task) {{
     .expect("bench source compiles")
 }
 
+fn repeated_literal_search_chunk(root: &str) -> Chunk {
+    let root = serde_json::to_string(root).expect("root string literal");
+    compile_source(&format!(
+        r#"
+pipeline default(task) {{
+  let count = 0
+  for pattern in ["needle", "ordinary", "const", "value", "main", "fn", "pkg", "missing"] {{
+    count = count + len(find_text({root}, pattern, {{include: ["**/*.harn"], max_matches: 10000}}))
+  }}
+  return count
+}}
+"#
+    ))
+    .expect("bench source compiles")
+}
+
+fn one_pass_evidence_chunk(root: &str) -> Chunk {
+    let root = serde_json::to_string(root).expect("root string literal");
+    compile_source(&format!(
+        r#"
+pipeline default(task) {{
+  return find_evidence(
+    [{{id: "repo", path: {root}}}],
+    [
+      {{id: "needle", text: "needle"}},
+      {{id: "ordinary", text: "ordinary"}},
+      {{id: "const", text: "const"}},
+      {{id: "value", text: "value"}},
+      {{id: "main", text: "main"}},
+      {{id: "fn", text: "fn"}},
+      {{id: "pkg", text: "pkg"}},
+      {{id: "missing", text: "missing"}},
+    ],
+    {{include: ["**/*.harn"], max_matches: 10000}},
+  ).match_count
+}}
+"#
+    ))
+    .expect("bench source compiles")
+}
+
 fn execute(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> VmValue {
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
@@ -79,6 +120,8 @@ fn bench_find_text_repo_scale(c: &mut Criterion) {
 
     let hits_chunk = find_text_hits_chunk(&root, "needle");
     let exists_chunk = find_text_exists_chunk(&root, "needle");
+    let repeated_chunk = repeated_literal_search_chunk(&root);
+    let evidence_chunk = one_pass_evidence_chunk(&root);
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("tokio runtime");
@@ -88,6 +131,12 @@ fn bench_find_text_repo_scale(c: &mut Criterion) {
     });
     c.bench_function("fs_find_text_repo_scale_exists_parallel", |b| {
         b.iter(|| black_box(execute(&rt, &exists_chunk)));
+    });
+    c.bench_function("fs_find_text_repo_scale_eight_repeated_walks", |b| {
+        b.iter(|| black_box(execute(&rt, &repeated_chunk)));
+    });
+    c.bench_function("fs_find_evidence_repo_scale_one_walk", |b| {
+        b.iter(|| black_box(execute(&rt, &evidence_chunk)));
     });
 }
 
