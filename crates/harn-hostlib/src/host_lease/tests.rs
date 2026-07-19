@@ -556,6 +556,128 @@ fn renew_requires_the_active_token() {
 }
 
 #[test]
+fn metadata_replacement_requires_the_exact_active_authority() {
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let mut initial = request("release-owner");
+    initial.domain = "release".to_string();
+    initial.metadata = BTreeMap::from([
+        ("discovery".to_string(), "pending".to_string()),
+        ("obsolete".to_string(), "remove-me".to_string()),
+    ]);
+    let handle = store
+        .try_acquire_at(initial, 1_000, None, 0)
+        .unwrap()
+        .handle
+        .unwrap();
+    let replacement = BTreeMap::from([
+        ("discovery".to_string(), "complete".to_string()),
+        ("revision".to_string(), "abc123".to_string()),
+    ]);
+
+    let wrong_token = store
+        .update_metadata_at_domain(
+            &handle.host,
+            handle.resource_class,
+            &handle.domain,
+            "wrong-token",
+            replacement.clone(),
+            1_001,
+        )
+        .unwrap();
+    assert!(!wrong_token.updated);
+    assert!(wrong_token.handle.is_none());
+
+    let wrong_domain = store
+        .update_metadata_at_domain(
+            &handle.host,
+            handle.resource_class,
+            "build",
+            &handle.lease_id,
+            replacement.clone(),
+            1_002,
+        )
+        .unwrap();
+    assert!(!wrong_domain.updated);
+    assert!(wrong_domain.handle.is_none());
+
+    let updated = store
+        .update_metadata_at_domain(
+            &handle.host,
+            handle.resource_class,
+            &handle.domain,
+            &handle.lease_id,
+            replacement.clone(),
+            1_003,
+        )
+        .unwrap();
+    assert!(updated.updated);
+    let updated_handle = updated.handle.unwrap();
+    assert_eq!(updated_handle.updated_at_ms, 1_003);
+    assert_eq!(updated_handle.expires_at_ms, handle.expires_at_ms);
+    assert_eq!(updated_handle.reason, handle.reason);
+    assert_eq!(updated_handle.metadata, replacement);
+    assert!(!updated_handle.metadata.contains_key("obsolete"));
+    assert_eq!(
+        store
+            .status_at_domain(&handle.host, handle.resource_class, &handle.domain, 1_004,)
+            .unwrap()
+            .active,
+        Some(updated_handle)
+    );
+}
+
+#[test]
+fn concurrent_metadata_replacements_never_merge_or_tear() {
+    let temp = TempDir::new().unwrap();
+    let store = Arc::new(store(&temp));
+    let handle = store
+        .try_acquire(request("metadata-owner"))
+        .unwrap()
+        .handle
+        .unwrap();
+    let first = BTreeMap::from([
+        ("writer".to_string(), "first".to_string()),
+        ("first-only".to_string(), "yes".to_string()),
+    ]);
+    let second = BTreeMap::from([
+        ("writer".to_string(), "second".to_string()),
+        ("second-only".to_string(), "yes".to_string()),
+    ]);
+    let barrier = Arc::new(Barrier::new(2));
+    let workers = [first.clone(), second.clone()]
+        .into_iter()
+        .map(|metadata| {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+            let handle = handle.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                store
+                    .update_metadata_for_domain(
+                        &handle.host,
+                        handle.resource_class,
+                        &handle.domain,
+                        &handle.lease_id,
+                        metadata,
+                    )
+                    .unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+    for worker in workers {
+        assert!(worker.join().unwrap().updated);
+    }
+
+    let active = store
+        .status_for_domain(&handle.host, handle.resource_class, &handle.domain)
+        .unwrap()
+        .active
+        .unwrap();
+    assert!(active.metadata == first || active.metadata == second);
+}
+
+#[test]
 fn non_expiring_lease_requires_a_live_owner_pid() {
     let temp = TempDir::new().unwrap();
     let store = store(&temp);

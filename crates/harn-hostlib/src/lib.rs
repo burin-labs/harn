@@ -61,9 +61,9 @@ pub use error::HostlibError;
 pub use host_lease::{
     HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseCargoExecutionContext,
     HostLeaseDeferReason, HostLeaseDeferReceipt, HostLeaseError, HostLeaseExecutionContext,
-    HostLeaseHandle, HostLeaseOperationKind, HostLeasePathIdentity, HostLeasePriorityClass,
-    HostLeaseProcessExit, HostLeaseReleaseReceipt, HostLeaseRenewReceipt, HostLeaseRequest,
-    HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
+    HostLeaseHandle, HostLeaseMetadataUpdateReceipt, HostLeaseOperationKind, HostLeasePathIdentity,
+    HostLeasePriorityClass, HostLeaseProcessExit, HostLeaseReleaseReceipt, HostLeaseRenewReceipt,
+    HostLeaseRequest, HostLeaseResourceClass, HostLeaseResourceDefinition, HostLeaseResourceKey,
     HostLeaseRunLaunchFailure, HostLeaseRunReceipt, HostLeaseRunReleaseOutcome,
     HostLeaseRunStartFailure, HostLeaseRunState, HostLeaseState, HostLeaseStore,
     DEFAULT_HOST_LEASE_DOMAIN, HOST_LEASE_ROOT_ENV,

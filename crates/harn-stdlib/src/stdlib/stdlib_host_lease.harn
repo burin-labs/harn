@@ -77,6 +77,13 @@ pub type HostLeaseReleaseReceipt = {
   observed_at_ms: int,
 }
 
+pub type HostLeaseMetadataUpdateReceipt = {
+  schema_version: int,
+  updated: bool,
+  observed_at_ms: int,
+  handle?: HostLeaseHandle,
+}
+
 pub type HostLeaseScopeResult<T> = {
   status: "completed" | "deferred",
   value?: T,
@@ -133,6 +140,29 @@ pub fn host_lease_acquire(
   wait_slice_ms: int = 0,
 ) -> HostLeaseAcquireReceipt {
   return hostlib_host_lease_acquire(__host_lease_request(options, wait_slice_ms))
+}
+
+/**
+ * Atomically replace all metadata on the active lease named by `handle`.
+ * Missing keys are removed; no implicit merge is performed. The cleanup guard
+ * remains owned by the acquire receipt or enclosing `with_host_lease` scope.
+ *
+ * @effects: [host]
+ * @errors: [backend_error, invalid_parameter, missing_parameter]
+ */
+pub fn host_lease_update_metadata(
+  handle: HostLeaseHandle,
+  metadata: dict<string, string>,
+) -> HostLeaseMetadataUpdateReceipt {
+  return hostlib_host_lease_update_metadata(
+    {
+      host: handle.host,
+      resource_class: handle.resource_class,
+      domain: handle.domain,
+      lease_id: handle.lease_id,
+      metadata: metadata,
+    },
+  )
 }
 
 /**

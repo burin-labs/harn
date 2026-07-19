@@ -432,6 +432,20 @@ pub struct HostLeaseRenewReceipt {
     pub handle: Option<HostLeaseHandle>,
 }
 
+/// Versioned result of a token-scoped metadata replacement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostLeaseMetadataUpdateReceipt {
+    /// Contract schema version.
+    pub schema_version: u32,
+    /// True only when the supplied token owned the active lease.
+    pub updated: bool,
+    /// Observation timestamp in Unix milliseconds.
+    pub observed_at_ms: i64,
+    #[serde(default)]
+    /// Updated handle when replacement succeeds.
+    pub handle: Option<HostLeaseHandle>,
+}
+
 /// Versioned result of a token-scoped lease release.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostLeaseReleaseReceipt {
@@ -741,6 +755,71 @@ impl HostLeaseStore {
         Ok(HostLeaseRenewReceipt {
             schema_version: SCHEMA_VERSION,
             renewed: true,
+            observed_at_ms: now,
+            handle: Some(handle),
+        })
+    }
+
+    /// Replace metadata on one named domain only when its token matches.
+    ///
+    /// Replacement is atomic and complete: keys absent from `metadata` are
+    /// removed. This keeps retries deterministic and avoids hidden merge
+    /// policy in the lease registry.
+    pub fn update_metadata_for_domain(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+        lease_id: &str,
+        metadata: BTreeMap<String, String>,
+    ) -> Result<HostLeaseMetadataUpdateReceipt, HostLeaseError> {
+        self.update_metadata_at_domain(
+            host,
+            resource_class,
+            domain,
+            lease_id,
+            metadata,
+            unix_now_ms()?,
+        )
+    }
+
+    fn update_metadata_at_domain(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+        lease_id: &str,
+        metadata: BTreeMap<String, String>,
+        now: i64,
+    ) -> Result<HostLeaseMetadataUpdateReceipt, HostLeaseError> {
+        let resource = HostLeaseResourceKey::normalize(host, resource_class, domain)?;
+        let lease_id = normalize_component("lease_id", lease_id)?;
+        let mut conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (active, _) = active_handle(
+            &tx,
+            &resource.machine,
+            resource.resource_class,
+            &resource.domain,
+            now,
+            self.process_inspector.as_ref(),
+        )?;
+        let Some(mut handle) = active.filter(|handle| handle.lease_id == lease_id) else {
+            tx.commit()?;
+            return Ok(HostLeaseMetadataUpdateReceipt {
+                schema_version: SCHEMA_VERSION,
+                updated: false,
+                observed_at_ms: now,
+                handle: None,
+            });
+        };
+        handle.updated_at_ms = now;
+        handle.metadata = metadata;
+        write_handle(&tx, &handle)?;
+        tx.commit()?;
+        Ok(HostLeaseMetadataUpdateReceipt {
+            schema_version: SCHEMA_VERSION,
+            updated: true,
             observed_at_ms: now,
             handle: Some(handle),
         })

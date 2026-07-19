@@ -590,8 +590,8 @@ fn install_default_wires_every_module_into_a_vm() {
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 3 host_lease = 83.
-    assert!(registry.builtins().len() >= 83);
+    // + 1 hostlib_enable + 4 secret_store + 1 verdict + 4 host_lease = 84.
+    assert!(registry.builtins().len() >= 84);
 }
 
 #[test]
@@ -603,6 +603,7 @@ fn host_lease_capability_registers_scoped_lifecycle() {
         vec![
             "hostlib_host_lease_status",
             "hostlib_host_lease_acquire",
+            "hostlib_host_lease_update_metadata",
             "hostlib_host_lease_release",
         ]
     );
@@ -628,6 +629,77 @@ fn host_lease_capability_registers_scoped_lifecycle() {
         }
         other => panic!("expected invalid host error, got {other:?}"),
     }
+}
+
+#[test]
+fn stdlib_host_lease_replaces_metadata_inside_one_guarded_scope() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    let source = r#"
+import {
+  host_lease_status,
+  host_lease_update_metadata,
+  with_host_lease,
+} from "std/host_lease"
+
+pipeline default(task) {
+  const scope = with_host_lease(
+    {
+      host: "mac-local",
+      owner: "metadata-test",
+      resource_class: "whole-machine",
+      domain: "discovery",
+      metadata: {phase: "pending", obsolete: "remove-me"},
+    },
+    { handle ->
+      const update = host_lease_update_metadata(
+        handle,
+        {phase: "complete", revision: "abc123"},
+      )
+      const active = host_lease_status("mac-local", "whole-machine", "discovery").active
+      return {update: update, active: active}
+    },
+  )
+  return {
+    scope: scope,
+    final: host_lease_status("mac-local", "whole-machine", "discovery"),
+  }
+}
+"#;
+
+    let result = expect_dict(execute_harn(source).expect("metadata scope"));
+    let Some(VmValue::Dict(scope)) = result.get("scope") else {
+        panic!("scope result must be a dict");
+    };
+    let Some(VmValue::Dict(value)) = scope.get("value") else {
+        panic!("completed scope must carry its callback value");
+    };
+    assert_response_schema(
+        "host_lease",
+        "update_metadata",
+        value.get("update").expect("metadata update receipt"),
+    );
+    let Some(VmValue::Dict(active)) = value.get("active") else {
+        panic!("active handle must remain visible inside the scope");
+    };
+    let Some(VmValue::Dict(metadata)) = active.get("metadata") else {
+        panic!("active handle must expose replacement metadata");
+    };
+    assert_eq!(metadata.len(), 2);
+    assert_eq!(
+        metadata.get("phase").map(VmValue::display),
+        Some("complete".to_string())
+    );
+    assert_eq!(
+        metadata.get("revision").map(VmValue::display),
+        Some("abc123".to_string())
+    );
+    assert!(!metadata.contains_key("obsolete"));
+    let Some(VmValue::Dict(final_state)) = result.get("final") else {
+        panic!("final state must be a dict");
+    };
+    assert!(matches!(final_state.get("active"), Some(VmValue::Nil)));
 }
 
 #[test]

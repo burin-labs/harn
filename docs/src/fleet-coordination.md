@@ -166,6 +166,32 @@ receipt; forced task cancellation, frame teardown, and VM drop invoke the same
 idempotent cleanup through guard lifetime. Acquisition waits in bounded slices
 on registry notifications rather than sleeping or parsing process tables.
 
+When deterministic discovery finishes after acquisition, replace the active
+lease metadata without introducing a sidecar authority or releasing ownership:
+
+```harn
+import { host_lease_update_metadata, with_host_lease } from "std/host_lease"
+
+with_host_lease(
+  {
+    owner: "indexer",
+    domain: "repository-index",
+    metadata: {phase: "discovering"},
+  },
+  { handle ->
+    const update = host_lease_update_metadata(
+      handle,
+      {phase: "ready", revision: discover_revision()},
+    )
+    build_index(update.handle)
+  },
+)
+```
+
+Metadata updates require the active token and exact resource domain. They
+replace the complete map atomically, so omitted keys are removed and retries do
+not depend on prior merge state. The scope retains its opaque cleanup guard.
+
 Use the `harn host lease` CLI adapter for non-Harn commands:
 
 ```bash

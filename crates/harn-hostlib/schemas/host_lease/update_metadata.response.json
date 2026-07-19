@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/host_lease/update_metadata.response.json",
+  "title": "host_lease.update_metadata response",
+  "description": "The result of a token-scoped, full metadata replacement.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "updated": {"type": "boolean"},
+    "observed_at_ms": {"type": "integer"},
+    "handle": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/Handle"}
+      ]
+    }
+  },
+  "required": ["schema_version", "updated", "observed_at_ms", "handle"],
+  "additionalProperties": false,
+  "$defs": {
+    "Handle": {
+      "type": "object",
+      "properties": {
+        "schema_version": {"type": "integer", "minimum": 1},
+        "host": {"type": "string", "minLength": 1},
+        "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
+        "domain": {"type": "string", "minLength": 1},
+        "lease_id": {"type": "string", "minLength": 1},
+        "owner": {"type": "string", "minLength": 1},
+        "priority_class": {
+          "type": "string",
+          "enum": ["interactive", "measurement", "ci-verify", "deferrable"]
+        },
+        "acquired_at_ms": {"type": "integer"},
+        "updated_at_ms": {"type": "integer"},
+        "expires_at_ms": {"type": ["integer", "null"]},
+        "owner_pid": {"type": ["integer", "null"], "minimum": 0},
+        "owner_process_identity": {"type": ["integer", "null"], "minimum": 0},
+        "reason": {"type": ["string", "null"]},
+        "metadata": {"type": "object", "additionalProperties": {"type": "string"}}
+      },
+      "required": [
+        "schema_version",
+        "host",
+        "resource_class",
+        "domain",
+        "lease_id",
+        "owner",
+        "priority_class",
+        "acquired_at_ms",
+        "updated_at_ms",
+        "expires_at_ms",
+        "owner_pid",
+        "owner_process_identity",
+        "reason",
+        "metadata"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

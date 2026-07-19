@@ -14,8 +14,9 @@ use harn_vm::{VmResourceGuardHandle, VmValue};
 use crate::error::HostlibError;
 use crate::host_lease::{
     HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseDeferReceipt, HostLeaseHandle,
-    HostLeasePriorityClass, HostLeaseReleaseReceipt, HostLeaseRequest, HostLeaseResourceClass,
-    HostLeaseState, HostLeaseStore, DEFAULT_HOST_LEASE_DOMAIN,
+    HostLeaseMetadataUpdateReceipt, HostLeasePriorityClass, HostLeaseReleaseReceipt,
+    HostLeaseRequest, HostLeaseResourceClass, HostLeaseState, HostLeaseStore,
+    DEFAULT_HOST_LEASE_DOMAIN,
 };
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
@@ -24,6 +25,7 @@ use crate::tools::args::{
 
 const STATUS_BUILTIN: &str = "hostlib_host_lease_status";
 const ACQUIRE_BUILTIN: &str = "hostlib_host_lease_acquire";
+const UPDATE_METADATA_BUILTIN: &str = "hostlib_host_lease_update_metadata";
 const RELEASE_BUILTIN: &str = "hostlib_host_lease_release";
 const MAX_WAIT_SLICE_MS: i64 = 5_000;
 
@@ -44,8 +46,30 @@ impl HostlibCapability for HostLeaseCapability {
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
         registry.register_fn("host_lease", STATUS_BUILTIN, "status", handle_status);
         registry.register_fn("host_lease", ACQUIRE_BUILTIN, "acquire", handle_acquire);
+        registry.register_fn(
+            "host_lease",
+            UPDATE_METADATA_BUILTIN,
+            "update_metadata",
+            handle_update_metadata,
+        );
         registry.register_fn("host_lease", RELEASE_BUILTIN, "release", handle_release);
     }
+}
+
+fn handle_update_metadata(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let dict = dict_arg(UPDATE_METADATA_BUILTIN, args)?;
+    let host = require_nonempty_string(UPDATE_METADATA_BUILTIN, &dict, "host")?;
+    let resource_class = resource_class(UPDATE_METADATA_BUILTIN, dict.get("resource_class"))?;
+    let domain = optional_string(UPDATE_METADATA_BUILTIN, &dict, "domain")?
+        .unwrap_or_else(|| DEFAULT_HOST_LEASE_DOMAIN.to_string());
+    let lease_id = require_nonempty_string(UPDATE_METADATA_BUILTIN, &dict, "lease_id")?;
+    let metadata = string_map(UPDATE_METADATA_BUILTIN, dict.get("metadata"))?;
+    let receipt = HostLeaseStore::from_env()
+        .and_then(|store| {
+            store.update_metadata_for_domain(&host, resource_class, &domain, &lease_id, metadata)
+        })
+        .map_err(|error| backend(UPDATE_METADATA_BUILTIN, error))?;
+    metadata_update_to_value(&receipt)
 }
 
 fn handle_status(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -340,6 +364,28 @@ fn release_to_value(receipt: &HostLeaseReleaseReceipt) -> VmValue {
         ("lease_id", str_value(&receipt.lease_id)),
         ("observed_at_ms", VmValue::Int(receipt.observed_at_ms)),
     ])
+}
+
+fn metadata_update_to_value(
+    receipt: &HostLeaseMetadataUpdateReceipt,
+) -> Result<VmValue, HostlibError> {
+    Ok(build_dict([
+        (
+            "schema_version",
+            VmValue::Int(i64::from(receipt.schema_version)),
+        ),
+        ("updated", VmValue::Bool(receipt.updated)),
+        ("observed_at_ms", VmValue::Int(receipt.observed_at_ms)),
+        (
+            "handle",
+            receipt
+                .handle
+                .as_ref()
+                .map(|handle| handle_to_value(UPDATE_METADATA_BUILTIN, handle))
+                .transpose()?
+                .unwrap_or(VmValue::Nil),
+        ),
+    ]))
 }
 
 fn require_nonempty_string(
