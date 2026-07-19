@@ -2316,6 +2316,20 @@ pub(crate) fn developer_toolchain_cache_write_roots_for_home(home: &Path) -> Vec
         "Library/Caches/go-build", // Go build cache (GOCACHE, macOS default)
         ".cache/go-build",         // Go build cache (GOCACHE, Linux default)
         "go/pkg/mod",              // Go module cache (GOMODCACHE default)
+        // Cargo registry + git caches. `cargo fetch`/`cargo build` unpack crate
+        // sources into `registry/src`, download tarballs into `registry/cache`,
+        // refresh the index under `registry/index`, and check out git deps under
+        // `git/db` + `git/checkouts`; a build fails to unpack ("failed to create
+        // directory .../registry/src/...: Operation not permitted") when these
+        // are read-only. These hold build artifacts only — Cargo credentials and
+        // config live at the CARGO_HOME root (`.cargo/credentials.toml`,
+        // `.cargo/config.toml`), OUTSIDE `registry`/`git`, and stay read-only
+        // (granted read via `.cargo` in `developer_toolchain_read_roots_for_home`
+        // and re-denied write by the package-manager preset). `.package-cache` is
+        // Cargo's advisory build lock at the CARGO_HOME root.
+        ".cargo/registry",       // crate cache/index/src (CARGO_HOME default)
+        ".cargo/git",            // git dependency db + checkouts
+        ".cargo/.package-cache", // Cargo's advisory build lock file
     ]
     .into_iter()
     .map(|entry| normalize_for_policy(&home.join(entry)))
@@ -2341,8 +2355,13 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
         ".cargo/config.toml",
         ".cargo/credentials",
         ".cargo/credentials.toml",
-        ".cargo/registry",
-        ".cargo/git",
+        // NOTE: `.cargo/registry` and `.cargo/git` are deliberately NOT here.
+        // They are build caches Cargo must WRITE, so they moved to
+        // `developer_toolchain_cache_write_roots_for_home`. Listing them here
+        // too would re-deny their writes: the macOS backend emits a
+        // `(deny file-write*)` for every package-manager read root AFTER the
+        // write-allow block, and last-match-wins would cancel the cache grant.
+        // `.cargo` itself stays readable via `developer_toolchain_read_roots`.
     ]
     .into_iter()
     .map(|entry| normalize_for_policy(&home.join(entry)))
