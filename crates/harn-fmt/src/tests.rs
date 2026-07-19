@@ -2,6 +2,7 @@ mod comments;
 mod layout;
 mod roundtrip;
 mod scoped_blocks;
+mod semantic_tokens;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
