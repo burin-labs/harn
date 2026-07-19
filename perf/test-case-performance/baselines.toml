@@ -5,26 +5,26 @@ schema_version = 1
 workload_version = 1
 
 [platform.macos]
-measured_at = "2026-07-19T11:38:26Z"
-source_commit = "42746f83b2e0c32ccf55e072804a8c8b7055d8c4"
+measured_at = "2026-07-19T11:48:02Z"
+source_commit = "c7e314af4d8ab32d32a943c83b974877868e4807"
 host = "macOS 26.5.1 arm64"
 sample_count = 1
 regression_x = 2.0
 warn_utilization = 0.8
 telemetry_warn_x = 4.0
-max_child_wall_ms = 300.0
-sum_user_ms = 3650.0
-sum_sys_ms = 150.0
+max_child_wall_ms = 330.0
+sum_user_ms = 4000.0
+sum_sys_ms = 160.0
 setup_p50_ms = 5.0
 setup_p90_ms = 7.0
-execute_p90_ms = 221.0
+execute_p90_ms = 249.0
 
 [platform.macos.telemetry]
-max_rss_kb = 98784
-major_faults = 408
-minor_faults = 32420
-voluntary_context_switches = 0
-involuntary_context_switches = 4880
+max_rss_kb = 98896
+major_faults = 323
+minor_faults = 31055
+voluntary_context_switches = 122
+involuntary_context_switches = 6475
 fs_inputs = 0
 fs_outputs = 0
 
