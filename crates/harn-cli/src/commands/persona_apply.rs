@@ -548,12 +548,36 @@ fn materialized_persona_name(package_root: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::future::Future;
     use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
 
     use harn_modules::package_snapshot::PackageSnapshot;
 
     use super::*;
+
+    /// Persona apply materializes through compile + doctor paths that drive the
+    /// Harn VM. That work needs more than libtest's default 2 MiB worker stack
+    /// and can otherwise SIGABRT the whole `harn-cli` test binary (#5250).
+    fn block_on_cli_stack_async<Fut>(build: impl FnOnce() -> Fut + Send + 'static) -> Fut::Output
+    where
+        Fut: Future + 'static,
+        Fut::Output: Send + 'static,
+    {
+        thread::Builder::new()
+            .name("persona-apply-test".into())
+            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
+            .spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("persona-apply test runtime")
+                    .block_on(build())
+            })
+            .expect("failed to spawn persona-apply test thread")
+            .join()
+            .expect("persona-apply test thread panicked")
+    }
 
     fn apply_fixture(root: &Path) -> (PathBuf, PersonaMaterializeArgs) {
         fs::create_dir_all(root).unwrap();
@@ -741,37 +765,39 @@ mod tests {
         assert!(!outside.path().join("accepted_prompt_watch").exists());
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn activation_failure_rolls_back_the_local_package_install() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, args) = apply_fixture(temp.path());
-        let ledger = temp.path().join(".harn/personas/activations.json");
-        fs::create_dir_all(ledger.parent().unwrap()).unwrap();
-        fs::write(&ledger, "{\"schema_version\":99,\"activations\":{}}\n").unwrap();
+    #[test]
+    fn activation_failure_rolls_back_the_local_package_install() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, args) = apply_fixture(temp.path());
+            let ledger = temp.path().join(".harn/personas/activations.json");
+            fs::create_dir_all(ledger.parent().unwrap()).unwrap();
+            fs::write(&ledger, "{\"schema_version\":99,\"activations\":{}}\n").unwrap();
 
-        let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
+            let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
 
-        assert!(!receipt.ok);
-        assert_eq!(receipt.stage, PersonaApplyStage::Activate);
-        assert!(receipt.install.is_some());
-        assert!(receipt.activation.is_none());
-        let error = receipt.error.unwrap();
-        assert_eq!(error.code, "activation_failed");
-        assert!(error.retryable);
-        assert!(!error.installed_inert);
-        assert!(!error.activation_present);
-        assert!(!fs::read_to_string(&manifest)
-            .unwrap()
-            .contains("accepted_prompt_watch ="));
-        assert!(temp.path().join("harn.lock").exists());
-        assert!(PackageSnapshot::acquire(temp.path())
-            .unwrap()
-            .unwrap()
-            .package_names()
-            .is_empty());
-        let ledger_value: serde_json::Value =
-            serde_json::from_slice(&fs::read(&ledger).unwrap()).unwrap();
-        assert_eq!(ledger_value["activations"], serde_json::json!({}));
+            assert!(!receipt.ok);
+            assert_eq!(receipt.stage, PersonaApplyStage::Activate);
+            assert!(receipt.install.is_some());
+            assert!(receipt.activation.is_none());
+            let error = receipt.error.unwrap();
+            assert_eq!(error.code, "activation_failed");
+            assert!(error.retryable);
+            assert!(!error.installed_inert);
+            assert!(!error.activation_present);
+            assert!(!fs::read_to_string(&manifest)
+                .unwrap()
+                .contains("accepted_prompt_watch ="));
+            assert!(temp.path().join("harn.lock").exists());
+            assert!(PackageSnapshot::acquire(temp.path())
+                .unwrap()
+                .unwrap()
+                .package_names()
+                .is_empty());
+            let ledger_value: serde_json::Value =
+                serde_json::from_slice(&fs::read(&ledger).unwrap()).unwrap();
+            assert_eq!(ledger_value["activations"], serde_json::json!({}));
+        });
     }
 
     #[tokio::test(flavor = "current_thread")]
