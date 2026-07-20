@@ -91,7 +91,9 @@ pub fn atomic_write_with_durability(
     bytes: &[u8],
     durability: AtomicWriteDurability,
 ) -> io::Result<AtomicWriteReceipt> {
-    atomic_write_stream_with_durability_and_mode(path, durability, None, |writer| writer.write_all(bytes))
+    atomic_write_stream_with_durability_and_mode(path, durability, None, |writer| {
+        writer.write_all(bytes)
+    })
 }
 
 pub(crate) fn atomic_write_with_durability_unlocked(
@@ -99,12 +101,9 @@ pub(crate) fn atomic_write_with_durability_unlocked(
     bytes: &[u8],
     durability: AtomicWriteDurability,
 ) -> io::Result<AtomicWriteReceipt> {
-    atomic_write_stream_with_durability_and_mode_unlocked(
-        path,
-        durability,
-        None,
-        |writer| writer.write_all(bytes),
-    )
+    atomic_write_stream_with_durability_and_mode_unlocked(path, durability, None, |writer| {
+        writer.write_all(bytes)
+    })
 }
 
 /// Atomically write the destination at `path` by streaming through a
@@ -118,13 +117,8 @@ pub fn atomic_write_with<F>(path: &Path, write_fn: F) -> io::Result<()>
 where
     F: FnOnce(&mut BufWriter<File>) -> io::Result<()>,
 {
-    atomic_write_stream_with_durability_and_mode(
-        path,
-        AtomicWriteDurability::Flush,
-        None,
-        write_fn,
-    )
-    .map(|_| ())
+    atomic_write_stream_with_durability_and_mode(path, AtomicWriteDurability::Flush, None, write_fn)
+        .map(|_| ())
 }
 
 fn atomic_write_stream_with_durability_and_mode<F>(
@@ -424,8 +418,6 @@ mod tests {
         );
     }
 
-    #[test]
-
     #[cfg(unix)]
     #[test]
     fn mode_is_applied_before_the_rename() {
@@ -450,6 +442,7 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
     }
 
+    #[test]
     fn concurrent_writers_do_not_collide() {
         let dir = tempfile::tempdir().unwrap();
         let path = std::sync::Arc::new(dir.path().join("state.json"));
