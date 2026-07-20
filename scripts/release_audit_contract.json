@@ -51,7 +51,7 @@
         {
           "id": "release-audit-behavior-build",
           "condition": "matrix.kind == 'behavior'",
-          "run": "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$GITHUB_SHA\""
+          "run": "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$GITHUB_SHA\""
         },
         {
           "id": "release-audit-rust-test-fallback",

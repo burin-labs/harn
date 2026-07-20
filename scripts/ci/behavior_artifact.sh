@@ -13,8 +13,9 @@ trap '[[ -z "$cleanup_dir" ]] || rm -rf "$cleanup_dir"' EXIT
 usage() {
   cat <<'EOF'
 usage:
-  scripts/ci/behavior_artifact.sh build <bundle.tar.zst> <commit-sha>
+  scripts/ci/behavior_artifact.sh build <bundle.tar.zst> <cli-bundle.tar.zst> <commit-sha>
   scripts/ci/behavior_artifact.sh restore <bundle.tar.zst> <directory> <commit-sha> [github-env]
+  scripts/ci/behavior_artifact.sh restore-cli <cli-bundle.tar.zst> <directory> <commit-sha> [github-env]
 EOF
 }
 
@@ -137,6 +138,17 @@ verify_manifest() {
   fi
 }
 
+verify_cli_manifest() {
+  local destination=$1
+  local commit=$2
+  require_manifest_value "$destination/manifest" schema harn.behavior_artifact.v3
+  require_manifest_value "$destination/manifest" commit "$commit"
+  require_manifest_value "$destination/manifest" rust_toolchain_sha256 "$(sha256 rust-toolchain.toml)"
+  require_manifest_value "$destination/manifest" rustflags_sha256 "$(printf '%s' "$EXPECTED_RUSTFLAGS" | sha256sum | cut -d ' ' -f 1)"
+  require_manifest_value "$destination/manifest" dev_debug_sha256 "$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f 1)"
+  require_manifest_value "$destination/manifest" harn_sha256 "$(sha256 "$destination/harn")"
+}
+
 report_timing() {
   local operation=$1
   local seconds=$2
@@ -155,8 +167,9 @@ report_timing() {
 
 build_bundle() {
   local output=$1
-  local commit=$2
-  local output_dir target_dir staging started bytes
+  local cli_output=$2
+  local commit=$3
+  local output_dir cli_output_dir target_dir staging started bytes
   started=$SECONDS
 
   validate_commit "$commit"
@@ -166,6 +179,9 @@ build_bundle() {
   mkdir -p "$(dirname "$output")"
   output_dir="$(cd "$(dirname "$output")" && pwd -P)"
   output="${output_dir}/$(basename "$output")"
+  mkdir -p "$(dirname "$cli_output")"
+  cli_output_dir="$(cd "$(dirname "$cli_output")" && pwd -P)"
+  cli_output="${cli_output_dir}/$(basename "$cli_output")"
   target_dir="$(cargo metadata --format-version 1 --no-deps | jq -er '.target_directory')"
   staging="$(mktemp -d "${output_dir}/behavior-artifact.XXXXXX")"
   cleanup_dir="$staging"
@@ -187,11 +203,51 @@ build_bundle() {
     cd "$staging"
     sha256sum harn-tests.tar.zst harn manifest > SHA256SUMS
     tar --zstd -cf "$output.tmp" harn-tests.tar.zst harn manifest SHA256SUMS
+    sha256sum harn manifest > CLI_SHA256SUMS
+    tar --zstd -cf "$cli_output.tmp" harn manifest CLI_SHA256SUMS
   )
   require_size_budget "$output.tmp"
   mv "$output.tmp" "$output"
+  mv "$cli_output.tmp" "$cli_output"
   bytes="$(wc -c < "$output" | tr -d ' ')"
   report_timing build "$((SECONDS - started))" "$bytes"
+}
+
+restore_cli_bundle() {
+  local bundle=$1
+  local destination=$2
+  local commit=$3
+  local github_env=${4:-}
+  local listing
+
+  validate_commit "$commit"
+  require_source_commit "$commit"
+  if [[ -e "$destination" ]]; then
+    echo "error: restore destination already exists: $destination" >&2
+    exit 1
+  fi
+
+  listing="$(tar --zstd -tf "$bundle" | sort)"
+  if [[ "$listing" != $'CLI_SHA256SUMS\nharn\nmanifest' ]]; then
+    echo "error: CLI artifact has an unexpected file set" >&2
+    printf '%s\n' "$listing" >&2
+    exit 1
+  fi
+
+  mkdir -p "$destination"
+  tar --zstd -xf "$bundle" -C "$destination"
+  (
+    cd "$destination"
+    sha256sum -c CLI_SHA256SUMS
+  )
+  verify_cli_manifest "$destination" "$commit"
+  if [[ ! -x "$destination/harn" ]]; then
+    echo "error: restored harn CLI is not executable" >&2
+    exit 1
+  fi
+  if [[ -n "$github_env" ]]; then
+    printf 'HARN_BIN=%s\n' "$(cd "$destination" && pwd -P)/harn" >> "$github_env"
+  fi
 }
 
 restore_bundle() {
@@ -245,12 +301,16 @@ command=$1
 shift
 case "$command" in
   build)
-    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    [[ $# -eq 3 ]] || { usage >&2; exit 2; }
     build_bundle "$@"
     ;;
   restore)
     [[ $# -ge 3 && $# -le 4 ]] || { usage >&2; exit 2; }
     restore_bundle "$@"
+    ;;
+  restore-cli)
+    [[ $# -ge 3 && $# -le 4 ]] || { usage >&2; exit 2; }
+    restore_cli_bundle "$@"
     ;;
   *)
     usage >&2

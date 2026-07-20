@@ -70,6 +70,7 @@ chmod +x "$tmpdir/target/debug/harn"
 
 commit=0123456789abcdef0123456789abcdef01234567
 bundle="$tmpdir/out/behavior.tar.zst"
+cli_bundle="$tmpdir/out/harn-cli.tar.zst"
 run_artifact() {
   (
     cd "$tmpdir/work"
@@ -97,7 +98,7 @@ expect_failure() {
   fi
 }
 
-run_artifact build "$bundle" "$commit"
+run_artifact build "$bundle" "$cli_bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-tests"
 
@@ -109,12 +110,21 @@ grep -Fxq "HARN_BIN=$restored/harn" "$github_env"
 tar --zstd -tf "$bundle" | sort | diff -u - <(printf '%s\n' \
   SHA256SUMS harn harn-tests.tar.zst manifest | sort)
 
+cli_github_env="$tmpdir/cli-github-env"
+run_artifact restore-cli "$cli_bundle" "$tmpdir/restored-cli" "$commit" "$cli_github_env"
+"$tmpdir/restored-cli/harn" | grep -Fxq harn
+restored_cli="$(cd "$tmpdir/restored-cli" && pwd -P)"
+grep -Fxq "HARN_BIN=$restored_cli/harn" "$cli_github_env"
+tar --zstd -tf "$cli_bundle" | sort | diff -u - <(printf '%s\n' \
+  CLI_SHA256SUMS harn manifest | sort)
+
 expect_failure "restore accepted a bundle for the wrong commit" \
   run_artifact restore "$bundle" "$tmpdir/wrong-commit" fedcba9876543210fedcba9876543210fedcba98
 
 FAKE_COMMIT_OVERRIDE=fedcba9876543210fedcba9876543210fedcba98 \
   expect_failure "build accepted a commit that did not match checkout HEAD" \
-  run_artifact build "$tmpdir/out/wrong-source.tar.zst" "$commit"
+  run_artifact build "$tmpdir/out/wrong-source.tar.zst" \
+    "$tmpdir/out/wrong-source-cli.tar.zst" "$commit"
 
 FAKE_NEXTEST_VERSION_OVERRIDE=0.9.131 VERIFY_RUNTIME_OVERRIDE=1 \
   expect_failure "restore accepted the wrong nextest version" \
@@ -130,6 +140,8 @@ RUSTFLAGS_OVERRIDE='-D warnings' VERIFY_RUNTIME_OVERRIDE=1 \
 
 expect_failure "restore overwrote an existing destination" \
   run_artifact restore "$bundle" "$tmpdir/restored" "$commit"
+expect_failure "CLI restore overwrote an existing destination" \
+  run_artifact restore-cli "$cli_bundle" "$tmpdir/restored-cli" "$commit"
 
 MAX_BYTES_OVERRIDE=1 \
   expect_failure "restore accepted an over-budget bundle" \
@@ -142,6 +154,14 @@ tar --zstd -cf "$tmpdir/out/altered-manifest.tar.zst" -C "$tmpdir/tampered" \
   harn-tests.tar.zst harn manifest SHA256SUMS
 expect_failure "restore accepted an altered manifest" \
   run_artifact restore "$tmpdir/out/altered-manifest.tar.zst" "$tmpdir/altered-manifest" "$commit"
+
+mkdir "$tmpdir/tampered-cli"
+tar --zstd -xf "$cli_bundle" -C "$tmpdir/tampered-cli"
+printf 'corrupt\n' >> "$tmpdir/tampered-cli/harn"
+tar --zstd -cf "$tmpdir/out/corrupt-cli.tar.zst" -C "$tmpdir/tampered-cli" \
+  harn manifest CLI_SHA256SUMS
+expect_failure "CLI restore accepted corrupt harn bytes" \
+  run_artifact restore-cli "$tmpdir/out/corrupt-cli.tar.zst" "$tmpdir/corrupt-cli" "$commit"
 
 printf 'corrupt\n' >> "$tmpdir/tampered/harn-tests.tar.zst"
 tar --zstd -cf "$tmpdir/out/corrupt-member.tar.zst" -C "$tmpdir/tampered" \
@@ -162,6 +182,7 @@ mv "$tmpdir/work/rust-toolchain.toml.saved" "$tmpdir/work/rust-toolchain.toml"
 
 MAX_BYTES_OVERRIDE=1 \
   expect_failure "build accepted an over-budget bundle" \
-  run_artifact build "$tmpdir/out/build-over-budget.tar.zst" "$commit"
+  run_artifact build "$tmpdir/out/build-over-budget.tar.zst" \
+    "$tmpdir/out/build-over-budget-cli.tar.zst" "$commit"
 
 echo "behavior_artifact_test: ok"

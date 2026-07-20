@@ -466,6 +466,7 @@ jobs:
         run: >-
           ./scripts/ci/behavior_artifact.sh build
           "$RUNNER_TEMP/harn-behavior.tar.zst"
+          "$RUNNER_TEMP/harn-cli.tar.zst"
           "$GITHUB_SHA"
       # Blacksmith's sticky compiler cache makes a separate test consumer
       # useful there: the audit consumers can fan out while it restores warm
@@ -490,7 +491,17 @@ jobs:
         if: matrix.kind == 'behavior'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
+          name: harn-behavior.tar.zst
           path: ${{ runner.temp }}/harn-behavior.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload portable Harn CLI
+        if: matrix.kind == 'behavior'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}/harn-cli.tar.zst
           archive: false
           if-no-files-found: error
           retention-days: 1
@@ -632,17 +643,19 @@ jobs:
           # The changelog-history audit runs in audit-scripts; this lane only
           # needs the checked-out tree and the exact producer payload.
           fetch-depth: 1
-      - name: Download portable behavior payload
+      # This lane only executes Harn scripts. Download the small CLI artifact,
+      # not the multi-gigabyte nextest archive consumed by Rust test lanes.
+      - name: Download portable Harn CLI
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: harn-behavior.tar.zst
+          name: harn-cli.tar.zst
           path: ${{ runner.temp }}
           skip-decompress: true
-      - name: Verify portable behavior payload
+      - name: Verify portable Harn CLI
         run: >-
-          ./scripts/ci/behavior_artifact.sh restore
-          "$RUNNER_TEMP/harn-behavior.tar.zst"
-          "$RUNNER_TEMP/harn-behavior"
+          ./scripts/ci/behavior_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
       - uses: ./.github/actions/node-cache
@@ -683,17 +696,19 @@ jobs:
           # Full history + tags so the changelog retroactive-edit check can
           # traverse BASE..HEAD and inspect commit trailers.
           fetch-depth: 0
-      - name: Download portable behavior payload
+      # This lane only executes Harn scripts. Download the small CLI artifact,
+      # not the multi-gigabyte nextest archive consumed by Rust test lanes.
+      - name: Download portable Harn CLI
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: harn-behavior.tar.zst
+          name: harn-cli.tar.zst
           path: ${{ runner.temp }}
           skip-decompress: true
-      - name: Verify portable behavior payload
+      - name: Verify portable Harn CLI
         run: >-
-          ./scripts/ci/behavior_artifact.sh restore
-          "$RUNNER_TEMP/harn-behavior.tar.zst"
-          "$RUNNER_TEMP/harn-behavior"
+          ./scripts/ci/behavior_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
       # `make spec-lint` must run the repository's declared Redocly CLI, not
