@@ -25,7 +25,7 @@ const LOCK_FILE_VERSION: u32 = 4;
 const REGISTRY_INDEX_VERSION: u32 = 1;
 const PACKAGE_ARCHIVE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const PACKAGE_ARCHIVE_MAX_UNPACKED_BYTES: u64 = 64 * 1024 * 1024;
-const MANIFEST: &str = "harn.toml";
+const MANIFEST: &str = harn_modules::manifest_walk::MANIFEST_FILENAME;
 const LOCK_FILE: &str = "harn.lock";
 const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 
@@ -34,6 +34,7 @@ mod extensions;
 mod generations;
 mod lockfile;
 mod manifest;
+mod manifest_search;
 mod maturity;
 mod mutation;
 mod package_ops;
@@ -56,6 +57,7 @@ pub use lockfile::{
     remove_package, update_packages, PackageLockExport, PackageLockExports,
 };
 pub use manifest::*;
+pub(crate) use manifest_search::*;
 pub use maturity::{
     artifacts_check, artifacts_manifest, audit_packages, outdated_packages, ArtifactDriftReport,
     AuditCode, AuditFinding, AuditReport, AuditSeverity, OutdatedEntry, OutdatedReport,

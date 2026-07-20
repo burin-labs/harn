@@ -124,7 +124,7 @@ fn installed_package_dir(
     std::path::PathBuf,
 )> {
     let cwd = std::env::current_dir().ok()?;
-    let (_, project_dir) = crate::package::find_nearest_manifest(&cwd)?;
+    let project_dir = crate::package::find_nearest_manifest_dir(&cwd)?;
     let snapshot = harn_modules::package_snapshot::PackageSnapshot::acquire(&project_dir)
         .ok()
         .flatten()?;
@@ -185,7 +185,10 @@ fn discover_project_rules() -> Result<Vec<RuleSpec>, String> {
 /// rule directories are declared.
 pub(crate) fn project_rule_dirs() -> Result<Vec<PathBuf>, String> {
     let cwd = std::env::current_dir().map_err(|e| format!("current dir: {e}"))?;
-    let Some((manifest, manifest_dir)) = crate::package::find_nearest_manifest(&cwd) else {
+    let Some((manifest, manifest_dir)) = crate::package::load_nearest_manifest(&cwd)
+        .into_result()
+        .map_err(|error| error.to_string())?
+    else {
         return Ok(Vec::new());
     };
 

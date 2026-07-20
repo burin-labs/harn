@@ -951,17 +951,11 @@ fn exec_opts_command(label: &str, value: Option<&VmValue>) -> Result<Vec<String>
     Ok(command)
 }
 
-/// Find the project root by walking up from a base directory looking for harn.toml.
+/// Find the project root by walking up from a base directory looking for
+/// `harn.toml`, via the shared `harn-modules` walk so the in-VM resolver agrees
+/// with the CLI and LSP on where a project starts.
 pub fn find_project_root(base: &std::path::Path) -> Option<std::path::PathBuf> {
-    let mut dir = base.to_path_buf();
-    loop {
-        if dir.join("harn.toml").exists() {
-            return Some(dir);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    harn_modules::manifest_walk::find_project_root(base)
 }
 
 /// Register builtins that depend on source directory context.

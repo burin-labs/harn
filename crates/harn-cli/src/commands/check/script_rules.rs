@@ -67,7 +67,7 @@ mod imp {
     /// `[rules] ruleDirs`. Mirrors `lint::project_engine_rule_sources` (the
     /// declarative-rule discovery) but for imperative `.harn` modules.
     fn discover_rule_paths(file: &Path) -> Vec<PathBuf> {
-        let Some((manifest, dir)) = crate::package::find_nearest_manifest(file) else {
+        let Some((manifest, dir)) = crate::package::nearest_manifest_or_warn(file) else {
             return Vec::new();
         };
         let mut paths = Vec::new();

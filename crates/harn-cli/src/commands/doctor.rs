@@ -1704,17 +1704,10 @@ fn check_event_log() -> Vec<DoctorCheck> {
     }
 }
 
+/// Locate the `harn.toml` governing `start` via the shared project-root walk,
+/// so `harn doctor` reports on the same manifest the rest of the CLI loads.
 fn find_nearest_manifest(start: &Path) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
-    loop {
-        let manifest = dir.join("harn.toml");
-        if manifest.is_file() {
-            return Some(manifest);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    harn_modules::manifest_walk::find_nearest_manifest(start).map(|found| found.path)
 }
 
 fn default_secret_namespace() -> String {

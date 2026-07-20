@@ -400,23 +400,14 @@ fn project_rule_dirs(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Locate the nearest `harn.toml` via the shared project-root walk and parse
+/// just the `[rules]` view the LSP needs. Using the shared walk keeps the
+/// server's notion of the project root identical to the CLI's.
 fn find_nearest_manifest(start: &Path) -> Option<(MinimalManifest, PathBuf)> {
-    let mut dir = if start.is_file() {
-        start.parent()?.to_path_buf()
-    } else {
-        start.to_path_buf()
-    };
-    loop {
-        let path = dir.join("harn.toml");
-        if path.is_file() {
-            let source = std::fs::read_to_string(&path).ok()?;
-            let manifest = toml::from_str::<MinimalManifest>(&source).ok()?;
-            return Some((manifest, dir));
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    let found = harn_modules::manifest_walk::find_nearest_manifest(start)?;
+    let source = std::fs::read_to_string(&found.path).ok()?;
+    let manifest = toml::from_str::<MinimalManifest>(&source).ok()?;
+    Some((manifest, found.dir))
 }
 
 fn load_rule_dir(dir: &Path, specs: &mut Vec<RuleSpec>, errors: &mut Vec<RuleLoadError>) {

@@ -27,7 +27,6 @@ use self::store::{run_connect_api_key, run_connect_list, run_connect_revoke};
 #[cfg(test)]
 use self::{callback::*, github::*, linear::*, oauth::*, status::*};
 
-const MANIFEST: &str = "harn.toml";
 const DEFAULT_LINEAR_API_BASE_URL: &str = "https://api.linear.app/graphql";
 const OAUTH_CALLBACK_TIMEOUT: Duration = Duration::from_mins(5);
 const CONNECT_INDEX_NAMESPACE: &str = "connect";

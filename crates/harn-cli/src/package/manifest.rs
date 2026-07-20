@@ -1460,49 +1460,6 @@ pub(crate) fn absolutize_check_config_paths(
     config
 }
 
-/// Walk upward from `start` (or its parent if it's a file path that
-/// does not yet exist) looking for the nearest `harn.toml`. Stops at
-/// a `.git` boundary so a stray manifest in `$HOME` or a parent
-/// project is never silently picked up. Returns `(manifest, manifest_dir)`
-/// when found.
-pub(crate) fn find_nearest_manifest(start: &Path) -> Option<(Manifest, PathBuf)> {
-    const MAX_PARENT_DIRS: usize = 16;
-    let base = if start.is_absolute() {
-        start.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(start)
-    };
-    let mut cursor: Option<PathBuf> = if base.is_dir() {
-        Some(base)
-    } else {
-        base.parent().map(Path::to_path_buf)
-    };
-    let mut steps = 0usize;
-    while let Some(dir) = cursor {
-        if steps >= MAX_PARENT_DIRS {
-            break;
-        }
-        steps += 1;
-        let candidate = dir.join(MANIFEST);
-        if candidate.is_file() {
-            match read_manifest_from_path(&candidate) {
-                Ok(manifest) => return Some((manifest, dir)),
-                Err(error) => {
-                    eprintln!("warning: {error}");
-                    return None;
-                }
-            }
-        }
-        if dir.join(".git").exists() {
-            break;
-        }
-        cursor = dir.parent().map(Path::to_path_buf);
-    }
-    None
-}
-
 /// Load the `[check]` config from the nearest `harn.toml`.
 /// Walks up from the given file (or from cwd if no file is given),
 /// stopping at a `.git` boundary.
@@ -1510,7 +1467,7 @@ pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
     let anchor = harn_file
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    if let Some((manifest, dir)) = find_nearest_manifest(&anchor) {
+    if let Some((manifest, dir)) = nearest_manifest_or_warn(&anchor) {
         return absolutize_check_config_paths(manifest.check, &dir);
     }
     CheckConfig::default()
@@ -1523,7 +1480,7 @@ pub fn load_workspace_config(anchor: Option<&Path>) -> Option<(WorkspaceConfig, 
     let anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let (manifest, dir) = find_nearest_manifest(&anchor)?;
+    let (manifest, dir) = nearest_manifest_or_warn(&anchor)?;
     Some((manifest.workspace, dir))
 }
 
@@ -1531,7 +1488,7 @@ pub fn load_package_eval_pack_paths(anchor: Option<&Path>) -> Result<Vec<PathBuf
     let anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let Some((manifest, dir)) = find_nearest_manifest(&anchor) else {
+    let Some((manifest, dir)) = load_nearest_manifest(&anchor).into_result()? else {
         return Err(PackageError::Manifest(
             "no harn.toml found for package eval discovery".to_string(),
         ));

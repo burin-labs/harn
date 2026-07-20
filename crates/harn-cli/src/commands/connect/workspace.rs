@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use super::MANIFEST;
-
 pub(super) fn resolve_manifest_path(explicit: Option<&str>) -> Result<(PathBuf, PathBuf), String> {
     if let Some(path) = explicit {
         let path = PathBuf::from(path);
@@ -21,30 +19,11 @@ pub(super) fn resolve_manifest_path(explicit: Option<&str>) -> Result<(PathBuf, 
         })
 }
 
+/// Locate the nearest `harn.toml` via the shared project-root walk.
+/// Returns `(manifest_path, manifest_dir)`.
 pub(super) fn find_nearest_manifest(start: &Path) -> Option<(PathBuf, PathBuf)> {
-    const MAX_PARENT_DIRS: usize = 16;
-    let mut cursor = Some(start.to_path_buf());
-    let mut steps = 0usize;
-    while let Some(dir) = cursor {
-        if steps >= MAX_PARENT_DIRS {
-            break;
-        }
-        steps += 1;
-        let base = if dir.is_dir() {
-            dir
-        } else {
-            dir.parent()?.to_path_buf()
-        };
-        let candidate = base.join(MANIFEST);
-        if candidate.is_file() {
-            return Some((candidate, base));
-        }
-        if base.join(".git").exists() {
-            break;
-        }
-        cursor = base.parent().map(Path::to_path_buf);
-    }
-    None
+    let found = harn_modules::manifest_walk::find_nearest_manifest(start)?;
+    Some((found.path, found.dir))
 }
 
 pub(super) fn secret_namespace_for(manifest_dir: &Path) -> String {

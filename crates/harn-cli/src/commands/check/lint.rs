@@ -20,7 +20,7 @@ use harn_lint::{is_generated_path, path_is_stdlib_source};
 /// Loaded per file for simplicity; the dirs are small and the common path is a
 /// single manifest lookup. Hoisting to once-per-run is a future optimization.
 pub(crate) fn project_engine_rule_sources(path: &Path) -> Vec<String> {
-    let Some((manifest, dir)) = crate::package::find_nearest_manifest(path) else {
+    let Some((manifest, dir)) = crate::package::nearest_manifest_or_warn(path) else {
         return Vec::new();
     };
     let mut sources = Vec::new();
@@ -49,7 +49,7 @@ pub(crate) fn project_engine_rule_sources(path: &Path) -> Vec<String> {
 /// `[rules] nativeRuleDirs`. These paths are trusted by configuration: Harn
 /// never searches ambient directories or environment variables for native code.
 pub(crate) fn project_native_rule_paths(path: &Path) -> Vec<PathBuf> {
-    let Some((manifest, dir)) = crate::package::find_nearest_manifest(path) else {
+    let Some((manifest, dir)) = crate::package::nearest_manifest_or_warn(path) else {
         return Vec::new();
     };
     let mut paths = Vec::new();

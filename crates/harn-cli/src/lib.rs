@@ -2784,8 +2784,8 @@ pub(crate) fn default_harness_for_manifest_or_base_dir(
     source_path: &Path,
     base_dir: &Path,
 ) -> Result<harn_vm::Harness, String> {
-    let secret_namespace = package::find_nearest_manifest(source_path)
-        .map(|(_, manifest_dir)| connector_secret_namespace(&manifest_dir))
+    let secret_namespace = package::find_nearest_manifest_dir(source_path)
+        .map(|manifest_dir| connector_secret_namespace(&manifest_dir))
         .unwrap_or_else(|| connector_secret_namespace(base_dir));
     default_harness_for_secret_namespace(secret_namespace)
 }

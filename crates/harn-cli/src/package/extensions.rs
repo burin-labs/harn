@@ -12,7 +12,7 @@ pub(crate) fn is_empty_capabilities(file: &harn_vm::llm::capabilities::Capabilit
 }
 
 pub fn validate_runtime_manifest_extensions(anchor: &Path) -> Result<(), PackageError> {
-    let Some((manifest, _manifest_dir)) = find_nearest_manifest(anchor) else {
+    let Some((manifest, _manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(());
     };
     validate_handoff_routes(&manifest.handoff_routes, &manifest)?;
@@ -23,7 +23,7 @@ pub fn validate_runtime_manifest_extensions(anchor: &Path) -> Result<(), Package
 /// merge the root project's runtime extensions.
 pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, PackageError> {
     ensure_dependencies_materialized(anchor)?;
-    let Some((root_manifest, manifest_dir)) = find_nearest_manifest(anchor) else {
+    let Some((root_manifest, manifest_dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(RuntimeExtensions::default());
     };
 
@@ -1202,7 +1202,7 @@ pub fn load_personas_config(
     let anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let Some((manifest, dir)) = find_nearest_manifest(&anchor) else {
+    let Some((manifest, dir)) = nearest_manifest_or_warn(&anchor) else {
         return Ok(None);
     };
     let manifest_path = dir.join(MANIFEST);
