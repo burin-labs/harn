@@ -38,7 +38,12 @@ pub const HOST_LEASE_ROOT_ENV: &str = "HARN_HOST_LEASE_ROOT";
 const HARN_HOME_ENV: &str = "HARN_HOME";
 const LEASE_DB_FILE: &str = "host-leases.sqlite";
 const RUN_RECEIPTS_DIR: &str = "receipts";
-const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
+// Headroom for a briefly-contended registry writer to serialize rather than
+// erroring "database is locked". WAL keeps genuine contention short, so a
+// writer only waits this long under pathological parallel load (for example a
+// CI host running the whole test workspace at once); it is not a per-operation
+// latency floor.
+const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const REGISTRY_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const PROCESS_LIVENESS_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 const SCHEMA_VERSION: u32 = 3;
@@ -906,6 +911,19 @@ impl HostLeaseStore {
 
     fn connection(&self, busy_timeout: Duration) -> Result<Connection, HostLeaseError> {
         let conn = Connection::open(&self.db_path)?;
+        // Use WAL journal mode so readers and writers proceed concurrently
+        // instead of taking a whole-database exclusive lock. Under the default
+        // rollback journal a writer blocks every other connection, and on
+        // Windows under heavy parallel load a writer can exceed the busy timeout
+        // and surface "database is locked". WAL keeps a single writer (the
+        // Immediate-transaction serialization the lease registry relies on) but
+        // no longer blocks readers, so contention windows are far shorter.
+        // `synchronous = NORMAL` is the conventional durability setting under
+        // WAL. journal_mode is a persistent property of the database file, so
+        // once `initialize()` converts it this is a cheap no-op per connection.
+        // Executed via `execute_batch` because `PRAGMA journal_mode` returns the
+        // resulting mode as a row.
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         #[cfg(test)]
         if !busy_timeout.is_zero() {
             if let Some(handler) = self.busy_handler {

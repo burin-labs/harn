@@ -787,6 +787,22 @@ fn registry_write_contention_returns_a_typed_defer_receipt() {
     assert!(defer.active.is_none());
 }
 
+#[test]
+fn lease_database_uses_wal_journal_mode() {
+    // WAL is what lets concurrent lease acquires/releases proceed without a
+    // whole-database exclusive lock, so a briefly-contended writer no longer
+    // surfaces "database is locked" under heavy parallel load. Assert the
+    // persistent journal mode rather than the (platform-timing-dependent)
+    // contention behavior so this holds on every OS.
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let conn = store.connection(SQLITE_MUTATION_BUSY_TIMEOUT).unwrap();
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode.to_lowercase(), "wal");
+}
+
 static BUSY_HANDLER_BARRIERS: OnceLock<(Barrier, Barrier)> = OnceLock::new();
 static BUSY_HANDLER_OBSERVED: AtomicBool = AtomicBool::new(false);
 
