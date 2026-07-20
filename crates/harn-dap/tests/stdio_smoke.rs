@@ -10,7 +10,7 @@
 //! any of those regress, this test fails instead of the debugger silently
 //! rotting behind the (unpublished) VS Code extension.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::BufReader;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -43,24 +43,7 @@ struct DapClient {
 /// Returns `None` at EOF or on a malformed frame so the reader thread can
 /// exit cleanly (closing the channel).
 fn read_message(stdout: &mut BufReader<ChildStdout>) -> Option<Value> {
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        if stdout.read_line(&mut line).ok()? == 0 {
-            return None; // EOF
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some((name, val)) = trimmed.split_once(':') {
-            if name.eq_ignore_ascii_case("Content-Length") {
-                content_length = val.trim().parse().ok()?;
-            }
-        }
-    }
-    let mut body = vec![0u8; content_length];
-    stdout.read_exact(&mut body).ok()?;
+    let body = harn_dap::framing::read_frame(stdout).ok()??;
     serde_json::from_slice(&body).ok()
 }
 
@@ -97,9 +80,7 @@ impl DapClient {
             msg["arguments"] = arguments;
         }
         let body = serde_json::to_vec(&msg).unwrap();
-        write!(self.stdin, "Content-Length: {}\r\n\r\n", body.len()).unwrap();
-        self.stdin.write_all(&body).unwrap();
-        self.stdin.flush().unwrap();
+        harn_dap::framing::write_frame(&mut self.stdin, &body).unwrap();
     }
 
     /// Block for messages until `pred` matches, returning that message. Fails
