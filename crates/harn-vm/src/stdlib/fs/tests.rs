@@ -404,7 +404,13 @@ fn workspace_temp_dir_is_inside_sandbox_workspace() {
 
     let root = PathBuf::from(root);
     let child = PathBuf::from(child);
-    let workspace_root = workspace.path().canonicalize().unwrap();
+    // The temp-dir builtins now return de-verbatimed paths (a `\\?\` prefix
+    // breaks the documented `dir + "/child"` join on Windows), so normalize the
+    // expected workspace root the same way before comparing components —
+    // otherwise `\\?\C:\…` vs `C:\…` fails `starts_with` on Windows only.
+    let workspace_root = PathBuf::from(temp_dir_path_string(
+        &workspace.path().canonicalize().unwrap(),
+    ));
     assert!(root.starts_with(&workspace_root));
     assert!(root.ends_with(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME));
     assert!(root.is_dir());
@@ -1368,4 +1374,29 @@ fn unknown_prompt_asset_is_a_typed_not_found_result() {
     )
     .expect("unknown assets are returned as Result.Err");
     assert_eq!(field(result_error(&result), "kind").display(), "not_found");
+}
+
+#[test]
+fn strip_windows_verbatim_prefix_normalizes_verbatim_paths() {
+    // Drive/root verbatim path loses its `\\?\` prefix so a later `/`-join
+    // resolves as a separator instead of a literal filename character.
+    assert_eq!(
+        strip_windows_verbatim_prefix(r"\\?\C:\Users\runner\Temp\harn-abc"),
+        r"C:\Users\runner\Temp\harn-abc"
+    );
+    // UNC verbatim paths collapse back to the `\\server\share` form.
+    assert_eq!(
+        strip_windows_verbatim_prefix(r"\\?\UNC\server\share\dir"),
+        r"\\server\share\dir"
+    );
+    // Already-normal paths (every well-formed POSIX path, plain Windows paths)
+    // are returned unchanged.
+    assert_eq!(
+        strip_windows_verbatim_prefix("/tmp/harn-abc/child"),
+        "/tmp/harn-abc/child"
+    );
+    assert_eq!(
+        strip_windows_verbatim_prefix(r"C:\Temp\harn-abc"),
+        r"C:\Temp\harn-abc"
+    );
 }

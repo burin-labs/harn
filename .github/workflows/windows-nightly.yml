@@ -30,6 +30,18 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-D warnings"
+  # Give every test worker thread the same 16 MiB stack the production CLI
+  # runs on (`CLI_RUNTIME_STACK_SIZE` in `crates/harn-cli/src/lib.rs`). Tests
+  # that drive the Harn VM's recursive compile/evaluate/materialize paths need
+  # more than libtest's / tokio's default 2 MiB worker stack. That work is deep
+  # but bounded, and production already hosts it on a 16 MiB thread, so it never
+  # overflows in the field. Windows stack frames are larger than Unix, so the
+  # same VM walk that fits in 2 MiB on Linux/macOS overflows on Windows and
+  # aborts the whole test process (0xc00000fd). std::thread (and thus tokio's
+  # default-stack workers) honor RUST_MIN_STACK, so setting it here aligns the
+  # test stack with production and kills the overflow class across the whole
+  # workspace instead of padding one test module at a time.
+  RUST_MIN_STACK: "16777216"
 
 jobs:
   nextest:

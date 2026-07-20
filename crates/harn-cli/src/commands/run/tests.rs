@@ -494,12 +494,26 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
         policy.sandbox_profile,
         harn_vm::orchestration::SandboxProfile::Worktree
     );
+    // On Unix the grant is already absolute, so the write jail lists it
+    // verbatim. On Windows a POSIX-style `/tmp/...` grant is not absolute and
+    // is anchored to the current drive, so the stored root differs by design;
+    // the enforced/rendered form is asserted portably through the attestation
+    // below.
+    #[cfg(unix)]
     assert!(
         policy
             .workspace_roots
             .iter()
             .any(|root| root == &grant.display().to_string()),
         "the write grant should join the workspace write jail: {:?}",
+        policy.workspace_roots
+    );
+    // Portable invariant: the grant widens the jail with exactly one extra root
+    // beyond the base workspace root, on every platform.
+    assert_eq!(
+        policy.workspace_roots.len(),
+        2,
+        "the write grant should add exactly one workspace root: {:?}",
         policy.workspace_roots
     );
 
