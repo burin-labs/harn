@@ -7,7 +7,16 @@ use harn_vm::orchestration::RunExecutionRecord;
 use harn_vm::security::session_grants::SessionProfile;
 use harn_vm::value::VmError;
 
-pub const PROCESS_HELPER: &str = env!("CARGO_BIN_EXE_harn-test-echo-env");
+/// Path to the process helper binary.
+///
+/// Prefer the runtime `CARGO_BIN_EXE_*` / `NEXTEST_BIN_EXE_*` values that
+/// nextest rewrites when executing from an archive; fall back to the
+/// compile-time `env!` path for plain `cargo test`.
+pub fn process_helper() -> String {
+    std::env::var("CARGO_BIN_EXE_harn-test-echo-env")
+        .or_else(|_| std::env::var("NEXTEST_BIN_EXE_harn-test-echo-env"))
+        .unwrap_or_else(|_| env!("CARGO_BIN_EXE_harn-test-echo-env").to_string())
+}
 
 // Environment variables are process-global, while tests in one integration
 // binary run concurrently. Hold the lock for the guard's lifetime so a child
@@ -64,7 +73,7 @@ pub fn harn_quote(value: &str) -> String {
 
 pub fn helper_command(args: &[&str]) -> String {
     let mut values = Vec::with_capacity(args.len() + 1);
-    values.push(harn_quote(PROCESS_HELPER));
+    values.push(harn_quote(&process_helper()));
     values.extend(args.iter().map(|arg| harn_quote(arg)));
     format!("[{}]", values.join(", "))
 }

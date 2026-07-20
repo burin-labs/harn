@@ -51,7 +51,7 @@ fn exec_at_opts_honors_directory() {
 #[test]
 fn exec_uses_execution_context_cwd_and_env() {
     let directory = tempfile::tempdir().expect("temporary directory");
-    let command = support::harn_quote(support::PROCESS_HELPER);
+    let command = support::harn_quote(&support::process_helper());
     let source = format!(
         "\nconst env_result = exec({command}, \"--env\", \"HARN_PROCESS_TEST\")\nconst cwd_result = exec({command}, \"--cwd\")\nlog(env_result.stdout + \"|\" + cwd_result.stdout)\n"
     );
@@ -77,7 +77,7 @@ fn exec_at_resolves_relative_to_execution_cwd() {
     std::fs::create_dir(&nested).expect("nested directory");
     let source = format!(
         "\nconst result = exec_at(\"nested\", {}, \"--cwd\")\nlog(result.stdout)\n",
-        support::harn_quote(support::PROCESS_HELPER),
+        support::harn_quote(&support::process_helper()),
     );
     let context = RunExecutionRecord {
         cwd: Some(directory.path().to_string_lossy().into_owned()),
