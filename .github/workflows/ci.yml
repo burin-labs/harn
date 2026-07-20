@@ -1176,17 +1176,17 @@ jobs:
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
           "${HOME}/.local/bin/actionlint" -version
       - run: make lint-actions
-      # Online audits (`known-vulnerable-actions`) query GitHub Advisories.
-      # That API intermittently returns 503 and zizmor treats the transport
-      # failure as a fatal "no audit was performed", which false-fails every
-      # PR. Keep online checks on merge_group/push (the land gate) and run
-      # offline on pull_request so PR hygiene stays deterministic while the
-      # merge queue still blocks known-vulnerable action pins.
+      # Keep the required hygiene gate deterministic. Online audits such as
+      # `known-vulnerable-actions` depend on the GitHub Advisories API, whose
+      # transport failures are indistinguishable from audit failures to
+      # zizmor. The scheduled actions-vulnerability-audit workflow owns that
+      # availability-dependent security signal without blocking every PR or
+      # merge group when the external API returns 5xx.
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
         with:
           version: "1.26.1"
-          online-audits: ${{ github.event_name == 'merge_group' || github.event_name == 'push' }}
+          online-audits: false
           advanced-security: false
           annotations: true
           min-severity: medium
