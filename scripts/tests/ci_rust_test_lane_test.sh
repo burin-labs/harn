@@ -9,9 +9,13 @@ trap 'rm -rf "$tmpdir"' EXIT
 summary="$tmpdir/summary.md"
 log="$tmpdir/output.log"
 
-# Archive-only consumers do not compile; keep the short execution budget.
+# Archive-only consumers do not compile; the lane must stay bounded by an
+# execution-only timeout. The expected value is owned by
+# scripts/check_ci_cache_policy.harn (EXECUTION_ONLY_TIMEOUT_MINUTES), which the
+# check-ci-cache-policy gate enforces against ci.yml — only assert presence here
+# so the two guards cannot drift on the literal.
 rust_test_block="$(sed -n '/^  rust-test:/,/^  rust-security:/p' "$repo_root/.github/workflows/ci.yml")"
-grep -qx '    timeout-minutes: 20' <<<"$rust_test_block"
+grep -qE '^    timeout-minutes: [0-9]+$' <<<"$rust_test_block"
 
 GITHUB_STEP_SUMMARY="$summary" "$script" true >"$log" 2>&1
 grep -q 'Rust test resources before' "$summary"

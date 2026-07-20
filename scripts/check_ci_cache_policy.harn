@@ -38,6 +38,14 @@ const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
 
 const PERSISTENT_SCCACHE_SIZE = "15G"
 
+// Hang backstop for the archived-behavior consumer lanes. These lanes never
+// compile (the structural checks below pin that directly: archive-only test
+// command, no compiler caches, no compile fan-out), so the timeout only has to
+// cover test execution. Worst observed hosted-runner execution is ~17m on a
+// cold cache; ~2x headroom means only a genuine hang trips it. This constant is
+// the single owner of the value — ci.yml carries the same number.
+const EXECUTION_ONLY_TIMEOUT_MINUTES = "35"
+
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
 const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
@@ -563,8 +571,11 @@ fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string>
   if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
     errors = errors + ["ci.yml:${job_name} must match rust-builds RUSTFLAGS"]
   }
-  if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != "20" {
-    errors = errors + ["ci.yml:${job_name} must keep the execution-only 20-minute timeout"]
+  if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must keep the execution-only ${EXECUTION_ONLY_TIMEOUT_MINUTES}-minute timeout",
+    ]
   }
   if len(matching_steps(consumer, SCCACHE_ACTION)) > 0
     || len(

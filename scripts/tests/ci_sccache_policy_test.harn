@@ -58,7 +58,7 @@ fn workflow() {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
     needs: ["changes", "rust-builds"],
-    "timeout-minutes": 20,
+    "timeout-minutes": 35,
     steps: [
       {
         name: "Verify portable behavior payload",
@@ -177,7 +177,7 @@ pipeline test_rejects_recompiling_behavior_consumer(task) {
     },
   }
   const errors = ci_sccache_policy_errors(sccache_action(), invalid)
-  assert(errors.contains("ci.yml:rust-test must keep the execution-only 20-minute timeout"))
+  assert(errors.contains("ci.yml:rust-test must keep the execution-only 35-minute timeout"))
   assert(errors.contains("ci.yml:rust-test must not restore compiler caches or build-disk setup"))
   assert(errors.contains("ci.yml:rust-test must verify the archived Rust runtime contract"))
   assert(errors.contains("ci.yml:rust-test must execute only the remapped nextest archive"))
