@@ -1508,10 +1508,11 @@ impl HardenedGitEnv {
         })
     }
 
-    fn apply_to(&self, command: &mut process::Command, cwd: Option<&Path>) {
-        if let Some(dir) = cwd {
-            command.current_dir(dir);
-        }
+    fn apply_to(&self, command: &mut process::Command, cwd: Cwd<'_>) {
+        // Always set an explicit working directory: `Detached` resolves to the
+        // env's own `HOME` tempdir, so a remote-only git call never inherits —
+        // and never dies on — a deleted process CWD.
+        command.current_dir(cwd.resolve(self.home.as_path()));
         // Registry git URLs are untrusted input, so fetches must not inherit
         // user Git config, credential helpers, SSH agents, or askpass hooks.
         command.env_clear();
@@ -1530,10 +1531,7 @@ impl HardenedGitEnv {
     }
 }
 
-pub(crate) fn git_output<I, S>(
-    args: I,
-    cwd: Option<&Path>,
-) -> Result<std::process::Output, PackageError>
+pub(crate) fn git_output<I, S>(args: I, cwd: Cwd<'_>) -> Result<std::process::Output, PackageError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -1577,7 +1575,8 @@ pub(crate) fn resolve_git_commit(
         std::iter::once("ls-remote".to_string())
             .chain(std::iter::once(url.to_string()))
             .chain(refs),
-        None,
+        // Remote query — no working tree involved.
+        Cwd::Detached,
     )?;
     if !output.status.success() {
         return Err(format!(
@@ -1627,7 +1626,7 @@ pub(crate) fn clone_git_commit_to(
     fs::create_dir_all(dest)
         .map_err(|error| format!("failed to create {}: {error}", dest.display()))?;
 
-    let init = git_output(["init", "--quiet"], Some(dest))?;
+    let init = git_output(["init", "--quiet"], Cwd::In(dest))?;
     if !init.status.success() {
         return Err(format!(
             "failed to initialize git repo in {}: {}",
@@ -1637,7 +1636,7 @@ pub(crate) fn clone_git_commit_to(
         .into());
     }
 
-    let remote = git_output(["remote", "add", "origin", url], Some(dest))?;
+    let remote = git_output(["remote", "add", "origin", url], Cwd::In(dest))?;
     if !remote.status.success() {
         return Err(format!(
             "failed to add git remote {url}: {}",
@@ -1646,7 +1645,7 @@ pub(crate) fn clone_git_commit_to(
         .into());
     }
 
-    let fetch = git_output(["fetch", "--depth", "1", "origin", commit], Some(dest))?;
+    let fetch = git_output(["fetch", "--depth", "1", "origin", commit], Cwd::In(dest))?;
     if !fetch.status.success() {
         let fallback_dir = dest.with_extension("full-clone");
         if fallback_dir.exists() {
@@ -1655,7 +1654,8 @@ pub(crate) fn clone_git_commit_to(
         }
         let clone = git_output(
             ["clone", url, fallback_dir.to_string_lossy().as_ref()],
-            None,
+            // `fallback_dir` is an absolute destination — no working tree needed.
+            Cwd::Detached,
         )?;
         if !clone.status.success() {
             return Err(format!(
@@ -1664,7 +1664,7 @@ pub(crate) fn clone_git_commit_to(
             )
             .into());
         }
-        let checkout = git_output(["checkout", commit], Some(&fallback_dir))?;
+        let checkout = git_output(["checkout", commit], Cwd::In(&fallback_dir))?;
         if !checkout.status.success() {
             return Err(format!(
                 "failed to checkout {commit} in {}: {}",
@@ -1683,7 +1683,7 @@ pub(crate) fn clone_git_commit_to(
             )
         })?;
     } else {
-        let checkout = git_output(["checkout", "--detach", "FETCH_HEAD"], Some(dest))?;
+        let checkout = git_output(["checkout", "--detach", "FETCH_HEAD"], Cwd::In(dest))?;
         if !checkout.status.success() {
             return Err(format!(
                 "failed to checkout FETCH_HEAD in {}: {}",
@@ -2564,7 +2564,7 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
                 "http.https://attacker.example/.extraheader",
             )
             .env("GIT_CONFIG_VALUE_0", "Authorization: bearer secret");
-        git_env.apply_to(&mut command, None);
+        git_env.apply_to(&mut command, Cwd::Detached);
 
         let output = command.output().unwrap();
         assert!(

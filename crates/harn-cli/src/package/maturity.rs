@@ -656,7 +656,7 @@ fn resolve_remote_branch_head(entry: &LockEntry) -> Result<Option<String>, Packa
 }
 
 fn git_ls_remote_ref(url: &str, refname: &str) -> Result<Option<String>, PackageError> {
-    let output = git_output(["ls-remote", url, refname], None)?;
+    let output = git_output(["ls-remote", url, refname], Cwd::Detached)?;
     if !output.status.success() {
         return Err(format!(
             "git ls-remote {url} {refname} failed: {}",

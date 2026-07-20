@@ -31,6 +31,7 @@ const TRIGGER_RETRY_MAX_LIMIT: u32 = 100;
 pub(crate) mod errors;
 mod extensions;
 mod generations;
+mod git_cwd;
 mod lockfile;
 mod manifest;
 mod manifest_search;
@@ -48,6 +49,7 @@ pub use errors::{PackageError, PackageResult};
 
 pub use extensions::*;
 pub(crate) use generations::*;
+pub(crate) use git_cwd::Cwd;
 #[cfg(test)]
 pub use lockfile::add_package;
 pub(crate) use lockfile::*;
