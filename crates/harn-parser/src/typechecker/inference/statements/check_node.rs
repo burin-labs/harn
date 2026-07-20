@@ -725,10 +725,7 @@ impl TypeChecker {
             } => {
                 scope.enums.insert(
                     name.clone(),
-                    EnumDeclInfo {
-                        type_params: type_params.clone(),
-                        variants: variants.clone(),
-                    },
+                    EnumDeclInfo::local(type_params.clone(), variants.clone()),
                 );
                 self.check_enum_decl_variance(type_params, variants, name, span);
             }

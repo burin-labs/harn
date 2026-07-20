@@ -4,6 +4,7 @@ use harn_parser::{
     Attribute, AttributeArg, BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam,
     Variance, WhereClause,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::{Formatter, AUTO_SEPARATOR_WIDTH};
 
@@ -791,16 +792,17 @@ pub(crate) fn format_float(f: f64) -> String {
 /// multiple physical lines and the next token tails its last line.
 pub(crate) fn last_line_width(s: &str) -> usize {
     match s.rfind('\n') {
-        Some(idx) => s[idx + 1..].chars().count(),
-        None => s.chars().count(),
+        Some(idx) => text_width(&s[idx + 1..]),
+        None => text_width(s),
     }
 }
 
-/// Count the columns occupied by formatter text. Harn indentation and source
-/// identifiers are Unicode-safe at the character level; byte length is not a
-/// line-width measurement when a literal contains non-ASCII text.
+/// Count the terminal columns occupied by formatter text. A line budget is a
+/// column budget: bytes over-count non-ASCII, and `char`s under-count the
+/// double-width CJK and emoji a string literal may hold. For ASCII — every
+/// keyword, identifier, and indent the formatter emits — all three agree.
 pub(crate) fn text_width(s: &str) -> usize {
-    s.chars().count()
+    UnicodeWidthStr::width(s)
 }
 
 /// Return the column immediately after `s` when it starts at `column`.
@@ -862,4 +864,32 @@ pub(crate) fn is_simple_expr(node: &SNode) -> bool {
             | Node::ContinueStmt
             | Node::RequireStmt { .. }
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{column_after, last_line_width, text_width};
+
+    #[test]
+    fn text_width_counts_columns_not_chars_or_bytes() {
+        // ASCII is the case every existing fixture exercises: all three
+        // measurements agree, so formatted output is unchanged.
+        assert_eq!(text_width("let value = 1"), 13);
+        assert_eq!(text_width("let value = 1"), "let value = 1".chars().count());
+
+        // CJK is where they diverge: 5 chars, 15 bytes, 10 columns.
+        assert_eq!("日本語です".chars().count(), 5);
+        assert_eq!("日本語です".len(), 15);
+        assert_eq!(text_width("日本語です"), 10);
+
+        // Emoji likewise occupy two columns each.
+        assert_eq!("🚀🚀".chars().count(), 2);
+        assert_eq!(text_width("🚀🚀"), 4);
+    }
+
+    #[test]
+    fn column_tracking_uses_the_same_unit() {
+        assert_eq!(last_line_width("alpha\n日本語"), 6);
+        assert_eq!(column_after(4, "日本語"), 10);
+    }
 }

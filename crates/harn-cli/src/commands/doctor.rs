@@ -12,6 +12,7 @@ use harn_vm::secrets::{
 };
 use serde::Serialize;
 
+use crate::commands::hardware;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
@@ -827,9 +828,13 @@ async fn check_ollama() -> DoctorCheck {
 }
 
 fn check_hardware() -> (DoctorCheck, HardwareSnapshot) {
-    let ram_gb = detect_ram_gb();
-    let gpu = detect_gpu();
-    let free_disk_gb = detect_free_disk_gb();
+    let ram_gb = hardware::detect_ram()
+        .total_bytes
+        .map(hardware::bytes_to_gib_floor);
+    let gpu = hardware::detect_gpu().kind.label().to_string();
+    let free_disk_gb = hardware::detect_disk(&disk_probe_path())
+        .free_bytes
+        .map(hardware::bytes_to_gib_floor);
 
     let mut detail_parts = Vec::new();
     if let Some(ram) = ram_gb {
@@ -865,88 +870,18 @@ fn check_hardware() -> (DoctorCheck, HardwareSnapshot) {
     )
 }
 
-fn detect_ram_gb() -> Option<u64> {
-    #[cfg(target_os = "macos")]
-    {
-        let output = std::process::Command::new("sysctl")
-            .args(["-n", "hw.memsize"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let bytes: u64 = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .parse()
-            .ok()?;
-        Some(bytes / (1024 * 1024 * 1024))
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-        for line in text.lines() {
-            if let Some(rest) = line.strip_prefix("MemTotal:") {
-                let kb: u64 = rest
-                    .split_whitespace()
-                    .next()
-                    .and_then(|n| n.parse().ok())?;
-                return Some(kb / (1024 * 1024));
-            }
-        }
-        None
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        None
-    }
-}
-
-fn detect_gpu() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        let output = std::process::Command::new("sysctl")
-            .args(["-n", "hw.optional.arm64"])
-            .output();
-        if let Ok(out) = output {
-            if out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "1" {
-                return "Apple Silicon (MPS available)".to_string();
-            }
-        }
-        "CPU-only".to_string()
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if std::path::Path::new("/dev/nvidia0").exists() {
-            return "NVIDIA GPU detected".to_string();
-        }
-        "CPU-only".to_string()
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        "unknown".to_string()
-    }
-}
-
-fn detect_free_disk_gb() -> Option<u64> {
+/// Where `harn` writes run state — the volume whose free space the disk check
+/// reports. `metadata_dir` lives under the same volume as the rest of
+/// `~/.harn` / workspace state on every platform we ship today, so it's a fine
+/// proxy; fall back to the cwd before it has been created.
+fn disk_probe_path() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_default();
-    // metadata_dir lives under the same volume as the rest of `~/.harn` /
-    // workspace state on every platform we ship today, so it's a fine proxy
-    // for "where do we write run state".
     let metadata = runtime_paths::metadata_dir(&cwd);
-    let probe = if metadata.exists() { metadata } else { cwd };
-    let output = std::process::Command::new("df")
-        .args(["-Pk"])
-        .arg(&probe)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    if metadata.exists() {
+        metadata
+    } else {
+        cwd
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let line = text.lines().nth(1)?;
-    let cols: Vec<&str> = line.split_whitespace().collect();
-    let avail_kb: u64 = cols.get(3)?.parse().ok()?;
-    Some(avail_kb / (1024 * 1024))
 }
 
 /// Definition for a CLI tool we want `harn doctor` to inspect.

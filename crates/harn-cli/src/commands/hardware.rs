@@ -1,8 +1,16 @@
+//! Single owner for host hardware facts.
+//!
+//! Every command that reports RAM, GPU, or free disk reads them from here
+//! (`harn doctor`, `harn quickstart`, `harn local *`, `harn models recommend`)
+//! so the numbers they print cannot drift apart. RAM totals and disk space come
+//! from `sysinfo`; GPU still shells out, because `sysinfo` does not model
+//! accelerators.
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
-use sysinfo::{Disk, Disks};
+use sysinfo::{Disks, MemoryRefreshKind, RefreshKind, System};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -30,9 +38,19 @@ pub(crate) struct GpuSnapshot {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum GpuKind {
     None,
-    #[allow(dead_code)]
     Mps,
     Cuda,
+}
+
+impl GpuKind {
+    /// Human-readable label for report surfaces such as `harn doctor`.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            GpuKind::None => "CPU-only",
+            GpuKind::Mps => "Apple Silicon (MPS available)",
+            GpuKind::Cuda => "NVIDIA GPU detected",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -62,45 +80,55 @@ pub(crate) fn bytes_to_gib_f64(bytes: u64) -> f64 {
     bytes as f64 / GIB as f64
 }
 
-fn detect_ram() -> RamSnapshot {
-    detect_ram_platform().unwrap_or(RamSnapshot {
-        total_bytes: None,
-        available_bytes: None,
-    })
+pub(crate) fn detect_ram() -> RamSnapshot {
+    let system = System::new_with_specifics(
+        RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
+    );
+    RamSnapshot {
+        total_bytes: nonzero(system.total_memory()),
+        available_bytes: available_ram_bytes(&system),
+    }
 }
 
-#[cfg(target_os = "linux")]
-fn detect_ram_platform() -> Option<RamSnapshot> {
-    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-    parse_linux_meminfo(&text)
+/// Everywhere but macOS, `sysinfo` reports the platform's own "memory you
+/// could still allocate" figure — `MemAvailable` on Linux — which is exactly
+/// what callers want, so defer to it.
+#[cfg(not(target_os = "macos"))]
+fn available_ram_bytes(system: &System) -> Option<u64> {
+    nonzero(system.available_memory())
 }
 
+/// macOS is the deliberate exception: do NOT route this through
+/// `sysinfo::available_memory()`, and do not "finish the migration" by doing
+/// so later. That figure is `active + inactive + free` (see sysinfo
+/// `src/unix/apple/system.rs`), i.e. pages processes are *currently resident
+/// in* — a different quantity from "pages we could reclaim under memory
+/// pressure". Measured on a 48 GiB machine under load it read 32.5 GiB against
+/// the 16.5 GiB this reclaimable estimate reports: roughly 2x.
+///
+/// Two call sites treat this number as a headroom budget, and doubling it
+/// silently disables both:
+///   - `commands/local/launch.rs` refuses to launch a model when
+///     `estimate + safety_margin > available` — an inflated `available` turns
+///     that refusal into a green light on the exact machines the guard exists
+///     to protect.
+///   - `commands/models/recommend.rs` (`ram_bucket_from_available_bytes`)
+///     buckets on it, so an inflated value recommends a larger local model
+///     than actually fits.
+///
+/// So keep the conservative `vm_stat` reclaimable-pages estimate on macOS.
 #[cfg(target_os = "macos")]
-fn detect_ram_platform() -> Option<RamSnapshot> {
-    let total = command_stdout("sysctl", &["-n", "hw.memsize"])
-        .and_then(|text| text.trim().parse::<u64>().ok());
-    let available = command_stdout("vm_stat", &[]).and_then(|text| parse_macos_vm_stat(&text));
-    Some(RamSnapshot {
-        total_bytes: total,
-        available_bytes: available,
-    })
+fn available_ram_bytes(_system: &System) -> Option<u64> {
+    command_stdout("vm_stat", &[]).and_then(|text| parse_macos_vm_stat(&text))
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn detect_ram_platform() -> Option<RamSnapshot> {
-    None
-}
-
-fn detect_gpu() -> GpuSnapshot {
-    #[cfg(target_os = "macos")]
-    {
-        if Path::new("/System/Library/Frameworks/MetalPerformanceShaders.framework").exists() {
-            return GpuSnapshot {
-                kind: GpuKind::Mps,
-                total_memory_bytes: None,
-                free_memory_bytes: None,
-            };
-        }
+pub(crate) fn detect_gpu() -> GpuSnapshot {
+    if apple_silicon_detected() {
+        return GpuSnapshot {
+            kind: GpuKind::Mps,
+            total_memory_bytes: None,
+            free_memory_bytes: None,
+        };
     }
 
     if let Some((total, free)) = detect_nvidia_memory_bytes() {
@@ -111,6 +139,16 @@ fn detect_gpu() -> GpuSnapshot {
         };
     }
 
+    // A CUDA host without `nvidia-smi` on PATH still exposes the device node;
+    // we learn the kind but not the memory.
+    if Path::new("/dev/nvidia0").exists() {
+        return GpuSnapshot {
+            kind: GpuKind::Cuda,
+            total_memory_bytes: None,
+            free_memory_bytes: None,
+        };
+    }
+
     GpuSnapshot {
         kind: GpuKind::None,
         total_memory_bytes: None,
@@ -118,18 +156,49 @@ fn detect_gpu() -> GpuSnapshot {
     }
 }
 
+/// Free space on the volume backing `path`, as `sysinfo` reports it. The exact
+/// figure is the platform's "space you could realistically write" number, which
+/// differs from the raw free-block count the old `df`/`fs2` probes returned:
+/// on Linux/BSD it is `f_bavail` (excludes root-reserved blocks); on macOS it is
+/// `AvailableCapacityForImportantUsage`, which additionally counts purgeable
+/// space (caches, local snapshots) the OS reclaims under pressure — so on macOS
+/// this reads *higher* than `df`, matching Finder's "Available".
+pub(crate) fn detect_disk(path: &Path) -> DiskSnapshot {
+    DiskSnapshot {
+        path: path.to_path_buf(),
+        free_bytes: available_space_for(path),
+    }
+}
+
+fn available_space_for(path: &Path) -> Option<u64> {
+    let probe = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    Disks::new_with_refreshed_list()
+        .iter()
+        // Nested mounts all prefix-match `probe`; the deepest one owns it.
+        .filter(|disk| probe.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .map(|disk| disk.available_space())
+}
+
+#[cfg(target_os = "macos")]
+fn apple_silicon_detected() -> bool {
+    command_stdout("sysctl", &["-n", "hw.optional.arm64"]).is_some_and(|value| value.trim() == "1")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apple_silicon_detected() -> bool {
+    false
+}
+
 fn detect_nvidia_memory_bytes() -> Option<(u64, u64)> {
-    let output = Command::new("nvidia-smi")
-        .args([
+    let text = command_stdout(
+        "nvidia-smi",
+        &[
             "--query-gpu=memory.total,memory.free",
             "--format=csv,noheader,nounits",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    parse_nvidia_memory_csv(&String::from_utf8_lossy(&output.stdout))
+        ],
+    )?;
+    parse_nvidia_memory_csv(&text)
 }
 
 fn parse_nvidia_memory_csv(text: &str) -> Option<(u64, u64)> {
@@ -140,54 +209,12 @@ fn parse_nvidia_memory_csv(text: &str) -> Option<(u64, u64)> {
     Some((total_mib * 1024 * 1024, free_mib * 1024 * 1024))
 }
 
-fn detect_disk(path: &Path) -> DiskSnapshot {
-    DiskSnapshot {
-        path: path.to_path_buf(),
-        free_bytes: free_space(path),
-    }
-}
-
-/// Space available on the filesystem backing `path`.
-///
-/// Resolved by picking the mounted filesystem whose mount point is the longest
-/// prefix of `path`, which is the mount that actually serves it once nested
-/// mounts are in play.
-fn free_space(path: &Path) -> Option<u64> {
-    let path = path.canonicalize().ok()?;
-    Disks::new_with_refreshed_list()
-        .iter()
-        .filter(|disk| path.starts_with(disk.mount_point()))
-        .max_by_key(|disk| disk.mount_point().as_os_str().len())
-        .map(Disk::available_space)
-}
-
-#[cfg(target_os = "macos")]
 fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     output
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-#[cfg(any(target_os = "linux", test))]
-fn parse_linux_meminfo(text: &str) -> Option<RamSnapshot> {
-    let mut total_kib = None;
-    let mut available_kib = None;
-    for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        match parts.next() {
-            Some("MemTotal:") => total_kib = parts.next().and_then(|value| value.parse().ok()),
-            Some("MemAvailable:") => {
-                available_kib = parts.next().and_then(|value| value.parse().ok());
-            }
-            _ => {}
-        }
-    }
-    Some(RamSnapshot {
-        total_bytes: total_kib.map(|kib: u64| kib * 1024),
-        available_bytes: available_kib.map(|kib: u64| kib * 1024),
-    })
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -222,27 +249,16 @@ fn parse_page_count(value: &str) -> Option<u64> {
     value.trim().trim_end_matches('.').parse().ok()
 }
 
+fn nonzero(value: u64) -> Option<u64> {
+    (value > 0).then_some(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        bytes_to_gib_rounded, parse_linux_meminfo, parse_macos_vm_stat, parse_nvidia_memory_csv,
-        RamSnapshot, GIB,
+        bytes_to_gib_rounded, detect_disk, detect_ram, parse_macos_vm_stat,
+        parse_nvidia_memory_csv, GpuKind, GIB,
     };
-
-    #[test]
-    fn linux_meminfo_reports_total_and_available_bytes() {
-        let snapshot = parse_linux_meminfo(
-            "MemTotal:       16384000 kB\nMemFree:         1000000 kB\nMemAvailable:    8192000 kB\n",
-        )
-        .expect("meminfo parses");
-        assert_eq!(
-            snapshot,
-            RamSnapshot {
-                total_bytes: Some(16_384_000 * 1024),
-                available_bytes: Some(8_192_000 * 1024),
-            }
-        );
-    }
 
     #[test]
     fn macos_vm_stat_counts_reclaimable_pages() {
@@ -254,6 +270,8 @@ mod tests {
              Pages speculative:                        40.\n",
         )
         .expect("vm_stat parses");
+        // Deliberately excludes the 20 active pages: this is a headroom budget,
+        // not a "how much RAM exists" figure.
         assert_eq!(available, 80 * 16_384);
     }
 
@@ -268,6 +286,37 @@ mod tests {
         assert_eq!(
             parse_nvidia_memory_csv("32607, 20480\n24576, 12000\n"),
             Some((32607 * 1024 * 1024, 20480 * 1024 * 1024))
+        );
+    }
+
+    #[test]
+    fn gpu_kind_labels_match_the_documented_doctor_strings() {
+        assert_eq!(GpuKind::None.label(), "CPU-only");
+        assert_eq!(GpuKind::Mps.label(), "Apple Silicon (MPS available)");
+        assert_eq!(GpuKind::Cuda.label(), "NVIDIA GPU detected");
+    }
+
+    #[test]
+    fn ram_detection_reports_a_plausible_total() {
+        let ram = detect_ram();
+        let total = ram.total_bytes.expect("host reports total RAM");
+        assert!(total >= GIB, "total RAM {total} bytes looks too small");
+        if let Some(available) = ram.available_bytes {
+            assert!(
+                available <= total,
+                "available RAM {available} exceeds total {total}"
+            );
+        }
+    }
+
+    #[test]
+    fn disk_detection_resolves_the_volume_backing_a_path() {
+        let cwd = std::env::current_dir().expect("cwd readable");
+        let disk = detect_disk(&cwd);
+        assert_eq!(disk.path, cwd);
+        assert!(
+            disk.free_bytes.is_some(),
+            "cwd should resolve to a mounted volume"
         );
     }
 }

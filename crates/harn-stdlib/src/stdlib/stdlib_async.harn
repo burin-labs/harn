@@ -83,7 +83,9 @@ pub fn retry_predicate_with_backoff(max_attempts, base_ms, predicate) {
 // Calls the closure only if the circuit breaker is not open.
 // Records success/failure on the circuit breaker automatically.
 // Returns Err("circuit_open") if the circuit is open.
-// In half_open state, allows one call through as a probe.
+// In half_open state (after the cooldown elapses) calls are admitted again as
+// probes; unlike a reserving breaker this does not gate them to a single
+// concurrent probe.
 /**
  * circuit_call.
  *

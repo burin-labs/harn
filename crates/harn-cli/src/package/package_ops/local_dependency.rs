@@ -301,9 +301,14 @@ fn local_dependency_path(project_root: &Path, package_root: &Path) -> Result<Str
             "a project cannot install itself as a local dependency".to_string(),
         ));
     }
+    // The result is written into `harn.toml` as a dependency `path = "..."`.
+    // Manifests are portable artifacts, so the stored path always uses POSIX
+    // separators; otherwise a manifest authored on Windows would carry
+    // backslashes and fail to resolve when the project is checked out on a
+    // Unix host. Forward slashes resolve correctly on every platform.
     selected
         .to_str()
-        .map(str::to_string)
+        .map(|path| path.replace('\\', "/"))
         .ok_or_else(|| PackageError::Manifest("local package path is not UTF-8".to_string()))
 }
 

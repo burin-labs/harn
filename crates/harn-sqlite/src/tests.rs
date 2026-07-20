@@ -408,8 +408,13 @@ fn transient_initializer_rejects_file_backed_connection() {
 
     match error {
         InitializationError::FileBackedTransient { path } => assert_eq!(
-            path,
-            std::fs::canonicalize(database).expect("canonical database")
+            // The diagnostic carries the caller's raw path, which on Windows is
+            // the un-canonicalized `%TEMP%` short (8.3) form while the fixture
+            // holds the long verbatim `\\?\` form. Canonicalize both operands so
+            // the invariant ("the rejected database is this file") holds on every
+            // platform rather than tripping on Windows path aliasing.
+            std::fs::canonicalize(&path).expect("canonical rejected path"),
+            std::fs::canonicalize(&database).expect("canonical database")
         ),
         other => panic!("expected file-backed transient error, got {other:?}"),
     }

@@ -958,6 +958,37 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_with_long_scope_id_and_deep_root_writes_bodies() {
+        // Reproduces the ACP session-rollback redo capture that failed only on
+        // Windows: a deep workspace root plus a long, colon-bearing redo scope
+        // id (`{checkpoint_id}:redo:{snapshot_id}`) drives the derived storage
+        // path toward the legacy 260-char MAX_PATH. The atomic temp sibling used
+        // to be ~40 chars longer than its target, so the body write overflowed
+        // MAX_PATH and failed with os error 3. It must succeed on every OS.
+        let dir = TempDir::new().unwrap();
+        let mut root = dir.path().to_path_buf();
+        for segment in ["AppData", "Local", "Temp", "workspace-checkout", "packages"] {
+            root.push(segment);
+        }
+        stdfs::create_dir_all(&root).unwrap();
+        let file = root.join("note.txt");
+        stdfs::write(&file, b"before").unwrap();
+        let session = unique_session("redo-longpath");
+        let scope = format!("turn_{}:redo:turn-file", "0".repeat(32));
+        let _session_guard = enter_session(&session);
+
+        let result = snapshot(
+            &session,
+            &scope,
+            &[file.to_string_lossy().into_owned()],
+            Some(&root),
+        )
+        .expect("long-path redo snapshot must write its bodies");
+        assert_eq!(result.captured_paths.len(), 1);
+        assert_eq!(result.byte_count, 6);
+    }
+
+    #[test]
     fn restore_reinstates_deleted_file() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("doomed.txt");

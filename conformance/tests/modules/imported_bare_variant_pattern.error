@@ -1,0 +1,1 @@
+names a variant of imported enum `ImportedShape`; imported variants must be qualified as `ImportedShape.Circle(...)`

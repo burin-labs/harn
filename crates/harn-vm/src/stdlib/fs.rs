@@ -1,4 +1,5 @@
 use crate::value::VmDictExt;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1045,15 +1046,44 @@ fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     )))
 }
 
+/// Strip a Windows verbatim (`\\?\`) prefix from a path string so it parses
+/// with normal OS path rules: `\\?\UNC\server\share` → `\\server\share`,
+/// `\\?\C:\dir` → `C:\dir`. Inputs without the prefix (every well-formed Unix
+/// path, and non-canonicalized Windows paths) are returned unchanged.
+///
+/// The temp-directory builtins hand their result back to Harn-land, whose
+/// documented `mkdtemp*(...) + "/child"` pattern joins with a forward slash. In
+/// a verbatim path, `/` is a literal filename character rather than a
+/// separator, so a canonicalized workspace root (which carries the `\\?\`
+/// prefix on Windows) would turn `root + "/notes.txt"` into a single
+/// non-existent leaf and fail the write with ERROR_PATH_NOT_FOUND. A path
+/// handed into a `/`-joining language must be OS-normal, so normalize here at
+/// the boundary. Pure string logic so it is unit-testable on every platform.
+fn strip_windows_verbatim_prefix(text: &str) -> Cow<'_, str> {
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        Cow::Owned(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        Cow::Borrowed(rest)
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
+/// Render a temp-directory path for return to Harn-land, normalizing away any
+/// Windows verbatim prefix (see [`strip_windows_verbatim_prefix`]).
+fn temp_dir_path_string(path: &Path) -> String {
+    strip_windows_verbatim_prefix(&path.to_string_lossy()).into_owned()
+}
+
 #[harn_builtin(
     sig = "workspace_temp_dir() -> string",
     category = "fs",
     doc = "Return a sandbox-writable workspace-local temporary directory path, creating it lazily."
 )]
 fn workspace_temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        workspace_temp_root()?.to_string_lossy().into_owned(),
-    )))
+    Ok(VmValue::String(arcstr::ArcStr::from(temp_dir_path_string(
+        &workspace_temp_root()?,
+    ))))
 }
 
 #[harn_builtin(
@@ -1075,9 +1105,9 @@ fn mkdtemp_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             &error,
         )
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        path.to_string_lossy().into_owned(),
-    )))
+    Ok(VmValue::String(arcstr::ArcStr::from(temp_dir_path_string(
+        &path,
+    ))))
 }
 
 #[harn_builtin(
@@ -1103,9 +1133,9 @@ fn mkdtemp_in_workspace_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         )
     })?;
     queue_file_edited_for(&path, "mkdtemp_in_workspace", 0);
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        path.to_string_lossy().into_owned(),
-    )))
+    Ok(VmValue::String(arcstr::ArcStr::from(temp_dir_path_string(
+        &path,
+    ))))
 }
 
 fn workspace_temp_root() -> Result<PathBuf, VmError> {

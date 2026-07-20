@@ -521,7 +521,10 @@ jobs:
     needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 20
+    # Hang backstop, not a performance gate (the perf gate re-measures wall
+    # time separately). Worst observed hosted-runner run is ~17m on a cold
+    # cache; keep ~2x headroom so a slow runner day cancels nothing.
+    timeout-minutes: 35
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Match rust-builds RUSTFLAGS. Nested cargo fixtures (hostlib verdict tests)
@@ -568,6 +571,12 @@ jobs:
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$RUNNER_TEMP/harn-behavior"
           "$GITHUB_SHA"
+      # The compressed bundle and its extracted copy are each ~8.4 GiB, and
+      # nextest unpacks the inner archive into a third, uncompressed copy.
+      # Hosted runners do not reliably fit all three, so drop the bundle the
+      # moment the checksummed restore no longer needs it.
+      - name: Drop compressed payload after restore
+        run: rm -f "$RUNNER_TEMP/harn-behavior.tar.zst"
       # Landlock is the one environment-specific proof owned by rust-security;
       # every other default-suite test remains required here.
       - name: Run full environment-neutral test suite
@@ -586,7 +595,11 @@ jobs:
     needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Hang backstop, not a performance gate. Typical hosted-runner runs take
+    # ~5.5m, but a cold-cache run has been killed at exactly the old 10m cap
+    # (conclusion "cancelled", which reads as flake instead of failing loudly).
+    # Keep ~3x typical headroom so only a genuine hang trips it.
+    timeout-minutes: 20
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
@@ -617,6 +630,10 @@ jobs:
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$RUNNER_TEMP/harn-behavior"
           "$GITHUB_SHA"
+      # Same disk math as rust-test: bundle + extracted copy + nextest's
+      # uncompressed unpack do not reliably fit a hosted runner together.
+      - name: Drop compressed payload after restore
+        run: rm -f "$RUNNER_TEMP/harn-behavior.tar.zst"
       - name: Run Landlock escape proof on GitHub Ubuntu
         id: release-audit-rust-security
         run: >-
@@ -911,6 +928,14 @@ jobs:
           # coverage.
           HARN_SECRET_STORE_BACKEND: file
           HARN_LLM_CALLS_DISABLED: "1"
+          # Match the production CLI's 16 MiB runtime stack
+          # (`CLI_RUNTIME_STACK_SIZE`). Windows stack frames are larger than
+          # Unix, so tests that drive the Harn VM's deep-but-bounded recursive
+          # walk overflow libtest's / tokio's default 2 MiB worker stack and
+          # abort the test process (0xc00000fd). std::thread and tokio's
+          # default-stack workers honor RUST_MIN_STACK; see windows-nightly.yml
+          # for the full rationale.
+          RUST_MIN_STACK: "16777216"
           # Failure output stays suppressed on success; when a Windows
           # AppContainer test times out, these milestones show whether it
           # stalled in CreateProcess, pipe draining, or ACL cleanup.

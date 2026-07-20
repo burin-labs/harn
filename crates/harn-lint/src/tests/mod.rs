@@ -148,6 +148,7 @@ mod imports;
 mod invalid_binop;
 mod llm_rules;
 mod long_running;
+mod match_patterns;
 mod mcp_tools;
 mod mutability;
 mod naming_types;

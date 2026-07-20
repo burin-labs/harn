@@ -1,0 +1,9 @@
+/**
+ * Library half of the imported bare-variant match regression (harn#5268).
+ * Exports an enum whose variants the importing module tries to match in bare,
+ * unqualified form.
+ */
+pub enum ImportedShape {
+  Circle(int)
+  Square(int)
+}

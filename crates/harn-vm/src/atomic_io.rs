@@ -208,31 +208,130 @@ fn replace_temp_file(
     Ok(false)
 }
 
+/// Build a NUL-terminated UTF-16 buffer for `path`, prepending the `\\?\`
+/// extended-length prefix so `MoveFileExW` accepts paths longer than the legacy
+/// 260-char `MAX_PATH`.
+///
+/// std applies this automatically for its own file APIs (`File::open`,
+/// `create_dir_all`), but a hand-rolled `MoveFileExW` call does not, so any
+/// operand over the limit fails with `ERROR_PATH_NOT_FOUND`. Mirroring std's
+/// conservative rules, only drive/UNC-absolute paths already in backslash
+/// normal form are rewritten; a verbatim/device path, a relative path, or one
+/// containing `/`, `.`, or `..` (which a verbatim prefix would treat literally)
+/// is passed through unchanged.
+#[cfg(windows)]
+fn wide_maybe_verbatim(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+
+    fn nul_terminated(mut wide: Vec<u16>) -> Vec<u16> {
+        wide.push(0);
+        wide
+    }
+
+    let raw: Vec<u16> = path.as_os_str().encode_wide().collect();
+    const BACKSLASH: u16 = b'\\' as u16;
+    const SLASH: u16 = b'/' as u16;
+    const QUESTION: u16 = b'?' as u16;
+    const DOT: u16 = b'.' as u16;
+    // Already verbatim (`\\?\`) or a device path (`\\.\`): leave untouched.
+    if raw.starts_with(&[BACKSLASH, BACKSLASH, QUESTION, BACKSLASH])
+        || raw.starts_with(&[BACKSLASH, BACKSLASH, DOT, BACKSLASH])
+    {
+        return nul_terminated(raw);
+    }
+    // A forward slash is a literal filename character under a verbatim prefix,
+    // so such paths are ineligible.
+    if raw.contains(&SLASH) {
+        return nul_terminated(raw);
+    }
+    let mut components = path.components();
+    let is_supported_prefix = matches!(
+        components.next(),
+        Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::UNC(_, _))
+    );
+    if !is_supported_prefix || !matches!(components.next(), Some(Component::RootDir)) {
+        return nul_terminated(raw);
+    }
+    // `.`/`..` components would resolve literally under a verbatim prefix.
+    if components.any(|component| !matches!(component, Component::Normal(_))) {
+        return nul_terminated(raw);
+    }
+    // Re-read the prefix kind to choose the correct verbatim form.
+    let prefix_kind = path
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Prefix(prefix) => Some(prefix.kind()),
+            _ => None,
+        });
+    let prefixed = match prefix_kind {
+        // `C:\...` -> `\\?\C:\...`
+        Some(Prefix::Disk(_)) => {
+            let mut out: Vec<u16> = r"\\?\".encode_utf16().collect();
+            out.extend_from_slice(&raw);
+            out
+        }
+        // `\\server\share\...` -> `\\?\UNC\server\share\...` (drop one leading `\`)
+        Some(Prefix::UNC(_, _)) => {
+            let mut out: Vec<u16> = r"\\?\UNC".encode_utf16().collect();
+            out.extend_from_slice(&raw[1..]);
+            out
+        }
+        _ => raw,
+    };
+    nul_terminated(prefixed)
+}
+
 #[cfg(windows)]
 fn replace_temp_file(
     temp: &Path,
     destination: &Path,
     durability: AtomicWriteDurability,
 ) -> io::Result<bool> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
-    let mut temp_wide: Vec<u16> = temp.as_os_str().encode_wide().collect();
-    temp_wide.push(0);
-    let mut destination_wide: Vec<u16> = destination.as_os_str().encode_wide().collect();
-    destination_wide.push(0);
+    let temp_wide = wide_maybe_verbatim(temp);
+    let destination_wide = wide_maybe_verbatim(destination);
     let mut flags = MOVEFILE_REPLACE_EXISTING;
     if durability == AtomicWriteDurability::Flush {
         flags |= MOVEFILE_WRITE_THROUGH;
     }
-    // SAFETY: both paths are NUL-terminated UTF-16 buffers that remain alive
-    // for the duration of the call.
-    if unsafe { MoveFileExW(temp_wide.as_ptr(), destination_wide.as_ptr(), flags) } == 0 {
-        return Err(io::Error::last_os_error());
+
+    // Unlike POSIX `rename`, which atomically replaces a destination even while
+    // another process holds it open, `MoveFileExW` can transiently fail when a
+    // virus scanner, the Windows indexer, or a lagging handle close briefly
+    // holds the destination (ERROR_SHARING_VIOLATION) or its ACL check races
+    // (ERROR_ACCESS_DENIED). Those windows are short-lived, so retry with a
+    // small bounded backoff. This restores the rename tolerance the
+    // pre-consolidation snapshot writer had, WITHOUT reintroducing its
+    // destructive `remove_file(destination)` fallback (dropped deliberately so
+    // a crash mid-replace can never leave the destination missing).
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    const MAX_ATTEMPTS: u32 = 10;
+    let mut backoff = std::time::Duration::from_millis(1);
+    for attempt in 1..=MAX_ATTEMPTS {
+        // SAFETY: both paths are NUL-terminated UTF-16 buffers that remain
+        // alive for the duration of the call.
+        if unsafe { MoveFileExW(temp_wide.as_ptr(), destination_wide.as_ptr(), flags) } != 0 {
+            return Ok(durability == AtomicWriteDurability::Flush);
+        }
+        let error = io::Error::last_os_error();
+        let retryable = matches!(
+            error.raw_os_error(),
+            Some(ERROR_SHARING_VIOLATION | ERROR_ACCESS_DENIED)
+        );
+        if !retryable || attempt == MAX_ATTEMPTS {
+            return Err(error);
+        }
+        std::thread::sleep(backoff);
+        backoff = (backoff * 2).min(std::time::Duration::from_millis(50));
     }
-    Ok(durability == AtomicWriteDurability::Flush)
+    unreachable!("the loop returns on the final attempt")
 }
 
 fn sync_parent_dir(path: &Path) -> bool {
@@ -267,6 +366,25 @@ struct TempFile {
     file: Option<File>,
 }
 
+/// Longest prefix of the target file name kept in the temp sibling's name.
+const TEMP_STEM_MAX: usize = 16;
+
+/// Build the name of the temp file written next to `file_name` before the
+/// atomic replace.
+///
+/// The temp sibling must not be meaningfully longer than the target it
+/// replaces: embedding the full target name (which can be a 64-char content
+/// hash) plus a hyphenated UUID made the temp path ~40 chars longer than the
+/// target, so a target that fits under Windows' legacy 260-char `MAX_PATH`
+/// could still produce a temp path that overflows it, failing `CreateFile`
+/// with `ERROR_PATH_NOT_FOUND` (os error 3). A short recognizable prefix plus a
+/// compact (unhyphenated) UUID keeps the temp co-located and unique while
+/// bounding its length to a small constant regardless of the target name.
+fn temp_sibling_name(file_name: &str) -> String {
+    let stem: String = file_name.chars().take(TEMP_STEM_MAX).collect();
+    format!(".{stem}.{}.tmp", uuid::Uuid::now_v7().simple())
+}
+
 impl TempFile {
     fn create(target: &Path, mode: Option<u32>) -> io::Result<Self> {
         let parent = target.parent().ok_or_else(|| {
@@ -285,10 +403,11 @@ impl TempFile {
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("file");
+        let tmp_name = temp_sibling_name(file_name);
         let tmp_path = if parent.as_os_str().is_empty() {
-            PathBuf::from(format!(".{file_name}.{}.tmp", uuid::Uuid::now_v7()))
+            PathBuf::from(tmp_name)
         } else {
-            parent.join(format!(".{file_name}.{}.tmp", uuid::Uuid::now_v7()))
+            parent.join(tmp_name)
         };
         let file = OpenOptions::new()
             .create_new(true)
@@ -317,6 +436,34 @@ impl TempFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temp_sibling_name_is_length_bounded_regardless_of_target_name() {
+        // A very long target name (e.g. a 64-char content hash, or longer) must
+        // not inflate the temp sibling past a small constant, so a target that
+        // fits under Windows' MAX_PATH can never produce an overflowing temp.
+        let bound = 1 + TEMP_STEM_MAX + 1 + 32 + 4; // ".{<=16}.{32-hex uuid}.tmp"
+        for name in ["s", "state.json", &"a".repeat(64), &"z".repeat(4096)] {
+            let temp = temp_sibling_name(name);
+            assert!(
+                temp.len() <= bound,
+                "temp name {:?} (len {}) exceeds bound {bound}",
+                temp,
+                temp.len()
+            );
+            assert!(temp.starts_with('.') && temp.ends_with(".tmp"));
+        }
+    }
+
+    #[test]
+    fn atomic_write_succeeds_for_a_long_target_file_name() {
+        // The temp sibling used to embed the full (long) target name, so this
+        // write overflowed MAX_PATH on Windows. It must succeed on every OS.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a".repeat(200));
+        atomic_write(&path, b"payload").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"payload");
+    }
 
     #[test]
     fn writes_bytes_atomically() {

@@ -56,6 +56,12 @@ pub fn ambiguous_bare_variant_message(variant: &str, owners: &[String]) -> Strin
     )
 }
 
+pub fn imported_bare_variant_message(variant: &str, owner: &str) -> String {
+    format!(
+        "match pattern `{variant}(...)` names a variant of imported enum `{owner}`; imported variants must be qualified as `{owner}.{variant}(...)`",
+    )
+}
+
 /// Node slices whose declarations are predeclared in the module type scope.
 ///
 /// Top-level declarations and declarations directly inside pipeline bodies

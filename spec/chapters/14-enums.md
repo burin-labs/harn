@@ -49,6 +49,33 @@ error, not a warning. Add the missing arm or end with a wildcard
 partial; opt into exhaustiveness by ending the chain with
 `unreachable("…")`.
 
+#### Bare variant patterns
+
+A variant of an enum **declared in the same module** may also be matched in
+bare, unqualified form. The built-in `Result` variants `Ok` and `Err` are
+always available this way:
+
+```harn
+match s {
+  Circle(radius) -> { log("circle r=${radius}") }
+  Rectangle(w, h) -> { log("rect ${w}x${h}") }
+}
+```
+
+Two restrictions apply, both hard errors:
+
+- If more than one visible enum declares the same variant name, the bare form
+  is ambiguous and must be qualified.
+- A variant of an **imported** enum must always be qualified as
+  `EnumName.Variant(…)`. Bare variant patterns resolve against the compiling
+  module's own enum declarations only; folding an imported module's whole
+  variant surface into that namespace would capture ordinary identifiers, so
+  the qualified form is required instead.
+
+A call-shaped pattern whose head is not a visible variant is an ordinary
+expression-equality pattern: the expression is evaluated and compared to the
+match subject.
+
 ### Built-in result enum
 
 Harn provides a built-in generic `Result<T, E>` enum with two variants:

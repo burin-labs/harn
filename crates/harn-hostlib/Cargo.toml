@@ -210,6 +210,12 @@ tree-sitter-md = { version = "0.5", optional = true }
 tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=0.10.29", optional = true }
 arcstr = { version = "1", features = ["serde", "std"] }
 
+# `libc` supplies the POSIX `kill` probe and, on Apple targets, the
+# `proc_pidinfo`/`proc_bsdinfo` bindings behind the process-generation
+# identity in `process_liveness`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Per-OS secret-store backends. The file backend is always compiled in
 # (and is the universal fallback when `HARN_SECRET_STORE_BACKEND=file` is
 # set); the OS-native backends are gated behind target_os so headless

@@ -15,12 +15,37 @@ env:
   HARN_LLM_CALLS_DISABLED: "1"
   RUSTFLAGS: "-D warnings"
 
+  # --- Flake-rerun budget knobs ---------------------------------------------
+  # The rerun is deadline-driven, not fixed-count. It targets CEILING
+  # iterations but stops starting new ones once the remaining wall-clock
+  # budget cannot fit another, so it always finishes with an honest verdict
+  # instead of being silently cancelled at `timeout-minutes` (which reports
+  # "cancelled", not "failed", and produced zero flake signal for days).
+  #
+  # FLAKE_ITERATIONS_CEILING: the ideal iteration count (best-case coverage).
+  # FLAKE_ITERATIONS_FLOOR:   the minimum for a credible verdict; if the
+  #                           budget cannot cover this many, the job FAILS
+  #                           loudly rather than passing on thin coverage.
+  # FLAKE_JOB_BUDGET_MINUTES: wall-clock budget measured from job start
+  #                           (covers detect + build + reruns). Kept a
+  #                           comfortable margin below `timeout-minutes` so a
+  #                           trailing iteration and the post steps still land
+  #                           under the hard backstop.
+  FLAKE_ITERATIONS_CEILING: "50"
+  FLAKE_ITERATIONS_FLOOR: "10"
+  FLAKE_JOB_BUDGET_MINUTES: "160"
+
 jobs:
   flake-rerun:
-    name: 50x flake rerun (touched tests)
+    name: Budget-aware flake rerun (touched tests)
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
+      # Anchor the wall-clock budget as early as possible so it covers every
+      # subsequent step (detect + build + reruns), not just the rerun loop.
+      - name: Record budget start
+        run: echo "FLAKE_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
@@ -96,7 +121,7 @@ jobs:
         if: steps.touched.outputs.has_tests == 'true'
         run: cargo test --no-run --workspace
 
-      - name: 50x flake rerun
+      - name: Budget-aware flake rerun
         if: steps.touched.outputs.has_tests == 'true'
         env:
           NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
@@ -108,12 +133,105 @@ jobs:
           # binaries". `binary(...)` filters happened to work because
           # they scan built artifacts in target/debug/deps directly, but
           # package() filters need cargo metadata.
-          for i in $(seq 50); do
-            printf -- '--- Iteration %d/50 ---\n' "$i"
-            cargo nextest run \
+          #
+          # This loop is deadline-driven, not fixed-count. High merge velocity
+          # can map the 24h diff onto package() filters covering much of the
+          # workspace, and hosted runners are slower than the previous class,
+          # so a fixed 50x loop can overrun `timeout-minutes` — which cancels
+          # the job (reported "cancelled", not "failed") and yields ZERO flake
+          # signal while looking non-red. Instead we run up to CEILING
+          # iterations, stop early once the remaining budget cannot fit
+          # another (conservatively estimated from the slowest observed
+          # iteration), and always emit an honest verdict.
+          set -uo pipefail
+
+          ceiling="$FLAKE_ITERATIONS_CEILING"
+          floor="$FLAKE_ITERATIONS_FLOOR"
+          budget_secs=$(( FLAKE_JOB_BUDGET_MINUTES * 60 ))
+          deadline=$(( FLAKE_JOB_START_EPOCH + budget_secs ))
+
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          {
+            echo "## Flake detection"
+            echo ""
+            echo "- Filter: \`${NEXTEST_FILTER}\`"
+            echo "- Budget: ${FLAKE_JOB_BUDGET_MINUTES} min wall-clock from job start"
+            echo "- Iteration target: ${floor} (floor) / ${ceiling} (ceiling)"
+          } >> "$summary"
+
+          completed=0
+          max_iter_secs=0
+
+          while :; do
+            now=$(date +%s)
+            remaining=$(( deadline - now ))
+
+            # Budget gate. Skipped for the first iteration (no measurement yet);
+            # a single iteration always fits since the build already succeeded.
+            if (( completed > 0 )); then
+              est=$max_iter_secs
+              if (( est < 1 )); then est=1; fi
+
+              if (( completed < floor )); then
+                # Still below the floor: fail loudly the moment it is provable
+                # the remaining budget cannot cover the rest of the floor.
+                needed=$(( (floor - completed) * est ))
+                if (( remaining < needed )); then
+                  echo "::error::Flake detection cannot reach its ${floor}-iteration floor within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (completed ${completed}; slowest iteration ${est}s; ${remaining}s left). The touched-test surface is too large for this budget — shard the nextest filter or raise FLAKE_JOB_BUDGET_MINUTES (and timeout-minutes) for this run."
+                  {
+                    echo "- Iterations completed: ${completed}/${ceiling}"
+                    echo "- Slowest iteration: ${max_iter_secs}s"
+                    echo "- Result: FAILED — floor of ${floor} unreachable within budget."
+                  } >> "$summary"
+                  exit 1
+                fi
+              else
+                # Floor met: keep pursuing the ceiling only while a full
+                # iteration still fits. Otherwise stop with degraded coverage.
+                if (( remaining < est )); then
+                  echo "::warning::Flake detection stopped at ${completed}/${ceiling} iterations to stay within the ${FLAKE_JOB_BUDGET_MINUTES}-minute budget (slowest iteration ${est}s; ${remaining}s left). Coverage is degraded but above the ${floor}-iteration floor; consider sharding the touched-test surface or raising the budget."
+                  break
+                fi
+              fi
+            fi
+
+            if (( completed >= ceiling )); then
+              break
+            fi
+
+            iter=$(( completed + 1 ))
+            printf -- '--- Iteration %d/%d (%ds budget left) ---\n' "$iter" "$ceiling" "$remaining"
+            start=$(date +%s)
+            if ! cargo nextest run \
               --workspace \
               --profile flake-detection \
               --test-threads 8 \
-              -E "$NEXTEST_FILTER" \
-              || { echo "::error::Flake detected on iteration $i"; exit 1; }
+              -E "$NEXTEST_FILTER"; then
+              echo "::error::Flake detected on iteration $iter"
+              {
+                echo "- Iterations completed: ${completed}/${ceiling}"
+                echo "- Result: FAILED — flake detected on iteration ${iter}."
+              } >> "$summary"
+              exit 1
+            fi
+            end=$(date +%s)
+            dur=$(( end - start ))
+            completed=$(( completed + 1 ))
+            if (( dur > max_iter_secs )); then
+              max_iter_secs=$dur
+            fi
+            printf -- 'Iteration %d completed in %ds\n' "$iter" "$dur"
           done
+
+          {
+            echo "- Iterations completed: ${completed}/${ceiling}"
+            echo "- Slowest iteration: ${max_iter_secs}s"
+          } >> "$summary"
+
+          if (( completed >= ceiling )); then
+            echo "Flake detection completed all ${ceiling} iterations with no flake."
+            echo "- Result: PASSED — ${completed}/${ceiling} iterations, no flake detected." >> "$summary"
+          else
+            echo "Flake detection passed with degraded coverage: ${completed}/${ceiling} iterations within budget."
+            echo "- Result: PASSED (degraded) — ${completed}/${ceiling} iterations within budget; floor of ${floor} met." >> "$summary"
+          fi

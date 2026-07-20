@@ -3057,6 +3057,7 @@ dependencies = [
  "toml",
  "tower 0.5.3",
  "tracing",
+ "unicode-width",
  "url",
  "uuid",
  "wat",
@@ -3124,6 +3125,7 @@ version = "0.10.29"
 dependencies = [
  "harn-lexer",
  "harn-parser",
+ "unicode-width",
 ]
 
 [[package]]
@@ -3168,6 +3170,7 @@ dependencies = [
  "hex",
  "ignore",
  "image",
+ "libc",
  "notify",
  "regex",
  "regex-automata",
@@ -3559,6 +3562,7 @@ dependencies = [
  "sha2 0.11.0",
  "sha3",
  "shell-words",
+ "similar",
  "sqlx-core",
  "sqlx-postgres",
  "stacker",
@@ -3581,6 +3585,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-normalization",
  "unicode-segmentation",
+ "unicode-width",
  "url",
  "uuid",
  "wait-timeout",
@@ -7340,6 +7345,15 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "similar"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6505efef05804732ed8a3f2d4f279429eb485bd69d5b0cc6b19cc02005cda16"
+dependencies = [
+ "bstr",
+]
 
 [[package]]
 name = "simple_asn1"

@@ -128,8 +128,7 @@ fn hash_str(value: &str) -> u64 {
 }
 
 fn hash_json(value: &serde_json::Value) -> u64 {
-    let encoded = serde_json::to_string(value).unwrap_or_default();
-    hash_str(&encoded)
+    hash_str(&crate::canonical_json::to_string(value))
 }
 
 fn env_flag_enabled(name: &str) -> bool {

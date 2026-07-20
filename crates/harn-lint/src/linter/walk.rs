@@ -954,7 +954,7 @@ impl<'a> Linter<'a> {
                             break;
                         }
                     }
-                    self.lint_node(&arm.pattern);
+                    self.lint_match_pattern(&arm.pattern);
                     if let Some(ref guard) = arm.guard {
                         self.lint_node(guard);
                     }
@@ -1359,6 +1359,59 @@ impl<'a> Linter<'a> {
                     self.lint_node(alt);
                 }
             }
+        }
+    }
+
+    /// Lint a match-arm pattern.
+    ///
+    /// Patterns are parsed as ordinary expressions, so a call-shaped pattern
+    /// such as `Circle(radius)` arrives as a `FunctionCall`. It is not a call:
+    /// the head names an enum variant and the arguments bind payloads. Walking
+    /// it as an expression would record a call site and report the variant as
+    /// an undefined function.
+    ///
+    /// Deciding whether a call-shaped head is a variant needs the enum catalog
+    /// plus the imported-enum surface, which only the typechecker has. It
+    /// already makes that call in `check_match_pattern`, reporting an
+    /// unresolvable head as `HARN-NAM-002` and a mis-scoped variant as
+    /// `HARN-MAT-003` — both hard errors. So the lint declines to guess here
+    /// rather than keeping a second, weaker copy of that judgement.
+    ///
+    /// Sub-patterns are still walked so name references stay recorded and the
+    /// unused-binding and unused-import rules keep working.
+    fn lint_match_pattern(&mut self, pattern: &SNode) {
+        match &pattern.node {
+            Node::FunctionCall { name, args, .. } => {
+                // The head is still a *reference*: when the pattern turns out
+                // to be an expression-equality pattern it names a real
+                // function, and the unused-function and unused-import rules
+                // must keep seeing it. Only the call-site record — the input
+                // to the undefined-function rule — is withheld.
+                self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
+                for arg in args {
+                    self.lint_match_pattern(arg);
+                }
+            }
+            Node::OrPattern(alternatives) => {
+                for alternative in alternatives {
+                    self.lint_match_pattern(alternative);
+                }
+            }
+            Node::ListLiteral(elements) => {
+                for element in elements {
+                    self.lint_match_pattern(element);
+                }
+            }
+            Node::DictLiteral(entries) => {
+                for entry in entries {
+                    // Keys stay ordinary expressions; only values hold
+                    // sub-patterns.
+                    self.lint_node(&entry.key);
+                    self.lint_match_pattern(&entry.value);
+                }
+            }
+            _ => self.lint_node(pattern),
         }
     }
 

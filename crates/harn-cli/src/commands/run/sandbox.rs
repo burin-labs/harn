@@ -358,25 +358,45 @@ mod tests {
 
     #[test]
     fn single_write_root_names_the_delta() {
-        let options =
-            RunSandboxOptions::default().with_write_roots(vec![PathBuf::from("/out/coordination")]);
+        let root = PathBuf::from("/out/coordination");
+        let options = RunSandboxOptions::default().with_write_roots(vec![root.clone()]);
+        // The disclosed path is the enforced jail root, which is platform
+        // specific (a verbatim `\\?\` path on Windows). Derive the expectation
+        // from the same renderer the production path uses so the assertion pins
+        // the singular wording and composition without hard-coding a Unix-only
+        // rendering.
+        let expected = format!(
+            "sandbox active; extra write root: {}\n",
+            rendered_jail_root(&root).display()
+        );
         assert_eq!(
             sandbox_grant_disclosure(&options).as_deref(),
-            Some("sandbox active; extra write root: /out/coordination\n"),
+            Some(expected.as_str()),
         );
     }
 
     #[test]
     fn multiple_grants_join_on_one_line() {
+        let write_a = PathBuf::from("/out/a");
+        let write_b = PathBuf::from("/out/b");
+        let read_shared = PathBuf::from("/ref/shared");
         let options = RunSandboxOptions::sandboxed(true)
-            .with_write_roots(vec![PathBuf::from("/out/a"), PathBuf::from("/out/b")])
-            .with_read_only_roots(vec![PathBuf::from("/ref/shared")]);
+            .with_write_roots(vec![write_a.clone(), write_b.clone()])
+            .with_read_only_roots(vec![read_shared.clone()]);
+        // Pin the plural wording, the delta ordering (write roots, then
+        // read-only, then network), and the `, ` / `; ` joins while deriving
+        // each enforced jail path from the shared renderer so the test holds on
+        // Windows, where jail roots render as verbatim paths.
+        let expected = format!(
+            "sandbox active; extra write roots: {}, {}; \
+             extra read-only root: {}; subprocess network allowed\n",
+            rendered_jail_root(&write_a).display(),
+            rendered_jail_root(&write_b).display(),
+            rendered_jail_root(&read_shared).display(),
+        );
         assert_eq!(
             sandbox_grant_disclosure(&options).as_deref(),
-            Some(
-                "sandbox active; extra write roots: /out/a, /out/b; \
-                 extra read-only root: /ref/shared; subprocess network allowed\n"
-            ),
+            Some(expected.as_str()),
         );
     }
 

@@ -1,6 +1,5 @@
 //! Orchestration integration tests for policy/workflow/mutation-session.
 
-use super::records::{myers_diff, DiffOp};
 use super::*;
 use futures::StreamExt;
 use std::collections::BTreeMap;
@@ -1193,12 +1192,8 @@ fn render_unified_diff_marks_removed_and_added_lines() {
 #[test]
 fn render_unified_diff_identical_inputs() {
     let text = "line1\nline2\nline3";
-    let diff = render_unified_diff(None, text, text);
-    assert!(diff.contains("--- a/artifact"));
-    let body: Vec<&str> = diff.lines().skip(2).collect();
-    assert!(!body.iter().any(|l| l.starts_with('-')));
-    assert!(!body.iter().any(|l| l.starts_with('+')));
-    assert_eq!(body.len(), 3);
+    // No hunks means no diff at all — not a bare header over every line.
+    assert_eq!(render_unified_diff(None, text, text), "");
 }
 
 #[test]
@@ -1221,11 +1216,7 @@ fn render_unified_diff_empty_after() {
 
 #[test]
 fn render_unified_diff_both_empty() {
-    let diff = render_unified_diff(None, "", "");
-    assert!(diff.contains("--- a/artifact"));
-    assert!(diff.contains("+++ b/artifact"));
-    let body: String = diff.lines().skip(2).collect();
-    assert!(body.is_empty());
+    assert_eq!(render_unified_diff(None, "", ""), "");
 }
 
 #[test]
@@ -1281,33 +1272,37 @@ fn render_unified_diff_large_similar() {
     assert!(diff.contains("+NEW LINE 500"));
     assert!(diff.contains(" line 499"));
     assert!(diff.contains(" line 501"));
+    // A hunk header locates the change, and context stays bounded rather
+    // than reprinting all 1000 unchanged lines.
+    assert!(diff.contains("@@ -"));
+    assert!(!diff.contains(" line 100\n"));
+    assert!(diff.lines().count() < 20);
 }
 
 #[test]
-fn myers_diff_empty_sequences() {
-    let ops = myers_diff(&[], &[]);
-    assert!(ops.is_empty());
+fn render_unified_diff_insert_only_has_no_removals() {
+    let diff = render_unified_diff(None, "", "a\nb");
+    let body: Vec<&str> = diff.lines().skip(3).collect();
+    assert_eq!(body.iter().filter(|l| l.starts_with('+')).count(), 2);
+    assert!(!body.iter().any(|l| l.starts_with('-')));
 }
 
 #[test]
-fn myers_diff_insert_only() {
-    let ops = myers_diff(&[], &["a", "b"]);
-    assert_eq!(ops.len(), 2);
-    assert!(ops.iter().all(|(op, _)| *op == DiffOp::Insert));
+fn render_unified_diff_delete_only_has_no_insertions() {
+    let diff = render_unified_diff(None, "a\nb", "");
+    let body: Vec<&str> = diff.lines().skip(3).collect();
+    assert_eq!(body.iter().filter(|l| l.starts_with('-')).count(), 2);
+    assert!(!body.iter().any(|l| l.starts_with('+')));
 }
 
 #[test]
-fn myers_diff_delete_only() {
-    let ops = myers_diff(&["a", "b"], &[]);
-    assert_eq!(ops.len(), 2);
-    assert!(ops.iter().all(|(op, _)| *op == DiffOp::Delete));
-}
-
-#[test]
-fn myers_diff_equal() {
-    let ops = myers_diff(&["a", "b", "c"], &["a", "b", "c"]);
-    assert_eq!(ops.len(), 3);
-    assert!(ops.iter().all(|(op, _)| *op == DiffOp::Equal));
+fn render_unified_diff_trailing_newline_change_is_visible() {
+    // "a\nb" and "a\nb\n" differ only in the final byte; the diff must
+    // not collapse them into a no-op.
+    let diff = render_unified_diff(None, "a\nb", "a\nb\n");
+    assert!(diff.contains("\\ No newline at end of file"));
+    assert!(diff.contains("-b"));
+    assert!(diff.contains("+b"));
 }
 
 #[test]

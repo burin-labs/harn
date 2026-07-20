@@ -8,6 +8,7 @@ use crate::value::{string_char_count, values_equal, VmError, VmValue};
 use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::stdlib::template::{
     render_asset_result, render_asset_with_provenance_result, render_template_result,
@@ -812,7 +813,9 @@ fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
 /// Greedy word-wrap that breaks on ASCII whitespace and preserves the
 /// original line structure (existing newlines split paragraphs). Words
 /// longer than `width` are emitted on their own line rather than split
-/// mid-token.
+/// mid-token. `width` is a terminal-column budget, so a word's cost is its
+/// display width — CJK and emoji are two columns each, combining marks zero —
+/// not its grapheme count.
 fn word_wrap_str(text: &str, width: usize) -> String {
     let mut out = String::with_capacity(text.len());
     let mut first_line = true;
@@ -824,7 +827,7 @@ fn word_wrap_str(text: &str, width: usize) -> String {
         let mut col = 0usize;
         let mut first_word = true;
         for word in line.split_whitespace() {
-            let word_len = UnicodeSegmentation::graphemes(word, true).count();
+            let word_len = UnicodeWidthStr::width(word);
             if first_word {
                 out.push_str(word);
                 col = word_len;
@@ -884,6 +887,39 @@ mod tests {
     fn word_wrap_long_word_keeps_word_intact() {
         let result = word_wrap_str("aa supercalifragilistic bb", 5);
         assert_eq!(result, "aa\nsupercalifragilistic\nbb");
+    }
+
+    #[test]
+    fn word_wrap_measures_cjk_as_double_width() {
+        // Each glyph is one grapheme but two columns. Under a budget of 5,
+        // exactly two glyphs fit per line (2 + 1 + 2 = 5); a grapheme count
+        // would have packed three (3 <= 5) and overflowed to six columns.
+        let result = word_wrap_str("日 本 語 で", 5);
+        assert_eq!(result, "日 本\n語 で");
+    }
+
+    #[test]
+    fn word_wrap_measures_emoji_as_double_width() {
+        let result = word_wrap_str("🚀 🚀 🚀", 5);
+        assert_eq!(result, "🚀 🚀\n🚀");
+    }
+
+    #[test]
+    fn word_wrap_combining_marks_do_not_add_width() {
+        // "e" + U+0301 (combining acute) renders in one column, so "café"
+        // spelled with a combining mark is four columns wide and fits a
+        // five-column line beside nothing — but two of them do not.
+        let cafe = "cafe\u{0301}";
+        let result = word_wrap_str(&format!("{cafe} {cafe}"), 8);
+        assert_eq!(result, format!("{cafe}\n{cafe}"));
+    }
+
+    #[test]
+    fn word_wrap_ascii_unchanged_from_char_count() {
+        // Regression guard: for ASCII the column budget equals the old char
+        // count, so historical output is byte-for-byte preserved.
+        let result = word_wrap_str("the quick brown fox jumps over the lazy dog", 15);
+        assert_eq!(result, "the quick brown\nfox jumps over\nthe lazy dog");
     }
 
     #[test]
