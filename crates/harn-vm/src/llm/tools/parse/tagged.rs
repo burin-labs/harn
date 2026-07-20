@@ -1699,17 +1699,24 @@ const INVOKE_MARKUP_OPEN: &str = "<invoke name=";
 /// or the attribute spelling `<invoke name="edit">` +
 /// `<parameter name="action">create</parameter>` + `</invoke>`.
 ///
+/// A third dialect some open-weight models emit is a trailing JSON object
+/// instead of `<parameter=...>` blocks (#5252):
+///
+/// ```text
+/// <function=echo_marker>{"value": "MK-7Q3Z"}
+/// ```
+///
 /// `body` is the markup WITHOUT the optional `<tool_call>` wrapper. Returns:
 /// * `Ok(None)` — body does not open with a plausible function-markup tag
 ///   (the caller falls through to its other recovery paths);
 /// * `Ok(Some(call))` — a complete markup block for a registered tool. A
 ///   missing `</function>` / `</invoke>` close is tolerated as long as every
 ///   `<parameter ...>` block is itself properly closed (some emissions close
-///   only the outer `</tool_call>`);
+///   only the outer `</tool_call>`), or the trailing JSON object is balanced;
 /// * `Err(msg)` — recognizably function markup but unusable: unknown tool,
-///   an unterminated `<parameter ...>` block (truncation — never dispatch a
-///   partial argument value), or a second call sharing the block. The message
-///   is model-facing parse feedback.
+///   an unterminated `<parameter ...>` / JSON arguments object (truncation —
+///   never dispatch a partial argument value), or a second call sharing the
+///   block. The message is model-facing parse feedback.
 ///
 /// Parameter values are typed against the registered tool schema: parameters
 /// the schema declares as strings (or whose schema entry is missing) keep
@@ -1830,11 +1837,64 @@ fn parse_function_markup_body(
              emit one call per <tool_call> block."
         ));
     }
+    // Dialect: `<function=NAME>{json}` — some open-weight models emit the
+    // arguments as a trailing/enclosed JSON object instead of `<parameter=...>`
+    // blocks (#5252). Only when no parameter tags were recovered: parameter
+    // style wins if both appear, matching the markup grammar that already
+    // owns this path. An additive adaptive lane would double-count with the
+    // partial call this used to produce (empty args), so the fix stays here.
+    let arguments = if args.is_empty() {
+        match parse_function_markup_json_args(leftover.trim(), name, style)? {
+            Some(json_args) => json_args,
+            None => serde_json::Value::Object(args),
+        }
+    } else {
+        serde_json::Value::Object(args)
+    };
     Ok(Some(serde_json::json!({
         "id": format!("tc_fnmarkup_{name}"),
         "name": name,
-        "arguments": serde_json::Value::Object(args),
+        "arguments": arguments,
     })))
+}
+
+/// Parse a trailing JSON-object arguments payload for function markup when the
+/// body has no `<parameter=...>` tags. Returns `Ok(None)` when `src` is empty
+/// or does not open with `{` (no-arg tool / non-JSON leftover slop). A leading
+/// `{` that never closes is truncation; a closed object that is not a JSON
+/// object is a hard parse error — never dispatch empty args for those shapes.
+fn parse_function_markup_json_args(
+    src: &str,
+    name: &str,
+    style: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    if src.is_empty() || !src.starts_with('{') {
+        return Ok(None);
+    }
+    let Some(obj_len) = balanced_json_object_len(src) else {
+        return Err(format!(
+            "TOOL CALL TRUNCATED: the JSON arguments object in the {style} markup for \
+             `{name}` was never closed — the response appears to have been cut off. The \
+             call was NOT executed; re-emit the complete call."
+        ));
+    };
+    let mut arguments: serde_json::Value =
+        serde_json::from_str(&src[..obj_len]).map_err(|error| {
+            format!(
+                "The {style} markup for `{name}` had a JSON arguments object that did not \
+                 parse: {error}. The call was NOT executed."
+            )
+        })?;
+    if !arguments.is_object() {
+        return Err(format!(
+            "JSON arguments for tool '{name}' in {style} markup must be an object, got \
+             `{arguments}`."
+        ));
+    }
+    // Same JSON-string channel as `parse_json_tool_call_body` / nested XML:
+    // decode escaped markup delimiters exactly once at this boundary.
+    decode_html_entities_in_args(&mut arguments);
+    Ok(Some(arguments))
 }
 
 /// Type a raw function-markup parameter value against its schema entry.

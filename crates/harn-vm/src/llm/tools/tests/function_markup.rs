@@ -6,7 +6,23 @@
 //! fallback contract can act on them) and surface precise errors for
 //! truncated markup — and must NOT fire on prose or fenced examples.
 
-use super::{json, parse_text_tool_calls_with_tools, sample_tool_registry};
+use super::{json, parse_text_tool_calls_with_tools, sample_tool_registry, vm_dict, vm_str};
+use crate::value::VmValue;
+
+/// Single-tool registry mirroring the conformance probe's `echo_marker(value)`.
+fn echo_marker_tools() -> VmValue {
+    let value_param = vm_dict(&[
+        ("type", vm_str("string")),
+        ("description", vm_str("The marker value to echo.")),
+    ]);
+    let params = VmValue::dict([("value", value_param)]);
+    let tool = vm_dict(&[
+        ("name", vm_str("echo_marker")),
+        ("description", vm_str("Echo the probe marker exactly.")),
+        ("parameters", params),
+    ]);
+    VmValue::dict([("tools", VmValue::List(vec![tool].into()))])
+}
 
 /// The live failure shape from the 2026-06-09 host eval meter run: a
 /// complete, well-formed `edit` call in qwen's chat-template XML style,
@@ -238,5 +254,96 @@ fn non_string_schema_parameter_parses_as_json() {
             .get("arguments")
             .and_then(|args| args.get("ops")),
         Some(&json!([{"op": "a"}]))
+    );
+}
+
+/// Assert a recovered `echo_marker` call round-trips the given JSON args.
+fn assert_echo_marker_args(
+    parsed: &crate::llm::tools::TextToolParseResult,
+    expected: serde_json::Value,
+) {
+    assert_eq!(parsed.errors, Vec::<String>::new(), "{:?}", parsed.errors);
+    assert_eq!(
+        parsed.calls.len(),
+        1,
+        "expected one call: {:?}",
+        parsed.calls
+    );
+    assert_eq!(
+        parsed.calls[0].get("name").and_then(|v| v.as_str()),
+        Some("echo_marker")
+    );
+    assert_eq!(
+        parsed.calls[0].get("arguments"),
+        Some(&expected),
+        "arguments must round-trip the trailing JSON object"
+    );
+}
+
+#[test]
+fn function_markup_trailing_json_object_round_trips_args() {
+    // Exact live dialect from #5252 / the tool-scorecard classifier miss:
+    // `<function=NAME>{json}` with no `<parameter=...>` blocks and no close tag.
+    let tools = echo_marker_tools();
+    let text = r#"<function=echo_marker>{"value": "MK-7Q3Z"}"#;
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_echo_marker_args(&parsed, json!({"value": "MK-7Q3Z"}));
+}
+
+#[test]
+fn function_markup_enclosed_json_object_round_trips_args() {
+    // Same dialect with an explicit `</function>` close.
+    let tools = echo_marker_tools();
+    let text = r#"<function=echo_marker>{"value": "MK-7Q3Z"}</function>"#;
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_echo_marker_args(&parsed, json!({"value": "MK-7Q3Z"}));
+}
+
+#[test]
+fn function_markup_wrapped_trailing_json_object_round_trips_args() {
+    // Inside a `<tool_call>` wrapper (parameter-style markup's usual home).
+    let tools = echo_marker_tools();
+    let text = r#"<tool_call><function=echo_marker>{"value": "MK-7Q3Z"}</function></tool_call>"#;
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_echo_marker_args(&parsed, json!({"value": "MK-7Q3Z"}));
+}
+
+#[test]
+fn function_markup_trailing_json_empty_object_is_no_arg_call() {
+    let tools = echo_marker_tools();
+    let text = r#"<function=echo_marker>{}"#;
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_echo_marker_args(&parsed, json!({}));
+}
+
+#[test]
+fn function_markup_trailing_json_nested_object_round_trips() {
+    let tools = echo_marker_tools();
+    let text = r#"<function=echo_marker>{"value": "x", "meta": {"n": 1}}"#;
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_echo_marker_args(&parsed, json!({"value": "x", "meta": {"n": 1}}));
+}
+
+#[test]
+fn invoke_markup_trailing_json_object_round_trips_args() {
+    // Attribute spelling of the same trailing-JSON dialect.
+    let tools = echo_marker_tools();
+    let text = r#"<invoke name="echo_marker">{"value": "MK-7Q3Z"}</invoke>"#;
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_echo_marker_args(&parsed, json!({"value": "MK-7Q3Z"}));
+}
+
+#[test]
+fn function_markup_truncated_trailing_json_errors_and_does_not_dispatch() {
+    // An opened `{` that never closes must not dispatch empty/partial args.
+    let tools = echo_marker_tools();
+    let text = r#"<function=echo_marker>{"value": "MK-7Q3Z""#;
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(parsed.calls.len(), 0);
+    assert_eq!(parsed.errors.len(), 1);
+    assert!(
+        parsed.errors[0].contains("TRUNCATED"),
+        "{:?}",
+        parsed.errors
     );
 }
