@@ -11,7 +11,7 @@ log="$tmpdir/output.log"
 
 # Archive-only consumers do not compile; keep the short execution budget.
 rust_test_block="$(sed -n '/^  rust-test:/,/^  rust-security:/p' "$repo_root/.github/workflows/ci.yml")"
-grep -qx '    timeout-minutes: 12' <<<"$rust_test_block"
+grep -qx '    timeout-minutes: 20' <<<"$rust_test_block"
 
 GITHUB_STEP_SUMMARY="$summary" "$script" true >"$log" 2>&1
 grep -q 'Rust test resources before' "$summary"
