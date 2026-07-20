@@ -67,12 +67,6 @@ fn contract() -> ReleaseAuditContract {
             "matrix.kind == 'behavior'",
             "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$GITHUB_SHA\"",
           ),
-          proof_step(
-            "release-audit-rust-test-fallback",
-            "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
-            "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
-            {HARN_LLM_CALLS_DISABLED: "1"},
-          ),
         ],
       },
       {
@@ -342,14 +336,6 @@ pipeline test_release_audit_ci_contract_drift(task) {
             if: "matrix.kind == 'behavior'",
             run:
               "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$GITHUB_SHA\"",
-          },
-          {
-            id: "release-audit-rust-test-fallback",
-            if:
-              "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
-            env: {HARN_LLM_CALLS_DISABLED: "1"},
-            run:
-              "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           },
         ],
       },

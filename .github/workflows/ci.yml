@@ -356,10 +356,9 @@ jobs:
   # fail-fast enabled: if any required Rust lane fails, GitHub cancels the
   # sibling Rust lane that is still queued or running. The behavior row is the
   # one producer: it compiles the suite once on persistent storage and
-  # publishes an exact-SHA behavior bundle for execution-only proof consumers.
-  # On the GitHub-hosted fallback, where cross-job compiler objects are not
-  # reusable, the producer also runs the full suite against its warm target
-  # directory instead of paying for a second cold compilation.
+  # publishes an exact-SHA nextest archive for execution-only proof consumers.
+  # Consumers execute that compiled archive without requiring cross-job Cargo
+  # target reuse on either Blacksmith or GitHub-hosted runners.
   rust-builds:
     name: ${{ matrix.name }}
     needs: changes
@@ -468,22 +467,6 @@ jobs:
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$GITHUB_SHA"
-      # Blacksmith's sticky compiler cache makes a separate test consumer
-      # useful there: the audit consumers can fan out while it restores warm
-      # objects. GitHub-hosted runners have no such cross-job object reuse.
-      # Running the same complete suite here removes the observed ~10-minute
-      # duplicate compile while retaining every test and the Landlock owner.
-      - name: Run full environment-neutral test suite on hosted fallback
-        id: release-audit-rust-test-fallback
-        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
-        env:
-          CARGO_BUILD_JOBS: "4"
-          HARN_LLM_CALLS_DISABLED: "1"
-          NEXTEST_PROFILE: ci
-        run: >-
-          scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --workspace --profile ci
-          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
       - name: Start portable behavior payload upload timer
         if: matrix.kind == 'behavior'
         run: echo "HARN_BEHAVIOR_UPLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
