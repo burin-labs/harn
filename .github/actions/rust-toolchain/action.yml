@@ -5,6 +5,10 @@ inputs:
     description: Optional comma-separated rustup components to add after rust-toolchain.toml is installed.
     required: false
     default: ""
+  targets:
+    description: Optional comma-separated rustup targets to install.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -12,17 +16,46 @@ runs:
       shell: bash
       env:
         EXTRA_COMPONENTS: ${{ inputs.components }}
+        EXTRA_TARGETS: ${{ inputs.targets }}
       run: |
         set -euo pipefail
 
-        rustup show
+        retry_rustup() {
+          local attempt=1
+          local max_attempts=4
+          local delay=2
+          until "$@"; do
+            if (( attempt >= max_attempts )); then
+              echo "rustup command failed after ${attempt} attempts: $*" >&2
+              return 1
+            fi
+            echo "::warning::rustup transport failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s: $*"
+            sleep "$delay"
+            attempt=$((attempt + 1))
+            delay=$((delay * 2))
+          done
+        }
+
+        # rust-toolchain.toml owns the exact channel. Hosted runner DNS/CDN
+        # transport occasionally fails before rustup can install it; retry the
+        # narrow network operations instead of rerunning an entire release
+        # matrix or silently falling back to a floating preinstalled toolchain.
+        retry_rustup rustup show
 
         components=()
         while IFS= read -r component; do
           components+=("$component")
         done < <(printf '%s\n' "$EXTRA_COMPONENTS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d')
         if [[ "${#components[@]}" -gt 0 ]]; then
-          rustup component add "${components[@]}"
+          retry_rustup rustup component add "${components[@]}"
+        fi
+
+        targets=()
+        while IFS= read -r target; do
+          targets+=("$target")
+        done < <(printf '%s\n' "$EXTRA_TARGETS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;/^$/d')
+        if [[ "${#targets[@]}" -gt 0 ]]; then
+          retry_rustup rustup target add "${targets[@]}"
         fi
 
         rustc -Vv

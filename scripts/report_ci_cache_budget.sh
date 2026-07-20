@@ -6,8 +6,39 @@ policy_path="${HARN_CACHE_POLICY_PATH:-$repo_root/.github/cache-policy.json}"
 repository="${GITHUB_REPOSITORY:-burin-labs/harn}"
 
 configured_limit="$(jq -er '.storage_limit_bytes | select(type == "number" and . >= 1073741824 and floor == .)' "$policy_path")"
+
+list_cache_pages() {
+  gh api --paginate "repos/$repository/actions/caches?per_page=100" --slurp
+}
+
+# Release warm runs intentionally rotate exact keys when the toolchain or
+# workspace fingerprint changes, but only the newest cache in each target
+# family can win the broad restore prefix. Delete superseded generations
+# before enforcing the repository budget instead of waiting for GitHub's
+# seven-day eviction while every main warm saves another multi-GB generation.
+if [[ "${HARN_PRUNE_SUPERSEDED_RELEASE_CACHES:-0}" == "1" ]]; then
+  prune_pages="$(list_cache_pages)"
+  while IFS= read -r cache_id; do
+    [[ -n "$cache_id" ]] || continue
+    gh cache delete "$cache_id" --repo "$repository"
+  done < <(
+    jq -r '
+      [.[].actions_caches[]
+        | select(.key | startswith("v0-rust-release-"))
+        | . + {family: (.key | sub("-[^-]+-[^-]+$"; ""))}
+      ]
+      | group_by(.family)
+      | .[]
+      | sort_by(.created_at, .id)
+      | reverse
+      | .[1:][]
+      | .id
+    ' <<<"$prune_pages"
+  )
+fi
+
 usage_json="$(gh api "repos/$repository/actions/cache/usage")"
-pages_json="$(gh api --paginate "repos/$repository/actions/caches?per_page=100" --slurp)"
+pages_json="$(list_cache_pages)"
 
 usage_bytes="$(jq -er '.active_caches_size_in_bytes | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"
 usage_count="$(jq -er '.active_caches_count | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"

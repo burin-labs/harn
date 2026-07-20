@@ -319,8 +319,8 @@ fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
     return ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must define the cache-budget reporter"]
   }
   let errors: list<string> = []
-  if trim(job?.permissions?.actions ?? "") != "read" {
-    errors = errors + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must grant actions: read"]
+  if trim(job?.permissions?.actions ?? "") != "write" {
+    errors = errors + ["${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must grant actions: write"]
   }
   const reporters = (job?.steps ?? []).filter(
     { step -> trim(step?.run ?? "") == CACHE_BUDGET_SCRIPT },
@@ -336,6 +336,12 @@ fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
     errors = errors
       + [
       "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must fail when cache telemetry fails",
+    ]
+  }
+  if trim(reporters[0]?.env?.HARN_PRUNE_SUPERSEDED_RELEASE_CACHES ?? "") != "1" {
+    errors = errors
+      + [
+      "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must prune superseded release caches",
     ]
   }
   return errors

@@ -87,10 +87,28 @@ trap cleanup EXIT
 
 if [[ -z "$run_json" ]]; then
   run_json="$tmp_dir/run.json"
-  gh run view "$run_id" \
+  if ! gh run view "$run_id" \
     --repo "$repo" \
     --json databaseId,event,conclusion,status,headBranch,headSha,url,attempt,workflowName,jobs \
-    > "$run_json"
+    > "$run_json"; then
+    # This controller is recovery machinery, not another required proof. If
+    # GitHub's own API is unavailable, no safe classification or mutation can
+    # be made; report that fact and leave the original failed run authoritative
+    # instead of creating a second red workflow for every API 5xx.
+    printf 'classification=metadata_unavailable\n'
+    printf 'planned_action=none\n'
+    printf 'run_id=%s\n' "$run_id"
+    echo "::warning title=CI preemption repair::GitHub run metadata is unavailable; no recovery action was attempted for run ${run_id}" >&2
+    if [[ "$emit_summary" == "true" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      {
+        printf '## CI Preemption Repair\n\n'
+        printf -- "- classification: \`metadata_unavailable\`\n"
+        printf -- "- action: \`none\`\n"
+        printf -- "- run id: \`%s\`\n" "$run_id"
+      } >> "$GITHUB_STEP_SUMMARY"
+    fi
+    exit 0
+  fi
 fi
 
 [[ -f "$run_json" ]] || die "run JSON not found: $run_json"
@@ -217,16 +235,16 @@ printf 'run_url=%s\n' "$run_url"
 if [[ "$emit_summary" == "true" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
     printf '## CI Preemption Repair\n\n'
-    printf -- '- classification: `%s`\n' "$classification"
-    printf -- '- workflow: `%s`\n' "$workflow_name"
-    printf -- '- event: `%s`\n' "$event"
-    printf -- '- attempt: `%s`\n' "$attempt"
-    printf -- '- action: `%s`\n' "$planned_action"
+    printf -- "- classification: \`%s\`\n" "$classification"
+    printf -- "- workflow: \`%s\`\n" "$workflow_name"
+    printf -- "- event: \`%s\`\n" "$event"
+    printf -- "- attempt: \`%s\`\n" "$attempt"
+    printf -- "- action: \`%s\`\n" "$planned_action"
     if [[ -n "$preempted_jobs" ]]; then
-      printf -- '- preempted jobs: `%s`\n' "$preempted_jobs"
+      printf -- "- preempted jobs: \`%s\`\n" "$preempted_jobs"
     fi
     if [[ -n "$planned_command" ]]; then
-      printf -- '- command: `%s`\n' "$planned_command"
+      printf -- "- command: \`%s\`\n" "$planned_command"
     fi
     if [[ -n "$run_url" ]]; then
       printf -- '- run: %s\n' "$run_url"

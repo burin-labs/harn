@@ -83,8 +83,13 @@ fn workflows() {
           ],
         },
         cache_budget: {
-          permissions: {actions: "read", contents: "read"},
-          steps: [{run: "./scripts/report_ci_cache_budget.sh"}],
+          permissions: {actions: "write", contents: "read"},
+          steps: [
+            {
+              env: {HARN_PRUNE_SUPERSEDED_RELEASE_CACHES: "1"},
+              run: "./scripts/report_ci_cache_budget.sh",
+            },
+          ],
         },
       },
     },
@@ -181,7 +186,10 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
     ),
   )
   assert(errors.contains("ci.yml:test enables an ungated BuildKit cache writer"))
-  assert(errors.contains("build-release-binaries.yml:cache_budget must grant actions: read"))
+  assert(errors.contains("build-release-binaries.yml:cache_budget must grant actions: write"))
+  assert(
+    errors.contains("build-release-binaries.yml:cache_budget must prune superseded release caches"),
+  )
   assert(
     errors.contains(
       "build-release-binaries.yml:cache_budget must run ./scripts/report_ci_cache_budget.sh exactly once",
