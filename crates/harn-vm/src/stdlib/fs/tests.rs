@@ -404,7 +404,13 @@ fn workspace_temp_dir_is_inside_sandbox_workspace() {
 
     let root = PathBuf::from(root);
     let child = PathBuf::from(child);
-    let workspace_root = workspace.path().canonicalize().unwrap();
+    // The temp-dir builtins now return de-verbatimed paths (a `\\?\` prefix
+    // breaks the documented `dir + "/child"` join on Windows), so normalize the
+    // expected workspace root the same way before comparing components —
+    // otherwise `\\?\C:\…` vs `C:\…` fails `starts_with` on Windows only.
+    let workspace_root = PathBuf::from(temp_dir_path_string(
+        &workspace.path().canonicalize().unwrap(),
+    ));
     assert!(root.starts_with(&workspace_root));
     assert!(root.ends_with(crate::stdlib::sandbox::WORKSPACE_TMPDIR_NAME));
     assert!(root.is_dir());
