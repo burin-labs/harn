@@ -154,4 +154,22 @@ manual_cancel_output="$(run_recover "$shutdown_without_143_dir/run.json" "$shutd
 assert_contains "$manual_cancel_output" "classification=unknown_failure"
 assert_contains "$manual_cancel_output" "planned_action=none"
 
+mkdir -p "$tmp_root/api-outage/bin"
+cat > "$tmp_root/api-outage/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "HTTP 503: no server is available" >&2
+exit 1
+SH
+chmod +x "$tmp_root/api-outage/bin/gh"
+api_outage_output="$(
+  PATH="$tmp_root/api-outage/bin:$PATH" \
+    "$recover_script" \
+      --repo burin-labs/harn \
+      --run-id 28757331133 \
+      --apply 2>"$tmp_root/api-outage/stderr"
+)"
+assert_contains "$api_outage_output" "classification=metadata_unavailable"
+assert_contains "$api_outage_output" "planned_action=none"
+grep -Fq "no recovery action was attempted" "$tmp_root/api-outage/stderr"
+
 echo "ci_preemption_recover_test: ok"

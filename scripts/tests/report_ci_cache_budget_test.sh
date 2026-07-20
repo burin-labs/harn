@@ -18,7 +18,13 @@ if [[ "$args" == *'/actions/cache/usage'* ]]; then
   fi
   printf '{"full_name":"burin-labs/harn","active_caches_size_in_bytes":%s,"active_caches_count":2}\n' "${MOCK_USAGE_BYTES:-3000}"
 elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
-  printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-linux","size_in_bytes":2000},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000}]}]\n'
+  if [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
+    printf '[{"total_count":3,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-oldhash-oldlock","size_in_bytes":2000,"created_at":"2026-01-01T00:00:00Z"},{"id":3,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-newhash-newlock","size_in_bytes":2100,"created_at":"2026-01-02T00:00:00Z"},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000,"created_at":"2026-01-01T00:00:00Z"}]}]\n'
+  else
+    printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-linux","size_in_bytes":2000},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000}]}]\n'
+  fi
+elif [[ "$args" == "cache delete 1 --repo burin-labs/harn" ]]; then
+  exit 0
 else
   echo "unexpected gh arguments: $args" >&2
   exit 64
@@ -51,6 +57,11 @@ if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/over-gh.log" MOCK_USAGE_BYTES=1073741
   exit 1
 fi
 grep -q 'cache exceeds the 10737418240-byte policy budget' "$tmp/over.err"
+
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/prune-gh.log" MOCK_DUPLICATE_RELEASE=1 \
+  HARN_PRUNE_SUPERSEDED_RELEASE_CACHES=1 GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/report_ci_cache_budget.sh" >"$tmp/prune.json"
+grep -Fxq 'cache delete 1 --repo burin-labs/harn' "$tmp/prune-gh.log"
 
 if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/error-gh.log" MOCK_API_ERROR=usage \
   GITHUB_REPOSITORY=burin-labs/harn \

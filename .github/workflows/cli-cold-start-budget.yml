@@ -43,12 +43,11 @@ jobs:
     # of the required CI aggregate. Keep an explicit ceiling so a wedged release
     # build does not burn the platform default timeout.
     timeout-minutes: 25
-    # Bench is wall-clock sensitive, so a fixed-class runner is the
-    # right long-term home. For now we stay on ubuntu-latest so the
-    # workflow lights up for everyone without depending on the
-    # self-hosted macOS pool being available. Once W1 lands its
-    # baseline (#2297) we move this to `[self-hosted, macos, m5pro]`
-    # to match the fleet documented in the epic.
+    # Bench is wall-clock sensitive, so runner noise is the main threat
+    # to the budget. This repo runs CI on hosted runners only (public
+    # repo: hosted minutes are free, and self-hosted routing contends
+    # with local development work), so the budget and iteration count
+    # are calibrated to the ubuntu-latest noise floor.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -72,6 +71,4 @@ jobs:
         # `--no-build` because we already built above; `--iterations` is
         # intentionally lower on CI than the local default (20) because
         # the ubuntu-latest noise floor makes a tighter loop misleading.
-        # We will bump this back up when we move to the self-hosted
-        # macOS pool.
         run: ./scripts/bench_cli_cold_start.sh --no-build --iterations 10

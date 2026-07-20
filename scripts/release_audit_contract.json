@@ -52,6 +52,12 @@
           "id": "release-audit-behavior-build",
           "condition": "matrix.kind == 'behavior'",
           "run": "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$GITHUB_SHA\""
+        },
+        {
+          "id": "release-audit-rust-test-fallback",
+          "condition": "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
         }
       ]
     },

@@ -736,13 +736,9 @@ jobs:
           tool: cargo-bloat
 
       - name: Install repo-pinned Rust toolchain and target
-        run: |
-          # rust-toolchain.toml pins the channel; `rustup show` triggers install
-          # of that exact toolchain instead of first installing floating stable.
-          rustup show active-toolchain || rustup show
-          rustc --version
-          cargo --version
-          rustup target add ${{ matrix.target }}
+        uses: ./.github/actions/rust-toolchain
+        with:
+          targets: ${{ matrix.target }}
 
       # Cross gcc/linker is ONLY needed when building arm64 Linux on an x86
       # host. The arm64 Linux leg now runs on a native arm64 runner, so this
@@ -1177,13 +1173,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: read
+      actions: write
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Report repository cache inventory
         env:
           GH_TOKEN: ${{ github.token }}
+          HARN_PRUNE_SUPERSEDED_RELEASE_CACHES: "1"
         run: ./scripts/report_ci_cache_budget.sh
 
   container:

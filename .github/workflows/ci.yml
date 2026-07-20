@@ -29,13 +29,6 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  runner-availability:
-    name: Detect self-hosted runner availability
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@51a98eb52e4b189cb56a0ed91ccaff8bd2562779
-    secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
   # Decide whether the heavy Linux Rust lanes (rust-builds, audit-scripts) need
   # to run at all.
   #
@@ -289,8 +282,8 @@ jobs:
 
   fmt:
     name: Format check
-    # Runs `make fmt-check`; no compilation, no cache benefit, and no reason to
-    # wait for a scarce self-hosted runner.
+    # Runs `make fmt-check`; no compilation and no cache benefit, so the
+    # smallest hosted runner is the right home.
     needs: changes
     if: needs.changes.outputs.merge_group_proven != 'true'
     runs-on: ubuntu-latest
@@ -353,7 +346,7 @@ jobs:
 
   lint-md:
     name: Markdown lint
-    # Single ~5 s Action step; no point contending for self-hosted runners.
+    # Single ~5 s Action step; the smallest hosted runner is plenty.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -365,7 +358,9 @@ jobs:
   # one producer: it compiles the suite once on persistent storage and
   # publishes only the small security/CLI payload that must execute on GitHub
   # Ubuntu. Execution-only proof consumers fan out after that immutable
-  # producer succeeds.
+  # producer succeeds. On the GitHub-hosted fallback, where cross-job compiler
+  # objects are not reusable, the producer also runs the full suite against its
+  # warm target directory instead of paying for a second cold compilation.
   rust-builds:
     name: ${{ matrix.name }}
     needs: changes
@@ -473,6 +468,22 @@ jobs:
           ./scripts/ci/behavior_artifact.sh build
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$GITHUB_SHA"
+      # Blacksmith's sticky compiler cache makes a separate test consumer
+      # useful there: the audit consumers can fan out while it restores warm
+      # objects. GitHub-hosted runners have no such cross-job object reuse.
+      # Running the same complete suite here removes the observed ~10-minute
+      # duplicate compile while retaining every test and the Landlock owner.
+      - name: Run full environment-neutral test suite on hosted fallback
+        id: release-audit-rust-test-fallback
+        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        env:
+          CARGO_BUILD_JOBS: "4"
+          HARN_LLM_CALLS_DISABLED: "1"
+          NEXTEST_PROFILE: ci
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --workspace --profile ci
+          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
       - name: Upload portable behavior payload
         if: matrix.kind == 'behavior'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -502,7 +513,10 @@ jobs:
   rust-test:
     name: Rust test
     needs: [changes, rust-builds]
-    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && needs.rust-builds.result == 'success'
+      && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
     # GitHub-hosted fallback runners need about 10 minutes for a cold compile
     # before the 10k-test nextest suite starts. Cache reuse is an optimization,
@@ -1058,13 +1072,13 @@ jobs:
 
   macos:
     name: Rust on macOS (deny-warnings build + lint)
-    # Prefer an idle self-hosted macOS runner to reduce merge/release queue
-    # latency; if the local pool is busy or inaccessible, fall through to
-    # GitHub-hosted macOS instead of queueing behind active eval/development
-    # work on the shared Mac.
-    runs-on: ${{ needs.runner-availability.outputs.macos == 'true' && fromJSON('["self-hosted", "macOS", "harn-ci"]') || 'macos-latest' }}
+    # Hosted runners only: this is a public repo, so GitHub-hosted macOS
+    # minutes are free, and routing CI to a self-hosted machine contends with
+    # local development work on that machine. Keep every lane on hosted
+    # runners rather than probing a self-hosted pool.
+    runs-on: macos-latest
     timeout-minutes: 60
-    needs: [macos-plan, runner-availability]
+    needs: macos-plan
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
     # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
@@ -1183,10 +1197,17 @@ jobs:
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
           "${HOME}/.local/bin/actionlint" -version
       - run: make lint-actions
+      # Keep the required hygiene gate deterministic. Online audits such as
+      # `known-vulnerable-actions` depend on the GitHub Advisories API, whose
+      # transport failures are indistinguishable from audit failures to
+      # zizmor. The scheduled actions-vulnerability-audit workflow owns that
+      # availability-dependent security signal without blocking every PR or
+      # merge group when the external API returns 5xx.
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7
         with:
           version: "1.26.1"
+          online-audits: false
           advanced-security: false
           annotations: true
           min-severity: medium
@@ -1267,7 +1288,6 @@ jobs:
     if: always()
     needs:
       [
-        runner-availability,
         changes,
         fmt,
         package-audit,
@@ -1292,11 +1312,11 @@ jobs:
       - name: Verify required CI jobs
         env:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
+          BLACKSMITH_DISABLED: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX }}
         run: |
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Runner availability"]="${{ needs['runner-availability'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
@@ -1347,7 +1367,8 @@ jobs:
           rust_test_result="${{ needs['rust-test'].result }}"
           echo "Rust test: $rust_test_result"
           if [ "$rust_test_result" != "success" ]; then
-            if [ "$rust_test_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+            if [ "$rust_test_result" = "skipped" ] \
+              && { [ "${{ needs.changes.outputs.rust }}" != "true" ] || [ "$BLACKSMITH_DISABLED" = "true" ]; }; then
               :
             else
               echo "::error::Rust test failed or skipped while Rust proof was required."
@@ -1478,8 +1499,8 @@ jobs:
     # deploy silently skipped, and no later non-docs push ever re-fired it. This
     # decouples docs delivery from the rest of CI so that can't recur.
     needs: [docs-site]
-    # Single `curl` to the Render deploy hook; running it on a self-hosted
-    # runner adds no value.
+    # Single `curl` to the Render deploy hook; the smallest hosted runner
+    # is plenty.
     runs-on: ubuntu-latest
     # `always()` keeps the job evaluable even if `docs-site` were ever skipped
     # (the actions/runner#2205 quirk); the explicit success check is the gate.

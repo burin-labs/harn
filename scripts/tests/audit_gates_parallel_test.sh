@@ -113,7 +113,7 @@ if [[ "$(wc -l < "$tmp_root/conformance-record.txt" | tr -d ' ')" != "3" ]]; the
   exit 1
 fi
 for shard_index in 1 2 3; do
-  expected="test conformance --shard-index $shard_index --shard-total 3"
+  expected="test conformance --timeout 60000 --shard-index $shard_index --shard-total 3"
   if ! grep -Fq "$expected" "$tmp_root/conformance-record.txt"; then
     echo "conformance shard invocation missing: $expected" >&2
     cat "$tmp_root/conformance-record.txt" >&2
@@ -128,6 +128,81 @@ fi
 if ! grep -Fq "check-ported-handler-loc" "$record"; then
   echo "required audit fanout omitted the ported-handler LOC ratchet" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+# Default (unset) AUDIT_GATES_CONCURRENCY must reserve cores for conformance
+# shards so process-heavy cases are not starved by the make -j fanout.
+: > "$record"
+rm -f "$tmp_root/audit.started"
+# Fake nproc=4 via a PATH wrapper around getconf would be brittle; instead
+# force a high explicit-unset path by patching through env that the script
+# treats as unset. We simulate by calling with AUDIT_GATES_CONCURRENCY unset
+# and HARN_CONFORMANCE_SHARDS=3 while injecting a getconf that reports 4.
+fake_getconf="$fake_bin/getconf"
+cat > "$fake_getconf" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1-}" == "_NPROCESSORS_ONLN" ]]; then
+  echo 4
+  exit 0
+fi
+command getconf "$@"
+SH
+chmod +x "$fake_getconf"
+# The fake make only accepts -j3 today; extend it to also accept the reserved
+# -j1 that default concurrency (4) minus shards (3) produces.
+cat > "$fake_bin/make" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1-}" == "--help" ]]; then
+  printf 'GNU Make test double\n  --output-sync\n'
+  exit 0
+fi
+
+printf 'invocation\t%s\tHARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+
+case "$*" in
+  -j3\ -k\ -Otarget\ *|-j1\ -k\ -Otarget\ *)
+    touch "$FAKE_AUDIT_ROOT/audit.started"
+    exec 3< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-1"
+    exec 4< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-2"
+    exec 5< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-3"
+    IFS= read -r <&3
+    IFS= read -r <&4
+    IFS= read -r <&5
+    exec 3<&-
+    exec 4<&-
+    exec 5<&-
+    if [[ "${FAKE_AUDIT_FAIL-0}" == "1" ]]; then
+      echo "make: *** [Makefile:314: fmt-harn] Error 123" >&2
+      echo "make: *** [Makefile:705: check-source-file-lengths] Error 1" >&2
+      echo "fake audit gates failed" >&2
+      exit 43
+    fi
+    printf 'fake audit gates ok\n'
+    exit 0
+    ;;
+  *)
+    echo "unexpected make invocation: $*" >&2
+    exit 42
+    ;;
+esac
+SH
+chmod +x "$fake_bin/make"
+unset AUDIT_GATES_CONCURRENCY
+HARN_CONFORMANCE_SHARDS=3 \
+  HARN_BIN="$fake_harn" \
+  FAKE_AUDIT_RECORD="$record" \
+  FAKE_CONFORMANCE_RECORD="$tmp_root/conformance-reserve-record.txt" \
+  FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/audit_gates.sh" > "$tmp_root/audit-reserve.out"
+if ! grep -Fq $'\t-j1 -k -Otarget ' "$record"; then
+  echo "default audit concurrency did not reserve cores for conformance shards" >&2
+  cat "$record" >&2
+  cat "$tmp_root/audit-reserve.out" >&2
   exit 1
 fi
 
