@@ -227,12 +227,38 @@ fn replace_temp_file(
     if durability == AtomicWriteDurability::Flush {
         flags |= MOVEFILE_WRITE_THROUGH;
     }
-    // SAFETY: both paths are NUL-terminated UTF-16 buffers that remain alive
-    // for the duration of the call.
-    if unsafe { MoveFileExW(temp_wide.as_ptr(), destination_wide.as_ptr(), flags) } == 0 {
-        return Err(io::Error::last_os_error());
+
+    // Unlike POSIX `rename`, which atomically replaces a destination even while
+    // another process holds it open, `MoveFileExW` can transiently fail when a
+    // virus scanner, the Windows indexer, or a lagging handle close briefly
+    // holds the destination (ERROR_SHARING_VIOLATION) or its ACL check races
+    // (ERROR_ACCESS_DENIED). Those windows are short-lived, so retry with a
+    // small bounded backoff. This restores the rename tolerance the
+    // pre-consolidation snapshot writer had, WITHOUT reintroducing its
+    // destructive `remove_file(destination)` fallback (dropped deliberately so
+    // a crash mid-replace can never leave the destination missing).
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    const MAX_ATTEMPTS: u32 = 10;
+    let mut backoff = std::time::Duration::from_millis(1);
+    for attempt in 1..=MAX_ATTEMPTS {
+        // SAFETY: both paths are NUL-terminated UTF-16 buffers that remain
+        // alive for the duration of the call.
+        if unsafe { MoveFileExW(temp_wide.as_ptr(), destination_wide.as_ptr(), flags) } != 0 {
+            return Ok(durability == AtomicWriteDurability::Flush);
+        }
+        let error = io::Error::last_os_error();
+        let retryable = matches!(
+            error.raw_os_error(),
+            Some(ERROR_SHARING_VIOLATION | ERROR_ACCESS_DENIED)
+        );
+        if !retryable || attempt == MAX_ATTEMPTS {
+            return Err(error);
+        }
+        std::thread::sleep(backoff);
+        backoff = (backoff * 2).min(std::time::Duration::from_millis(50));
     }
-    Ok(durability == AtomicWriteDurability::Flush)
+    unreachable!("the loop returns on the final attempt")
 }
 
 fn sync_parent_dir(path: &Path) -> bool {
