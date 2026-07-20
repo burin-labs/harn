@@ -133,6 +133,13 @@ if [[ "$(awk -F '\t' '{print $3}' "$tmp_root/conformance-record.txt" | sort -u |
   cat "$tmp_root/conformance-record.txt" >&2
   exit 1
 fi
+while IFS= read -r session_field; do
+  session_store="${session_field#SESSION_STORE=}"
+  if [[ -e "$session_store" ]]; then
+    echo "conformance shard leaked its isolated session store: $session_store" >&2
+    exit 1
+  fi
+done < <(awk -F '\t' '{print $3}' "$tmp_root/conformance-record.txt")
 for shard_index in 1 2 3; do
   expected="test conformance --timeout 60000 --shard-index $shard_index --shard-total 3"
   if ! grep -Fq "$expected" "$tmp_root/conformance-record.txt"; then

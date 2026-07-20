@@ -25,4 +25,4 @@ trap 'rm -rf -- "$session_store_root"' EXIT
 export HARN_LLM_CALLS_DISABLED=1
 export HARN_SESSION_STORE_ROOT="$session_store_root"
 
-exec "$@"
+"$@"
