@@ -22,8 +22,13 @@
 #
 # Usage: scripts/audit_gates.sh
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
-#   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc)
+#   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc minus conformance
+#                            shards; see headroom note below). Explicit values
+#                            are honored unchanged.
 #   HARN_CONFORMANCE_SHARDS  process shard count (default: min(nproc, 4))
+#   HARN_CONFORMANCE_TIMEOUT_MS
+#                            per-case timeout for conformance shards
+#                            (default: 60000 under this parallel fanout)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -72,7 +77,8 @@ GATES=(
 )
 
 nproc_count() { getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4; }
-concurrency="${AUDIT_GATES_CONCURRENCY:-$(nproc_count)}"
+explicit_audit_concurrency="${AUDIT_GATES_CONCURRENCY-}"
+concurrency="${explicit_audit_concurrency:-$(nproc_count)}"
 case "$concurrency" in
   ''|*[!0-9]*) concurrency="$(nproc_count)" ;;
 esac
@@ -85,6 +91,32 @@ case "$conformance_shards" in
   ''|*[!0-9]*) conformance_shards="$default_shards" ;;
 esac
 [ "$conformance_shards" -lt 1 ] && conformance_shards=1
+
+# Conformance shards and the audit `make -j` fanout share one runner. Process-
+# heavy cases (agent_state_resume_process, autonomy_*, trust_graph_*, trigger_*)
+# already budget ~30s of internal polling for scheduling starvation; when the
+# audit fanout also claims every core, those cases still hit the outer 30s
+# per-case timeout while passing in isolation. Reserve cores for conformance
+# whenever AUDIT_GATES_CONCURRENCY is left unset (CI/default path). Explicit
+# concurrency stays absolute so local scripts/tests keep their knobs.
+if [ -z "$explicit_audit_concurrency" ] && [ "$concurrency" -gt 1 ]; then
+  reserved="$conformance_shards"
+  if [ "$concurrency" -gt "$reserved" ]; then
+    concurrency=$((concurrency - reserved))
+  else
+    concurrency=1
+  fi
+fi
+
+# Parallel audit load needs a looser outer case budget than the CLI default
+# (30s). Helpers in conformance/tests/_common.harn already poll for 30s; the
+# case timeout must exceed that under contention. Override with
+# HARN_CONFORMANCE_TIMEOUT_MS when needed.
+conformance_timeout_ms="${HARN_CONFORMANCE_TIMEOUT_MS:-60000}"
+case "$conformance_timeout_ms" in
+  ''|*[!0-9]*) conformance_timeout_ms=60000 ;;
+esac
+[ "$conformance_timeout_ms" -lt 1000 ] && conformance_timeout_ms=60000
 
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
@@ -170,6 +202,7 @@ for shard_index in $(seq 1 "$conformance_shards"); do
   shard_log="$conformance_log_dir/shard-$shard_index.log"
   (
     HARN_LLM_CALLS_DISABLED=1 "$HARN_BIN" test conformance \
+      --timeout "$conformance_timeout_ms" \
       --shard-index "$shard_index" \
       --shard-total "$conformance_shards"
   ) >"$shard_log" 2>&1 &
