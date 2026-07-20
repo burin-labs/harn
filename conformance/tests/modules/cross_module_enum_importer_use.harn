@@ -1,0 +1,23 @@
+// Regression for harn#5203: the IMPORTING module must be able to construct and
+// `match` an imported enum's variants at runtime, matching `harn check`.
+//
+// Before the fix, the importer's compiler seeded its enum catalog only from its
+// OWN enum declarations, so `ImportedColor.Red(1)` construction and the
+// `ImportedColor.Red(_)` match arms lowered to a bare variable load of the enum
+// name and threw "Undefined variable: ImportedColor" at runtime while `check`
+// reported this file `ok`. The library defines only the enum (no constructor
+// function), so this exercises the importer-side path independently of harn#5062
+// (construction inside an imported function body).
+import { ImportedColor } from "cross_module_enum_importer_use_lib"
+
+pub fn describe(c: ImportedColor) -> string {
+  match c {
+    ImportedColor.Red(_r) -> { return "red" }
+    ImportedColor.Blue(_b) -> { return "blue" }
+  }
+}
+
+pipeline default() {
+  __io_println(describe(ImportedColor.Red(1)))
+  __io_println(describe(ImportedColor.Blue(2)))
+}
