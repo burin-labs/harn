@@ -155,6 +155,7 @@ wat = { version = "1", optional = true }
 tempfile = { version = "3", optional = true }
 wait-timeout = "0.2"
 arcstr = { version = "1", features = ["serde", "std"] }
+similar = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

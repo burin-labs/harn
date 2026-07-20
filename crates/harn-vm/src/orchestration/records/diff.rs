@@ -1,7 +1,9 @@
-//! Myers diff primitives, unified-diff rendering, and the `diff_run_records` comparator.
+//! Unified-diff rendering and the `diff_run_records` comparator.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+
+use crate::text_diff::render_line_diff;
 
 use super::action_graph::derive_run_observability;
 use super::types::{
@@ -9,120 +11,19 @@ use super::types::{
     ToolCallDiffRecord, ToolCallRecord,
 };
 
-/// Edit operation in a diff sequence.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum DiffOp {
-    Equal,
-    Delete,
-    Insert,
-}
-
-/// Compute the shortest edit script using Myers' O(nd) algorithm.
-/// Returns a sequence of (DiffOp, line_index_in_before_or_after).
-/// Time: O(nd) where d = edit distance. Space: O(d * n).
-pub(crate) fn myers_diff(a: &[&str], b: &[&str]) -> Vec<(DiffOp, usize)> {
-    let n = a.len() as isize;
-    let m = b.len() as isize;
-    if n == 0 && m == 0 {
-        return Vec::new();
-    }
-    if n == 0 {
-        return (0..m as usize).map(|j| (DiffOp::Insert, j)).collect();
-    }
-    if m == 0 {
-        return (0..n as usize).map(|i| (DiffOp::Delete, i)).collect();
-    }
-
-    let max_d = (n + m) as usize;
-    let offset = max_d as isize;
-    let v_size = 2 * max_d + 1;
-    let mut v = vec![0isize; v_size];
-    // trace[d] holds the `v` snapshot BEFORE step d ran — required for backtrack.
-    let mut trace: Vec<Vec<isize>> = Vec::new();
-
-    'outer: for d in 0..=max_d as isize {
-        trace.push(v.clone());
-        let mut new_v = v.clone();
-        for k in (-d..=d).step_by(2) {
-            let ki = (k + offset) as usize;
-            // Myers diff: `k == -d` is the bottom boundary, `k != d` is the
-            // top boundary — they're distinct edge cases, not a typo. Same
-            // story for `x < n && y < m`: `n` bounds `a`, `m` bounds `b`.
-            #[allow(clippy::suspicious_operation_groupings)]
-            let mut x = if k == -d || (k != d && v[ki - 1] < v[ki + 1]) {
-                v[ki + 1]
-            } else {
-                v[ki - 1] + 1
-            };
-            let mut y = x - k;
-            #[allow(clippy::suspicious_operation_groupings)]
-            while x < n && y < m && a[x as usize] == b[y as usize] {
-                x += 1;
-                y += 1;
-            }
-            new_v[ki] = x;
-            if x >= n && y >= m {
-                let _ = new_v;
-                break 'outer;
-            }
-        }
-        v = new_v;
-    }
-
-    let mut ops: Vec<(DiffOp, usize)> = Vec::new();
-    let mut x = n;
-    let mut y = m;
-    for d in (1..trace.len() as isize).rev() {
-        let k = x - y;
-        let v_prev = &trace[d as usize];
-        let prev_k = if k == -d
-            || (k != d && v_prev[(k - 1 + offset) as usize] < v_prev[(k + 1 + offset) as usize])
-        {
-            k + 1
-        } else {
-            k - 1
-        };
-        let prev_x = v_prev[(prev_k + offset) as usize];
-        let prev_y = prev_x - prev_k;
-
-        while x > prev_x && y > prev_y {
-            x -= 1;
-            y -= 1;
-            ops.push((DiffOp::Equal, x as usize));
-        }
-        if prev_k < k {
-            x -= 1;
-            ops.push((DiffOp::Delete, x as usize));
-        } else {
-            y -= 1;
-            ops.push((DiffOp::Insert, y as usize));
-        }
-    }
-    while x > 0 && y > 0 {
-        x -= 1;
-        y -= 1;
-        ops.push((DiffOp::Equal, x as usize));
-    }
-    ops.reverse();
-    ops
-}
-
+/// Render a unified diff between two artifact bodies.
+///
+/// Standard unified-diff format: an `a/`--`b/` file header followed by `@@`
+/// hunks with bounded context (see [`crate::text_diff`]). Identical inputs
+/// produce an empty string rather than a header with no hunks, matching
+/// `git diff`.
 pub fn render_unified_diff(path: Option<&str>, before: &str, after: &str) -> String {
-    let before_lines: Vec<&str> = before.lines().collect();
-    let after_lines: Vec<&str> = after.lines().collect();
-    let ops = myers_diff(&before_lines, &after_lines);
-
-    let mut diff = String::new();
-    let file = path.unwrap_or("artifact");
-    diff.push_str(&format!("--- a/{file}\n+++ b/{file}\n"));
-    for &(op, idx) in &ops {
-        match op {
-            DiffOp::Equal => diff.push_str(&format!(" {}\n", before_lines[idx])),
-            DiffOp::Delete => diff.push_str(&format!("-{}\n", before_lines[idx])),
-            DiffOp::Insert => diff.push_str(&format!("+{}\n", after_lines[idx])),
-        }
+    let body = render_line_diff(before, after).body;
+    if body.is_empty() {
+        return String::new();
     }
-    diff
+    let file = path.unwrap_or("artifact");
+    format!("--- a/{file}\n+++ b/{file}\n{body}")
 }
 
 pub fn diff_run_records(left: &RunRecord, right: &RunRecord) -> RunDiffReport {

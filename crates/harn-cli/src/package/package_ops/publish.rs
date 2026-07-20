@@ -2,6 +2,7 @@ use super::*;
 
 use crate::format::shell_quote_path;
 use base64::Engine as _;
+use harn_vm::text_diff::render_line_diff;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PackagePublishOptions<'a> {
@@ -178,7 +179,7 @@ pub(super) fn prepare_publish_plan(
             &index_content,
             &updated,
             &normalized_relative_path(options.index_path),
-        )?;
+        );
         (updated, diff)
     };
 
@@ -796,37 +797,16 @@ pub(super) fn push_toml_string_field(
     Ok(())
 }
 
-pub(super) fn render_unified_diff(
-    old: &str,
-    new: &str,
-    label: &str,
-) -> Result<String, PackageError> {
-    let temp = tempfile::tempdir()
-        .map_err(|error| PackageError::Ops(format!("failed to create temp dir: {error}")))?;
-    let old_path = temp.path().join("old");
-    let new_path = temp.path().join("new");
-    fs::write(&old_path, old).map_err(|error| format!("failed to write diff input: {error}"))?;
-    fs::write(&new_path, new).map_err(|error| format!("failed to write diff input: {error}"))?;
-    let output = process::Command::new("git")
-        .args(["diff", "--no-index", "--"])
-        .arg(&old_path)
-        .arg(&new_path)
-        .output()
-        .map_err(|error| {
-            PackageError::Ops(format!("failed to render package-index diff: {error}"))
-        })?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(PackageError::Ops(format!(
-            "failed to render package-index diff: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )));
+/// Render the package-index change as a unified diff for display in the
+/// publish plan. Display only — the index PR is built from
+/// [`PackagePublishPlan::updated_index_content`], not from this text.
+/// Identical inputs yield an empty string.
+pub(super) fn render_unified_diff(old: &str, new: &str, label: &str) -> String {
+    let body = render_line_diff(old, new).body;
+    if body.is_empty() {
+        return String::new();
     }
-    let mut diff = String::from_utf8_lossy(&output.stdout).into_owned();
-    let old_display = old_path.display().to_string();
-    let new_display = new_path.display().to_string();
-    diff = diff.replace(&format!("--- {old_display}"), &format!("--- a/{label}"));
-    diff = diff.replace(&format!("+++ {new_display}"), &format!("+++ b/{label}"));
-    Ok(diff)
+    format!("--- a/{label}\n+++ b/{label}\n{body}")
 }
 
 pub(super) fn git_output<const N: usize>(
