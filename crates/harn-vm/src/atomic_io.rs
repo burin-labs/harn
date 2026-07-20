@@ -208,21 +208,94 @@ fn replace_temp_file(
     Ok(false)
 }
 
+/// Build a NUL-terminated UTF-16 buffer for `path`, prepending the `\\?\`
+/// extended-length prefix so `MoveFileExW` accepts paths longer than the legacy
+/// 260-char `MAX_PATH`.
+///
+/// std applies this automatically for its own file APIs (`File::open`,
+/// `create_dir_all`), but a hand-rolled `MoveFileExW` call does not, so any
+/// operand over the limit fails with `ERROR_PATH_NOT_FOUND`. Mirroring std's
+/// conservative rules, only drive/UNC-absolute paths already in backslash
+/// normal form are rewritten; a verbatim/device path, a relative path, or one
+/// containing `/`, `.`, or `..` (which a verbatim prefix would treat literally)
+/// is passed through unchanged.
+#[cfg(windows)]
+fn wide_maybe_verbatim(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Component, Prefix};
+
+    fn nul_terminated(mut wide: Vec<u16>) -> Vec<u16> {
+        wide.push(0);
+        wide
+    }
+
+    let raw: Vec<u16> = path.as_os_str().encode_wide().collect();
+    const BACKSLASH: u16 = b'\\' as u16;
+    const SLASH: u16 = b'/' as u16;
+    const QUESTION: u16 = b'?' as u16;
+    const DOT: u16 = b'.' as u16;
+    // Already verbatim (`\\?\`) or a device path (`\\.\`): leave untouched.
+    if raw.starts_with(&[BACKSLASH, BACKSLASH, QUESTION, BACKSLASH])
+        || raw.starts_with(&[BACKSLASH, BACKSLASH, DOT, BACKSLASH])
+    {
+        return nul_terminated(raw);
+    }
+    // A forward slash is a literal filename character under a verbatim prefix,
+    // so such paths are ineligible.
+    if raw.contains(&SLASH) {
+        return nul_terminated(raw);
+    }
+    let mut components = path.components();
+    let is_supported_prefix = matches!(
+        components.next(),
+        Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::UNC(_, _))
+    );
+    if !is_supported_prefix || !matches!(components.next(), Some(Component::RootDir)) {
+        return nul_terminated(raw);
+    }
+    // `.`/`..` components would resolve literally under a verbatim prefix.
+    if components.any(|component| !matches!(component, Component::Normal(_))) {
+        return nul_terminated(raw);
+    }
+    // Re-read the prefix kind to choose the correct verbatim form.
+    let prefix_kind = path
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Prefix(prefix) => Some(prefix.kind()),
+            _ => None,
+        });
+    let prefixed = match prefix_kind {
+        // `C:\...` -> `\\?\C:\...`
+        Some(Prefix::Disk(_)) => {
+            let mut out: Vec<u16> = r"\\?\".encode_utf16().collect();
+            out.extend_from_slice(&raw);
+            out
+        }
+        // `\\server\share\...` -> `\\?\UNC\server\share\...` (drop one leading `\`)
+        Some(Prefix::UNC(_, _)) => {
+            let mut out: Vec<u16> = r"\\?\UNC".encode_utf16().collect();
+            out.extend_from_slice(&raw[1..]);
+            out
+        }
+        _ => raw,
+    };
+    nul_terminated(prefixed)
+}
+
 #[cfg(windows)]
 fn replace_temp_file(
     temp: &Path,
     destination: &Path,
     durability: AtomicWriteDurability,
 ) -> io::Result<bool> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
-    let mut temp_wide: Vec<u16> = temp.as_os_str().encode_wide().collect();
-    temp_wide.push(0);
-    let mut destination_wide: Vec<u16> = destination.as_os_str().encode_wide().collect();
-    destination_wide.push(0);
+    let temp_wide = wide_maybe_verbatim(temp);
+    let destination_wide = wide_maybe_verbatim(destination);
     let mut flags = MOVEFILE_REPLACE_EXISTING;
     if durability == AtomicWriteDurability::Flush {
         flags |= MOVEFILE_WRITE_THROUGH;

@@ -11,8 +11,12 @@
   lagging handle close briefly holding a destination open no longer fails a
   durable write of transcripts, run records, snapshots, or other persistent
   state.
-- Bound the length of `harn_vm::atomic_io`'s temporary sibling file so it can no
-  longer be longer than the destination it replaces. A destination that fits
-  under Windows' 260-char `MAX_PATH` (for example a deeply nested filesystem
-  snapshot body) previously produced a temp path that overflowed it, failing the
-  write with a path-not-found error.
+- Make `harn_vm::atomic_io` durable writes robust to long Windows paths. The
+  temp sibling's name is now bounded so it can never be longer than the
+  destination it replaces (its previous name embedded the full destination name,
+  so a destination that fits under the 260-char `MAX_PATH` could still produce an
+  overflowing temp path), and the atomic replace now applies the `\\?\`
+  extended-length prefix to its `MoveFileExW` operands — matching what the
+  standard library already does for its own file APIs — so a destination longer
+  than `MAX_PATH` (for example a deeply nested filesystem snapshot body) no
+  longer fails with a path-not-found error.
