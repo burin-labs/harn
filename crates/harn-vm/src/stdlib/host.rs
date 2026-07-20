@@ -461,29 +461,13 @@ fn host_operation_is_registered(capability: &str, operation: &str) -> bool {
         })
 }
 
-fn edit_distance(a: &str, b: &str) -> usize {
-    let mut previous: Vec<usize> = (0..=b.chars().count()).collect();
-    let mut current = vec![0; previous.len()];
-    for (i, ca) in a.chars().enumerate() {
-        current[0] = i + 1;
-        for (j, cb) in b.chars().enumerate() {
-            let substitution = previous[j] + usize::from(ca != cb);
-            let insertion = current[j] + 1;
-            let deletion = previous[j + 1] + 1;
-            current[j + 1] = substitution.min(insertion).min(deletion);
-        }
-        std::mem::swap(&mut previous, &mut current);
-    }
-    previous[b.chars().count()]
-}
-
 fn closest_host_operation(capability: &str, operation: &str) -> Option<(String, String)> {
     let requested = format!("{capability}.{operation}");
     known_host_operations()
         .into_iter()
         .map(|(candidate_capability, candidate_operation)| {
             let candidate = format!("{candidate_capability}.{candidate_operation}");
-            let distance = edit_distance(&requested, &candidate);
+            let distance = strsim::levenshtein(&requested, &candidate);
             (distance, candidate_capability, candidate_operation)
         })
         .filter(|(distance, _, _)| *distance <= 4)

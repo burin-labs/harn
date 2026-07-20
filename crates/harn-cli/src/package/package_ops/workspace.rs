@@ -107,7 +107,7 @@ impl PackageWorkspace {
             }
         }
 
-        if let Some((manifest, manifest_dir)) = find_nearest_manifest(&self.manifest_dir) {
+        if let Some((manifest, manifest_dir)) = nearest_manifest_or_warn(&self.manifest_dir) {
             if let Some(raw) = manifest
                 .registry
                 .url

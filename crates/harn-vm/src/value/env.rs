@@ -564,24 +564,6 @@ impl VmEnv {
     }
 }
 
-/// Compute Levenshtein edit distance between two strings.
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let (m, n) = (a.len(), b.len());
-    let mut prev = (0..=n).collect::<Vec<_>>();
-    let mut curr = vec![0; n + 1];
-    for i in 1..=m {
-        curr[0] = i;
-        for j in 1..=n {
-            let cost = usize::from(a[i - 1] != b[j - 1]);
-            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[n]
-}
-
 /// Find the closest match from a list of candidates using Levenshtein distance.
 /// Returns `Some(suggestion)` if a candidate is within `max_dist` edits.
 pub fn closest_match<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<String> {
@@ -592,7 +574,7 @@ pub fn closest_match<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) 
     };
     candidates
         .filter(|c| *c != name && !c.starts_with("__"))
-        .map(|c| (c, levenshtein(name, c)))
+        .map(|c| (c, strsim::levenshtein(name, c)))
         .filter(|(_, d)| *d <= max_dist)
         // Prefer smallest distance, then closest length to original, then alphabetical
         .min_by(|(a, da), (b, db)| {

@@ -11,7 +11,7 @@ pub(crate) fn load_manifest_context_for_anchor(
     } else if anchor.file_name() == Some(OsStr::new(MANIFEST)) {
         anchor
     } else {
-        let (_, dir) = find_nearest_manifest(&anchor)
+        let dir = find_nearest_manifest_dir(&anchor)
             .ok_or_else(|| format!("no {MANIFEST} found from {}", anchor.display()))?;
         dir.join(MANIFEST)
     };

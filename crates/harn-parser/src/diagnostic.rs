@@ -63,24 +63,6 @@ pub fn normalize_diagnostic_path(path: &str) -> String {
     }
 }
 
-/// Compute the Levenshtein edit distance between two strings.
-pub fn edit_distance(a: &str, b: &str) -> usize {
-    let a_chars: Vec<char> = a.chars().collect();
-    let b_chars: Vec<char> = b.chars().collect();
-    let n = b_chars.len();
-    let mut prev = (0..=n).collect::<Vec<_>>();
-    let mut curr = vec![0; n + 1];
-    for (i, ac) in a_chars.iter().enumerate() {
-        curr[0] = i + 1;
-        for (j, bc) in b_chars.iter().enumerate() {
-            let cost = usize::from(ac != bc);
-            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
-        }
-        std::mem::swap(&mut prev, &mut curr);
-    }
-    prev[n]
-}
-
 fn has_same_snake_case_segments(a: &str, b: &str) -> bool {
     if !a.contains('_') || !b.contains('_') {
         return false;
@@ -114,7 +96,7 @@ pub fn find_closest_match<'a>(
             if candidate.len().abs_diff(name.len()) > max_dist && !reordered {
                 return None;
             }
-            let distance = edit_distance(name, candidate);
+            let distance = strsim::levenshtein(name, candidate);
             (distance <= max_dist || reordered).then_some((distance, candidate))
         })
         .min_by_key(|(distance, _)| *distance)

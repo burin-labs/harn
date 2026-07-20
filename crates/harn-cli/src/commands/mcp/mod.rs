@@ -948,22 +948,16 @@ fn resolve_server_reference(server_ref: &McpServerRefArgs) -> Result<ResolvedMcp
 }
 
 fn find_manifest() -> Result<(PathBuf, package::Manifest), String> {
-    let mut dir =
+    let cwd =
         env::current_dir().map_err(|error| format!("Failed to read current directory: {error}"))?;
-    loop {
-        let manifest_path = dir.join("harn.toml");
-        if manifest_path.is_file() {
-            let content = fs::read_to_string(&manifest_path)
-                .map_err(|error| format!("Failed to read {}: {error}", manifest_path.display()))?;
-            let manifest = toml::from_str::<package::Manifest>(&content)
-                .map_err(|error| format!("Failed to parse {}: {error}", manifest_path.display()))?;
-            return Ok((manifest_path, manifest));
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
-    Err("No harn.toml found in the current directory or its parents".to_string())
+    let Some(found) = harn_modules::manifest_walk::find_nearest_manifest(&cwd) else {
+        return Err("No harn.toml found in the current directory or its parents".to_string());
+    };
+    let content = fs::read_to_string(&found.path)
+        .map_err(|error| format!("Failed to read {}: {error}", found.path.display()))?;
+    let manifest = toml::from_str::<package::Manifest>(&content)
+        .map_err(|error| format!("Failed to parse {}: {error}", found.path.display()))?;
+    Ok((found.path, manifest))
 }
 
 fn canonical_server_resource(server_url: &str) -> Result<String, String> {

@@ -1,107 +1,13 @@
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::text::case::{
+    lowercase_first, split_camel, split_kebab, split_snake, uppercase_first, words_to_camel,
+    words_to_kebab, words_to_pascal, words_to_snake,
+};
 use crate::value::VmDictExt;
 use crate::value::{string_char_count, values_equal, VmError, VmValue};
 use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
-
-fn split_snake(s: &str) -> Vec<&str> {
-    s.split('_').filter(|p| !p.is_empty()).collect()
-}
-
-fn split_kebab(s: &str) -> Vec<&str> {
-    s.split('-').filter(|p| !p.is_empty()).collect()
-}
-
-/// Splits a camelCase or PascalCase string into lowercase words.
-/// `"HTTPServer"` → `["http", "server"]`.
-/// `"testFilePatterns"` → `["test", "file", "patterns"]`.
-fn split_camel(s: &str) -> Vec<String> {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.is_empty() {
-        return Vec::new();
-    }
-    let mut words = Vec::new();
-    let mut cur = String::new();
-    for i in 0..chars.len() {
-        let c = chars[i];
-        if i > 0 && c.is_uppercase() {
-            let prev = chars[i - 1];
-            let next = chars.get(i + 1).copied();
-            let prev_lower_or_digit = prev.is_lowercase() || prev.is_ascii_digit();
-            let acronym_end = prev.is_uppercase() && next.is_some_and(|n| n.is_lowercase());
-            if (prev_lower_or_digit || acronym_end) && !cur.is_empty() {
-                words.push(cur.clone());
-                cur.clear();
-            }
-        }
-        for lc in c.to_lowercase() {
-            cur.push(lc);
-        }
-    }
-    if !cur.is_empty() {
-        words.push(cur);
-    }
-    words
-}
-
-fn uppercase_first_str(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
-fn lowercase_first_str(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
-fn words_to_camel<S: AsRef<str>>(words: &[S]) -> String {
-    let mut out = String::new();
-    for (i, w) in words.iter().enumerate() {
-        let lower = w.as_ref().to_lowercase();
-        if i == 0 {
-            out.push_str(&lower);
-        } else {
-            out.push_str(&uppercase_first_str(&lower));
-        }
-    }
-    out
-}
-
-fn words_to_pascal<S: AsRef<str>>(words: &[S]) -> String {
-    words
-        .iter()
-        .map(|w| uppercase_first_str(&w.as_ref().to_lowercase()))
-        .collect()
-}
-
-fn words_to_snake<S: AsRef<str>>(words: &[S]) -> String {
-    let mut out = String::new();
-    for (i, w) in words.iter().enumerate() {
-        if i > 0 {
-            out.push('_');
-        }
-        out.push_str(&w.as_ref().to_lowercase());
-    }
-    out
-}
-
-fn words_to_kebab<S: AsRef<str>>(words: &[S]) -> String {
-    let mut out = String::new();
-    for (i, w) in words.iter().enumerate() {
-        if i > 0 {
-            out.push('-');
-        }
-        out.push_str(&w.as_ref().to_lowercase());
-    }
-    out
-}
 
 use crate::stdlib::template::{
     render_asset_result, render_asset_with_provenance_result, render_template_result,
@@ -587,17 +493,13 @@ fn kebab_to_snake_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(sig = "pascal_to_camel(text: string?) -> string", category = "strings")]
 fn pascal_to_camel_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first_str(
-        &s,
-    ))))
+    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first(&s))))
 }
 
 #[harn_builtin(sig = "camel_to_pascal(text: string?) -> string", category = "strings")]
 fn camel_to_pascal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first_str(
-        &s,
-    ))))
+    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first(&s))))
 }
 
 #[harn_builtin(sig = "title_case(text: string?) -> string", category = "strings")]
@@ -622,17 +524,13 @@ fn title_case_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(sig = "uppercase_first(text: string?) -> string", category = "strings")]
 fn uppercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first_str(
-        &s,
-    ))))
+    Ok(VmValue::String(arcstr::ArcStr::from(uppercase_first(&s))))
 }
 
 #[harn_builtin(sig = "lowercase_first(text: string?) -> string", category = "strings")]
 fn lowercase_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first_str(
-        &s,
-    ))))
+    Ok(VmValue::String(arcstr::ArcStr::from(lowercase_first(&s))))
 }
 
 #[harn_builtin(sig = "dirname(path: string?) -> string", category = "strings")]

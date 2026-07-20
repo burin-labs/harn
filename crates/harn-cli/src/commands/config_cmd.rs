@@ -9,8 +9,7 @@ use crate::{
 };
 
 const PROJECT_CONFIG: &str = "harn.config.toml";
-const MANIFEST: &str = "harn.toml";
-const MAX_PARENT_DIRS: usize = 16;
+const MANIFEST: &str = harn_modules::manifest_walk::MANIFEST_FILENAME;
 
 pub(crate) async fn run(args: ConfigArgs) -> Result<(), String> {
     match args.command {
@@ -434,33 +433,10 @@ fn discovered_validation_files() -> Vec<PathBuf> {
     files
 }
 
+/// Locate the nearest ancestor file named `name` via the shared
+/// [`manifest_walk`](harn_modules::manifest_walk) walk. Returns its path.
 fn find_nearest_named(start: &Path, name: &str) -> Option<PathBuf> {
-    let base = if start.is_absolute() {
-        start.to_path_buf()
-    } else {
-        env::current_dir().ok()?.join(start)
-    };
-    let mut cursor = if base.is_dir() {
-        Some(base)
-    } else {
-        base.parent().map(Path::to_path_buf)
-    };
-    let mut steps = 0usize;
-    while let Some(dir) = cursor {
-        if steps >= MAX_PARENT_DIRS {
-            break;
-        }
-        steps += 1;
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        if dir.join(".git").exists() {
-            break;
-        }
-        cursor = dir.parent().map(Path::to_path_buf);
-    }
-    None
+    harn_modules::manifest_walk::find_nearest_ancestor(start, name).map(|found| found.path)
 }
 
 fn redacted_url(value: &str) -> String {

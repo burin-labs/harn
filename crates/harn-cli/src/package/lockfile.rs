@@ -1043,7 +1043,7 @@ pub(crate) fn validate_lock_matches_manifest(
 }
 
 pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), PackageError> {
-    let Some((manifest, dir)) = find_nearest_manifest(anchor) else {
+    let Some((manifest, dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(());
     };
     let ctx = ManifestContext { manifest, dir };
