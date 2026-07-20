@@ -191,7 +191,7 @@ pub type AgentLoopOptions = {
   audio?: bool,
   pdf?: bool,
   video?: bool,
-  tools?: list | dict,
+  tools?: list | ToolRegistry,
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,
   tool_format?: string,
@@ -354,3 +354,5 @@ import { LlmCallerTransport } from "std/agent/caller_transport"
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 
 import { AgentLoopRetryOptions } from "std/agent/retry"
+
+import { ToolRegistry } from "std/tools"

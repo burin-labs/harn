@@ -1,4 +1,4 @@
-import "std/tools"
+import { ToolDefinitionSpec, ToolRegistry, tool_define_many, tool_registry_from } from "std/tools"
 
 pipeline test(task) {
   const specs: list<ToolDefinitionSpec> = [

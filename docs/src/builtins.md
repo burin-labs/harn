@@ -2255,22 +2255,24 @@ Low-level tool management functions for building and inspecting tool
 registries programmatically. For MCP serving, see the `tool_define` /
 `mcp_tools` API above.
 
-For declarative batches, `import { tool_define_many, tool_registry_from } from
-"std/tools"`. `tool_define_many(registry, specs: list<ToolDefinitionSpec>)`
-adds typed `{name, description, parameters, handler, ...}` specs to a
-`ToolRegistry`, and `tool_registry_from(specs)` creates a fresh registry from
-the same shape.
+For declarative batches, `import { ToolRegistry, ToolDefinitionSpec,
+tool_define_many, tool_registry_from } from "std/tools"`.
+`tool_define_many(registry, specs: list<ToolDefinitionSpec>)` adds typed
+`{name, description, parameters, handler, ...}` specs to a `ToolRegistry`, and
+`tool_registry_from(specs)` creates a fresh registry from the same shape.
+Packages that forward registries should name `ToolRegistry` on public
+boundaries instead of `dict` or a local structural copy.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `tool_remove(registry, name)` | registry, name: string | dict | Remove a tool by name |
-| `tool_list(registry)` | registry: dict | list | List tools as `[{name, description, parameters}]` |
-| `tool_find(registry, name)` | registry, name: string | dict or nil | Find a tool entry by name |
-| `tool_select(registry, names)` | registry: dict, names: list | dict | Return a registry containing only the named tools |
-| `tool_count(registry)` | registry: dict | int | Number of tools in the registry |
-| `tool_describe(registry)` | registry: dict | string | Human-readable summary of all tools |
-| `tool_schema(registry, components?)` | registry, components: dict | dict | Generate JSON Schema for all tools |
-| `tool_prompt(registry)` | registry: dict | string | Generate an LLM system prompt describing available tools |
+| `tool_remove(registry, name)` | registry: `ToolRegistry`, name: string | `ToolRegistry` | Remove a tool by name |
+| `tool_list(registry)` | registry: `ToolRegistry` | list | List tools as `[{name, description, parameters}]` |
+| `tool_find(registry, name)` | registry: `ToolRegistry`, name: string | dict or nil | Find a tool entry by name |
+| `tool_select(registry, names)` | registry: `ToolRegistry`, names: list | `ToolRegistry` | Return a registry containing only the named tools |
+| `tool_count(registry)` | registry: `ToolRegistry` | int | Number of tools in the registry |
+| `tool_describe(registry)` | registry: `ToolRegistry` | string | Human-readable summary of all tools |
+| `tool_schema(registry, components?)` | registry: `ToolRegistry`, components: dict | dict | Generate JSON Schema for all tools |
+| `tool_prompt(registry)` | registry: `ToolRegistry` | string | Generate an LLM system prompt describing available tools |
 | `tool_parse_call(text)` | text: string | list | Parse `<tool_call>...</tool_call>` XML from LLM output |
 | `tool_format_result(name, result)` | name, result: string | string | Format a `<tool_result>` XML envelope |
 
@@ -2582,8 +2584,8 @@ tool registry dict.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `tool_registry()` | — | tool registry | Create an empty `{_type: "tool_registry", tools: []}` registry |
-| `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
+| `tool_registry()` | — | `ToolRegistry` | Create an empty `{_type: "tool_registry", tools: []}` registry (`ToolRegistry` is exported from `std/tools`) |
+| `tool_define(registry, name, desc, config)` | registry: `ToolRegistry`, name, desc: string, config: dict | `ToolRegistry` | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
 | `tool_define_many(registry, specs)` | registry: `ToolRegistry`, specs: `list<ToolDefinitionSpec>` | `ToolRegistry` | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
 | `tool_registry_from(specs)` | specs: `list<ToolDefinitionSpec>` | `ToolRegistry` | Stdlib helper from `std/tools`; create a registry from declarative tool specs |
 | `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |

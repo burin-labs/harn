@@ -1,4 +1,11 @@
-type ToolRegistry = {_type: "tool_registry", tools: list<dict>}
+/**
+ * Registry value produced by `tool_registry()` / `tool_define(...)`.
+ *
+ * Packages that accept or forward registries through typed public APIs
+ * should import this alias from `std/tools` instead of `dict` or a local
+ * structural copy.
+ */
+pub type ToolRegistry = {_type: "tool_registry", tools: list<dict>}
 
 type ToolDefinitionConfig = {
   parameters?: dict,
@@ -15,13 +22,15 @@ type ToolDefinitionConfig = {
 }
 
 /**
- * System-prompt guidance co-located with the tool. When this tool is
+ * Declarative tool spec accepted by `tool_define_many` / `tool_registry_from`.
+ *
+ * System-prompt `guidance` is co-located with the tool. When this tool is
  * present in the active tool set, the runtime auto-injects this text as a
  * capability-gated system-prompt fragment (gated on the tool's own
  * presence), so instruction and tool can never drift. Omit it and the
  * instruction never appears. See docs/src/prompt-assembly.md.
  */
-type ToolDefinitionSpec = {
+pub type ToolDefinitionSpec = {
   name: string,
   description?: string,
   desc?: string,
@@ -92,18 +101,12 @@ fn __tool_spec_config(spec: ToolDefinitionSpec) -> ToolDefinitionConfig {
  * @effects: []
  * @errors: []
  */
-pub fn tool_define_many(registry, specs: list<ToolDefinitionSpec>? = nil) -> ToolRegistry {
-  let target = registry
-  let items = specs
-  if items == nil {
-    target = tool_registry()
-    items = registry
-  }
-  if type_of(items) != "list" {
+pub fn tool_define_many(registry: ToolRegistry, specs: list<ToolDefinitionSpec>) -> ToolRegistry {
+  if type_of(specs) != "list" {
     throw "tool_define_many: specs must be a list"
   }
-  let tools = target ?? tool_registry()
-  for spec in items {
+  let tools = registry ?? tool_registry()
+  for spec in specs {
     const name = spec.name
     const description = spec.description ?? spec.desc
     if name == nil || name == "" {

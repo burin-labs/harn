@@ -104,6 +104,10 @@ keeps condensed series summaries instead of full per-patch history.
 
 ### Changed
 
+- **`ToolRegistry` is a public `std/tools` alias (#5294).** Packages can import
+  the registry type returned by `tool_registry()`, use it on public function
+  boundaries, and pass it through typed tool helpers and agent/LLM option
+  surfaces without widening to `dict`/`any` or copying the registry shape.
 - **Background command readiness is event-driven (#5270).** `std/command`
   can wait for a literal or regex in stdout, stderr, or combined output and
   return deterministic byte offsets plus the latest normalized command state.

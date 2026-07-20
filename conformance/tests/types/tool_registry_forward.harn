@@ -1,0 +1,29 @@
+/**
+ * A package can import `ToolRegistry`, accept/return it on a public function
+ * boundary, bind tools through stdlib helpers, and pass the result into
+ * typed agent options — without `dict`, `any`, or a duplicated local record.
+ */
+import { AgentLoopOptions, agent_options } from "std/agent/options"
+import { ToolDefinitionSpec, ToolRegistry, tool_define_many } from "std/tools"
+import { with_ping_tool } from "tool_registry_forward_lib"
+
+pipeline test(task) {
+  const base: ToolRegistry = tool_registry()
+  const pinged: ToolRegistry = with_ping_tool(base)
+  const specs: list<ToolDefinitionSpec> = [
+    {
+      name: "echo",
+      description: "Echo text",
+      parameters: {text: {type: "string"}},
+      handler: { args -> args.text },
+    },
+  ]
+  const tools: ToolRegistry = tool_define_many(pinged, specs)
+  // Typed agent options accept the imported registry alias on `tools:`.
+  const opts: AgentLoopOptions = agent_options({provider: "mock", tools: tools})
+  assert(opts.tools != nil, "agent options retained the forwarded registry")
+  assert(tool_count(tools) == 2, "forwarded registry keeps both tools")
+  assert(tool_find(tools, "ping") != nil, "package boundary preserved ping")
+  assert(tool_find(tools, "echo") != nil, "stdlib binding preserved echo")
+  log("tool_registry_forward ok count=" + to_string(tool_count(tools)))
+}
