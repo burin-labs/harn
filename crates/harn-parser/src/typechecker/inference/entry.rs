@@ -12,7 +12,8 @@ use crate::ast::*;
 use crate::diagnostic_codes::Code;
 
 use super::super::scope::{
-    EnumDeclInfo, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo, TypeScope,
+    DeclOrigin, EnumDeclInfo, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
+    TypeScope,
 };
 use super::super::{InlayHintInfo, TypeChecker, TypeDiagnostic};
 use super::decls::CallableDeclarationContext;
@@ -29,12 +30,16 @@ impl TypeChecker {
         // any further `make_mut` would copy — but at that point we don't
         // mutate `self.scope` directly, only its children.
         let scope_mut = Rc::make_mut(&mut self.scope);
-        Self::register_declarations_into(scope_mut, &self.imported_type_decls);
+        Self::register_declarations_into(
+            scope_mut,
+            &self.imported_type_decls,
+            DeclOrigin::Imported,
+        );
         Self::register_imported_callable_signatures_into(scope_mut, &self.imported_callable_decls);
         // First pass: collect declarations (type/enum/struct/interface) into scope
         // before type-checking bodies so forward references resolve.
         for nodes in crate::lexical::module_scope_node_slices(program) {
-            Self::register_declarations_into(scope_mut, nodes);
+            Self::register_declarations_into(scope_mut, nodes, DeclOrigin::Local);
         }
         // Pre-register every top-level `fn`/`pipeline`/`tool` name so a
         // caller earlier in the file can reference a callable defined
@@ -406,7 +411,7 @@ impl TypeChecker {
     }
 
     /// Register type, enum, interface, and struct declarations from AST nodes into a scope.
-    fn register_declarations_into(scope: &mut TypeScope, nodes: &[SNode]) {
+    fn register_declarations_into(scope: &mut TypeScope, nodes: &[SNode], origin: DeclOrigin) {
         for snode in nodes {
             let (_, decl) = peel_attributes(snode);
             match &decl.node {
@@ -435,6 +440,7 @@ impl TypeChecker {
                         EnumDeclInfo {
                             type_params: type_params.clone(),
                             variants: variants.clone(),
+                            origin,
                         },
                     );
                 }

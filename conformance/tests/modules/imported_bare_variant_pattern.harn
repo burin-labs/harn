@@ -1,0 +1,24 @@
+// Regression for harn#5268: a bare (unqualified) match pattern naming an
+// IMPORTED enum's variant must be rejected by the checker.
+//
+// The VM resolves bare variant patterns against a compile-time catalog seeded
+// only from the compiling module's own enum declarations. Seeding an imported
+// module's whole variant surface into that catalog is unsafe — it would capture
+// ordinary identifiers — so imported variants must be written qualified.
+//
+// Before the fix this file drew only a `HARN-LNT-022` *warning* ("function
+// `Circle` is not defined"), passed `harn check`, and then failed at runtime
+// with "Undefined variable: _r" because the arm lowered to a call instead of a
+// pattern. Now the checker rejects it up front and names the qualified form.
+import { ImportedShape } from "imported_bare_variant_pattern_lib"
+
+pub fn describe(s: ImportedShape) -> string {
+  match s {
+    Circle(_r) -> { return "circle" }
+    Square(_w) -> { return "square" }
+  }
+}
+
+pipeline default() {
+  __io_println(describe(ImportedShape.Circle(1)))
+}

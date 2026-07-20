@@ -112,7 +112,19 @@ impl TypeChecker {
             Node::FunctionCall { name, .. } => {
                 let catalog = scope.lexical_match_pattern_catalog();
                 match catalog.resolve_bare_variant(name) {
-                    crate::lexical::BareVariantResolution::Unique(_) => {}
+                    crate::lexical::BareVariantResolution::Unique(owner) => {
+                        // The VM resolves bare variants only against locally
+                        // declared enums, so accepting an imported one here
+                        // would pass `harn check` and then fail at runtime.
+                        if scope
+                            .get_enum(owner)
+                            .is_some_and(|info| info.origin == DeclOrigin::Imported)
+                        {
+                            let message =
+                                crate::lexical::imported_bare_variant_message(name, owner);
+                            self.error_at(Code::InvalidMatchPattern, message, pattern.span);
+                        }
+                    }
                     crate::lexical::BareVariantResolution::Ambiguous(owners) => self.error_at(
                         Code::InvalidMatchPattern,
                         crate::lexical::ambiguous_bare_variant_message(name, owners),

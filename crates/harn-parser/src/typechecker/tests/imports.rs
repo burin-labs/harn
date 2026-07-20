@@ -175,3 +175,128 @@ pipeline caller(task) {
         "expected imported pipeline argument error, got: {errors:?}"
     );
 }
+
+/// The VM resolves bare variant patterns only against locally declared enums,
+/// so an imported bare variant must be rejected at check time rather than
+/// passing the checker and failing in the runtime.
+#[test]
+fn bare_imported_variant_pattern_requires_qualification() {
+    let imported = parse_program(r"pub enum Shape { Circle(radius: int) Square(width: int) }");
+    let program = parse_program(
+        r#"
+fn describe(s: Shape) -> string {
+  match s {
+    Circle(_r) -> { return "circle" }
+    Square(_w) -> { return "square" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.iter().any(
+            |error| error.contains("names a variant of imported enum `Shape`")
+                && error.contains("`Shape.Circle(...)`")
+        ),
+        "expected a qualification error for the imported bare variant, got: {errors:?}"
+    );
+}
+
+#[test]
+fn qualified_imported_variant_pattern_is_accepted() {
+    let imported = parse_program(r"pub enum Shape { Circle(radius: int) Square(width: int) }");
+    let program = parse_program(
+        r#"
+fn describe(s: Shape) -> string {
+  match s {
+    Shape.Circle(_r) -> { return "circle" }
+    Shape.Square(_w) -> { return "square" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "qualified imported variant patterns are valid: {errors:?}"
+    );
+}
+
+/// A locally declared enum keeps the bare form: its variants are in the VM's
+/// compile-time catalog, so check and runtime agree.
+#[test]
+fn bare_local_variant_pattern_is_accepted_alongside_imports() {
+    let imported = parse_program(r"pub enum Other { Thing(id: int) }");
+    let program = parse_program(
+        r#"
+enum Shape { Circle(radius: int) Square(width: int) }
+
+fn describe(s: Shape) -> string {
+  match s {
+    Circle(_r) -> { return "circle" }
+    Square(_w) -> { return "square" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "bare local variant patterns stay valid: {errors:?}"
+    );
+}
+
+/// A local enum shadowing an imported name is registered last, so its origin
+/// wins and the bare form stays legal.
+#[test]
+fn local_enum_shadowing_an_imported_one_allows_bare_patterns() {
+    let imported = parse_program(r"pub enum Shape { Circle(radius: int) }");
+    let program = parse_program(
+        r#"
+enum Shape { Circle(radius: int) }
+
+fn describe(s: Shape) -> string {
+  match s {
+    Circle(_r) -> { return "circle" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "a local enum shadowing an import keeps bare patterns legal: {errors:?}"
+    );
+}
