@@ -23,5 +23,18 @@ pipeline test(task) {
     "alpha beta\ngamma delta",
     "word_wrap preserves paragraphs under the limit",
   )
+  // word_wrap measures terminal columns, not graphemes: a CJK glyph and an
+  // emoji each occupy two columns, so fewer fit per line than a grapheme
+  // count would have allowed. This is a deliberate behavior change.
+  assert_eq(
+    word_wrap("日 本 語 で", 5),
+    "日 本\n語 で",
+    "word_wrap counts CJK glyphs as two columns",
+  )
+  assert_eq(word_wrap("🚀 🚀 🚀", 5), "🚀 🚀\n🚀", "word_wrap counts an emoji as two columns")
+  // A combining mark adds no width: "café" is e + a combining acute,
+  // five code points but four columns, so both words share a nine-column
+  // line where a naive code-point count (five each) would have split them.
+  assert_eq(word_wrap("café café", 9), "café café", "word_wrap ignores zero-width combining marks")
   log("string helpers: all tests passed")
 }

@@ -2,12 +2,14 @@ use std::collections::BTreeMap;
 
 use harn_lexer::{Lexer, Span, Token, TokenKind};
 
+use crate::helpers::text_width;
+
 /// A physical output line that exceeds the configured formatter width.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineWidthViolation {
     /// One-based physical line number.
     pub line: usize,
-    /// Number of Unicode scalar values on the line.
+    /// Terminal columns occupied by the line.
     pub width: usize,
     /// The complete physical line, without its line ending.
     pub text: String,
@@ -61,7 +63,7 @@ pub fn line_width_violations(source: &str, line_width: usize) -> Vec<LineWidthVi
         .enumerate()
         .filter_map(|(index, line)| {
             let line_number = index + 1;
-            let width = line.chars().count();
+            let width = text_width(line);
             (width > line_width
                 && !line_is_comment_only_overflow(source, line, line_number, line_width, &comments)
                 && !line_is_inside_unbreakable_token(line_number, &unbreakable_tokens)
@@ -81,7 +83,7 @@ fn physical_line_violations(source: &str, line_width: usize) -> Vec<LineWidthVio
         .lines()
         .enumerate()
         .filter_map(|(index, line)| {
-            let width = line.chars().count();
+            let width = text_width(line);
             (width > line_width).then(|| LineWidthViolation {
                 line: index + 1,
                 width,
@@ -115,7 +117,7 @@ fn line_is_comment_only_overflow(
 
         let start_column = span.column.saturating_sub(1);
         let code_prefix = line.chars().take(start_column).collect::<String>();
-        if code_prefix.chars().count() > line_width {
+        if text_width(&code_prefix) > line_width {
             return false;
         }
 
@@ -211,6 +213,39 @@ mod tests {
         let violations = line_width_violations("let value = one + two + three\n", 10);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].line, 1);
+    }
+
+    /// A line holding a string literal is exempt from the width guard, so this
+    /// exercises the unlexable path (unterminated literal), where every
+    /// physical overflow is reported and the measurement is not short-circuited.
+    #[test]
+    fn measures_overflow_in_columns_not_bytes_or_chars() {
+        // The line is 21 chars, 31 bytes, and 26 columns wide. A budget of 24
+        // separates chars from columns: a `char` count sees it as fitting,
+        // a column count does not.
+        let source = "let greeting = \"日本語です\n";
+        let line = source.lines().next().unwrap();
+        assert_eq!(line.chars().count(), 21);
+        assert_eq!(line.len(), 31);
+
+        let violations = line_width_violations(source, 24);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].width, 26);
+
+        // And a budget of 28 separates columns from bytes: the byte length
+        // overflows it, the true column width does not.
+        assert!(line_width_violations(source, 28).is_empty());
+    }
+
+    #[test]
+    fn measures_emoji_as_double_width() {
+        // Each emoji scalar occupies two columns: 14 chars, 20 bytes, 16 cols.
+        let source = "let flag = \"🚀🚀\n";
+        let violations = line_width_violations(source, 15);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].width, 16);
+        // A `char` count would have called this line 14 wide and let it pass.
+        assert!(line_width_violations(source, 18).is_empty());
     }
 
     #[test]
