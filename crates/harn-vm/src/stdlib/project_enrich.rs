@@ -1,3 +1,4 @@
+use crate::canonical_json;
 use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -96,10 +97,13 @@ async fn project_enrich_impl(
     let bindings = enrichment_bindings(&root, &enriched_evidence, &relevant_files);
     let rendered_prompt = render_template_result(&options.prompt, Some(&bindings), None, None)
         .map_err(VmError::from)?;
-    let schema_hash = sha256_hex(canonical_json(&vm_value_to_json(&options.schema)));
+    // `canonical_schema` is reused by the token estimate below.
+    let canonical_schema = canonical_json::to_string(&vm_value_to_json(&options.schema));
+    let canonical_evidence = canonical_json::to_string(&vm_value_to_json(&enriched_evidence));
+    let schema_hash = sha256_hex(&canonical_schema);
     let prompt_hash = sha256_hex(rendered_prompt.as_bytes());
     let content_hash = hash_relevant_files(&relevant_files);
-    let evidence_hash = sha256_hex(canonical_json(&vm_value_to_json(&enriched_evidence)));
+    let evidence_hash = sha256_hex(&canonical_evidence);
     let cache_path = cache_file_path(
         &root,
         options.cache_dir.as_deref(),
@@ -118,8 +122,8 @@ async fn project_enrich_impl(
         ));
     }
 
-    let estimated_input_tokens = estimate_tokens(&rendered_prompt)
-        + estimate_tokens(&canonical_json(&vm_value_to_json(&options.schema)));
+    let estimated_input_tokens =
+        estimate_tokens(&rendered_prompt) + estimate_tokens(&canonical_schema);
     if estimated_input_tokens > options.budget_tokens {
         let mut budget_result = (*base_dict).clone();
         budget_result.insert(
@@ -1676,7 +1680,7 @@ fn cache_file_path(
     });
     cache_root.join(format!(
         "{}.json",
-        sha256_hex(canonical_json(&identity).as_bytes())
+        sha256_hex(canonical_json::to_string(&identity).as_bytes())
     ))
 }
 
@@ -1735,10 +1739,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
         return text.to_string();
     }
     text.chars().take(max_chars).collect()
-}
-
-fn canonical_json(value: &serde_json::Value) -> String {
-    serde_json::to_string(value).unwrap_or_default()
 }
 
 fn sha256_hex(data: impl AsRef<[u8]>) -> String {

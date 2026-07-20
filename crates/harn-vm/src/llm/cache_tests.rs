@@ -153,17 +153,6 @@ fn corrupt_cache_entries_are_misses() {
 }
 
 #[test]
-fn canonical_json_sorts_nested_object_keys() {
-    let first = serde_json::json!({"b": 2, "a": {"d": 4, "c": 3}});
-    let second = serde_json::json!({"a": {"c": 3, "d": 4}, "b": 2});
-
-    assert_eq!(
-        canonical_json_bytes(&first).unwrap(),
-        canonical_json_bytes(&second).unwrap()
-    );
-}
-
-#[test]
 fn cache_record_large_ttl_saturates_forward() {
     let record = CacheRecord::new("a", serde_json::json!(true), 1_000, u64::MAX);
 

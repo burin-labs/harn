@@ -35,6 +35,7 @@ mod builtin_id;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
+pub mod canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;

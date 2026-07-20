@@ -334,12 +334,12 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         identity.insert("mock_scope", mock_scope);
     }
 
-    let canonical = canonical_json_bytes(&serde_json::to_value(identity).map_err(|error| {
+    let canonical = crate::canonical_json::of(&identity).map_err(|error| {
         VmError::Runtime(format!(
             "__llm_cache_key: failed to encode identity: {error}"
         ))
-    })?)?;
-    let digest = Sha256::digest(&canonical);
+    })?;
+    let digest = Sha256::digest(canonical.as_bytes());
     Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "sha256:{}",
         hex::encode(digest)
@@ -854,30 +854,6 @@ fn json_float_or_null(value: Option<f64>) -> serde_json::Value {
         .and_then(serde_json::Number::from_f64)
         .map(serde_json::Value::Number)
         .unwrap_or(serde_json::Value::Null)
-}
-
-fn canonical_json_bytes(value: &serde_json::Value) -> Result<Vec<u8>, VmError> {
-    serde_json::to_vec(&canonicalize_json_value(value)).map_err(|error| {
-        VmError::Runtime(format!("failed to encode canonical cache JSON: {error}"))
-    })
-}
-
-fn canonicalize_json_value(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Array(items) => {
-            serde_json::Value::Array(items.iter().map(canonicalize_json_value).collect())
-        }
-        serde_json::Value::Object(map) => {
-            let mut keys = map.keys().collect::<Vec<_>>();
-            keys.sort();
-            let mut out = serde_json::Map::new();
-            for key in keys {
-                out.insert(key.clone(), canonicalize_json_value(&map[key]));
-            }
-            serde_json::Value::Object(out)
-        }
-        other => other.clone(),
-    }
 }
 
 thread_local! {

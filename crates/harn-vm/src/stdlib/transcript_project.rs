@@ -14,6 +14,7 @@
 //! conflict through the projection event's `provider_safety_blocked`
 //! flag and pass the original message through.
 
+use crate::canonical_json;
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
@@ -1137,7 +1138,7 @@ fn reachability_root_blob(
     let mut roots = policy.gc_root_texts.join("\n");
     for message in raw.iter().skip(root_start) {
         roots.push('\n');
-        roots.push_str(&canonical_json(message));
+        roots.push_str(&canonical_json::to_string(message));
     }
     roots
 }
@@ -1443,7 +1444,7 @@ fn message_has_signed_reasoning(message: &JsonValue) -> bool {
 }
 
 fn hash_messages(messages: &[JsonValue]) -> String {
-    let canonical = canonical_json(&JsonValue::Array(messages.to_vec()));
+    let canonical = canonical_json::to_string(&JsonValue::Array(messages.to_vec()));
     hash_string(&canonical)
 }
 
@@ -1452,26 +1453,6 @@ fn hash_string(value: &str) -> String {
     hasher.update(value.as_bytes());
     let digest: [u8; 32] = hasher.finalize().into();
     format!("sha256:{}", hex::encode(digest))
-}
-
-fn canonical_json(value: &JsonValue) -> String {
-    match value {
-        JsonValue::Object(map) => {
-            let mut parts = Vec::with_capacity(map.len());
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            for key in keys {
-                let escaped_key = serde_json::to_string(key).unwrap_or_default();
-                parts.push(format!("{}:{}", escaped_key, canonical_json(&map[key])));
-            }
-            format!("{{{}}}", parts.join(","))
-        }
-        JsonValue::Array(items) => {
-            let parts: Vec<String> = items.iter().map(canonical_json).collect();
-            format!("[{}]", parts.join(","))
-        }
-        _ => serde_json::to_string(value).unwrap_or_else(|_| "null".to_string()),
-    }
 }
 
 pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy) -> VmValue {
@@ -2024,13 +2005,6 @@ mod tests {
         assert_ne!(h1, h2);
         let h3 = hash_messages(&raw_msgs);
         assert_eq!(h1, h3);
-    }
-
-    #[test]
-    fn canonical_json_orders_keys() {
-        let a = serde_json::json!({"b": 1, "a": 2});
-        let b = serde_json::json!({"a": 2, "b": 1});
-        assert_eq!(canonical_json(&a), canonical_json(&b));
     }
 
     #[test]

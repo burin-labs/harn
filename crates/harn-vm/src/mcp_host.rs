@@ -842,7 +842,7 @@ fn looks_like_transport_failure(err: &VmError) -> bool {
 
 fn hash_args(args: &JsonValue) -> String {
     let mut hasher = Sha256::new();
-    let canonical = canonicalize_json(args);
+    let canonical = crate::canonical_json::to_string(args);
     hasher.update(canonical.as_bytes());
     let digest = hasher.finalize();
     let mut hex = String::with_capacity(digest.len() * 2);
@@ -851,33 +851,6 @@ fn hash_args(args: &JsonValue) -> String {
         let _ = write!(&mut hex, "{byte:02x}");
     }
     hex
-}
-
-/// Canonical JSON encoding for hash stability: keys sorted, no
-/// insignificant whitespace.
-fn canonicalize_json(value: &JsonValue) -> String {
-    match value {
-        JsonValue::Object(map) => {
-            let mut sorted: Vec<(&String, &JsonValue)> = map.iter().collect();
-            sorted.sort_by(|a, b| a.0.cmp(b.0));
-            let body: Vec<String> = sorted
-                .into_iter()
-                .map(|(k, v)| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(k).unwrap_or_default(),
-                        canonicalize_json(v)
-                    )
-                })
-                .collect();
-            format!("{{{}}}", body.join(","))
-        }
-        JsonValue::Array(items) => {
-            let body: Vec<String> = items.iter().map(canonicalize_json).collect();
-            format!("[{}]", body.join(","))
-        }
-        other => serde_json::to_string(other).unwrap_or_default(),
-    }
 }
 
 fn take_cache_hit(server: &str, tool: &str, args_hash: &str, now: Instant) -> Option<JsonValue> {
@@ -1020,13 +993,6 @@ mod tests {
             state.record_restart(t);
         }
         assert!(state.backoff_delay() <= MAX_RESTART_BACKOFF);
-    }
-
-    #[test]
-    fn canonical_json_sorts_object_keys() {
-        let a = canonicalize_json(&serde_json::json!({"b": 1, "a": 2}));
-        let b = canonicalize_json(&serde_json::json!({"a": 2, "b": 1}));
-        assert_eq!(a, b);
     }
 
     #[test]

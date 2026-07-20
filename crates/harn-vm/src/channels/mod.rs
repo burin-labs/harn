@@ -935,48 +935,13 @@ fn signed_match_timestamp(
 }
 
 /// CH-07 (#1878): SHA-256 of the canonical JSON encoding of a channel
-/// emit payload. `serde_json::to_string` sorts object keys
-/// deterministically when the value originates from `serde_json::Value`
-/// (BTreeMap-backed `Map` with `preserve_order` disabled — the default
-/// for this crate). Used by the replay oracle to detect producer-side
-/// drift (`HARN-REP-CHN-002`).
+/// emit payload, via [`crate::canonical_json`] (object keys sorted
+/// recursively, array order preserved). Used by the replay oracle to
+/// detect producer-side drift (`HARN-REP-CHN-002`).
 pub fn channel_payload_hash(payload: &serde_json::Value) -> String {
-    let canonical = canonical_json_string(payload);
+    let canonical = crate::canonical_json::to_string(payload);
     let digest = Sha256::digest(canonical.as_bytes());
     format!("sha256:{}", hex::encode(digest))
-}
-
-/// CH-07 (#1878): canonicalize a JSON value to a deterministic string so
-/// the SHA-256 hash on `ChannelEmitReceipt.payload_hash` is stable
-/// across reruns. Recursively sorts object keys; arrays preserve their
-/// (semantically meaningful) order. Mirrors the canonicalization rule
-/// `replay_oracle::canonicalize_run` relies on for cross-run diffs.
-fn canonical_json_string(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Object(map) => {
-            let mut sorted: std::collections::BTreeMap<&String, &serde_json::Value> =
-                std::collections::BTreeMap::new();
-            for (key, value) in map {
-                sorted.insert(key, value);
-            }
-            let parts: Vec<String> = sorted
-                .iter()
-                .map(|(key, value)| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(key).unwrap_or_else(|_| (*key).clone()),
-                        canonical_json_string(value)
-                    )
-                })
-                .collect();
-            format!("{{{}}}", parts.join(","))
-        }
-        serde_json::Value::Array(items) => {
-            let parts: Vec<String> = items.iter().map(canonical_json_string).collect();
-            format!("[{}]", parts.join(","))
-        }
-        other => serde_json::to_string(other).unwrap_or_else(|_| "null".to_string()),
-    }
 }
 
 /// CH-07 (#1878): append a channel audit receipt to the durable
