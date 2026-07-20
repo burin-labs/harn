@@ -563,8 +563,8 @@ fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string>
   if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
     errors = errors + ["ci.yml:${job_name} must match rust-builds RUSTFLAGS"]
   }
-  if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != "12" {
-    errors = errors + ["ci.yml:${job_name} must keep the execution-only 12-minute timeout"]
+  if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != "20" {
+    errors = errors + ["ci.yml:${job_name} must keep the execution-only 20-minute timeout"]
   }
   if len(matching_steps(consumer, SCCACHE_ACTION)) > 0
     || len(
