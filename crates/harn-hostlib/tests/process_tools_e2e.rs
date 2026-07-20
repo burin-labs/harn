@@ -391,9 +391,9 @@ fn real_run_command_file_capture_kills_child_when_timeout_elapses() {
     let cleanup = require_nested_dict(&resp, "process_cleanup");
     assert_eq!(require_int(&cleanup, "root_pid"), pid);
     let pgid = require_int(&resp, "process_group_id");
-    assert!(
-        !unix_process_exists(-pgid),
-        "timed-out file-capture process group {pgid} must be gone"
+    assert_process_gone(
+        -pgid,
+        &format!("timed-out file-capture process group {pgid}"),
     );
 }
 
@@ -569,12 +569,39 @@ fn real_run_command_respects_a_caller_pinned_tmpdir() {
 // --- Subprocess lifecycle: cancel/deadline interrupts kill the child group ---
 
 /// `kill(pid, 0)` probe: returns true while the target (or, for a negative
-/// pid, any member of the group) still exists.
+/// pid, any member of the group) still exists. A killed-but-unreaped zombie
+/// still counts as existing, so a single negative probe cannot prove a process
+/// is gone — see [`assert_process_gone`].
 fn unix_process_exists(pid: i64) -> bool {
     extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;
     }
     unsafe { kill(pid as i32, 0) == 0 }
+}
+
+/// Assert a pid (or, for a negative pid, a whole process group) has vanished,
+/// tolerating reap latency.
+///
+/// Signalling a process is synchronous but *reaping* it is not: between the
+/// kill and the parent's (or init's) `wait`, the pid lingers as a zombie and
+/// `kill(pid, 0)` keeps succeeding. There is no observable event a test can
+/// synchronize on for that transition, so this bounded poll is the honest
+/// mechanism — it is not a load-sensitive sleep standing in for a missing
+/// signal. A process that is genuinely still alive never vanishes, so the
+/// assertion still fails; the window only absorbs scheduling delay on a loaded
+/// CI host.
+fn assert_process_gone(pid: i64, what: &str) {
+    const REAP_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
+    let deadline = std::time::Instant::now() + REAP_WINDOW;
+    while unix_process_exists(pid) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what} still exists after waiting {REAP_WINDOW:?} for it to be reaped"
+        );
+        std::thread::sleep(POLL_INTERVAL);
+    }
 }
 
 fn unix_kill_process(pid: i64) {
@@ -642,9 +669,9 @@ fn real_run_command_interrupt_kills_the_whole_process_group() {
         "cleanup receipt should record the background sleep descendant"
     );
     assert_eq!(require_int(&cleanup, "survivor_count"), 0);
-    assert!(
-        !unix_process_exists(-pgid),
-        "process group {pgid} (incl. the sleep grandchild) must be gone"
+    assert_process_gone(
+        -pgid,
+        &format!("process group {pgid} (incl. the sleep grandchild)"),
     );
 }
 
@@ -710,7 +737,7 @@ fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
         VmValue::String(value) if value.as_str() == "SIGKILL"
     )));
     assert_eq!(require_int(&cleanup, "survivor_count"), 0);
-    assert!(!unix_process_exists(-pgid));
+    assert_process_gone(-pgid, &format!("SIGKILLed process group {pgid}"));
 }
 
 #[test]
@@ -857,9 +884,9 @@ print("parent-exit", flush=True)
         reaped_descendant.get("command").is_none(),
         "cleanup receipt must not include raw reaped child command text: {reaped_descendant:?}"
     );
-    assert!(
-        !unix_process_exists(descendant_pid),
-        "reparented descendant {descendant_pid} must be gone after token cleanup"
+    assert_process_gone(
+        descendant_pid,
+        &format!("reparented descendant {descendant_pid} after token cleanup"),
     );
 }
 
@@ -912,4 +939,23 @@ print("parent-exit", flush=True)
         "file capture should preserve direct-run output: {stdout:?}"
     );
     assert!(resp.get("process_cleanup").is_none());
+}
+
+#[test]
+#[should_panic(expected = "still exists after waiting")]
+fn assert_process_gone_still_fails_on_a_genuinely_live_process() {
+    // Guards the reap-tolerance window in `assert_process_gone` against being
+    // widened into vacuity: a process that never exits must still trip the
+    // assertion rather than being absorbed as reap latency.
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn live child");
+    let pid = child.id() as i64;
+    let result = std::panic::catch_unwind(|| assert_process_gone(pid, "live child"));
+    let _ = child.kill();
+    let _ = child.wait();
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
 }
