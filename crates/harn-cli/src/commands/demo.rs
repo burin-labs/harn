@@ -21,6 +21,8 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::cli::DemoArgs;
 use crate::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
@@ -430,6 +432,9 @@ fn print_list_table(as_json: bool) {
     println!("Use real provider: harn demo <id> --live");
 }
 
+/// Greedy word-wrap for terminal output. `width` is a column budget, so the
+/// fit test measures display columns — byte length wraps non-ASCII text far
+/// too early, and a `char` count misses double-width CJK and emoji.
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current = String::new();
@@ -438,7 +443,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
             current.push_str(word);
             continue;
         }
-        if current.len() + 1 + word.len() > width {
+        if UnicodeWidthStr::width(current.as_str()) + 1 + UnicodeWidthStr::width(word) > width {
             lines.push(std::mem::take(&mut current));
             current.push_str(word);
         } else {
@@ -780,6 +785,34 @@ fn print_json_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_text_budgets_columns_not_bytes_or_chars() {
+        // Each word is 2 chars / 6 bytes / 4 columns, which separates all three
+        // readings under a budget of 9: by columns exactly two words fit
+        // (4 + 1 + 4 = 9); by bytes not even two would (6 + 1 + 6 = 13); by
+        // chars all three would have been packed onto one line (8).
+        let wrapped = wrap_text("日本 語で すね", 9);
+        assert_eq!(wrapped, vec!["日本 語で".to_string(), "すね".to_string()]);
+    }
+
+    #[test]
+    fn wrap_text_treats_emoji_as_double_width() {
+        // "🚀🚀" is 2 chars but 4 columns, so it cannot join "ab" under a
+        // budget of 6 (2 + 1 + 4 = 7). A char count would have packed them.
+        assert_eq!(
+            wrap_text("ab 🚀🚀", 6),
+            vec!["ab".to_string(), "🚀🚀".to_string()]
+        );
+    }
+
+    #[test]
+    fn wrap_text_is_unchanged_for_ascii() {
+        assert_eq!(
+            wrap_text("the quick brown fox", 9),
+            vec!["the quick".to_string(), "brown fox".to_string()]
+        );
+    }
 
     #[test]
     fn bare_demo_action_covers_every_stdio_shape() {

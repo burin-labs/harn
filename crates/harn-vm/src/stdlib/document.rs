@@ -8,6 +8,8 @@
 
 use std::sync::Arc;
 
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{optional_dict_arg, ErrorKind, OptionsParser};
 use crate::value::{VmDictExt, VmError, VmValue};
@@ -469,6 +471,11 @@ fn pdf_page_content(lines: &[String], options: &PdfRenderOptions) -> String {
     content
 }
 
+/// Greedy word-wrap for the rendered document body. `max_chars` is a column
+/// budget (each rendered glyph advances the cursor by its display width), so
+/// fit decisions measure display columns: a CJK glyph or emoji costs two, a
+/// combining mark zero. A word wider than the budget is hard-split so it still
+/// renders within the page; every other word stays intact.
 fn wrap_lines(source: &str, max_chars: usize) -> Vec<String> {
     let mut out = Vec::new();
     for raw_line in source.lines() {
@@ -480,14 +487,18 @@ fn wrap_lines(source: &str, max_chars: usize) -> Vec<String> {
         let mut current = String::new();
         for word in normalized.split_whitespace() {
             let extra = usize::from(!current.is_empty());
-            if current.chars().count() + word.chars().count() + extra > max_chars
+            if UnicodeWidthStr::width(current.as_str()) + UnicodeWidthStr::width(word) + extra
+                > max_chars
                 && !current.is_empty()
             {
                 out.push(std::mem::take(&mut current));
             }
-            if word.chars().count() > max_chars {
+            if UnicodeWidthStr::width(word) > max_chars {
                 for ch in word.chars() {
-                    if current.chars().count() >= max_chars {
+                    let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if !current.is_empty()
+                        && UnicodeWidthStr::width(current.as_str()) + ch_width > max_chars
+                    {
                         out.push(std::mem::take(&mut current));
                     }
                     current.push(ch);
@@ -571,5 +582,45 @@ mod tests {
             SourceFormat::Markdown,
         );
         assert_eq!(got, "Title\nAmount link");
+    }
+
+    #[test]
+    fn wrap_lines_ascii_is_unchanged() {
+        // For ASCII the column budget equals the old char count, so wrapping
+        // is byte-for-byte what it always was.
+        assert_eq!(
+            wrap_lines("the quick brown fox", 9),
+            vec!["the quick".to_string(), "brown fox".to_string()]
+        );
+    }
+
+    #[test]
+    fn wrap_lines_measures_cjk_as_double_width() {
+        // Four glyphs, each two columns. A budget of 5 fits two per line
+        // (2 + 1 + 2 = 5); a char count would have packed all four.
+        assert_eq!(
+            wrap_lines("日 本 語 で", 5),
+            vec!["日 本".to_string(), "語 で".to_string()]
+        );
+    }
+
+    #[test]
+    fn wrap_lines_hard_splits_an_overlong_wide_word_on_columns() {
+        // A single 8-column word cannot fit a 5-column line, so it is split.
+        // The break lands where the column budget runs out, not after N chars:
+        // two double-width glyphs fill four columns, a third would reach six.
+        assert_eq!(
+            wrap_lines("日本語", 4),
+            vec!["日本".to_string(), "語".to_string()]
+        );
+    }
+
+    #[test]
+    fn wrap_lines_combining_marks_do_not_add_width() {
+        let cafe = "cafe\u{0301}";
+        assert_eq!(
+            wrap_lines(&format!("{cafe} {cafe}"), 8),
+            vec![cafe.to_string(), cafe.to_string()]
+        );
     }
 }

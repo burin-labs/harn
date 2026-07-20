@@ -3068,6 +3068,7 @@ dependencies = [
  "toml",
  "tower 0.5.3",
  "tracing",
+ "unicode-width",
  "url",
  "uuid",
  "wat",
@@ -3135,6 +3136,7 @@ version = "0.10.29"
 dependencies = [
  "harn-lexer",
  "harn-parser",
+ "unicode-width",
 ]
 
 [[package]]
@@ -3596,6 +3598,7 @@ dependencies = [
  "tracing-subscriber",
  "unicode-normalization",
  "unicode-segmentation",
+ "unicode-width",
  "url",
  "uuid",
  "wait-timeout",

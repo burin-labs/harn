@@ -133,6 +133,7 @@ ipnet = "2"
 ignore = "0.4"
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
+unicode-width = "0.2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "component"] }
