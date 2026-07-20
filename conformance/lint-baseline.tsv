@@ -177,7 +177,6 @@
 1	trust_graph/trust_graph_schema_v0_1_effects_inheritance.harn	HARN-LNT-014
 1	trust_graph/trust_query_limit_and_group_by_trace.harn	HARN-LNT-016
 1	types/assert_require_narrowing.harn	HARN-LNT-025
-2	types/bare_variant_match_patterns.harn	HARN-LNT-022
 1	types/dict_shape_narrowed_with_schema_is.harn	HARN-LNT-049
 1	types/enum_basic.harn	HARN-LNT-020
 1	types/enum_match.harn	HARN-LNT-020

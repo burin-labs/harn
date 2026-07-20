@@ -64,10 +64,40 @@ impl Polarity {
     }
 }
 
+/// Whether a declaration was written in this module or pulled in by an
+/// `import`.
+///
+/// Bare enum-variant match patterns (`Circle(r)`) only resolve for enums
+/// declared locally: the VM's compile-time variant catalog is deliberately
+/// local-only, because folding an imported module's whole variant surface into
+/// the importing compile would capture ordinary identifiers. Imported variants
+/// must therefore be written in qualified `Enum.Variant(...)` form, and the
+/// checker needs the origin to say so instead of accepting a pattern the
+/// runtime will reject.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DeclOrigin {
+    Local,
+    Imported,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct EnumDeclInfo {
     pub(super) type_params: Vec<TypeParam>,
     pub(super) variants: Vec<EnumVariant>,
+    pub(super) origin: DeclOrigin,
+}
+
+impl EnumDeclInfo {
+    /// An enum declared in the module being checked. Registration that can
+    /// also see imported declarations passes its origin through explicitly
+    /// instead.
+    pub(super) fn local(type_params: Vec<TypeParam>, variants: Vec<EnumVariant>) -> Self {
+        Self {
+            type_params,
+            variants,
+            origin: DeclOrigin::Local,
+        }
+    }
 }
 
 /// Full metadata for a `type T<...> = ...` alias. The type parameters are
@@ -256,6 +286,9 @@ impl TypeScope {
                         span: Span::dummy(),
                     },
                 ],
+                // Builtin `Result` is always in scope, so bare `Ok`/`Err`
+                // patterns resolve exactly as a locally declared enum's do.
+                origin: DeclOrigin::Local,
             },
         );
         scope.define_var("argv", None);
