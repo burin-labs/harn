@@ -293,6 +293,25 @@ struct TempFile {
     file: Option<File>,
 }
 
+/// Longest prefix of the target file name kept in the temp sibling's name.
+const TEMP_STEM_MAX: usize = 16;
+
+/// Build the name of the temp file written next to `file_name` before the
+/// atomic replace.
+///
+/// The temp sibling must not be meaningfully longer than the target it
+/// replaces: embedding the full target name (which can be a 64-char content
+/// hash) plus a hyphenated UUID made the temp path ~40 chars longer than the
+/// target, so a target that fits under Windows' legacy 260-char `MAX_PATH`
+/// could still produce a temp path that overflows it, failing `CreateFile`
+/// with `ERROR_PATH_NOT_FOUND` (os error 3). A short recognizable prefix plus a
+/// compact (unhyphenated) UUID keeps the temp co-located and unique while
+/// bounding its length to a small constant regardless of the target name.
+fn temp_sibling_name(file_name: &str) -> String {
+    let stem: String = file_name.chars().take(TEMP_STEM_MAX).collect();
+    format!(".{stem}.{}.tmp", uuid::Uuid::now_v7().simple())
+}
+
 impl TempFile {
     fn create(target: &Path, mode: Option<u32>) -> io::Result<Self> {
         let parent = target.parent().ok_or_else(|| {
@@ -311,10 +330,11 @@ impl TempFile {
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("file");
+        let tmp_name = temp_sibling_name(file_name);
         let tmp_path = if parent.as_os_str().is_empty() {
-            PathBuf::from(format!(".{file_name}.{}.tmp", uuid::Uuid::now_v7()))
+            PathBuf::from(tmp_name)
         } else {
-            parent.join(format!(".{file_name}.{}.tmp", uuid::Uuid::now_v7()))
+            parent.join(tmp_name)
         };
         let file = OpenOptions::new()
             .create_new(true)
@@ -343,6 +363,34 @@ impl TempFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temp_sibling_name_is_length_bounded_regardless_of_target_name() {
+        // A very long target name (e.g. a 64-char content hash, or longer) must
+        // not inflate the temp sibling past a small constant, so a target that
+        // fits under Windows' MAX_PATH can never produce an overflowing temp.
+        let bound = 1 + TEMP_STEM_MAX + 1 + 32 + 4; // ".{<=16}.{32-hex uuid}.tmp"
+        for name in ["s", "state.json", &"a".repeat(64), &"z".repeat(4096)] {
+            let temp = temp_sibling_name(name);
+            assert!(
+                temp.len() <= bound,
+                "temp name {:?} (len {}) exceeds bound {bound}",
+                temp,
+                temp.len()
+            );
+            assert!(temp.starts_with('.') && temp.ends_with(".tmp"));
+        }
+    }
+
+    #[test]
+    fn atomic_write_succeeds_for_a_long_target_file_name() {
+        // The temp sibling used to embed the full (long) target name, so this
+        // write overflowed MAX_PATH on Windows. It must succeed on every OS.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a".repeat(200));
+        atomic_write(&path, b"payload").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"payload");
+    }
 
     #[test]
     fn writes_bytes_atomically() {

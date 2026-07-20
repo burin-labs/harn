@@ -281,8 +281,6 @@ impl AcpServer {
         if reverse {
             ids.reverse();
         }
-        // TEMP DIAGNOSTIC (windows-nightly acp:1299) — remove before merge.
-        eprintln!("[diag-acp-restore] session={session_id} ids={ids:?} reverse={reverse}");
         let mut restored = Vec::new();
         for snapshot_id in ids {
             let result = harn_hostlib::fs_snapshot::restore(session_id, &snapshot_id, &[])
@@ -323,11 +321,6 @@ impl AcpServer {
             .into_iter()
             .map(|summary| (summary.snapshot_id.clone(), summary))
             .collect();
-        // TEMP DIAGNOSTIC (windows-nightly acp:1299) — remove before merge.
-        eprintln!(
-            "[diag-acp-redo] cwd={cwd:?} rollback_snapshot_ids={rollback_snapshot_ids:?} known_ids={:?}",
-            by_id.keys().collect::<Vec<_>>()
-        );
         let mut redo_ids = Vec::new();
         for snapshot_id in rollback_snapshot_ids {
             let Some(summary) = by_id.get(snapshot_id) else {
@@ -337,11 +330,6 @@ impl AcpServer {
                 continue;
             }
             let redo_id = format!("{checkpoint_id}:redo:{snapshot_id}");
-            // TEMP DIAGNOSTIC (windows-nightly acp:1299) — remove before merge.
-            eprintln!(
-                "[diag-acp-redo] snapshotting redo_id={redo_id:?} captured_paths={:?}",
-                summary.captured_paths
-            );
             harn_hostlib::fs_snapshot::snapshot(
                 session_id,
                 &redo_id,
@@ -377,8 +365,6 @@ impl AcpServer {
         status: &'static str,
         message: &str,
     ) {
-        // TEMP DIAGNOSTIC (windows-nightly acp:1299) — remove before merge.
-        eprintln!("[diag-acp-checkpoint-error] code={code} status={status} message={message}");
         self.send_error_with_data(id, code, message, serde_json::json!({ "status": status }));
     }
 

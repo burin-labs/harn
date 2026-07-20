@@ -11,3 +11,8 @@
   lagging handle close briefly holding a destination open no longer fails a
   durable write of transcripts, run records, snapshots, or other persistent
   state.
+- Bound the length of `harn_vm::atomic_io`'s temporary sibling file so it can no
+  longer be longer than the destination it replaces. A destination that fits
+  under Windows' 260-char `MAX_PATH` (for example a deeply nested filesystem
+  snapshot body) previously produced a temp path that overflowed it, failing the
+  write with a path-not-found error.
