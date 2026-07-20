@@ -5,7 +5,7 @@
  * should import this alias from `std/tools` instead of `dict` or a local
  * structural copy.
  */
-pub type ToolRegistry = {_type: "tool_registry", tools: list<dict>}
+pub type ToolRegistry = {_type: "tool_registry", tools: list}
 
 type ToolDefinitionConfig = {
   parameters?: dict,

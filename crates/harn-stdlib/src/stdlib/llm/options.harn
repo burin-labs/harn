@@ -1,6 +1,5 @@
 // @harn-entrypoint-category llm.stdlib
 import { pick_keys } from "std/collections"
-import { ToolRegistry } from "std/tools"
 
 // -------------------------------------------------------------------------------------------------
 
@@ -131,8 +130,9 @@ pub type LlmCallOptions = {
   audio?: bool,
   pdf?: bool,
   video?: bool,
-  // Tools.
-  tools?: list | ToolRegistry,
+  // Tools. Structural twin of `std/tools.ToolRegistry` (inline for the same
+  // cross-module option-field resolution reason as AgentLoopOptions.tools).
+  tools?: list | {_type: "tool_registry", tools: list},
   provider_tools?: list | dict,
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,

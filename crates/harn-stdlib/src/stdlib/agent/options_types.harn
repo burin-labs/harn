@@ -191,7 +191,10 @@ pub type AgentLoopOptions = {
   audio?: bool,
   pdf?: bool,
   video?: bool,
-  tools?: list | ToolRegistry,
+  // Structural twin of `std/tools.ToolRegistry`. Keep this inline so consumers
+  // can assign `tool_registry()` without also importing that alias (cross-module
+  // aliases in option fields do not resolve for importers yet).
+  tools?: list | {_type: "tool_registry", tools: list},
   tool_choice?: string | dict,
   tool_search?: bool | string | dict,
   tool_format?: string,
@@ -354,5 +357,3 @@ import { LlmCallerTransport } from "std/agent/caller_transport"
 import { MonologueActuationOptions } from "std/agent/monologue_actuation_types"
 
 import { AgentLoopRetryOptions } from "std/agent/retry"
-
-import { ToolRegistry } from "std/tools"
