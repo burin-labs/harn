@@ -582,10 +582,7 @@ fn command_name(command: &[std::ffi::OsString]) -> Option<String> {
 
 #[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    unsafe { kill(pid as i32, 0) == 0 }
+    unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
 #[cfg(unix)]

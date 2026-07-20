@@ -16,15 +16,14 @@ pub(crate) fn process_liveness(pid: u32) -> ProcessLiveness {
     if pid == 0 || pid > i32::MAX as u32 {
         return ProcessLiveness::Unknown;
     }
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    if unsafe { kill(pid as i32, 0) } == 0 {
+    if unsafe { libc::kill(pid as i32, 0) } == 0 {
         return ProcessLiveness::Alive;
     }
-    const ESRCH: i32 = 3;
+    // `ESRCH` is the only errno that proves absence. Anything else (notably
+    // `EPERM` for a live process we may not signal) must stay `Alive` so lease
+    // recovery never steals from an owner it merely cannot inspect.
     match std::io::Error::last_os_error().raw_os_error() {
-        Some(ESRCH) => ProcessLiveness::Dead,
+        Some(libc::ESRCH) => ProcessLiveness::Dead,
         Some(_) => ProcessLiveness::Alive,
         None => ProcessLiveness::Unknown,
     }
@@ -80,51 +79,12 @@ pub(crate) fn process_identity(pid: u32) -> Option<u64> {
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn process_identity(pid: u32) -> Option<u64> {
-    const MAXCOMLEN: usize = 16;
-    const PROC_PIDTBSDINFO: i32 = 3;
-
-    #[repr(C)]
-    struct ProcBsdInfo {
-        pbi_flags: u32,
-        pbi_status: u32,
-        pbi_xstatus: u32,
-        pbi_pid: u32,
-        pbi_ppid: u32,
-        pbi_uid: u32,
-        pbi_gid: u32,
-        pbi_ruid: u32,
-        pbi_rgid: u32,
-        pbi_svuid: u32,
-        pbi_svgid: u32,
-        rfu_1: u32,
-        pbi_comm: [i8; MAXCOMLEN],
-        pbi_name: [i8; 2 * MAXCOMLEN],
-        pbi_nfiles: u32,
-        pbi_pgid: u32,
-        pbi_pjobc: u32,
-        e_tdev: u32,
-        e_tpgid: u32,
-        pbi_nice: i32,
-        pbi_start_tvsec: u64,
-        pbi_start_tvusec: u64,
-    }
-
-    extern "C" {
-        fn proc_pidinfo(
-            pid: i32,
-            flavor: i32,
-            arg: u64,
-            buffer: *mut std::ffi::c_void,
-            buffersize: i32,
-        ) -> i32;
-    }
-
-    let mut info = std::mem::MaybeUninit::<ProcBsdInfo>::zeroed();
-    let size = std::mem::size_of::<ProcBsdInfo>();
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>();
     let written = unsafe {
-        proc_pidinfo(
+        libc::proc_pidinfo(
             i32::try_from(pid).ok()?,
-            PROC_PIDTBSDINFO,
+            libc::PROC_PIDTBSDINFO,
             0,
             info.as_mut_ptr().cast(),
             i32::try_from(size).ok()?,
@@ -134,11 +94,22 @@ pub(crate) fn process_identity(pid: u32) -> Option<u64> {
         return None;
     }
     let info = unsafe { info.assume_init() };
-    Some(
-        info.pbi_start_tvsec
-            .saturating_mul(1_000_000)
-            .saturating_add(info.pbi_start_tvusec),
-    )
+    Some(fold_bsd_start_time(
+        info.pbi_start_tvsec,
+        info.pbi_start_tvusec,
+    ))
+}
+
+/// Fold a BSD process start time into one microsecond-resolution identity.
+///
+/// Both fields must contribute: the seconds anchor the epoch and the
+/// microseconds preserve the sub-second resolution that lets two processes
+/// which reused a PID within the same wall-clock second be told apart. A fold
+/// that dropped `tv_usec` would silently coarsen this to seconds and reopen the
+/// PID-reuse window this identity exists to close.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn fold_bsd_start_time(tv_sec: u64, tv_usec: u64) -> u64 {
+    tv_sec.saturating_mul(1_000_000).saturating_add(tv_usec)
 }
 
 #[cfg(windows)]
@@ -212,6 +183,24 @@ mod tests {
     #[test]
     fn current_process_has_a_native_identity() {
         assert!(process_identity(std::process::id()).is_some());
+    }
+
+    // Guards the microsecond component of the Apple start-time identity. If the
+    // fold ever drops `tv_usec`, two processes that reuse a PID within the same
+    // second would collapse to one identity and the PID-reuse defense would
+    // silently regress to second resolution.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn bsd_start_time_fold_preserves_microseconds() {
+        // The seconds anchor the value...
+        assert_eq!(fold_bsd_start_time(1, 0), 1_000_000);
+        // ...and each microsecond shifts it, so same-second neighbours differ.
+        assert_eq!(fold_bsd_start_time(1, 1), 1_000_001);
+        assert_ne!(fold_bsd_start_time(42, 0), fold_bsd_start_time(42, 1));
+        assert_eq!(
+            fold_bsd_start_time(42, 999_999) - fold_bsd_start_time(42, 0),
+            999_999
+        );
     }
 }
 
