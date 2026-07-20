@@ -76,10 +76,17 @@ The tool template creates a package with a Harn-native registry builder,
 `[[package.tools]]` metadata, a local smoke test that dispatches the tool,
 and CI that exercises the same publish-readiness checks. The generated package
 is intentionally ordinary Harn source; consumers install it with `harn add`,
-import the stable export, and merge it into their own tool registry:
+import the stable export, and merge it into their own tool registry. The
+builder is typed with `ToolRegistry` from `std/tools` so packages can forward
+registries across public boundaries without falling back to `dict`:
 
 ```harn,ignore
+import { ToolRegistry } from "std/tools"
 import { tools } from "acme-echo/tools"
+
+pub fn with_acme_tools(registry: ToolRegistry) -> ToolRegistry {
+  return tools(registry)
+}
 ```
 
 ## Create an OpenAPI SDK package

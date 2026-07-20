@@ -122,7 +122,11 @@ fn __render_tools_harn(package_name: string, handler: string, description: strin
   // the docstring summary reads naturally with the trailing period we
   // add back in the rendered text.
   const handler_doc = __strip_trailing_periods(description)
-  return "/** " + handler_doc + ". */\n"
+  return "import { ToolRegistry } from \"std/tools\"\n"
+    + "\n"
+    + "/** "
+    + handler_doc
+    + ". */\n"
     + "pub fn "
     + handler
     + "(args) {\n"
@@ -139,7 +143,7 @@ fn __render_tools_harn(package_name: string, handler: string, description: strin
     + "/** Return a tool registry containing `"
     + package_name
     + "`. */\n"
-    + "pub fn tools(registry = nil) {\n"
+    + "pub fn tools(registry: ToolRegistry? = nil) -> ToolRegistry {\n"
     + "  let reg = registry ?? tool_registry()\n"
     + "  reg = tool_define(reg, "
     + tool_name

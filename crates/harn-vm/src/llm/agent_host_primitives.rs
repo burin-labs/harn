@@ -694,7 +694,7 @@ fn attach_hook_reminder_audit(
 /// canonical tagged/heredoc grammar. `"native"` never reaches a text parser,
 /// so it also reads as the tagged grammar (defensive default).
 #[harn_builtin(
-    sig = "__host_agent_parse_tool_calls(text: string, tools?: dict|nil, tool_format?: string|nil) -> dict",
+    sig = "__host_agent_parse_tool_calls(text: string, tools?: {_type: \"tool_registry\", tools: list}?, tool_format?: string?) -> dict",
     kind = "async",
     category = "agent.host",
     runtime_only = true
@@ -822,7 +822,7 @@ async fn host_agent_dispatch_tool_batch_capped(
 
 /// Dispatch a batch of normalized agent tool calls through the host tool runtime.
 #[harn_builtin(
-    sig = "__host_agent_dispatch_tool_batch(calls: list, tools?: dict|nil, options?: dict|nil) -> list",
+    sig = "__host_agent_dispatch_tool_batch(calls: list, tools?: {_type: \"tool_registry\", tools: list}?, options?: dict?) -> list",
     kind = "async",
     category = "agent.host",
     runtime_only = true
@@ -1057,7 +1057,7 @@ fn upgrade_to_trifecta_ask(
 
 /// Dispatch one normalized agent tool call through the host tool runtime.
 #[harn_builtin(
-    sig = "__host_agent_dispatch_tool_call(call: dict, tools?: dict|nil, options?: dict|nil) -> dict",
+    sig = "__host_agent_dispatch_tool_call(call: dict, tools?: {_type: \"tool_registry\", tools: list}?, options?: dict?) -> dict",
     kind = "async",
     category = "agent.host",
     runtime_only = true

@@ -9,6 +9,15 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Changed
+
+- **`ToolRegistry` is a public `std/tools` alias (#5294).** Packages can import
+  the registry type returned by `tool_registry()`, use it on public function
+  boundaries, and pass it through typed tool helpers and agent/LLM option
+  surfaces without widening to `dict`/`any` or copying the registry shape.
+
 ## v0.10.29
 
 ### Breaking

@@ -17,7 +17,27 @@ This keeps the tool contract explicit:
 Build a registry with `tool_define(...)`, give each tool a precise input and
 output shape, and keep the handler body purely stdlib. For repeated
 declarative specs, import `tool_define_many(...)` or `tool_registry_from(...)`
-from `std/tools`.
+from `std/tools`. Import the producer-owned `ToolRegistry` alias when a package
+accepts or forwards registries through a typed public API — do not widen to
+`dict` / `any` or duplicate the `{_type: "tool_registry", tools: ...}` shape.
+
+```harn
+import { AgentLoopOptions, agent_options } from "std/agent/options"
+import { ToolRegistry } from "std/tools"
+
+/** Package export: accept and return the stdlib registry type. */
+pub fn with_search_tool(registry: ToolRegistry) -> ToolRegistry {
+  return tool_define(registry, "search", "Search the corpus", {
+    parameters: {query: {type: "string"}},
+    handler: { args -> "hits for " + args.query },
+  })
+}
+
+fn agent_opts_from_package() -> AgentLoopOptions {
+  const tools: ToolRegistry = with_search_tool(tool_registry())
+  return agent_options({provider: "mock", tools: tools})
+}
+```
 
 ```harn
 import "std/vision"

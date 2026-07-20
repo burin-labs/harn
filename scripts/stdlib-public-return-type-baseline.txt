@@ -132,7 +132,6 @@
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_external_agent.harn
 # count   10  crates/harn-stdlib/src/stdlib/stdlib_fs.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_gha.harn
-# count    2  crates/harn-stdlib/src/stdlib/stdlib_git.harn
 # count   18  crates/harn-stdlib/src/stdlib/stdlib_graphql.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_handoffs.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_host.harn
@@ -1142,8 +1141,6 @@ crates/harn-stdlib/src/stdlib/stdlib_fs.harn::write_yaml
 crates/harn-stdlib/src/stdlib/stdlib_gha.harn::gha_error
 crates/harn-stdlib/src/stdlib/stdlib_gha.harn::gha_notice
 crates/harn-stdlib/src/stdlib/stdlib_gha.harn::gha_warning
-crates/harn-stdlib/src/stdlib/stdlib_git.harn::git_toolbox_tools
-crates/harn-stdlib/src/stdlib/stdlib_git.harn::git_tools
 crates/harn-stdlib/src/stdlib/stdlib_graphql.harn::graphql_assert_ok
 crates/harn-stdlib/src/stdlib/stdlib_graphql.harn::graphql_auth_headers
 crates/harn-stdlib/src/stdlib/stdlib_graphql.harn::graphql_codegen_wrapper
