@@ -911,6 +911,14 @@ jobs:
           # coverage.
           HARN_SECRET_STORE_BACKEND: file
           HARN_LLM_CALLS_DISABLED: "1"
+          # Match the production CLI's 16 MiB runtime stack
+          # (`CLI_RUNTIME_STACK_SIZE`). Windows stack frames are larger than
+          # Unix, so tests that drive the Harn VM's deep-but-bounded recursive
+          # walk overflow libtest's / tokio's default 2 MiB worker stack and
+          # abort the test process (0xc00000fd). std::thread and tokio's
+          # default-stack workers honor RUST_MIN_STACK; see windows-nightly.yml
+          # for the full rationale.
+          RUST_MIN_STACK: "16777216"
           # Failure output stays suppressed on success; when a Windows
           # AppContainer test times out, these milestones show whether it
           # stalled in CreateProcess, pipe draining, or ACL cleanup.
