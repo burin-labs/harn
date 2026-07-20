@@ -282,25 +282,11 @@ impl PackageSnapshot {
     pub fn nearest_project_root(anchor: &Path) -> Option<PathBuf> {
         #[cfg(test)]
         probe_counter::record_root_walk();
-        let mut cursor = if anchor.is_dir() {
-            Some(anchor)
-        } else {
-            anchor.parent()
-        };
-        while let Some(dir) = cursor {
-            if dir
-                .join(PACKAGE_STATE_DIR)
-                .join(PACKAGE_CURRENT_FILE)
-                .is_file()
-            {
-                return Some(dir.to_path_buf());
-            }
-            if dir.join(".git").exists() {
-                break;
-            }
-            cursor = dir.parent();
-        }
-        None
+        // Same upward walk as every other Harn frontend, parameterized on the
+        // package-state sentinel (`.harn/package-current.toml`) instead of
+        // `harn.toml`.
+        let sentinel = Path::new(PACKAGE_STATE_DIR).join(PACKAGE_CURRENT_FILE);
+        crate::manifest_walk::find_nearest_ancestor(anchor, sentinel).map(|found| found.dir)
     }
 
     pub fn acquire_nearest(anchor: &Path) -> Result<Option<Self>, PackageSnapshotError> {

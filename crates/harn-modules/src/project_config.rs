@@ -36,17 +36,6 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-const MANIFEST: &str = "harn.toml";
-
-/// Hard cap on how many parent directories the loader will inspect.
-///
-/// The walk also stops early at a `.git` boundary (the first directory
-/// containing a `.git` child is treated as the project root). The cap
-/// exists to defend against pathological paths, symlink loops, and
-/// accidental pickup of a stray `harn.toml` high up the filesystem
-/// (e.g. a user's home directory or `/tmp`).
-const MAX_PARENT_DIRS: usize = 16;
-
 /// Generic `harn.toml` view shared by the CLI, LSP, and future frontends.
 #[derive(Debug, Default, Clone)]
 pub struct HarnConfig {
@@ -179,46 +168,16 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// Walks up from `start` to find the nearest `harn.toml`. Returns
+/// Walks up from `start` to find the nearest `harn.toml` via the shared
+/// [`manifest_walk`](crate::manifest_walk) walk. Returns
 /// `Ok(HarnConfig::default())` if none is found. Returns `Err` on parse
 /// failure so callers can surface the problem rather than silently ignore
 /// malformed config.
 pub fn load_for_path(start: &Path) -> Result<HarnConfig, ConfigError> {
-    // Normalize to an absolute path so the walk works when `start` is a
-    // non-existent relative path.
-    let base = if start.is_absolute() {
-        start.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(start)
-    };
-
-    let mut cursor: Option<PathBuf> = if base.is_dir() {
-        Some(base)
-    } else {
-        base.parent().map(Path::to_path_buf)
-    };
-
-    let mut steps = 0usize;
-    while let Some(dir) = cursor {
-        if steps >= MAX_PARENT_DIRS {
-            break;
-        }
-        steps += 1;
-        let candidate = dir.join(MANIFEST);
-        if candidate.is_file() {
-            return parse_manifest(&candidate);
-        }
-        // Stop at a `.git` boundary so a stray `harn.toml` in a parent
-        // project or in `$HOME` is never silently picked up.
-        if dir.join(".git").exists() {
-            break;
-        }
-        cursor = dir.parent().map(Path::to_path_buf);
+    match crate::manifest_walk::find_nearest_manifest(start) {
+        Some(found) => parse_manifest(&found.path),
+        None => Ok(HarnConfig::default()),
     }
-
-    Ok(HarnConfig::default())
 }
 
 fn parse_manifest(path: &Path) -> Result<HarnConfig, ConfigError> {
@@ -456,7 +415,7 @@ line_width = 999
         // recursing all the way to the filesystem root.
         let tmp = tempfile::tempdir().unwrap();
         let mut dir = tmp.path().to_path_buf();
-        for i in 0..(MAX_PARENT_DIRS + 4) {
+        for i in 0..(crate::manifest_walk::MAX_PARENT_DIRS + 4) {
             dir = dir.join(format!("lvl{i}"));
         }
         std::fs::create_dir_all(&dir).unwrap();

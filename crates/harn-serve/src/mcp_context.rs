@@ -202,19 +202,12 @@ impl McpContextResource {
 }
 
 fn project_root_for_script(script_path: &Path) -> PathBuf {
-    let mut cursor = script_path.parent().unwrap_or_else(|| Path::new("."));
-    loop {
-        if cursor.join("harn.toml").is_file() {
-            return cursor.to_path_buf();
-        }
-        let Some(parent) = cursor.parent() else {
-            return script_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf();
-        };
-        cursor = parent;
-    }
+    // Resolve the project root via the shared walk, starting from the script's
+    // parent (the script itself is a file, not a project directory). Keep this
+    // caller's policy of falling back to that parent when the script lives
+    // outside any project, so paths still resolve relative to the script.
+    let start = script_path.parent().unwrap_or_else(|| Path::new("."));
+    harn_modules::manifest_walk::find_project_root(start).unwrap_or_else(|| start.to_path_buf())
 }
 
 fn display_relative_path(root: &Path, path: &Path) -> String {

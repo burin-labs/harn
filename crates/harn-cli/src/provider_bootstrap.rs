@@ -125,7 +125,7 @@ fn env_has_non_auto_value(name: &str) -> bool {
 }
 
 fn project_llm_configured(anchor: &Path) -> bool {
-    crate::package::find_nearest_manifest(anchor)
+    crate::package::nearest_manifest_or_warn(anchor)
         .map(|(manifest, _)| !manifest.llm.is_empty())
         .unwrap_or(false)
 }

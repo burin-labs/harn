@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::cli::CheckOutputFormat;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 use crate::package::{
-    find_nearest_manifest, normalize_connector_capability, read_manifest_from_path,
+    find_nearest_manifest_dir, normalize_connector_capability, read_manifest_from_path,
     ConnectorCapabilities, Manifest,
 };
 
@@ -152,7 +152,7 @@ fn default_sources_for_cli() -> Vec<PathBuf> {
         return vec![fixture_source];
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Some((_, manifest_dir)) = find_nearest_manifest(&cwd) {
+    if let Some(manifest_dir) = find_nearest_manifest_dir(&cwd) {
         return vec![manifest_dir.join("harn.toml")];
     }
     eprintln!(

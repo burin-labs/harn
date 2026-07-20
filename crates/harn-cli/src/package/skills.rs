@@ -17,7 +17,7 @@ pub fn load_skills_config(anchor: Option<&Path>) -> Option<ResolvedSkillsConfig>
     let anchor = anchor
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let (manifest, dir) = find_nearest_manifest(&anchor)?;
+    let (manifest, dir) = nearest_manifest_or_warn(&anchor)?;
 
     // Absolutize `[[skill.source]]` fs paths relative to manifest_dir.
     let sources = manifest

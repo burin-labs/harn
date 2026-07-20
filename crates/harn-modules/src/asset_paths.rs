@@ -61,18 +61,9 @@ pub fn parse(path: &str) -> Option<AssetRef<'_>> {
 }
 
 /// Walk up from `base` looking for the nearest ancestor containing
-/// `harn.toml`. Mirrors `harn-vm`'s in-VM walker so the resolver can
-/// run from the LSP/CLI without dragging in the VM crate.
+/// `harn.toml`, via the shared [`manifest_walk`](crate::manifest_walk) walk.
 pub fn find_project_root(base: &Path) -> Option<PathBuf> {
-    let mut dir = base.to_path_buf();
-    loop {
-        if dir.join("harn.toml").exists() {
-            return Some(dir);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    crate::manifest_walk::find_project_root(base)
 }
 
 /// Resolve an `@`-prefixed asset path to an absolute filesystem path.

@@ -9,6 +9,7 @@ use harn_parser::{Node, Parser, SNode};
 pub mod asset_paths;
 mod declarations;
 pub mod fingerprint;
+pub mod manifest_walk;
 pub mod package_execution;
 mod package_imports;
 pub mod package_snapshot;
