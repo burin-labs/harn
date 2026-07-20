@@ -33,13 +33,12 @@ case "$1" in
       printf '\n' >&2
       exit 2
     fi
-    case "$8" in
-      'all()') kind=neutral ;;
-      'package(harn-vm) and binary(harn_vm)') kind=security ;;
-      *) echo "unexpected nextest filter: $8" >&2; exit 2 ;;
-    esac
-    printf '%s archive\n' "$kind" > "${10}"
-    : > "${CARGO_RECEIPTS:?}/nextest-${kind}"
+    if [[ "$8" != 'all()' ]]; then
+      echo "unexpected nextest filter: $8" >&2
+      exit 2
+    fi
+    printf 'tests archive\n' > "${10}"
+    : > "${CARGO_RECEIPTS:?}/nextest-tests"
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -84,7 +83,7 @@ run_artifact() {
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
       CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
       HARN_VERIFY_RUST_RUNTIME="${VERIFY_RUNTIME_OVERRIDE:-0}" \
-      HARN_BEHAVIOR_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-2147483648}" \
+      HARN_BEHAVIOR_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-6442450944}" \
       "$script" "$@"
   )
 }
@@ -100,8 +99,7 @@ expect_failure() {
 
 run_artifact build "$bundle" "$commit"
 test -f "$tmpdir/receipts/build"
-test -f "$tmpdir/receipts/nextest-neutral"
-test -f "$tmpdir/receipts/nextest-security"
+test -f "$tmpdir/receipts/nextest-tests"
 
 github_env="$tmpdir/github-env"
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore "$bundle" "$tmpdir/restored" "$commit" "$github_env"
@@ -109,7 +107,7 @@ VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore "$bundle" "$tmpdir/restored" "$co
 restored="$(cd "$tmpdir/restored" && pwd -P)"
 grep -Fxq "HARN_BIN=$restored/harn" "$github_env"
 tar --zstd -tf "$bundle" | sort | diff -u - <(printf '%s\n' \
-  SHA256SUMS harn harn-neutral.tar.zst harn-security.tar.zst manifest | sort)
+  SHA256SUMS harn harn-tests.tar.zst manifest | sort)
 
 expect_failure "restore accepted a bundle for the wrong commit" \
   run_artifact restore "$bundle" "$tmpdir/wrong-commit" fedcba9876543210fedcba9876543210fedcba98
@@ -141,18 +139,18 @@ mkdir "$tmpdir/tampered"
 tar --zstd -xf "$bundle" -C "$tmpdir/tampered"
 printf '\nchanged=true\n' >> "$tmpdir/tampered/manifest"
 tar --zstd -cf "$tmpdir/out/altered-manifest.tar.zst" -C "$tmpdir/tampered" \
-  harn-neutral.tar.zst harn-security.tar.zst harn manifest SHA256SUMS
+  harn-tests.tar.zst harn manifest SHA256SUMS
 expect_failure "restore accepted an altered manifest" \
   run_artifact restore "$tmpdir/out/altered-manifest.tar.zst" "$tmpdir/altered-manifest" "$commit"
 
-printf 'corrupt\n' >> "$tmpdir/tampered/harn-neutral.tar.zst"
+printf 'corrupt\n' >> "$tmpdir/tampered/harn-tests.tar.zst"
 tar --zstd -cf "$tmpdir/out/corrupt-member.tar.zst" -C "$tmpdir/tampered" \
-  harn-neutral.tar.zst harn-security.tar.zst harn manifest SHA256SUMS
+  harn-tests.tar.zst harn manifest SHA256SUMS
 expect_failure "restore accepted corrupt archive bytes" \
   run_artifact restore "$tmpdir/out/corrupt-member.tar.zst" "$tmpdir/corrupt-member" "$commit"
 
 tar --zstd -cf "$tmpdir/out/missing-member.tar.zst" -C "$tmpdir/tampered" \
-  harn-security.tar.zst harn manifest SHA256SUMS
+  harn manifest SHA256SUMS
 expect_failure "restore accepted a missing archive member" \
   run_artifact restore "$tmpdir/out/missing-member.tar.zst" "$tmpdir/missing-member" "$commit"
 

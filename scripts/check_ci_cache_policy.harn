@@ -586,7 +586,7 @@ fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string>
   const test_step = step_by_name(consumer?.steps ?? [], "Run full environment-neutral test suite")
   const test_command = trim(test_step?.run ?? "")
   if !contains(test_command, "--archive-file")
-    || !contains(test_command, "harn-neutral.tar.zst")
+    || !contains(test_command, "harn-tests.tar.zst")
     || !contains(test_command, "--workspace-remap")
     || regex_match(
     "(^|[ ])--workspace([ ]|$)",

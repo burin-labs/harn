@@ -68,7 +68,7 @@ fn workflow() {
       {
         name: "Run full environment-neutral test suite",
         run:
-          "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-neutral.tar.zst --workspace-remap workspace",
+          "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace",
       },
     ],
   }

@@ -6,7 +6,7 @@ readonly NEUTRAL_FILTER='all()'
 readonly SECURITY_FILTER='package(harn-vm) and binary(harn_vm)'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
-readonly DEFAULT_MAX_BUNDLE_BYTES=2147483648
+readonly DEFAULT_MAX_BUNDLE_BYTES=6442450944  # 6 GiB: one nextest archive for this workspace
 cleanup_dir=""
 trap '[[ -z "$cleanup_dir" ]] || rm -rf "$cleanup_dir"' EXIT
 
@@ -90,7 +90,7 @@ write_manifest() {
   local commit=$2
   local rustc_digest=$3
   cat > "$destination/manifest" <<EOF
-schema=harn.behavior_artifact.v2
+schema=harn.behavior_artifact.v3
 commit=${commit}
 nextest=${NEXTEST_VERSION}
 rustc_sha256=${rustc_digest}
@@ -100,8 +100,7 @@ dev_debug_sha256=$(printf '%s' "$EXPECTED_DEV_DEBUG" | sha256sum | cut -d ' ' -f
 neutral_filter_sha256=$(printf '%s' "$NEUTRAL_FILTER" | sha256sum | cut -d ' ' -f 1)
 security_filter_sha256=$(printf '%s' "$SECURITY_FILTER" | sha256sum | cut -d ' ' -f 1)
 harn_sha256=$(sha256 "$destination/harn")
-neutral_archive_sha256=$(sha256 "$destination/harn-neutral.tar.zst")
-security_archive_sha256=$(sha256 "$destination/harn-security.tar.zst")
+tests_archive_sha256=$(sha256 "$destination/harn-tests.tar.zst")
 EOF
 }
 
@@ -120,7 +119,7 @@ require_manifest_value() {
 verify_manifest() {
   local destination=$1
   local commit=$2
-  require_manifest_value "$destination/manifest" schema harn.behavior_artifact.v2
+  require_manifest_value "$destination/manifest" schema harn.behavior_artifact.v3
   require_manifest_value "$destination/manifest" commit "$commit"
   require_manifest_value "$destination/manifest" nextest "$NEXTEST_VERSION"
   require_manifest_value "$destination/manifest" rust_toolchain_sha256 "$(sha256 rust-toolchain.toml)"
@@ -129,8 +128,7 @@ verify_manifest() {
   require_manifest_value "$destination/manifest" neutral_filter_sha256 "$(printf '%s' "$NEUTRAL_FILTER" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" security_filter_sha256 "$(printf '%s' "$SECURITY_FILTER" | sha256sum | cut -d ' ' -f 1)"
   require_manifest_value "$destination/manifest" harn_sha256 "$(sha256 "$destination/harn")"
-  require_manifest_value "$destination/manifest" neutral_archive_sha256 "$(sha256 "$destination/harn-neutral.tar.zst")"
-  require_manifest_value "$destination/manifest" security_archive_sha256 "$(sha256 "$destination/harn-security.tar.zst")"
+  require_manifest_value "$destination/manifest" tests_archive_sha256 "$(sha256 "$destination/harn-tests.tar.zst")"
 
   if [[ "${HARN_VERIFY_RUST_RUNTIME:-0}" == "1" ]]; then
     require_nextest_version
@@ -173,12 +171,11 @@ build_bundle() {
   cleanup_dir="$staging"
 
   cargo build --locked --bin harn
+  # One archive covers both consumer lanes. The security filter is a strict
+  # subset of all(), so a second archive only duplicated multi-GB binaries.
   cargo nextest archive --locked --workspace --profile ci \
     -E "$NEUTRAL_FILTER" \
-    --archive-file "$staging/harn-neutral.tar.zst"
-  cargo nextest archive --locked --workspace --profile ci \
-    -E "$SECURITY_FILTER" \
-    --archive-file "$staging/harn-security.tar.zst"
+    --archive-file "$staging/harn-tests.tar.zst"
 
   if [[ ! -x "$target_dir/debug/harn" ]]; then
     echo "error: build did not produce the required harn CLI at $target_dir/debug/harn" >&2
@@ -188,8 +185,8 @@ build_bundle() {
   write_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
   (
     cd "$staging"
-    sha256sum harn-neutral.tar.zst harn-security.tar.zst harn manifest > SHA256SUMS
-    tar --zstd -cf "$output.tmp" harn-neutral.tar.zst harn-security.tar.zst harn manifest SHA256SUMS
+    sha256sum harn-tests.tar.zst harn manifest > SHA256SUMS
+    tar --zstd -cf "$output.tmp" harn-tests.tar.zst harn manifest SHA256SUMS
   )
   require_size_budget "$output.tmp"
   mv "$output.tmp" "$output"
@@ -214,7 +211,7 @@ restore_bundle() {
   fi
 
   listing="$(tar --zstd -tf "$bundle" | sort)"
-  if [[ "$listing" != $'SHA256SUMS\nharn\nharn-neutral.tar.zst\nharn-security.tar.zst\nmanifest' ]]; then
+  if [[ "$listing" != $'SHA256SUMS\nharn\nharn-tests.tar.zst\nmanifest' ]]; then
     echo "error: behavior artifact has an unexpected file set" >&2
     printf '%s\n' "$listing" >&2
     exit 1
