@@ -759,7 +759,9 @@ Returns an empty list if there are no matches. Throws on invalid regex.
 | `base64_encode(string)` | string: string | string | Base64 encode a string (standard alphabet with padding) |
 | `base64_decode(string)` | string: string | string | Base64 decode a string. Throws on invalid input |
 | `base64url_encode(string)` | string: string | string | Base64 encode a string with the URL-safe alphabet and no padding |
-| `base64url_decode(string)` | string: string | string | Decode a URL-safe base64 string without padding. Throws on invalid input |
+| `base64url_decode(string)` | string: string | string | Decode a URL-safe base64 string without padding into a UTF-8 string (lossy for non-UTF-8 payloads). Throws on invalid input |
+| `bytes_from_base64url(string)` | string: string | bytes | Decode URL-safe base64 (padded or unpadded) into raw `bytes`. Rejects the standard `+`/`/` alphabet. Use this for binary payloads that must round-trip with `bytes_to_base64url` / `base64url_encode` |
+| `bytes_to_base64url(bytes_or_string)` | bytes_or_string: bytes or string | string | Encode bytes (or UTF-8 string bytes) as URL-safe base64 without padding |
 | `base32_encode(string)` | string: string | string | Base32 encode a string using the RFC 4648 alphabet with padding |
 | `base32_decode(string)` | string: string | string | Decode a base32 string. Throws on invalid input |
 | `hex_encode(string)` | string: string | string | Hex encode a string as lowercase ASCII |
@@ -777,6 +779,9 @@ log(base64_decode(encoded))   // Hello, World!
 
 ```harn
 log(base64url_encode(">>>???///"))     // Pj4-Pz8_Ly8v
+const raw = bytes_from_hex("0001ff80")
+log(bytes_to_base64url(raw))           // AAH_gA
+log(bytes_to_hex(bytes_from_base64url("AAH_gA=="))) // 0001ff80 (padded ok)
 log(base32_encode("foobar"))           // MZXW6YTBOI======
 log(hex_encode("hello"))               // 68656c6c6f
 log(hex_decode("68656c6c6f"))          // hello

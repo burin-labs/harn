@@ -5386,6 +5386,8 @@ Sets are iterable with `for ... in` and support `len()`.
 | `bytes_to_hex(bytes)` | Hex-encodes `bytes` |
 | `bytes_from_base64(str)` | Decodes base64 into `bytes` |
 | `bytes_to_base64(bytes)` | Encodes `bytes` as base64 |
+| `bytes_from_base64url(str)` | Decodes URL-safe base64 (padded or unpadded) into `bytes`; rejects the standard `+`/`/` alphabet |
+| `bytes_to_base64url(bytes)` | Encodes `bytes` as URL-safe base64 without padding |
 | `bytes_len(bytes)` | Returns the length in octets |
 | `bytes_concat(a, b)` | Concatenates two byte buffers |
 | `bytes_slice(bytes, start, end)` | Returns a clamped slice of a byte buffer |

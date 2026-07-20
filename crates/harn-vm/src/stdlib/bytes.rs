@@ -75,6 +75,42 @@ fn bytes_from_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     Ok(VmValue::Bytes(std::sync::Arc::new(bytes)))
 }
 
+/// Decode URL-safe base64 into raw bytes.
+///
+/// Accepts both padded and unpadded inputs. Rejects the standard base64
+/// alphabet (`+` / `/`) so callers get a hard alphabet check rather than a
+/// silent transliteration. Pair with `bytes_to_base64url` for lossless binary
+/// round trips that `base64url_decode` cannot provide (that builtin returns a
+/// UTF-8 string via lossy conversion).
+fn decode_base64url_bytes(text: &str) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::{
+        alphabet,
+        engine::{general_purpose::GeneralPurpose, DecodePaddingMode, GeneralPurposeConfig},
+        Engine,
+    };
+
+    // Cached engine: URL-safe alphabet, padding optional on decode.
+    const URL_SAFE_PADDING_OPTIONAL: GeneralPurpose = GeneralPurpose::new(
+        &alphabet::URL_SAFE,
+        GeneralPurposeConfig::new()
+            .with_encode_padding(false)
+            .with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    );
+
+    URL_SAFE_PADDING_OPTIONAL.decode(text.as_bytes())
+}
+
+#[harn_builtin(
+    sig = "bytes_from_base64url(text: string?) -> bytes",
+    category = "bytes"
+)]
+fn bytes_from_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = expect_string_arg(args, 0, "bytes_from_base64url", ErrorKind::Runtime)?;
+    let bytes = decode_base64url_bytes(text)
+        .map_err(|error| runtime_error(format!("bytes_from_base64url: {error}")))?;
+    Ok(VmValue::Bytes(std::sync::Arc::new(bytes)))
+}
+
 #[harn_builtin(sig = "bytes_len(input: bytes) -> int", category = "bytes")]
 fn bytes_len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = expect_bytes_arg(args, 0, "bytes_len", ErrorKind::Runtime)?;
@@ -131,6 +167,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &BYTES_FROM_HEX_IMPL_DEF,
     &BYTES_TO_BASE64_IMPL_DEF,
     &BYTES_FROM_BASE64_IMPL_DEF,
+    &BYTES_FROM_BASE64URL_IMPL_DEF,
     &BYTES_LEN_IMPL_DEF,
     &BYTES_CONCAT_IMPL_DEF,
     &BYTES_SLICE_IMPL_DEF,
@@ -183,6 +220,49 @@ mod tests {
         let encoded = call(&mut vm, "bytes_to_base64", vec![b(&[0, 1, 2, 255])]).unwrap();
         let decoded = call(&mut vm, "bytes_from_base64", vec![encoded]).unwrap();
         assert_eq!(decoded.as_bytes().unwrap(), &[0, 1, 2, 255]);
+    }
+
+    #[test]
+    fn bytes_from_base64url_binary_round_trip() {
+        use base64::Engine;
+
+        let mut vm = vm();
+        // Non-UTF-8 payload: lossy string decode would replace 0xFF.
+        let raw = [0u8, 1, 2, 0xFF, 0x80, 0xFE];
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
+        let decoded = call(&mut vm, "bytes_from_base64url", vec![s(&encoded)]).unwrap();
+        assert_eq!(decoded.as_bytes().unwrap(), &raw);
+    }
+
+    #[test]
+    fn bytes_from_base64url_accepts_padded_and_unpadded() {
+        let mut vm = vm();
+        // "f" -> "Zg" (unpadded) / "Zg==" (padded)
+        let unpadded = call(&mut vm, "bytes_from_base64url", vec![s("Zg")]).unwrap();
+        let padded = call(&mut vm, "bytes_from_base64url", vec![s("Zg==")]).unwrap();
+        assert_eq!(unpadded.as_bytes().unwrap(), b"f");
+        assert_eq!(padded.as_bytes().unwrap(), b"f");
+    }
+
+    #[test]
+    fn bytes_from_base64url_rejects_standard_alphabet() {
+        let mut vm = vm();
+        let result = call(&mut vm, "bytes_from_base64url", vec![s("not+url/safe")]);
+        assert!(result.is_err(), "standard alphabet must be rejected");
+    }
+
+    #[test]
+    fn bytes_from_base64url_rejects_malformed_length() {
+        let mut vm = vm();
+        let result = call(&mut vm, "bytes_from_base64url", vec![s("A")]);
+        assert!(result.is_err(), "length-1 input must be rejected");
+    }
+
+    #[test]
+    fn bytes_from_base64url_empty() {
+        let mut vm = vm();
+        let decoded = call(&mut vm, "bytes_from_base64url", vec![s("")]).unwrap();
+        assert_eq!(decoded.as_bytes().unwrap(), &[] as &[u8]);
     }
 
     #[test]

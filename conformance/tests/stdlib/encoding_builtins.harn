@@ -1,6 +1,12 @@
 pipeline test(task) {
   __io_println(base64url_encode(">>>???///"))
   __io_println(base64url_decode("Pj4-Pz8_Ly8v"))
+  // Binary-safe URL-safe base64: non-UTF-8 octets round-trip, padded or not.
+  const raw = bytes_from_hex("0001ff80")
+  const encoded = bytes_to_base64url(raw)
+  __io_println(encoded)
+  __io_println(bytes_to_hex(bytes_from_base64url(encoded)))
+  __io_println(bytes_to_hex(bytes_from_base64url("AAH_gA==")))
   __io_println(base32_encode("foobar"))
   __io_println(base32_decode("MZXW6YTBOI======"))
   __io_println(hex_encode("hello"))
