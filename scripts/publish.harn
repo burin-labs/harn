@@ -307,6 +307,28 @@ fn publish_argv(package: PublishPlanPackage, verify: bool, allow_dirty: bool) ->
   return args
 }
 
+/**
+ * `command_run` may spawn under a session closed-env allowlist that strips
+ * credential-shaped variables. Overlay the crates.io token explicitly so
+ * `cargo publish` still authenticates (harn#5255 DAG publisher + hermetic env).
+ */
+fn cargo_publish_env() -> dict {
+  let env = {}
+  const token = harness.env.get("CARGO_REGISTRY_TOKEN")
+  if token {
+    env = env + {CARGO_REGISTRY_TOKEN: token}
+  }
+  const crates_io_token = harness.env.get("CARGO_REGISTRIES_CRATES_IO_TOKEN")
+  if crates_io_token {
+    env = env + {CARGO_REGISTRIES_CRATES_IO_TOKEN: crates_io_token}
+  }
+  return env
+}
+
+fn run_cargo_publish(args: list<string>) -> dict {
+  return command_run(args, {env: cargo_publish_env(), env_mode: "merge"})
+}
+
 fn tree_requires_allow_dirty() -> bool {
   const diff = command_run(["git", "diff", "--quiet", "--ignore-submodules", "HEAD", "--"])
   if !diff.success {
@@ -376,7 +398,7 @@ fn main(harness: Harness) {
     if allow_dirty {
       args = args + ["--allow-dirty"]
     }
-    const result = command_run(args)
+    const result = run_cargo_publish(args)
     harness.stdio.print(result.stdout)
     harness.stdio.eprint(result.stderr)
     if !result.success {
@@ -387,7 +409,7 @@ fn main(harness: Harness) {
   const adapters: PublishAdapters = {
     probe: crates_io_probe,
     publish: { package ->
-      const result = command_run(publish_argv(package, verify, allow_dirty))
+      const result = run_cargo_publish(publish_argv(package, verify, allow_dirty))
       harness.stdio.print(result.stdout)
       harness.stdio.eprint(result.stderr)
       return {success: result.success, output: command_output(result)}
