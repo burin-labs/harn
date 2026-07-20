@@ -25,11 +25,6 @@
       "workflow": "ci.yml",
       "job": "rust-builds",
       "shared_key": "workspace-behavior"
-    },
-    {
-      "workflow": "ci.yml",
-      "job": "rust-test",
-      "shared_key": "workspace-test"
     }
   ]
 }

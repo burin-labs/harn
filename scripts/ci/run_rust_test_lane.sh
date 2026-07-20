@@ -6,14 +6,10 @@ if [[ $# -eq 0 ]]; then
   exit 2
 fi
 
-: "${CARGO_BUILD_JOBS:=2}"
-export CARGO_BUILD_JOBS
-
 report_resources() {
   local label="$1"
 
   echo "::group::$label"
-  echo "CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}"
   if command -v nproc >/dev/null 2>&1; then
     echo "nproc=$(nproc)"
   fi
@@ -25,7 +21,6 @@ report_resources() {
     {
       echo "### $label"
       echo
-      echo "- \`CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}\`"
       if command -v nproc >/dev/null 2>&1; then
         echo "- \`nproc=$(nproc)\`"
       fi
@@ -61,7 +56,18 @@ trap 'report_on_signal SIGTERM' TERM
 trap 'report_on_signal SIGINT' INT
 
 report_resources "Rust test resources before"
+started=$SECONDS
 status=0
 "$@" || status=$?
+duration=$((SECONDS - started))
 report_resources "Rust test resources after"
+echo "rust_test_execution_seconds=${duration}"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  {
+    echo "### Rust test execution"
+    echo
+    echo "- Duration: ${duration}s"
+    echo "- Exit status: ${status}"
+  } >> "$GITHUB_STEP_SUMMARY"
+fi
 exit "$status"

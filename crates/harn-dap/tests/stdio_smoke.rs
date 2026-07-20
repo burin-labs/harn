@@ -18,7 +18,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-const BIN: &str = env!("CARGO_BIN_EXE_harn-dap");
+fn harn_dap_bin() -> String {
+    std::env::var("CARGO_BIN_EXE_harn-dap")
+        .or_else(|_| std::env::var("NEXTEST_BIN_EXE_harn-dap"))
+        .unwrap_or_else(|_| env!("CARGO_BIN_EXE_harn-dap").to_string())
+}
 
 /// Per-message read bound. Generous — this catches a *wedged* adapter (the
 /// failure mode this smoke test exists to detect), not slow-but-working
@@ -62,7 +66,7 @@ fn read_message(stdout: &mut BufReader<ChildStdout>) -> Option<Value> {
 
 impl DapClient {
     fn spawn() -> Self {
-        let mut child = Command::new(BIN)
+        let mut child = Command::new(harn_dap_bin())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

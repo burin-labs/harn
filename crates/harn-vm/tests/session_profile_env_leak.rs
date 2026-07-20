@@ -24,7 +24,7 @@ fn exec_does_not_leak_the_secret() {
     let out = support::logged_hermetic(&format!(
         r#"const r = exec({}, "{}")
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
-        support::harn_quote(support::PROCESS_HELPER),
+        support::harn_quote(&support::process_helper()),
         SECRET,
     ))
     .expect("exec result");
@@ -37,7 +37,7 @@ fn exec_opts_does_not_leak_the_secret() {
     let out = support::logged_hermetic(&format!(
         r#"const r = exec_opts([{}, "{}"], {{}})
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
-        support::harn_quote(support::PROCESS_HELPER),
+        support::harn_quote(&support::process_helper()),
         SECRET,
     ))
     .expect("exec_opts result");
@@ -50,7 +50,7 @@ fn spawn_captured_does_not_leak_the_secret() {
     let out = support::logged_hermetic(&format!(
         r#"const r = spawn_captured({{ cmd: {}, args: ["{}"] }})
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
-        support::harn_quote(support::PROCESS_HELPER),
+        support::harn_quote(&support::process_helper()),
         SECRET,
     ))
     .expect("spawn_captured result");
@@ -65,7 +65,7 @@ fn host_process_exec_does_not_leak_the_secret() {
     let out = support::logged_hermetic(&format!(
         r#"const r = host_call("process.exec", {{ mode: "argv", argv: [{}, "{}"] }})
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
-        support::harn_quote(support::PROCESS_HELPER),
+        support::harn_quote(&support::process_helper()),
         SECRET,
     ))
     .expect("host process result");
@@ -86,9 +86,11 @@ fn std_command_for_returns_a_closed_command() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
     harn_vm::reset_thread_local_state();
     harn_vm::stdlib::process::set_session_profile(Some(SessionProfile::hermetic()));
-    let mut command =
-        harn_vm::process_sandbox::std_command_for(support::PROCESS_HELPER, &[SECRET.to_string()])
-            .expect("build command");
+    let mut command = harn_vm::process_sandbox::std_command_for(
+        &support::process_helper(),
+        &[SECRET.to_string()],
+    )
+    .expect("build command");
     let out = command.output().expect("spawn");
     harn_vm::stdlib::process::set_session_profile(None);
     assert_eq!(
