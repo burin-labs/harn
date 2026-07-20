@@ -311,7 +311,7 @@ fn function_markup_wrapped_trailing_json_object_round_trips_args() {
 #[test]
 fn function_markup_trailing_json_empty_object_is_no_arg_call() {
     let tools = echo_marker_tools();
-    let text = r#"<function=echo_marker>{}"#;
+    let text = r"<function=echo_marker>{}";
     let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert_echo_marker_args(&parsed, json!({}));
 }
