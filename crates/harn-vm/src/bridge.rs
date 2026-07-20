@@ -1169,28 +1169,19 @@ impl HostBridge {
         }
     }
 
-    /// Check if the host has sent a cancel notification.
+    /// Host cancel notification; `cancelled_flag` is the Arc for VM cancel tokens.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
-
-    /// Arc handle to the same cancellation flag `is_cancelled` reads.
-    /// Hosts install this as the VM's cooperative cancel token
-    /// (`Vm::install_cancel_token`) so a `session/cancel` that flips this
-    /// flag also unwinds the VM step loop and kills in-flight
-    /// `process.exec` children, not just outstanding bridge calls.
     pub fn cancelled_flag(&self) -> Arc<AtomicBool> {
         self.cancelled.clone()
     }
-
     pub fn take_resume_signal(&self) -> bool {
         self.resume_requested.swap(false, Ordering::SeqCst)
     }
-
     pub fn signal_resume(&self) {
         self.resume_requested.store(true, Ordering::SeqCst);
     }
-
     pub fn set_daemon_idle(&self, idle: bool) {
         self.daemon_idle.store(idle, Ordering::SeqCst);
     }
