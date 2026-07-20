@@ -83,7 +83,7 @@ run_artifact() {
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
       CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
       HARN_VERIFY_RUST_RUNTIME="${VERIFY_RUNTIME_OVERRIDE:-0}" \
-      HARN_BEHAVIOR_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-6442450944}" \
+      HARN_BEHAVIOR_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-9663676416}" \
       "$script" "$@"
   )
 }
