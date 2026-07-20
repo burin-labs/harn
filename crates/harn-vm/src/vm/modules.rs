@@ -1,9 +1,11 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
+
+use harn_modules::DefKind;
 
 use crate::bytecode_cache;
 use crate::module_artifact::compile_module_artifact_from_source;
@@ -29,6 +31,27 @@ fn verified_package_source(bytes: Vec<u8>, path: &Path) -> Result<String, VmErro
     })
 }
 
+fn exported_function_closures(
+    loaded: &LoadedModule,
+    display_path: &Path,
+) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
+    let mut exports = BTreeMap::new();
+    for name in loaded
+        .public_exports
+        .keys()
+        .filter(|name| loaded.functions.contains_key(*name))
+    {
+        let Some(closure) = loaded.functions.get(name) else {
+            return Err(VmError::Runtime(format!(
+                "Import error: exported function '{name}' is missing from {}",
+                display_path.display()
+            )));
+        };
+        exports.insert(name.clone(), Arc::clone(closure));
+    }
+    Ok(exports)
+}
+
 #[cfg(test)]
 fn reset_stdlib_module_artifact_cache() {
     stdlib_module_artifact_cache().lock().unwrap().clear();
@@ -46,15 +69,12 @@ fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize>
 
 pub(crate) struct LoadedModule {
     pub(crate) functions: BTreeMap<String, Arc<VmClosure>>,
-    pub(crate) public_names: HashSet<String>,
-    /// Evaluated values of exported `pub const` / `pub let` bindings, read out
-    /// of the instantiated module env after the init chunk ran. Importers bind
-    /// these by value (like every other cross-module value). Disjoint from
-    /// `functions` and `public_type_names`.
+    /// Shared public declaration contract copied from the artifact and
+    /// extended by explicit re-exports.
+    pub(crate) public_exports: BTreeMap<String, DefKind>,
+    /// Evaluated values of exported declarations whose runtime binding is
+    /// produced by module initialization, including structs and enums.
     pub(crate) public_values: BTreeMap<String, VmValue>,
-    /// Names of `pub type` aliases (and re-exported ones). Erased at runtime:
-    /// selective imports may name them, but they bind no value of their own.
-    pub(crate) public_type_names: HashSet<String>,
     /// Decoded JSON-Schema dict for each `pub type` alias that lowers to a
     /// schema. Importers bind the alias name to this value so
     /// expression-position uses (`output: ImportedAlias`) work.
@@ -105,6 +125,33 @@ impl ImportProjection<'_> {
             Self::MaterializeOnly => "execution",
         }
     }
+}
+
+/// Resolve the names an import may introduce from one loaded module. The
+/// artifact's typed export contract is authoritative for ordinary imports,
+/// re-exports, and delayed cycle binding alike.
+fn module_import_names(
+    module_name: &str,
+    loaded: &LoadedModule,
+    selected_names: Option<&[String]>,
+) -> Result<Vec<String>, VmError> {
+    if let Some(names) = selected_names {
+        for name in names {
+            if !loaded.public_exports.contains_key(name) {
+                let hint = if loaded.functions.contains_key(name) {
+                    " — it is defined there but not `pub`; mark it `pub` to export it"
+                } else {
+                    ""
+                };
+                return Err(VmError::Runtime(format!(
+                    "Import error: '{name}' is not exported by {module_name}{hint}"
+                )));
+            }
+        }
+        return Ok(names.to_vec());
+    }
+
+    Ok(loaded.public_exports.keys().cloned().collect())
 }
 
 pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
@@ -369,10 +416,12 @@ impl Vm {
             // A `pub fn` in the module's Harn source wins: it is the more
             // specific declaration, and silently shadowing it here would make
             // the source of an export unguessable from reading the module.
-            if loaded.public_names.contains(*name) {
+            if loaded.public_exports.contains_key(*name) {
                 continue;
             }
-            loaded.public_names.insert((*name).to_string());
+            loaded
+                .public_exports
+                .insert((*name).to_string(), DefKind::Function);
             loaded.public_values.insert(
                 (*name).to_string(),
                 VmValue::BuiltinRef(arcstr::ArcStr::from(*name)),
@@ -487,23 +536,20 @@ impl Vm {
         let registry: ModuleFunctionRegistry =
             Arc::new(crate::value::VmMutex::new(BTreeMap::new()));
         let mut functions: BTreeMap<String, Arc<VmClosure>> = BTreeMap::new();
-        let mut public_names = artifact.public_names.clone();
-        // `pub const` / `pub let`: the init chunk already ran into `module_state`,
-        // so the bound values are live there. Read each exported value name out
-        // and publish it so importers can bind it. Add the names to
-        // `public_names` too, so the selective/wildcard export machinery treats
-        // them as part of the public surface (validation, re-export lists).
+        let mut public_exports = artifact.public_exports.clone();
+        // The init chunk already ran into `module_state`, so init-backed public
+        // values are live there. Read only the names identified by the artifact
+        // contract and publish their evaluated values for importers.
         let mut public_values: BTreeMap<String, VmValue> = BTreeMap::new();
         {
             let state = module_state.lock();
             for name in &artifact.public_value_names {
                 if let Some(value) = state.get(name) {
                     public_values.insert(name.clone(), value);
-                    public_names.insert(name.clone());
                 }
             }
         }
-        let mut public_type_names = artifact.public_type_names.clone();
+        let public_type_names = artifact.public_type_names.clone();
         let mut public_type_schemas: BTreeMap<String, VmValue> = {
             let state = module_state.lock();
             public_type_names
@@ -553,41 +599,31 @@ impl Vm {
                     import.path
                 )));
             };
-            let names_to_reexport: Vec<String> = match &import.selected_names {
-                Some(names) => names.clone(),
-                // A wildcard `pub import` re-exports exactly the target's `pub`
-                // surface (functions and erased `pub type` aliases). A module
-                // with no `pub` declarations exports nothing.
-                None => loaded
-                    .public_names
-                    .iter()
-                    .chain(loaded.public_type_names.iter())
-                    .cloned()
-                    .collect(),
-            };
+            let names_to_reexport =
+                module_import_names(&import.path, &loaded, import.selected_names.as_deref())?;
             for name in names_to_reexport {
-                let Some(closure) = loaded.functions.get(&name) else {
-                    // `pub const` / `pub let` values carry no closure: re-export
-                    // the value directly.
-                    if let Some(value) = loaded.public_values.get(&name) {
-                        public_values.insert(name.clone(), value.clone());
-                        public_names.insert(name);
-                        continue;
-                    }
-                    // `pub type` aliases are erased at runtime: re-export the
-                    // name (and its schema lowering, when present) for
-                    // importers, with no closure to bind.
-                    if loaded.public_type_names.contains(&name) {
-                        if let Some(schema) = loaded.public_type_schemas.get(&name) {
-                            public_type_schemas.insert(name.clone(), schema.clone());
-                        }
-                        public_type_names.insert(name);
-                        continue;
-                    }
+                let Some(kind) = loaded.public_exports.get(&name).copied() else {
                     return Err(VmError::Runtime(format!(
                         "Re-export error: '{name}' is not exported by '{}'",
                         import.path
                     )));
+                };
+                let Some(closure) = loaded.functions.get(&name) else {
+                    // Init-backed declarations carry their evaluated value
+                    // directly, including struct constructors and enum
+                    // namespaces.
+                    if let Some(value) = loaded.public_values.get(&name) {
+                        public_values.insert(name.clone(), value.clone());
+                        public_exports.insert(name, kind);
+                        continue;
+                    }
+                    // Type-only declarations carry no runtime binding. Preserve
+                    // an optional schema lowering and the contract entry.
+                    if let Some(schema) = loaded.public_type_schemas.get(&name) {
+                        public_type_schemas.insert(name.clone(), schema.clone());
+                    }
+                    public_exports.insert(name, kind);
+                    continue;
                 };
                 if let Some(existing) = functions.get(&name) {
                     if !Arc::ptr_eq(existing, closure) {
@@ -599,7 +635,7 @@ impl Vm {
                     }
                 }
                 functions.insert(name.clone(), Arc::clone(closure));
-                public_names.insert(name);
+                public_exports.insert(name, kind);
             }
         }
 
@@ -608,9 +644,8 @@ impl Vm {
 
         Ok(LoadedModule {
             functions,
-            public_names,
+            public_exports,
             public_values,
-            public_type_names,
             public_type_schemas,
             package_execution_guard: module_source_dir
                 .as_ref()
@@ -627,48 +662,9 @@ impl Vm {
         selected_names: Option<&[String]>,
     ) -> Result<(), VmError> {
         let module_name = module_path.display().to_string();
-        let export_names: Vec<String> = if let Some(names) = selected_names {
-            // Selective imports may only name symbols the module marks `pub`.
-            // A module with no `pub` functions exports nothing — matching every
-            // strict-visibility language (TypeScript, Rust, Go) and removing
-            // the old footgun where adding the first `pub` silently turned every
-            // other (previously importable) function private to callers.
-            for name in names {
-                if !loaded.public_names.contains(name) && !loaded.public_type_names.contains(name) {
-                    let hint = if loaded.functions.contains_key(name) {
-                        " — it is defined there but not `pub`; mark it `pub` to export it"
-                    } else {
-                        ""
-                    };
-                    return Err(VmError::Runtime(format!(
-                        "Import error: '{name}' is not exported by {module_name}{hint}"
-                    )));
-                }
-            }
-            names.to_vec()
-        } else {
-            // Wildcard import brings in exactly the module's `pub` surface,
-            // including erased `pub type` aliases.
-            loaded
-                .public_names
-                .iter()
-                .chain(loaded.public_type_names.iter())
-                .cloned()
-                .collect()
-        };
+        let export_names = module_import_names(&module_name, loaded, selected_names)?;
 
         for name in export_names {
-            // `pub type` aliases are erased at runtime: the import is valid
-            // (the type checker consumed it). When the alias lowers to a JSON
-            // schema, bind the name to that dict so expression-position uses
-            // (`output: ImportedAlias`, `schema_is(x, ImportedAlias)`)
-            // behave like a locally declared alias; otherwise bind nothing.
-            if loaded.public_type_names.contains(&name) && !loaded.functions.contains_key(&name) {
-                if let Some(schema) = loaded.public_type_schemas.get(&name) {
-                    self.env.define(&name, schema.clone(), false)?;
-                }
-                continue;
-            }
             // `pub const` / `pub let` values: bind by value.
             if let Some(value) = loaded.public_values.get(&name) {
                 if self.env.get(&name).is_some() {
@@ -679,6 +675,20 @@ impl Vm {
                     )));
                 }
                 self.env.define(&name, value.clone(), false)?;
+                continue;
+            }
+            // Type and interface declarations are valid imports without a
+            // runtime value. Schema-capable aliases still bind their schema so
+            // expression-position uses match local alias lowering.
+            if let Some(schema) = loaded.public_type_schemas.get(&name) {
+                self.env.define(&name, schema.clone(), false)?;
+                continue;
+            }
+            if loaded
+                .public_exports
+                .get(&name)
+                .is_some_and(|kind| !kind.has_runtime_value())
+            {
                 continue;
             }
             let Some(closure) = loaded.functions.get(&name) else {
@@ -949,13 +959,11 @@ impl Vm {
                 continue;
             };
 
-            let export_names: Vec<String> = match &import.selected_names {
-                Some(names) => names.clone(),
-                None if !target.public_names.is_empty() => {
-                    target.public_names.iter().cloned().collect()
-                }
-                None => target.functions.keys().cloned().collect(),
-            };
+            let export_names = module_import_names(
+                &import.target.display().to_string(),
+                &target,
+                import.selected_names.as_deref(),
+            )?;
 
             let mut module_state = importer._module_state.lock();
             for name in export_names {
@@ -967,8 +975,15 @@ impl Vm {
                 if let Some(closure) = target.functions.get(&name) {
                     module_state.define(&name, VmValue::Closure(Arc::clone(closure)), false)?;
                 } else if let Some(value) = target.public_values.get(&name) {
-                    // `pub const` / `pub let` imported across a cycle.
+                    // Init-backed public declarations imported across a cycle.
                     module_state.define(&name, value.clone(), false)?;
+                } else if target
+                    .public_exports
+                    .get(&name)
+                    .is_some_and(|kind| !kind.has_runtime_value())
+                {
+                    // Type-only public declarations carry no runtime binding.
+                    continue;
                 } else {
                     return Err(VmError::Runtime(format!(
                         "Import error: '{name}' is not defined in {}",
@@ -1039,7 +1054,7 @@ impl Vm {
         name: &str,
     ) -> Result<Arc<VmClosure>, VmError> {
         let (canonical, loaded) = self.loaded_module_for_path(path).await?;
-        if !loaded.public_names.contains(name) {
+        if !loaded.public_exports.contains_key(name) {
             let hint = if loaded.functions.contains_key(name) {
                 "; it is defined there but not `pub`"
             } else {
@@ -1065,25 +1080,7 @@ impl Vm {
         path: &Path,
     ) -> Result<BTreeMap<String, Arc<VmClosure>>, VmError> {
         let (canonical, loaded) = self.loaded_module_for_path(path).await?;
-
-        let export_names: Vec<String> = if loaded.public_names.is_empty() {
-            loaded.functions.keys().cloned().collect()
-        } else {
-            loaded.public_names.iter().cloned().collect()
-        };
-
-        let mut exports = BTreeMap::new();
-        for name in export_names {
-            let Some(closure) = loaded.functions.get(&name) else {
-                return Err(VmError::Runtime(format!(
-                    "Import error: exported function '{name}' is missing from {}",
-                    canonical.display()
-                )));
-            };
-            exports.insert(name, Arc::clone(closure));
-        }
-
-        Ok(exports)
+        exported_function_closures(&loaded, &canonical)
     }
 
     /// Load synthetic source keyed by a synthetic module path and return
@@ -1098,24 +1095,23 @@ impl Vm {
         let loaded = self
             .load_module_from_source(synthetic.clone(), source)
             .await?;
-        let export_names: Vec<String> = if loaded.public_names.is_empty() {
-            loaded.functions.keys().cloned().collect()
-        } else {
-            loaded.public_names.iter().cloned().collect()
-        };
+        exported_function_closures(&loaded, &synthetic)
+    }
 
-        let mut exports = BTreeMap::new();
-        for name in export_names {
-            let Some(closure) = loaded.functions.get(&name) else {
-                return Err(VmError::Runtime(format!(
-                    "Import error: exported function '{name}' is missing from {}",
-                    synthetic.display()
-                )));
-            };
-            exports.insert(name, Arc::clone(closure));
-        }
-
-        Ok(exports)
+    /// Load one callable from synthetic source for a host dispatch surface
+    /// that has already selected the callable through its own policy. This is
+    /// deliberately separate from module exports: script imports must
+    /// continue to see only declarations in the typed public export contract.
+    pub async fn load_module_callable_from_source(
+        &mut self,
+        source_key: impl Into<PathBuf>,
+        source: &str,
+        name: &str,
+    ) -> Result<Option<Arc<VmClosure>>, VmError> {
+        self.ensure_execution_available()?;
+        let synthetic = source_key.into();
+        let loaded = self.load_module_from_source(synthetic, source).await?;
+        Ok(loaded.functions.get(name).cloned())
     }
 
     /// Load a module by import path (`std/foo`, relative module path, or
@@ -1139,22 +1135,7 @@ impl Vm {
                     synthetic.display()
                 ))
             })?;
-            let mut exports = BTreeMap::new();
-            let export_names: Vec<String> = if loaded.public_names.is_empty() {
-                loaded.functions.keys().cloned().collect()
-            } else {
-                loaded.public_names.iter().cloned().collect()
-            };
-            for name in export_names {
-                let Some(closure) = loaded.functions.get(&name) else {
-                    return Err(VmError::Runtime(format!(
-                        "Import error: exported function '{name}' is missing from {}",
-                        synthetic.display()
-                    )));
-                };
-                exports.insert(name, Arc::clone(closure));
-            }
-            return Ok(exports);
+            return exported_function_closures(&loaded, &synthetic);
         }
 
         let base = self

@@ -707,15 +707,14 @@ impl DispatchCore {
                     let mut vm = Vm::new();
                     install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
                     self.config.vm_configurator.configure(&mut vm)?;
-                    let exports = vm
-                        .load_module_exports_from_source(script_path.clone(), &source)
+                    let closure = vm
+                        .load_module_callable_from_source(&script_path, &source, &function.name)
                         .await
                         .map_err(classify_vm_error)?;
-                    let closure = exports
-                        .get(&function.name)
+                    let closure = closure
                         .ok_or_else(|| DispatchError::MissingExport(function.name.clone()))?;
                     let args = build_vm_args(&arguments, &function, &vm)?;
-                    let result = vm.call_closure_pub(closure, &args).await;
+                    let result = vm.call_closure_pub(&closure, &args).await;
 
                     match result {
                         Ok(_) => {

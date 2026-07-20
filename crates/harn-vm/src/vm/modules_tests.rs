@@ -250,35 +250,73 @@ pub fn decide() -> Decision {
 }
 
 #[test]
-fn imported_public_fn_constructs_home_module_enum() {
-    // Regression for harn#5062: an imported `pub fn` that constructs its own
-    // module's enum variant must build the variant at runtime, matching what
-    // `harn check` already accepts. Before the fix the imported body was
-    // recompiled without seeding the module's enum catalog, so the enum name
-    // lowered to a bare variable load and threw "Undefined variable" here.
+fn imported_public_enum_exports_namespace_and_preserves_source_context() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("runtime builds");
     let temp = tempfile::tempdir().expect("tempdir");
-    let types = temp.path().join("types.harn");
+    let library = temp.path().join("library.harn");
+    let facade = temp.path().join("facade.harn");
     let consumer = temp.path().join("consumer.harn");
+    let wildcard_consumer = temp.path().join("wildcard_consumer.harn");
     std::fs::write(
-        &types,
-        "struct Inner { n: int }\npub enum Verdict { Pass(Inner) Fail(int) }\npub fn mk_pass(n: int) -> Verdict { return Verdict.Pass(Inner {n: n}) }\n",
+        &library,
+        r"
+pub enum Color {
+  Ready(message: string)
+  Empty
+}
+
+pub fn from_library(message: string) -> Color {
+  return Color.Ready(message)
+}
+",
     )
-    .expect("write type module");
+    .expect("write enum module");
+    std::fs::write(
+        &facade,
+        r#"
+pub import { Color, from_library } from "./library"
+"#,
+    )
+    .expect("write enum facade");
     std::fs::write(
         &consumer,
         r#"
-import { mk_pass } from "./types"
+import { Color, from_library } from "./facade"
 
-pub fn build() -> Verdict {
-  return mk_pass(7)
+pub fn exercise() -> string {
+  const direct = Color.Ready("direct")
+  const indirect = from_library("indirect")
+  match direct {
+    Color.Ready(message) -> {
+      match indirect {
+        Color.Ready(other) -> { return message + ":" + other }
+        _ -> { return "indirect-mismatch" }
+      }
+    }
+    _ -> { return "direct-mismatch" }
+  }
 }
 "#,
     )
     .expect("write consumer module");
+    std::fs::write(
+        &wildcard_consumer,
+        r#"
+import "./facade"
+
+pub fn exercise() -> string {
+  const direct = Color.Ready("wildcard")
+  match direct {
+    Color.Ready(message) -> { return message }
+    _ -> { return "wildcard-mismatch" }
+  }
+}
+"#,
+    )
+    .expect("write wildcard consumer module");
 
     runtime.block_on(async {
         let mut vm = Vm::new();
@@ -287,21 +325,32 @@ pub fn build() -> Verdict {
             .load_module_exports(&consumer)
             .await
             .expect("consumer module loads");
-        let build = exports.get("build").expect("build export");
+        let exercise = exports.get("exercise").expect("exercise export");
         let result = vm
-            .call_closure_pub(build, &[])
+            .call_closure_pub(exercise, &[])
             .await
-            .expect("imported enum constructor executes without Undefined variable");
+            .expect("imported enum namespace and function execute");
 
-        let VmValue::EnumVariant(variant) = result else {
-            panic!("expected enum variant, got {result:?}");
-        };
-        assert!(
-            variant.is_variant("Verdict", "Pass"),
-            "expected Verdict.Pass, got {}.{}",
-            variant.enum_name.as_str(),
-            variant.variant.as_str()
-        );
+        assert!(matches!(
+            result,
+            VmValue::String(value) if value.as_str() == "direct:indirect"
+        ));
+
+        let wildcard_exports = vm
+            .load_module_exports(&wildcard_consumer)
+            .await
+            .expect("wildcard consumer module loads");
+        let wildcard_exercise = wildcard_exports
+            .get("exercise")
+            .expect("wildcard exercise export");
+        let wildcard_result = vm
+            .call_closure_pub(wildcard_exercise, &[])
+            .await
+            .expect("wildcard imported enum namespace executes");
+        assert!(matches!(
+            wildcard_result,
+            VmValue::String(value) if value.as_str() == "wildcard"
+        ));
     });
 }
 

@@ -5,8 +5,11 @@ HARN_BIN ?=
 HARN_PROTOCOL_ARTIFACT_VERSION ?=
 HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 # Rust tests start from a known security-policy environment. Focused tests may
-# still seed these variables explicitly after process startup.
-HARN_RUST_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK HARN_LLM_CALLS_DISABLED=1
+# still seed these variables explicitly after process startup. Harn script
+# tests use harn_test_env.sh so they also get a fresh durable session store.
+HARN_EGRESS_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK
+HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1
+HARN_SCRIPT_TEST_ENV = bash ./scripts/harn_test_env.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)
 HARN_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --,$(HARN_BIN_CMD) --)
@@ -149,7 +152,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	$(HARN_RUST_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance
 
 # Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
 # termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
@@ -159,10 +162,10 @@ conformance:
 # `make conformance`, broken out here for authoring and as the documented gate.
 # See conformance/tests/mechanisms/README.md.
 mechanism-contracts:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) test conformance --filter '.contract'
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test conformance --filter '.contract'
 
 protocol-conformance:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) test protocols
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test protocols
 
 # MCP RC compatibility harness: exercises Harn's MCP client against fake
 # RC servers, fake RC clients against the generic and orchestrator
@@ -191,10 +194,10 @@ mcp-rc-conformance:
 	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_rc_compat_tests
 
 replay-oracle:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) orchestrator replay-oracle
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) orchestrator replay-oracle
 
 replay-bench:
-	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) bench replay --json >/dev/null
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) bench replay --json >/dev/null
 
 eval-tool-calls:
 	$(HARN_CMD_VERBOSE) eval tool-calls --dataset conformance/tool-call-eval --planner mock:mock --output .harn-runs/tool-call-eval/latest
@@ -340,8 +343,8 @@ audit-fmt-harn-tokens:
 # check). Wired into `make all` and exercised by CI.
 test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
-	@$(HARN_CMD) test scripts/tests/ --parallel
-	@$(HARN_CMD) test experiments/burin-mini/tests/ --parallel
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/burin-mini/tests/ --parallel
 	@echo "    Harn script tests OK."
 
 # Agent-loop Harn unit tests (stall detector, loop control, judge verdict,
@@ -349,7 +352,7 @@ test-harn-scripts:
 # by `make conformance`; this target wires them into CI so they cannot rot.
 test-agent-scripts:
 	@echo "=== Running Harn agent-loop test suite ==="
-	@HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD) test tests/agent/
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/agent/
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
@@ -611,7 +614,7 @@ check-connector-matrix:
 # before the Harn script reaches its fixture setup.
 check-provider-catalog-drift:
 	@echo "=== Checking provider catalog refresh workflow ==="
-	@$(HARN_RUST_TEST_ENV) $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
 	@echo "    Provider catalog refresh OK."
 
 # Validate the ready-to-customize trigger example library.

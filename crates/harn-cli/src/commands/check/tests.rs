@@ -33,7 +33,7 @@ fn collect_preflight_diagnostics(
     program: &[SNode],
     config: &CheckConfig,
 ) -> Vec<PreflightDiagnostic> {
-    let module_graph = harn_modules::build(std::slice::from_ref(&path.to_path_buf()));
+    let module_graph = harn_modules::build_with_source(path, source);
     collect_preflight_diagnostics_with_module_graph(path, source, program, config, &module_graph)
 }
 

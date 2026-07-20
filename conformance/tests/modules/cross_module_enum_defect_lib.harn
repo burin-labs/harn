@@ -1,0 +1,15 @@
+/** Private payload for `CrossModuleEnum.Made`. */
+struct Inner {
+  n: int
+}
+
+/** Library half of the cross-module public-enum construction regression. */
+pub enum CrossModuleEnum {
+  Made(Inner)
+  Other(int)
+}
+
+/** Construct a public enum variant while retaining a private payload type. */
+pub fn make_cross_module_enum(n: int) -> CrossModuleEnum {
+  return CrossModuleEnum.Made(Inner {n: n})
+}

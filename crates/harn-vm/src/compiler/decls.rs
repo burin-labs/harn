@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use harn_parser::{Attribute, DictEntry, Node, SNode, StructField, TypedParam};
+use harn_parser::{Attribute, DictEntry, EnumVariant, Node, SNode, StructField, TypedParam};
 
 use crate::chunk::{CompiledFunction, Constant, Op};
 
@@ -17,6 +17,12 @@ impl Compiler {
         for arg in args {
             self.compile_node(arg)?;
         }
+        self.emit_build_enum(enum_name, variant, args.len());
+        Ok(())
+    }
+
+    /// Emit `BuildEnum` after its fields are already on the operand stack.
+    pub(super) fn emit_build_enum(&mut self, enum_name: &str, variant: &str, field_count: usize) {
         let enum_idx = self.string_constant(enum_name);
         let var_idx = self.string_constant(variant);
         // BuildEnum operands: enum_name_idx, variant_idx, field_count.
@@ -29,7 +35,7 @@ impl Compiler {
         self.chunk.columns.push(self.column);
         self.chunk.lines.push(self.line);
         self.chunk.columns.push(self.column);
-        let fc = args.len() as u16;
+        let fc = field_count as u16;
         let fhi = (fc >> 8) as u8;
         let flo = fc as u8;
         self.chunk.code.push(fhi);
@@ -38,7 +44,6 @@ impl Compiler {
         self.chunk.columns.push(self.column);
         self.chunk.lines.push(self.line);
         self.chunk.columns.push(self.column);
-        Ok(())
     }
 
     pub(super) fn compile_struct_construct(
@@ -90,6 +95,9 @@ impl Compiler {
                 let mut fn_compiler = self.nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
                 fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
+                fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+                fn_compiler.imported_enum_candidates_authoritative =
+                    self.imported_enum_candidates_authoritative;
                 fn_compiler.interface_methods = self.interface_methods.clone();
                 fn_compiler.type_aliases = self.type_aliases.clone();
                 fn_compiler.struct_layouts = self.struct_layouts.clone();
@@ -151,6 +159,72 @@ impl Compiler {
         Ok(())
     }
 
+    /// Materialize an enum namespace so imported enums retain the same
+    /// `Color.Ready(...)` construction surface as locally declared enums.
+    /// Local construction still lowers directly to `BuildEnum`; this namespace
+    /// is the runtime bridge for a module whose consumer cannot see the enum
+    /// declaration during its own compilation.
+    pub(super) fn compile_enum_decl(
+        &mut self,
+        enum_name: &str,
+        variants: &[EnumVariant],
+    ) -> Result<(), CompileError> {
+        for variant in variants {
+            let key_idx = self.string_constant(&variant.name);
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            if variant.fields.is_empty() {
+                self.emit_build_enum(enum_name, &variant.name, 0);
+                continue;
+            }
+
+            let params: Vec<TypedParam> = variant
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(index, _)| TypedParam::untyped(format!("__field_{index}")))
+                .collect();
+            // A variant constructor only loads its parameters and emits one
+            // `BuildEnum`; cloning the enclosing module's full type/import
+            // catalogs here made every public enum pay for unrelated module
+            // declarations during cold artifact compilation.
+            let mut constructor = self.nested_body();
+            constructor.enum_names.insert(enum_name.to_string());
+            constructor.declare_param_slots(&params);
+            constructor.emit_default_preamble(&params)?;
+            for param in &params {
+                constructor.emit_get_binding(&param.name);
+            }
+            constructor.emit_build_enum(enum_name, &variant.name, params.len());
+            constructor.chunk.emit(Op::Return, self.line);
+
+            let param_slots = crate::chunk::ParamSlot::vec_from_typed(&params);
+            super::ensure_chunk_addressable(
+                &constructor.chunk,
+                &format!("enum constructor `{enum_name}.{}`", variant.name),
+                self.line,
+            )?;
+            let function = CompiledFunction {
+                name: format!("{enum_name}.{}", variant.name),
+                type_params: Vec::new(),
+                nominal_type_names: constructor.nominal_type_names(),
+                params: param_slots,
+                default_start: None,
+                chunk: Arc::new(constructor.chunk),
+                is_generator: false,
+                is_stream: false,
+                has_rest_param: false,
+                has_runtime_type_checks: false,
+            };
+            let index = self.chunk.functions.len();
+            self.chunk.functions.push(Arc::new(function));
+            self.chunk.emit_u16(Op::Closure, index as u16, self.line);
+        }
+        self.chunk
+            .emit_u16(Op::BuildDict, variants.len() as u16, self.line);
+        self.emit_define_binding(enum_name, false);
+        Ok(())
+    }
+
     /// Compile the runtime constructor paired with a struct declaration.
     ///
     /// Module artifacts call this directly so an imported `pub struct`
@@ -163,6 +237,9 @@ impl Compiler {
         let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
+        fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
+        fn_compiler.imported_enum_candidates_authoritative =
+            self.imported_enum_candidates_authoritative;
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();

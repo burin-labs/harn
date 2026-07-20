@@ -173,7 +173,7 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
         &host_exports,
     )?;
 
-    let chunk = harn_vm::Compiler::new()
+    let chunk = crate::compiler_for_source(&config.script, &script_source)
         .compile(&script_program)
         .map_err(|error| format!("error: compile error: {error}\n"))?;
 
@@ -246,6 +246,11 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
             execution_result
         })
         .await;
+    // A playground invocation is a complete VM run. Clear runtime-owned
+    // thread-local state before a watch-mode rerun or the next in-process
+    // invocation can inherit mocks, policies, event sinks, or other ambient
+    // state from this run.
+    harn_vm::reset_thread_local_state();
     drop(env_guard);
     result
 }
@@ -498,14 +503,15 @@ pub fn build_prompt(task) {
 pipeline default(task) {
   llm_mock({text: "done"})
   const result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
+  llm_mock({text: "stale if the run is not reset"})
   __io_println(result.text)
 }
 "#,
         );
 
         let output = execute_playground(&PlaygroundConfig {
-            host,
-            script,
+            host: host.clone(),
+            script: script.clone(),
             task: "ship it".to_string(),
             llm: Some(LlmOverride {
                 provider: "mock".to_string(),
@@ -517,6 +523,26 @@ pipeline default(task) {
         .unwrap();
 
         assert!(output.contains("done"));
+
+        write_file(
+            &script,
+            r"
+pipeline default(task) {
+  const snapshot = llm_mock_snapshot()
+  __io_println(len(keys(snapshot.queue_remaining)))
+}
+",
+        );
+        let next_output = execute_playground(&PlaygroundConfig {
+            host,
+            script,
+            task: "ship it again".to_string(),
+            llm: None,
+            llm_mock_mode: CliLlmMockMode::Off,
+        })
+        .await
+        .unwrap();
+        assert_eq!(next_output.trim(), "0");
     }
 
     #[tokio::test(flavor = "current_thread")]

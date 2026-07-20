@@ -25,7 +25,6 @@ use harn_vm::orchestration::{
     WorkflowBundlePolicy, WorkflowBundleReplayMetadata, WorkflowBundleTrigger,
     WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
-use harn_vm::Compiler;
 use harn_vm::{AutonomyTier, TrustRecord};
 use serde::{Deserialize, Serialize};
 
@@ -440,15 +439,25 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         debug_assert_eq!(parsed_source, source);
         type_check_or_fail(&source, &module_str, &program)?;
 
-        let entry_chunk = Compiler::new().compile(&program).map_err(|err| {
-            PackError::new(
-                "module.compile_failed",
-                format!("compile error in {}: {err}", module_path.display()),
-            )
-        })?;
+        let imported_enum_candidates =
+            crate::imported_enum_candidates_for_source(module_path, &source);
+        let entry_chunk =
+            crate::compiler_with_imported_enum_candidates(imported_enum_candidates.iter().cloned())
+                .compile(&program)
+                .map_err(|err| {
+                    PackError::new(
+                        "module.compile_failed",
+                        format!("compile error in {}: {err}", module_path.display()),
+                    )
+                })?;
 
         let module_artifact_opt =
-            module_artifact::compile_module_artifact(&program, Some(module_str.clone())).ok();
+            module_artifact::compile_module_artifact_from_source_with_imported_enums(
+                module_path,
+                &source,
+                imported_enum_candidates,
+            )
+            .ok();
 
         let entry_cache_key = bytecode_cache::CacheKey::from_source(module_path, &source);
         let chunk_bytes = bytecode_cache::serialize_chunk_artifact(&entry_cache_key, &entry_chunk)

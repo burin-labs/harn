@@ -355,7 +355,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     }
 
     let compile_step_start = Instant::now();
-    let chunk = match harn_vm::Compiler::new().compile(&program) {
+    let chunk = match crate::compiler_for_source(Path::new(path), &source).compile(&program) {
         Ok(c) => c,
         Err(e) => {
             stderr.push_str(&format!("error: compile error: {e}\n"));

@@ -15,10 +15,15 @@
 #      audit gates in parallel. GNU make already IS a bounded worker pool with
 #      failure collection; `-k` keeps going after a failing gate so the run
 #      reports EVERY gate's verdict, not just the first.
+#   4. Run the per-test performance ratchet after that fanout. Its workload is
+#      intentionally parallel, but its wall/user-time measurements must not be
+#      contaminated by the unrelated audit processes running beside it.
 #
 # Serial wall-clock was `warm build + conformance + max(tail gate)`; parallel
-# wall-clock is `warm build + max(conformance, tail gates)` modulo the `-j`
-# cap.
+# wall-clock is `warm build + max(conformance, tail gates) + performance gate`
+# modulo the `-j` cap. Keeping the benchmark isolated trades a small amount of
+# throughput for a measurement that reflects the workload rather than runner
+# contention.
 #
 # Usage: scripts/audit_gates.sh
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
@@ -74,7 +79,6 @@ GATES=(
   check-docs-workflow-quickstart
   check-release-audit-contract
   check-vm-rss-soak
-  check-test-case-performance
 )
 
 nproc_count() { getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4; }
@@ -159,10 +163,12 @@ fi
 # safe: without it the pipe would report tee's status and every audit failure
 # would read as a pass.
 audit_log="$(mktemp)"
+performance_log="$(mktemp)"
 conformance_log_dir="$(mktemp -d)"
 child_pids=()
 cleanup_files() {
   rm -f "$audit_log"
+  rm -f "$performance_log"
   rm -rf "$conformance_log_dir"
 }
 terminate_children() {
@@ -205,7 +211,7 @@ conformance_pids=()
 for shard_index in $(seq 1 "$conformance_shards"); do
   shard_log="$conformance_log_dir/shard-$shard_index.log"
   (
-    HARN_LLM_CALLS_DISABLED=1 "$HARN_BIN" test conformance \
+    "$SCRIPT_DIR/harn_test_env.sh" "$HARN_BIN" test conformance \
       --timeout "$conformance_timeout_ms" \
       --shard-index "$shard_index" \
       --shard-total "$conformance_shards"
@@ -244,6 +250,19 @@ else
 fi
 child_pids[0]=""
 
+# The performance gate is a benchmark, not a source or artifact consistency
+# check. Run it only after the conformance shards and audit fanout have settled
+# so its resource measurements are comparable to the platform baseline.
+performance_status=0
+performance_started="$(date +%s)"
+echo "=== test-case performance (isolated, HARN_BIN warm) ==="
+if make check-test-case-performance 2>&1 | tee "$performance_log"; then
+  echo "ok: test-case performance ($(( $(date +%s) - performance_started ))s)"
+else
+  performance_status=$?
+  echo "FAIL: test-case performance ($(( $(date +%s) - performance_started ))s)" >&2
+fi
+
 # Say at the TAIL what failed, because the tail is where a reader looks.
 #
 # Conformance and the audit gates run in PARALLEL, so a failing gate prints its
@@ -255,12 +274,13 @@ child_pids[0]=""
 # failure look like a known flake is a defect even when every gate is correct.
 failure_summary() {
   local phase="$1"
+  local log_path="${2:-$audit_log}"
   local names
   # `|| true`: a gate can fail WITHOUT emitting `make: *** [target]` (a bare
   # non-zero, a killed process). Under `set -euo pipefail` an empty grep would
   # abort this function and print nothing at all — the silence this summary
   # exists to end. Name what we can; always print the rest.
-  names="$(grep -oE 'make: \*\*\* \[[^]]+\]' "$audit_log" 2>/dev/null \
+  names="$(grep -oE 'make: \*\*\* \[[^]]+\]' "$log_path" 2>/dev/null \
     | sed -E 's/.*: ([^]]+)\]/\1/' | sort -u | tr '\n' ' ' || true)"
   {
     echo ""
@@ -268,8 +288,13 @@ failure_summary() {
     if [ -n "${names// /}" ]; then
       echo "failing gate(s): ${names}"
     fi
-    echo "The failing output is ABOVE, not at this tail: the audit gates run in parallel"
-    echo "with conformance. Search this log for 'make: *** ' and 'FAIL:'."
+    echo "The failing output is ABOVE, not at this tail."
+    if [ "$log_path" = "$audit_log" ]; then
+      echo "The audit gates run in parallel with conformance."
+    else
+      echo "This phase runs after conformance and the audit fanout."
+    fi
+    echo "Search this log for 'make: *** ' and 'FAIL:'."
     echo "'ok: conformance' near the tail does NOT mean this job passed."
   } >&2
 }
@@ -280,6 +305,14 @@ if [ "$conformance_status" -ne 0 ]; then
 fi
 if [ "$audit_status" -ne 0 ]; then
   failure_summary "audit gates"
+fi
+if [ "$performance_status" -ne 0 ]; then
+  failure_summary "test-case performance" "$performance_log"
+fi
+if [ "$audit_status" -ne 0 ]; then
   exit "$audit_status"
+fi
+if [ "$performance_status" -ne 0 ]; then
+  exit "$performance_status"
 fi
 echo "=== conformance and audit gates passed ==="

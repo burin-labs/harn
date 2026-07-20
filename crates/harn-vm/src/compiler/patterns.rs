@@ -384,7 +384,7 @@ impl Compiler {
                     self.compile_enum_variant_arm(&enum_name, name, pat_args, arm, &mut end_jumps)?;
                 }
                 // Enum variant without args: PropertyAccess(EnumName, Variant)
-                Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) =>
+                Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(n) if self.is_known_enum_name(n)) =>
                 {
                     let enum_name = if let Node::Identifier(n) = &object.node {
                         n.as_str()
@@ -433,7 +433,7 @@ impl Compiler {
                     object,
                     method,
                     args: pat_args,
-                } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) => {
+                } if matches!(&object.node, Node::Identifier(n) if self.is_known_enum_name(n)) => {
                     let enum_name = if let Node::Identifier(n) = &object.node {
                         n.clone()
                     } else {

@@ -29,7 +29,11 @@ while [[ $# -gt 0 ]]; do
     shift
   fi
 done
-printf '%s\t%s\n' "$invocation" "HARN_BIN=$0" >> "$FAKE_CONFORMANCE_RECORD"
+printf '%s\t%s\tSESSION_STORE=%s\n' "$invocation" "HARN_BIN=$0" "$HARN_SESSION_STORE_ROOT" >> "$FAKE_CONFORMANCE_RECORD"
+if [[ -z "${HARN_SESSION_STORE_ROOT-}" || ! -d "$HARN_SESSION_STORE_ROOT" ]]; then
+  echo "conformance shard did not receive an isolated session store" >&2
+  exit 46
+fi
 # Opening the FIFO blocks until the audit fanout has reached its own barrier;
 # this proves ordering without a wall-clock polling loop.
 printf 'conformance-started\n' > "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-$shard_index"
@@ -57,7 +61,19 @@ fi
 printf 'invocation\t%s\tHARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
 
 case "$*" in
-  -j3\ -k\ -Otarget\ *)
+  check-test-case-performance)
+    if [[ "$(wc -l < "$FAKE_CONFORMANCE_RECORD" | tr -d ' ')" != "3" ]]; then
+      echo "performance gate started before conformance completed" >&2
+      exit 45
+    fi
+    if [[ "${FAKE_PERFORMANCE_FAIL-0}" == "1" ]]; then
+      echo "fake performance gate failed" >&2
+      exit 47
+    fi
+    printf 'fake performance gate ok\n'
+    exit 0
+    ;;
+  -j3\ -k\ -Otarget\ *|-j1\ -k\ -Otarget\ *)
     touch "$FAKE_AUDIT_ROOT/audit.started"
     exec 3< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-1"
     exec 4< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-2"
@@ -112,6 +128,18 @@ if [[ "$(wc -l < "$tmp_root/conformance-record.txt" | tr -d ' ')" != "3" ]]; the
   cat "$tmp_root/conformance-record.txt" >&2
   exit 1
 fi
+if [[ "$(awk -F '\t' '{print $3}' "$tmp_root/conformance-record.txt" | sort -u | wc -l | tr -d ' ')" != "3" ]]; then
+  echo "conformance shards did not receive distinct session stores" >&2
+  cat "$tmp_root/conformance-record.txt" >&2
+  exit 1
+fi
+while IFS= read -r session_field; do
+  session_store="${session_field#SESSION_STORE=}"
+  if [[ -e "$session_store" ]]; then
+    echo "conformance shard leaked its isolated session store: $session_store" >&2
+    exit 1
+  fi
+done < <(awk -F '\t' '{print $3}' "$tmp_root/conformance-record.txt")
 for shard_index in 1 2 3; do
   expected="test conformance --timeout 60000 --shard-index $shard_index --shard-total 3"
   if ! grep -Fq "$expected" "$tmp_root/conformance-record.txt"; then
@@ -127,6 +155,11 @@ if ! grep -Fq $'\t-j3 -k -Otarget ' "$record"; then
 fi
 if ! grep -Fq "check-ported-handler-loc" "$record"; then
   echo "required audit fanout omitted the ported-handler LOC ratchet" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq $'invocation\tcheck-test-case-performance' "$record"; then
+  echo "performance gate did not run as an isolated phase" >&2
   cat "$record" >&2
   exit 1
 fi
@@ -149,47 +182,6 @@ fi
 command getconf "$@"
 SH
 chmod +x "$fake_getconf"
-# The fake make only accepts -j3 today; extend it to also accept the reserved
-# -j1 that default concurrency (4) minus shards (3) produces.
-cat > "$fake_bin/make" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ "${1-}" == "--help" ]]; then
-  printf 'GNU Make test double\n  --output-sync\n'
-  exit 0
-fi
-
-printf 'invocation\t%s\tHARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
-
-case "$*" in
-  -j3\ -k\ -Otarget\ *|-j1\ -k\ -Otarget\ *)
-    touch "$FAKE_AUDIT_ROOT/audit.started"
-    exec 3< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-1"
-    exec 4< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-2"
-    exec 5< "$FAKE_CONFORMANCE_START_FIFO_DIR/shard-3"
-    IFS= read -r <&3
-    IFS= read -r <&4
-    IFS= read -r <&5
-    exec 3<&-
-    exec 4<&-
-    exec 5<&-
-    if [[ "${FAKE_AUDIT_FAIL-0}" == "1" ]]; then
-      echo "make: *** [Makefile:314: fmt-harn] Error 123" >&2
-      echo "make: *** [Makefile:705: check-source-file-lengths] Error 1" >&2
-      echo "fake audit gates failed" >&2
-      exit 43
-    fi
-    printf 'fake audit gates ok\n'
-    exit 0
-    ;;
-  *)
-    echo "unexpected make invocation: $*" >&2
-    exit 42
-    ;;
-esac
-SH
-chmod +x "$fake_bin/make"
 unset AUDIT_GATES_CONCURRENCY
 HARN_CONFORMANCE_SHARDS=3 \
   HARN_BIN="$fake_harn" \
@@ -247,6 +239,28 @@ fi
 if ! grep -Fq "=== FAILED: audit gates ===" "$tmp_root/audit-fail.out"; then
   echo "audit_gates did not report the failing audit fanout" >&2
   cat "$tmp_root/audit-fail.out" >&2
+  exit 1
+fi
+
+: > "$record"
+rm -f "$tmp_root/audit.started"
+if AUDIT_GATES_CONCURRENCY=3 \
+  HARN_CONFORMANCE_SHARDS=3 \
+  HARN_BIN="$fake_harn" \
+  FAKE_AUDIT_RECORD="$record" \
+  FAKE_CONFORMANCE_RECORD="$tmp_root/performance-fail-record.txt" \
+  FAKE_AUDIT_ROOT="$tmp_root" \
+  FAKE_CONFORMANCE_START_FIFO_DIR="$conformance_start_fifo_dir" \
+  FAKE_PERFORMANCE_FAIL=1 \
+  PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/audit_gates.sh" > "$tmp_root/performance-fail.out" 2>&1; then
+  echo "audit_gates masked a failing performance phase" >&2
+  cat "$tmp_root/performance-fail.out" >&2
+  exit 1
+fi
+if ! grep -Fq "=== FAILED: test-case performance ===" "$tmp_root/performance-fail.out"; then
+  echo "audit_gates did not report the failing performance phase" >&2
+  cat "$tmp_root/performance-fail.out" >&2
   exit 1
 fi
 

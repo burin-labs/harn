@@ -1,39 +1,41 @@
 use std::path::{Path, PathBuf};
 
-use harn_modules::resolve_import_path;
 use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use super::preflight::PreflightDiagnostic;
-use super::source::parse_resolved_module;
 
 /// Tracks the origin of an imported name for collision detection.
 struct ImportedName {
     module_path: String,
 }
 
-/// Collect all function names that would be imported by each import statement
-/// in the program, and flag collisions.
+/// Collect the public names imported by each import statement and flag
+/// collisions. The module graph owns export visibility and re-export
+/// traversal, so this preflight does not maintain a second export table.
 pub(super) fn scan_import_collisions(
     file_path: &Path,
     source: &str,
     program: &[SNode],
+    graph: &harn_modules::ModuleGraph,
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     let mut imported_names: std::collections::HashMap<String, ImportedName> =
         std::collections::HashMap::new();
+    let imports = graph.imports_for_module(file_path);
 
     for node in program {
         match &node.node {
             Node::ImportDecl { path, .. } => {
-                let Some(import_path) = resolve_import_path(file_path, path) else {
+                let Some(import_path) = imports
+                    .iter()
+                    .find(|import| import.raw_path == *path)
+                    .and_then(|import| import.resolved_path.clone())
+                else {
                     // Already diagnosed as unresolved elsewhere.
                     continue;
                 };
-                let import_str = import_path.to_string_lossy().into_owned();
-                let Some(parsed) = parse_resolved_module(&import_path) else {
-                    continue;
-                };
-                let names = collect_exported_names(&parsed.0, &import_path);
+                let import_str = import_path.display().to_string();
+                let names = graph.exports_for_module(Path::new(&import_path));
                 for name in names {
                     if let Some(existing) = imported_names.get(&name) {
                         if existing.module_path != import_str {
@@ -63,8 +65,11 @@ pub(super) fn scan_import_collisions(
                 }
             }
             Node::SelectiveImport { names, path, .. } => {
-                let module_path = resolve_import_path(file_path, path)
-                    .map(|p| p.to_string_lossy().into_owned())
+                let module_path = imports
+                    .iter()
+                    .find(|import| import.raw_path == *path)
+                    .and_then(|import| import.resolved_path.clone())
+                    .map(|path| path.display().to_string())
                     .unwrap_or_else(|| path.clone());
                 for name in names {
                     if let Some(existing) = imported_names.get(name) {
@@ -196,66 +201,5 @@ pub(super) fn scan_re_export_conflicts(
             ),
             tags: None,
         });
-    }
-}
-
-/// Parse a module source and extract the names it would export via wildcard
-/// import. Resolves `pub import` re-export chains by recursing into the
-/// target module's source so the collision check sees the same names a
-/// runtime wildcard import would expose.
-fn collect_exported_names(source: &str, file_path: &Path) -> Vec<String> {
-    let mut visited = std::collections::HashSet::new();
-    let mut names = Vec::new();
-    collect_exported_names_into(source, file_path, &mut names, &mut visited);
-    names
-}
-
-fn collect_exported_names_into(
-    source: &str,
-    file_path: &Path,
-    names: &mut Vec<String>,
-    visited: &mut std::collections::HashSet<PathBuf>,
-) {
-    let canonical = harn_modules::canonical_path(file_path);
-    if !visited.insert(canonical) {
-        return;
-    }
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let tokens = match lexer.tokenize() {
-        Ok(t) => t,
-        Err(_) => return,
-    };
-    let mut parser = harn_parser::Parser::new(tokens);
-    let program = match parser.parse() {
-        Ok(p) => p,
-        Err(_) => return,
-    };
-    let has_pub = program
-        .iter()
-        .any(|n| matches!(&n.node, Node::FnDecl { is_pub: true, .. }));
-    for node in &program {
-        match &node.node {
-            Node::FnDecl { name, is_pub, .. } if !has_pub || *is_pub => {
-                names.push(name.clone());
-            }
-            Node::SelectiveImport {
-                names: import_names,
-                is_pub: true,
-                ..
-            } => {
-                names.extend(import_names.iter().cloned());
-            }
-            Node::ImportDecl {
-                path: nested,
-                is_pub: true,
-            } => {
-                if let Some(nested_path) = resolve_import_path(file_path, nested) {
-                    if let Some(parsed) = parse_resolved_module(&nested_path) {
-                        collect_exported_names_into(&parsed.0, &nested_path, names, visited);
-                    }
-                }
-            }
-            _ => {}
-        }
     }
 }

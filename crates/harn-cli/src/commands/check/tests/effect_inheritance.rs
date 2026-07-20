@@ -1,5 +1,42 @@
 use super::*;
 
+#[test]
+fn preflight_detects_struct_and_enum_import_collisions() {
+    let dir = unique_temp_dir("harn-check-type-collision");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(
+        dir.join("lib").join("a.harn"),
+        "pub struct Shared { value: int }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("lib").join("b.harn"),
+        "pub enum Shared { Ready }\n",
+    )
+    .unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+import "lib/a.harn"
+import "lib/b.harn"
+
+pipeline main() {}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("import collision")),
+        "expected type import collision diagnostic, got: {:?}",
+        diagnostics
+            .iter()
+            .map(|diagnostic| &diagnostic.message)
+            .collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ── E5.4 (HARN-CAP-301): effect inheritance ────────────────────────────
 
 #[test]

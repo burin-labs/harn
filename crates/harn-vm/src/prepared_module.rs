@@ -9,6 +9,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use harn_modules::DefKind;
 use parking_lot::Mutex;
 
 use crate::chunk::{Chunk, CompiledFunction};
@@ -22,7 +23,7 @@ pub(crate) struct PreparedModuleArtifact {
     pub(crate) type_schema_init_chunk: Option<Arc<Chunk>>,
     pub(crate) init_chunk: Option<Arc<Chunk>>,
     pub(crate) functions: BTreeMap<String, Arc<CompiledFunction>>,
-    pub(crate) public_names: std::collections::HashSet<String>,
+    pub(crate) public_exports: BTreeMap<String, DefKind>,
     pub(crate) public_value_names: std::collections::HashSet<String>,
     pub(crate) public_type_names: std::collections::HashSet<String>,
 }
@@ -34,7 +35,7 @@ impl PreparedModuleArtifact {
             type_schema_init_chunk,
             init_chunk,
             functions,
-            public_names,
+            public_exports,
             public_value_names,
             public_type_names,
         } = artifact;
@@ -50,7 +51,7 @@ impl PreparedModuleArtifact {
             type_schema_init_chunk,
             init_chunk,
             functions,
-            public_names,
+            public_exports,
             public_value_names,
             public_type_names,
         }
@@ -202,7 +203,7 @@ mod tests {
             type_schema_init_chunk: None,
             init_chunk: None,
             functions: BTreeMap::new(),
-            public_names: Default::default(),
+            public_exports: BTreeMap::new(),
             public_value_names: Default::default(),
             public_type_names: Default::default(),
         }))
@@ -290,7 +291,13 @@ pub fn answer(items: list<string>) {
         let param_type_name = named_list_element(&function.params[0].type_expr).as_ptr();
         let nested_name = function.chunk.functions[0].name.as_ptr();
         let nested_code = function.chunk.functions[0].chunk.code.as_ptr();
-        let public_name = artifact.public_names.get("answer").unwrap().as_ptr();
+        let public_export_name = artifact
+            .public_exports
+            .get_key_value("answer")
+            .unwrap()
+            .0
+            .as_ptr();
+        let public_export_kind = *artifact.public_exports.get("answer").unwrap();
         let public_value_name = artifact.public_value_names.get("value").unwrap().as_ptr();
         let public_type_name = artifact.public_type_names.get("Result").unwrap().as_ptr();
         let hydrated = PreparedModuleArtifact::from_cached(artifact);
@@ -341,8 +348,17 @@ pub fn answer(items: list<string>) {
             nested_code
         );
         assert_eq!(
-            hydrated.public_names.get("answer").unwrap().as_ptr(),
-            public_name
+            hydrated
+                .public_exports
+                .get_key_value("answer")
+                .unwrap()
+                .0
+                .as_ptr(),
+            public_export_name
+        );
+        assert_eq!(
+            hydrated.public_exports.get("answer"),
+            Some(&public_export_kind)
         );
         assert_eq!(
             hydrated.public_value_names.get("value").unwrap().as_ptr(),

@@ -1,8 +1,57 @@
+use std::collections::HashSet;
+
 use harn_parser::{Node, SNode};
 
 use super::{Compiler, EnumCatalogSnapshot};
 
 impl Compiler {
+    pub(super) fn collect_imported_enum_candidates(&mut self, program: &[SNode]) {
+        if self.imported_enum_candidates_authoritative {
+            return;
+        }
+        if !harn_parser::visit::contains_identifier_receiver_access(program) {
+            return;
+        }
+        let imported_names: HashSet<&str> = program
+            .iter()
+            .filter_map(|node| match &node.node {
+                Node::SelectiveImport { names, .. } => Some(names),
+                _ => None,
+            })
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        if imported_names.is_empty() {
+            return;
+        }
+
+        // A selective import is not necessarily an enum. Keep ordinary
+        // imports out of every nested compiler's lexical catalog unless the
+        // source actually uses the syntax whose meaning depends on enum
+        // resolution (`ImportedEnum.Variant`). Wildcard imports are resolved
+        // by the module graph and supplied separately by the artifact path.
+        let mut used_imports = HashSet::new();
+        harn_parser::visit::walk_program(program, &mut |node| {
+            let object = match &node.node {
+                Node::PropertyAccess { object, .. }
+                | Node::OptionalPropertyAccess { object, .. }
+                | Node::MethodCall { object, .. }
+                | Node::OptionalMethodCall { object, .. } => object,
+                _ => return,
+            };
+            if let Node::Identifier(name) = &object.node {
+                if imported_names.contains(name.as_str()) {
+                    used_imports.insert(name.clone());
+                }
+            }
+        });
+        self.imported_enum_candidates.extend(used_imports);
+    }
+
+    pub(super) fn is_known_enum_name(&self, name: &str) -> bool {
+        self.enum_names.contains(name) || self.imported_enum_candidates.contains(name)
+    }
+
     pub(super) fn enum_catalog_snapshot(&self) -> EnumCatalogSnapshot {
         EnumCatalogSnapshot {
             names: self.enum_names.clone(),
@@ -65,31 +114,6 @@ impl Compiler {
                     .insert((declaration.span.start, declaration.span.end));
             }
         }
-    }
-
-    /// Seed the full module type catalog into this compiler: enum names and
-    /// variant owners (including the built-in `Result`), struct field layouts,
-    /// interface method sets, and type aliases.
-    ///
-    /// Every path that compiles a module-scoped body must seed the same
-    /// catalog so catalog-dependent lowerings resolve identically no matter
-    /// which module later calls the compiled body: the top-level program
-    /// (`compile`), pipeline callables (`compile_pipeline_callable`), and the
-    /// per-function and `init` chunks emitted for imported modules
-    /// (`compile_module_artifact`). The most visible dependent lowering is
-    /// `EnumName.Variant(...)` construction, which only becomes a `BuildEnum`
-    /// op when the enum is in `enum_names`. Without this seed an imported
-    /// function body recompiled in a fresh, catalog-less compiler lowers enum
-    /// construction to a bare variable load of the enum name and crashes at
-    /// runtime with "Undefined variable" even though `check` passes (harn#5062).
-    pub(crate) fn seed_module_catalog(&mut self, program: &[SNode]) {
-        self.collect_module_enum_catalog(program);
-        if self.enum_names.insert("Result".to_string()) {
-            Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
-        }
-        Self::collect_struct_layouts(program, &mut self.struct_layouts);
-        Self::collect_interface_methods(program, &mut self.interface_methods);
-        self.collect_type_aliases(program);
     }
 
     /// Seed the built-in `Result` enum's variants into the owner map.

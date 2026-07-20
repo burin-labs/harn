@@ -17,7 +17,6 @@
 //! run` that doesn't actually exist in the current codebase; the
 //! preconditions for porting each are filed as #2348 (`harn bench` →
 //! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
-//!
 use std::path::{Path, PathBuf};
 
 use harn_parser::DiagnosticSeverity;
@@ -187,7 +186,7 @@ fn precompile_one(
         eprint!("{messages}");
     }
 
-    let artifacts = compile_artifacts(source_path, &program)?;
+    let artifacts = compile_artifacts(source_path, &source, &program)?;
     let entry_key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
 
     let entry_dest = output_path(
@@ -222,17 +221,22 @@ fn precompile_one(
 /// cache regardless of how the user invokes the file.
 fn compile_artifacts(
     source_path: &Path,
+    source: &str,
     program: &[harn_parser::SNode],
 ) -> Result<PrecompileArtifacts, String> {
-    let entry_chunk = harn_vm::Compiler::new()
-        .compile(program)
-        .map_err(|e| format!("compile error: {e}"))?;
-    let module_artifact = harn_vm::module_artifact::compile_module_artifact(
-        program,
-        Some(source_path.display().to_string()),
-    )
-    .map_err(|e| format!("module compile error: {e}"))
-    .ok();
+    let imported_enum_candidates = crate::imported_enum_candidates_for_source(source_path, source);
+    let entry_chunk =
+        crate::compiler_with_imported_enum_candidates(imported_enum_candidates.iter().cloned())
+            .compile(program)
+            .map_err(|e| format!("compile error: {e}"))?;
+    let module_artifact =
+        harn_vm::module_artifact::compile_module_artifact_from_source_with_imported_enums(
+            source_path,
+            source,
+            imported_enum_candidates,
+        )
+        .map_err(|e| format!("module compile error: {e}"))
+        .ok();
     Ok(PrecompileArtifacts {
         entry_chunk,
         module_artifact,
