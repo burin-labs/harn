@@ -571,6 +571,12 @@ jobs:
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$RUNNER_TEMP/harn-behavior"
           "$GITHUB_SHA"
+      # The compressed bundle and its extracted copy are each ~8.4 GiB, and
+      # nextest unpacks the inner archive into a third, uncompressed copy.
+      # Hosted runners do not reliably fit all three, so drop the bundle the
+      # moment the checksummed restore no longer needs it.
+      - name: Drop compressed payload after restore
+        run: rm -f "$RUNNER_TEMP/harn-behavior.tar.zst"
       # Landlock is the one environment-specific proof owned by rust-security;
       # every other default-suite test remains required here.
       - name: Run full environment-neutral test suite
@@ -624,6 +630,10 @@ jobs:
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$RUNNER_TEMP/harn-behavior"
           "$GITHUB_SHA"
+      # Same disk math as rust-test: bundle + extracted copy + nextest's
+      # uncompressed unpack do not reliably fit a hosted runner together.
+      - name: Drop compressed payload after restore
+        run: rm -f "$RUNNER_TEMP/harn-behavior.tar.zst"
       - name: Run Landlock escape proof on GitHub Ubuntu
         id: release-audit-rust-security
         run: >-

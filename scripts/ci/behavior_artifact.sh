@@ -227,7 +227,7 @@ restore_cli_bundle() {
     exit 1
   fi
 
-  listing="$(tar --zstd -tf "$bundle" | sort)"
+  listing="$(tar --zstd -tf "$bundle" | LC_ALL=C sort)"
   if [[ "$listing" != $'CLI_SHA256SUMS\nharn\nmanifest' ]]; then
     echo "error: CLI artifact has an unexpected file set" >&2
     printf '%s\n' "$listing" >&2
@@ -266,7 +266,7 @@ restore_bundle() {
     exit 1
   fi
 
-  listing="$(tar --zstd -tf "$bundle" | sort)"
+  listing="$(tar --zstd -tf "$bundle" | LC_ALL=C sort)"
   if [[ "$listing" != $'SHA256SUMS\nharn\nharn-tests.tar.zst\nmanifest' ]]; then
     echo "error: behavior artifact has an unexpected file set" >&2
     printf '%s\n' "$listing" >&2
