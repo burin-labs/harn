@@ -507,7 +507,12 @@ pub fn run() -> int { return helper(1) }
             Path::new("<test>/qualified.harn"),
             r#"
 import { Status } from "./status"
-pub fn run() { return Status.Ready() }
+pub fn run(value: Status) {
+  match value {
+    Status.Ready -> { return 1 }
+    _ -> { return 0 }
+  }
+}
 "#,
         )
         .expect("qualified module parses");
