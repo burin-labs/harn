@@ -1,5 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { command_run } from "std/command"
+import { shell_quote } from "std/runtime"
 import { truncate_text } from "std/text"
 import {
   PublishPlanPackage,
@@ -317,12 +318,30 @@ fn tree_requires_allow_dirty() -> bool {
   )
 }
 
-fn load_publish_packages() -> list<PublishPlanPackage> {
-  const metadata = command_run(["cargo", "metadata", "--format-version", "1", "--no-deps"])
-  if !metadata.success {
-    throw "cargo metadata failed: " + command_output(metadata)
+/**
+ * Load publishable packages from `cargo metadata`.
+ *
+ * Writes JSON to a temp file instead of capturing stdout: hostlib command
+ * capture truncates around 50 KiB, and workspace metadata with `--no-deps`
+ * is already ~180 KiB, which previously aborted crates.io finalize with
+ * `structured_parse_error` / EOF mid-string.
+ */
+fn load_publish_packages(harness: Harness) -> list<PublishPlanPackage> {
+  const tmp = command_run(["mktemp", "harn-publish-metadata.XXXXXX"])
+  if !tmp.success {
+    throw "mktemp failed while staging cargo metadata: " + command_output(tmp)
   }
-  return publish_plan_packages_from_metadata(json_parse(metadata.stdout))
+  const metadata_path = trim(tmp.stdout)
+  const write = command_run(
+    ["bash", "-lc", "cargo metadata --format-version 1 --no-deps > " + shell_quote(metadata_path)],
+  )
+  if !write.success {
+    const _ = command_run(["rm", "-f", metadata_path])
+    throw "cargo metadata failed: " + command_output(write)
+  }
+  const text = harness.fs.read_text(metadata_path)
+  const _cleanup = command_run(["rm", "-f", metadata_path])
+  return publish_plan_packages_from_metadata(json_parse(text))
 }
 
 fn arg_spec() {
@@ -347,7 +366,7 @@ fn main(harness: Harness) {
     exit(2)
   }
   const dry_run = unwrap(parsed_result).options.dry_run ?? false
-  const packages = load_publish_packages()
+  const packages = load_publish_packages(harness)
   const version = publish_plan_version(packages)
   const verify = harness.env.get("HARN_PUBLISH_VERIFY") == "1"
   const allow_dirty = tree_requires_allow_dirty()
