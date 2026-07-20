@@ -36,7 +36,9 @@ name = "harn"
 path = "src/main.rs"
 
 [dependencies]
-harn-glob = { path = "../harn-glob", version = "=0.10.28", default-features = false }
+# `name` is needed for model-id pattern matching; harn-vm already enables it,
+# so this costs no additional build.
+harn-glob = { path = "../harn-glob", version = "=0.10.28", default-features = false, features = ["name"] }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.28" }
 harn-parser = { path = "../harn-parser", version = "=0.10.28" }
 harn-ir = { path = "../harn-ir", version = "=0.10.28" }
@@ -94,6 +96,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 futures = "0.3"
 blake3 = "1"
 sha2 = "0.11"
+# POSIX-correct argv quoting for every emitted shell command line. Hand-rolled
+# quoters disagreed on the safe-character set and dropped empty arguments.
+shell-words = "1.1"
 hex = "0.4"
 hmac = "0.13"
 ipnet = "2"

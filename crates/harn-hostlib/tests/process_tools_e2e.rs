@@ -78,10 +78,6 @@ fn python3() -> Option<String> {
     status.success().then_some(candidate)
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (*map).clone(),
@@ -167,7 +163,7 @@ fn real_wait_command_completes_background_after_fifo_release() {
 
     let script = format!(
         "set -eu\nprintf 'bg-ready\\n'\nIFS= read -r _ < {}\nprintf 'bg-done\\n'\n",
-        shell_quote(&fifo_path.to_string_lossy())
+        shell_words::quote(&fifo_path.to_string_lossy())
     );
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["bash", "-c", &script]));
@@ -610,7 +606,7 @@ fn real_run_command_interrupt_kills_the_whole_process_group() {
 
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
-    let ready_path_arg = shell_quote(&ready_path.to_string_lossy());
+    let ready_path_arg = shell_words::quote(&ready_path.to_string_lossy()).into_owned();
     let worker = std::thread::spawn(move || {
         let _guard = harn_vm::op_interrupt::install(Some(worker_cancel), None);
         let mut req = dict();
@@ -672,7 +668,7 @@ fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
 
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
-    let ready_path_arg = shell_quote(&ready_path.to_string_lossy());
+    let ready_path_arg = shell_words::quote(&ready_path.to_string_lossy()).into_owned();
     let worker = std::thread::spawn(move || {
         let _guard = harn_vm::op_interrupt::install(Some(worker_cancel), None);
         let mut req = dict();
@@ -895,9 +891,9 @@ print("parent-exit", flush=True)
     let mut req = dict();
     let command = format!(
         "{} {} {}",
-        shell_quote(&python),
-        shell_quote(&script_path.to_string_lossy()),
-        shell_quote(&pid_path.to_string_lossy())
+        shell_words::quote(&python),
+        shell_words::quote(&script_path.to_string_lossy()),
+        shell_words::quote(&pid_path.to_string_lossy())
     );
     req.insert("mode".into(), vstr("shell"));
     req.insert("command".into(), vstr(&command));

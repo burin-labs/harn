@@ -791,20 +791,14 @@ fn comparison_provider_model(comparison: &JsonValue) -> Option<(String, String)>
     ))
 }
 
+/// Match a configured model pattern against a model id.
+///
+/// Model ids are flat names, so this uses [`harn_glob::match_name`] (full glob
+/// syntax, `/` not special). Matching stays case-insensitive, as it has always
+/// been for this surface: patterns are hand-written in config and model ids are
+/// conventionally — but not reliably — lowercase.
 fn model_pattern_matches(pattern: &str, model: &str) -> bool {
-    let pattern = pattern.to_lowercase();
-    let model = model.to_lowercase();
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return model.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return model.ends_with(suffix);
-    }
-    if pattern.contains('*') {
-        let parts: Vec<&str> = pattern.split('*').collect();
-        return parts.len() == 2 && model.starts_with(parts[0]) && model.ends_with(parts[1]);
-    }
-    model == pattern
+    harn_glob::match_name(&pattern.to_lowercase(), &model.to_lowercase())
 }
 
 fn load_notes(path: &Path) -> Result<SupportNotesFile, String> {

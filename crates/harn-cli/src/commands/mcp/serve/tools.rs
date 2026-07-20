@@ -20,6 +20,7 @@ use crate::commands::orchestrator::common::{
     TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 use crate::commands::orchestrator::inspect_data::collect_orchestrator_inspect_data;
+use crate::format::shell_quote_path;
 
 use super::protocol::paginated_list_response;
 use super::types::{
@@ -1427,11 +1428,6 @@ fn next_debug_commands(
         ));
     }
     commands
-}
-
-fn shell_quote_path(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    format!("'{}'", raw.replace('\'', "'\\''"))
 }
 
 pub(super) fn tool_def(

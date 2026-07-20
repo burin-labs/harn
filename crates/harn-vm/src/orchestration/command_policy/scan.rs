@@ -310,33 +310,15 @@ pub(super) fn scan_universal_catastrophic_reason(
 
 /// Quote a single argv element so that re-joining the elements with spaces
 /// reproduces a shell command line whose tokenization matches the original argv
-/// boundaries. A token made only of shell-neutral characters (no whitespace and
-/// none of the shell metacharacters the floor's tokenizer/splitter act on) is
-/// safe to leave bare; anything else is wrapped in single quotes with embedded
-/// single quotes escaped as `'\''`.
+/// boundaries.
+///
+/// Delegates to `shell_words::quote`, the workspace's single definition of POSIX
+/// argv quoting. The floor's own tokenizer strips quotes before matching, so the
+/// exact set of characters left bare is not observable to it — only the token
+/// boundaries are, and those are preserved for every input including the empty
+/// string (quoted as `''`).
 pub(super) fn shell_quote_arg(arg: &str) -> String {
-    let is_safe = !arg.is_empty()
-        && arg.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(
-                    byte,
-                    b'_' | b'-' | b'.' | b'/' | b':' | b'=' | b'+' | b',' | b'@' | b'%'
-                )
-        });
-    if is_safe {
-        return arg.to_string();
-    }
-    let mut out = String::with_capacity(arg.len() + 2);
-    out.push('\'');
-    for ch in arg.chars() {
-        if ch == '\'' {
-            out.push_str("'\\''");
-        } else {
-            out.push(ch);
-        }
-    }
-    out.push('\'');
-    out
+    shell_words::quote(arg).into_owned()
 }
 
 pub(super) fn risk_labels_from_scan(scan: &JsonValue) -> Vec<String> {

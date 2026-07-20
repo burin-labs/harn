@@ -592,7 +592,7 @@ fn push_env_if_missing(
     if env_file_has_key(existing, key) {
         return;
     }
-    let assignment = format!("{key}={}", shell_quote(value));
+    let assignment = format!("{key}={}", shell_words::quote(value));
     if commented {
         additions.push(format!("# {assignment}"));
     } else {
@@ -805,10 +805,6 @@ fn toml_quote(value: &str) -> String {
     out
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -846,10 +842,18 @@ mod tests {
     fn appends_missing_env_values_without_overwriting_existing_keys() {
         let existing = "HARN_LLM_PROVIDER='openai'\n";
         let merged = merge_env_file(existing, &selection("anthropic", "claude-sonnet-4"));
+        // Pre-existing lines are copied through verbatim, quotes and all;
+        // newly appended ones are quoted only where `source .env` needs it.
         assert!(merged.contains("HARN_LLM_PROVIDER='openai'"));
-        assert!(merged.contains("HARN_LLM_MODEL='claude-sonnet-4'"));
-        assert!(merged.contains("# ANTHROPIC_API_KEY='replace-me'"));
+        assert!(merged.contains("HARN_LLM_MODEL=claude-sonnet-4"));
+        assert!(merged.contains("# ANTHROPIC_API_KEY=replace-me"));
         assert_eq!(merged.matches("HARN_LLM_PROVIDER=").count(), 1);
+    }
+
+    #[test]
+    fn appended_env_values_are_quoted_when_the_shell_needs_it() {
+        let merged = merge_env_file("", &selection("anthropic", "claude sonnet '4'"));
+        assert!(merged.contains(r"HARN_LLM_MODEL='claude sonnet '\''4'\'''"));
     }
 
     #[test]
