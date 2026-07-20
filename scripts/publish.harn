@@ -326,7 +326,7 @@ fn cargo_publish_env() -> dict {
 }
 
 fn run_cargo_publish(args: list<string>) -> dict {
-  return command_run(args, {env: cargo_publish_env(), env_mode: "merge"})
+  return command_run(args, {env: cargo_publish_env(), env_mode: "patch"})
 }
 
 fn tree_requires_allow_dirty() -> bool {
