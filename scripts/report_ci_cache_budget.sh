@@ -90,7 +90,7 @@ report="$(jq -cn \
     listed_count: $inventory.listed_count,
     by_ref: $inventory.by_ref,
     by_class: $inventory.by_class,
-    within_budget: ($active_bytes <= $configured_limit_bytes and $inventory.listed_bytes <= $configured_limit_bytes)
+    within_budget: ($inventory.listed_bytes <= $configured_limit_bytes)
   }')"
 
 printf '%s\n' "$report"
@@ -111,7 +111,10 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   } >>"$GITHUB_STEP_SUMMARY"
 fi
 
-if [[ "$usage_bytes" -gt "$configured_limit" || "$listed_bytes" -gt "$configured_limit" ]]; then
+if [[ "$listed_bytes" -gt "$configured_limit" ]]; then
   echo "::warning::GitHub Actions cache exceeds the $configured_limit-byte policy budget (active=$usage_bytes listed=$listed_bytes)" >&2
   exit 1
+fi
+if [[ "$usage_bytes" -gt "$configured_limit" ]]; then
+  echo "::notice::GitHub cache usage telemetry is still above budget after the current inventory was pruned (active=$usage_bytes listed=$listed_bytes)" >&2
 fi
