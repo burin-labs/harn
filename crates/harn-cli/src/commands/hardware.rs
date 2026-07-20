@@ -6,6 +6,7 @@
 //! from `sysinfo`; GPU still shells out, because `sysinfo` does not model
 //! accelerators.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -170,8 +171,29 @@ pub(crate) fn detect_disk(path: &Path) -> DiskSnapshot {
     }
 }
 
+/// Strip a Windows verbatim (`\\?\`) prefix from a path string:
+/// `\\?\C:\dir` -> `C:\dir`, `\\?\UNC\server\share` -> `\\server\share`. Inputs
+/// without the prefix (every well-formed Unix path, plain Windows paths) are
+/// returned unchanged. Pure string logic so it is unit-testable on every
+/// platform; safe to call unconditionally because a well-formed absolute path
+/// off Windows never carries the prefix.
+fn strip_verbatim_prefix(text: &str) -> Cow<'_, str> {
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        Cow::Owned(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        Cow::Borrowed(rest)
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 fn available_space_for(path: &Path) -> Option<u64> {
-    let probe = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // On Windows `canonicalize` returns an extended-length `\\?\` verbatim path,
+    // whose prefix component never `starts_with`-matches the plain `C:\` mount
+    // points sysinfo reports, so no disk would match and free space would read
+    // as `None` on every Windows machine. De-verbatim before comparing.
+    let probe = PathBuf::from(strip_verbatim_prefix(&canonical.to_string_lossy()).into_owned());
     Disks::new_with_refreshed_list()
         .iter()
         // Nested mounts all prefix-match `probe`; the deepest one owns it.
@@ -257,7 +279,7 @@ fn nonzero(value: u64) -> Option<u64> {
 mod tests {
     use super::{
         bytes_to_gib_rounded, detect_disk, detect_ram, parse_macos_vm_stat,
-        parse_nvidia_memory_csv, GpuKind, GIB,
+        parse_nvidia_memory_csv, strip_verbatim_prefix, GpuKind, GIB,
     };
 
     #[test]
@@ -318,5 +340,23 @@ mod tests {
             disk.free_bytes.is_some(),
             "cwd should resolve to a mounted volume"
         );
+    }
+
+    #[test]
+    fn strip_verbatim_prefix_deverbatims_extended_length_paths() {
+        // A canonicalized Windows path (`\\?\C:\...`) must reduce to the plain
+        // `C:\...` form so it prefix-matches a `C:\` mount point.
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\Users\me"), r"C:\Users\me");
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\server\share\dir"),
+            r"\\server\share\dir"
+        );
+        // Already-plain paths (every Unix path, plain Windows paths) are
+        // unchanged.
+        assert_eq!(
+            strip_verbatim_prefix("/mnt/data/project"),
+            "/mnt/data/project"
+        );
+        assert_eq!(strip_verbatim_prefix(r"C:\plain"), r"C:\plain");
     }
 }
