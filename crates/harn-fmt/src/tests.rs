@@ -209,6 +209,27 @@ fn test_wraps_long_function_call_arguments() {
 }
 
 #[test]
+fn test_formats_expression_result_calls() {
+    let source = r"fn make(base: int) -> fn(int) -> int {
+  { value: int -> base + value }
+}
+
+pipeline default(task) {
+  const first = make(40)(2)
+  const second = (make(39))(3)
+  const callback = { value: int -> make(value)(2) }
+}";
+    let formatted = format_source(source).unwrap();
+    assert!(formatted.contains("make(40)(2)"), "{formatted}");
+    assert!(formatted.contains("make(39)(3)"), "{formatted}");
+    assert!(
+        formatted.contains("{ value: int -> make(value)(2) }"),
+        "{formatted}"
+    );
+    assert_eq!(formatted, format_source(&formatted).unwrap());
+}
+
+#[test]
 fn test_removes_single_line_trailing_commas() {
     let source = r#"pipeline default(task) {
   let xs = [1, 2, 3,]

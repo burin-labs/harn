@@ -62,6 +62,12 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
                 collect_references(a, target_name, refs);
             }
         }
+        Node::ValueCall { callee, args } => {
+            collect_references(callee, target_name, refs);
+            for arg in args {
+                collect_references(arg, target_name, refs);
+            }
+        }
         // For definitions, the name itself is a "reference" too
         Node::Pipeline {
             name, body, params, ..

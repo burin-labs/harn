@@ -291,7 +291,7 @@ impl TypeChecker {
             let mut arm_scope = scope.child();
             self.define_match_pattern_bindings(&arm.pattern, value_type.as_ref(), &mut arm_scope);
             self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);
-            if let Some(arm_type) = self.infer_block_type(&arm.body, &arm_scope) {
+            if let Some(arm_type) = self.infer_block_type(&arm.body, &arm_scope).into_inferred() {
                 arm_types.push(arm_type);
             }
         }
@@ -742,6 +742,13 @@ impl TypeChecker {
                 // Check builtin return types
                 builtin_return_type(name)
             }
+            Node::ValueCall { callee, .. } => {
+                let callee_type = self.infer_type(callee, scope)?;
+                match self.resolve_alias(&callee_type, scope) {
+                    TypeExpr::FnType { return_type, .. } => Some(*return_type),
+                    _ => None,
+                }
+            }
 
             Node::BinaryOp { op, left, right } => {
                 if op == "|>" {
@@ -1184,12 +1191,14 @@ impl TypeChecker {
                 let refs = self.extract_refinements(condition, scope);
                 let mut then_scope = scope.child();
                 refs.apply_truthy(&mut then_scope);
-                let then_type = self.infer_block_type(then_body, &then_scope);
+                let then_type = self
+                    .infer_block_type(then_body, &then_scope)
+                    .into_inferred();
                 match else_body {
                     Some(eb) => {
                         let mut else_scope = scope.child();
                         refs.apply_falsy(&mut else_scope);
-                        let else_type = self.infer_block_type(eb, &else_scope);
+                        let else_type = self.infer_block_type(eb, &else_scope).into_inferred();
                         match (then_type, else_type) {
                             (Some(TypeExpr::Never), Some(TypeExpr::Never)) => Some(TypeExpr::Never),
                             (Some(TypeExpr::Never), Some(other))
@@ -1211,6 +1220,7 @@ impl TypeChecker {
             Node::TryExpr { body } => {
                 let ok_type = self
                     .infer_block_type(body, scope)
+                    .into_inferred()
                     .unwrap_or_else(Self::wildcard_type);
                 let inferred_err_type = self.infer_try_error_type(body, scope);
                 if let TypeExpr::Applied { name, args } = &ok_type {
@@ -1236,6 +1246,7 @@ impl TypeChecker {
             Node::Parallel { mode, body, .. } => {
                 let item_type = self
                     .infer_block_type(body, scope)
+                    .into_inferred()
                     .unwrap_or_else(Self::wildcard_type);
                 match mode {
                     ParallelMode::Count | ParallelMode::Each => {
@@ -1250,7 +1261,7 @@ impl TypeChecker {
             // error never returns. Type is therefore EXPR's inferred type.
             Node::TryStar { operand } => self.infer_type(operand, scope),
 
-            Node::CostRoute { body, .. } => self.infer_block_type(body, scope),
+            Node::CostRoute { body, .. } => self.infer_block_type(body, scope).into_inferred(),
 
             Node::StructConstruct {
                 struct_name,
@@ -1995,7 +2006,7 @@ impl TypeChecker {
                 }
                 return_type
                     .clone()
-                    .or_else(|| self.infer_block_type(body, &closure_scope))
+                    .or_else(|| self.infer_block_type(body, &closure_scope).into_inferred())
             }
             Node::Identifier(name) => {
                 if let Some(sig) = scope.get_fn(name).cloned() {
@@ -2008,80 +2019,5 @@ impl TypeChecker {
                 _ => None,
             },
         }
-    }
-
-    fn contains_pipe_placeholder(node: &SNode) -> bool {
-        match &node.node {
-            Node::Identifier(name) if name == "_" => true,
-            Node::FunctionCall { args, .. } => args.iter().any(Self::contains_pipe_placeholder),
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
-                Self::contains_pipe_placeholder(object)
-                    || args.iter().any(Self::contains_pipe_placeholder)
-            }
-            Node::HitlExpr { args, .. } => args
-                .iter()
-                .any(|arg| Self::contains_pipe_placeholder(&arg.value)),
-            Node::BinaryOp { left, right, .. } => {
-                Self::contains_pipe_placeholder(left) || Self::contains_pipe_placeholder(right)
-            }
-            Node::UnaryOp { operand, .. } => Self::contains_pipe_placeholder(operand),
-            Node::Ternary {
-                condition,
-                true_expr,
-                false_expr,
-            } => {
-                Self::contains_pipe_placeholder(condition)
-                    || Self::contains_pipe_placeholder(true_expr)
-                    || Self::contains_pipe_placeholder(false_expr)
-            }
-            Node::Assignment { target, value, .. } => {
-                Self::contains_pipe_placeholder(target) || Self::contains_pipe_placeholder(value)
-            }
-            Node::RangeExpr { start, end, .. } => {
-                Self::contains_pipe_placeholder(start) || Self::contains_pipe_placeholder(end)
-            }
-            Node::ListLiteral(items) => items.iter().any(Self::contains_pipe_placeholder),
-            Node::DictLiteral(entries)
-            | Node::StructConstruct {
-                fields: entries, ..
-            } => entries.iter().any(|entry| {
-                Self::contains_pipe_placeholder(&entry.key)
-                    || Self::contains_pipe_placeholder(&entry.value)
-            }),
-            Node::EnumConstruct { args, .. } => args.iter().any(Self::contains_pipe_placeholder),
-            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-                Self::contains_pipe_placeholder(object)
-            }
-            Node::SubscriptAccess { object, index }
-            | Node::OptionalSubscriptAccess { object, index } => {
-                Self::contains_pipe_placeholder(object) || Self::contains_pipe_placeholder(index)
-            }
-            Node::SliceAccess { object, start, end } => {
-                Self::contains_pipe_placeholder(object)
-                    || start
-                        .as_ref()
-                        .is_some_and(|start| Self::contains_pipe_placeholder(start))
-                    || end
-                        .as_ref()
-                        .is_some_and(|end| Self::contains_pipe_placeholder(end))
-            }
-            Node::Spread(inner)
-            | Node::TryOperator { operand: inner }
-            | Node::TryStar { operand: inner } => Self::contains_pipe_placeholder(inner),
-            _ => false,
-        }
-    }
-
-    /// Infer the type of a block (last expression, or `never` if the block definitely exits).
-    pub(in crate::typechecker) fn infer_block_type(
-        &self,
-        stmts: &[SNode],
-        scope: &TypeScope,
-    ) -> InferredType {
-        if Self::block_definitely_exits(stmts) {
-            return Some(TypeExpr::Never);
-        }
-        stmts.last().and_then(|s| self.infer_type(s, scope))
     }
 }

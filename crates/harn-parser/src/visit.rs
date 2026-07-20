@@ -257,6 +257,10 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         Node::FunctionCall { args, .. } | Node::EnumConstruct { args, .. } => {
             collect_nodes(args, children);
         }
+        Node::ValueCall { callee, args } => {
+            children.push(callee);
+            collect_nodes(args, children);
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             children.push(object);
             collect_nodes(args, children);

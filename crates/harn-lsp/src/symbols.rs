@@ -836,6 +836,12 @@ fn collect_symbols(
                 recurse!(a, scope_span);
             }
         }
+        Node::ValueCall { callee, args } => {
+            recurse!(callee, scope_span);
+            for arg in args {
+                recurse!(arg, scope_span);
+            }
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             recurse!(object, scope_span);
             for a in args {

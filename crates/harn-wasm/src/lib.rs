@@ -451,6 +451,16 @@ impl SyncInterpreter {
                 }
                 Err(EvalStop::Error(format!("Undefined builtin: {name}")))
             }
+            Node::ValueCall { callee, args } => {
+                let callable = self.eval(callee)?;
+                let arg_values: Result<Vec<_>, _> = args.iter().map(|arg| self.eval(arg)).collect();
+                match callable {
+                    Val::Closure(params, body, env) => {
+                        self.invoke_closure(&params, &body, &env, &arg_values?)
+                    }
+                    _ => Err(EvalStop::Error("Value is not callable".to_string())),
+                }
+            }
             Node::MethodCall {
                 object,
                 method,

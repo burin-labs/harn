@@ -34,6 +34,8 @@ mod tests_runtime;
 mod tests_runtime_process_exit;
 #[cfg(test)]
 mod tests_typed_op_fallback;
+#[cfg(test)]
+mod tests_value_calls;
 
 pub(crate) use async_builtin::run_async_builtin_with;
 pub use async_builtin::AsyncBuiltinCtx;

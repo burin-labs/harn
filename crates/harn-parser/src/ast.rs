@@ -406,6 +406,11 @@ pub enum Node {
         type_args: Vec<TypeExpr>,
         args: Vec<SNode>,
     },
+    /// A postfix call whose callee is an expression result: `make()(arg)`.
+    ValueCall {
+        callee: Box<SNode>,
+        args: Vec<SNode>,
+    },
     MethodCall {
         object: Box<SNode>,
         method: String,
@@ -530,6 +535,38 @@ pub enum Node {
         /// The formatter preserves this distinction.
         fn_syntax: bool,
     },
+}
+
+/// Whether evaluating a node leaves a value for its surrounding block.
+///
+/// This is the shared AST contract used by both the type checker and compiler:
+/// a false result means block evaluation supplies `nil`, while a true result
+/// whose type cannot be inferred remains gradual rather than becoming `nil`.
+pub fn node_produces_value(node: &Node) -> bool {
+    match node {
+        Node::AttributedDecl { inner, .. } => node_produces_value(&inner.node),
+        Node::LetBinding { .. }
+        | Node::ConstBinding { .. }
+        | Node::Assignment { .. }
+        | Node::ReturnStmt { .. }
+        | Node::FnDecl { .. }
+        | Node::ToolDecl { .. }
+        | Node::SkillDecl { .. }
+        | Node::EvalPackDecl { .. }
+        | Node::ImplBlock { .. }
+        | Node::StructDecl { .. }
+        | Node::EnumDecl { .. }
+        | Node::InterfaceDecl { .. }
+        | Node::TypeDecl { .. }
+        | Node::OverrideDecl { .. }
+        | Node::Pipeline { .. }
+        | Node::ThrowStmt { .. }
+        | Node::BreakStmt
+        | Node::ContinueStmt
+        | Node::RequireStmt { .. }
+        | Node::DeferStmt { .. } => false,
+        _ => true,
+    }
 }
 
 /// First-class human-in-the-loop primitive.

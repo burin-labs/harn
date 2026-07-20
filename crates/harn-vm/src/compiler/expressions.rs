@@ -208,6 +208,14 @@ impl Compiler {
         }
         Ok(())
     }
+    pub(super) fn compile_call_expression(
+        &mut self,
+        callee: &SNode,
+        args: &[SNode],
+    ) -> Result<(), CompileError> {
+        self.compile_node(callee)?;
+        self.compile_value_call(args)
+    }
 
     /// Build a spread argument list while preserving ordinary argument order.
     /// Returns false without emitting anything when no spread is present.

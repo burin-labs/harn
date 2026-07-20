@@ -150,8 +150,7 @@ cache behavior, without touching the loop:
 ```harn
 import {default_llm_caller, with_retry, compose} from "std/llm/handlers"
 
-const wrap = compose([with_retry({max_attempts: 4, backoff: "exponential"})])
-const caller = wrap(default_llm_caller())
+const caller = compose([with_retry({max_attempts: 4, backoff: "exponential"})])(default_llm_caller())
 agent_loop(task, system, {loop_until_done: true, llm_caller: caller})
 ```
 

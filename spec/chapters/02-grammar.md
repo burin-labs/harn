@@ -351,11 +351,17 @@ optional_subscript_access
                     ::= '?.[' expression ']'
                        | '?[' expression ']'     (* legacy spelling *)
 slice_access       ::= '[' [expression] ':' [expression] ']'
-call               ::= [type_args] '(' arg_list ')'
-                       (* only when postfix base is an identifier *)
+call               ::= '(' arg_list ')'
+                     | type_args '(' arg_list ')'
+                       (* type_args require an identifier base *)
 type_args          ::= '<' type_expr (',' type_expr)* '>'
 try_unwrap         ::= '?'                 (* expr? on Result *)
 ```
+
+A non-generic `call` may follow any value-producing postfix expression, so
+`factory(x)(y)` calls the value returned by `factory(x)`. The opening `(` must
+be on the same source line as the callee; `const f = factory\n(y)` remains two
+statements. Generic type arguments remain available only on identifier calls.
 
 ### Primary expressions
 

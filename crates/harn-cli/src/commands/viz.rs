@@ -399,6 +399,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::BreakStmt => "break".to_string(),
         Node::ContinueStmt => "continue".to_string(),
         Node::FunctionCall { name, .. } => format!("{name}(...)"),
+        Node::ValueCall { callee, .. } => format!("{}(...)", inline_label(callee)),
         Node::MethodCall { object, method, .. } => {
             format!("{}.{}(...)", inline_label(object), method)
         }
@@ -550,6 +551,7 @@ fn inline_label(node: &SNode) -> String {
         Node::NilLiteral => "nil".to_string(),
         Node::DurationLiteral(value) => format!("{value}ms"),
         Node::FunctionCall { name, .. } => format!("{name}(...)"),
+        Node::ValueCall { callee, .. } => format!("{}(...)", inline_label(callee)),
         Node::MethodCall { object, method, .. } => {
             format!("{}.{}(...)", inline_label(object), method)
         }

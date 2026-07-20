@@ -488,6 +488,12 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
                 collect_calls(arg, calls);
             }
         }
+        Node::ValueCall { callee, args } => {
+            collect_calls(callee, calls);
+            for arg in args {
+                collect_calls(arg, calls);
+            }
+        }
         Node::MethodCall {
             object,
             method,

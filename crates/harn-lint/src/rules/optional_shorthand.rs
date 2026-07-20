@@ -235,6 +235,12 @@ impl<'a, 'd> State<'a, 'd> {
                     self.visit_node(arg);
                 }
             }
+            Node::ValueCall { callee, args } => {
+                self.visit_node(callee);
+                for arg in args {
+                    self.visit_node(arg);
+                }
+            }
             Node::MethodCall { object, args, .. }
             | Node::OptionalMethodCall { object, args, .. } => {
                 self.visit_node(object);

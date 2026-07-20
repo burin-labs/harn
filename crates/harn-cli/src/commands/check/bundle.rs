@@ -456,6 +456,11 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
             children
         }
         Node::FunctionCall { args, .. } => args.iter().collect(),
+        Node::ValueCall { callee, args } => {
+            let mut children = vec![callee.as_ref()];
+            children.extend(args.iter());
+            children
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             let mut children = vec![object.as_ref()];
             children.extend(args.iter());

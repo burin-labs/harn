@@ -628,6 +628,10 @@ fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
             calls.push(name.clone());
             collect_many(args, calls);
         }
+        Node::ValueCall { callee, args } => {
+            collect_called_functions_node(callee, calls);
+            collect_many(args, calls);
+        }
         Node::LetBinding { value, .. }
         | Node::ConstBinding { value, .. }
         | Node::ReturnStmt { value: Some(value) }

@@ -202,6 +202,12 @@ fn collect_ast_ranges(
                 collect_ast_ranges(arg, ranges, seen);
             }
         }
+        Node::ValueCall { callee, args } => {
+            collect_ast_ranges(callee, ranges, seen);
+            for arg in args {
+                collect_ast_ranges(arg, ranges, seen);
+            }
+        }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
             collect_ast_ranges(object, ranges, seen);
             for arg in args {

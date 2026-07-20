@@ -22,8 +22,7 @@ pipeline default() {
   const a = make_tagger("a")
   const b = make_tagger("b")
   const c = make_tagger("c")
-  const factory = compose([a, b, c])
-  const composed = factory(base)
+  const composed = compose([a, b, c])(base)
   const env = composed(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )

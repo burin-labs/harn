@@ -29,6 +29,7 @@ mod soundness;
 mod strict_types;
 mod throws;
 mod typing;
+mod value_calls;
 
 pub(super) fn check_source(source: &str) -> Vec<TypeDiagnostic> {
     let mut lexer = Lexer::new(source);

@@ -562,6 +562,24 @@ log(add(2, 3))     // 5
 
 Closures capture the enclosing bindings they reference.
 
+### Calling returned functions
+
+Call postfixes can chain on the same line. If a function returns another
+function, call the result directly:
+
+```harn
+fn make_adder(base: int) -> fn(int) -> int {
+  return { value: int -> base + value }
+}
+
+const answer = make_adder(40)(2)       // 42
+const also = (make_adder(39))(3)       // 42
+```
+
+The opening parenthesis must stay on the callee's line. A newline starts a new
+statement, so `const add = make_adder(40)\n(2)` binds `add` and then evaluates
+`2`; it does not call `add`.
+
 ### Capture semantics
 
 Closures capture the enclosing bindings they reference, by reference. A closure

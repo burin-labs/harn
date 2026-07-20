@@ -841,6 +841,7 @@ pub(crate) fn is_simple_expr(node: &SNode) -> bool {
             | Node::BinaryOp { .. }
             | Node::UnaryOp { .. }
             | Node::FunctionCall { .. }
+            | Node::ValueCall { .. }
             | Node::MethodCall { .. }
             | Node::OptionalMethodCall { .. }
             | Node::PropertyAccess { .. }

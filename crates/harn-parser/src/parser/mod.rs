@@ -49,6 +49,34 @@ mod tests {
             "`scope` as a dict key / property must remain an identifier"
         );
     }
+    #[test]
+    fn parses_same_line_calls_on_expression_results() {
+        let program = parse_source(
+            "pipeline test(task) { f(1)(2)\n(outer(3))(4)\nconst separate = outer\n(5) }",
+        )
+        .unwrap();
+        let Node::Pipeline { body, .. } = &program[0].node else {
+            panic!("expected pipeline");
+        };
+
+        assert!(matches!(
+            &body[0].node,
+            Node::ValueCall { callee, args }
+                if args.len() == 1
+                    && matches!(&callee.node, Node::FunctionCall { name, .. } if name == "f")
+        ));
+        assert!(matches!(
+            &body[1].node,
+            Node::ValueCall { callee, args }
+                if args.len() == 1
+                    && matches!(&callee.node, Node::FunctionCall { name, .. } if name == "outer")
+        ));
+        assert!(matches!(
+            &body[2].node,
+            Node::ConstBinding { value, .. } if matches!(&value.node, Node::Identifier(name) if name == "outer")
+        ));
+        assert!(matches!(&body[3].node, Node::IntLiteral(5)));
+    }
 
     #[test]
     fn parses_lexical_block_and_keeps_block_identifier_contextual() {

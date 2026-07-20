@@ -19,6 +19,26 @@ use super::union::apply_refinements;
 /// Inferred type of an expression. None means unknown/untyped (gradual typing).
 pub(super) type InferredType = Option<TypeExpr>;
 
+/// Type inference for a block tail. Unlike `InferredType`, this preserves the
+/// difference between an expression with an unknown type and a statement that
+/// produces no value (and therefore evaluates to `nil` at runtime).
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum BlockTypeInference {
+    Known(TypeExpr),
+    Unknown,
+    NoValue,
+}
+
+impl BlockTypeInference {
+    pub(super) fn into_inferred(self) -> InferredType {
+        match self {
+            Self::Known(ty) => Some(ty),
+            Self::Unknown => None,
+            Self::NoValue => Some(TypeExpr::Named("nil".into())),
+        }
+    }
+}
+
 /// The polarity of a position in a type when checking subtyping.
 ///
 /// Polarity propagates through compound types: `FnType` flips it on

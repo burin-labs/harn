@@ -238,89 +238,7 @@ fn collect_spawn_agent_sites(
 }
 
 fn spawn_site_children(node: &SNode) -> Vec<&SNode> {
-    let mut children: Vec<&SNode> = Vec::new();
-    match &node.node {
-        Node::AttributedDecl { inner, .. } => children.push(inner.as_ref()),
-        Node::Pipeline { body, .. }
-        | Node::FnDecl { body, .. }
-        | Node::ToolDecl { body, .. }
-        | Node::SpawnExpr { body }
-        | Node::ScopeBlock { body }
-        | Node::Retry { body, .. }
-        | Node::TryExpr { body }
-        | Node::DeferStmt { body }
-        | Node::MutexBlock { body, .. }
-        | Node::Block(body)
-        | Node::OverrideDecl { body, .. } => children.extend(body.iter()),
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            children.push(condition.as_ref());
-            children.extend(then_body.iter());
-            if let Some(else_body) = else_body.as_ref() {
-                children.extend(else_body.iter());
-            }
-        }
-        Node::ForIn { iterable, body, .. } => {
-            children.push(iterable.as_ref());
-            children.extend(body.iter());
-        }
-        Node::WhileLoop { condition, body } => {
-            children.push(condition.as_ref());
-            children.extend(body.iter());
-        }
-        Node::MatchExpr { value, arms } => {
-            children.push(value.as_ref());
-            for arm in arms {
-                if let Some(guard) = arm.guard.as_ref() {
-                    children.push(guard.as_ref());
-                }
-                children.extend(arm.body.iter());
-            }
-        }
-        Node::TryCatch {
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            children.extend(body.iter());
-            children.extend(catch_body.iter());
-            if let Some(finally_body) = finally_body.as_ref() {
-                children.extend(finally_body.iter());
-            }
-        }
-        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => {
-            children.push(value.as_ref());
-        }
-        Node::ReturnStmt { value } => {
-            if let Some(value) = value.as_ref() {
-                children.push(value.as_ref());
-            }
-        }
-        Node::Assignment { target, value, .. } => {
-            children.push(target.as_ref());
-            children.push(value.as_ref());
-        }
-        Node::FunctionCall { args, .. } => children.extend(args.iter()),
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            children.push(object.as_ref());
-            children.extend(args.iter());
-        }
-        Node::Closure { body, .. } => children.extend(body.iter()),
-        Node::ListLiteral(items) => children.extend(items.iter()),
-        Node::DictLiteral(entries) => {
-            for entry in entries {
-                children.push(&entry.key);
-                children.push(&entry.value);
-            }
-        }
-        _ => {}
-    }
-    children
+    harn_parser::visit::immediate_children(node)
 }
 
 #[derive(Debug, Clone)]
@@ -1622,6 +1540,26 @@ fn scan_node_preflight(
             }
         }
         Node::FunctionCall { args, .. } => {
+            scan_children(
+                args,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
+        }
+        Node::ValueCall { callee, args } => {
+            scan_node_preflight(
+                callee,
+                file_path,
+                source,
+                config,
+                host_capabilities,
+                visited,
+                diagnostics,
+            );
             scan_children(
                 args,
                 file_path,
