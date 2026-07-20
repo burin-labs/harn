@@ -76,8 +76,5 @@ pub use view::{
 pub(crate) use types::run_child_record_from_worker_metadata;
 
 #[cfg(test)]
-pub(crate) use diff::{myers_diff, DiffOp};
-
-#[cfg(test)]
 #[path = "../records_tests.rs"]
 mod records_tests;
