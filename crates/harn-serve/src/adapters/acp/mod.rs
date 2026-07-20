@@ -785,16 +785,22 @@ impl AcpServerConfig {
 }
 
 impl AcpSandboxConfig {
-    /// Whether the embedder actually contributed any sandbox configuration.
+    /// Whether the embedder actually opted into *process*-level OS sandbox
+    /// confinement.
     ///
-    /// A default (empty) config means "embedder said nothing" — the no-config
-    /// path that must behave exactly as before. A non-default config (any
-    /// read-only root, or any process preset/read/write root) is the signal
-    /// that the embedder opted into confinement, which the ActAuto `code` mode
-    /// now honors as a `Worktree`-level OS sandbox.
+    /// `read_only_roots` alone does NOT count: Burin always registers bundled
+    /// pipeline roots (and other dependency roots) as `read_only_roots` on
+    /// every session, regardless of whether the user asked for sandboxing.
+    /// Treating that as an opt-in signal accidentally armed `Worktree`-level
+    /// OS confinement for every TUI session, which sandboxes child processes
+    /// and breaks their network access (e.g. `git fetch` failing DNS
+    /// resolution for `github.com`). Only real process-sandbox config
+    /// (`presets`, `read_roots`, or `write_roots`) is the opt-in signal; a
+    /// default (empty) config, or a config with only `read_only_roots`, means
+    /// "embedder said nothing about process confinement" and must behave
+    /// exactly as before.
     pub fn is_configured(&self) -> bool {
-        !self.read_only_roots.is_empty()
-            || self.process.presets.is_some()
+        self.process.presets.is_some()
             || !self.process.read_roots.is_empty()
             || !self.process.write_roots.is_empty()
     }

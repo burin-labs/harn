@@ -21,6 +21,17 @@ fn approval_unavailable_names_terminal_risk_class() {
     );
     let result = &envelope["result"];
     assert_eq!(result["error"], serde_json::json!("permission_denied"));
+    let human_summary = result["human_summary"]
+        .as_str()
+        .expect("human_summary is a top-level plain-English string for hosts that skip the structured fields");
+    assert!(
+        human_summary.contains("exec"),
+        "human_summary should name the blocked tool: {human_summary}"
+    );
+    assert!(
+        human_summary.contains("approval required but no host bridge is available"),
+        "human_summary should carry the reason for hosts that render it alone: {human_summary}"
+    );
     assert_eq!(
         result["denial_class"],
         serde_json::json!("approval_required+package_install")
