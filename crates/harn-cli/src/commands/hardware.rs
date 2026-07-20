@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
+use sysinfo::{Disk, Disks};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -142,8 +143,22 @@ fn parse_nvidia_memory_csv(text: &str) -> Option<(u64, u64)> {
 fn detect_disk(path: &Path) -> DiskSnapshot {
     DiskSnapshot {
         path: path.to_path_buf(),
-        free_bytes: fs2::free_space(path).ok(),
+        free_bytes: free_space(path),
     }
+}
+
+/// Space available on the filesystem backing `path`.
+///
+/// Resolved by picking the mounted filesystem whose mount point is the longest
+/// prefix of `path`, which is the mount that actually serves it once nested
+/// mounts are in play.
+fn free_space(path: &Path) -> Option<u64> {
+    let path = path.canonicalize().ok()?;
+    Disks::new_with_refreshed_list()
+        .iter()
+        .filter(|disk| path.starts_with(disk.mount_point()))
+        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .map(Disk::available_space)
 }
 
 #[cfg(target_os = "macos")]

@@ -4,7 +4,6 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -201,7 +200,8 @@ impl PackageSnapshot {
         }
         require_regular_file(&publication_lock_path)?;
         let publication_lock = open_existing_lock_file(&publication_lock_path)?;
-        FileExt::lock_shared(&publication_lock)
+        publication_lock
+            .lock_shared()
             .map_err(|error| PackageSnapshotError::io("lock", &publication_lock_path, error))?;
 
         if !pointer_path.is_file() {
@@ -220,12 +220,14 @@ impl PackageSnapshot {
         let lease_path = generation_root.join(GENERATION_LEASE_FILE);
         require_regular_file(&lease_path)?;
         let lease = open_existing_lock_file(&lease_path)?;
-        FileExt::lock_shared(&lease)
+        lease
+            .lock_shared()
             .map_err(|error| PackageSnapshotError::io("lock", &lease_path, error))?;
 
         // The generation lease now protects every immutable artifact below the
         // selected root, so GC no longer needs to be excluded.
-        FileExt::unlock(&publication_lock)
+        publication_lock
+            .unlock()
             .map_err(|error| PackageSnapshotError::io("unlock", &publication_lock_path, error))?;
 
         let manifest_path = generation_root.join(GENERATION_MANIFEST_FILE);
@@ -590,10 +592,10 @@ mod tests {
         let lease =
             open_existing_lock_file(&snapshot.generation_root().join(GENERATION_LEASE_FILE))
                 .unwrap();
-        assert!(FileExt::try_lock_exclusive(&lease).is_err());
+        assert!(lease.try_lock().is_err());
 
         drop(snapshot);
-        FileExt::try_lock_exclusive(&lease).unwrap();
+        lease.try_lock().unwrap();
     }
 
     #[test]
@@ -602,7 +604,7 @@ mod tests {
         publish_fixture(temp.path(), "generation_a", "version = 4\n# lock a\n");
         let root = temp.path().to_path_buf();
         let publication = open_lock_file(&package_publication_lock_path(&root)).unwrap();
-        FileExt::lock_exclusive(&publication).unwrap();
+        publication.lock().unwrap();
 
         let started = Arc::new(Barrier::new(2));
         let reader_started = Arc::clone(&started);
@@ -614,7 +616,7 @@ mod tests {
         started.wait();
 
         publish_fixture(&root, "generation_b", "version = 4\n# lock b\n");
-        FileExt::unlock(&publication).unwrap();
+        publication.unlock().unwrap();
 
         let snapshot = reader.join().unwrap();
         assert_eq!(snapshot.generation(), "generation_b");

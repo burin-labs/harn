@@ -1,14 +1,12 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, Read, Write};
-use std::path::Path;
-use std::process::{Command, Stdio};
-
-use fs2::FileExt;
 use harn_modules::package_snapshot::{
     generation_root, package_current_path, package_generations_dir, package_lock_digest,
     package_publication_lock_path, PackageGenerationManifest, PackageGenerationPointer,
     GENERATION_LEASE_FILE, GENERATION_LOCK_FILE, GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
 };
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io::{self, BufRead, Read, Write};
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 const CHILD_ENV: &str = "HARN_PACKAGE_LEASE_TEST_CHILD";
 
@@ -35,14 +33,14 @@ fn publish(root: &Path, generation: &str, source: &str) {
         .write(true)
         .open(&publication_path)
         .unwrap();
-    publication.lock_exclusive().unwrap();
+    publication.lock().unwrap();
     let pointer = PackageGenerationPointer::new(generation).unwrap();
     fs::write(
         package_current_path(root),
         toml::to_string_pretty(&pointer).unwrap(),
     )
     .unwrap();
-    FileExt::unlock(&publication).unwrap();
+    publication.unlock().unwrap();
 }
 
 fn collect(root: &Path, current: &str) {
@@ -57,24 +55,35 @@ fn collect(root: &Path, current: &str) {
             .open(entry.path().join(GENERATION_LEASE_FILE))
         {
             Ok(lease) => lease,
-            Err(error) if lock_is_contended(&error) => continue,
+            Err(error) if open_is_contended(&error) => continue,
             Err(error) => panic!("failed to inspect generation lease: {error}"),
         };
-        match lease.try_lock_exclusive() {
+        match lease.try_lock() {
             Ok(()) => {
-                FileExt::unlock(&lease).unwrap();
+                lease.unlock().unwrap();
                 drop(lease);
                 fs::remove_dir_all(entry.path()).unwrap();
             }
-            Err(error) if lock_is_contended(&error) => {}
+            Err(TryLockError::WouldBlock) => {}
             Err(error) => panic!("failed to inspect generation lease: {error}"),
         }
     }
 }
 
-fn lock_is_contended(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::WouldBlock
-        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+/// Windows `ERROR_LOCK_VIOLATION`; see `open_is_contended`.
+#[cfg(windows)]
+const ERROR_LOCK_VIOLATION: i32 = 33;
+
+/// Whether an `open` failed because another process holds the lease lock.
+///
+/// `std` folds this code into `TryLockError::WouldBlock` inside `try_lock`, but
+/// an `open` rejected by a live byte-range lock surfaces it raw.
+fn open_is_contended(error: &io::Error) -> bool {
+    #[cfg(windows)]
+    let lock_violation = error.raw_os_error() == Some(ERROR_LOCK_VIOLATION);
+    #[cfg(not(windows))]
+    let lock_violation = false;
+    error.kind() == io::ErrorKind::WouldBlock || lock_violation
 }
 
 fn child(root: &Path) {

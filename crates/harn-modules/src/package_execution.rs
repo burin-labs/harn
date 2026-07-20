@@ -628,7 +628,6 @@ mod tests {
         PackageGenerationManifest, PackageGenerationPointer, GENERATION_LEASE_FILE,
         GENERATION_LOCK_FILE, GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
     };
-    use fs2::FileExt;
     use std::fs::File;
 
     fn fixture() -> (tempfile::TempDir, Arc<PackageSnapshot>, PathBuf, String) {
@@ -722,10 +721,10 @@ mod tests {
             PackageExecutionGuard::new(Arc::clone(&snapshot), "agents", content_hash).unwrap();
         drop(snapshot);
         let lease = File::open(lease_path).unwrap();
-        assert!(FileExt::try_lock_exclusive(&lease).is_err());
+        assert!(lease.try_lock().is_err());
         guard.verify_entry(&entry).unwrap();
         drop(guard);
-        FileExt::try_lock_exclusive(&lease).unwrap();
+        lease.try_lock().unwrap();
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use std::fs::TryLockError;
 use std::io;
 use std::io::Write as _;
 use std::path::Path;
@@ -87,7 +88,7 @@ struct FileLockGuard<'a>(&'a std::fs::File);
 
 impl Drop for FileLockGuard<'_> {
     fn drop(&mut self) {
-        let _ = fs2::FileExt::unlock(self.0);
+        let _ = self.0.unlock();
     }
 }
 
@@ -100,9 +101,9 @@ fn lock_file_exclusive<'a>(
     let deadline_ms = crate::stdlib::clock::now_monotonic_ms().saturating_add(timeout_ms);
     let mut backoff = Duration::from_millis(10);
     loop {
-        match fs2::FileExt::try_lock_exclusive(file) {
+        match file.try_lock() {
             Ok(()) => return Ok(FileLockGuard(file)),
-            Err(error) if lock_is_contended(&error) => {
+            Err(TryLockError::WouldBlock) => {
                 let now_ms = crate::stdlib::clock::now_monotonic_ms();
                 if timeout.is_zero() || now_ms >= deadline_ms {
                     return Err(io::Error::new(
@@ -118,7 +119,7 @@ fn lock_file_exclusive<'a>(
                 wait_for_retry(backoff.min(remaining));
                 backoff = (backoff * 2).min(Duration::from_millis(100));
             }
-            Err(error) => return Err(error),
+            Err(TryLockError::Error(error)) => return Err(error),
         }
     }
 }
@@ -136,9 +137,4 @@ fn wait_for_retry(duration: Duration) {
         return;
     }
     std::thread::sleep(duration);
-}
-
-fn lock_is_contended(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::WouldBlock
-        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }

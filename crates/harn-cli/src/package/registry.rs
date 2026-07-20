@@ -195,7 +195,7 @@ pub(crate) fn acquire_git_cache_lock_in(
     }
     let file = File::create(&path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    file.lock_exclusive()
+    file.lock()
         .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
     Ok(file)
 }
@@ -212,7 +212,7 @@ pub(crate) fn acquire_archive_cache_lock_in(
     }
     let file = File::create(&path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    file.lock_exclusive()
+    file.lock()
         .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
     Ok(file)
 }

@@ -127,7 +127,6 @@ sqlx-postgres = { version = "0.9", default-features = false, features = ["json",
 rust_decimal = { version = "1" }
 tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
-fs2 = "0.4"
 httpdate = "1"
 ipnet = "2"
 ignore = "0.4"

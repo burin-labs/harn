@@ -5,7 +5,6 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 use crate::atomic_io::{
@@ -287,7 +286,7 @@ pub(crate) fn acquire_lock(path: &Path) -> io::Result<ConditionalReplaceLock> {
         .read(true)
         .write(true)
         .open(root.join(name))?;
-    file.lock_exclusive()?;
+    file.lock()?;
     Ok(ConditionalReplaceLock { file })
 }
 
@@ -338,7 +337,7 @@ pub(crate) struct ConditionalReplaceLock {
 
 impl Drop for ConditionalReplaceLock {
     fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.file);
+        let _ = self.file.unlock();
     }
 }
 

@@ -1,5 +1,3 @@
-use fs2::FileExt;
-
 use super::*;
 
 pub(crate) fn with_manifest_write_lock<T>(
@@ -15,11 +13,11 @@ pub(crate) fn with_manifest_write_lock<T>(
     let lock_path = project_root.join(".harn/package-manifest.lock");
     let lock = harn_modules::package_snapshot::open_lock_file(&lock_path)
         .map_err(|error| PackageError::Lockfile(error.to_string()))?;
-    lock.lock_exclusive().map_err(|error| {
+    lock.lock().map_err(|error| {
         PackageError::Lockfile(format!("failed to lock {}: {error}", lock_path.display()))
     })?;
     let result = operation();
-    let unlock = FileExt::unlock(&lock).map_err(|error| {
+    let unlock = lock.unlock().map_err(|error| {
         PackageError::Lockfile(format!("failed to unlock {}: {error}", lock_path.display()))
     });
     match (result, unlock) {
