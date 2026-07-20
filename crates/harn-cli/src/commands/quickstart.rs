@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 use std::env;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use crate::cli::QuickstartArgs;
+use crate::commands::hardware::{self, GpuKind};
 use crate::commands::local_readiness;
 
 const QUICKSTART_ALIAS: &str = "quickstart";
@@ -58,7 +58,7 @@ struct OllamaProbe {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DiskProbe {
-    available_kib: Option<u64>,
+    free_bytes: Option<u64>,
     detail: String,
 }
 
@@ -698,45 +698,26 @@ fn format_choice(choice: &ProviderChoice, ollama: &OllamaProbe) -> String {
 }
 
 fn detect_disk_space(path: &Path) -> DiskProbe {
-    let output = Command::new("df").arg("-Pk").arg(path).output();
-    match output {
-        Ok(output) if output.status.success() => {
-            let text = String::from_utf8_lossy(&output.stdout);
-            if let Some(kib) = parse_df_available_kib(&text) {
-                DiskProbe {
-                    available_kib: Some(kib),
-                    detail: format!("{:.1} GiB available at {}", kib_to_gib(kib), path.display()),
-                }
-            } else {
-                DiskProbe {
-                    available_kib: None,
-                    detail: "could not parse df output".to_string(),
-                }
-            }
-        }
-        Ok(output) => DiskProbe {
-            available_kib: None,
-            detail: format!("df exited with {}", output.status),
+    match hardware::detect_disk(path).free_bytes {
+        Some(free_bytes) => DiskProbe {
+            free_bytes: Some(free_bytes),
+            detail: format!(
+                "{:.1} GiB available at {}",
+                hardware::bytes_to_gib_f64(free_bytes),
+                path.display()
+            ),
         },
-        Err(error) => DiskProbe {
-            available_kib: None,
-            detail: format!("df not available: {error}"),
+        None => DiskProbe {
+            free_bytes: None,
+            detail: format!("could not determine free space at {}", path.display()),
         },
     }
 }
 
-fn parse_df_available_kib(output: &str) -> Option<u64> {
-    output.lines().skip(1).find_map(|line| {
-        let columns: Vec<&str> = line.split_whitespace().collect();
-        columns.get(3).and_then(|value| value.parse::<u64>().ok())
-    })
-}
-
-fn kib_to_gib(kib: u64) -> f64 {
-    kib as f64 / 1024.0 / 1024.0
-}
-
 fn detect_gpu() -> GpuProbe {
+    // An explicit CUDA device selection is honored even when `nvidia-smi` is
+    // absent — a quickstart-specific courtesy the shared detector does not
+    // model (it reports memory-capacity facts, not env-var intent).
     if let Ok(value) = env::var("CUDA_VISIBLE_DEVICES") {
         let trimmed = value.trim();
         if !trimmed.is_empty() && trimmed != "-1" {
@@ -746,47 +727,18 @@ fn detect_gpu() -> GpuProbe {
             };
         }
     }
-    if let Ok(output) = Command::new("nvidia-smi").arg("-L").output() {
-        if output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("NVIDIA GPU detected")
-                .to_string();
-            if !detail.trim().is_empty() {
-                return GpuProbe {
-                    detected: true,
-                    detail,
-                };
-            }
-        }
-    }
-    if apple_silicon_detected() {
-        return GpuProbe {
+    // Otherwise defer to the single owner so quickstart, doctor, and recommend
+    // agree on what counts as a GPU.
+    match hardware::detect_gpu().kind {
+        GpuKind::None => GpuProbe {
+            detected: false,
+            detail: "no local GPU detected".to_string(),
+        },
+        kind => GpuProbe {
             detected: true,
-            detail: "Apple Silicon GPU available".to_string(),
-        };
+            detail: kind.label().to_string(),
+        },
     }
-    GpuProbe {
-        detected: false,
-        detail: "no local GPU detected".to_string(),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn apple_silicon_detected() -> bool {
-    Command::new("sysctl")
-        .args(["-n", "hw.optional.arm64"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "1")
-        .unwrap_or(false)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn apple_silicon_detected() -> bool {
-    false
 }
 
 fn toml_quote(value: &str) -> String {
@@ -866,12 +818,6 @@ mod tests {
             "# OPENAI_API_KEY='sk-test'\n",
             "OPENAI_API_KEY"
         ));
-    }
-
-    #[test]
-    fn parses_df_available_column() {
-        let output = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk 100 10 90 10% /\n";
-        assert_eq!(parse_df_available_kib(output), Some(90));
     }
 
     #[test]
