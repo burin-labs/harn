@@ -9,7 +9,98 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.29
+
+### Breaking
+
+- Add `SchemaContract<T>` for ordered cross-field and context-dependent
+  validation rules, including typed file and run-artifact results.
+- Correct `parse_json_typed<T>` to return `T?`, matching its `nil` default when
+  parsing or validation fails.
+- `llm_call` now returns one canonical response envelope. `usage` is the single
+  owner of all accounting — the top-level duplicates (`input_tokens`,
+  `output_tokens`, `cache_read_tokens`, `cache_write_tokens`,
+  `cache_creation_input_tokens`, `served_fast`, `cache_hit_ratio`,
+  `cache_visibility`, `cache_savings_usd`, `provider_telemetry`) and the alias
+  keys (`prose`, `private_reasoning`, `parsed_done_marker`,
+  `usage.cache_creation_input_tokens`) are removed; `tool_calls` is always
+  present. Every response now carries a typed `outcome: {kind, billed}`
+  (`complete` | `tool_use` | `truncated` | `refused` | `paused` | `empty`), and
+  streaming chunks use `stop_reason` (was `finish_reason`). New `std/llm/envelope`
+  module exports the typed contract (`LlmResponse`, `LlmUsage`, `LlmOutcome`, …);
+  `std/llm/handlers` gains `llm_caller()` (the blessed default caller with typed
+  retry statuses and billed-empty re-dispatch), and `safe_call` /
+  `default_llm_caller` failures now map onto the reserved status vocabulary
+  (including the new never-retried `provider_error`) instead of only
+  `budget_exhausted` / `exception`. Session-usage records and receipts no longer
+  emit the `cache_creation_input_tokens` alias (ingest still accepts it).
+- **LLM calls now have one canonical, validated option surface.** `llm_call`
+  and its safe, structured, streaming, agent-loop, and persona entry points
+  reject unknown or removed keys instead of silently dropping them. `output`
+  replaces the structured-output aliases; `system` accepts ordered fragments;
+  provider-specific settings live under `provider_options`; and the canonical
+  transport, speed, effort, routing, tool, store, repair, and model-policy
+  spellings replace their former synonyms. The typechecker, runtime, stdlib,
+  linter, docs, skills, persona manifests, and migration guide derive from or
+  document the same `harn-builtin-meta::llm_options` registry.
+
+### Added
+
+- **Replicated coding-agent parity sweeps.** `harn eval coding-agent --replicates`
+  now records independent tool-format trials without overwriting receipts, making
+  local catalog decisions auditable (#5162).
+- **Catalog-mapped local inference flags.** Harn local launch maps llama.cpp
+  chat-template kwargs through the provider catalog with validated JSON input.
+- **Deterministic pre-approval tool-deny seam (#5167).** An embedder can
+  register a single deterministic precheck closure that the agent tool-dispatch
+  boundary consults before it emits any `session/request_permission` prompt or
+  runs the dynamic-permission and approval-policy gates. A precheck that refuses
+  a call short-circuits it straight to the model-facing denial, so a tool call
+  the embedder has already decided to block never asks the human to approve it
+  first. The seam is generic over tools and fail-open: with no precheck
+  registered, or a return the boundary cannot read as a deny, dispatch stays
+  byte-identical to the pre-seam behavior. The precheck stack is per-task scoped
+  so a spawned worker carries its own scope without leaking into siblings.
+- Added `agent_tool_result_outcome` and `agent_tool_result_is_ok` to `std/agent/tool_lifecycle`: a typed
+  `AgentToolResultOutcome` contract that classifies a dispatched tool result from its structured envelope
+  (transport status, typed error category, producer-stamped product-error / edit-outcome / diagnostics count)
+  without inspecting rendered prose, with an explicit `unknown` verdict when no structured field is present. The
+  error taxonomy now folds `invalid_arguments` into `schema_validation`.
+- The agent-loop stall detector now recognizes repeated-identical-**success**
+  loops. A model that re-runs the same already-succeeding command with no
+  intervening edit — e.g. re-running an already-green test command — previously
+  looped invisibly to wall-clock timeout, because the existing conditions fire
+  only on repeated failure or a byte-identical observation (which timing jitter
+  in passing output defeats). The new `repeated_success` condition counts the
+  same action succeeding again with a varying observation and no intervening
+  mutating action, injects a typed "you already succeeded, conclude or act
+  differently" nudge, and escalates through the existing recovery ladder. Tunable
+  via `stall_diagnostics.repeat_success` (default 3); failure-streak behavior is
+  unchanged.
+- Added typed text and byte conditional replacement with observed SHA-256
+  leases, closed receipts, explicit durability, sandbox and testbench support,
+  and one shared atomic boundary for VM writes and hostlib safe patches.
+- Added a first-party, cross-platform GitHub Action that installs the
+  repository-pinned Harn release from a checksum-verified, safely cached archive.
+- Added an opt-in `adaptive` tool-call format: a permissive union parser that runs every text-channel lane and
+  recovers the tool-name-as-key JSON dialect (`{"tool": {args}}`) that the pinned grammars miss, accepting a call
+  only when it maps unambiguously to exactly one presented tool with schema-valid arguments. Default-off — no
+  catalog route resolves to it; reachable only via an explicit `tool_format` pin/request.
+- The agent loop now OWNS long-running commands instead of asking the model to poll them. A converted
+  `run_command` (a `status=="running"` handle) is entered in a session-scoped command ledger; while an `awaited`
+  handle is live and a model turn makes no tool calls, the loop parks on the session inbox with zero inference and
+  re-enters the model only on its own sparse, delta-gated decision schedule (30s base, doubling, 5-minute cap) with
+  ONE coalesced `command_status` digest covering every live handle. Terminal completions wake the hold immediately;
+  progress-only re-entries are output-capped while terminal-result re-entries stay uncapped. Per-handle first-stderr
+  and byte-stall triggers, a 15-minute awaited-wall ceiling with per-surface auto-resolve (kill in headless/eval,
+  release-to-service in interactive), a separate hold re-entry budget, and a `command_hold` checkpoint kind make the
+  mechanism bounded and replay-deterministic. Thresholds and wording are normalized once through the `command_wait`
+  options contract, so a host passes only overrides.
+- Background `run_command` handles gained the telemetry a controlling agent loop needs to schedule its own
+  decision cadence: running snapshots now carry a monotonic `output_offset` (so a consumer pages only the delta
+  since its last read), a `stderr_byte_count`, and `silence_ms` since the last output chunk; each handle records an
+  `awaited`/`service` lease tag; and a new `tools.list_handles` builtin enumerates the live handles for a session
+  (empty once each completes and its waiter drains it).
 
 ### Changed
 
@@ -18,6 +109,160 @@ keeps condensed series summaries instead of full per-patch history.
   return deterministic byte offsets plus the latest normalized command state.
   Output, exit, timeout, and caller cancellation race without polling artifact
   files or sleeping in the wrapper.
+
+- Export the canonical `std/git` receipt, payload, repository, and
+  captured-command contracts so composed adapters retain precise types without
+  duplicating Harn-owned shapes.
+- Release smoke orchestration now runs in Harn through `std/command`, with explicit candidate-binary injection,
+  attributable capability results, native cross-platform process-group cancellation, and parallel-safe script tests.
+- Background `run_command` progress feedback now follows an exponential backoff schedule instead of a fixed
+  interval: it starts at `progress_interval_ms`, doubles the delay after each snapshot, and is clamped by the new
+  optional `progress_max_interval_ms` request field (default 30000ms, never below the base interval). A
+  long-running command emits frequent early progress that thins out over time, so a quiet multi-minute command
+  stays cheap while its completion snapshot is still published on exit.
+
+### Fixed
+
+- Preserve unknown expression-tail types in typed tools and pipelines instead of misreporting them as `nil`.
+- Allow same-line calls on returned functions and other callable expression results, including `factory(x)(y)`.
+- An imported `pub fn` (or `pub const`) that constructs its home module's `enum` variant now builds the variant at
+  runtime instead of throwing "Undefined variable" while `check` passed. Every module-body compile path — the top-level
+  program, pipeline callables, and the per-function and init chunks emitted for imported modules — now seeds the same
+  type catalog (enum names and variant owners, struct layouts, interface methods, type aliases) from one shared helper,
+  so catalog-dependent lowering behaves identically no matter which module later calls the compiled body.
+- `process.spawn`: a terminal spawn handle evicted from the process-global registry under cap pressure now
+  leaves a compact terminal receipt, so a later `poll`/`wait`/`kill` still observes the real exit status
+  instead of a hard unknown-handle error. Previously an unrelated run that flooded the registry past its cap
+  could destroy another run's unobserved terminal result between the process's termination and the owner's
+  observation. Eviction now prefers already-observed terminal entries and never drops an unobserved one
+  without leaving a receipt.
+- **Cross-platform subprocess test probes.** Rust process and hermetic-environment
+  tests now use a Cargo-built helper binary instead of Unix-only shell expansion,
+  keeping environment-isolation coverage on Windows. (#5151)
+- **Agent feedback telemetry now counts each parse-repair injection once (#5172).**
+- Routing failover now attributes terminal errors to the route that actually produced them. A failed
+  provider-exhaustion error carries the authoritative top-level `provider`/`model` of the terminal attempt (not the
+  base/requested route), and a race where no single route is responsible reports `no_single_route` instead of
+  fabricating one. The ACP `harn.acp.prompt_error.v1` envelope additionally projects the per-route `attempts` ledger
+  and a `routeUnknown` signal.
+- Generic call inference now follows concrete type arguments through nested type
+  aliases, including collections, records, callbacks, nullable fields, and
+  unions.
+- Materialize runtime schemas for imported type aliases, including aliases from
+  embedded standard-library modules, nested imports, generic applications, and
+  open-record extras.
+- Keep installed package generations leased until commands finish using resolved
+  import paths, preventing concurrent package publication from removing modules
+  during compilation or execution.
+- Make workspace publication resume the unpublished dependency DAG, wait for
+  registry propagation with bounded backoff, and emit an auditable recovery
+  receipt without shell retry heuristics.
+- Scope inline LLM fixtures, call logs, cache state, and receipts to each logical VM so async and concurrent
+  executions remain deterministic across executor threads.
+- Host lease acquisition now absorbs bounded SQLite registry writer contention
+  before reporting semantic lease deferral, so parallel VMs using distinct named
+  domains can release and immediately reacquire reliably.
+- macOS sandbox: a `read_only_root` that coincides with or nests under a
+  developer-toolchain cache-write root (e.g. a host that lists `~/.cargo/registry`
+  or `~/go/pkg/mod` read-only for dependency browsing) no longer cancels the
+  cache's write grant. `sandbox-exec` is last-match-wins, so the trailing
+  read-only deny was silently un-granting the cache the toolchain must write,
+  breaking builds with `operation not permitted` (which Go reports as the
+  misleading "not in std"). The cache preset's write intent now wins for its own
+  roots; a read-only root outside every cache root is still hermetically denied.
+- Added the macOS Go env-config dir (`~/Library/Application Support/go`, GOENV)
+  to the DeveloperToolchains cache-write roots so `go` can rewrite `go/env`.
+- **Persona-apply rollback lib test no longer SIGABRTs the `harn-cli` suite
+  (#5250).** `activation_failure_rolls_back_the_local_package_install` now
+  runs on a `CLI_RUNTIME_STACK_SIZE` worker thread so VM-backed materialize
+  work cannot overflow libtest's default 2 MiB stack and abort the binary.
+- **Tagged `<function=NAME>{json}` markup now round-trips trailing JSON
+  arguments (#5252).** The chat-template function-markup path previously
+  recognized the dialect but dropped the JSON object into an empty-args call;
+  it now parses a balanced trailing/enclosed object as the call's arguments
+  (parameter-tag style still wins when both appear).
+- The script MCP HTTP server now queues server-to-client requests (such as
+  `elicitation/create`) made before the client opens its event stream,
+  delivering them as soon as the stream registers instead of failing the
+  tool call. A request whose client never opens a stream still fails
+  loudly after a bounded grace period.
+- **LSP position conversion is no longer quadratic.** Converting between byte
+  offsets and LSP `(line, UTF-16 column)` positions rescanned the document from
+  byte zero on every call, and the callers are per-item: once per semantic token,
+  twice per diagnostic. A large file therefore cost thousands of full-source
+  scans on a path that runs on every keystroke. The document now carries a
+  `line-index` built once per document version alongside its text, so each
+  conversion is a binary search over line starts. Conversions also no longer
+  panic when a span lands inside a multi-byte character; they resolve to that
+  character's start. (#5281)
+- `harn package pack` now excludes linked-worktree `.git` files and nested
+  `.harn-*` runtime directories from package file lists and artifacts.
+- Make package checks and generated API docs resolve selective, wildcard, and
+  transitive public re-exports to their original declarations.
+- The CI Rust test lane's job timeout now leaves headroom for a cold build
+  followed by the full suite on hosted runners, instead of killing passing
+  runs mid-suite; a lane test pins the budget.
+- **Empty arguments no longer vanish from emitted shell commands.** Seven hand-rolled shell quoters
+  disagreed on which characters were safe to leave bare and how to escape embedded quotes; two of them
+  tested `value.chars().all(is_safe)`, which is vacuously true for the empty string. An intentionally-empty
+  argument therefore rendered as nothing at all and silently disappeared from the deploy script printed by
+  `harn orchestrator deploy --dry-run`. Every copy now delegates to `shell_words::quote`. (#5313)
+- **A `*` in the middle of a persona hook pattern now matches.** `register_step_hook("merge_*_captain", …)`
+  fell through to string equality, so it matched no persona and the `persona-hook-target` lint rejected
+  valid code. Persona-hook and model-id matching now use `harn-glob`, the workspace's single glob
+  implementation. (#5313)
+- ACP `execute_chunk` now installs the host cancel token on the VM so Esc/cancel
+  stops in-flight tool work. Pipeline `read_only_roots` alone no longer mark the
+  OS sandbox as configured, so network `git fetch` works in TUI sessions.
+  Cancelled permission requests reject as cancelled (not Unavailable), and
+  approval-unavailable tool results include a `human_summary`.
+- Harden CI against two systemic false failures: decouple zizmor's online
+  Advisories audit from required PR and merge-group hygiene while retaining
+  it as a scheduled security signal, and prevent conformance timeouts under
+  the parallel audit fanout by reserving cores for conformance shards and
+  raising the per-case timeout to 60s. Release CI now prunes superseded
+  per-target caches, retries narrow rustup network operations, and leaves
+  GitHub API outages non-fatal in the preemption-repair controller.
+- Avoid recompiling the complete Rust test graph on GitHub-hosted fallback
+  runners by executing the unchanged suite in the behavior producer's warm
+  workspace; Blacksmith lanes retain the parallel cached-consumer topology.
+- **Durable atomic file writes everywhere.** Four divergent private
+  `atomic_write` copies (filesystem overlay commits, filesystem snapshot
+  manifests, the credentials file, and the bytecode cache) now share the one
+  correct implementation in `harn-vm`'s `atomic_io`, which fsyncs the temp file,
+  renames it over the destination, and fsyncs the parent directory. The overlay
+  and snapshot copies previously fell back to unlinking the destination before
+  retrying the rename, so a crash mid-retry could lose both the old and the new
+  file; none of the four synced the parent directory, so a completed write could
+  vanish on power loss. The credentials file also gains its `0600` mode on the
+  temp file before the rename rather than on the destination afterwards, closing
+  a window in which stored secrets were readable at the process umask default.
+- Enforce the Actions cache budget from the post-prune cache inventory while
+  retaining GitHub's eventually consistent aggregate usage value as telemetry.
+- **llama.cpp Qwen3.6 routes default to native tool calls again (harn#5162).** The `*qwen3.6*` llama.cpp
+  capability rule is re-promoted to `native_tools = true` / `preferred_tool_format = "native"` with
+  `tool_mode_parity = "text_unreliable"`, matching the mlx and local-vLLM siblings that serve the same weights and
+  chat template. 2026-07-18 evidence with `--jinja` + the model's tool template: 5/5 forced-native trials on a
+  13-action edit schema selected the correct action with all required fields, while the json text channel produced
+  zero parseable write calls in a live agent session. The 2026-07-17 demotion predated confirmation that the serving
+  config applied the tool template.
+- The parallel test-case performance gate re-measures on a breach (up to 3
+  rounds) and judges the best observation per metric, so a transient noisy
+  neighbor on a shared CI runner no longer fails the gate while a real
+  regression, which breaches every round, still does.
+- **Linux sandbox: validate the syscall ABI before the syscall number.** The
+  seccomp-bpf allowlist matched `seccomp_data.nr` without first checking
+  `seccomp_data.arch`, so a confined x86-64 process could re-enter the kernel
+  through the i386 compat gate (`int $0x80`) — where the same numbers name
+  different syscalls — and reach calls the policy withholds. Number 26 is
+  `msync`, which every profile permits; i386 number 26 is `ptrace`, which the
+  allowlist deliberately excludes. `CONFIG_IA32_EMULATION` is enabled by
+  default across mainstream distro kernels and needs no 32-bit binary or
+  libraries to reach, so the confinement was bypassable as shipped. Filter
+  construction now goes through `seccompiler`, which prefixes every program
+  with an architecture check that kills the process on mismatch. The program is
+  also compiled ahead of `fork` rather than inside `pre_exec`, where its
+  allocation was not async-signal-safe.
 
 ## v0.10.28
 
