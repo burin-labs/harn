@@ -67,13 +67,33 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     atomic_write_with(path, |writer| writer.write_all(bytes))
 }
 
+/// Atomically write `bytes` to `path`, giving the file the Unix permission
+/// bits `mode` (e.g. `0o600`).
+///
+/// The mode is applied to the temp file *before* the rename, so the bytes are
+/// never observable at the process umask's default permissions — not even for
+/// the width of the write. That ordering is the whole point of this variant:
+/// writing first and `chmod`ing the destination afterwards leaves a window in
+/// which a secret is world-readable. On non-Unix targets `mode` is ignored.
+pub fn atomic_write_with_mode(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
+    atomic_write_stream_with_durability_and_mode(
+        path,
+        AtomicWriteDurability::Flush,
+        Some(mode),
+        |writer| writer.write_all(bytes),
+    )
+    .map(|_| ())
+}
+
 /// Atomically write `bytes` with an explicit durability request.
 pub fn atomic_write_with_durability(
     path: &Path,
     bytes: &[u8],
     durability: AtomicWriteDurability,
 ) -> io::Result<AtomicWriteReceipt> {
-    atomic_write_stream_with_durability(path, durability, |writer| writer.write_all(bytes))
+    atomic_write_stream_with_durability_and_mode(path, durability, None, |writer| {
+        writer.write_all(bytes)
+    })
 }
 
 pub(crate) fn atomic_write_with_durability_unlocked(
@@ -81,7 +101,9 @@ pub(crate) fn atomic_write_with_durability_unlocked(
     bytes: &[u8],
     durability: AtomicWriteDurability,
 ) -> io::Result<AtomicWriteReceipt> {
-    atomic_write_stream_with_durability_unlocked(path, durability, |writer| writer.write_all(bytes))
+    atomic_write_stream_with_durability_and_mode_unlocked(path, durability, None, |writer| {
+        writer.write_all(bytes)
+    })
 }
 
 /// Atomically write the destination at `path` by streaming through a
@@ -95,12 +117,14 @@ pub fn atomic_write_with<F>(path: &Path, write_fn: F) -> io::Result<()>
 where
     F: FnOnce(&mut BufWriter<File>) -> io::Result<()>,
 {
-    atomic_write_stream_with_durability(path, AtomicWriteDurability::Flush, write_fn).map(|_| ())
+    atomic_write_stream_with_durability_and_mode(path, AtomicWriteDurability::Flush, None, write_fn)
+        .map(|_| ())
 }
 
-fn atomic_write_stream_with_durability<F>(
+fn atomic_write_stream_with_durability_and_mode<F>(
     path: &Path,
     durability: AtomicWriteDurability,
+    mode: Option<u32>,
     write_fn: F,
 ) -> io::Result<AtomicWriteReceipt>
 where
@@ -112,18 +136,19 @@ where
     #[cfg(windows)]
     let _lock = crate::conditional_replace::acquire_lock(path)?;
 
-    atomic_write_stream_with_durability_unlocked(path, durability, write_fn)
+    atomic_write_stream_with_durability_and_mode_unlocked(path, durability, mode, write_fn)
 }
 
-fn atomic_write_stream_with_durability_unlocked<F>(
+fn atomic_write_stream_with_durability_and_mode_unlocked<F>(
     path: &Path,
     durability: AtomicWriteDurability,
+    mode: Option<u32>,
     write_fn: F,
 ) -> io::Result<AtomicWriteReceipt>
 where
     F: FnOnce(&mut BufWriter<File>) -> io::Result<()>,
 {
-    let mut tmp = TempFile::create(path)?;
+    let mut tmp = TempFile::create(path, mode)?;
     let result = write_and_finalize(&mut tmp, durability, write_fn);
     if let Err(err) = result {
         let _ = std::fs::remove_file(&tmp.path);
@@ -222,6 +247,19 @@ fn sync_parent_dir(path: &Path) -> bool {
     false
 }
 
+/// Set `path`'s permission bits. Uses `set_permissions` rather than
+/// `OpenOptions::mode` so the umask cannot widen or narrow the request.
+#[cfg(unix)]
+fn apply_mode(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn apply_mode(_path: &Path, _mode: u32) -> io::Result<()> {
+    Ok(())
+}
+
 /// Owns the temp file path + handle so callers can rely on RAII for
 /// cleanup if they bail out mid-write.
 struct TempFile {
@@ -230,7 +268,7 @@ struct TempFile {
 }
 
 impl TempFile {
-    fn create(target: &Path) -> io::Result<Self> {
+    fn create(target: &Path, mode: Option<u32>) -> io::Result<Self> {
         let parent = target.parent().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -256,7 +294,13 @@ impl TempFile {
             .create_new(true)
             .write(true)
             .open(&tmp_path)?;
-        if let Ok(metadata) = std::fs::metadata(target) {
+        if let Some(mode) = mode {
+            if let Err(error) = apply_mode(&tmp_path, mode) {
+                drop(file);
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(error);
+            }
+        } else if let Ok(metadata) = std::fs::metadata(target) {
             if let Err(error) = file.set_permissions(metadata.permissions()) {
                 drop(file);
                 let _ = std::fs::remove_file(&tmp_path);
@@ -372,6 +416,30 @@ mod tests {
             std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
             0o640
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_is_applied_before_the_rename() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        atomic_write_with_mode(&path, b"secret", 0o600).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "credentials must be owner-only");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_survives_overwriting_a_loose_destination() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        std::fs::write(&path, b"old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        atomic_write_with_mode(&path, b"secret", 0o600).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
