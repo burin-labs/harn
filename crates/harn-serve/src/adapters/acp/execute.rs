@@ -261,6 +261,13 @@ pub(super) async fn execute_chunk(
 
     builtins::register_acp_builtins(&mut vm, bridge.clone()).await;
 
+    // Share the same cancellation flag the ACP session's `cancellation`
+    // already installed on `host_bridge` (see prompt.rs) with the VM's
+    // cooperative cancel token, so Esc / `session/cancel` unwinds the VM step
+    // loop and kills in-flight `process.exec` children instead of only
+    // interrupting outstanding bridge calls.
+    vm.install_cancel_token(host_bridge.cancelled_flag());
+
     // Forward unknown builtins to the ACP client as `builtin_call` JSON-RPC
     // until host-local pseudo-builtins are migrated to typed host
     // capabilities and explicit Harn stdlib wrappers.
@@ -442,6 +449,86 @@ mod tests {
         assert_eq!(
             acp_project_root(Some(&source_path), &nested, None),
             Some(project_root.path().to_path_buf())
+        );
+    }
+
+    /// Regression for the missing `vm.install_cancel_token(...)` call: the ACP
+    /// prompt path already shares one `cancelled` flag between the session's
+    /// `SessionCancellation` and `HostBridge` (see `prompt.rs`), but the VM
+    /// itself never learned about it, so `is_cancelled()` (and every
+    /// `process.exec` child registered through `op_interrupt`) stayed blind to
+    /// a `session/cancel` that arrived mid-turn. Pre-cancelling before the turn
+    /// starts and asserting the VM observes it end-to-end is deterministic and
+    /// avoids needing a real subprocess or timing race.
+    #[tokio::test(flavor = "current_thread")]
+    async fn execute_chunk_installs_host_bridge_cancel_token_on_the_vm() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use tokio::sync::Mutex as TokioMutex;
+
+        let cwd = tempfile::tempdir().expect("cwd");
+        let source =
+            "pipeline main() {\n  __io_println(json_stringify({cancelled: is_cancelled()}))\n}\n"
+                .to_string();
+        let chunk = harn_vm::compile_source(&source).expect("compile inline pipeline");
+
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let cancellation = super::super::SessionCancellation::default();
+        // Pre-cancel: this is what a `session/cancel` that raced ahead of
+        // `session/prompt` looks like on the wire, and it lets this test stay
+        // synchronous instead of racing a background cancel against the turn.
+        cancellation.cancelled.store(true, Ordering::SeqCst);
+
+        let bridge = Arc::new(AcpBridge {
+            session_id: "cancel-token-test".to_string(),
+            output: super::super::AcpOutput::Channel(tx),
+            pending: Arc::new(TokioMutex::new(std::collections::HashMap::new())),
+            next_id_counter: AtomicU64::new(1),
+            cancellation: cancellation.clone(),
+            script_name: std::sync::Mutex::new(String::new()),
+            assistant_state: std::sync::Mutex::new(
+                harn_vm::visible_text::VisibleTextState::default(),
+            ),
+        });
+
+        let host_bridge = Arc::new(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_cancel_notify(
+                Arc::new(TokioMutex::new(std::collections::HashMap::new())),
+                cancellation.cancelled.clone(),
+                cancellation.notify.clone(),
+                Arc::new(|_line: &str| Ok(())),
+                1,
+            ),
+        );
+
+        let output = execute_chunk(
+            chunk,
+            bridge,
+            host_bridge,
+            PromptGlobals {
+                text: "",
+                content: &[],
+                messages: &[],
+            },
+            VmSetup {
+                source: &source,
+                baseline: None,
+                baseline_cache_hit: None,
+                baseline_prepare_ms: 0,
+                source_path: None,
+                cwd: cwd.path(),
+                project_root: None,
+                runtime_configurator: Arc::new(super::super::NoopAcpRuntimeConfigurator),
+                session_profile: None,
+            },
+        )
+        .await
+        .expect("cancelled-but-otherwise-normal turn should still execute");
+
+        assert_eq!(
+            output, "{\"cancelled\":true}\n",
+            "the VM's cancel token must observe the same flag the ACP session \
+             already shares with HostBridge, so is_cancelled() (and, by the \
+             same wiring, in-flight process.exec children) see a session/cancel"
         );
     }
 }

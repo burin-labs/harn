@@ -691,21 +691,48 @@ mod tests {
     }
 
     #[test]
-    fn policy_for_code_with_config_applies_worktree_confinement() {
-        // When the embedder opts into sandboxing, ActAuto `code` mode must
-        // honor it as a Worktree-level OS sandbox.
+    fn policy_for_code_with_only_read_only_roots_does_not_enable_worktree() {
+        // Burin always registers bundled pipeline roots (and other dependency
+        // roots) as `read_only_roots` on every session, regardless of whether
+        // the user asked for process-level OS sandboxing. Treating that as an
+        // opt-in signal accidentally armed Worktree confinement for every TUI
+        // session and broke child-process network access (e.g. `git fetch`
+        // DNS resolution). `read_only_roots` alone must NOT enable Worktree —
+        // this is the historical ambient-behavior no-config path.
         let roots = vec!["/work/project".to_string()];
-        let sandbox = AcpSandboxConfig::with_read_only_roots(roots.clone());
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots);
+        assert!(!sandbox.is_configured());
+        assert!(
+            policy_for_mode("code", &sandbox).is_none(),
+            "read_only_roots alone must not install a confinement policy"
+        );
+    }
+
+    #[test]
+    fn policy_for_code_with_process_config_applies_worktree_confinement() {
+        // Real process-sandbox config (presets/read_roots/write_roots) is the
+        // only opt-in signal for Worktree confinement. When present, any
+        // read_only_roots the embedder also configured still ride along via
+        // `apply_sandbox_config`.
+        let mut sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+                ]),
+                read_roots: Vec::new(),
+                write_roots: Vec::new(),
+            });
+        sandbox.read_only_roots = vec!["/work/project".to_string()];
         assert!(sandbox.is_configured());
         let policy = policy_for_mode("code", &sandbox)
-            .expect("configured code mode must install a confinement policy");
+            .expect("process-configured code mode must install a confinement policy");
         // Worktree-level OS confinement is engaged...
         assert_eq!(
             policy.sandbox_profile,
             harn_vm::orchestration::SandboxProfile::Worktree
         );
-        // ...the embedder roots are carried through...
-        assert_eq!(policy.read_only_roots, roots);
+        // ...the embedder's read-only roots are still carried through...
+        assert_eq!(policy.read_only_roots, vec!["/work/project".to_string()]);
         // ...and ActAuto approval semantics are preserved (no approval gate ->
         // the current maximum side-effect ceiling, no recursion clamp).
         assert_eq!(policy.side_effect_level.as_deref(), Some("desktop_control"));
@@ -822,11 +849,21 @@ mod tests {
     }
 
     #[test]
-    fn code_mode_honors_embedder_read_only_roots() {
-        // A configured embedder gets Worktree confinement with its declared
-        // read-only roots applied, even in full-access ACP code mode.
-        let sandbox =
-            AcpSandboxConfig::with_read_only_roots(vec!["/opt/burin/pipelines".to_string()]);
+    fn code_mode_honors_embedder_read_only_roots_when_process_sandbox_is_configured() {
+        // A process-sandbox-configured embedder gets Worktree confinement
+        // with its declared read-only roots still applied, even in
+        // full-access ACP code mode. `read_only_roots` alone (no process
+        // config) is covered by
+        // `policy_for_code_with_only_read_only_roots_does_not_enable_worktree`.
+        let mut sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+                ]),
+                read_roots: Vec::new(),
+                write_roots: Vec::new(),
+            });
+        sandbox.read_only_roots = vec!["/opt/burin/pipelines".to_string()];
         let policy = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
         assert_eq!(
             policy.read_only_roots,
@@ -902,15 +939,24 @@ mod tests {
 
     #[test]
     fn configured_code_mode_installs_ssrf_guard() {
-        // A configured embedder gets the SSRF private-address backstop for the
-        // turn: block_private becomes active. Public hosts stay reachable (the
-        // guard only blocks private/loopback/link-local/metadata addresses).
+        // A process-sandbox-configured embedder gets the SSRF private-address
+        // backstop for the turn: block_private becomes active. Public hosts
+        // stay reachable (the guard only blocks
+        // private/loopback/link-local/metadata addresses). `read_only_roots`
+        // alone (Burin's ambient bundled-pipeline roots) must NOT arm this.
         assert_eq!(
             harn_vm::egress::current_ssrf_client_settings(),
             (false, false)
         );
         {
-            let sandbox = AcpSandboxConfig::with_read_only_roots(vec!["/work/project".to_string()]);
+            let sandbox =
+                AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                    presets: Some(vec![
+                        harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+                    ]),
+                    read_roots: Vec::new(),
+                    write_roots: Vec::new(),
+                });
             let _guard = ModePolicyGuard::enter("code", &sandbox);
             assert!(
                 harn_vm::egress::current_ssrf_client_settings().0,

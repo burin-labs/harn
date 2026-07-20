@@ -111,6 +111,76 @@ pub(super) async fn request_host_permission(
                 HostPermissionOutcome::Rejected { reason }
             }
         },
-        Err(_) => HostPermissionOutcome::Unavailable,
+        Err(err) => {
+            // A `session/cancel` races the outstanding permission call and
+            // the bridge unwinds it with a "cancelled" error rather than a
+            // host-side rejection or transport failure. Report that as a
+            // normal user rejection, not the generic "host doesn't implement
+            // this method" Unavailable path — the host DID implement it, the
+            // user just cancelled before it resolved.
+            if err.to_string().contains("cancelled") {
+                HostPermissionOutcome::Rejected {
+                    reason: "cancelled by user".to_string(),
+                }
+            } else {
+                HostPermissionOutcome::Unavailable
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicBool;
+    use tokio::sync::Mutex as TokioMutex;
+
+    fn request() -> HostPermissionRequest {
+        HostPermissionRequest {
+            session_id: "cancel-outcome-test".to_string(),
+            tool_call_id: "call_1".to_string(),
+            tool_name: "exec".to_string(),
+            tool_args: serde_json::json!({ "command": "echo hi" }),
+            policy_decision: serde_json::Value::Null,
+            request_context: serde_json::Value::Null,
+            requested_capabilities: Vec::new(),
+            tool_descriptor: None,
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_bridge_call_is_rejected_not_unavailable() {
+        // A bridge that is already cancelled short-circuits `call` with
+        // "Bridge: operation cancelled" before ever writing to the host.
+        // This must surface as a normal user rejection, not the
+        // trust-killing "host does not implement session/request_permission"
+        // Unavailable message — the host never even got asked.
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let bridge = Arc::new(HostBridge::from_parts(
+            Arc::new(TokioMutex::new(HashMap::new())),
+            cancelled,
+            Arc::new(std::sync::Mutex::new(())),
+            1,
+        ));
+
+        let outcome = request_host_permission(Some(&bridge), request()).await;
+
+        match outcome {
+            HostPermissionOutcome::Rejected { reason } => {
+                assert_eq!(reason, "cancelled by user");
+            }
+            HostPermissionOutcome::Allowed { .. } => panic!("expected Rejected, got Allowed"),
+            HostPermissionOutcome::Unavailable => panic!(
+                "a cancelled permission request must be Rejected, not the generic \
+                 Unavailable trust-killer message"
+            ),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_bridge_is_unavailable() {
+        let outcome = request_host_permission(None, request()).await;
+        assert!(matches!(outcome, HostPermissionOutcome::Unavailable));
     }
 }

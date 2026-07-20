@@ -22,8 +22,12 @@ pub(in crate::llm) fn approval_unavailable_tool_result(
              pivot to allowed work or report the missing permission."
         )
     };
+    // A plain-English one-liner for hosts that render only a top-level
+    // summary and never descend into the structured fields below.
+    let human_summary = format!("`{tool_name}` was blocked: {reason}");
     serde_json::json!({
         "error": "permission_denied",
+        "human_summary": human_summary,
         "tool": tool_name,
         "reason": reason,
         "denial_class": class,

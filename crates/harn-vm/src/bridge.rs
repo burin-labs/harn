@@ -1169,19 +1169,19 @@ impl HostBridge {
         }
     }
 
-    /// Check if the host has sent a cancel notification.
+    /// Host cancel notification; `cancelled_flag` is the Arc for VM cancel tokens.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }
-
+    pub fn cancelled_flag(&self) -> Arc<AtomicBool> {
+        self.cancelled.clone()
+    }
     pub fn take_resume_signal(&self) -> bool {
         self.resume_requested.swap(false, Ordering::SeqCst)
     }
-
     pub fn signal_resume(&self) {
         self.resume_requested.store(true, Ordering::SeqCst);
     }
-
     pub fn set_daemon_idle(&self, idle: bool) {
         self.daemon_idle.store(idle, Ordering::SeqCst);
     }
