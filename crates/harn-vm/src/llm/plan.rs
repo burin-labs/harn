@@ -30,7 +30,7 @@ pub fn normalize_plan_tool_call(tool_name: &str, args: &serde_json::Value) -> se
         "approval": normalize_approval(source.get("approval").or_else(|| args.get("approval"))),
     });
 
-    let digest_input = serde_json::to_vec(&plan).unwrap_or_default();
+    let digest_input = crate::canonical_json::to_vec(&plan);
     let digest = hex::encode(Sha256::digest(digest_input));
     plan["id"] = serde_json::Value::String(format!("plan_{}", &digest[..12]));
     plan

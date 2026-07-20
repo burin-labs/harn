@@ -510,7 +510,7 @@ impl std::error::Error for LifecycleReceiptError {}
 /// the replay-oracle comparator. We hash canonical JSON so map-key order
 /// doesn't drift between record and replay.
 pub fn hash_resume_input(input: Option<&JsonValue>) -> String {
-    let canonical = canonical_json_bytes(input.unwrap_or(&JsonValue::Null));
+    let canonical = crate::canonical_json::to_vec(input.unwrap_or(&JsonValue::Null));
     let digest = Sha256::digest(&canonical);
     format!("sha256:{}", hex::encode(digest))
 }
@@ -521,31 +521,6 @@ pub fn hash_resume_input(input: Option<&JsonValue>) -> String {
 pub fn hash_drain_decision_prompt(prompt: &str) -> String {
     let digest = Sha256::digest(prompt.as_bytes());
     format!("sha256:{}", hex::encode(digest))
-}
-
-fn canonical_json_bytes(value: &JsonValue) -> Vec<u8> {
-    let canonical = canonicalize_for_hash(value);
-    serde_json::to_vec(&canonical).unwrap_or_default()
-}
-
-fn canonicalize_for_hash(value: &JsonValue) -> JsonValue {
-    match value {
-        JsonValue::Object(map) => {
-            let mut sorted = serde_json::Map::new();
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            for key in keys {
-                if let Some(v) = map.get(key) {
-                    sorted.insert(key.clone(), canonicalize_for_hash(v));
-                }
-            }
-            JsonValue::Object(sorted)
-        }
-        JsonValue::Array(items) => {
-            JsonValue::Array(items.iter().map(canonicalize_for_hash).collect())
-        }
-        other => other.clone(),
-    }
 }
 
 /// Lightweight policy for redacting persisted `ResumptionReceipt.input`

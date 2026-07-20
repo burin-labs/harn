@@ -1081,8 +1081,7 @@ fn record_unified_tape_llm_call(result: &LlmResult) {
             if call.prefill.is_some() {
                 request.insert("prefill".to_string(), serde_json::json!(call.prefill));
             }
-            let serialized =
-                serde_json::to_vec(&serde_json::Value::Object(request)).unwrap_or_default();
+            let serialized = crate::canonical_json::to_vec(&serde_json::Value::Object(request));
             crate::testbench::tape::content_hash(&serialized)
         })
         .unwrap_or_else(|| {

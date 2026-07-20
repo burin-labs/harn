@@ -712,7 +712,7 @@ pub fn audit_transcript(
             } => {
                 tool_calls += 1;
                 // Repeated-read detection.
-                let arg_hash = canonical_json(raw_input);
+                let arg_hash = crate::canonical_json::to_string(raw_input);
                 match last_tool_call.get_mut(&session) {
                     Some(entry) if entry.0 == *tool_name && entry.1 == arg_hash => {
                         entry.2.push(env.index);
@@ -1154,11 +1154,6 @@ fn already_approved(steps_seen: &[String], steps: &[GoldenStateStep]) -> bool {
         .iter()
         .filter(|s| s.approval_gate)
         .any(|s| steps_seen.contains(&s.step))
-}
-
-fn canonical_json(value: &serde_json::Value) -> String {
-    // Deterministic stringification for arg-hash equality.
-    serde_json::to_string(value).unwrap_or_default()
 }
 
 #[cfg(test)]
