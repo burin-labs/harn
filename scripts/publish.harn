@@ -377,8 +377,8 @@ fn main(harness: Harness) {
       args = args + ["--allow-dirty"]
     }
     const result = command_run(args)
-    harness.stdio.write(result.stdout)
-    harness.stdio.write(result.stderr)
+    harness.stdio.print(result.stdout)
+    harness.stdio.eprint(result.stderr)
     if !result.success {
       exit(result.exit_code ?? 1)
     }
@@ -388,8 +388,8 @@ fn main(harness: Harness) {
     probe: crates_io_probe,
     publish: { package ->
       const result = command_run(publish_argv(package, verify, allow_dirty))
-      harness.stdio.write(result.stdout)
-      harness.stdio.write(result.stderr)
+      harness.stdio.print(result.stdout)
+      harness.stdio.eprint(result.stderr)
       return {success: result.success, output: command_output(result)}
     },
     wait: { delay_ms ->
