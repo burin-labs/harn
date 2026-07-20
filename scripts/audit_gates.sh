@@ -25,7 +25,8 @@
 #   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc minus conformance
 #                            shards; see headroom note below). Explicit values
 #                            are honored unchanged.
-#   HARN_CONFORMANCE_SHARDS  process shard count (default: min(nproc, 4))
+#   HARN_CONFORMANCE_SHARDS  process shard count (default: half of nproc,
+#                            capped at 4; the other half runs audit gates)
 #   HARN_CONFORMANCE_TIMEOUT_MS
 #                            per-case timeout for conformance shards
 #                            (default: 60000 under this parallel fanout)
@@ -84,7 +85,9 @@ case "$concurrency" in
 esac
 [ "$concurrency" -lt 1 ] && concurrency=1
 
-default_shards="$(nproc_count)"
+processor_count="$(nproc_count)"
+default_shards=$((processor_count / 2))
+[ "$default_shards" -lt 1 ] && default_shards=1
 [ "$default_shards" -gt 4 ] && default_shards=4
 conformance_shards="${HARN_CONFORMANCE_SHARDS:-$default_shards}"
 case "$conformance_shards" in
@@ -96,9 +99,10 @@ esac
 # heavy cases (agent_state_resume_process, autonomy_*, trust_graph_*, trigger_*)
 # already budget ~30s of internal polling for scheduling starvation; when the
 # audit fanout also claims every core, those cases still hit the outer 30s
-# per-case timeout while passing in isolation. Reserve cores for conformance
-# whenever AUDIT_GATES_CONCURRENCY is left unset (CI/default path). Explicit
-# concurrency stays absolute so local scripts/tests keep their knobs.
+# per-case timeout while passing in isolation. The default shard count claims
+# at most half the cores, and the default audit fanout receives the remainder,
+# so the two worker pools never oversubscribe the runner. Explicit shard and
+# concurrency values remain absolute so local scripts/tests keep their knobs.
 if [ -z "$explicit_audit_concurrency" ] && [ "$concurrency" -gt 1 ]; then
   reserved="$conformance_shards"
   if [ "$concurrency" -gt "$reserved" ]; then
