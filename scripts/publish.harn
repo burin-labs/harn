@@ -340,7 +340,7 @@ fn load_publish_packages(harness: Harness) -> list<PublishPlanPackage> {
     throw "cargo metadata failed: " + command_output(write)
   }
   const text = harness.fs.read_text(metadata_path)
-  const _cleanup = command_run(["rm", "-f", metadata_path])
+  const _ = command_run(["rm", "-f", metadata_path])
   return publish_plan_packages_from_metadata(json_parse(text))
 }
 
