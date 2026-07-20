@@ -50,7 +50,6 @@ pub import {
  * Import: import "std/git"
  */
 import { process_result_success, process_result_text, process_run } from "std/runtime"
-import { ToolRegistry } from "std/tools"
 
 type GitRunOptions = {
   repo?: string | GitRepo | GitReceipt,
@@ -1250,9 +1249,9 @@ fn __git_define_catalog_tool(tools, entry, opts) {
  * @errors: []
  */
 pub fn git_tools(
-  registry: ToolRegistry? = nil,
+  registry: {_type: "tool_registry", tools: list}? = nil,
   options: GitToolRegistryOptions = {},
-) -> ToolRegistry {
+) -> {_type: "tool_registry", tools: list} {
   const opts = options
   let tools = registry ?? tool_registry()
   for entry in __git_catalog_all() {
@@ -1301,9 +1300,9 @@ fn __git_toolbox_run_annotations(opts, key) {
  * @errors: []
  */
 pub fn git_toolbox_tools(
-  registry: ToolRegistry? = nil,
+  registry: {_type: "tool_registry", tools: list}? = nil,
   options: GitToolRegistryOptions = {},
-) -> ToolRegistry {
+) -> {_type: "tool_registry", tools: list} {
   const opts = options
   let tools = registry ?? tool_registry()
   if __git_toolbox_enabled(opts, "find_git_tool") {

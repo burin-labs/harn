@@ -213,7 +213,7 @@ fn tool_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 }
 
 #[harn_builtin(
-    sig = "tool_list(registry: dict | closure) -> list",
+    sig = "tool_list(registry: {_type: \"tool_registry\", tools: list} | closure) -> list",
     category = "tools"
 )]
 fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -245,7 +245,7 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
-    sig = "tool_find(registry: dict | closure, name: string) -> dict?",
+    sig = "tool_find(registry: {_type: \"tool_registry\", tools: list} | closure, name: string) -> dict?",
     category = "tools"
 )]
 fn tool_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -280,7 +280,7 @@ fn tool_find_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 }
 
 #[harn_builtin(
-    sig = "tool_select(registry: dict | closure, names: list) -> dict",
+    sig = "tool_select(registry: {_type: \"tool_registry\", tools: list} | closure, names: list) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
 fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -330,7 +330,7 @@ fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig = "tool_describe(registry: dict | closure) -> string",
+    sig = "tool_describe(registry: {_type: \"tool_registry\", tools: list} | closure) -> string",
     category = "tools"
 )]
 fn tool_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -380,7 +380,7 @@ fn tool_describe_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 }
 
 #[harn_builtin(
-    sig = "tool_remove(registry: dict | closure, name: string) -> dict",
+    sig = "tool_remove(registry: {_type: \"tool_registry\", tools: list} | closure, name: string) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
 fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -428,7 +428,7 @@ fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 }
 
 #[harn_builtin(
-    sig = "tool_count(registry: dict | closure) -> int",
+    sig = "tool_count(registry: {_type: \"tool_registry\", tools: list} | closure) -> int",
     category = "tools"
 )]
 fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -446,7 +446,7 @@ fn tool_count_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 }
 
 #[harn_builtin(
-    sig = "tool_schema(registry: dict | closure, components?: dict) -> dict",
+    sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure, components?: dict) -> dict",
     category = "tools"
 )]
 fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -522,7 +522,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 // capability-gated system-prompt fragment, so a tool's instruction and the
 // tool itself share one source of truth and cannot drift.
 #[harn_builtin(
-    sig = "tool_define(registry: dict | closure, name: string, description: string, config: dict) -> {_type: \"tool_registry\", tools: list}",
+    sig = "tool_define(registry: {_type: \"tool_registry\", tools: list} | closure, name: string, description: string, config: dict) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
 fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -850,7 +850,7 @@ fn tool_format_result_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 }
 
 #[harn_builtin(
-    sig = "tool_prompt(registry: dict | closure) -> string",
+    sig = "tool_prompt(registry: {_type: \"tool_registry\", tools: list} | closure) -> string",
     category = "tools"
 )]
 fn tool_prompt_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -937,7 +937,7 @@ fn tool_surface_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 }
 
 #[harn_builtin(
-    sig = "tool_bind(registry?: dict | closure) -> dict | nil",
+    sig = "tool_bind(registry?: {_type: \"tool_registry\", tools: list} | closure) -> dict | nil",
     category = "tools"
 )]
 fn tool_bind_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
