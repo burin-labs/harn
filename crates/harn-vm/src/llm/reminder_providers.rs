@@ -11,6 +11,7 @@ use harn_parser::diagnostic_codes::Code;
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::llm::reminder_iteration::ReminderIterationState;
 use crate::orchestration::{HookEffect, HookEvent, ReminderSpec};
+use crate::text::{strip_ansi, truncate_end, truncate_end_bytes};
 use crate::value::{VmClosure, VmError};
 
 const TOKEN_PRESSURE_ID: &str = "token_pressure";
@@ -824,7 +825,10 @@ fn collect_text_review_findings(
     collect_text_field(payload, &["observation"], &mut text_blocks);
     collect_text_field(payload, &["error"], &mut text_blocks);
     for text in text_blocks {
-        let text = strip_ansi_codes(&truncate_bytes(&text, GROUNDED_REVIEW_MAX_TEXT_BYTES));
+        // Strip before trimming to budget: escape bytes are not content, so
+        // charging them against the budget both wastes it and risks cutting
+        // mid-sequence, leaving the stripper a fragment it cannot recognize.
+        let text = truncate_end_bytes(&strip_ansi(&text), GROUNDED_REVIEW_MAX_TEXT_BYTES);
         if !looks_like_verifier_output(&tool_name, &command, &text) {
             continue;
         }
@@ -1153,51 +1157,7 @@ fn error_value_summary(value: &JsonValue) -> Option<String> {
 
 fn truncate_review_summary(value: &str) -> String {
     let cleaned = clean_inline_text(value.to_string());
-    truncate_chars(&cleaned, GROUNDED_REVIEW_SUMMARY_CHARS)
-}
-
-fn truncate_chars(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let mut out = String::new();
-    for _ in 0..max_chars {
-        let Some(ch) = chars.next() else {
-            return value.to_string();
-        };
-        out.push(ch);
-    }
-    if chars.next().is_some() {
-        out.push_str("...");
-    }
-    out
-}
-
-fn truncate_bytes(value: &str, max_bytes: usize) -> String {
-    if value.len() <= max_bytes {
-        return value.to_string();
-    }
-    let mut end = max_bytes;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &value[..end])
-}
-
-fn strip_ansi_codes(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut chars = value.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
+    truncate_end(&cleaned, GROUNDED_REVIEW_SUMMARY_CHARS)
 }
 
 fn dedupe_review_findings(findings: Vec<GroundedReviewFinding>) -> Vec<GroundedReviewFinding> {

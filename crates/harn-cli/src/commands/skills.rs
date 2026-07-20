@@ -32,6 +32,7 @@ use harn_vm::skills::{
     DiscoveryOptions, FsLayerConfig, Layer, LayeredDiscovery, ManifestSource, Skill,
     SkillManifestRef,
 };
+use harn_vm::text::truncate_end;
 
 use crate::cli::{
     SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
@@ -178,7 +179,7 @@ pub(crate) fn run_list(args: &SkillsListArgs) {
         println!(
             "  {:<name_width$}  {}",
             skill.name,
-            truncate(short, 72),
+            truncate_end(short, 72),
             name_width = name_width
         );
     }
@@ -446,7 +447,7 @@ pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
             let short = if desc.is_empty() {
                 "(no description)".to_string()
             } else {
-                truncate(desc, 60)
+                truncate_end(desc, 60)
             };
             println!(
                 "  {:<id_width$}  [{}]  {}",
@@ -1179,14 +1180,6 @@ fn count_path_hits(patterns: &[String], files: &[String]) -> usize {
 
 use harn_glob::match_path as glob_match;
 
-fn truncate(value: &str, max: usize) -> String {
-    if value.chars().count() <= max {
-        return value.to_string();
-    }
-    let truncated: String = value.chars().take(max.saturating_sub(1)).collect();
-    format!("{truncated}…")
-}
-
 // Silence an unused-import warning when the public aliases aren't used.
 #[allow(dead_code)]
 fn _types(_: SkillManifestRef) {}
@@ -1218,15 +1211,6 @@ mod tests {
             resolve_git_url("https://example.com/x.git"),
             "https://example.com/x.git"
         );
-    }
-
-    #[test]
-    fn truncate_keeps_short_strings() {
-        assert_eq!(truncate("short", 60), "short");
-        let long = "x".repeat(65);
-        let truncated = truncate(&long, 60);
-        assert_eq!(truncated.chars().count(), 60);
-        assert!(truncated.ends_with('…'));
     }
 
     #[test]

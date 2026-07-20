@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process;
 
 use harn_parser::{BindingPattern, MatchArm, Node, SNode};
+use harn_vm::text::truncate_end;
 
 pub(crate) fn run_viz(file: &str, output: Option<&str>) {
     let source = fs::read_to_string(file).unwrap_or_else(|error| {
@@ -598,15 +599,11 @@ fn inline_label(node: &SNode) -> String {
     }
 }
 
+/// Node labels are laid out on a single mermaid row, so they get a tight
+/// budget the shared truncator enforces as a hard ceiling.
 fn truncate(value: &str) -> String {
     const MAX_CHARS: usize = 24;
-    let mut chars = value.chars();
-    let truncated: String = chars.by_ref().take(MAX_CHARS).collect();
-    if chars.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
-    }
+    truncate_end(value, MAX_CHARS)
 }
 
 fn escape_mermaid_label(label: &str) -> String {

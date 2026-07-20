@@ -123,6 +123,7 @@ pub(crate) mod synchronization;
 pub mod tenant;
 pub(crate) mod term;
 pub mod testbench;
+pub mod text;
 pub mod tool_annotations;
 pub mod tool_call_cancellations;
 pub mod tool_surface;

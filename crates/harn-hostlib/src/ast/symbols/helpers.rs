@@ -9,6 +9,11 @@ use tree_sitter::Node;
 
 use super::super::types::{Symbol, SymbolKind};
 
+/// Signature shaping is budget-capped truncation, so the per-language
+/// extractors in [`super`] pull it from this module alongside the other
+/// shaping primitives rather than reaching into `harn_vm` individually.
+pub(super) use harn_vm::text::truncate_end;
+
 /// Position quadruple used by helpers that build [`Symbol`]s. We pull
 /// these out once per node so the helper signatures stay short.
 #[derive(Debug, Clone, Copy)]
@@ -55,18 +60,6 @@ pub(in crate::ast) fn node_text(node: Node<'_>, source: &str) -> String {
 pub(super) fn field_text(node: Node<'_>, field: &str, source: &str) -> Option<String> {
     node.child_by_field_name(field)
         .map(|n| node_text(n, source))
-}
-
-/// Truncate to `max` chars with an ellipsis suffix. Operates on Unicode
-/// scalars, not bytes.
-pub(super) fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() > max {
-        let mut out: String = s.chars().take(max).collect();
-        out.push('…');
-        out
-    } else {
-        s.to_string()
-    }
 }
 
 /// Depth-first named-tree walk. The visitor receives each named node and
@@ -197,9 +190,9 @@ pub(super) fn push_func(args: PushFuncArgs<'_, '_, '_>) {
     let name = node_text(name_node, args.source);
     let params = field_text(args.node, "parameters", args.source).unwrap_or_else(|| "()".into());
     let sig = if args.prefix.is_empty() {
-        format!("{name}{}", truncate(&params, 80))
+        format!("{name}{}", truncate_end(&params, 80))
     } else {
-        format!("{} {name}{}", args.prefix, truncate(&params, 80))
+        format!("{} {name}{}", args.prefix, truncate_end(&params, 80))
     };
     args.out
         .push(sym(&name, args.kind, args.container, sig, args.pos));

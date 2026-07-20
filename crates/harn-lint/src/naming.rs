@@ -27,38 +27,10 @@ pub(crate) fn is_pascal_case(name: &str) -> bool {
     name.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
-pub(crate) fn to_snake_case(name: &str) -> String {
-    let mut out = String::new();
-    for (index, ch) in name.chars().enumerate() {
-        if ch.is_ascii_uppercase() {
-            if index > 0 {
-                out.push('_');
-            }
-            out.push(ch.to_ascii_lowercase());
-        } else if ch.is_ascii_alphanumeric() || ch == '_' {
-            out.push(ch.to_ascii_lowercase());
-        }
-    }
-    out
-}
-
-pub(crate) fn to_pascal_case(name: &str) -> String {
-    let mut out = String::new();
-    let mut uppercase_next = true;
-    for ch in name.chars() {
-        if !ch.is_ascii_alphanumeric() {
-            uppercase_next = true;
-            continue;
-        }
-        if uppercase_next {
-            out.push(ch.to_ascii_uppercase());
-            uppercase_next = false;
-        } else {
-            out.push(ch.to_ascii_lowercase());
-        }
-    }
-    out
-}
+// Rename suggestions reuse the same case conversion the `strings` builtins
+// expose, so a fixit the linter proposes is exactly what `camel_to_snake`
+// would produce at runtime.
+pub(crate) use harn_vm::text::case::{to_pascal_case, to_snake_case};
 
 /// Top-level items for the `blank-line-between-items` rule. Includes
 /// module-scope let/var bindings, which the plain "decl" set excludes.

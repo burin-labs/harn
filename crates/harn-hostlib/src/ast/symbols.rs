@@ -23,7 +23,7 @@ use super::types::{Symbol, SymbolKind};
 pub(super) mod helpers;
 
 use helpers::{
-    field_text, has_anonymous_child, named_decl_with_keyword, point_pos, push_func, truncate,
+    field_text, has_anonymous_child, named_decl_with_keyword, point_pos, push_func, truncate_end,
     walk_named, NamedDeclArgs, NodePos, PushFuncArgs,
 };
 
@@ -433,7 +433,7 @@ fn extract_go(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 } else {
                     ""
                 };
-                let sig = format!("{prefix}func {name}{}", truncate(&params, 80));
+                let sig = format!("{prefix}func {name}{}", truncate_end(&params, 80));
                 out.push(helpers::sym(
                     &name,
                     SymbolKind::Function,
@@ -448,7 +448,7 @@ fn extract_go(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 let name = helpers::node_text(name_node, source);
                 let receiver = field_text(node, "receiver", source).unwrap_or_default();
                 let params = field_text(node, "parameters", source).unwrap_or_else(|| "()".into());
-                let sig = format!("func {receiver} {name}{}", truncate(&params, 80));
+                let sig = format!("func {receiver} {name}{}", truncate_end(&params, 80));
                 out.push(helpers::sym(&name, SymbolKind::Method, container, sig, pos));
                 None
             }
@@ -682,7 +682,7 @@ fn extract_python(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 } else {
                     SymbolKind::Function
                 };
-                let sig = format!("def {name}{}", truncate(&cleaned, 80));
+                let sig = format!("def {name}{}", truncate_end(&cleaned, 80));
                 out.push(helpers::sym(&name, kind, container, sig, pos));
                 None
             }
@@ -832,7 +832,7 @@ fn push_typed_method(
     } else {
         SymbolKind::Function
     };
-    let sig = format!("{return_type} {name}{}", truncate(&params, 80));
+    let sig = format!("{return_type} {name}{}", truncate_end(&params, 80));
     out.push(helpers::sym(&name, kind, container, sig, pos));
 }
 
@@ -959,7 +959,7 @@ fn push_c_function(
         return;
     };
     let params = declarator_params(declarator, source);
-    let sig = format!("{name}{}", truncate(&params, 80));
+    let sig = format!("{name}{}", truncate_end(&params, 80));
     out.push(helpers::sym_with_access_level(
         &name,
         kind,
@@ -1313,7 +1313,7 @@ fn extract_ruby(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 let sig = if params.is_empty() {
                     format!("def {name}")
                 } else {
-                    format!("def {name}{}", truncate(&params, 80))
+                    format!("def {name}{}", truncate_end(&params, 80))
                 };
                 out.push(helpers::sym(&name, kind, container, sig, pos));
                 None
@@ -1469,7 +1469,7 @@ fn extract_scala(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                     &name,
                     kind,
                     container,
-                    format!("def {name}{}", truncate(&params, 80)),
+                    format!("def {name}{}", truncate_end(&params, 80)),
                     pos,
                 ));
                 None
@@ -1776,7 +1776,7 @@ fn extract_elixir(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                     &name,
                     kind,
                     container,
-                    format!("{keyword} {}", truncate(&sig, 80)),
+                    format!("{keyword} {}", truncate_end(&sig, 80)),
                     pos,
                 ));
                 None
@@ -1807,7 +1807,7 @@ fn extract_lua(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                     &name,
                     kind,
                     container,
-                    format!("function {name}{}", truncate(&params, 80)),
+                    format!("function {name}{}", truncate_end(&params, 80)),
                     pos,
                 ));
                 None
@@ -1820,7 +1820,7 @@ fn extract_lua(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                     &name,
                     SymbolKind::Function,
                     container,
-                    format!("local function {name}{}", truncate(&params, 80)),
+                    format!("local function {name}{}", truncate_end(&params, 80)),
                     pos,
                 ));
                 None
@@ -1909,7 +1909,7 @@ fn extract_r(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             &name,
             SymbolKind::Function,
             container,
-            format!("{name} <- function{}", truncate(&params, 80)),
+            format!("{name} <- function{}", truncate_end(&params, 80)),
             pos,
         ));
         None
@@ -2052,7 +2052,7 @@ fn push_harn_callable(
         &name,
         kind,
         container,
-        format!("{keyword} {name}{}", truncate(&params, 80)),
+        format!("{keyword} {name}{}", truncate_end(&params, 80)),
         pos,
     ));
 }
