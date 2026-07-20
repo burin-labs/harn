@@ -358,7 +358,9 @@ jobs:
   # one producer: it compiles the suite once on persistent storage and
   # publishes only the small security/CLI payload that must execute on GitHub
   # Ubuntu. Execution-only proof consumers fan out after that immutable
-  # producer succeeds.
+  # producer succeeds. On the GitHub-hosted fallback, where cross-job compiler
+  # objects are not reusable, the producer also runs the full suite against its
+  # warm target directory instead of paying for a second cold compilation.
   rust-builds:
     name: ${{ matrix.name }}
     needs: changes
@@ -466,6 +468,22 @@ jobs:
           ./scripts/ci/behavior_artifact.sh build
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$GITHUB_SHA"
+      # Blacksmith's sticky compiler cache makes a separate test consumer
+      # useful there: the audit consumers can fan out while it restores warm
+      # objects. GitHub-hosted runners have no such cross-job object reuse.
+      # Running the same complete suite here removes the observed ~10-minute
+      # duplicate compile while retaining every test and the Landlock owner.
+      - name: Run full environment-neutral test suite on hosted fallback
+        id: release-audit-rust-test-fallback
+        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        env:
+          CARGO_BUILD_JOBS: "4"
+          HARN_LLM_CALLS_DISABLED: "1"
+          NEXTEST_PROFILE: ci
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --workspace --profile ci
+          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
       - name: Upload portable behavior payload
         if: matrix.kind == 'behavior'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -495,7 +513,10 @@ jobs:
   rust-test:
     name: Rust test
     needs: [changes, rust-builds]
-    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && needs.rust-builds.result == 'success'
+      && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
     # GitHub-hosted fallback runners need about 10 minutes for a cold compile
     # before the 10k-test nextest suite starts. Cache reuse is an optimization,
@@ -1291,6 +1312,7 @@ jobs:
       - name: Verify required CI jobs
         env:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
+          BLACKSMITH_DISABLED: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX }}
         run: |
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
@@ -1345,7 +1367,8 @@ jobs:
           rust_test_result="${{ needs['rust-test'].result }}"
           echo "Rust test: $rust_test_result"
           if [ "$rust_test_result" != "success" ]; then
-            if [ "$rust_test_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+            if [ "$rust_test_result" = "skipped" ] \
+              && { [ "${{ needs.changes.outputs.rust }}" != "true" ] || [ "$BLACKSMITH_DISABLED" = "true" ]; }; then
               :
             else
               echo "::error::Rust test failed or skipped while Rust proof was required."
