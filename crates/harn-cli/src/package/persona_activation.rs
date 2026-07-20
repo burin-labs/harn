@@ -3,7 +3,6 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use fs2::FileExt;
 use harn_modules::personas::{
     PersonaAutonomyTier, PersonaBudget, PersonaManifestEntry, PersonaModelPolicy,
     PersonaReceiptPolicy,
@@ -34,7 +33,7 @@ pub(crate) fn acquire_project_mutation_lock(
     let file = open_lock_file(&lock_path)?;
     #[cfg(test)]
     project_mutation_lock_test_probe::before_lock();
-    file.lock_exclusive()
+    file.lock()
         .map_err(|source| io_error("lock", &lock_path, source))?;
     Ok(ProjectMutationLock { _file: file })
 }
@@ -828,7 +827,7 @@ fn mutate_activation_ledger<T>(
     fs::create_dir_all(lock_path.parent().unwrap_or(project_root))
         .map_err(|source| io_error("create", &lock_path, source))?;
     let lock = open_lock_file(&lock_path)?;
-    lock.lock_exclusive()
+    lock.lock()
         .map_err(|source| io_error("lock", &lock_path, source))?;
     let result = (|| {
         let mut ledger = load_activation_ledger(project_root)?;
@@ -838,8 +837,9 @@ fn mutate_activation_ledger<T>(
         }
         Ok((changed, value))
     })();
-    let unlock_result =
-        FileExt::unlock(&lock).map_err(|source| io_error("unlock", &lock_path, source));
+    let unlock_result = lock
+        .unlock()
+        .map_err(|source| io_error("unlock", &lock_path, source));
     match (result, unlock_result) {
         (Err(error), _) => Err(error),
         (Ok(_), Err(error)) => Err(error),

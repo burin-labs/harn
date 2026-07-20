@@ -34,7 +34,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -391,7 +391,7 @@ struct CloudRefreshLock {
 impl Drop for OAuthStorageRefreshLockGuard {
     fn drop(&mut self) {
         if let Some(file) = &self.file {
-            let _ = fs2::FileExt::unlock(file);
+            let _ = file.unlock();
         }
     }
 }
@@ -503,24 +503,20 @@ async fn acquire_file_refresh_lock(
                 lock_path.display()
             ))
         })?;
-    wait_for_refresh_lock(
-        || fs2::FileExt::try_lock_exclusive(&file),
-        lock_path.as_path(),
-    )
-    .await?;
+    wait_for_refresh_lock(|| file.try_lock(), lock_path.as_path()).await?;
     Ok(file)
 }
 
 async fn wait_for_refresh_lock<F>(mut try_lock: F, lock_path: &Path) -> Result<(), VmError>
 where
-    F: FnMut() -> std::io::Result<()>,
+    F: FnMut() -> Result<(), TryLockError>,
 {
     let lock_result = tokio::time::timeout(REFRESH_LOCK_TIMEOUT, async {
         let mut backoff = std::time::Duration::from_millis(25);
         loop {
             match try_lock() {
                 Ok(()) => return Ok(()),
-                Err(error) if refresh_lock_is_contended(&error) => {
+                Err(TryLockError::WouldBlock) => {
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(std::time::Duration::from_millis(500));
                 }
@@ -543,11 +539,6 @@ where
             lock_path.display()
         ))),
     }
-}
-
-fn refresh_lock_is_contended(error: &std::io::Error) -> bool {
-    error.kind() == std::io::ErrorKind::WouldBlock
-        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }
 
 fn file_refresh_lock_path(handle: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> {
@@ -1156,7 +1147,7 @@ mod tests {
                 || {
                     let attempt = attempts.fetch_add(1, Ordering::SeqCst);
                     if attempt < 2 {
-                        Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                        Err(TryLockError::WouldBlock)
                     } else {
                         Ok(())
                     }
@@ -1178,11 +1169,7 @@ mod tests {
     async fn refresh_lock_timeout_uses_virtual_time() {
         let path = PathBuf::from("refresh.lock");
         let task = tokio::spawn(async move {
-            wait_for_refresh_lock(
-                || Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)),
-                path.as_path(),
-            )
-            .await
+            wait_for_refresh_lock(|| Err(TryLockError::WouldBlock), path.as_path()).await
         });
         tokio::task::yield_now().await;
 

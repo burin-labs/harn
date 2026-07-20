@@ -171,7 +171,7 @@ fn append_file_locked_creates_parent_dirs_and_honors_advisory_lock() {
         .append(true)
         .open(&path)
         .unwrap();
-    fs2::FileExt::try_lock_exclusive(&holder).unwrap();
+    holder.try_lock().unwrap();
     let clock = crate::stdlib::clock::MockClockGuard::install(0);
     let error = call(
         &mut vm,
@@ -191,7 +191,7 @@ fn append_file_locked_creates_parent_dirs_and_honors_advisory_lock() {
     }
     assert_eq!(clock.now_monotonic_ms(), 25);
     drop(clock);
-    fs2::FileExt::unlock(&holder).unwrap();
+    holder.unlock().unwrap();
 
     call(
         &mut vm,

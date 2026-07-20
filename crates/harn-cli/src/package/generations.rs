@@ -1,14 +1,12 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-
-use fs2::FileExt;
 use harn_modules::package_snapshot::{
     generation_root, open_lock_file, package_current_path, package_generations_dir,
     package_lock_digest, package_publication_lock_path, PackageGenerationManifest,
     PackageGenerationPointer, PackageSnapshot, GENERATION_LEASE_FILE, GENERATION_LOCK_FILE,
     GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
 };
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 use super::{
     materialized_hash_matches, validate_package_alias, LockFile, ManifestContext, PackageError,
@@ -163,7 +161,7 @@ pub(crate) fn dependency_package_snapshot(
 fn acquire_package_install_lock(ctx: &ManifestContext) -> Result<File, PackageError> {
     let path = ctx.dir.join(".harn").join("package-install.lock");
     let file = open_lock_file(&path).map_err(|error| PackageError::Lockfile(error.to_string()))?;
-    FileExt::lock_exclusive(&file)
+    file.lock()
         .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
     Ok(file)
 }
@@ -175,7 +173,8 @@ fn publish_pointer_and_collect(
     let publication_path = package_publication_lock_path(&ctx.dir);
     let publication = open_lock_file(&publication_path)
         .map_err(|error| PackageError::Lockfile(error.to_string()))?;
-    FileExt::lock_exclusive(&publication)
+    publication
+        .lock()
         .map_err(|error| format!("failed to lock {}: {error}", publication_path.display()))?;
 
     let pointer = PackageGenerationPointer::new(generation)
@@ -248,20 +247,20 @@ fn collect_old_generations(ctx: &ManifestContext, current: &str) -> Result<(), P
             // open before we get a handle on which to try the exclusive lock.
             // That is the same observable state as lock contention: a live
             // reader owns this generation, so collection must leave it alone.
-            Err(error) if lock_is_contended(&error) => continue,
+            Err(error) if open_is_contended(&error) => continue,
             Err(error) => {
                 return Err(format!("failed to open {}: {error}", lease_path.display()).into())
             }
         };
-        match FileExt::try_lock_exclusive(&lease) {
+        match lease.try_lock() {
             Ok(()) => {
-                FileExt::unlock(&lease).map_err(|error| {
+                lease.unlock().map_err(|error| {
                     format!("failed to unlock {}: {error}", lease_path.display())
                 })?;
                 drop(lease);
                 remove_generation_path(&entry.path())?;
             }
-            Err(error) if lock_is_contended(&error) => {}
+            Err(TryLockError::WouldBlock) => {}
             Err(error) => {
                 return Err(format!("failed to lock {}: {error}", lease_path.display()).into())
             }
@@ -270,9 +269,20 @@ fn collect_old_generations(ctx: &ManifestContext, current: &str) -> Result<(), P
     Ok(())
 }
 
-fn lock_is_contended(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::WouldBlock
-        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+/// Windows `ERROR_LOCK_VIOLATION`. `std` translates this into
+/// [`TryLockError::WouldBlock`] inside `try_lock`, but an `open` rejected by a
+/// live byte-range lock surfaces the raw code, and Windows maps only
+/// `WSAEWOULDBLOCK` onto [`io::ErrorKind::WouldBlock`].
+#[cfg(windows)]
+const ERROR_LOCK_VIOLATION: i32 = 33;
+
+/// Whether an `open` failed because another process holds the lease lock.
+fn open_is_contended(error: &io::Error) -> bool {
+    #[cfg(windows)]
+    let lock_violation = error.raw_os_error() == Some(ERROR_LOCK_VIOLATION);
+    #[cfg(not(windows))]
+    let lock_violation = false;
+    error.kind() == io::ErrorKind::WouldBlock || lock_violation
 }
 
 fn remove_abandoned_staging_directories(generations_dir: &Path) -> Result<(), PackageError> {

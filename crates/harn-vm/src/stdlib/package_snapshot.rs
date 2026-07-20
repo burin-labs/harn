@@ -121,15 +121,13 @@ fn display_path(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{self, File};
-
-    use fs2::FileExt;
     use harn_modules::package_snapshot::{
         package_current_path, package_generations_dir, package_lock_digest,
         package_publication_lock_path, package_state_dir, PackageGenerationManifest,
         PackageGenerationPointer, GENERATION_LEASE_FILE, GENERATION_LOCK_FILE,
         GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
     };
+    use std::fs::{self, File};
 
     fn publish_fixture(root: &std::path::Path) -> PathBuf {
         const GENERATION: &str = "reset_lease_generation";
@@ -176,7 +174,7 @@ mod tests {
 
         let lease = File::open(&lease_path).unwrap();
         assert!(
-            FileExt::try_lock_exclusive(&lease).is_err(),
+            lease.try_lock().is_err(),
             "the open snapshot must hold its generation lease"
         );
 
@@ -184,12 +182,13 @@ mod tests {
             .join()
             .unwrap();
         assert!(
-            FileExt::try_lock_exclusive(&lease).is_err(),
+            lease.try_lock().is_err(),
             "another execution reset must not release the owner's live lease"
         );
 
         drop(owner);
-        FileExt::try_lock_exclusive(&lease)
+        lease
+            .try_lock()
             .expect("dropping the owning execution must release its abandoned reader lease");
     }
 
@@ -210,7 +209,8 @@ mod tests {
             VmValue::Bool(true)
         ));
         let lease = File::open(lease_path).unwrap();
-        FileExt::try_lock_exclusive(&lease)
+        lease
+            .try_lock()
             .expect("explicit close must release the owning execution's reader lease");
     }
 }

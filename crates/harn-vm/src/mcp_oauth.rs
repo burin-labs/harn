@@ -1291,7 +1291,7 @@ impl std::fmt::Debug for OAuthRefreshLockGuard {
 
 impl Drop for OAuthRefreshLockGuard {
     fn drop(&mut self) {
-        let _ = fs2::FileExt::unlock(&self.file);
+        let _ = self.file.unlock();
     }
 }
 
@@ -1308,10 +1308,10 @@ async fn acquire_oauth_refresh_lock(
 /// only ever delay — never permanently block — later 401 recovery:
 ///
 /// 1. The in-process async mutex is awaited under `tokio::time::timeout`.
-/// 2. The cross-process file lock uses a non-blocking `try_lock_exclusive`
-///    with retry/backoff instead of a blocking `lock_exclusive`, which would
-///    otherwise pin a `spawn_blocking` thread indefinitely while another
-///    *process* holds the lock.
+/// 2. The cross-process file lock uses a non-blocking `try_lock` with
+///    retry/backoff instead of a blocking `lock`, which would otherwise pin a
+///    `spawn_blocking` thread indefinitely while another *process* holds the
+///    lock.
 async fn acquire_oauth_refresh_lock_with_timeout(
     key: &OAuthTokenStoreKey,
     lock_dir_override: Option<&Path>,
@@ -1359,12 +1359,9 @@ async fn acquire_oauth_refresh_lock_with_timeout(
     let deadline = tokio::time::Instant::now() + lock_timeout;
     let mut backoff = std::time::Duration::from_millis(25);
     loop {
-        match fs2::FileExt::try_lock_exclusive(&file) {
+        match file.try_lock() {
             Ok(()) => break,
-            Err(error)
-                if error.kind() == std::io::ErrorKind::WouldBlock
-                    || error.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
-            {
+            Err(std::fs::TryLockError::WouldBlock) => {
                 if tokio::time::Instant::now() >= deadline {
                     return Err(format!(
                         "Timed out after {}s waiting for the cross-process OAuth refresh lock \
@@ -2310,7 +2307,7 @@ mod tests {
             .write(true)
             .open(&lock_path)
             .unwrap();
-        fs2::FileExt::lock_exclusive(&holder).unwrap();
+        holder.lock().unwrap();
 
         let error = acquire_oauth_refresh_lock_with_timeout(
             &key,
@@ -2324,7 +2321,7 @@ mod tests {
             "{error}"
         );
 
-        fs2::FileExt::unlock(&holder).unwrap();
+        holder.unlock().unwrap();
         let _guard = acquire_oauth_refresh_lock_with_timeout(
             &key,
             Some(lock_dir.path()),

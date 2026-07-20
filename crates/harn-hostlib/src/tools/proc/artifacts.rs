@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 use crate::error::HostlibError;
@@ -251,7 +250,7 @@ fn mark_artifacts_active(artifacts: &CommandArtifacts) -> Result<(), HostlibErro
             builtin: "hostlib_tools_run_command",
             message: format!("failed to open command artifact lease: {error}"),
         })?;
-    FileExt::lock_exclusive(&lease).map_err(|error| HostlibError::Backend {
+    lease.lock().map_err(|error| HostlibError::Backend {
         builtin: "hostlib_tools_run_command",
         message: format!("failed to lock command artifact lease: {error}"),
     })?;
@@ -266,7 +265,7 @@ fn mark_artifacts_inactive(artifacts: &CommandArtifacts) {
             .expect("active command artifact lease store poisoned")
             .remove(&dir)
         {
-            let _ = FileExt::unlock(&lease);
+            let _ = lease.unlock();
         }
         let _ = std::fs::remove_file(dir.join(ACTIVE_LEASE_FILE));
     }
@@ -443,12 +442,12 @@ fn should_preserve_artifact_dir(dir: &ArtifactDir) -> bool {
     let Ok(lease) = OpenOptions::new().read(true).write(true).open(lease_path) else {
         return true;
     };
-    match FileExt::try_lock_exclusive(&lease) {
+    match lease.try_lock() {
         Ok(()) => {
-            let _ = FileExt::unlock(&lease);
+            let _ = lease.unlock();
             false
         }
-        Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => true,
+        // Contended or unreadable: either way, treat the lease as live.
         Err(_) => true,
     }
 }
@@ -578,13 +577,13 @@ mod tests {
             .truncate(false)
             .open(lease_path)
             .unwrap();
-        FileExt::lock_exclusive(&lease).unwrap();
+        lease.lock().unwrap();
         set_dir_mtime(&active, now - Duration::from_secs(10));
 
         sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
         assert!(active.exists());
 
-        FileExt::unlock(&lease).unwrap();
+        lease.unlock().unwrap();
         sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
         assert!(!active.exists());
     }

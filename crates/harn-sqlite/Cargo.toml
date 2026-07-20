@@ -9,7 +9,6 @@ homepage.workspace = true
 description = "Cross-process SQLite initialization primitives for Harn runtimes"
 
 [dependencies]
-fs2 = "0.4"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
 [dev-dependencies]

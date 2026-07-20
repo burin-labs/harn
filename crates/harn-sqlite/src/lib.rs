@@ -5,17 +5,15 @@
 //! exact marker are visible, later opens avoid the lock. Transient databases
 //! share the schema transaction contract without a filesystem lock or WAL.
 
-use std::ffi::OsString;
-use std::fmt;
-use std::fs::{File, OpenOptions};
-use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::Duration;
-
-use fs2::FileExt;
 use rusqlite::{
     params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
 };
+use std::ffi::OsString;
+use std::fmt;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::Duration;
 
 const SCHEMA_MARKER_TABLE: &str = "_harn_sqlite_schema_versions";
 const CREATE_SCHEMA_MARKER_TABLE: &str =
@@ -438,7 +436,7 @@ fn acquire_initialization_lock<E>(
             path: path.clone(),
             source,
         })?;
-    file.lock_exclusive()
+    file.lock()
         .map_err(|source| InitializationError::InitializationLockAcquire {
             path: path.clone(),
             source,
@@ -464,18 +462,18 @@ fn acquire_readiness_lock<E>(
             return Err(InitializationError::InitializationLockOpen { path, source });
         }
     };
-    match FileExt::try_lock_shared(&file) {
+    match file.try_lock_shared() {
         Ok(()) => {}
-        Err(source) if source.kind() == std::io::ErrorKind::WouldBlock => {
+        Err(TryLockError::WouldBlock) => {
             on_contention();
-            FileExt::lock_shared(&file).map_err(|source| {
+            file.lock_shared().map_err(|source| {
                 InitializationError::InitializationLockAcquire {
                     path: path.clone(),
                     source,
                 }
             })?;
         }
-        Err(source) => {
+        Err(TryLockError::Error(source)) => {
             return Err(InitializationError::InitializationLockAcquire { path, source });
         }
     }
@@ -527,7 +525,7 @@ impl Drop for SqliteInitializationLock {
     fn drop(&mut self) {
         // Keep the lock file linked so queued openers cannot split across
         // different inodes. Process exit also releases the advisory lock.
-        let _ = FileExt::unlock(&self.file);
+        let _ = self.file.unlock();
     }
 }
 
