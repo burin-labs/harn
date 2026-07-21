@@ -63,19 +63,19 @@ const REQUIRED_RELEASE_ASSETS = ["SHA256SUMS", "release-assets.json"]
  * @errors: []
  */
 pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
-  const defaults = {
-    repo: "",
-    token: "",
-    branch: "automation/bump-harn-runtime",
-    base: "main",
-    version_file: ".harn-version",
-    refresh_command: "harn install --locked || harn install",
-    validation_command: "",
-    readiness_max_attempts: 1,
-    readiness_interval_ms: 20000,
-    readiness_timeout_ms: 20000,
+  const o = overrides ?? {}
+  return {
+    repo: to_string(o.repo ?? ""),
+    token: to_string(o.token ?? ""),
+    branch: to_string(o.branch ?? "automation/bump-harn-runtime"),
+    base: to_string(o.base ?? "main"),
+    version_file: to_string(o.version_file ?? ".harn-version"),
+    refresh_command: to_string(o.refresh_command ?? "harn install --locked || harn install"),
+    validation_command: to_string(o.validation_command ?? ""),
+    readiness_max_attempts: to_int(o.readiness_max_attempts ?? 1) ?? 1,
+    readiness_interval_ms: to_int(o.readiness_interval_ms ?? 20000) ?? 20000,
+    readiness_timeout_ms: to_int(o.readiness_timeout_ms ?? 20000) ?? 20000,
   }
-  return defaults + (overrides ?? {})
 }
 
 fn __git(argv: list<string>) {
@@ -162,7 +162,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         { ->
           attempts = attempts + 1
           const view = release_view(cfg.repo, target)
-          const ready = (view?.ok ?? false) && __release_finalized(view)
+          const ready = view.ok && __release_finalized(view)
           lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
           return if ready {
             view
@@ -349,23 +349,18 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
     },
     close_pr: fn(number, comment) {
       const result = close_pr(cfg.repo, number, comment)
-      return result?.ok ?? false
+      return result.ok
     },
     enable_auto_merge: fn(number, _head) {
       const result = enable_auto_merge(cfg.repo, number, {method: "squash"})
-      const ok = result?.ok ?? false
+      const ok = result.ok
       return {
         enabled: ok,
-        state: result?.state
-          ?? if ok {
-          "enabled"
-        } else {
-          "failed"
-        },
+        state: result.state,
         detail: if ok {
           ""
         } else {
-          json_stringify(result?.error ?? "auto-merge not enabled")
+          json_stringify(result.error ?? "auto-merge not enabled")
         },
       }
     },

@@ -16,9 +16,6 @@
  */
 import { strip_v } from "std/semver"
 
-/** Poll cadence bounds forwarded to the readiness adapter. Milliseconds. */
-pub type BumpReadinessBounds = {max_attempts?: int, interval_ms?: int, timeout_ms?: int}
-
 /** Everything the caller controls about one bump attempt. */
 pub type BumpOptions = {
   tag: string,
@@ -27,7 +24,6 @@ pub type BumpOptions = {
   base: string,
   enable_auto_merge: bool,
   merge_method: string,
-  readiness: BumpReadinessBounds,
 }
 
 /** Normalized readiness verdict for a target release. */
@@ -154,16 +150,15 @@ fn __bump_empty_changeset() -> BumpChangeSet {
  * @errors: []
  */
 pub fn bump_options(overrides: dict = {}) -> BumpOptions {
-  const defaults = {
-    tag: "",
-    repo: "",
-    branch: "automation/bump-harn-runtime",
-    base: "main",
-    enable_auto_merge: true,
-    merge_method: "squash",
-    readiness: {},
+  const o = overrides ?? {}
+  return {
+    tag: to_string(o.tag ?? ""),
+    repo: to_string(o.repo ?? ""),
+    branch: to_string(o.branch ?? "automation/bump-harn-runtime"),
+    base: to_string(o.base ?? "main"),
+    enable_auto_merge: (o.enable_auto_merge ?? true) == true,
+    merge_method: to_string(o.merge_method ?? "squash"),
   }
-  return defaults + (overrides ?? {})
 }
 
 /**
