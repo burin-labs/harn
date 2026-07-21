@@ -27,13 +27,20 @@ chmod +x "$fake_harn"
 export HOOK_DRIFT_RECORD="$record"
 export HARN_BIN="$fake_harn"
 
+# Run from a fake repo root so the hook can stage the path list under .harn/tmp.
+wire_root="$tmp_root/wire-root"
+mkdir -p "$wire_root/scripts"
+cp "$repo_root/scripts/warn_generated_artifact_drift.harn" "$wire_root/scripts/"
+git -C "$wire_root" init --quiet
 staged="$tmp_root/staged.txt"
 printf '%s\n' 'crates/harn-lexer/src/token.rs' > "$staged"
 : > "$record"
-hook_warn_generated_artifact_drift "$staged"
-expected="run:run --no-sandbox scripts/warn_generated_artifact_drift.harn -- --staged-files ${staged}"
-if [[ "$(cat "$record")" != "$expected" ]]; then
-  fail "hook should invoke Harn warner; got: $(cat "$record")"
+(
+  cd "$wire_root"
+  hook_warn_generated_artifact_drift "$staged"
+)
+if ! grep -Eq '^run:run scripts/warn_generated_artifact_drift\.harn -- --staged-files .*/\.harn/tmp/staged-paths\.' "$record"; then
+  fail "hook should invoke Harn warner with in-repo staged list; got: $(cat "$record")"
 fi
 
 # Missing binary must not fail the commit path.

@@ -358,11 +358,19 @@ hook_warn_generated_artifact_drift() {
     return 0
   fi
 
-  # --no-sandbox: pre-commit writes the staged path list to mktemp outside the
-  # worktree, which the default FS sandbox cannot read. Stay advisory even if
-  # the script errors — CI remains the drift authority.
-  "$harn_bin" run --no-sandbox scripts/warn_generated_artifact_drift.harn -- \
-    --staged-files "$changed_file_list" || true
+  # Pre-commit's staged list lives in system mktemp (outside the worktree).
+  # Copy it under .harn/ so the default FS sandbox can read it — avoid
+  # --no-sandbox so every commit does not print a sandbox-disable warning.
+  mkdir -p "$repo_root/.harn/tmp"
+  staged_in_repo=$(mktemp "$repo_root/.harn/tmp/staged-paths.XXXXXX") || return 0
+  if ! cp "$changed_file_list" "$staged_in_repo" 2>/dev/null; then
+    rm -f "$staged_in_repo"
+    return 0
+  fi
+  # Stay advisory even if the script errors — CI remains the drift authority.
+  "$harn_bin" run scripts/warn_generated_artifact_drift.harn -- \
+    --staged-files "$staged_in_repo" || true
+  rm -f "$staged_in_repo"
 }
 
 hook_export_existing_harn_bin_for_non_rust_changes() {
