@@ -6,6 +6,7 @@
 //! watcher on the database directory wakes waiting callers after release or
 //! renewal; expiry and caller deadlines remain timer wakeups.
 
+mod db;
 mod execution;
 mod schema;
 
@@ -21,9 +22,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use notify::{RecursiveMode, Watcher};
-use rusqlite::{
-    params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
-};
+use rusqlite::{params, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use uuid::Uuid;
@@ -38,7 +37,12 @@ pub const HOST_LEASE_ROOT_ENV: &str = "HARN_HOST_LEASE_ROOT";
 const HARN_HOME_ENV: &str = "HARN_HOME";
 const LEASE_DB_FILE: &str = "host-leases.sqlite";
 const RUN_RECEIPTS_DIR: &str = "receipts";
-const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
+// Headroom for a briefly-contended registry writer to serialize rather than
+// erroring "database is locked". WAL keeps genuine contention short, so a
+// writer only waits this long under pathological parallel load (for example a
+// CI host running the whole test workspace at once); it is not a per-operation
+// latency floor.
+const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const REGISTRY_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const PROCESS_LIVENESS_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
 const SCHEMA_VERSION: u32 = 3;
@@ -902,19 +906,6 @@ impl HostLeaseStore {
         }
         tx.commit()?;
         Ok(())
-    }
-
-    fn connection(&self, busy_timeout: Duration) -> Result<Connection, HostLeaseError> {
-        let conn = Connection::open(&self.db_path)?;
-        #[cfg(test)]
-        if !busy_timeout.is_zero() {
-            if let Some(handler) = self.busy_handler {
-                conn.busy_handler(Some(handler))?;
-                return Ok(conn);
-            }
-        }
-        conn.busy_timeout(busy_timeout)?;
-        Ok(conn)
     }
 
     #[cfg(test)]
