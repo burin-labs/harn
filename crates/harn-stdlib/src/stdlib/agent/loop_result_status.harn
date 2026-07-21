@@ -1,3 +1,9 @@
+import {
+  agent_tool_lifecycle_error_category,
+  agent_tool_result_is_ok,
+  agent_tool_result_outcome,
+} from "std/agent/tool_lifecycle"
+
 pub fn __dispatch_results_list(dispatch) {
   if dispatch == nil {
     return []
@@ -17,17 +23,35 @@ pub fn __tool_result_write_product_tool(result) -> bool {
   return contains(__PRODUCT_ERROR_WRITE_TOOL_NAMES, name)
 }
 
-pub fn __tool_result_dispatch_rejection_text(lower: string) -> bool {
-  return lower.contains("\"error\":\"invalid_arguments\"")
-    || lower.contains(
-    "\"error\": \"invalid_arguments\"",
-  )
-    || lower.contains("error: invalid_arguments")
-    || lower.contains("\"error\":\"permission_denied\"")
-    || lower.contains(
-    "\"error\": \"permission_denied\"",
-  )
-    || lower.contains("error: permission_denied")
+fn __error_category_is_dispatch_rejection(category) -> bool {
+  return category == "schema_validation" || category == "permission_denied"
+}
+
+/**
+ * Dispatch rejection from STRUCTURED fields only: the outer envelope's typed
+ * error category (via `agent_tool_result_outcome`), or the nested host body
+ * `result.error` / `result.error_category` that denial producers already stamp.
+ * Never substring-matches rendered prose.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __tool_result_dispatch_rejection(result) -> bool {
+  if type_of(result) != "dict" {
+    return false
+  }
+  const outcome = agent_tool_result_outcome(result)
+  if __error_category_is_dispatch_rejection(outcome.error_category) {
+    return true
+  }
+  const nested = result?.result
+  if type_of(nested) == "dict" {
+    const nested_cat = agent_tool_lifecycle_error_category(nested?.error_category ?? nested?.error)
+    if __error_category_is_dispatch_rejection(nested_cat) {
+      return true
+    }
+  }
+  return false
 }
 
 pub fn __tool_result_write_product_error_text(text: string) -> bool {
@@ -45,12 +69,18 @@ pub fn __tool_result_write_product_error_text(text: string) -> bool {
     || lower.starts_with("file already exists")
     || lower.starts_with("missing required parameter")
     || lower.contains("[edit rejected]")
-    || __tool_result_dispatch_rejection_text(lower)
 }
 
 pub fn __tool_result_product_error(result) -> bool {
   if type_of(result) != "dict" {
     return false
+  }
+  // Producer-stamped field wins when present (PR-3/4 path).
+  if result?.product_error != nil {
+    return result.product_error ? true : false
+  }
+  if __tool_result_dispatch_rejection(result) {
+    return true
   }
   const write_tool = __tool_result_write_product_tool(result)
   for key in ["error", "observation", "rendered_result", "result", "output"] {
@@ -71,8 +101,16 @@ pub fn __tool_result_product_error(result) -> bool {
 }
 
 pub fn __tool_result_ok(result) -> bool {
+  const outcome = agent_tool_result_outcome(result)
+  const structured = agent_tool_result_is_ok(outcome)
+  if structured == false {
+    return false
+  }
   if __tool_result_product_error(result) {
     return false
+  }
+  if structured == true {
+    return true
   }
   if result?.ok != nil {
     return result.ok ? true : false
