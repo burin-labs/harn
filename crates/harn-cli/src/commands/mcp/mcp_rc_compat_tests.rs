@@ -9,8 +9,6 @@
 //! The in-process drive avoids the 30–40 s cold-start the subprocess
 //! tests pay so this suite stays in the fast `make test` path.
 
-#![allow(clippy::await_holding_lock)]
-
 use super::*;
 use std::fs;
 use std::path::Path;
@@ -20,7 +18,7 @@ use harn_mcp_rc_compat::fixtures::{load_named, WireFixtureKind};
 use serde_json::json;
 use tempfile::TempDir;
 
-use crate::tests::common::harn_state_lock::lock_harn_state;
+use crate::tests::common::harn_state_lock::lock_harn_state_async;
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -79,7 +77,7 @@ async fn fresh_service() -> (McpOrchestratorService, TempDir) {
 
 #[tokio::test(flavor = "current_thread")]
 async fn orchestrator_modern_tools_list_carries_rc_envelope_and_cache_hint() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let (service, _temp) = fresh_service().await;
     let mut session = ConnectionState::default();
     let request = rc_request(1, "tools/list", json!({}), "harn-rc-compat-client");
@@ -95,7 +93,7 @@ async fn orchestrator_modern_tools_list_carries_rc_envelope_and_cache_hint() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn orchestrator_modern_non_list_methods_carry_result_type_envelope() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let (service, _temp) = fresh_service().await;
     let mut session = ConnectionState::default();
     for method in ["ping", "tasks/list"] {
@@ -114,7 +112,7 @@ async fn orchestrator_modern_non_list_methods_carry_result_type_envelope() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn orchestrator_unsupported_meta_version_returns_minus_32004() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let (service, _temp) = fresh_service().await;
     let mut session = ConnectionState::default();
     let request = json!({
@@ -140,7 +138,7 @@ async fn orchestrator_unsupported_meta_version_returns_minus_32004() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn orchestrator_server_discover_returns_capabilities_and_skips_initialize() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let (service, _temp) = fresh_service().await;
     let mut session = ConnectionState::default();
     let request = json!({
@@ -162,7 +160,7 @@ async fn orchestrator_server_discover_returns_capabilities_and_skips_initialize(
 
 #[tokio::test(flavor = "current_thread")]
 async fn orchestrator_legacy_initialize_omits_rc_envelope() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let (service, _temp) = fresh_service().await;
     let mut session = ConnectionState::default();
     let request = legacy_request(
@@ -185,7 +183,7 @@ async fn orchestrator_legacy_initialize_omits_rc_envelope() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn orchestrator_replays_published_modern_success_fixture() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let (service, _temp) = fresh_service().await;
     let fixture = load_named("modern_success.json");
     assert_eq!(fixture.kind, WireFixtureKind::Exchange);

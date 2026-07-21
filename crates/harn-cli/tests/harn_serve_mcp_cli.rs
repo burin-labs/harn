@@ -2,7 +2,6 @@
 // piped stdio and tears each child down by closing stdin or calling
 // `std::process::Child::kill` (TerminateProcess on Windows / SIGKILL on Unix),
 // so it does not rely on POSIX signals or platform-specific shellouts.
-#![allow(clippy::await_holding_lock)]
 
 #[path = "support/mcp.rs"]
 mod mcp_support;

@@ -848,7 +848,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::cli::OrchestratorLocalArgs;
-    use crate::tests::common::harn_state_lock::lock_harn_state;
+    use crate::tests::common::harn_state_lock::lock_harn_state_async;
 
     use super::super::common::load_local_runtime;
     use super::*;
@@ -926,9 +926,8 @@ pub fn on_ok(event: TriggerEvent) -> dict {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)]
     async fn collect_orchestrator_inspect_data_reports_flow_control_state() {
-        let _guard = lock_harn_state();
+        let _guard = lock_harn_state_async().await;
         let temp = TempDir::new().unwrap();
         write_fixture(&temp);
 

@@ -742,7 +742,6 @@ async fn api_runs_returns_json() {
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // sync state lock must span the awaits: it guards env + event-log globals for the whole test
 async fn api_personas_exposes_runtime_status() {
     // `pause_payload` resolves its event log through
     // `EventLogConfig::for_base_dir`, which honors `HARN_EVENT_LOG_*` env
@@ -750,7 +749,7 @@ async fn api_personas_exposes_runtime_status() {
     // route the pause event into the wrong log and this test would read the
     // persona as idle. The guard unsets those vars on entry; reset the
     // thread-local log too since cargo test threads are reused.
-    let _guard = crate::tests::common::harn_state_lock::lock_harn_state();
+    let _guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     harn_vm::event_log::reset_active_event_log();
     let temp = tempfile::tempdir().unwrap();
     let manifest = temp.path().join("harn.toml");

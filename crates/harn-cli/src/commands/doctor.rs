@@ -1908,13 +1908,12 @@ pub fn on_new_issue(event: TriggerEvent) {
         );
     }
 
-    #[allow(clippy::await_holding_lock)] // sync state lock guards process-global PATH mutation across the await
     #[tokio::test(flavor = "current_thread")]
     async fn ollama_check_skips_when_binary_missing() {
         // Force `which` to fail by clearing PATH for the duration of this
         // assertion. We restore it immediately on return; the global env
         // mutation is bracketed and the test is single-threaded.
-        let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
+        let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
         let prev = std::env::var_os("PATH");
         std::env::set_var("PATH", "");
         let result = check_ollama().await;

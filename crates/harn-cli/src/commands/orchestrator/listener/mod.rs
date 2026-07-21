@@ -14,7 +14,4 @@ pub(crate) use routes::{
 };
 
 #[cfg(test)]
-// Tests hold the shared `lock_harn_state` guard across `.await` points; the
-// guard is dropped when each `#[tokio::test]` future resolves.
-#[allow(clippy::await_holding_lock)]
 mod tests;

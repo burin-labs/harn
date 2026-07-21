@@ -17,7 +17,7 @@ fn run_list_endpoints_page_with_cursor() {
 
 async fn list_endpoints_page_with_cursor_async() {
     let _env_lock = lock_env().lock().await;
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let _page_size = ScopedEnvVar::set(mcp_protocol::MCP_LIST_PAGE_SIZE_ENV, "1");
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
