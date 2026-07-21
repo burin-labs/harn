@@ -308,17 +308,17 @@ fn namespace_import_rejects_unknown_member_call() {
     use crate::NamespaceImportBinding;
 
     let program = parse_program(
-        r#"
+        r"
 pipeline t(task) {
   lib.missing()
 }
-"#,
+",
     );
     let mut members = BTreeSet::new();
     members.insert("greet".into());
     members.insert("other".into());
     let diagnostics = TypeChecker::new()
-        .with_imported_names(["lib".into()].into_iter().collect())
+        .with_imported_names(std::iter::once("lib".into()).collect())
         .with_namespace_imports([(
             "lib".into(),
             NamespaceImportBinding {
@@ -355,16 +355,16 @@ fn namespace_import_accepts_known_member_call() {
     use crate::NamespaceImportBinding;
 
     let program = parse_program(
-        r#"
+        r"
 pipeline t(task) {
   lib.greet()
 }
-"#,
+",
     );
     let mut members = BTreeSet::new();
     members.insert("greet".into());
     let diagnostics = TypeChecker::new()
-        .with_imported_names(["lib".into()].into_iter().collect())
+        .with_imported_names(std::iter::once("lib".into()).collect())
         .with_namespace_imports([(
             "lib".into(),
             NamespaceImportBinding {
