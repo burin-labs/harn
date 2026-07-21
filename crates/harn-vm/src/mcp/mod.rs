@@ -503,3 +503,6 @@ pub(crate) struct McpInputRound {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_stdio_deadline;
