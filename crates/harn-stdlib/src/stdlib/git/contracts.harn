@@ -58,7 +58,19 @@ pub type GitReceipt = {
   repo: GitRepo?,
 }
 
-/** Captured result returned by argv-mode git helpers. */
+/**
+ * Captured result returned by argv-mode git helpers.
+ *
+ * A structural superset of the shared `std/command::CommandResult` envelope:
+ * it carries every field that contract guarantees (`ok`, `success`, `status`,
+ * `exit_code`, `stdout`, `stderr`) plus the git-specific capture fields (argv,
+ * cwd, combined output, output refs). Because `CommandResult` is an open
+ * record, a `GitCommandResult` value flows anywhere the common command-result
+ * contract is expected — with no downstream copy of the shared shape. (The
+ * fields are spelled out rather than intersected with `CommandResult` because
+ * a core stdlib contract module cannot name a type from another stdlib module
+ * inside a `pub type` without a load-order cycle.)
+ */
 pub type GitCommandResult = {
   ok: bool,
   success: bool,

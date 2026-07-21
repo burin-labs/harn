@@ -1,0 +1,49 @@
+/**
+ * A package can import `GitCommandResult` from the installed `std/git` path,
+ * pass `git_run` through a named runner/result contract, and forward the
+ * result where the shared `std/command::CommandResult` envelope is expected —
+ * all without `dict`, `any`, or a duplicated local record.
+ */
+import { CommandResult } from "std/command"
+import { GitCommandResult, git_run } from "std/git"
+import { GitRunner, forward_git_run } from "git_command_result_forward_lib"
+
+pipeline test(task) {
+  // The real `git_run` satisfies the producer-owned runner contract; a
+  // synthetic stub does too. Binding both to `GitRunner` type-checks
+  // `git_run`'s signature against the imported contract without a subprocess.
+  const runner: GitRunner = { args -> git_run(args) }
+  const stub: GitRunner = { args ->
+    return {
+      success: true,
+      ok: true,
+      status: "completed",
+      exit_code: 0,
+      stdout: "",
+      stderr: "",
+      timed_out: false,
+      command_id: nil,
+      handle_id: nil,
+      argv: ["git"] + args,
+      command_args: ["git"] + args,
+      cwd: ".",
+      combined: "",
+      output_path: nil,
+      stdout_path: nil,
+      stderr_path: nil,
+    }
+  }
+  const runners: list<GitRunner> = [runner, stub]
+  assert(len(runners) == 2, "git_run conforms to the GitRunner contract")
+
+  // Drive the contract deterministically through the package boundary.
+  const result: GitCommandResult = forward_git_run(stub, ["status", "--porcelain"])
+
+  // A GitCommandResult flows where the shared CommandResult contract is
+  // expected, with no downstream copy of the schema.
+  const common: CommandResult = result
+  assert(common.ok, "git result satisfies the shared CommandResult contract")
+  assert(common.success && result.success, "shared and git-specific fields coexist")
+  assert(len(result.argv) == 3, "runner contract preserved git argv")
+  log("git_command_result_forward ok argv=" + to_string(len(result.argv)))
+}
