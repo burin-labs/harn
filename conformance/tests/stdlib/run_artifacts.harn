@@ -1,8 +1,14 @@
+import { FileReplaceOptions } from "std/fs"
 import "std/run_artifacts"
+import "std/schema"
 
 type Facts = {status: string, count?: int}
 
 type WrongFacts = {status: string, count: string}
+
+fn facts_descriptor(name: string = "facts.json") -> ArtifactDescriptor<Facts> {
+  return artifact_descriptor(name, schema_contract(schema_of(Facts), []))
+}
 
 pipeline test(task) {
   const root = path_join(harness.fs.temp_dir(), "harn-run-artifacts-" + uuid_v7())
@@ -14,48 +20,50 @@ pipeline test(task) {
   __io_println(run.root == path_normalize(root))
   __io_println(harness.fs.exists(run.dir))
   __io_println(path_relative_to(paths.facts, run.dir))
-  run_artifact_write_json(run, "facts.json", {status: "ok", count: 2}, {pretty: true})
-  const facts = run_artifact_read_json_typed(run, "facts.json", schema_of(Facts))
+  const facts_artifact = facts_descriptor()
+  run_artifact_write_json(run, facts_artifact, {status: "ok", count: 2}, {pretty: true})
+  const facts = run_artifact_read_json(run, facts_artifact)
   __io_println(facts.status)
   __io_println(facts.count)
-  run_artifact_write_json_typed(run, "typed.json", {status: "before", count: 1}, schema_of(Facts))
-  const rejected_write = try {
-    run_artifact_write_json_typed(
-      run,
-      "typed.json",
-      {status: "invalid", count: "not-an-int"},
-      schema_of(Facts),
-    )
-  }
-  __io_println(!is_ok(rejected_write))
-  __io_println(run_artifact_read_json_typed(run, "typed.json", schema_of(Facts)).status)
-  const typed_result = run_artifact_read_json_typed_result(run, "typed.json", schema_of(Facts))
+  const typed_artifact = facts_descriptor("typed.json")
+  const first_write = run_artifact_write_json(run, typed_artifact, {status: "before", count: 1})
+  const invalid_value: any = {status: "invalid", count: "not-an-int"}
+  const rejected_write = run_artifact_write_json_result(run, typed_artifact, invalid_value)
+  __io_println(unwrap_err(rejected_write).kind)
+  __io_println(run_artifact_read_json(run, typed_artifact).status)
+  const typed_result = run_artifact_read_json_result(run, typed_artifact)
   __io_println(unwrap(typed_result).count)
-  const invalid_typed_result = run_artifact_read_json_typed_result(
-    run,
+  const wrong_artifact = artifact_descriptor(
     "typed.json",
-    schema_of(WrongFacts),
+    schema_contract(schema_of(WrongFacts), []),
   )
+  const invalid_typed_result = run_artifact_read_json_result(run, wrong_artifact)
   __io_println(unwrap_err(invalid_typed_result).kind)
+  run_artifact_write_json(run, typed_artifact, {status: "after", count: 2})
+  const stale_replace: FileReplaceOptions = {expected_sha256: first_write.after_sha256}
+  const stale_options: ArtifactWriteOptions = {replace: stale_replace}
+  const stale = run_artifact_write_json(
+    run,
+    typed_artifact,
+    {status: "stale", count: 3},
+    stale_options,
+  )
+  __io_println(stale.status + ":" + run_artifact_read_json(run, typed_artifact).status)
+  const shared_artifact = facts_descriptor("shared.json")
   const concurrent_writes = parallel each [1, 2, 3, 4, 5, 6, 7, 8] with {
     max_concurrent: 8,
   } { writer ->
-    return run_artifact_write_json_typed(
-      run,
-      "shared.json",
-      {status: "writer", count: writer},
-      schema_of(Facts),
-    )
+    return run_artifact_write_json(run, shared_artifact, {status: "writer", count: writer})
   }
-  const shared = run_artifact_read_json_typed(run, "shared.json", schema_of(Facts))
+  const shared = run_artifact_read_json(run, shared_artifact)
   __io_println(
     len(concurrent_writes) == 8 && shared.status == "writer" && shared.count >= 1
       && shared.count <= 8,
   )
-  const missing = run_artifact_read_json_result(run, "missing.json")
+  const missing = run_artifact_read_json_raw_result(run, "missing.json")
   __io_println(unwrap_err(missing).kind)
   harness.fs.write_text(run_artifact_path(run, "bad.json"), "{bad")
-  const malformed = run_artifact_read_json_result(run, "bad.json")
+  const malformed = run_artifact_read_json_raw_result(run, "bad.json")
   __io_println(unwrap_err(malformed).kind)
   run_artifact_write_text(run, "review.md", "hello")
   __io_println(run_artifact_read_text(run, "review.md", "") == "hello\n")
@@ -68,13 +76,17 @@ pipeline test(task) {
     run_artifact_path(run, "../secret.json")
   }
   __io_println(!is_ok(escaped))
+  const invalid_descriptor = try {
+    facts_descriptor("../secret.json")
+  }
+  __io_println(!is_ok(invalid_descriptor))
   const missing_root = path_join(root, "missing-root")
   __io_println(len(run_artifacts_list("eval", {root: missing_root})) == 0)
   const empty_root = path_join(root, "empty-root")
   harness.fs.mkdir(path_join(empty_root, "eval"))
   __io_println(len(run_artifacts_list("eval", {root: empty_root})) == 0)
   const run_b = run_artifacts_open("eval", {root: root, run_id: "run-b"})
-  run_artifact_write_json(run_b, "facts.json", {status: "ok"})
+  run_artifact_write_json(run_b, facts_artifact, {status: "ok"})
   const listed: list<RunArtifactsRun> = run_artifacts_list("eval", {root: root, limit: 10})
   __io_println(len(listed))
   __io_println(listed[0]?.modified >= listed[1]?.modified)

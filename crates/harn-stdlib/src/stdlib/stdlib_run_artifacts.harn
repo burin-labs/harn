@@ -1,24 +1,35 @@
 // std/run_artifacts - directory-backed run artifact helpers for harnesses.
 import {
+  FileReplaceOptions,
+  FileReplaceReceipt,
+  FsFailure,
   StructuredReadFailure,
   TypedReadResult,
   is_dir,
-  read_json,
   read_json_contract,
   read_json_contract_result,
   read_json_result,
-  read_json_typed,
-  read_json_typed_result,
-  write_json,
+  replace_text_result,
   write_lines,
 } from "std/fs"
+import { pretty } from "std/json"
 import { SchemaContract, SchemaContractFailure, schema_contract_check } from "std/schema"
 
 type RunArtifactsOpenOptions = {root?: string, namespace?: string, run_id?: string}
 
 type RunArtifactsListOptions = {root?: string, namespace?: string, limit?: int}
 
-type RunArtifactWriteOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
+pub type ArtifactWriteOptions = {
+  replace?: FileReplaceOptions,
+  pretty?: bool,
+  trailing_newline?: bool,
+}
+
+type RunArtifactTextWriteOptions = {trailing_newline?: bool, ensure_parent?: bool}
+
+pub type ArtifactDescriptor<T> = {name: string, contract: SchemaContract<T>}
+
+pub type ArtifactWriteFailure = SchemaContractFailure | FsFailure
 
 type RunArtifactPaths = {
   facts: string,
@@ -123,6 +134,23 @@ fn __run_artifacts_path(run: {dir: string, ...rest}, name) -> string {
   return joined
 }
 
+fn __run_artifact_json_text(value, options: ArtifactWriteOptions) -> string {
+  const opts = options ?? {}
+  const body = if opts.pretty ?? false {
+    pretty(value)
+  } else {
+    json_stringify(value)
+  }
+  if opts.trailing_newline ?? true {
+    return body + "\n"
+  }
+  return body
+}
+
+fn __run_artifact_replace_options(options: ArtifactWriteOptions) -> FileReplaceOptions {
+  return (options ?? {}).replace ?? {}
+}
+
 fn __run_artifacts_standard_paths(run: {dir: string, ...rest}) -> RunArtifactPaths {
   return {
     facts: __run_artifacts_path(run, "facts.json"),
@@ -180,156 +208,137 @@ pub fn run_artifact_path(run: RunArtifactsRun, name: string) -> string {
 }
 
 /**
- * Write a JSON artifact using the standard `std/fs.write_json` conventions.
+ * Bind one stable artifact name to its structural schema and validation rules.
  *
- * @effects: [fs.read, fs.write]
- * @errors: [validation, fs]
- * @example: run_artifact_write_json(run, "facts.json", facts, {pretty: true})
+ * @effects: []
+ * @errors: [validation]
+ * @example: artifact_descriptor("receipt.json", receipt_contract())
  */
-pub fn run_artifact_write_json(
-  run: RunArtifactsRun,
-  name: string,
-  value,
-  options: RunArtifactWriteOptions = {},
-) {
-  write_json(run_artifact_path(run, name), value, options ?? {})
+pub fn artifact_descriptor<T>(name: string, contract: SchemaContract<T>) -> ArtifactDescriptor<T> {
+  return {name: __run_artifacts_clean_relative(name, "artifact path"), contract: contract}
 }
 
 /**
- * Validate a JSON artifact before replacing it through the typed contract.
- * The destination is unchanged when schema validation fails.
+ * Validate and conditionally replace descriptor-bound JSON.
  *
- * @effects: [fs.read, fs.write]
- * @errors: [validation, fs, SchemaValidationFailure]
+ * @effects: [fs.write]
+ * @errors: [ArtifactWriteFailure]
  */
-pub fn run_artifact_write_json_typed<T>(
+pub fn run_artifact_write_json<T>(
   run: RunArtifactsRun,
-  name: string,
-  value: unknown,
-  schema: Schema<T>,
-  options: RunArtifactWriteOptions = {},
-) -> T {
-  const validated = schema_expect(value, schema)
-  write_json(run_artifact_path(run, name), validated, options ?? {})
-  return validated
+  descriptor: ArtifactDescriptor<T>,
+  value: T,
+  options: ArtifactWriteOptions = {},
+) -> FileReplaceReceipt {
+  return unwrap(run_artifact_write_json_result(run, descriptor, value, options))
 }
 
 /**
- * Validate every structural and relational invariant before replacing a JSON
- * artifact. The destination is unchanged on validation failure.
+ * Result form of `run_artifact_write_json`.
  *
- * @effects: [fs.read, fs.write]
- * @errors: [validation, fs]
+ * Validation finishes before the conditional-replacement boundary, so an
+ * invalid value never mutates the destination.
+ *
+ * @effects: [fs.write]
+ * @errors: []
  */
-pub fn run_artifact_write_json_contract_result<T>(
+pub fn run_artifact_write_json_result<T>(
   run: RunArtifactsRun,
-  name: string,
-  value: unknown,
-  contract: SchemaContract<T>,
-  options: RunArtifactWriteOptions = {},
-) -> Result<T, SchemaContractFailure> {
-  const validated = schema_contract_check(value, contract)
+  descriptor: ArtifactDescriptor<T>,
+  value: T,
+  options: ArtifactWriteOptions = {},
+) -> Result<FileReplaceReceipt, ArtifactWriteFailure> {
+  const validated = schema_contract_check(value, descriptor.contract)
   if !is_ok(validated) {
     return Err(unwrap_err(validated))
   }
-  const typed = unwrap(validated)
-  write_json(run_artifact_path(run, name), typed, options ?? {})
-  return Ok(typed)
+  const written = replace_text_result(
+    run_artifact_path(run, descriptor.name),
+    __run_artifact_json_text(unwrap(validated), options),
+    __run_artifact_replace_options(options),
+  )
+  if !is_ok(written) {
+    return Err(unwrap_err(written))
+  }
+  return Ok(unwrap(written))
 }
 
 /**
- * Validate and replace a contract-bound JSON artifact, throwing its typed
- * validation failure when the value is invalid.
+ * Conditionally replace JSON without a descriptor or validation contract.
+ * This is the low-level escape hatch for untyped external formats.
  *
- * @effects: [fs.read, fs.write]
- * @errors: [validation, fs, SchemaContractFailure]
+ * @effects: [fs.write]
+ * @errors: [validation, FsFailure]
  */
-pub fn run_artifact_write_json_contract<T>(
+pub fn run_artifact_write_json_raw(
   run: RunArtifactsRun,
   name: string,
-  value: unknown,
-  contract: SchemaContract<T>,
-  options: RunArtifactWriteOptions = {},
-) -> T {
-  return unwrap(run_artifact_write_json_contract_result(run, name, value, contract, options))
+  value,
+  options: ArtifactWriteOptions = {},
+) -> FileReplaceReceipt {
+  return unwrap(run_artifact_write_json_raw_result(run, name, value, options))
 }
 
 /**
- * Read a required JSON artifact, throwing a typed JSON read failure.
+ * Result form of `run_artifact_write_json_raw`.
+ *
+ * @effects: [fs.write]
+ * @errors: [validation]
+ */
+pub fn run_artifact_write_json_raw_result(
+  run: RunArtifactsRun,
+  name: string,
+  value,
+  options: ArtifactWriteOptions = {},
+) -> Result<FileReplaceReceipt, FsFailure> {
+  return replace_text_result(
+    run_artifact_path(run, name),
+    __run_artifact_json_text(value, options),
+    __run_artifact_replace_options(options),
+  )
+}
+
+/**
+ * Read and validate descriptor-bound JSON.
+ *
+ * @effects: [fs.read]
+ * @errors: [validation, TypedReadFailure]
+ */
+pub fn run_artifact_read_json<T>(run: RunArtifactsRun, descriptor: ArtifactDescriptor<T>) -> T {
+  return read_json_contract(run_artifact_path(run, descriptor.name), descriptor.contract)
+}
+
+/**
+ * Result form of `run_artifact_read_json`.
+ *
+ * @effects: [fs.read]
+ * @errors: [validation]
+ */
+pub fn run_artifact_read_json_result<T>(
+  run: RunArtifactsRun,
+  descriptor: ArtifactDescriptor<T>,
+) -> TypedReadResult<T> {
+  return read_json_contract_result(run_artifact_path(run, descriptor.name), descriptor.contract)
+}
+
+/**
+ * Read JSON without a descriptor or validation contract.
+ * This is the low-level escape hatch for untyped external formats.
  *
  * @effects: [fs.read]
  * @errors: [validation, StructuredReadFailure]
- * @example: run_artifact_read_json(run, "facts.json")
  */
-pub fn run_artifact_read_json(run: RunArtifactsRun, name: string) -> unknown {
-  return read_json(run_artifact_path(run, name))
+pub fn run_artifact_read_json_raw(run: RunArtifactsRun, name: string) -> unknown {
+  return unwrap(run_artifact_read_json_raw_result(run, name))
 }
 
 /**
- * Read and validate a required JSON artifact against its consumer-owned schema.
- *
- * @effects: [fs.read]
- * @errors: [validation, StructuredReadFailure, SchemaValidationFailure]
- */
-pub fn run_artifact_read_json_typed<T>(
-  run: RunArtifactsRun,
-  name: string,
-  schema: Schema<T>,
-  apply_defaults: bool = false,
-) -> T {
-  return read_json_typed(run_artifact_path(run, name), schema, apply_defaults)
-}
-
-/**
- * Read and validate an optional JSON artifact without erasing read or schema failures.
+ * Result form of `run_artifact_read_json_raw`.
  *
  * @effects: [fs.read]
  * @errors: [validation]
  */
-pub fn run_artifact_read_json_typed_result<T>(
-  run: RunArtifactsRun,
-  name: string,
-  schema: Schema<T>,
-  apply_defaults: bool = false,
-) -> TypedReadResult<T> {
-  return read_json_typed_result(run_artifact_path(run, name), schema, apply_defaults)
-}
-
-/**
- * Read and validate a required JSON artifact through a schema contract.
- *
- * @effects: [fs.read]
- * @errors: [validation, StructuredReadFailure, ContractValidationFailure]
- */
-pub fn run_artifact_read_json_contract<T>(
-  run: RunArtifactsRun,
-  name: string,
-  contract: SchemaContract<T>,
-) -> T {
-  return read_json_contract(run_artifact_path(run, name), contract)
-}
-
-/**
- * Read contract-bound JSON without erasing read, schema, or rule failures.
- *
- * @effects: [fs.read]
- * @errors: [validation]
- */
-pub fn run_artifact_read_json_contract_result<T>(
-  run: RunArtifactsRun,
-  name: string,
-  contract: SchemaContract<T>,
-) -> TypedReadResult<T> {
-  return read_json_contract_result(run_artifact_path(run, name), contract)
-}
-
-/**
- * Read a JSON artifact as a typed Result when absence is an expected state.
- *
- * @effects: [fs.read]
- * @errors: [validation]
- */
-pub fn run_artifact_read_json_result(
+pub fn run_artifact_read_json_raw_result(
   run: RunArtifactsRun,
   name: string,
 ) -> Result<unknown, StructuredReadFailure> {
@@ -347,9 +356,10 @@ pub fn run_artifact_write_text(
   run: RunArtifactsRun,
   name: string,
   text: string,
-  options: RunArtifactWriteOptions = {},
-) {
+  options: RunArtifactTextWriteOptions = {},
+) -> nil {
   write_lines(run_artifact_path(run, name), [text ?? ""], options ?? {})
+  return nil
 }
 
 /**
@@ -359,7 +369,11 @@ pub fn run_artifact_write_text(
  * @errors: [validation]
  * @example: run_artifact_read_text(run, "review.md", "")
  */
-pub fn run_artifact_read_text(run: RunArtifactsRun, name: string, fallback = nil) {
+pub fn run_artifact_read_text(
+  run: RunArtifactsRun,
+  name: string,
+  fallback: string? = nil,
+) -> string? {
   const result = try {
     harness.fs.read_text(run_artifact_path(run, name))
   }
