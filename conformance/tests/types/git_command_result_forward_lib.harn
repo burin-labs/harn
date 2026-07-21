@@ -1,0 +1,16 @@
+import { GitCommandResult } from "std/git"
+
+/**
+ * Named runner contract: a git runner yields the producer-owned
+ * `GitCommandResult`, so a package boundary names the imported alias instead
+ * of `dict` / `any` / a duplicated local record.
+ */
+pub type GitRunner = fn(list<string>) -> GitCommandResult
+
+/**
+ * Forward a git runner's result through the producer-owned contract without
+ * recreating the schema locally. Returns the runner's own GitCommandResult.
+ */
+pub fn forward_git_run(run: GitRunner, args: list<string>) -> GitCommandResult {
+  return run(args)
+}
