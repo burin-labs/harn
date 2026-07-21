@@ -1,0 +1,85 @@
+import "std/jsonl"
+import "std/schema"
+
+type Event = {id: int, version: string}
+
+fn event_contract() -> SchemaContract<Event> {
+  const valid_id = validation_rule(
+    "valid_id",
+    fn(value: Event) -> list<ValidationIssue> {
+      if value.id == 13 {
+        throw "rule implementation broke"
+      }
+      if value.id < 0 {
+        return [validation_issue("event.id", "id must be non-negative", "id")]
+      }
+      return []
+    },
+  )
+  return schema_contract(schema_of(Event), [valid_id])
+}
+
+pipeline default(task) {
+  const root = path_join(harness.fs.temp_dir(), "harn-jsonl-pages-" + uuid_v7())
+  harness.fs.mkdir(root)
+  const path = path_join(root, "events.jsonl")
+  harness.fs.write_text(
+    path,
+    "{\"id\":1,\"version\":\"v1\"}\r\n\n{bad}\n"
+      + "{\"id\":\"bad\",\"version\":\"v1\"}\n"
+      + "{\"id\":-1,\"version\":\"v1\"}\n"
+      + "{\"id\":13,\"version\":\"v1\"}\n"
+      + "{\"id\":2,\"version\":\"π\"}",
+  )
+  const contract = event_contract()
+  const first = unwrap(read_jsonl_contract_page_result(path, contract, {max_records: 3}))
+  __io_println(
+    to_string(len(first.records))
+      + ":"
+      + first.issues[0].kind
+      + ":"
+      + to_string(first.issues[0].line)
+      + ":"
+      + to_string(first.next_cursor.line),
+  )
+  const second = unwrap(
+    read_jsonl_contract_page_result(path, contract, {cursor: first.next_cursor, max_records: 3}),
+  )
+  __io_println(
+    second.issues[0].kind
+      + ":"
+      + second.issues[1].kind
+      + ":"
+      + second.issues[2].kind
+      + ":"
+      + to_string(second.next_cursor.line),
+  )
+  const third = unwrap(
+    read_jsonl_contract_page_result(path, contract, {cursor: second.next_cursor}),
+  )
+  __io_println(
+    to_string(third.records[0].value.id)
+      + ":"
+      + third.records[0].value.version
+      + ":"
+      + to_string(third.records[0].line)
+      + ":"
+      + to_string(third.done),
+  )
+  const materialized = read_jsonl(path)
+  const folded = fold_jsonl_file(path, 0, fn(count, _value, _index) { return count + 1 })
+  __io_println(to_string(len(materialized)) + ":" + to_string(folded))
+  const strict = try {
+    read_jsonl(path, {strict: true})
+  }
+  __io_println(to_string(!is_ok(strict)))
+  const missing = read_jsonl_page_result(path_join(root, "missing.jsonl"))
+  __io_println(unwrap_err(missing).kind)
+  const oversized_path = path_join(root, "oversized.jsonl")
+  harness.fs.write_text(oversized_path, "abcdef\n")
+  const oversized = read_jsonl_page_result(oversized_path, {max_bytes: 4})
+  __io_println(unwrap_err(oversized).kind)
+  const invalid = read_jsonl_page_result(path, {max_records: 0})
+  __io_println(unwrap_err(invalid).kind)
+  harness.fs.delete(root)
+}

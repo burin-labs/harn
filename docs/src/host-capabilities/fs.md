@@ -32,6 +32,7 @@ surface.
 | `harness.fs.stat(path)` | `stat(path)` | `workspace.exists` |
 | `harness.fs.rename(src, dst)` | `move_file(src, dst)` | `workspace.write_text` |
 | `harness.fs.read_lines(path)` | `read_lines(path)` | `workspace.read_text` |
+| `harness.fs.read_lines_page_result(path, options?)` | `read_lines_page_result(path, options?)` | `workspace.read_text` |
 | `harness.fs.walk(path, options?)` | `walk_dir(path, options?)` | `workspace.list` |
 | `harness.fs.glob(pattern, base_or_options?, options?)` | `glob(pattern, base_or_options?, options?)` | `workspace.list` |
 | `harness.fs.find_text(root, pattern, options?)` | `find_text(root, pattern, options?)` | `workspace.list` + `workspace.read_text` |
@@ -41,6 +42,12 @@ surface.
 with stable `kind` values such as `not_found`, `permission_denied`,
 `invalid_data`, and `sandbox_denied`. Branch on `kind`; keep `message` for
 diagnostics rather than parsing its prose.
+
+`harness.fs.read_lines_page_result(path, options?)` returns complete UTF-8
+lines plus an exact byte-and-line cursor. `max_lines` and `max_bytes` bound each
+page; a larger individual line returns `file_too_large` rather than partial
+text. Application code normally imports the typed wrapper from `std/fs` or the
+JSONL readers from `std/jsonl`.
 
 The replacement methods update a complete file only when the optional
 `expected_sha256` lease still matches. They return `created`, `replaced`,
