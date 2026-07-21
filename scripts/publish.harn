@@ -368,7 +368,7 @@ fn load_publish_packages(harness: Harness) -> list<PublishPlanPackage> {
 
 fn arg_spec() {
   return parser(
-    {name: "publish", args: [{kind: "flag", name: "dry_run", long: "--dry-run", parse: "bool"}]},
+    {name: "publish", args: [{kind: "switch", name: "dry_run", long: "--dry-run", parse: "bool"}]},
   )
 }
 
