@@ -9,6 +9,59 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.31
+
+### Fixed
+
+- Bound the pre-runtime Cargo probe used by hooks and worktree checks.
+  Timed-out descendants are terminated before a single retry without the
+  configured compiler cache.
+- The orchestrator now announces readiness — both the `/readyz` flag and the
+  `HTTP listener ready on …` log — only after startup housekeeping is durably
+  recorded (state snapshot written; `startup` and `startup_stranded_envelopes`
+  lifecycle events appended), rather than before. Previously readiness was
+  signalled first, so an observer that reacted to it and then read the event log
+  could race the durability of those startup events. This fixes the flaky
+  `restart_surfaces_stranded_envelopes_and_recover_replays_them_explicitly` e2e
+  test (harn#5399), whose `wait_for_topic_event` helper is now a single
+  deterministic read: it no longer relies on `subscribe`, whose in-process
+  broadcast tail cannot observe another process's appends. The listener still
+  accepts connections as soon as it binds; only the readiness *signal* moves.
+- Prevented the stdio JSON-RPC test-hang class across the board: the ACP
+  (`serve acp`) and test-worker (`serve test`) process-e2e suites drove their
+  long-lived children with an unbounded `read_line` and no captured stderr, so a
+  wedged server consumed the entire nextest slow-test cap as an opaque 180s
+  `TIMEOUT` — the same footgun fixed for `mcp serve` in #5398. All interactive
+  stdio surfaces now share one bounded, self-diagnosing `StdioJsonRpcClient`
+  (`crates/harn-cli/tests/test_util/stdio_jsonrpc.rs`): every read is
+  deadline-bounded and every failure path kills the child and reports its stderr
+  plus the in-flight request. The separate `tests/support/` module is retired in
+  favor of the shared `test_util` owner.
+- Fixed `std/bump/live` so the reusable `bump-harn` workflow can actually reach
+  GitHub. It routed every GitHub call through `std/connectors/github`, whose
+  `connector_call("github", …)` needs an ACTIVE connector client — only installed
+  in hosted/orchestrator runtimes, never in the plain `harn run` the workflow
+  uses — so every downstream bump threw `connector 'github' is not active`. The
+  adapter now drives GitHub through the `gh` CLI (App token via GH_TOKEN, patched
+  into the environment so PATH/HOME survive), matching how the rest of the fleet
+  reaches GitHub. Signed commits still go through the GraphQL
+  `createCommitOnBranch` mutation.
+- Fixed a latent release-tooling bug that blocked v0.10.30 asset publication:
+  `scripts/publish.harn` declared `--dry-run` as a value-taking `flag` instead of
+  a `switch`, so the tag-triggered publish's bare `publish.harn -- --dry-run`
+  failed argparse with "flag requires a value" (exit 2) before any crate could
+  ship. It is now a boolean `switch`, matching the documented `std/cli/argparse`
+  contract and how every caller invokes it.
+- Fixed the reusable `bump-harn` workflow for external (fleet) callers. The
+  "Checkout Harn runtime orchestration" step pinned the `burin-labs/harn`
+  checkout to `github.workflow_sha`, which for any caller other than
+  `burin-labs/harn` itself resolves to the *caller's* commit — a ref that does
+  not exist in `burin-labs/harn` — so every downstream bump failed with
+  `fatal: remote error: upload-pack: not our ref`. The step now resolves the
+  target release first and checks the orchestration + `setup-harn` action out at
+  that version tag, which is always a valid `burin-labs/harn` ref and keeps the
+  orchestration version-consistent with the Harn being installed.
+
 ## v0.10.30
 
 ### Breaking
