@@ -1,0 +1,15 @@
+import { AgentModelTurnCallback } from "std/agent/chat"
+
+/**
+ * Package-facing observer forwarder: wrap a caller's `on_model_turn`
+ * callback while naming the producer-owned `AgentModelTurnCallback` /
+ * `AgentModelTurn` contracts on the boundary instead of `dict` / `any` /
+ * a duplicated local record.
+ */
+pub fn with_turn_recorder(next: AgentModelTurnCallback) -> AgentModelTurnCallback {
+  return { turn, state ->
+    // Read a deterministic, library-owned field off the typed model turn.
+    log("recorded stop_reason=" + turn.stop_reason)
+    return next(turn, state)
+  }
+}

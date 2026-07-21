@@ -11,7 +11,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/agent/best_of_n.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/budget.harn
 # count    1  crates/harn-stdlib/src/stdlib/agent/canon.harn
-# count    3  crates/harn-stdlib/src/stdlib/agent/chat.harn
+# count    2  crates/harn-stdlib/src/stdlib/agent/chat.harn
 # count    5  crates/harn-stdlib/src/stdlib/agent/command_capture.harn
 # count    2  crates/harn-stdlib/src/stdlib/agent/daemon.harn
 # count   13  crates/harn-stdlib/src/stdlib/agent/events.harn
@@ -191,7 +191,6 @@ crates/harn-stdlib/src/stdlib/agent/best_of_n.harn::best_of_n_candidates
 crates/harn-stdlib/src/stdlib/agent/budget.harn::agent_budget_post_call_blocked
 crates/harn-stdlib/src/stdlib/agent/budget.harn::agent_budget_pre_call_blocked
 crates/harn-stdlib/src/stdlib/agent/canon.harn::canon_event_router
-crates/harn-stdlib/src/stdlib/agent/chat.harn::agent_chat_loop
 crates/harn-stdlib/src/stdlib/agent/chat.harn::agent_chat_route_input
 crates/harn-stdlib/src/stdlib/agent/chat.harn::agent_chat_wait_for_user_tools
 crates/harn-stdlib/src/stdlib/agent/command_capture.harn::command_capture_annotate

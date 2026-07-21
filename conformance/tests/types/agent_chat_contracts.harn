@@ -1,0 +1,30 @@
+/**
+ * A package imports the normalized model-turn and chat-loop result
+ * contracts, forwards `on_model_turn` through a helper that names the
+ * producer-owned callback type, and reads the aggregate loop result — all
+ * without `dict` / `any` or recreating either schema locally.
+ */
+import { AgentChatLoopResult, AgentModelTurn, agent_chat_loop } from "std/agent/chat"
+import { with_turn_recorder } from "agent_chat_contracts_lib"
+
+pipeline test(task) {
+  let turns_seen = 0
+  // The observer names the imported model-turn contract on its parameter and
+  // reads `stop_reason` as a typed field — no local schema copy.
+  const observer = { turn: AgentModelTurn, _state: dict ->
+    turns_seen = turns_seen + 1
+    return {last_stop: turn.stop_reason}
+  }
+  const result: AgentChatLoopResult = agent_chat_loop(
+    {
+      provider: "mock",
+      on_model_turn: with_turn_recorder(observer),
+      on_user_input: { _state -> {kind: "exit", reason: "done"} },
+      wait_for_user_tool: false,
+    },
+  )
+  assert(result.turns == 0, "no agent turn ran before the operator exit")
+  assert(result.stop_reason == "done", "aggregate result surfaced the exit reason")
+  assert(turns_seen == 0, "on_model_turn only fires after a completed turn")
+  log("agent_chat_contracts ok turns=" + to_string(result.turns))
+}

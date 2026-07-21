@@ -3,6 +3,77 @@ import { agent_loop } from "std/agent/loop"
 import { filter_nil, pick_keys } from "std/collections"
 import { read_line } from "std/io"
 
+/**
+ * Deterministic per-turn tool-dispatch envelope on an `AgentModelTurn`.
+ *
+ * `calls` carries the raw provider/tool call payloads and stays `list` so
+ * provider shapes evolve without a stdlib edit; the name lists and `mode`
+ * are library-owned deterministic fields. `...rest` keeps additive
+ * envelope fields forward compatible.
+ */
+pub type AgentTurnTools = {
+  calls: list,
+  successful: list<string>,
+  rejected: list<string>,
+  mode?: string,
+  ...rest,
+}
+
+/**
+ * Normalized model-turn contract produced by `agent_loop` and handed to
+ * `agent_chat_loop`'s `on_model_turn` callback after each completed turn.
+ *
+ * Model-authored prose (`text` / `visible_text`) is named distinctly from
+ * the deterministic stop signal and identifiers (`stop_reason`, `status`,
+ * `session_id`). Raw provider payloads (`transcript`, `llm`, `trace`, and
+ * the `tools.calls` entries) stay dynamic; `...rest` preserves forward
+ * compatibility for additive result fields.
+ */
+pub type AgentModelTurn = {
+  text: string,
+  visible_text: string,
+  stop_reason: string,
+  status?: string,
+  final_status?: string,
+  session_id?: string,
+  tools?: AgentTurnTools,
+  ...rest,
+}
+
+/**
+ * Signature of the `on_model_turn` callback: it receives the normalized
+ * model-turn result and the caller's chat state, and returns a state patch
+ * (or a `{state: ...}` replacement), or nil to leave state unchanged.
+ */
+pub type AgentModelTurnCallback = fn(AgentModelTurn, dict) -> dict?
+
+/**
+ * Aggregate result returned by `agent_chat_loop`: the deterministic
+ * loop-owned envelope over the operator-message / agent-turn session.
+ * `last_result` is the final `AgentModelTurn`; `transcript` is the raw
+ * session snapshot (kept dynamic). `...rest` preserves forward
+ * compatibility for additive aggregate fields.
+ */
+pub type AgentChatLoopResult = {
+  session_id: string,
+  turns: int,
+  input_events: int,
+  stop_reason: string,
+  last_result?: AgentModelTurn,
+  transcript?: any,
+  transcript_path?: string,
+  state: dict,
+  ...rest,
+}
+
+/**
+ * Public `agent_chat_loop` options surface. Only the deterministic
+ * callback boundary (`on_model_turn`) is named here; every other
+ * agent_loop / chat option flows through `...rest` so callers keep the
+ * full option set without this alias recreating it.
+ */
+pub type AgentChatLoopOptions = {on_model_turn?: AgentModelTurnCallback, ...rest}
+
 fn __chat_agent_option_keys() {
   return __llm_call_option_registry().keys
     + [
@@ -276,7 +347,7 @@ fn __chat_wait_question(result) {
   return question
 }
 
-fn __chat_after_model(callback, result, state) {
+fn __chat_after_model(callback: AgentModelTurnCallback?, result, state) {
   if callback == nil {
     return state
   }
@@ -330,7 +401,7 @@ fn __chat_finish(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_chat_loop(opts = nil) {
+pub fn agent_chat_loop(opts: AgentChatLoopOptions? = nil) -> AgentChatLoopResult {
   const config = __chat_dict(opts)
   const session_id = agent_session_open(config?.session_id)
   const max_turns = config?.max_turns ?? 0
