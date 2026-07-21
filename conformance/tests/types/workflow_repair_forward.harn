@@ -1,0 +1,63 @@
+/**
+ * A package can import the `workflow_run_repair` result and attempt contracts
+ * from the installed `std/workflow/repair` path, annotate the call site with
+ * the stable envelope, and forward it through a package boundary without
+ * recreating the schema. The success, exhausted, and execution-error outcomes
+ * are all representable through the same typed envelope.
+ */
+import { WorkflowRepairResult, workflow_run_repair } from "std/workflow/repair"
+import { summarize_repair } from "workflow_repair_forward_lib"
+
+pipeline test(task) {
+  const token = "GOTOKEN"
+  // Success after a repair: the inline executor emits the pass token only once
+  // it has seen it threaded through the prior attempt's findings (attempt 2).
+  const passing: WorkflowRepairResult = workflow_run_repair(
+    {
+      task: "Z",
+      executor: { ctx ->
+        return {
+          text: if contains(json_stringify(ctx.prior_findings), token) {
+            token
+          } else {
+            "empty"
+          },
+        }
+      },
+      verify: { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} },
+      max_attempts: 2,
+    },
+  )
+  const summary = summarize_repair(passing)
+  assert(passing.ok, "success variant settled")
+  assert(len(passing.attempts) == 2, "recorded both attempts")
+  assert(contains(summary, "1:failed"), "first attempt failed before the repair")
+  // Exhausted: a never-satisfiable verifier stops at the attempt cap.
+  const exhausted: WorkflowRepairResult = workflow_run_repair(
+    {
+      task: "u",
+      executor: { _ctx -> return {text: "x"} },
+      verify: { r -> return {ok: false, findings: ["never satisfied"]} },
+      max_attempts: 1,
+    },
+  )
+  assert(!exhausted.ok, "exhausted variant representable")
+  // Execution error: a throwing executor is a contained failed attempt.
+  const boom: WorkflowRepairResult = workflow_run_repair(
+    {
+      task: "b",
+      executor: { ctx ->
+        throw "boom " + to_string(ctx.attempt)
+      },
+      verify: { r -> return {ok: false, findings: []} },
+      max_attempts: 1,
+    },
+  )
+  assert(!boom.ok, "execution-error variant representable")
+  log(
+    "workflow_repair_forward " + summary + " | " + to_string(len(exhausted.attempts)) + " | "
+      + to_string(
+      len(boom.attempts),
+    ),
+  )
+}

@@ -1,0 +1,19 @@
+import { WorkflowRepairAttempt, WorkflowRepairResult } from "std/workflow/repair"
+
+/**
+ * Name the producer-owned attempt contract on a public boundary instead of
+ * `dict` / `any` / a duplicated local record.
+ */
+pub fn attempt_label(attempt: WorkflowRepairAttempt) -> string {
+  return to_string(attempt.attempt) + ":" + attempt.status
+}
+
+/**
+ * Forward a `workflow_run_repair` result through the producer-owned envelope
+ * without recreating the schema locally: read the stable `ok`/`attempts`
+ * fields and fold each attempt through the named attempt contract.
+ */
+pub fn summarize_repair(result: WorkflowRepairResult) -> string {
+  const parts = result.attempts.map({ a -> attempt_label(a) })
+  return to_string(result.ok) + "/" + to_string(len(result.attempts)) + "/" + join(parts, ",")
+}

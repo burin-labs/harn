@@ -180,6 +180,46 @@ pub type ValidateRepairConfig = {
 }
 
 /**
+ * One recorded attempt in a `workflow_run_repair` run. `status` is
+ * `"completed"` or `"failed"`; `outcome`/`branch` classify why; `error`
+ * carries the throw message for an execution-error attempt; `verification`
+ * holds the settled verdict (dynamic — a fn/composite verdict this envelope
+ * never narrows). Open (`...rest`) so host-recorded fields stay
+ * forward-compatible.
+ */
+pub type WorkflowRepairAttempt = {
+  attempt: int,
+  status: string,
+  outcome?: string?,
+  branch?: string?,
+  error?: string?,
+  verification?: any,
+  started_at?: string,
+  finished_at?: string,
+  ...rest,
+}
+
+/**
+ * Stable public envelope returned by `workflow_run_repair`. The success,
+ * exhausted, and execution-error outcomes are all representable: `ok` gates
+ * the final stage, `status` is the run status, `findings` surfaces the last
+ * verdict's findings, and `attempts` records every try. `result` and `run`
+ * stay dynamic (`any`) on purpose — the raw executor result and the
+ * workflow-run object are arbitrary payloads this envelope deliberately does
+ * not narrow.
+ */
+pub type WorkflowRepairResult = {
+  ok: bool,
+  status: string?,
+  text: string,
+  findings: list<string>,
+  verification: any,
+  attempts: list<WorkflowRepairAttempt>,
+  result: any,
+  run: any,
+}
+
+/**
  * workflow_run_repair runs one agent stage, validates its output with the
  * supplied verifier, and re-prompts with the findings up to `max_attempts`
  * times — the run -> validate -> repair pattern as a first-class helper.
@@ -196,7 +236,7 @@ pub type ValidateRepairConfig = {
  * @errors: []
  * @api_stability: stable
  */
-pub fn workflow_run_repair(config: ValidateRepairConfig) {
+pub fn workflow_run_repair(config: ValidateRepairConfig) -> WorkflowRepairResult {
   const cfg = __repair_dict(config)
   const task = __repair_string(cfg?.task, __repair_string(cfg?.prompt, ""))
   const verify = __repair_resolve_verify(cfg?.verify)
