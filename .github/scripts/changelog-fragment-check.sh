@@ -63,10 +63,25 @@ fi
 # and requires a fragment. This deliberately defaults strict so we don't
 # silently ship runtime changes without notes.
 #
-# `README` is matched with an optional path prefix ((.*/)?) so crate- and
-# package-level READMEs (e.g. crates/harn-hostlib/README.md) are exempt too,
-# not just the repo-root README. A README is documentation wherever it lives.
-ignored_pattern='^(\.github/|\.githooks/|docs/|spec/|(.*/)?README(\.md)?$|AGENTS\.md$|CLAUDE\.md$|CONTRIBUTING\.md$|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint[^/]*$|changelog\.d/(\.gitkeep|README\.md)$|tests?/|conformance/|benchmarks/|evals/|examples/|experiments/|perf/|playground/|tree-sitter-harn/|editors/)'
+# The ignore rules have three distinct anchoring semantics, kept as separate
+# named patterns so each alternative's intent is explicit. A single `^(...)`
+# group is the wrong tool: it silently root-anchors every alternative, which
+# is correct for repo-root infrastructure but wrong for "this kind of thing
+# wherever it lives" — a crate's `tests/` or a nested `AGENTS.md` is as
+# ignorable as the repo-root one, yet root-anchoring skips them and forces a
+# spurious fragment on test-only PRs.
+#
+#   1. Directory kinds ignorable anywhere in the tree. `(^|/)<dir>/` matches
+#      the segment at the root or after any `/`, so `crates/foo/tests/bar.rs`
+#      is covered. The `(^|/)` guard (not a bare `.*`) keeps `contests/` from
+#      matching `tests/`.
+ignorable_dir_anywhere='(^|/)(tests?|conformance|benchmarks|evals|examples|experiments|perf|playground|docs|spec|editors)/'
+#   2. Documentation/agent files that are documentation wherever they live.
+ignorable_doc_file_anywhere='(^|/)(README(\.md)?|AGENTS\.md|CLAUDE\.md|CONTRIBUTING\.md)$'
+#   3. Genuinely repo-root-only infrastructure (a nested `.github/` or
+#      `.gitignore` is not a thing; keep these anchored at the root).
+ignorable_root_only='^(\.github/|\.githooks/|tree-sitter-harn/|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint[^/]*$|changelog\.d/(\.gitkeep|README\.md)$)'
+ignored_pattern="($ignorable_dir_anywhere|$ignorable_doc_file_anywhere|$ignorable_root_only)"
 nontrivial=$(printf '%s\n' "$changed_files" | grep -Ev "$ignored_pattern" || true)
 if [ -z "$nontrivial" ]; then
   echo "::notice title=Changelog fragment gate::only docs/test/CI paths touched; pass."
