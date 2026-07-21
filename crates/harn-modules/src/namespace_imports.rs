@@ -87,9 +87,7 @@ impl ModuleGraph {
             .find(|import| import.namespace_alias.as_deref() == Some(alias))
             .and_then(|import| import.path.as_ref())
             .or_else(|| module.namespace_re_exports.get(alias))?;
-        if self.exported_kind(target, member).is_none() {
-            return None;
-        }
+        self.exported_kind(target, member)?;
         self.export_definition_of(target, member)
             .or_else(|| self.definition_of(target, member))
     }
