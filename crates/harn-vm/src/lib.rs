@@ -174,6 +174,7 @@ pub mod visible_text;
 mod vm;
 pub(crate) mod wait_for_graph;
 pub mod waitpoints;
+pub mod windows_path;
 pub mod workspace_anchor;
 pub mod workspace_path;
 

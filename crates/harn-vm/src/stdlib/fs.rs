@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1048,10 +1047,8 @@ fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     )))
 }
 
-/// Strip a Windows verbatim (`\\?\`) prefix from a path string so it parses
-/// with normal OS path rules: `\\?\UNC\server\share` → `\\server\share`,
-/// `\\?\C:\dir` → `C:\dir`. Inputs without the prefix (every well-formed Unix
-/// path, and non-canonicalized Windows paths) are returned unchanged.
+/// Render a temp-directory path for return to Harn-land, normalizing away any
+/// Windows verbatim prefix.
 ///
 /// The temp-directory builtins hand their result back to Harn-land, whose
 /// documented `mkdtemp*(...) + "/child"` pattern joins with a forward slash. In
@@ -1060,21 +1057,9 @@ fn temp_dir_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 /// prefix on Windows) would turn `root + "/notes.txt"` into a single
 /// non-existent leaf and fail the write with ERROR_PATH_NOT_FOUND. A path
 /// handed into a `/`-joining language must be OS-normal, so normalize here at
-/// the boundary. Pure string logic so it is unit-testable on every platform.
-fn strip_windows_verbatim_prefix(text: &str) -> Cow<'_, str> {
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        Cow::Owned(format!(r"\\{rest}"))
-    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-        Cow::Borrowed(rest)
-    } else {
-        Cow::Borrowed(text)
-    }
-}
-
-/// Render a temp-directory path for return to Harn-land, normalizing away any
-/// Windows verbatim prefix (see [`strip_windows_verbatim_prefix`]).
+/// the boundary via the shared owner in [`crate::windows_path`].
 fn temp_dir_path_string(path: &Path) -> String {
-    strip_windows_verbatim_prefix(&path.to_string_lossy()).into_owned()
+    crate::windows_path::strip_windows_verbatim_prefix(&path.to_string_lossy()).into_owned()
 }
 
 #[harn_builtin(
