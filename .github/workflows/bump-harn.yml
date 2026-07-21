@@ -1,0 +1,139 @@
+# Reusable "bump Harn runtime" workflow (harn#5299).
+#
+# One published, immutable-ref workflow that every Harn package repo calls to
+# roll its pinned Harn runtime forward. The orchestration is Harn code
+# (scripts/bump_harn_runtime.harn -> std/bump/runtime), not shell: this file is
+# limited to bootstrap + capability wiring.
+#
+# A consuming repo needs only a tiny trigger wrapper (schedule/dispatch) plus
+# its own single declared validation command. See
+# docs/src/dev/reusable-bump-harn-runtime.md for the minimal caller and the
+# security boundary.
+name: Bump Harn Runtime (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
+        required: false
+        type: string
+      validate-command:
+        description: "The caller's single declared validation entrypoint, run after the pin/lockfile refresh."
+        required: false
+        type: string
+        default: ""
+      branch:
+        description: "Bump branch name."
+        required: false
+        type: string
+        default: "automation/bump-harn-runtime"
+      base:
+        description: "Base branch the PR targets."
+        required: false
+        type: string
+        default: "main"
+      enable-auto-merge:
+        description: "Arm auto-merge on the bump PR (the merge queue owns the strategy)."
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      app-client-id:
+        description: "GitHub App client id used to mint a signed-commit-capable installation token."
+        required: true
+      app-private-key:
+        description: "GitHub App private key."
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize reruns per calling repo so a scheduled tick can't race a manual
+  # dispatch onto the same bump branch. cancel-in-progress stays false: a
+  # half-finished branch reset must not be interrupted.
+  group: bump-harn-runtime-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout package repo
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      # The orchestration script and the checksum-verifying setup-harn action
+      # both live in burin-labs/harn. Checking the repo out at this workflow's
+      # own commit SHA pins both to the exact immutable version the caller
+      # referenced — no separately-maintained action SHA to drift.
+      - name: Checkout Harn runtime orchestration
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: burin-labs/harn
+          ref: ${{ github.workflow_sha }}
+          path: .harn-runtime
+          persist-credentials: false
+
+      - name: Resolve target and short-circuit when already current
+        id: resolve
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_VERSION:-}"
+          if [ -z "${VERSION}" ]; then
+            VERSION="$(gh api repos/burin-labs/harn/releases/latest --jq '.tag_name')"
+          fi
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected tag like vX.Y.Z, got '${VERSION}'" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          CURRENT="$(cat .harn-version 2>/dev/null || true)"
+          if [ "${CURRENT}" = "${VERSION}" ]; then
+            echo "already-current=true" >> "$GITHUB_OUTPUT"
+            echo "Harn pin already matches ${VERSION}; nothing to do." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already-current=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Install the TARGET Harn through the checksum-verifying setup-harn
+      # action. The target release embeds std/bump/*, so the orchestration runs
+      # under it and the lockfile refresh + validation use the version we are
+      # bumping to. setup-harn's bounded retry absorbs still-publishing assets.
+      - name: Install target Harn
+        if: steps.resolve.outputs.already-current != 'true'
+        uses: ./.harn-runtime/.github/actions/setup-harn
+        with:
+          version: ${{ steps.resolve.outputs.version }}
+
+      - name: Run bump orchestration
+        if: steps.resolve.outputs.already-current != 'true'
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
+          HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
+          HARN_BUMP_VALIDATE: ${{ inputs.validate-command }}
+          HARN_BUMP_BRANCH: ${{ inputs.branch }}
+          HARN_BUMP_BASE: ${{ inputs.base }}
+          HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          harn --version
+          harn run --no-sandbox .harn-runtime/scripts/bump_harn_runtime.harn

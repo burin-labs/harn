@@ -1,0 +1,340 @@
+/**
+ * std/bump/runtime — the pure, provider-agnostic state machine that bumps a
+ * Harn package repository onto a newer pinned Harn runtime.
+ *
+ * The orchestration logic here performs NO I/O. Every side effect (release
+ * lookup, working-tree mutation, validation, branch/PR leases, signed commit
+ * creation, PR refresh, auto-merge) is reached through the injected
+ * [`BumpAdapter`] capability record. `std/bump/live` wires the real adapter
+ * over `std/connectors/github`, `std/command`, and git; the in-process
+ * fixtures inject fakes. That seam is what lets the whole state machine be
+ * exercised with `harn test` — no network, no clock, no sleeps.
+ *
+ * The single entry point is [`run_bump`]. It returns a typed [`BumpReceipt`]
+ * that is both the machine-readable receipt the workflow surfaces and the
+ * value the fixtures assert against.
+ */
+import { strip_v } from "std/semver"
+
+/** Poll cadence bounds forwarded to the readiness adapter. Milliseconds. */
+pub type BumpReadinessBounds = {max_attempts?: int, interval_ms?: int, timeout_ms?: int}
+
+/** Everything the caller controls about one bump attempt. */
+pub type BumpOptions = {
+  tag: string,
+  repo: string,
+  branch: string,
+  base: string,
+  enable_auto_merge: bool,
+  merge_method: string,
+  readiness: BumpReadinessBounds,
+}
+
+/** Normalized readiness verdict for a target release. */
+pub type ReleaseReadiness = {
+  ready: bool,
+  detail: string,
+  attempts: int,
+  attempt_lines: list<string>,
+}
+
+/** Outcome of writing the new pin and regenerating derived sources. */
+pub type BumpApplyOutcome = {changed: bool, refreshed: list<string>, detail: string}
+
+/** One declared validation lane (fmt/check/lint/test/package…) and its verdict. */
+pub type BumpValidationStep = {name: string, ok: bool, detail: string}
+
+/** Aggregate verdict over the caller's single declared validation entrypoint. */
+pub type BumpValidation = {ok: bool, steps: list<BumpValidationStep>, detail: string}
+
+/** The working-tree delta a signed commit would carry. */
+pub type BumpChangeSet = {additions: list<string>, deletions: list<string>}
+
+/** Observed state of an already-open bump PR, or nil when none exists. */
+pub type BumpPrState = {
+  number: int,
+  head_oid: string,
+  auto_merge_enabled: bool,
+  url: string,
+  state: string,
+}
+
+/** Inputs to a single signed `createCommitOnBranch`-style mutation. */
+pub type BumpCommitRequest = {
+  branch: string,
+  base_sha: string,
+  headline: string,
+  additions: list<string>,
+  deletions: list<string>,
+}
+
+/** Result of creating the signed bump commit. */
+pub type BumpCommitResult = {oid: string, url: string}
+
+/** Result of a create-or-refresh PR upsert. */
+pub type BumpPrUpsert = {number: int, head_oid: string, url: string, created: bool}
+
+/** Result of arming auto-merge. */
+pub type BumpAutoMerge = {enabled: bool, state: string, detail: string}
+
+/**
+ * The injected capability surface. Each field is a function the orchestrator
+ * calls at a well-defined phase; swapping the record swaps live I/O for
+ * fixtures without touching a line of the state machine.
+ */
+pub type BumpAdapter = {
+  resolve_target_tag: fn(string) -> string,
+  release_ready: fn(string) -> ReleaseReadiness,
+  read_current_version: fn() -> string,
+  base_sha: fn() -> string,
+  apply_version: fn(string) -> BumpApplyOutcome,
+  run_validation: fn() -> BumpValidation,
+  working_changes: fn() -> BumpChangeSet,
+  find_bump_pr: fn() -> BumpPrState?,
+  disable_auto_merge: fn(int) -> bool,
+  reset_branch: fn(string) -> bool,
+  create_signed_commit: fn(BumpCommitRequest) -> BumpCommitResult,
+  branch_matches_base: fn() -> bool,
+  upsert_pr: fn(BumpPrState?) -> BumpPrUpsert,
+  close_pr: fn(int, string) -> bool,
+  enable_auto_merge: fn(int, string) -> BumpAutoMerge,
+}
+
+/**
+ * Terminal outcome of a bump attempt. Every early-exit is a first-class,
+ * idempotent-safe state, not an error.
+ */
+pub type BumpOutcome = "not_ready" \
+  | "already_current" \
+  | "no_changes" \
+  | "validation_failed" \
+  | "closed_noop" \
+  | "committed"
+
+/** What happened to the PR head during this attempt. */
+pub type BumpPrAction = "none" | "created" | "refreshed" | "closed"
+
+/** The machine-readable receipt every attempt emits. */
+pub type BumpReceipt = {
+  schema: "harn-bump-runtime-v1",
+  outcome: BumpOutcome,
+  ok: bool,
+  repo: string,
+  branch: string,
+  target_tag: string,
+  previous_version: string,
+  ready: bool,
+  readiness_detail: string,
+  changed: bool,
+  refreshed: list<string>,
+  validation: BumpValidation,
+  changeset: BumpChangeSet,
+  lease_recovered: bool,
+  commit_oid: string?,
+  pr_action: BumpPrAction,
+  pr_number: int?,
+  pr_url: string?,
+  auto_merge: BumpAutoMerge?,
+  notes: list<string>,
+}
+
+fn __bump_default_validation() -> BumpValidation {
+  return {ok: true, steps: [], detail: ""}
+}
+
+fn __bump_empty_changeset() -> BumpChangeSet {
+  return {additions: [], deletions: []}
+}
+
+/**
+ * Merge caller-supplied options over the canonical defaults. The bump branch,
+ * base, and squash auto-merge mirror the shell workflow this replaces.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn bump_options(overrides: dict = {}) -> BumpOptions {
+  const defaults = {
+    tag: "",
+    repo: "",
+    branch: "automation/bump-harn-runtime",
+    base: "main",
+    enable_auto_merge: true,
+    merge_method: "squash",
+    readiness: {},
+  }
+  return defaults + (overrides ?? {})
+}
+
+/**
+ * True when the pinned version already matches the target, module a leading
+ * `v`. The pin file and the resolved tag are compared on their bare semver so
+ * `v0.10.30` and `0.10.30` are the same pin.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn bump_is_current(previous: string, target: string) -> bool {
+  return strip_v(trim(previous ?? "")) == strip_v(trim(target ?? ""))
+    && strip_v(trim(target ?? "")) != ""
+}
+
+/**
+ * True when a changeset carries nothing a commit could include.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn bump_changeset_empty(changeset: BumpChangeSet) -> bool {
+  return len(changeset?.additions ?? []) == 0 && len(changeset?.deletions ?? []) == 0
+}
+
+fn __bump_receipt_base(options, target, previous, readiness) -> BumpReceipt {
+  return {
+    schema: "harn-bump-runtime-v1",
+    outcome: "not_ready",
+    ok: false,
+    repo: options.repo,
+    branch: options.branch,
+    target_tag: target,
+    previous_version: previous,
+    ready: readiness.ready,
+    readiness_detail: readiness.detail,
+    changed: false,
+    refreshed: [],
+    validation: __bump_default_validation(),
+    changeset: __bump_empty_changeset(),
+    lease_recovered: false,
+    commit_oid: nil,
+    pr_action: "none",
+    pr_number: nil,
+    pr_url: nil,
+    auto_merge: nil,
+    notes: [],
+  }
+}
+
+/**
+ * Run the full bump state machine against an injected adapter and return its
+ * receipt. Pure with respect to this process: all effects flow through
+ * `adapter`. The phase order is fixed and every early return leaves the repo
+ * in a safe, re-runnable state.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
+  const target = adapter.resolve_target_tag(options.tag)
+  const readiness = adapter.release_ready(target)
+  const previous = trim(adapter.read_current_version())
+  let receipt = __bump_receipt_base(options, target, previous, readiness)
+
+  // Phase 1 — release readiness gate. A target that is still publishing its
+  // assets is not an error; the scheduled rerun will pick it up.
+  if !readiness.ready {
+    return receipt + {outcome: "not_ready", ok: true, notes: ["target release is not fully published yet"]}
+  }
+
+  // Phase 2 — idempotent no-op. Concurrent/scheduled reruns land here once the
+  // pin already matches, so the common steady state does zero mutation.
+  if bump_is_current(previous, target) {
+    return receipt
+      + {outcome: "already_current", ok: true, notes: ["pin already matches ${target}"]}
+  }
+
+  // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
+  const apply = adapter.apply_version(target)
+  receipt = receipt + {changed: apply.changed, refreshed: apply.refreshed}
+  if !apply.changed {
+    return receipt
+      + {outcome: "already_current", ok: true, notes: ["writing ${target} produced no change"]}
+  }
+
+  // Phase 4 — the caller's single declared validation entrypoint. A failure
+  // stops before any commit so a broken bump never reaches a PR.
+  const validation = adapter.run_validation()
+  receipt = receipt + {validation: validation}
+  if !validation.ok {
+    return receipt
+      + {outcome: "validation_failed", ok: false, notes: ["validation failed: ${validation.detail}"]}
+  }
+
+  // Phase 5 — nothing to commit? Treat as a clean no-op rather than an empty PR.
+  const changeset = adapter.working_changes()
+  receipt = receipt + {changeset: changeset}
+  if bump_changeset_empty(changeset) {
+    return receipt
+      + {outcome: "no_changes", ok: true, notes: ["no file changes after refresh"]}
+  }
+
+  // Phase 6 — branch/PR lease reconciliation. Disarm a stale PR's auto-merge
+  // BEFORE the branch is force-reset so it cannot merge mid-refresh and race a
+  // duplicate onto main; then reset the bump branch to the observed base.
+  const existing = adapter.find_bump_pr()
+  let notes = []
+  let lease_recovered = false
+  if existing != nil && existing.auto_merge_enabled {
+    adapter.disable_auto_merge(existing.number)
+    lease_recovered = true
+    notes = notes + ["disarmed stale auto-merge on #${existing.number} before refresh"]
+  }
+  const base_sha = trim(adapter.base_sha())
+  adapter.reset_branch(base_sha)
+  receipt = receipt + {lease_recovered: lease_recovered}
+
+  // Phase 7 — one signed commit via the App identity (GitHub signs
+  // createCommitOnBranch mutations, satisfying required_signatures).
+  const commit = adapter.create_signed_commit(
+    {
+      branch: options.branch,
+      base_sha: base_sha,
+      headline: "chore: bump Harn runtime to ${target}",
+      additions: changeset.additions,
+      deletions: changeset.deletions,
+    },
+  )
+  receipt = receipt + {commit_oid: commit.oid}
+
+  // Phase 8 — if the refreshed branch tree already matches base, the bump is a
+  // true no-op: close any stale PR instead of opening an empty one.
+  if adapter.branch_matches_base() {
+    if existing != nil {
+      adapter.close_pr(existing.number, "Closing: the refreshed Harn bump already matches ${options.base}.")
+      return receipt
+        + {
+        outcome: "closed_noop",
+        ok: true,
+        pr_action: "closed",
+        pr_number: existing.number,
+        notes: notes + ["branch tree matches ${options.base}; closed #${existing.number}"],
+      }
+    }
+    return receipt
+      + {outcome: "no_changes", ok: true, notes: notes + ["branch tree matches ${options.base}; no PR needed"]}
+  }
+
+  // Phase 9 — create or refresh the PR.
+  const upsert = adapter.upsert_pr(existing)
+  const pr_action = if upsert.created {
+    "created"
+  } else {
+    "refreshed"
+  }
+  receipt = receipt + {pr_action: pr_action, pr_number: upsert.number, pr_url: upsert.url}
+
+  // Phase 10 — arm auto-merge so the merge queue owns the final landing.
+  let auto_merge = nil
+  if options.enable_auto_merge {
+    auto_merge = adapter.enable_auto_merge(upsert.number, upsert.head_oid)
+    notes = notes
+      + [
+      if auto_merge.enabled {
+        "auto-merge armed on #${upsert.number}"
+      } else {
+        "auto-merge not enabled: ${auto_merge.detail}"
+      },
+    ]
+  }
+
+  return receipt + {outcome: "committed", ok: true, auto_merge: auto_merge, notes: notes}
+}

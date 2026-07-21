@@ -1,0 +1,398 @@
+/**
+ * std/bump/live — the live [`BumpAdapter`] that binds std/bump/runtime's pure
+ * state machine to real effects: git and the caller's validation entrypoint
+ * via std/command, and GitHub via HTTP/GraphQL over the net capability using a
+ * GitHub App installation token.
+ *
+ * This module is deliberately branch-free. It performs the I/O the orchestrator
+ * asks for and normalizes the result; ALL control flow lives in
+ * `std/bump/runtime`, which is exercised by the in-process fixtures. This seam
+ * is why the fixtures need no network: they replace this adapter wholesale. The
+ * live GitHub-mutation surface here (ref lease reset, signed
+ * `createCommitOnBranch`, PR upsert, auto-merge arm/disarm) is first exercised
+ * against real GitHub in CI, by construction.
+ *
+ * Signed commits use the GraphQL `createCommitOnBranch` mutation rather than a
+ * local `git commit` + push: commits created through the App installation token
+ * are signed by GitHub, satisfying an org `required_signatures` ruleset that an
+ * unsigned local push would violate.
+ */
+import { command_run } from "std/command"
+import { graphql_request } from "std/graphql"
+import { poll_until } from "std/poll"
+import { is_v_semver } from "std/semver"
+import {
+  BumpAdapter,
+  BumpApplyOutcome,
+  BumpAutoMerge,
+  BumpChangeSet,
+  BumpCommitRequest,
+  BumpCommitResult,
+  BumpPrState,
+  BumpPrUpsert,
+  ReleaseReadiness,
+} from "std/bump/runtime"
+
+/** Everything the live adapter needs to reach git, GitHub, and validation. */
+pub type LiveBumpConfig = {
+  repo: string,
+  token: string,
+  branch: string,
+  base: string,
+  version_file: string,
+  refresh_command: string,
+  validation_command: string,
+  api_base: string,
+  readiness_max_attempts: int,
+  readiness_interval_ms: int,
+  readiness_timeout_ms: int,
+}
+
+/** Release finalization sidecars that prove a Harn release is fully published. */
+const REQUIRED_RELEASE_ASSETS = ["SHA256SUMS", "release-assets.json"]
+
+/**
+ * Fill a caller's partial config with the canonical defaults used by the
+ * reusable workflow.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
+  const defaults = {
+    repo: "",
+    token: "",
+    branch: "automation/bump-harn-runtime",
+    base: "main",
+    version_file: ".harn-version",
+    refresh_command: "harn install --locked || harn install",
+    validation_command: "",
+    api_base: "https://api.github.com",
+    readiness_max_attempts: 1,
+    readiness_interval_ms: 20000,
+    readiness_timeout_ms: 20000,
+  }
+  return defaults + (overrides ?? {})
+}
+
+fn __git(argv: list<string>) {
+  return command_run(argv)
+}
+
+fn __shell(command: string) {
+  return command_run({mode: "shell", command: command})
+}
+
+fn __gh_rest(cfg: LiveBumpConfig, method: string, path: string, body = nil) {
+  let options = {
+    headers: {
+      Authorization: "Bearer ${cfg.token}",
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "harn-bump-runtime",
+    },
+  }
+  if body != nil {
+    options = options + {body: json_stringify(body)}
+  }
+  const response = harness.net.request(method, cfg.api_base + path, options)
+  const parsed = try {
+    json_parse(response.body ?? "")
+  }
+  return {
+    ok: response.ok ?? false,
+    status: response.status ?? 0,
+    json: if is_err(parsed) {
+      nil
+    } else {
+      parsed
+    },
+  }
+}
+
+fn __gh_graphql(cfg: LiveBumpConfig, query: string, variables: dict) {
+  return graphql_request(cfg.api_base + "/graphql", query, variables, {auth: cfg.token})
+}
+
+fn __release_finalized(release) -> bool {
+  const draft = release?.draft ?? true
+  const prerelease = release?.prerelease ?? true
+  const asset_names = (release?.assets ?? []).map({ a -> a.name }).to_list()
+  const missing = REQUIRED_RELEASE_ASSETS
+    .filter({ name -> !contains(asset_names, name) })
+    .to_list()
+  return !draft && !prerelease && len(missing) == 0
+}
+
+fn __pull_node(cfg: LiveBumpConfig, number: int) {
+  return __gh_rest(cfg, "GET", "/repos/${cfg.repo}/pulls/${number}")
+}
+
+/**
+ * Build the live BumpAdapter for one repository and token. Pass the result
+ * straight to `run_bump`.
+ *
+ * @effects: [net, process]
+ * @errors: []
+ */
+pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
+  const cfg = live_bump_config(config)
+  const owner = split(cfg.repo, "/")[0] ?? ""
+  return {
+    resolve_target_tag: fn(tag) -> string {
+      const requested = trim(tag ?? "")
+      if requested != "" {
+        if !is_v_semver(requested) {
+          throw "std/bump/live: --tag must look like vX.Y.Z, got '${requested}'"
+        }
+        return requested
+      }
+      const latest = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/releases/latest")
+      const resolved = trim(to_string(latest.json?.tag_name ?? ""))
+      if !is_v_semver(resolved) {
+        throw "std/bump/live: could not resolve a semver latest release for ${cfg.repo}"
+      }
+      return resolved
+    },
+    release_ready: fn(target) -> ReleaseReadiness {
+      let attempts = 0
+      let lines = []
+      const found = poll_until(
+        { ->
+          attempts = attempts + 1
+          const view = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/releases/tags/${target}")
+          const ready = view.ok && __release_finalized(view.json)
+          lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
+          return if ready {
+            view.json
+          } else {
+            nil
+          }
+        },
+        {
+          max_attempts: cfg.readiness_max_attempts,
+          interval_ms: cfg.readiness_interval_ms,
+          timeout_ms: cfg.readiness_timeout_ms,
+        },
+      )
+      const ready = found != nil
+      return {
+        ready: ready,
+        detail: if ready {
+          "${target} finalized with required assets present"
+        } else {
+          "${target} is not fully published yet"
+        },
+        attempts: attempts,
+        attempt_lines: lines,
+      }
+    },
+    read_current_version: fn() -> string {
+      const result = __shell("cat ${cfg.version_file} 2>/dev/null || true")
+      return trim(result.stdout ?? "")
+    },
+    base_sha: fn() -> string {
+      return trim((__git(["git", "rev-parse", "HEAD"])).stdout ?? "")
+    },
+    apply_version: fn(target) -> BumpApplyOutcome {
+      __shell("printf '%s\\n' '${target}' > ${cfg.version_file}")
+      const refresh = __shell(cfg.refresh_command)
+      const changed = !((__git(["git", "diff", "--quiet"])).success ?? false)
+      const names = trim((__git(["git", "diff", "--name-only"])).stdout ?? "")
+      const refreshed = if names == "" {
+        []
+      } else {
+        split(names, "\n").filter({ n -> trim(n) != "" }).to_list()
+      }
+      return {
+        changed: changed,
+        refreshed: refreshed,
+        detail: if refresh.success ?? false {
+          "refresh ok"
+        } else {
+          trim(refresh.stderr ?? "")
+        },
+      }
+    },
+    run_validation: fn() {
+      if trim(cfg.validation_command) == "" {
+        return {ok: true, steps: [], detail: "no validation command declared"}
+      }
+      const result = __shell(cfg.validation_command)
+      const ok = result.success ?? false
+      return {
+        ok: ok,
+        steps: [{name: "validation", ok: ok, detail: cfg.validation_command}],
+        detail: if ok {
+          "validation passed"
+        } else {
+          trim((result.stderr ?? "") + (result.stdout ?? ""))
+        },
+      }
+    },
+    working_changes: fn() -> BumpChangeSet {
+      const adds = trim(
+        (__git(["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"])).stdout ?? "",
+      )
+      const dels = trim((__git(["git", "diff", "--name-only", "--diff-filter=D", "HEAD"])).stdout ?? "")
+      return {
+        additions: if adds == "" {
+          []
+        } else {
+          split(adds, "\n").filter({ n -> trim(n) != "" }).to_list()
+        },
+        deletions: if dels == "" {
+          []
+        } else {
+          split(dels, "\n").filter({ n -> trim(n) != "" }).to_list()
+        },
+      }
+    },
+    find_bump_pr: fn() -> BumpPrState? {
+      const list = __gh_rest(
+        cfg,
+        "GET",
+        "/repos/${cfg.repo}/pulls?head=${owner}:${cfg.branch}&base=${cfg.base}&state=open",
+      )
+      const first = (list.json ?? [])[0]
+      if first == nil {
+        return nil
+      }
+      const detail = __pull_node(cfg, first.number)
+      return {
+        number: first.number,
+        head_oid: first.head?.sha ?? "",
+        auto_merge_enabled: (detail.json?.auto_merge ?? nil) != nil,
+        url: first.html_url ?? "",
+        state: first.state ?? "open",
+      }
+    },
+    disable_auto_merge: fn(number) -> bool {
+      const detail = __pull_node(cfg, number)
+      const node_id = detail.json?.node_id ?? ""
+      if node_id == "" {
+        return false
+      }
+      const result = __gh_graphql(
+        cfg,
+        "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }",
+        {id: node_id},
+      )
+      return result.ok ?? false
+    },
+    reset_branch: fn(base_sha) -> bool {
+      const ref = "/repos/${cfg.repo}/git/refs/heads/${cfg.branch}"
+      const existing = __gh_rest(cfg, "GET", ref)
+      if existing.ok {
+        return (__gh_rest(cfg, "PATCH", ref, {sha: base_sha, force: true})).ok
+      }
+      return (
+        __gh_rest(
+          cfg,
+          "POST",
+          "/repos/${cfg.repo}/git/refs",
+          {ref: "refs/heads/${cfg.branch}", sha: base_sha},
+        )
+      ).ok
+    },
+    create_signed_commit: fn(request: BumpCommitRequest) -> BumpCommitResult {
+      let additions = []
+      for path in request.additions {
+        const encoded = __shell("base64 -w0 < '${path}' || base64 < '${path}' | tr -d '\\n'")
+        additions = additions + [{path: path, contents: trim(encoded.stdout ?? "")}]
+      }
+      const deletions = request.deletions.map({ p -> {path: p} }).to_list()
+      const result = __gh_graphql(
+        cfg,
+        "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+        {
+          input: {
+            branch: {repositoryNameWithOwner: cfg.repo, branchName: request.branch},
+            message: {headline: request.headline},
+            fileChanges: {additions: additions, deletions: deletions},
+            expectedHeadOid: request.base_sha,
+          },
+        },
+      )
+      const commit = result.data?.createCommitOnBranch?.commit
+      if commit == nil {
+        throw "std/bump/live: createCommitOnBranch returned no commit; errors="
+          + json_stringify(result.errors ?? [])
+      }
+      return {oid: commit.oid, url: commit.url ?? ""}
+    },
+    branch_matches_base: fn() -> bool {
+      const branch = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/commits/${cfg.branch}")
+      const base = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/commits/${cfg.base}")
+      const branch_tree = branch.json?.commit?.tree?.sha ?? "branch"
+      const base_tree = base.json?.commit?.tree?.sha ?? "base"
+      return branch_tree == base_tree
+    },
+    upsert_pr: fn(existing: BumpPrState?) -> BumpPrUpsert {
+      const title = "Bump Harn runtime"
+      const body = "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
+      if existing != nil {
+        __gh_rest(
+          cfg,
+          "PATCH",
+          "/repos/${cfg.repo}/pulls/${existing.number}",
+          {title: title, body: body},
+        )
+        const detail = __pull_node(cfg, existing.number)
+        return {
+          number: existing.number,
+          head_oid: detail.json?.head?.sha ?? existing.head_oid,
+          url: detail.json?.html_url ?? existing.url,
+          created: false,
+        }
+      }
+      const created = __gh_rest(
+        cfg,
+        "POST",
+        "/repos/${cfg.repo}/pulls",
+        {title: title, head: cfg.branch, base: cfg.base, body: body},
+      )
+      return {
+        number: created.json?.number ?? 0,
+        head_oid: created.json?.head?.sha ?? "",
+        url: created.json?.html_url ?? "",
+        created: true,
+      }
+    },
+    close_pr: fn(number, comment) -> bool {
+      __gh_rest(
+        cfg,
+        "POST",
+        "/repos/${cfg.repo}/issues/${number}/comments",
+        {body: comment},
+      )
+      return (__gh_rest(cfg, "PATCH", "/repos/${cfg.repo}/pulls/${number}", {state: "closed"})).ok
+    },
+    enable_auto_merge: fn(number, head) -> BumpAutoMerge {
+      const detail = __pull_node(cfg, number)
+      const node_id = detail.json?.node_id ?? ""
+      if node_id == "" {
+        return {enabled: false, state: "failed", detail: "no pull request node id"}
+      }
+      const result = __gh_graphql(
+        cfg,
+        "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }",
+        {id: node_id},
+      )
+      const ok = result.ok ?? false
+      return {
+        enabled: ok,
+        state: if ok {
+          "enabled"
+        } else {
+          "failed"
+        },
+        detail: if ok {
+          ""
+        } else {
+          json_stringify(result.errors ?? [])
+        },
+      }
+    },
+  }
+}

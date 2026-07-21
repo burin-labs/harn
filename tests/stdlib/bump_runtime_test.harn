@@ -1,0 +1,259 @@
+// Run: harn test tests/stdlib/bump_runtime_test.harn
+//
+// In-process, no-network fixtures for the std/bump/runtime state machine.
+// Each scenario injects a recording fake adapter and asserts on the returned
+// receipt plus the side-effect calls the orchestrator made. There are no
+// sleeps and no wall-clock assertions: readiness, leases, and auto-merge are
+// all driven by adapter return values, never by elapsed time.
+import {
+  BumpAdapter,
+  BumpOptions,
+  BumpPrState,
+  bump_changeset_empty,
+  bump_is_current,
+  bump_options,
+  run_bump,
+} from "std/bump/runtime"
+import { assert, assert_eq } from "std/testing"
+
+// A recorder threads a mutable call log through the fake adapter so tests can
+// assert not just the receipt but the exact effect sequence (lease disarm,
+// branch reset, commit, PR upsert, auto-merge).
+fn make_fake(config = {}) {
+  let calls = []
+  const record = fn(name, arg) {
+    calls = calls + [{name: name, arg: arg}]
+  }
+  const cfg = {
+    target: "v0.10.30",
+    ready: true,
+    readiness_detail: "harn-cli 0.10.30 published; assets present; release finalized",
+    current: "v0.10.29",
+    apply_changed: true,
+    refreshed: ["harn.lock"],
+    validation_ok: true,
+    validation_detail: "",
+    additions: [".harn-version", "harn.lock"],
+    deletions: [],
+    existing_pr: nil,
+    branch_matches: false,
+    commit_oid: "c0ffee",
+    auto_merge_enabled: true,
+  }
+    + config
+  const adapter: BumpAdapter = {
+    resolve_target_tag: fn(tag) {
+      return if trim(tag ?? "") != "" {
+        tag
+      } else {
+        cfg.target
+      }
+    },
+    release_ready: fn(_target) {
+      return {
+        ready: cfg.ready,
+        detail: cfg.readiness_detail,
+        attempts: 1,
+        attempt_lines: ["attempt 1: ${cfg.readiness_detail}"],
+      }
+    },
+    read_current_version: fn() {
+      return cfg.current
+    },
+    base_sha: fn() {
+      return "base000"
+    },
+    apply_version: fn(_target) {
+      record("apply_version", _target)
+      return {changed: cfg.apply_changed, refreshed: cfg.refreshed, detail: ""}
+    },
+    run_validation: fn() {
+      record("run_validation", nil)
+      return {
+        ok: cfg.validation_ok,
+        steps: [{name: "package-policy", ok: cfg.validation_ok, detail: cfg.validation_detail}],
+        detail: cfg.validation_detail,
+      }
+    },
+    working_changes: fn() {
+      return {additions: cfg.additions, deletions: cfg.deletions}
+    },
+    find_bump_pr: fn() {
+      return cfg.existing_pr
+    },
+    disable_auto_merge: fn(number) {
+      record("disable_auto_merge", number)
+      return true
+    },
+    reset_branch: fn(sha) {
+      record("reset_branch", sha)
+      return true
+    },
+    create_signed_commit: fn(request) {
+      record("create_signed_commit", request)
+      return {oid: cfg.commit_oid, url: "https://example.test/commit/${cfg.commit_oid}"}
+    },
+    branch_matches_base: fn() {
+      return cfg.branch_matches
+    },
+    upsert_pr: fn(existing) {
+      record("upsert_pr", existing)
+      const number = existing?.number ?? 4242
+      return {
+        number: number,
+        head_oid: cfg.commit_oid,
+        url: "https://example.test/pull/${number}",
+        created: existing == nil,
+      }
+    },
+    close_pr: fn(number, comment) {
+      record("close_pr", {number: number, comment: comment})
+      return true
+    },
+    enable_auto_merge: fn(number, head) {
+      record("enable_auto_merge", {number: number, head: head})
+      return {
+        enabled: cfg.auto_merge_enabled,
+        state: if cfg.auto_merge_enabled {
+          "enabled"
+        } else {
+          "failed"
+        },
+        detail: "",
+      }
+    },
+  }
+  return {adapter: adapter, calls: fn() { return calls }}
+}
+
+fn call_names(calls) -> list<string> {
+  return calls.map({ c -> c.name }).to_list()
+}
+
+fn opts(overrides = {}) -> BumpOptions {
+  return bump_options({repo: "burin-labs/example"} + overrides)
+}
+
+pipeline test_pure_predicates_are_v_insensitive(task) {
+  assert_eq(bump_is_current("v0.10.30", "0.10.30"), true)
+  assert_eq(bump_is_current("v0.10.29", "v0.10.30"), false)
+  assert_eq(bump_is_current("", ""), false)
+  assert_eq(bump_changeset_empty({additions: [], deletions: []}), true)
+  assert_eq(bump_changeset_empty({additions: ["x"], deletions: []}), false)
+}
+
+// 1. No-op: the pin already matches the target. Zero mutation.
+pipeline test_already_current_is_a_clean_noop(task) {
+  const fake = make_fake({current: "v0.10.30", target: "v0.10.30"})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "already_current")
+  assert_eq(receipt.ok, true)
+  assert_eq(call_names(fake.calls()), [])
+}
+
+// 2. Delayed asset publication: readiness gate stops before any change.
+pipeline test_release_not_ready_stops_before_mutation(task) {
+  const fake = make_fake({ready: false, readiness_detail: "missing release assets: SHA256SUMS"})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "not_ready")
+  assert_eq(receipt.ok, true)
+  assert_eq(receipt.ready, false)
+  assert(contains(receipt.readiness_detail, "SHA256SUMS"))
+  assert_eq(call_names(fake.calls()), [])
+}
+
+// 3. Lockfile regeneration flows through to a created PR with the refreshed
+//    files recorded on the receipt.
+pipeline test_lockfile_refresh_produces_committed_pr(task) {
+  const fake = make_fake({refreshed: ["harn.lock", "generated/schema.json"]})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.changed, true)
+  assert_eq(receipt.refreshed, ["harn.lock", "generated/schema.json"])
+  assert_eq(receipt.pr_action, "created")
+  assert_eq(receipt.commit_oid, "c0ffee")
+  assert(contains(call_names(fake.calls()), "create_signed_commit"))
+}
+
+// 4. Validation failure: no commit, no PR, ok=false.
+pipeline test_validation_failure_blocks_commit(task) {
+  const fake = make_fake({validation_ok: false, validation_detail: "harn check failed"})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "validation_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.validation.ok, false)
+  assert(contains(call_names(fake.calls()), "run_validation"))
+  assert_eq(contains(call_names(fake.calls()), "create_signed_commit"), false)
+}
+
+// 5. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
+//    BEFORE the branch is reset, then refreshed. Order matters.
+pipeline test_stale_lease_is_disarmed_before_reset(task) {
+  const stale: BumpPrState = {
+    number: 71,
+    head_oid: "stale99",
+    auto_merge_enabled: true,
+    url: "https://example.test/pull/71",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.lease_recovered, true)
+  assert_eq(receipt.pr_action, "refreshed")
+  assert_eq(receipt.pr_number, 71)
+  const names = call_names(fake.calls())
+  const disable_idx = names.index_of("disable_auto_merge")
+  const reset_idx = names.index_of("reset_branch")
+  assert(disable_idx >= 0 && reset_idx >= 0)
+  assert(disable_idx < reset_idx)
+}
+
+// 6. Existing PR refresh: an open PR without armed auto-merge is edited in
+//    place, not recreated, and NOT disarmed.
+pipeline test_existing_pr_is_refreshed_in_place(task) {
+  const open: BumpPrState = {
+    number: 88,
+    head_oid: "old123",
+    auto_merge_enabled: false,
+    url: "https://example.test/pull/88",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: open})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.lease_recovered, false)
+  assert_eq(receipt.pr_action, "refreshed")
+  assert_eq(receipt.pr_number, 88)
+  assert_eq(contains(call_names(fake.calls()), "disable_auto_merge"), false)
+}
+
+// 7. Successful auto-merge: a fresh bump creates a PR and arms auto-merge.
+pipeline test_successful_bump_arms_auto_merge(task) {
+  const fake = make_fake({})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "committed")
+  assert_eq(receipt.pr_action, "created")
+  assert_eq(receipt.auto_merge?.enabled, true)
+  const enable_calls = fake.calls().filter({ c -> c.name == "enable_auto_merge" }).to_list()
+  assert_eq(len(enable_calls), 1)
+  assert_eq(enable_calls[0].arg.number, 4242)
+}
+
+// Bonus: a refreshed branch whose tree matches base closes a stale PR instead
+// of opening an empty one — the concurrency-safe "someone already landed it"
+// path.
+pipeline test_branch_matching_base_closes_stale_pr(task) {
+  const stale: BumpPrState = {
+    number: 12,
+    head_oid: "x",
+    auto_merge_enabled: false,
+    url: "https://example.test/pull/12",
+    state: "open",
+  }
+  const fake = make_fake({existing_pr: stale, branch_matches: true})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "closed_noop")
+  assert_eq(receipt.pr_action, "closed")
+  assert(contains(call_names(fake.calls()), "close_pr"))
+}
