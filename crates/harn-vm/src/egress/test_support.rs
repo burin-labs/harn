@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 
 pub(crate) struct OneShotHttpServer {
     port: u16,
-    handle: Option<JoinHandle<()>>,
+    handle: Option<JoinHandle<bool>>,
 }
 
 impl OneShotHttpServer {
@@ -16,11 +16,17 @@ impl OneShotHttpServer {
         let handle = thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
+                // A real client sends request bytes; the release connect from
+                // `unblock_and_join`/`Drop` sends none. The distinction lets
+                // tests assert a request genuinely arrived.
+                let served = matches!(stream.read(&mut buf), Ok(read) if read > 0);
                 let _ = stream.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
                 );
                 let _ = stream.flush();
+                served
+            } else {
+                false
             }
         });
         Self {
@@ -33,12 +39,18 @@ impl OneShotHttpServer {
         format!("http://localhost:{}/probe", self.port)
     }
 
-    pub(crate) fn join(mut self) {
+    pub(crate) fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Joins the server thread, returning whether a nonempty HTTP request
+    /// reached it.
+    pub(crate) fn join(mut self) -> bool {
         self.handle
             .take()
             .expect("probe server handle")
             .join()
-            .expect("probe server thread");
+            .expect("probe server thread")
     }
 
     /// Releases a server whose client request was correctly blocked before the
