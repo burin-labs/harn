@@ -381,58 +381,14 @@ pub fn reset_egress_policy_for_tests() {
     reset_egress_policy_for_host();
 }
 
-/// Reads one `HARN_EGRESS_*` variable for policy construction.
-///
-/// Under `cfg(test)` the process environment is structurally invisible: reads
-/// come from a thread-local override map instead, so ambient shell
-/// configuration (a developer's `HARN_EGRESS_BLOCK_PRIVATE=off`, a CI
-/// wrapper's allowlist) can never seed a policy a test did not ask for.
-/// Env-derived-policy tests inject values through
-/// [`EgressTestEnvGuard::set`], which matches the per-thread fallback context
-/// used by `cfg(test)` egress state and keeps tests parallel-safe without any
-/// cross-test lock.
-fn egress_env_var(key: &str) -> Option<String> {
-    #[cfg(test)]
-    {
-        test_env_overrides::get(key)
-    }
-    #[cfg(not(test))]
-    {
-        std::env::var(key).ok()
-    }
-}
-
-#[cfg(test)]
-mod test_env_overrides {
-    use std::cell::RefCell;
-    use std::collections::BTreeMap;
-
-    thread_local! {
-        static OVERRIDES: RefCell<BTreeMap<String, String>> =
-            const { RefCell::new(BTreeMap::new()) };
-    }
-
-    pub(super) fn get(key: &str) -> Option<String> {
-        OVERRIDES.with(|overrides| overrides.borrow().get(key).cloned())
-    }
-
-    pub(super) fn set(key: &str, value: &str) {
-        OVERRIDES.with(|overrides| {
-            overrides
-                .borrow_mut()
-                .insert(key.to_owned(), value.to_owned());
-        });
-    }
-
-    pub(super) fn clear() {
-        OVERRIDES.with(|overrides| overrides.borrow_mut().clear());
-    }
-}
-
-/// Gives a test a clean egress universe with hermetic edges: on both creation
-/// and drop it clears this thread's env overrides (see [`egress_env_var`])
-/// and resets this thread's policy state, so neither ambient configuration
-/// nor a sibling test's leftovers can leak in, and nothing leaks out.
+/// Gives a test a clean egress universe with hermetic edges: it layers this
+/// domain's policy reset over the shared env seam
+/// ([`crate::test_env::test_env_guard`]). On both creation and drop the inner
+/// guard clears this thread's env overrides while this wrapper resets this
+/// thread's egress policy state, so neither ambient configuration nor a sibling
+/// test's leftovers can leak in, and nothing leaks out. All `cfg(test)` egress
+/// state is thread-keyed, so no cross-test serialization is needed and the
+/// guard is safe to hold across `await` points.
 ///
 /// This governs only the *inputs* to policy installation;
 /// `egress_policy(...)`'s deliberate refuse-to-override behavior is
@@ -440,30 +396,37 @@ mod test_env_overrides {
 #[cfg(test)]
 #[must_use]
 pub(crate) fn test_env_guard() -> EgressTestEnvGuard {
-    test_env_overrides::clear();
+    // The inner guard clears the shared env overrides on creation; layer the
+    // egress-specific policy reset on top.
+    let inner = crate::test_env::test_env_guard();
     reset_egress_policy_for_host();
-    EgressTestEnvGuard {}
+    EgressTestEnvGuard { inner }
 }
 
 /// Guard returned by [`test_env_guard`]. Injects `HARN_EGRESS_*` values for
-/// this thread via [`EgressTestEnvGuard::set`] and clears all egress test
-/// state on drop.
+/// this thread via [`EgressTestEnvGuard::set`] and, on drop, resets this
+/// thread's egress policy state on top of the inner guard clearing the shared
+/// env overrides.
 #[cfg(test)]
-pub(crate) struct EgressTestEnvGuard {}
+pub(crate) struct EgressTestEnvGuard {
+    inner: crate::test_env::TestEnvGuard,
+}
 
 #[cfg(test)]
 impl EgressTestEnvGuard {
-    /// Sets a `HARN_EGRESS_*` variable for this thread only, visible to
-    /// [`egress_env_var`] readers on the same thread.
+    /// Sets a `HARN_EGRESS_*` variable for this thread only, visible to the
+    /// shared env seam ([`crate::test_env::env_var_seamed`]) readers on the
+    /// same thread.
     pub(crate) fn set(&self, key: &str, value: &str) {
-        test_env_overrides::set(key, value);
+        self.inner.set(key, value);
     }
 }
 
 #[cfg(test)]
 impl Drop for EgressTestEnvGuard {
     fn drop(&mut self) {
-        test_env_overrides::clear();
+        // Reset the egress policy state; the `inner` field's Drop then clears
+        // the shared env overrides. Neither read depends on the other's order.
         reset_egress_policy_for_host();
     }
 }
@@ -1117,11 +1080,17 @@ fn ensure_env_seeded() -> Result<(), VmError> {
         return Ok(());
     }
 
-    let allow = egress_env_var(HARN_EGRESS_ALLOW_ENV);
-    let deny = egress_env_var(HARN_EGRESS_DENY_ENV);
-    let default = egress_env_var(HARN_EGRESS_DEFAULT_ENV);
-    let block_private = egress_env_var(HARN_EGRESS_BLOCK_PRIVATE_ENV);
-    let allow_loopback = egress_env_var(HARN_EGRESS_ALLOW_LOOPBACK_ENV);
+    // `HARN_EGRESS_*` reads go through the shared env seam: under `cfg(test)`
+    // the process environment is structurally invisible (reads come from a
+    // per-thread override map), so ambient shell configuration can never seed a
+    // policy a test did not ask for. Env-derived-policy tests inject values
+    // through [`EgressTestEnvGuard::set`].
+    use crate::test_env::env_var_seamed;
+    let allow = env_var_seamed(HARN_EGRESS_ALLOW_ENV);
+    let deny = env_var_seamed(HARN_EGRESS_DENY_ENV);
+    let default = env_var_seamed(HARN_EGRESS_DEFAULT_ENV);
+    let block_private = env_var_seamed(HARN_EGRESS_BLOCK_PRIVATE_ENV);
+    let allow_loopback = env_var_seamed(HARN_EGRESS_ALLOW_LOOPBACK_ENV);
     let any_set = allow.is_some()
         || deny.is_some()
         || default.is_some()
