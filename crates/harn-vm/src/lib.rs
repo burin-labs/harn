@@ -123,6 +123,7 @@ pub mod store;
 pub(crate) mod synchronization;
 pub mod tenant;
 pub(crate) mod term;
+pub(crate) mod test_env;
 pub mod testbench;
 pub mod text;
 pub mod text_diff;

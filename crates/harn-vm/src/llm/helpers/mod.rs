@@ -161,40 +161,13 @@ mod tests {
         // sibling modules (e.g. llm::api streaming classification tests) that
         // also mutate LOCAL_LLM_BASE_URL.
         let _guard = crate::llm::env_guard();
-        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
-        let prev_model = std::env::var("LOCAL_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-
-        unsafe {
-            std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
-            std::env::set_var("LOCAL_LLM_MODEL", "qwen2.5-coder-32b");
-            std::env::remove_var("HARN_LLM_PROVIDER");
-            std::env::remove_var("HARN_LLM_MODEL");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
+        env.set("LOCAL_LLM_MODEL", "qwen2.5-coder-32b");
 
         assert_eq!(vm_resolve_provider(&None), "local");
         assert_eq!(vm_resolve_model(&None, "local"), "qwen2.5-coder-32b");
         assert!(resolve_api_key("local").is_ok());
-
-        unsafe {
-            match prev_base {
-                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
-                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
-            }
-            match prev_model {
-                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
-                None => std::env::remove_var("LOCAL_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-        }
     }
 
     #[test]
@@ -208,17 +181,8 @@ mod tests {
         // ends up at the local Ollama endpoint and returns a 404
         // `model_unavailable`.
         let _guard = crate::llm::env_guard();
-        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
-        let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-
-        unsafe {
-            std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434");
-            std::env::remove_var("LOCAL_LLM_MODEL");
-            std::env::remove_var("HARN_LLM_PROVIDER");
-            std::env::remove_var("HARN_LLM_MODEL");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434");
 
         // `anthropic/claude-sonnet-4-6` is a catalog alias that resolves
         // to the openrouter provider. With LOCAL_LLM_BASE_URL set the
@@ -236,25 +200,6 @@ mod tests {
             VmValue::String(arcstr::ArcStr::from("my-custom-local-tag")),
         )]));
         assert_eq!(vm_resolve_provider(&opts_unknown), "local");
-
-        unsafe {
-            match prev_base {
-                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
-                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
-            }
-            match prev_local_model {
-                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
-                None => std::env::remove_var("LOCAL_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-        }
     }
 
     #[test]
@@ -283,12 +228,8 @@ mod tests {
     #[test]
     fn extract_llm_options_rejects_removed_transcript_key() {
         let _guard = crate::llm::env_guard();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        unsafe {
-            std::env::set_var("HARN_LLM_PROVIDER", "mock");
-            std::env::remove_var("HARN_LLM_MODEL");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_LLM_PROVIDER", "mock");
 
         let transcript = new_transcript_with(None, Vec::new(), None, None);
         let options = VmValue::dict(crate::value::DictMap::from_iter([(
@@ -309,33 +250,16 @@ mod tests {
             msg.contains("transcript") && msg.contains("session_id"),
             "got: {msg}"
         );
-
-        unsafe {
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-        }
     }
 
     #[test]
     fn model_tier_prefers_reachable_env_provider_and_model() {
         let _guard = crate::llm::env_guard();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
-        let prev_local_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
-
-        unsafe {
-            std::env::set_var("HARN_LLM_MODEL", "gemma-4-e4b-it");
-            std::env::set_var("HARN_LLM_PROVIDER", "local");
-            std::env::set_var("LOCAL_LLM_MODEL", "gemma-4-e4b-it");
-            std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_LLM_MODEL", "gemma-4-e4b-it");
+        env.set("HARN_LLM_PROVIDER", "local");
+        env.set("LOCAL_LLM_MODEL", "gemma-4-e4b-it");
+        env.set("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
 
         let options = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model_tier"),
@@ -344,24 +268,6 @@ mod tests {
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider);
 
-        unsafe {
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_local_model {
-                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
-                None => std::env::remove_var("LOCAL_LLM_MODEL"),
-            }
-            match prev_local_base {
-                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
-                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
-            }
-        }
         assert_eq!(provider, "local");
         assert_eq!(resolved, "gemma-4-e4b-it");
     }
@@ -369,17 +275,9 @@ mod tests {
     #[test]
     fn model_tier_falls_back_to_reachable_local_provider_when_default_alias_is_unavailable() {
         let _guard = crate::llm::env_guard();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
-        let prev_local_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
-
-        unsafe {
-            std::env::remove_var("HARN_LLM_MODEL");
-            std::env::remove_var("HARN_LLM_PROVIDER");
-            std::env::set_var("LOCAL_LLM_MODEL", "gemma-4-e4b-it");
-            std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("LOCAL_LLM_MODEL", "gemma-4-e4b-it");
+        env.set("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");
 
         let options = Some(crate::value::DictMap::from_iter([(
             crate::value::intern_key("model_tier"),
@@ -387,25 +285,6 @@ mod tests {
         )]));
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider);
-
-        unsafe {
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_local_model {
-                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
-                None => std::env::remove_var("LOCAL_LLM_MODEL"),
-            }
-            match prev_local_base {
-                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
-                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
-            }
-        }
 
         assert_eq!(provider, "local");
         assert_eq!(resolved, "gemma-4-e4b-it");
@@ -414,26 +293,11 @@ mod tests {
     #[test]
     fn raw_env_model_is_accepted_when_env_provider_matches() {
         let _guard = crate::llm::env_guard();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-
-        unsafe {
-            std::env::set_var("HARN_LLM_MODEL", "google/gemma-4-31B-it");
-            std::env::set_var("HARN_LLM_PROVIDER", "together");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_LLM_MODEL", "google/gemma-4-31B-it");
+        env.set("HARN_LLM_PROVIDER", "together");
 
         let resolved = vm_resolve_model(&None, "together");
-
-        unsafe {
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-        }
 
         assert_eq!(resolved, "google/gemma-4-31B-it");
     }
@@ -444,14 +308,7 @@ mod tests {
         // model prefix that inference should resolve to Ollama rather than
         // the local OpenAI-compatible provider or Anthropic.
         let _guard = crate::llm::env_guard();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
-        unsafe {
-            std::env::remove_var("HARN_LLM_PROVIDER");
-            std::env::remove_var("HARN_LLM_MODEL");
-            std::env::remove_var("LOCAL_LLM_BASE_URL");
-        }
+        let _env = crate::test_env::test_env_guard();
 
         let mut opts: crate::value::DictMap = crate::value::DictMap::new();
         opts.put_str("provider", "auto");
@@ -469,36 +326,13 @@ mod tests {
         opts3.put_str("provider", "anthropic");
         opts3.put_str("model", "local:foo");
         assert_eq!(vm_resolve_provider(&Some(opts3)), "anthropic");
-
-        unsafe {
-            match prev_harn_provider {
-                Some(v) => std::env::set_var("HARN_LLM_PROVIDER", v),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_harn_model {
-                Some(v) => std::env::set_var("HARN_LLM_MODEL", v),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_base {
-                Some(v) => std::env::set_var("LOCAL_LLM_BASE_URL", v),
-                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
-            }
-        }
     }
 
     #[test]
     fn provider_auto_unknown_model_warns_and_uses_default_provider() {
         let _guard = crate::llm::env_guard();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-        let prev_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
-        unsafe {
-            std::env::remove_var("HARN_LLM_PROVIDER");
-            std::env::remove_var("HARN_LLM_MODEL");
-            std::env::remove_var("LOCAL_LLM_BASE_URL");
-            std::env::set_var("HARN_DEFAULT_PROVIDER", "mock");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_DEFAULT_PROVIDER", "mock");
 
         crate::events::clear_event_sinks();
         let sink = Rc::new(crate::events::CollectorSink::new());
@@ -526,60 +360,14 @@ mod tests {
         }));
 
         crate::events::reset_event_sinks();
-        unsafe {
-            match prev_harn_provider {
-                Some(v) => std::env::set_var("HARN_LLM_PROVIDER", v),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_harn_model {
-                Some(v) => std::env::set_var("HARN_LLM_MODEL", v),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_default_provider {
-                Some(v) => std::env::set_var("HARN_DEFAULT_PROVIDER", v),
-                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-            }
-            match prev_base {
-                Some(v) => std::env::set_var("LOCAL_LLM_BASE_URL", v),
-                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
-            }
-        }
     }
 
     #[test]
     fn openrouter_provider_fallback_uses_current_valid_model_id() {
         let _guard = crate::llm::env_guard();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_local_model = std::env::var("LOCAL_LLM_MODEL").ok();
-        let prev_local_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
-        unsafe {
-            std::env::remove_var("HARN_LLM_MODEL");
-            std::env::remove_var("HARN_LLM_PROVIDER");
-            std::env::remove_var("LOCAL_LLM_MODEL");
-            std::env::remove_var("LOCAL_LLM_BASE_URL");
-        }
+        let _env = crate::test_env::test_env_guard();
 
         let resolved = vm_resolve_model(&None, "openrouter");
-
-        unsafe {
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_local_model {
-                Some(value) => std::env::set_var("LOCAL_LLM_MODEL", value),
-                None => std::env::remove_var("LOCAL_LLM_MODEL"),
-            }
-            match prev_local_base {
-                Some(value) => std::env::set_var("LOCAL_LLM_BASE_URL", value),
-                None => std::env::remove_var("LOCAL_LLM_BASE_URL"),
-            }
-        }
 
         assert_eq!(resolved, "anthropic/claude-sonnet-4.6");
     }
@@ -592,12 +380,9 @@ mod tests {
         // default so the next `llm_call` honours it without each
         // builtin threading the session id manually.
         let _guard = crate::llm::env_guard();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        unsafe {
-            std::env::set_var("HARN_LLM_MODEL", "gpt-4o-mini");
-            std::env::set_var("HARN_LLM_PROVIDER", "openai");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_LLM_MODEL", "gpt-4o-mini");
+        env.set("HARN_LLM_PROVIDER", "openai");
 
         crate::agent_sessions::reset_session_store();
         let id = crate::agent_sessions::open_or_create(Some("pinned-resolver-session".to_string()));
@@ -608,20 +393,8 @@ mod tests {
         let provider = vm_resolve_provider(&None);
         let model = vm_resolve_model(&None, &provider);
 
-        // Drop the guard before mutating shared env to keep cleanup
-        // local even if the assertion below fails.
         drop(_session_guard);
         crate::agent_sessions::reset_session_store();
-        unsafe {
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-        }
 
         assert_eq!(provider, "anthropic", "session pin should reroute provider");
         assert_eq!(
@@ -633,12 +406,7 @@ mod tests {
     #[test]
     fn explicit_call_site_model_wins_over_session_pin() {
         let _guard = crate::llm::env_guard();
-        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
-        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        unsafe {
-            std::env::remove_var("HARN_LLM_MODEL");
-            std::env::remove_var("HARN_LLM_PROVIDER");
-        }
+        let _env = crate::test_env::test_env_guard();
 
         crate::agent_sessions::reset_session_store();
         let id =
@@ -659,16 +427,6 @@ mod tests {
 
         drop(_session_guard);
         crate::agent_sessions::reset_session_store();
-        unsafe {
-            match prev_harn_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-            match prev_harn_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-        }
 
         assert_eq!(provider, "openai");
         assert_eq!(model, "gpt-4o-mini");
