@@ -125,6 +125,12 @@ else
   echo "=== Pre-commit: skipping generated-artifact registry check (no registry/Makefile/workflow/hook changes) ==="
 fi
 
+# Cheap advisory: staged source-of-truth edits without their mirrored outputs.
+# Warn-only — comment-only/refactors inside watched dirs are common false
+# positives, and CI remains the drift authority. Catches forgotten
+# `make gen-*` / `make sync-*` before the 20-minute CI round-trip.
+hook_warn_generated_artifact_drift "$changed"
+
 if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/null 2>&1; then
   hook_write_staged_markdown_files "$markdown_files"
   if [ -s "$markdown_files" ]; then

@@ -1,0 +1,135 @@
+// Unit tests for scripts/warn_generated_artifact_drift.harn.
+import "../warn_generated_artifact_drift.harn"
+
+@test
+pipeline test_path_under_directory_prefix(task) {
+  assert_eq(path_under("crates/harn-lexer/src/token.rs", "crates/harn-lexer/src/"), true)
+  assert_eq(path_under("crates/harn-lexer/src", "crates/harn-lexer/src/"), true)
+  assert_eq(path_under("crates/harn-other/src/lib.rs", "crates/harn-lexer/src/"), false)
+}
+
+@test
+pipeline test_path_under_exact_and_nested_file(task) {
+  assert_eq(path_under("crates/harn-lexer/src/token.rs", "crates/harn-lexer/src/token.rs"), true)
+  assert_eq(
+    path_under(
+      "crates/harn-parser/src/diagnostic_codes/foo.rs",
+      "crates/harn-parser/src/diagnostic_codes",
+    ),
+    true,
+  )
+  assert_eq(path_under("crates/harn-lexer/src/lib.rs", "crates/harn-lexer/src/token.rs"), false)
+}
+
+@test
+pipeline test_path_under_glob(task) {
+  assert_eq(path_under("spec/chapters/07-runtime-values.md", "spec/chapters/*.md"), true)
+  assert_eq(path_under("spec/chapters/nested/x.md", "spec/chapters/*.md"), true)
+  assert_eq(path_under("spec/other/x.md", "spec/chapters/*.md"), false)
+}
+
+@test
+pipeline test_output_display_single_and_shared_prefix(task) {
+  assert_eq(output_display(["docs/theme/harn-keywords.js"]), "docs/theme/")
+  assert_eq(
+    output_display(
+      [
+        "crates/harn-cli/generated/cli-bytecode-manifest.json",
+        "crates/harn-cli/generated/cli-bytecode/",
+      ],
+    ),
+    "crates/harn-cli/generated/",
+  )
+}
+
+@test
+pipeline test_output_display_divergent_trees(task) {
+  assert_eq(
+    output_display(
+      [
+        "spec/HARN_SPEC.md",
+        "docs/src/language-spec.md",
+        "docs/src/spec/language",
+        "docs/src/SUMMARY.md",
+      ],
+    ),
+    "registered outputs",
+  )
+}
+
+@test
+pipeline test_drift_warnings_source_without_output(task) {
+  const artifacts = [
+    {
+      id: "highlight",
+      gen: "gen-highlight",
+      sources: ["crates/harn-lexer/src/"],
+      outputs: ["docs/theme/harn-keywords.js"],
+    },
+    {
+      id: "docs-workflow-quickstart",
+      gen: "",
+      sources: ["docs/src/"],
+      outputs: ["scripts/check_docs_workflow_quickstart.harn"],
+    },
+  ]
+  const warnings = drift_warnings(artifacts, ["crates/harn-lexer/src/token.rs"])
+  assert_eq(warnings.count, 1)
+  assert_eq(warnings[0]?.id, "highlight")
+  assert_eq(warnings[0]?.gen, "gen-highlight")
+  assert_eq(warnings[0]?.output_display, "docs/theme/")
+}
+
+@test
+pipeline test_drift_warnings_silenced_when_output_staged(task) {
+  const artifacts = [
+    {
+      id: "highlight",
+      gen: "gen-highlight",
+      sources: ["crates/harn-lexer/src/"],
+      outputs: ["docs/theme/harn-keywords.js"],
+    },
+  ]
+  const warnings = drift_warnings(
+    artifacts,
+    ["crates/harn-lexer/src/token.rs", "docs/theme/harn-keywords.js"],
+  )
+  assert_eq(warnings, [])
+}
+
+@test
+pipeline test_drift_warnings_language_spec_glob(task) {
+  const artifacts = [
+    {
+      id: "language-spec",
+      gen: "sync-language-spec",
+      sources: ["spec/chapters/*.md"],
+      outputs: ["spec/HARN_SPEC.md", "docs/src/language-spec.md"],
+    },
+  ]
+  const warnings = drift_warnings(artifacts, ["spec/chapters/07-runtime-values.md"])
+  assert_eq(warnings.count, 1)
+  assert_eq(warnings[0]?.gen, "sync-language-spec")
+  assert_eq(warnings[0]?.output_display, "registered outputs")
+}
+
+@test
+pipeline test_format_warning_names_make_target(task) {
+  const lines = format_warning(
+    {id: "highlight", gen: "gen-highlight", output_display: "docs/theme/"},
+  )
+  assert_eq(lines[0]?.contains("generated artifact 'highlight'"), true)
+  assert_eq(lines[1]?.contains("docs/theme/"), true)
+  assert_eq(lines[2], "  If this changed the generated output, run:  make gen-highlight")
+}
+
+@test
+pipeline test_real_registry_highlight_source_warns(task) {
+  const registry = toml_parse(harness.fs.read_text("../generated_artifacts.toml"))
+  const warnings = drift_warnings(registry?.artifact ?? [], ["crates/harn-lexer/src/token.rs"])
+  const ids = warnings.map({ w -> w.id })
+  assert_eq(ids.contains("highlight"), true)
+  assert_eq(ids.contains("tree-sitter-keywords"), true)
+  assert_eq(ids.contains("docs-workflow-quickstart"), false)
+  assert_eq(ids.contains("receipt-structs"), false)
+}
