@@ -778,32 +778,16 @@ fn server_sse_rejects_oversized_events() {
 }
 
 // --- SSRF egress guard: end-to-end through the real HTTP client path. ---
-
-/// Spawn a one-shot loopback HTTP server that answers a single GET with 200.
-fn spawn_loopback_ok_server() -> (u16, std::thread::JoinHandle<bool>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
-    listener.set_nonblocking(false).expect("blocking listener");
-    let port = listener.local_addr().expect("listener addr").port();
-    let handle = std::thread::spawn(move || {
-        // Best-effort: if the guard blocks the request the client never
-        // connects, so accept must not hang the test forever.
-        listener.set_nonblocking(false).expect("blocking listener");
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let _ = read_http_request_generic(&mut stream);
-                write_http_response_generic(&mut stream, 200, &[], "ok");
-                true
-            }
-            Err(_) => false,
-        }
-    });
-    (port, handle)
-}
+//
+// These tests drive this thread's egress policy state, so each takes the
+// egress test-environment guard for clean edges: it resets the thread's
+// policy and env overrides on both creation and drop, so a sibling test's
+// leftovers cannot seed a policy these tests never asked for.
 
 #[tokio::test]
 async fn ssrf_guard_default_on_blocks_loopback() {
+    let _env = crate::egress::test_env_guard();
     reset_http_state();
-    crate::egress::reset_egress_policy_for_tests();
     let _scope = crate::egress::require_ssrf_guard_for_host();
 
     // No server needed: the request must be blocked before any connection.
@@ -815,15 +799,13 @@ async fn ssrf_guard_default_on_blocks_loopback() {
     assert!(msg.contains("EgressBlocked"), "{msg}");
     assert!(msg.contains("disallowed address"), "{msg}");
 
-    drop(_scope);
-    crate::egress::reset_egress_policy_for_tests();
     reset_http_state();
 }
 
 #[tokio::test]
 async fn ssrf_guard_allow_loopback_hatch_permits_capture_server() {
+    let _env = crate::egress::test_env_guard();
     reset_http_state();
-    crate::egress::reset_egress_policy_for_tests();
     // Engage the guard scope (default-on), then open the loopback hatch via a
     // thread-local test policy (no process-global env mutation).
     let _scope = crate::egress::require_ssrf_guard_for_host();
@@ -835,10 +817,10 @@ async fn ssrf_guard_allow_loopback_hatch_permits_capture_server() {
         ("allow_loopback", VmValue::Bool(true)),
     ]);
 
-    let (port, handle) = spawn_loopback_ok_server();
+    let server = crate::egress::test_support::OneShotHttpServer::start();
     let response = vm_execute_http_request(
         "GET",
-        &format!("http://127.0.0.1:{port}/ok"),
+        &format!("http://127.0.0.1:{}/ok", server.port()),
         &crate::value::DictMap::new(),
     )
     .await
@@ -847,17 +829,15 @@ async fn ssrf_guard_allow_loopback_hatch_permits_capture_server() {
         response.as_dict().expect("response dict")["status"].as_int(),
         Some(200)
     );
-    assert!(handle.join().expect("server thread"));
+    assert!(server.join(), "request should have reached the server");
 
-    drop(_scope);
-    crate::egress::reset_egress_policy_for_tests();
     reset_http_state();
 }
 
 #[tokio::test]
 async fn ssrf_guard_block_private_off_permits_capture_server() {
+    let _env = crate::egress::test_env_guard();
     reset_http_state();
-    crate::egress::reset_egress_policy_for_tests();
     let _scope = crate::egress::require_ssrf_guard_for_host();
     // Explicit opt-out: block_private:"off" via a thread-local test policy.
     crate::egress::install_test_policy(&[(
@@ -865,10 +845,10 @@ async fn ssrf_guard_block_private_off_permits_capture_server() {
         VmValue::String(arcstr::ArcStr::from("off")),
     )]);
 
-    let (port, handle) = spawn_loopback_ok_server();
+    let server = crate::egress::test_support::OneShotHttpServer::start();
     let response = vm_execute_http_request(
         "GET",
-        &format!("http://127.0.0.1:{port}/ok"),
+        &format!("http://127.0.0.1:{}/ok", server.port()),
         &crate::value::DictMap::new(),
     )
     .await
@@ -877,9 +857,7 @@ async fn ssrf_guard_block_private_off_permits_capture_server() {
         response.as_dict().expect("response dict")["status"].as_int(),
         Some(200)
     );
-    assert!(handle.join().expect("server thread"));
+    assert!(server.join(), "request should have reached the server");
 
-    drop(_scope);
-    crate::egress::reset_egress_policy_for_tests();
     reset_http_state();
 }

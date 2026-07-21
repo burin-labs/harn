@@ -210,15 +210,42 @@ fn process_tape_replay_emits_recorded_output_without_spawning() {
 
 #[test]
 fn deny_network_default_blocks_egress_until_session_drops() {
-    // Steel thread #4: tear-down restores environment.
+    // Steel thread #4: tear-down restores the prior egress policy. Scrub
+    // ambient `HARN_EGRESS_*` first so the after-drop probe checks the
+    // bench's teardown, not whatever the invoking shell exported.
+    for key in [
+        "HARN_EGRESS_ALLOW",
+        "HARN_EGRESS_DENY",
+        "HARN_EGRESS_DEFAULT",
+        "HARN_EGRESS_BLOCK_PRIVATE",
+        "HARN_EGRESS_ALLOW_LOOPBACK",
+    ] {
+        std::env::remove_var(key);
+    }
+    harn_vm::egress::reset_egress_policy_for_host();
+
     let session = Testbench::builder()
         .deny_network()
         .build()
         .activate()
         .expect("activate");
-    assert_eq!(std::env::var("HARN_EGRESS_DEFAULT").as_deref(), Ok("deny"));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime
+        .block_on(harn_vm::egress::enforce_url_allowed(
+            "testbench",
+            "https://example.com/x",
+        ))
+        .expect_err("deny-by-default blocks egress while the session is live");
     drop(session);
-    assert!(std::env::var("HARN_EGRESS_DEFAULT").is_err());
+    runtime
+        .block_on(harn_vm::egress::enforce_url_allowed(
+            "testbench",
+            "https://example.com/x",
+        ))
+        .expect("dropping the session removes the deny policy");
 }
 
 #[test]
