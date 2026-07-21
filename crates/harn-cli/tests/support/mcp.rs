@@ -96,7 +96,8 @@ pub fn wait_for_child_log_suffix(
 /// (`terminate-after` at 180s) as an opaque timeout: on expiry the client
 /// kills the child and panics with the captured stderr and the in-flight
 /// request, turning a mystery hang into an actionable failure (harn#5397).
-pub const STDIO_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
+#[allow(dead_code)]
+pub const STDIO_CLIENT_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Bounded, self-diagnosing JSON-RPC-over-stdio client for the
 /// `harn mcp serve` binary surface.
@@ -107,6 +108,11 @@ pub const STDIO_CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// [`wait_for_child_log_suffix`]: no stdio test can silently hang to the
 /// nextest cap, and any real server-side wedge surfaces its stderr for
 /// diagnosis in the very CI run that hit it.
+///
+/// `#[allow(dead_code)]`: this support module is `#[path]`-included by more
+/// than one test binary, and not every includer drives the stdio client, so
+/// the unused-in-that-binary items would otherwise trip `-D warnings`.
+#[allow(dead_code)]
 pub struct StdioMcpClient {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -118,6 +124,7 @@ pub struct StdioMcpClient {
     last_request: Option<String>,
 }
 
+#[allow(dead_code)]
 impl StdioMcpClient {
     /// Spawn `command` (already configured with the `mcp serve` arguments)
     /// with piped stdin/stdout and captured stderr.
