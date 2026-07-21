@@ -337,6 +337,34 @@ hook_check_generated_registry() {
   "$HARN_BIN" run scripts/check_generated_registry.harn
 }
 
+# Warn (never fail) when staged paths touch a regenerable artifact's sources
+# without staging any of its outputs. Path matching lives in
+# scripts/warn_generated_artifact_drift.harn. Reuses an available harn binary
+# without forcing a rebuild; skips quietly when none is available.
+hook_warn_generated_artifact_drift() {
+  changed_file_list=$1
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+  script="$repo_root/scripts/warn_generated_artifact_drift.harn"
+  [ -f "$script" ] || return 0
+
+  harn_bin=${HARN_BIN:-}
+  if [ -z "$harn_bin" ]; then
+    harn_bin=$(command -v harn 2>/dev/null || true)
+  fi
+  if [ -z "$harn_bin" ] && [ -x "$repo_root/target/debug/harn" ]; then
+    harn_bin="$repo_root/target/debug/harn"
+  fi
+  if [ -z "$harn_bin" ] || [ ! -x "$harn_bin" ]; then
+    return 0
+  fi
+
+  # --no-sandbox: pre-commit writes the staged path list to mktemp outside the
+  # worktree, which the default FS sandbox cannot read. Stay advisory even if
+  # the script errors — CI remains the drift authority.
+  "$harn_bin" run --no-sandbox scripts/warn_generated_artifact_drift.harn -- \
+    --staged-files "$changed_file_list" || true
+}
+
 hook_export_existing_harn_bin_for_non_rust_changes() {
   changed_file_list=$1
   if hook_paths_match "$changed_file_list" "$HOOK_BINARY_INPUT_PATTERN"; then

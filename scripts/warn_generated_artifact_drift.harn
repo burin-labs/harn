@@ -1,0 +1,217 @@
+// Warn (never fail) when staged paths touch a regenerable generated-artifact
+// source without staging any of that artifact's outputs. Reads
+// scripts/generated_artifacts.toml — pure path matching, no codegen.
+//
+// Usage:
+//   harn run scripts/warn_generated_artifact_drift.harn -- \
+//     --staged-files <path> [--registry scripts/generated_artifacts.toml]
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+const DEFAULT_REGISTRY = "scripts/generated_artifacts.toml"
+
+pub type DriftWarning = {id: string, gen: string, output_display: string}
+
+/** `*` matches any run of characters (including `/`), same as Dependabot patterns. */
+pub fn wildcard_matches(pattern: string, value: string) -> bool {
+  const pchars = chars(pattern)
+  const vchars = chars(value)
+  let p = 0
+  let v = 0
+  let star = -1
+  let retry_at = 0
+  while v < vchars.count {
+    if p < pchars.count && pchars[p] == vchars[v] {
+      p = p + 1
+      v = v + 1
+    } else if p < pchars.count && pchars[p] == "*" {
+      star = p
+      retry_at = v
+      p = p + 1
+    } else if star >= 0 {
+      retry_at = retry_at + 1
+      v = retry_at
+      p = star + 1
+    } else {
+      return false
+    }
+  }
+  while p < pchars.count && pchars[p] == "*" {
+    p = p + 1
+  }
+  return p == pchars.count
+}
+
+/** True when `path` is the pattern or lives under it (registry "under" semantics). */
+pub fn path_under(path: string, pattern: string) -> bool {
+  if pattern == "" {
+    return false
+  }
+  if pattern.ends_with("/") {
+    const bare = pattern[0:pattern.len() - 1] ?? pattern
+    return path == bare || path.starts_with(pattern)
+  }
+  if pattern.contains("*") || pattern.contains("?") {
+    return wildcard_matches(pattern, path)
+  }
+  return path == pattern || path.starts_with(pattern + "/")
+}
+
+pub fn any_path_under(paths: list<string>, patterns: list<string>) -> bool {
+  for path in paths {
+    for pattern in patterns {
+      if path_under(path, pattern) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+fn dirname_slash(path: string) -> string {
+  if path.ends_with("/") {
+    return path
+  }
+  const slash = path.last_index_of("/")
+  if slash < 0 {
+    return path
+  }
+  return path[0:slash + 1] ?? path
+}
+
+/** Directory summary for a single output tree, or "registered outputs". */
+pub fn output_display(outputs: list<string>) -> string {
+  if outputs.count == 0 {
+    return "registered outputs"
+  }
+  const first = outputs[0] ?? ""
+  if first == "" {
+    return "registered outputs"
+  }
+  if outputs.count == 1 {
+    return dirname_slash(first)
+  }
+  const prefix = dirname_slash(first)
+  if !prefix.ends_with("/") {
+    return "registered outputs"
+  }
+  for out in outputs {
+    if !out.starts_with(prefix) {
+      return "registered outputs"
+    }
+  }
+  return prefix
+}
+
+/**
+ * Regenerable artifacts (non-empty `gen`) whose sources are staged but whose
+ * outputs are not. Behavioural guards with empty `gen` are skipped.
+ */
+pub fn drift_warnings(artifacts: list, staged: list<string>) -> list<DriftWarning> {
+  let out: list<DriftWarning> = []
+  for art in artifacts {
+    const id = trim(to_string(art?.id ?? ""))
+    const gen = trim(to_string(art?.gen ?? ""))
+    if id == "" || gen == "" {
+      continue
+    }
+    const sources = art?.sources ?? []
+    const outputs = art?.outputs ?? []
+    if sources.count == 0 || outputs.count == 0 {
+      continue
+    }
+    if !any_path_under(staged, sources) {
+      continue
+    }
+    if any_path_under(staged, outputs) {
+      continue
+    }
+    out = out + [{id: id, gen: gen, output_display: output_display(outputs)}]
+  }
+  return out
+}
+
+pub fn format_warning(warning: DriftWarning) -> list<string> {
+  return [
+    "⚠ staged changes touch sources for generated artifact '${warning.id}'",
+    "  but no output under ${warning.output_display} is staged.",
+    "  If this changed the generated output, run:  make ${warning.gen}",
+  ]
+}
+
+fn staged_paths_from_text(text: string) -> list<string> {
+  let paths: list<string> = []
+  for line in text.lines() {
+    const path = trim(line)
+    if path != "" {
+      paths = paths + [path]
+    }
+  }
+  return paths
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "warn_generated_artifact_drift",
+      args: [
+        {kind: "flag", name: "staged_files", long: "--staged-files", parse: "string", default: ""},
+        {
+          kind: "flag",
+          name: "registry",
+          long: "--registry",
+          parse: "string",
+          default: DEFAULT_REGISTRY,
+        },
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/warn_generated_artifact_drift.harn -- --staged-files PATH [--registry PATH]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    // Advisory tooling: never block the commit path on parse mistakes.
+    return nil
+  }
+  const parsed = unwrap(parsed_result)
+  const staged_files = trim(to_string(parsed.options?.staged_files ?? ""))
+  if staged_files == "" {
+    harness.stdio.eprintln(
+      "usage: harn run scripts/warn_generated_artifact_drift.harn -- --staged-files PATH [--registry PATH]",
+    )
+    return nil
+  }
+  if !harness.fs.exists(staged_files) {
+    return nil
+  }
+  const registry_path = trim(to_string(parsed.options?.registry ?? DEFAULT_REGISTRY))
+  if registry_path == "" || !harness.fs.exists(registry_path) {
+    return nil
+  }
+  const registry = try {
+    toml_parse(harness.fs.read_text(registry_path))
+  } catch (_err) {
+    return nil
+  }
+  const staged = staged_paths_from_text(harness.fs.read_text(staged_files))
+  if staged.count == 0 {
+    return nil
+  }
+  const warnings = drift_warnings(registry?.artifact ?? [], staged)
+  for warning in warnings {
+    for line in format_warning(warning) {
+      harness.stdio.eprintln(line)
+    }
+  }
+  if warnings.count > 0 {
+    harness.stdio.eprintln("  (warning only — commit continues; CI remains the drift authority)")
+  }
+  return nil
+}
