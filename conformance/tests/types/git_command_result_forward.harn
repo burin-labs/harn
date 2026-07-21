@@ -35,10 +35,8 @@ pipeline test(task) {
   }
   const runners: list<GitRunner> = [runner, stub]
   assert(len(runners) == 2, "git_run conforms to the GitRunner contract")
-
   // Drive the contract deterministically through the package boundary.
   const result: GitCommandResult = forward_git_run(stub, ["status", "--porcelain"])
-
   // A GitCommandResult flows where the shared CommandResult contract is
   // expected, with no downstream copy of the schema.
   const common: CommandResult = result
