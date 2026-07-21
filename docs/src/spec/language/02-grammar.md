@@ -30,6 +30,7 @@ attr_value         ::= STRING_LITERAL | RAW_STRING | INT_LITERAL
                      | IDENTIFIER | '-' INT_LITERAL | '-' FLOAT_LITERAL
 
 import_decl        ::= ['pub'] 'import' STRING_LITERAL
+                     | ['pub'] 'import' '*' 'as' IDENTIFIER 'from' STRING_LITERAL
                      | ['pub'] 'import' '{' IDENTIFIER (',' IDENTIFIER)* '}'
                        'from' STRING_LITERAL
                      | ['pub'] 'import' IDENTIFIER ('::' IDENTIFIER)* '::'

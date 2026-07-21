@@ -891,6 +891,14 @@ impl Formatter<'_> {
                 );
                 format!("{prefix}{line}")
             }
+            Node::NamespaceImport {
+                alias,
+                path,
+                is_pub,
+            } => {
+                let prefix = if *is_pub { "pub " } else { "" };
+                format!("{prefix}import * as {alias} from \"{path}\"")
+            }
             Node::EnumDecl { name, .. } => format!("/* enum {name} */"),
             Node::StructDecl { name, .. } => format!("/* struct {name} */"),
             Node::InterfaceDecl { name, .. } => format!("/* interface {name} */"),

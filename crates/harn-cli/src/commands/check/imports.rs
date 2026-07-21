@@ -100,6 +100,42 @@ pub(super) fn scan_import_collisions(
                     }
                 }
             }
+            Node::NamespaceImport { alias, path, .. } => {
+                let module_path = imports
+                    .iter()
+                    .find(|import| {
+                        import.raw_path == *path && import.namespace_alias.as_deref() == Some(alias)
+                    })
+                    .and_then(|import| import.resolved_path.clone())
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| path.clone());
+                if let Some(existing) = imported_names.get(alias) {
+                    if existing.module_path != module_path {
+                        diagnostics.push(PreflightDiagnostic {
+                            code: Code::ModuleImportCollision,
+                            path: file_path.display().to_string(),
+                            source: source.to_string(),
+                            span: node.span,
+                            message: format!(
+                                "preflight: import collision — '{alias}' is already imported from '{}' when binding namespace from '{path}'",
+                                existing.module_path
+                            ),
+                            help: Some(
+                                "rename the namespace alias: import * as <name> from \"...\""
+                                    .to_string(),
+                            ),
+                            tags: None,
+                        });
+                    }
+                } else {
+                    imported_names.insert(
+                        alias.clone(),
+                        ImportedName {
+                            module_path: module_path.clone(),
+                        },
+                    );
+                }
+            }
             _ => {}
         }
     }

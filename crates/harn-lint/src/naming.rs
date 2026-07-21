@@ -54,7 +54,10 @@ pub(crate) fn is_top_level_item(node: &Node) -> bool {
 }
 
 pub(crate) fn is_import_item(node: &Node) -> bool {
-    matches!(node, Node::ImportDecl { .. } | Node::SelectiveImport { .. })
+    matches!(
+        node,
+        Node::ImportDecl { .. } | Node::NamespaceImport { .. } | Node::SelectiveImport { .. }
+    )
 }
 
 /// Items whose preceding comments must use the canonical `/** */` form

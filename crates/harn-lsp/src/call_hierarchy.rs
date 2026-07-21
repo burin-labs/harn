@@ -718,6 +718,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
         }
         Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
+        | Node::NamespaceImport { .. }
         | Node::EnumDecl { .. }
         | Node::StructDecl { .. }
         | Node::InterfaceDecl { .. }

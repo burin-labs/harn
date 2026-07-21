@@ -248,7 +248,9 @@ fn scan_node_bundle(
     manifest: &mut BundleManifestBuilder,
 ) {
     match &node.node {
-        Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
+        Node::ImportDecl { path, .. }
+        | Node::SelectiveImport { path, .. }
+        | Node::NamespaceImport { path, .. } => {
             if let Some(import_path) = resolve_import_path(file_path, path) {
                 if let Some(parsed) = parse_resolved_module(&import_path) {
                     manifest.add_module(&import_path, "import");
@@ -509,6 +511,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         Node::ImplBlock { methods, .. } => methods.iter().collect(),
         Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
+        | Node::NamespaceImport { .. }
         | Node::EnumDecl { .. }
         | Node::StructDecl { .. }
         | Node::InterfaceDecl { .. }

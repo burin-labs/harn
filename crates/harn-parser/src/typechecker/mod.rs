@@ -40,6 +40,15 @@ pub struct InlayHintInfo {
     pub label: String,
 }
 
+/// Static info for one `import * as alias from "path"` binding.
+#[derive(Debug, Clone)]
+pub struct NamespaceImportBinding {
+    /// Module path as written / resolved display string for diagnostics.
+    pub module_path: String,
+    /// Public export names from the target module.
+    pub members: BTreeSet<String>,
+}
+
 /// A diagnostic produced by the type checker.
 #[derive(Debug, Clone)]
 pub struct TypeDiagnostic {
@@ -144,6 +153,9 @@ pub struct TypeChecker {
     /// Callable declarations imported from other modules. Only their
     /// signatures are registered; bodies stay owned by the defining module.
     imported_callable_decls: Vec<SNode>,
+    /// Namespace imports (`import * as alias from "..."`). The alias is bound
+    /// as an annotated shape whose fields are the target module's exports.
+    namespace_imports: std::collections::HashMap<String, NamespaceImportBinding>,
     /// Compile-time environment populated by every successfully folded
     /// `const` binding. Later const initializers see earlier values so
     /// expressions like `const Y = X + 1` work.
@@ -318,6 +330,7 @@ impl TypeChecker {
             imported_names: None,
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
+            namespace_imports: std::collections::HashMap::new(),
             const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
@@ -340,6 +353,7 @@ impl TypeChecker {
             imported_names: None,
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
+            namespace_imports: std::collections::HashMap::new(),
             const_env: crate::const_eval::ConstEnv::new(),
             subtype_cycle_guard: std::cell::RefCell::new(Vec::new()),
         }
@@ -374,6 +388,26 @@ impl TypeChecker {
     /// body in the caller's scope.
     pub fn with_imported_callable_decls(mut self, imported: Vec<SNode>) -> Self {
         self.imported_callable_decls = imported;
+        self
+    }
+
+    /// Attach namespace imports (`import * as alias from "..."`).
+    ///
+    /// Each alias is registered in `imported_names` (when that set is present)
+    /// and bound as an annotated closed shape so `alias.member` / `alias.member()`
+    /// are validated against the target module's export set.
+    pub fn with_namespace_imports(
+        mut self,
+        imports: impl IntoIterator<Item = (String, NamespaceImportBinding)>,
+    ) -> Self {
+        let imports: std::collections::HashMap<String, NamespaceImportBinding> =
+            imports.into_iter().collect();
+        if let Some(names) = self.imported_names.as_mut() {
+            for alias in imports.keys() {
+                names.insert(alias.clone());
+            }
+        }
+        self.namespace_imports = imports;
         self
     }
 

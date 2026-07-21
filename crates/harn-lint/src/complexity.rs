@@ -181,6 +181,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
             | Node::DurationLiteral(_)
             | Node::Identifier(_)
             | Node::ImportDecl { .. }
+            | Node::NamespaceImport { .. }
             | Node::SelectiveImport { .. }
             | Node::OverrideDecl { .. }
             | Node::EnumDecl { .. }

@@ -1629,7 +1629,8 @@ impl TypeChecker {
             | Node::ContinueStmt
             | Node::ReturnStmt { value: None }
             | Node::ImportDecl { .. }
-            | Node::SelectiveImport { .. } => {}
+            | Node::SelectiveImport { .. }
+            | Node::NamespaceImport { .. } => {}
             Node::Identifier(name) => {
                 self.check_value_identifier_resolves(name, span, scope);
             }
@@ -1646,7 +1647,6 @@ impl TypeChecker {
                 self.check_attributes(attributes, inner);
                 self.check_node(inner, scope);
             }
-
             // Or-patterns are only meaningful as a match-arm pattern.
             // Enforce the literal-only restriction here: an alternative
             // that is not a literal pattern (string, int, float, bool,

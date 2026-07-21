@@ -27,6 +27,7 @@ const TOKEN_RS = "crates/harn-lexer/src/token.rs"
 // (so user code may still use them as identifiers outside their special
 // position). Keep alphabetical.
 const CONTEXTUAL = [
+  "as",
   "block",
   "default",
   "each",

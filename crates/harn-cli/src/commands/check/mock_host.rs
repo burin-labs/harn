@@ -98,7 +98,9 @@ fn collect_mock_host_capabilities_from_node(
                 }
             }
         }
-        Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
+        Node::ImportDecl { path, .. }
+        | Node::SelectiveImport { path, .. }
+        | Node::NamespaceImport { path, .. } => {
             let Some(import_path) = resolve_import_path(file_path, path) else {
                 return;
             };

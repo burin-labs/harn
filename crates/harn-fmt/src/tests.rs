@@ -1215,6 +1215,23 @@ pipeline default(task) { log(1) }"#;
 }
 
 #[test]
+fn test_namespace_import_formats_and_sorts_between_wildcard_and_selective() {
+    let source = r#"import { zebra } from "module"
+import * as ns from "module"
+import "module"
+pipeline default(task) { log(1) }"#;
+    let result = format_source(source).unwrap();
+    let wildcard = result.find("import \"module\"").unwrap();
+    let namespace = result.find("import * as ns from \"module\"").unwrap();
+    let selective = result.find("import { zebra } from \"module\"").unwrap();
+    assert!(
+        wildcard < namespace && namespace < selective,
+        "namespace import should sort after wildcard and before selective, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
 fn test_roundtrip_never_type_annotation() {
     assert_roundtrip(
         r#"pipeline default(task) {

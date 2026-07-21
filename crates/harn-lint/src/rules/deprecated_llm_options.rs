@@ -274,6 +274,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
         | Node::StructDecl { .. }
         | Node::InterfaceDecl { .. }
         | Node::ImportDecl { .. }
+        | Node::NamespaceImport { .. }
         | Node::SelectiveImport { .. }
         | Node::TypeDecl { .. }
         | Node::BreakStmt

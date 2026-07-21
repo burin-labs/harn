@@ -1009,6 +1009,7 @@ fn collect_symbols(
         | Node::DurationLiteral(_)
         | Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
+        | Node::NamespaceImport { .. }
         | Node::TypeDecl { .. }
         | Node::ReturnStmt { value: None }
         | Node::YieldExpr { value: None }

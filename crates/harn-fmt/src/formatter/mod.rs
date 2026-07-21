@@ -498,17 +498,24 @@ impl<'a> Formatter<'a> {
     fn is_import_node(node: &SNode) -> bool {
         matches!(
             node.node,
-            Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+            Node::ImportDecl { .. } | Node::NamespaceImport { .. } | Node::SelectiveImport { .. }
         )
     }
 
     fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
         match &node.node {
+            // Kind order: wildcard=0, namespace=1, selective=2.
             Node::ImportDecl { path, .. } => (
                 u8::from(!path.starts_with("std/")),
                 path.clone(),
                 0,
                 String::new(),
+            ),
+            Node::NamespaceImport { alias, path, .. } => (
+                u8::from(!path.starts_with("std/")),
+                path.clone(),
+                1,
+                alias.clone(),
             ),
             Node::SelectiveImport { names, path, .. } => {
                 let mut sorted_names = names.clone();
@@ -516,11 +523,11 @@ impl<'a> Formatter<'a> {
                 (
                     u8::from(!path.starts_with("std/")),
                     path.clone(),
-                    1,
+                    2,
                     sorted_names.join(","),
                 )
             }
-            _ => (2, String::new(), 2, String::new()),
+            _ => (3, String::new(), 3, String::new()),
         }
     }
 

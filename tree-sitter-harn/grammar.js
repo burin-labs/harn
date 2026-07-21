@@ -208,6 +208,15 @@ module.exports = grammar({
         seq(
           optional("pub"),
           "import",
+          "*",
+          "as",
+          field("alias", $.identifier),
+          "from",
+          $.string_literal
+        ),
+        seq(
+          optional("pub"),
+          "import",
           "{",
           commaSep1($.identifier),
           optional(","),

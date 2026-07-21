@@ -103,6 +103,35 @@ impl TypeChecker {
         ) {
             return;
         }
+        if let Node::Identifier(alias) = &object.node {
+            if let Some(binding) = self.namespace_imports.get(alias) {
+                if !binding.members.contains(property) {
+                    let candidates: Vec<&str> =
+                        binding.members.iter().map(String::as_str).collect();
+                    let max_dist = if property.len() <= 4 { 1 } else { 2 };
+                    let suggestion = crate::diagnostic::find_closest_match(
+                        property,
+                        candidates.iter().copied(),
+                        max_dist,
+                    );
+                    let mut msg = format!(
+                        "module `{}` has no exported member `{property}`",
+                        binding.module_path
+                    );
+                    if let Some(close) = suggestion {
+                        msg.push_str(&format!(" — did you mean `{close}`?"));
+                    }
+                    let help = if candidates.is_empty() {
+                        format!("module `{}` exports no public names", binding.module_path)
+                    } else {
+                        format!("exported members: {}", candidates.join(", "))
+                    };
+                    self.error_at_with_help(Code::UnknownField, msg, span, help);
+                }
+                return;
+            }
+        }
+
         match &resolved {
             TypeExpr::Shape(fields) if !fields.iter().any(|f| f.name == *property) => {
                 let actual: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
@@ -424,6 +453,35 @@ impl TypeChecker {
         span: Span,
     ) {
         use crate::typechecker::method_registry as reg;
+
+        if let Node::Identifier(alias) = &object.node {
+            if let Some(binding) = self.namespace_imports.get(alias) {
+                if !binding.members.contains(method) {
+                    let candidates: Vec<&str> =
+                        binding.members.iter().map(String::as_str).collect();
+                    let max_dist = if method.len() <= 4 { 1 } else { 2 };
+                    let suggestion = crate::diagnostic::find_closest_match(
+                        method,
+                        candidates.iter().copied(),
+                        max_dist,
+                    );
+                    let mut msg = format!(
+                        "module `{}` has no exported member `{method}`",
+                        binding.module_path
+                    );
+                    if let Some(close) = suggestion {
+                        msg.push_str(&format!(" — did you mean `{close}`?"));
+                    }
+                    let help = if candidates.is_empty() {
+                        format!("module `{}` exports no public names", binding.module_path)
+                    } else {
+                        format!("exported members: {}", candidates.join(", "))
+                    };
+                    self.error_at_with_help(Code::UnknownMethod, msg, span, help);
+                }
+                return;
+            }
+        }
 
         let Some(raw) = self.infer_type(object, scope) else {
             return;

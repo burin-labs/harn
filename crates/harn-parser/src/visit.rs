@@ -150,6 +150,7 @@ fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
         Node::StructDecl { .. }
         | Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
+        | Node::NamespaceImport { .. }
         | Node::TypeDecl { .. }
         | Node::BreakStmt
         | Node::ContinueStmt => {}

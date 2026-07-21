@@ -534,6 +534,7 @@ fn import_is_vendor_locked(node: &SNode) -> bool {
         Node::SelectiveImport { names, path, .. } => {
             import_path_or_names_vendor_locked(path, names)
         }
+        Node::NamespaceImport { path, .. } => import_path_or_names_vendor_locked(path, &[]),
         _ => false,
     }
 }

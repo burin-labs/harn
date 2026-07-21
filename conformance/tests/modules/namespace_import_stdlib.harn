@@ -1,0 +1,5 @@
+import * as text from "std/text"
+
+pipeline default() {
+  __io_println(text.int_to_string(42))
+}

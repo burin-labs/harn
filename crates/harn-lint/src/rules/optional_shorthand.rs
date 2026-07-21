@@ -355,6 +355,7 @@ impl<'a, 'd> State<'a, 'd> {
             }
             // Leaf / no-type nodes — nothing to walk.
             Node::ImportDecl { .. }
+            | Node::NamespaceImport { .. }
             | Node::SelectiveImport { .. }
             | Node::BreakStmt
             | Node::ContinueStmt

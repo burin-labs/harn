@@ -33,6 +33,22 @@ pub(crate) fn typecheck_config(
     config: &CheckConfig,
     module_graph: &harn_modules::ModuleGraph,
 ) -> TypeCheckConfig {
+    let namespace_imports = module_graph
+        .namespace_imports_for_file(path)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|info| {
+            (
+                info.alias,
+                harn_parser::NamespaceImportBinding {
+                    // Prefer the import string as written (`std/text`,
+                    // `./lib`) so diagnostics stay stable across machines.
+                    module_path: info.raw_path,
+                    members: info.member_names.into_iter().collect(),
+                },
+            )
+        })
+        .collect();
     TypeCheckConfig::new()
         .with_strict_types(config.strict_types)
         .with_imported_names(module_graph.imported_names_for_file(path))
@@ -46,6 +62,7 @@ pub(crate) fn typecheck_config(
                 .imported_callable_declarations_for_file(path)
                 .unwrap_or_default(),
         )
+        .with_namespace_imports(namespace_imports)
 }
 
 pub(crate) fn render_file_analysis_error_or_exit(path: &str, error: FileAnalysisError) -> ! {

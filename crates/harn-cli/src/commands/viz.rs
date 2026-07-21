@@ -367,6 +367,14 @@ fn summarize_node(node: &SNode) -> String {
                 truncate(path)
             )
         }
+        Node::NamespaceImport {
+            alias,
+            path,
+            is_pub,
+        } => {
+            let prefix = if *is_pub { "pub " } else { "" };
+            format!("{prefix}import * as {alias} from \"{}\"", truncate(path))
+        }
         Node::EnumDecl { name, .. } => format!("enum {name}"),
         Node::StructDecl { name, .. } => format!("struct {name}"),
         Node::InterfaceDecl { name, .. } => format!("interface {name}"),

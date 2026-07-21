@@ -72,6 +72,22 @@ impl crate::vm::Vm {
                 if map.get(method).is_some_and(Self::is_callable_value) {
                     return None;
                 }
+                if let Some(VmValue::String(module_path)) = map.get("_namespace") {
+                    let mut members: Vec<&str> = map
+                        .keys()
+                        .map(|k| k.as_str())
+                        .filter(|k| *k != "_namespace")
+                        .collect();
+                    members.sort_unstable();
+                    let hint = if members.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — exported members: {}", members.join(", "))
+                    };
+                    return Some(Err(VmError::Runtime(format!(
+                        "module `{module_path}` has no exported member `{method}`{hint}"
+                    ))));
+                }
                 Err(VmError::Runtime(format!("dict has no method `{method}`")))
             }
         };

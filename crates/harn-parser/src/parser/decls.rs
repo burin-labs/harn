@@ -126,6 +126,32 @@ impl Parser {
             return self.parse_scoped_selective_import(start, is_pub);
         }
 
+        // Namespace import: `import * as alias from "module"`.
+        if self.check(&TokenKind::Star) {
+            self.advance();
+            if !self.check_identifier("as") {
+                return Err(self.error("'as'"));
+            }
+            self.advance();
+            let alias = self.consume_identifier("namespace import alias")?;
+            self.consume(&TokenKind::From, "from")?;
+            if let Some(tok) = self.current() {
+                if let TokenKind::StringLiteral(path) = &tok.kind {
+                    let path = path.clone();
+                    self.advance();
+                    return Ok(spanned(
+                        Node::NamespaceImport {
+                            alias,
+                            path,
+                            is_pub,
+                        },
+                        Span::merge(start, self.prev_span()),
+                    ));
+                }
+            }
+            return Err(self.error("import path string"));
+        }
+
         // Selective import: `import { foo, bar } from "module"`.
         if self.check(&TokenKind::LBrace) {
             self.advance();
