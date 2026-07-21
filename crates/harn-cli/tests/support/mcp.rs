@@ -239,30 +239,37 @@ impl StdioMcpClient {
     /// Drop stdin (signalling EOF) and wait, bounded, for a successful exit.
     /// A server that does not exit promptly on EOF is diagnosed with its
     /// stderr rather than left to consume the nextest slow-test cap.
+    ///
+    /// The wait is event-driven, not polled: the stdout reader thread's
+    /// channel disconnects when the child closes stdout, which for
+    /// `harn mcp serve` happens as it exits on EOF. Blocking on that channel
+    /// with a deadline (rather than a `try_wait` + sleep loop) keeps the
+    /// bound without a wall-clock poll.
     pub fn shutdown_expect_success(mut self) {
         drop(self.stdin.take());
         let deadline = Instant::now() + self.timeout;
         loop {
-            match self.child.try_wait() {
-                Ok(Some(status)) => {
-                    assert!(
-                        status.success(),
-                        "`harn mcp serve` exited unsuccessfully: {status}\nstderr:\n{}",
-                        self.collect_stderr()
-                    );
-                    return;
-                }
-                Ok(None) => {
-                    if Instant::now() >= deadline {
-                        self.diagnose(
-                            "`harn mcp serve` did not exit within the deadline after stdin EOF",
-                        );
-                    }
-                    thread::sleep(Duration::from_millis(25));
-                }
-                Err(error) => panic!("waiting on `harn mcp serve` failed: {error}"),
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                self.diagnose("`harn mcp serve` did not close stdout / exit within the deadline after stdin EOF");
+            }
+            match self.stdout_rx.recv_timeout(remaining) {
+                // Trailing output before shutdown; keep draining until EOF.
+                Ok(_) => continue,
+                // stdout closed: the process is exiting, so the reap below is
+                // effectively immediate.
+                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => self.diagnose(
+                    "`harn mcp serve` did not close stdout / exit within the deadline after stdin EOF",
+                ),
             }
         }
+        let status = self.child.wait().expect("wait on `harn mcp serve`");
+        assert!(
+            status.success(),
+            "`harn mcp serve` exited unsuccessfully: {status}\nstderr:\n{}",
+            self.collect_stderr()
+        );
     }
 
     /// Kill the child and panic with `context`, the last request sent, and
