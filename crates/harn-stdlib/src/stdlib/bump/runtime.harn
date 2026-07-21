@@ -156,7 +156,7 @@ pub fn bump_options(overrides: dict = {}) -> BumpOptions {
     repo: to_string(o.repo ?? ""),
     branch: to_string(o.branch ?? "automation/bump-harn-runtime"),
     base: to_string(o.base ?? "main"),
-    enable_auto_merge: (o.enable_auto_merge ?? true) == true,
+    enable_auto_merge: o.enable_auto_merge != false,
     merge_method: to_string(o.merge_method ?? "squash"),
   }
 }
