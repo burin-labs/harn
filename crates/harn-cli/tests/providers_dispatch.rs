@@ -426,11 +426,22 @@ fn provider_tool_probe_audit_validates_catalog_requests_in_process() {
         harn_value["request_profiles"],
         serde_json::json!(["catalog_default", "parameter_edges"])
     );
+    // No catalog request may FAIL validation. Not-applicable requests (e.g.
+    // signed-thinking probes on providers without a signed-thinking surface)
+    // are expected and grow with the catalog, so assert the accounting balances
+    // rather than a brittle exact not-applicable count.
     assert_eq!(harn_value["validation_fail_count"], 0);
-    assert_eq!(harn_value["not_applicable_count"], 0);
+    let request_count = harn_value["request_count"].as_u64().unwrap();
+    let validation_pass_count = harn_value["validation_pass_count"].as_u64().unwrap();
+    let not_applicable_count = harn_value["not_applicable_count"].as_u64().unwrap();
+    assert!(
+        validation_pass_count > 0,
+        "audit should validate at least some requests"
+    );
     assert_eq!(
-        harn_value["validation_pass_count"],
-        harn_value["request_count"]
+        validation_pass_count + not_applicable_count,
+        request_count,
+        "with zero failures, pass + not_applicable must account for every request"
     );
     assert!(
         harn_value["request_count"].as_u64().unwrap_or_default() >= 160,

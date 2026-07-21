@@ -380,39 +380,37 @@ fn provider_dispatch_audit_tool_probe_plan_marks_signed_thinking_not_applicable(
         plan["readiness_commands"][0]["route"],
         "ollama:devstral-small-2:24b"
     );
+    // One route x one case x two modes x two request profiles, every cell
+    // not-applicable for the same reason. Assert the shape and coverage as
+    // sets rather than fragile per-index positions that reorder when the
+    // request-profile set grows.
+    let not_applicable = plan["not_applicable_commands"]
+        .as_array()
+        .expect("not_applicable_commands is array");
+    assert_eq!(not_applicable.len(), 4);
+    let modes: std::collections::BTreeSet<&str> = not_applicable
+        .iter()
+        .map(|c| c["mode"].as_str().unwrap_or_default())
+        .collect();
     assert_eq!(
-        plan["not_applicable_commands"]
-            .as_array()
-            .expect("not_applicable_commands is array")
-            .len(),
-        2
+        modes,
+        std::collections::BTreeSet::from(["non_streaming", "streaming"])
     );
+    let profiles: std::collections::BTreeSet<&str> = not_applicable
+        .iter()
+        .map(|c| c["request_profile"].as_str().unwrap_or_default())
+        .collect();
     assert_eq!(
-        plan["not_applicable_commands"][0]["route"],
-        "ollama:devstral-small-2:24b"
+        profiles,
+        std::collections::BTreeSet::from(["catalog_default", "parameter_edges"])
     );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["case"],
-        "signed_thinking_tool_result_followup"
-    );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["structured_output"],
-        "format_kw"
-    );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["structured_output_mode"],
-        "delimited"
-    );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["request_profile"],
-        "catalog_default"
-    );
-    assert_eq!(plan["not_applicable_commands"][0]["mode"], "non_streaming");
-    assert_eq!(plan["not_applicable_commands"][1]["mode"], "streaming");
-    assert_eq!(
-        plan["not_applicable_commands"][0]["reason"],
-        "route_has_no_signed_thinking_tool_history_surface"
-    );
+    assert!(not_applicable.iter().all(|c| {
+        c["route"] == "ollama:devstral-small-2:24b"
+            && c["case"] == "signed_thinking_tool_result_followup"
+            && c["structured_output"] == "format_kw"
+            && c["structured_output_mode"] == "delimited"
+            && c["reason"] == "route_has_no_signed_thinking_tool_history_surface"
+    }));
 }
 
 #[test]
