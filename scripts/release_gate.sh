@@ -758,6 +758,8 @@ PY
   echo "  3. Push the signed v$next tag at the pinned release commit"
   echo "  4. Open the Release v$next PR and enable auto-merge"
   echo "  5. Let the tag-triggered publish and binary workflows finish"
+  echo "  6. Require Release smoke against the published artifacts:"
+  echo "       ./scripts/check_release_smoke.sh v$next"
 }
 
 cmd_publish() {
@@ -786,9 +788,12 @@ cmd_publish() {
     return
   fi
   echo "Publish phase complete for v$version"
-  echo "Follow-up:"
+  echo "Follow-up / verification checklist:"
   echo "  Ensure tag v$version has been pushed from the merge-queue-approved main commit"
   echo "  Review changelog-backed GitHub release notes"
+  echo "  Wait for Build release binaries to finalize the GitHub release (7 assets)"
+  echo "  Require Release smoke to pass against the published artifacts:"
+  echo "    ./scripts/check_release_smoke.sh v$version"
 }
 
 cmd_notes() {

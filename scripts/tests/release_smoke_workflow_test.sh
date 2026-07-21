@@ -30,6 +30,10 @@ else:
     if workflow_run.get("types") != ["completed"]:
         failures.append("workflow_run must trigger only on completed runs")
 
+run_name = str(workflow.get("run-name", ""))
+if "github.event.workflow_run.head_branch" not in run_name:
+    failures.append("run-name must surface the triggering release ref for the Actions run list")
+
 for forbidden in (
     "HARN_RELEASE_ASSET_WAIT_SECONDS",
     "sleep 30",
@@ -44,11 +48,18 @@ resolve = jobs.get("resolve", {})
 resolve_if = str(resolve.get("if", ""))
 for required in (
     "github.event.workflow_run.conclusion == 'success'",
-    "github.event.workflow_run.event == 'push'",
     "startsWith(github.event.workflow_run.head_branch, 'v')",
+    "startsWith(github.event.workflow_run.head_branch, 'release/v')",
+    "startsWith(github.event.workflow_run.head_branch, 'release-attempt/v')",
 ):
     if required not in resolve_if:
         failures.append(f"resolve job must gate workflow_run releases with: {required}")
+
+if "github.event.workflow_run.event == 'push'" in resolve_if:
+    failures.append(
+        "resolve job must not require workflow_run.event == 'push' "
+        "(recovery / release-attempt dispatches that finalize must also smoke)"
+    )
 
 timeout = resolve.get("timeout-minutes")
 if not isinstance(timeout, int) or timeout > 10:
@@ -63,6 +74,12 @@ if resolve_step is None:
     failures.append("resolve job must keep an id=resolve step")
 else:
     run = str(resolve_step.get("run", ""))
+    if "Create GitHub release" not in run:
+        failures.append(
+            "resolve step must require the triggering run's Create GitHub release job to succeed"
+        )
+    if "extract_release_tag" not in run:
+        failures.append("resolve step must extract vX.Y.Z from tag and release-branch head_branch shapes")
     if run.count("gh release view") != 1:
         failures.append("resolve step must inspect release assets exactly once")
     if "Missing release assets" not in run:
@@ -72,8 +89,11 @@ else:
             failures.append(f"resolve step must require finalized release asset {asset}")
 
 smoke = jobs.get("smoke", {})
-if str(smoke.get("if", "")).strip() != "needs.resolve.result == 'success'":
-    failures.append("smoke matrix must run only after successful input resolution")
+smoke_if = str(smoke.get("if", ""))
+if "needs.resolve.outputs.mode == 'artifact'" not in smoke_if:
+    failures.append("smoke matrix must run only for artifact or source modes (not noop)")
+if "needs.resolve.outputs.mode == 'source'" not in smoke_if:
+    failures.append("smoke matrix must still allow scheduled/manual source-health mode")
 checkout = None
 for step in smoke.get("steps", []):
     if str(step.get("uses", "")).startswith("actions/checkout@"):
