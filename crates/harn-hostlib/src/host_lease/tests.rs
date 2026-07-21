@@ -803,6 +803,33 @@ fn lease_database_uses_wal_journal_mode() {
     assert_eq!(mode.to_lowercase(), "wal");
 }
 
+#[test]
+fn concurrent_fresh_stores_survive_the_wal_conversion_race() {
+    // The first connection against a brand-new database file converts it to
+    // WAL under an exclusive lock. Stores racing to open the same fresh
+    // registry must wait that conversion out (the busy timeout is installed
+    // before the first pragma runs) rather than erroring "database is locked".
+    let temp = TempDir::new().unwrap();
+    let worker_count = 8;
+    let barrier = Arc::new(Barrier::new(worker_count));
+    let handles: Vec<_> = (0..worker_count)
+        .map(|worker| {
+            let barrier = Arc::clone(&barrier);
+            let root = temp.path().to_path_buf();
+            thread::spawn(move || {
+                barrier.wait();
+                let store = HostLeaseStore::for_root(root).unwrap();
+                store
+                    .try_acquire_once(request(&format!("owner-{worker}")), None, None)
+                    .unwrap();
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+}
+
 static BUSY_HANDLER_BARRIERS: OnceLock<(Barrier, Barrier)> = OnceLock::new();
 static BUSY_HANDLER_OBSERVED: AtomicBool = AtomicBool::new(false);
 

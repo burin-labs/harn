@@ -911,6 +911,13 @@ impl HostLeaseStore {
 
     fn connection(&self, busy_timeout: Duration) -> Result<Connection, HostLeaseError> {
         let conn = Connection::open(&self.db_path)?;
+        // Lock patience must be installed before the first statement runs: the
+        // journal-mode pragma below takes an exclusive lock while it actually
+        // converts a fresh database to WAL, and a newly opened connection has
+        // no busy timeout, so connections racing to open the same new registry
+        // would fail that conversion instantly with "database is locked"
+        // instead of waiting the mutation window out.
+        self.install_lock_patience(&conn, busy_timeout)?;
         // Use WAL journal mode so readers and writers proceed concurrently
         // instead of taking a whole-database exclusive lock. Under the default
         // rollback journal a writer blocks every other connection, and on
@@ -924,15 +931,23 @@ impl HostLeaseStore {
         // Executed via `execute_batch` because `PRAGMA journal_mode` returns the
         // resulting mode as a row.
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
+        Ok(conn)
+    }
+
+    fn install_lock_patience(
+        &self,
+        conn: &Connection,
+        busy_timeout: Duration,
+    ) -> Result<(), HostLeaseError> {
         #[cfg(test)]
         if !busy_timeout.is_zero() {
             if let Some(handler) = self.busy_handler {
                 conn.busy_handler(Some(handler))?;
-                return Ok(conn);
+                return Ok(());
             }
         }
         conn.busy_timeout(busy_timeout)?;
-        Ok(conn)
+        Ok(())
     }
 
     #[cfg(test)]
