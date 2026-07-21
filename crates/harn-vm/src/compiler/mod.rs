@@ -300,6 +300,23 @@ impl Compiler {
                 if self.emit_schema_for_alias(name) {
                     return Ok(());
                 }
+                // A type-alias name in value position denotes its runtime
+                // schema. If materialization failed we would otherwise fall
+                // through to a bare variable load and surface a misleading
+                // `Undefined variable` at runtime. Only a locally-defined
+                // alias body can reach here (imported names and
+                // successfully-lowered aliases take the branch above), so name
+                // the alias and the failure at compile time instead.
+                if let Some(alias) = self.type_aliases.get(name) {
+                    if alias.body.is_some() {
+                        return Err(CompileError {
+                            message: format!(
+                                "cannot materialize a runtime schema for type alias `{name}`: it nests a type with no schema representation (for example an unbounded-recursive generic)"
+                            ),
+                            line: self.line,
+                        });
+                    }
+                }
                 self.emit_get_binding(name);
             }
             Node::LetBinding { pattern, value, .. } => {
