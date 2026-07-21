@@ -315,6 +315,7 @@
 - [Maintainer release workflow](./maintainer-release.md)
 - [Release assets manifest](./dev/release-assets-manifest.md)
 - [Release runner policy](./dev/release-runner-policy.md)
+- [Reusable bump-harn workflow](./dev/reusable-bump-harn-runtime.md)
 - [Platform compatibility](./dev/platform-compatibility.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Deterministic test patterns](./dev/testing.md)

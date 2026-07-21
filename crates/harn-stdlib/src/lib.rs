@@ -304,6 +304,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "workflow/repair" => "stdlib/workflow/repair.harn",
     "security" => "stdlib/stdlib_security.harn",
     "pii" => "stdlib/stdlib_pii.harn",
+    "bump/runtime" => "stdlib/bump/runtime.harn",
+    "bump/live" => "stdlib/bump/live.harn",
 ]);
 
 /// Canonical normalized connector event schemas, authored as Harn `type`
