@@ -322,6 +322,11 @@ jobs:
         with:
           cache-key: package-audit
           sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          # On the hosted path (Blacksmith off) sccache has no sticky disk, so
+          # back it with the free GitHub Actions cache. Independent kill switch
+          # HARN_CI_DISABLE_SCCACHE_GHA restores the backendless 0%-hit path
+          # without re-enabling Blacksmith.
+          gha-backend: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
       - uses: ./.github/actions/rust-cache
         if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
         continue-on-error: true
@@ -427,6 +432,9 @@ jobs:
         with:
           cache-key: ${{ matrix.cache_key }}
           sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          # Hosted path: back sccache with the free GitHub Actions cache (see the
+          # package-audit lane). HARN_CI_DISABLE_SCCACHE_GHA is the kill switch.
+          gha-backend: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
       - uses: ./.github/actions/rust-cache
         if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
         continue-on-error: true
