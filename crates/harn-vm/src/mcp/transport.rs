@@ -186,62 +186,61 @@ pub(crate) async fn read_stdio_response(
     drained: Vec<serde_json::Value>,
     mut line_buf: Vec<u8>,
 ) -> Result<serde_json::Value, VmError> {
-    // One cumulative deadline for the whole response wait. Reading each line
-    // under its own `MCP_TIMEOUT` let a server that interleaves notifications
-    // reset the clock indefinitely, blocking an agent turn far beyond the
-    // budget (harn#4390). The deadline is fixed once here so notifications no
-    // longer extend it; a single synchronous call is bounded end to end.
-    let deadline = tokio::time::Instant::now() + inner.response_deadline;
-    let budget_secs = inner.response_deadline.as_secs();
-    let timed_out = || {
-        VmError::Runtime(format!(
-            "MCP: server did not respond to '{method}' within {budget_secs}s"
-        ))
-    };
-
     // Messages drained while the request write was in flight come first, in
-    // arrival order.
+    // arrival order; they are already available, so no waiting is involved.
     for msg in drained {
         if let Some(response) = dispatch_stdio_message(inner, server_name, id, msg).await? {
             return Ok(response);
         }
     }
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            return Err(timed_out());
-        }
-        // `line_buf` may still hold a partial line left over from the write
-        // drain; the first read resumes it.
-        let bytes_read = tokio::time::timeout(
-            remaining,
-            read_line_capped(&mut inner.reader, &mut line_buf, MCP_STDIO_MAX_LINE_BYTES),
-        )
-        .await
-        .map_err(|_| timed_out())??;
 
-        if bytes_read == 0 {
-            return Err(VmError::Runtime("MCP: server closed connection".into()));
-        }
+    // One cumulative timeout bounds the ENTIRE response wait. Reading each
+    // line under its own `MCP_TIMEOUT` let a server that interleaves
+    // notifications reset the clock on every line, blocking an agent turn far
+    // beyond the budget (harn#4390). Wrapping the whole loop in a single
+    // `timeout` fixes the budget end to end without a per-read reset — a
+    // single synchronous MCP call is bounded regardless of how many
+    // notifications arrive. `read_line_capped` is cancel-safe, so a timeout
+    // that drops this future mid-read loses no already-consumed bytes.
+    let budget = inner.response_deadline;
+    let read_loop = async {
+        loop {
+            // `line_buf` may still hold a partial line left over from the
+            // write drain; the first read resumes it.
+            let bytes_read =
+                read_line_capped(&mut inner.reader, &mut line_buf, MCP_STDIO_MAX_LINE_BYTES)
+                    .await?;
 
-        let msg = {
-            let text = std::str::from_utf8(&line_buf)
-                .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                serde_json::from_str::<serde_json::Value>(trimmed).ok()
+            if bytes_read == 0 {
+                return Err(VmError::Runtime("MCP: server closed connection".into()));
             }
-        };
-        line_buf.clear();
-        let Some(msg) = msg else {
-            continue;
-        };
-        if let Some(response) = dispatch_stdio_message(inner, server_name, id, msg).await? {
-            return Ok(response);
+
+            let msg = {
+                let text = std::str::from_utf8(&line_buf)
+                    .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    serde_json::from_str::<serde_json::Value>(trimmed).ok()
+                }
+            };
+            line_buf.clear();
+            let Some(msg) = msg else {
+                continue;
+            };
+            if let Some(response) = dispatch_stdio_message(inner, server_name, id, msg).await? {
+                return Ok(response);
+            }
         }
-    }
+    };
+
+    tokio::time::timeout(budget, read_loop).await.map_err(|_| {
+        VmError::Runtime(format!(
+            "MCP: server did not respond to '{method}' within {}s",
+            budget.as_secs()
+        ))
+    })?
 }
 
 /// Route one inbound stdio message while waiting for the response to request
