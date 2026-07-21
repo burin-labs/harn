@@ -12,7 +12,7 @@
  * running. `Verdict` makes the third outcome a first-class, uncoercible value.
  *
  * ISSUANCE AUTHORITY LIVES AT THE HOST BOUNDARY. A positive verdict is ISSUED by
- * the party that observed execution, never ASSERTED by the caller. The `pass`
+ * the party that observed execution, never ASSERTED by the caller. The `Pass`
  * variant carries a `proof: verdict_receipt` — an OPAQUE host value minted only
  * by `harness.verdict.issue`, and only from the host-owned record of a REAL
  * `run_test` execution whose plan the host discovered in the active workspace
@@ -22,30 +22,22 @@
  * handle, so it can never earn a pass — the proof is bound to execution the host
  * itself ran and observed, not to evidence the caller authored. No `.harn` code
  * can construct a `verdict_receipt` (there is no literal and no builtin hands one
- * back bare), so a hand-authored `{kind: "pass", ...}` is a type error and cannot
- * be minted by lying to a constructor — the constructor takes no disposition
- * scalar at all. `indeterminate` is the honest replacement for fail-open; an
- * exhaustive `match v.kind` forces every consumer to handle it separately from
- * `pass`.
+ * back bare), so `Verdict.Pass(...)` cannot be minted by lying to a constructor —
+ * the constructor takes no disposition scalar at all, and its first field rejects
+ * anything that is not a host-issued receipt. `Indeterminate` is the honest
+ * replacement for fail-open; an exhaustive `match` on `Verdict` forces every
+ * consumer to handle it separately from `Pass`.
  */
-/**
- * The proof-backed positive variant. `proof` is the opaque host receipt; a
- *  non-receipt value fails this annotation, so a pass is unforgeable.
- */
-type VerdictPass = {kind: "pass", proof: verdict_receipt, evidence_ref: string}
-
-/** The negative variant. */
-type VerdictFailShape = {kind: "fail", reason: string, detail: string}
-
-/** The undecided variant — the honest fail-open replacement. */
-type VerdictIndeterminateShape = {kind: "indeterminate", cause: string, detail: string}
-
 /**
  * A judge/gate disposition. Positive only with a host-issued proof receipt the
  * caller cannot forge; the undecided case is a first-class variant every
- * consumer must handle (an exhaustive `match v.kind` — `HARN-MAT-001`).
+ * consumer must handle (an exhaustive `match` — `HARN-MAT-001`).
  */
-pub type Verdict = VerdictPass | VerdictFailShape | VerdictIndeterminateShape
+pub enum Verdict {
+  Pass(proof: verdict_receipt, evidence_ref: string)
+  Fail(reason: string, detail: string)
+  Indeterminate(cause: string, detail: string)
+}
 
 /**
  * verdict_from_run — the sole positive path. Takes the result of a REAL host
@@ -53,9 +45,9 @@ pub type Verdict = VerdictPass | VerdictFailShape | VerdictIndeterminateShape
  * and asks the host issuance authority (`harness.verdict.issue`) to mint the
  * opaque receipt — but only when the host's OWN frozen disposition for that
  * execution is green. Maps the host outcome onto a Verdict: a red execution is
- * `fail`; a run with no handle, an unrecorded handle, or a zero-pass / unparsed
+ * `Fail`; a run with no handle, an unrecorded handle, or a zero-pass / unparsed
  * execution, caller-selected argv, or a plan outside the active workspace is
- * `indeterminate` (never a pass — the caller can neither assert a pass nor
+ * `Indeterminate` (never a pass — the caller can neither assert a pass nor
  * fabricate the evidence, because issuance reads no caller bytes).
  *
  * @effects: [host]
@@ -73,7 +65,7 @@ pub fn verdict_from_run(harness: Harness, run_result, subject = "") -> Verdict {
   }
   const r = harness.verdict.issue({result_handle: handle, subject: to_string(subject)})
   if r?.outcome == "pass" {
-    return {kind: "pass", proof: r.receipt, evidence_ref: to_string(r?.artifact_id ?? handle)}
+    return Verdict.Pass(r.receipt, to_string(r?.artifact_id ?? handle))
   }
   if r?.outcome == "fail" {
     return verdict_fail("evidence_red", to_string(r?.detail ?? ""))
@@ -83,7 +75,7 @@ pub fn verdict_from_run(harness: Harness, run_result, subject = "") -> Verdict {
 
 /**
  * verdict_from_checkpoint — combine an advisory judge decision with authoritative
- * host execution. The LLM checkpoint can VETO (`fail`) or ABSTAIN (`indeterminate`
+ * host execution. The LLM checkpoint can VETO (`Fail`) or ABSTAIN (`Indeterminate`
  * on error) but can NEVER mint a pass — entailment is not execution. Only when
  * the judge did not veto does the host execution decide, via verdict_from_run.
  *
@@ -116,7 +108,7 @@ pub fn verdict_from_checkpoint(
  * @api_stability: experimental
  */
 pub fn verdict_fail(reason: string, detail = "") -> Verdict {
-  return {kind: "fail", reason: to_string(reason), detail: to_string(detail)}
+  return Verdict.Fail(to_string(reason), to_string(detail))
 }
 
 /**
@@ -128,7 +120,7 @@ pub fn verdict_fail(reason: string, detail = "") -> Verdict {
  * @api_stability: experimental
  */
 pub fn verdict_indeterminate(cause: string, detail = "") -> Verdict {
-  return {kind: "indeterminate", cause: to_string(cause), detail: to_string(detail)}
+  return Verdict.Indeterminate(to_string(cause), to_string(detail))
 }
 
 /**
@@ -146,13 +138,21 @@ pub fn verdict_indeterminate(cause: string, detail = "") -> Verdict {
  */
 pub fn verdict_all(harness: Harness, verdicts: list) -> Verdict {
   for v in verdicts {
-    if v.kind == "fail" {
-      return v
+    match v {
+      Fail(_reason, _detail) -> { return v }
+      Pass(_proof, _evidence_ref) -> {
+      }
+      Indeterminate(_cause, _detail) -> {
+      }
     }
   }
   for v in verdicts {
-    if v.kind == "indeterminate" {
-      return v
+    match v {
+      Indeterminate(_cause, _detail) -> { return v }
+      Pass(_proof, _evidence_ref) -> {
+      }
+      Fail(_reason, _detail) -> {
+      }
     }
   }
   if len(verdicts) == 0 {
@@ -160,7 +160,13 @@ pub fn verdict_all(harness: Harness, verdicts: list) -> Verdict {
   }
   let proofs = []
   for v in verdicts {
-    proofs = proofs.push(v.proof)
+    match v {
+      Pass(proof, _evidence_ref) -> { proofs = proofs.push(proof) }
+      Fail(_reason, _detail) -> {
+      }
+      Indeterminate(_cause, _detail) -> {
+      }
+    }
   }
   if !harness.verdict.same_run(proofs) {
     return verdict_indeterminate(
@@ -180,7 +186,11 @@ pub fn verdict_all(harness: Harness, verdicts: list) -> Verdict {
  * @api_stability: experimental
  */
 pub fn verdict_disposition(v: Verdict) -> string {
-  return v.kind
+  match v {
+    Pass(_proof, _evidence_ref) -> { return "pass" }
+    Fail(_reason, _detail) -> { return "fail" }
+    Indeterminate(_cause, _detail) -> { return "indeterminate" }
+  }
 }
 
 /**
@@ -191,10 +201,10 @@ pub fn verdict_disposition(v: Verdict) -> string {
  * @api_stability: experimental
  */
 pub fn verdict_is_pass(v: Verdict) -> bool {
-  match v.kind {
-    "pass" -> { return true }
-    "fail" -> { return false }
-    "indeterminate" -> { return false }
+  match v {
+    Pass(_proof, _evidence_ref) -> { return true }
+    Fail(_reason, _detail) -> { return false }
+    Indeterminate(_cause, _detail) -> { return false }
   }
 }
 
@@ -206,10 +216,10 @@ pub fn verdict_is_pass(v: Verdict) -> bool {
  * @api_stability: experimental
  */
 pub fn verdict_is_indeterminate(v: Verdict) -> bool {
-  match v.kind {
-    "pass" -> { return false }
-    "fail" -> { return false }
-    "indeterminate" -> { return true }
+  match v {
+    Pass(_proof, _evidence_ref) -> { return false }
+    Fail(_reason, _detail) -> { return false }
+    Indeterminate(_cause, _detail) -> { return true }
   }
 }
 
@@ -222,9 +232,9 @@ pub fn verdict_is_indeterminate(v: Verdict) -> bool {
  * @api_stability: experimental
  */
 pub fn verdict_evidence_ref(v: Verdict) -> string {
-  match v.kind {
-    "pass" -> { return v.evidence_ref }
-    "fail" -> { return "" }
-    "indeterminate" -> { return "" }
+  match v {
+    Pass(_proof, evidence_ref) -> { return evidence_ref }
+    Fail(_reason, _detail) -> { return "" }
+    Indeterminate(_cause, _detail) -> { return "" }
   }
 }
