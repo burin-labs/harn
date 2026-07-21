@@ -413,10 +413,46 @@ clarifying-question kind for ambiguous tasks.
 fixtures for pack, projection, compaction, and tool-disclosure experiments. A
 manifest declares task fixtures and one or more context modes; the runner scores
 each task/mode pair without model calls and writes stable local artifacts:
-`summary.json`, `per_run.jsonl`, and `summary.md`. Use the builders in
-`std/context/eval` when authoring manifests from Harn code, and use
-`spec/schemas/context-eval-report.v1.schema.json` when ingesting
-`harn.context_eval.report.v1` reports from hosted systems or downstream UIs.
+`summary.json`, `per_run.jsonl`, and `summary.md`.
+
+`std/context/eval` exports one typed vocabulary for this surface. The
+builders return the manifest contracts directly, so authoring code never
+handles a bare `dict`:
+
+```harn
+import {
+  ContextEvalManifest,
+  ContextEvalMode,
+  ContextEvalTask,
+  context_eval_manifest,
+  context_eval_mode,
+  context_eval_task,
+} from "std/context/eval"
+
+fn smoke_manifest() -> ContextEvalManifest {
+  const mode: ContextEvalMode = context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
+  const task: ContextEvalTask = context_eval_task(
+    "incident",
+    "Find the failing service",
+    {expected: {required_terms: ["pagerduty"]}},
+  )
+  return context_eval_manifest([task], [mode], {id: "repo-context-smoke"})
+}
+```
+
+When ingesting `harn.context_eval.report.v1` reports from hosted systems or
+downstream UIs, name the `ContextEvalReport` contract (and its nested
+`ContextEvalRunReport` / `ContextEvalCorrectness` / `ContextEvalToolQuality`
+cases) instead of `dict`; `spec/schemas/context-eval-report.v1.schema.json`
+remains the language-neutral schema for the same shape.
+
+```harn
+import { ContextEvalReport } from "std/context/eval"
+
+fn mean_correctness(report: ContextEvalReport) -> float {
+  return report.aggregate.mean_final_correctness
+}
+```
 
 ```bash
 harn eval context examples/evals/context-engineering-smoke.json \

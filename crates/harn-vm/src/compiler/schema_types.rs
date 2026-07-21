@@ -59,6 +59,21 @@ impl Compiler {
                             continue;
                         }
                     }
+                    // A free row variable (`{..., ...rest}`) or a bare `dict`
+                    // tail has no concrete schema to merge — it only marks the
+                    // record open, so unknown fields of any type validate. Skip
+                    // it rather than failing to lower the whole alias. Bound
+                    // alias tails (`...SomeShape`) still merge as an `all_of`
+                    // branch below.
+                    if let TypeExpr::Named(name) = rest {
+                        let is_bound_alias = self
+                            .type_aliases
+                            .get(name)
+                            .is_some_and(|alias| alias.body.is_some());
+                        if !is_bound_alias {
+                            continue;
+                        }
+                    }
                     row_fragments.push(self.schema_fragment_for_type(rest, visiting)?);
                 }
                 let base = self.schema_fragment_for_shape(fields, additional, visiting)?;
