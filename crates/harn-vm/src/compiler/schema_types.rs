@@ -28,33 +28,9 @@ const MAX_SCHEMA_ALIAS_NEST: usize = 128;
 const SCHEMA_FRAGMENT_NODE_BUDGET: usize = 4096;
 
 impl SchemaFragment {
-    /// Fold a fragment tree containing no [`SchemaFragment::Ref`] into a
-    /// single constant value; `None` when any nested position needs a runtime
-    /// binding lookup.
-    fn as_constant(&self) -> Option<VmValue> {
-        match self {
-            SchemaFragment::Value(value) => Some(value.clone()),
-            SchemaFragment::Ref(_) => None,
-            SchemaFragment::Dict(entries) => {
-                let mut folded = std::collections::BTreeMap::new();
-                for (key, value) in entries {
-                    folded.insert(key.clone(), value.as_constant()?);
-                }
-                Some(VmValue::dict(folded))
-            }
-            SchemaFragment::List(items) => {
-                let folded = items
-                    .iter()
-                    .map(SchemaFragment::as_constant)
-                    .collect::<Option<Vec<_>>>()?;
-                Some(VmValue::List(std::sync::Arc::new(folded)))
-            }
-        }
-    }
-
-    /// Emission weight: how many bytecode-emitting nodes the fragment expands
-    /// to. A folded `Value` still emits per-element construction ops, so its
-    /// internal dict/list nodes are counted rather than treated as one unit.
+    /// Emission weight: the number of bytecode-emitting nodes in the fragment.
+    /// A `Value` containing a dict or list still emits per-element construction
+    /// ops, so its internal nodes count toward the budget.
     fn node_count(&self) -> usize {
         match self {
             SchemaFragment::Value(value) => vm_value_node_count(value),
@@ -411,16 +387,6 @@ impl Compiler {
     }
 
     pub(super) fn emit_schema_fragment(&mut self, fragment: &SchemaFragment) {
-        // A fragment tree with no `Ref` is pure data: fold it into ONE
-        // constant instead of emitting per-key construction ops. This is what
-        // keeps a large all-local alias graph's schema initializer small — a
-        // real-world OpenAPI module emitted ~100 KiB of BuildDict/BuildList
-        // bytecode without the fold, past the 64 KiB a jump operand can
-        // address, while the folded form is a handful of constant loads.
-        if let Some(constant) = fragment.as_constant() {
-            self.emit_vm_value_literal(&constant);
-            return;
-        }
         match fragment {
             SchemaFragment::Value(value) => self.emit_vm_value_literal(value),
             SchemaFragment::Ref(name) => self.emit_get_binding(name),
