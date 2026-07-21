@@ -127,8 +127,62 @@ fn run_cap_disabled() {
   )
 }
 
+fn run_diagnosis_recovery() {
+  with_llm_script(
+    [
+      llm_text("Malformed tool-call loop. ##DONE##"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"reasoning\":\"task remains incomplete\",\"diagnosis\":\"assistant is stuck in a loop sending malformed tool calls\",\"next_step\":\"use a different tool-call shape\"}",
+      ),
+      llm_text("Recovered after applying the diagnosis. ##DONE##"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"recovery succeeded\"}"),
+    ],
+    { ->
+      const session_id = "verify-judge-diagnosis-" + uuid()
+      const captured = agent_capture_events(
+        session_id,
+        fn() { return agent_loop(
+          "Recover from malformed tool calls.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            session_id: session_id,
+            done_sentinel: "##DONE##",
+            verify_completion_judge: true,
+          },
+        ) },
+      )
+      const calls = llm_mock_calls()
+      const judges = events_of(captured.events, "judge_decision")
+      const recovery_prompt = json_stringify(calls[2].messages)
+      __io_println("diagnosis.status=" + captured.result.status)
+      __io_println(
+        "diagnosis.injected="
+          + to_string(
+          recovery_prompt.contains("assistant is stuck in a loop sending malformed tool calls"),
+        ),
+      )
+      __io_println(
+        "diagnosis.next_step_injected="
+          + to_string(
+          recovery_prompt.contains("use a different tool-call shape"),
+        ),
+      )
+      __io_println(
+        "diagnosis.reasoning_observable="
+          + to_string(
+          judges[0].reasoning.contains("task remains incomplete"),
+        ),
+      )
+    },
+  )
+}
+
 pipeline default() {
   run_capped()
   run_approved()
   run_cap_disabled()
+  run_diagnosis_recovery()
 }
