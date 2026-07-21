@@ -302,7 +302,7 @@ fn describe(s: Shape) -> string {
 }
 
 #[test]
-fn namespace_import_rejects_unknown_member_call() {
+fn namespace_import_rejects_unknown_members() {
     use std::collections::BTreeSet;
 
     use crate::NamespaceImportBinding;
@@ -310,6 +310,7 @@ fn namespace_import_rejects_unknown_member_call() {
     let program = parse_program(
         r"
 pipeline t(task) {
+  let value = lib.absent
   lib.missing()
 }
 ",
@@ -332,17 +333,30 @@ pipeline t(task) {
         .filter(|diag| diag.severity == DiagnosticSeverity::Error)
         .collect();
     assert!(
-        errors.iter().any(|e| e
-            .message
-            .contains("module `./lib` has no exported member `missing`")),
-        "expected namespace missing-member error, got: {errors:?}"
+        errors.iter().any(|error| {
+            error.code == crate::typechecker::Code::UnknownField
+                && error
+                    .message
+                    .contains("module `./lib` has no exported member `absent`")
+        }),
+        "expected namespace property error, got: {errors:?}"
     );
     assert!(
-        errors.iter().any(|e| {
-            e.message.contains("did you mean")
-                || e.help
+        errors.iter().any(|error| {
+            error.code == crate::typechecker::Code::UnknownMethod
+                && error
+                    .message
+                    .contains("module `./lib` has no exported member `missing`")
+        }),
+        "expected namespace method error, got: {errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| {
+            error.message.contains("did you mean")
+                || error
+                    .help
                     .as_deref()
-                    .is_some_and(|h| h.contains("exported members"))
+                    .is_some_and(|help| help.contains("exported members"))
         }),
         "expected suggestion/help context, got: {errors:?}"
     );

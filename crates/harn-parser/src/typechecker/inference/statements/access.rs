@@ -16,6 +16,7 @@ impl TypeChecker {
         if !scope.is_generic_type_param(&type_name) {
             return;
         }
+
         let bounds = scope.get_where_constraints(&type_name);
         if bounds.is_empty() {
             return;
@@ -50,6 +51,52 @@ impl TypeChecker {
             format!("Method '{method}' not found in {iface_desc} (constraint on '{type_name}')"),
             span,
         );
+    }
+
+    /// Validate a namespace-import member and report the shared diagnostic.
+    /// Returns `true` whenever `object` is a namespace alias, including valid
+    /// members, so callers skip ordinary dict/shape access diagnostics.
+    fn check_namespace_member(
+        &mut self,
+        object: &SNode,
+        member: &str,
+        span: Span,
+        code: Code,
+    ) -> bool {
+        let Node::Identifier(alias) = &object.node else {
+            return false;
+        };
+        let Some(binding) = self.namespace_imports.get(alias) else {
+            return false;
+        };
+        if !binding.members.contains(member) {
+            let candidates: Vec<&str> = binding.members.iter().map(String::as_str).collect();
+            let max_dist = if member.len() <= 4 { 1 } else { 2 };
+            let suggestion =
+                crate::diagnostic::find_closest_match(member, candidates.iter().copied(), max_dist);
+            let mut message = format!(
+                "module `{}` has no exported member `{member}`",
+                binding.module_path
+            );
+            if let Some(close) = suggestion {
+                message.push_str(&format!(" — did you mean `{close}`?"));
+            }
+            let help = if candidates.is_empty() {
+                format!("module `{}` exports no public names", binding.module_path)
+            } else {
+                format!("exported members: {}", candidates.join(", "))
+            };
+            match code {
+                Code::UnknownField => {
+                    self.error_at_with_help(Code::UnknownField, message, span, help);
+                }
+                Code::UnknownMethod => {
+                    self.error_at_with_help(Code::UnknownMethod, message, span, help);
+                }
+                _ => unreachable!("namespace members only emit field or method diagnostics"),
+            }
+        }
+        true
     }
 
     /// Diagnose a property access (`obj.field` or `obj?.field`) against the
@@ -103,33 +150,8 @@ impl TypeChecker {
         ) {
             return;
         }
-        if let Node::Identifier(alias) = &object.node {
-            if let Some(binding) = self.namespace_imports.get(alias) {
-                if !binding.members.contains(property) {
-                    let candidates: Vec<&str> =
-                        binding.members.iter().map(String::as_str).collect();
-                    let max_dist = if property.len() <= 4 { 1 } else { 2 };
-                    let suggestion = crate::diagnostic::find_closest_match(
-                        property,
-                        candidates.iter().copied(),
-                        max_dist,
-                    );
-                    let mut msg = format!(
-                        "module `{}` has no exported member `{property}`",
-                        binding.module_path
-                    );
-                    if let Some(close) = suggestion {
-                        msg.push_str(&format!(" — did you mean `{close}`?"));
-                    }
-                    let help = if candidates.is_empty() {
-                        format!("module `{}` exports no public names", binding.module_path)
-                    } else {
-                        format!("exported members: {}", candidates.join(", "))
-                    };
-                    self.error_at_with_help(Code::UnknownField, msg, span, help);
-                }
-                return;
-            }
+        if self.check_namespace_member(object, property, span, Code::UnknownField) {
+            return;
         }
 
         match &resolved {
@@ -454,33 +476,8 @@ impl TypeChecker {
     ) {
         use crate::typechecker::method_registry as reg;
 
-        if let Node::Identifier(alias) = &object.node {
-            if let Some(binding) = self.namespace_imports.get(alias) {
-                if !binding.members.contains(method) {
-                    let candidates: Vec<&str> =
-                        binding.members.iter().map(String::as_str).collect();
-                    let max_dist = if method.len() <= 4 { 1 } else { 2 };
-                    let suggestion = crate::diagnostic::find_closest_match(
-                        method,
-                        candidates.iter().copied(),
-                        max_dist,
-                    );
-                    let mut msg = format!(
-                        "module `{}` has no exported member `{method}`",
-                        binding.module_path
-                    );
-                    if let Some(close) = suggestion {
-                        msg.push_str(&format!(" — did you mean `{close}`?"));
-                    }
-                    let help = if candidates.is_empty() {
-                        format!("module `{}` exports no public names", binding.module_path)
-                    } else {
-                        format!("exported members: {}", candidates.join(", "))
-                    };
-                    self.error_at_with_help(Code::UnknownMethod, msg, span, help);
-                }
-                return;
-            }
+        if self.check_namespace_member(object, method, span, Code::UnknownMethod) {
+            return;
         }
 
         let Some(raw) = self.infer_type(object, scope) else {
