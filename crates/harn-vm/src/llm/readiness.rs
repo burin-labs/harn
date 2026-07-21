@@ -468,15 +468,14 @@ pub fn configured_model_for_provider(provider: &str) -> Option<String> {
         }
     }
     if provider == "local" {
-        if let Ok(model) = std::env::var("LOCAL_LLM_MODEL") {
+        if let Some(model) = crate::test_env::env_var_seamed("LOCAL_LLM_MODEL") {
             if !model.trim().is_empty() {
                 return Some(model);
             }
         }
     }
-    let harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-    let model = std::env::var("HARN_LLM_MODEL")
-        .ok()
+    let harn_provider = crate::test_env::env_var_seamed("HARN_LLM_PROVIDER");
+    let model = crate::test_env::env_var_seamed("HARN_LLM_MODEL")
         .filter(|model| !model.trim().is_empty())?;
     let (_, resolved_provider) = llm_config::resolve_model(&model);
     if resolved_provider.as_deref() == Some(provider)

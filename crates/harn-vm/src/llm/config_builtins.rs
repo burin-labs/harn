@@ -711,8 +711,8 @@ async fn llm_healthcheck_builtin(
         let model = options
             .and_then(|opts| opts.get("model"))
             .map(|value| value.display())
-            .or_else(|| std::env::var("HARN_LLM_MODEL").ok())
-            .or_else(|| std::env::var("LOCAL_LLM_MODEL").ok());
+            .or_else(|| crate::test_env::env_var_seamed("HARN_LLM_MODEL"))
+            .or_else(|| crate::test_env::env_var_seamed("LOCAL_LLM_MODEL"));
         let warm = options
             .and_then(|opts| opts.get("warm").or_else(|| opts.get("preload")))
             .is_some_and(|value| matches!(value, VmValue::Bool(true)));
@@ -2179,10 +2179,7 @@ mod tests {
     #[test]
     fn test_llm_resolved_options_resolves_provider() {
         let _guard = crate::llm::env_guard();
-        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-        unsafe {
-            std::env::remove_var("HARN_DEFAULT_PROVIDER");
-        }
+        let _env = crate::test_env::test_env_guard();
         llm_config::clear_user_overrides();
 
         let mut out = String::new();
@@ -2197,13 +2194,6 @@ mod tests {
                 assert_eq!(s.as_str(), "anthropic", "provider mismatch: {s}");
             }
             other => panic!("expected provider string, got {other:?}"),
-        }
-
-        unsafe {
-            match prev_default_provider {
-                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
-                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-            }
         }
     }
 

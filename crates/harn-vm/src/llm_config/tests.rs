@@ -514,10 +514,7 @@ fn test_glob_match_exact() {
 #[test]
 fn test_infer_provider_from_defaults() {
     let _guard = crate::llm::env_guard();
-    let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-    unsafe {
-        std::env::remove_var("HARN_DEFAULT_PROVIDER");
-    }
+    let _env = crate::test_env::test_env_guard();
 
     assert_eq!(infer_provider("claude-sonnet-4-20250514"), "anthropic");
     assert_eq!(infer_provider("gpt-4o"), "openai");
@@ -528,13 +525,6 @@ fn test_infer_provider_from_defaults() {
     assert_eq!(infer_provider("qwen/qwen3-coder"), "openrouter");
     assert_eq!(infer_provider("llama3.2:latest"), "ollama");
     assert_eq!(infer_provider("unknown-model"), "anthropic");
-
-    unsafe {
-        match prev_default_provider {
-            Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
-            None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-        }
-    }
 }
 
 #[test]
@@ -549,40 +539,20 @@ fn test_infer_provider_prefix_rules() {
 #[test]
 fn test_openrouter_inference_requires_one_slash() {
     let _guard = crate::llm::env_guard();
-    let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-    unsafe {
-        std::env::remove_var("HARN_DEFAULT_PROVIDER");
-    }
+    let _env = crate::test_env::test_env_guard();
 
     assert_eq!(infer_provider("org/model"), "openrouter");
     assert_eq!(infer_provider("org/team/model"), "anthropic");
-
-    unsafe {
-        match prev_default_provider {
-            Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
-            None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-        }
-    }
 }
 
 #[test]
 fn test_cerebras_inference_beats_openrouter_slash_fallback() {
     let _guard = crate::llm::env_guard();
-    let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-    unsafe {
-        std::env::remove_var("HARN_DEFAULT_PROVIDER");
-    }
+    let _env = crate::test_env::test_env_guard();
 
     assert_eq!(infer_provider("cerebras/gpt-oss-120b"), "cerebras");
     assert_eq!(infer_provider("cerebras/zai-glm-4.7"), "cerebras");
     assert_eq!(infer_provider("cerebras/llama-3.3-70b"), "cerebras");
-
-    unsafe {
-        match prev_default_provider {
-            Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
-            None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-        }
-    }
 }
 
 #[test]
@@ -592,10 +562,7 @@ fn test_direct_catalog_model_id_resolves_to_catalog_provider() {
     // fallbacks. Regression for harn#2142 (model-info routed
     // `gpt-oss-120b` to openai, breaking host TUI credential checks).
     let _guard = crate::llm::env_guard();
-    let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-    unsafe {
-        std::env::remove_var("HARN_DEFAULT_PROVIDER");
-    }
+    let _env = crate::test_env::test_env_guard();
 
     for model in ["gpt-oss-120b", "zai-glm-4.7", "llama-3.3-70b"] {
         assert_eq!(
@@ -606,13 +573,6 @@ fn test_direct_catalog_model_id_resolves_to_catalog_provider() {
         let resolved = resolve_model_info(model);
         assert_eq!(resolved.id, model);
         assert_eq!(resolved.provider, "cerebras");
-    }
-
-    unsafe {
-        match prev_default_provider {
-            Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
-            None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-        }
     }
 }
 
@@ -1088,19 +1048,10 @@ fn test_enterprise_provider_defaults_and_inference() {
 #[test]
 fn test_default_provider_env_override_for_unknown_model() {
     let _guard = crate::llm::env_guard();
-    let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-    unsafe {
-        std::env::set_var("HARN_DEFAULT_PROVIDER", "openai");
-    }
+    let env = crate::test_env::test_env_guard();
+    env.set("HARN_DEFAULT_PROVIDER", "openai");
 
     let inference = infer_provider_detail("unknown-model");
-
-    unsafe {
-        match prev_default_provider {
-            Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
-            None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-        }
-    }
 
     assert_eq!(inference.provider, "openai");
     assert_eq!(
@@ -1112,20 +1063,11 @@ fn test_default_provider_env_override_for_unknown_model() {
 #[test]
 fn test_unknown_model_family_ignores_default_provider_fallback() {
     let _guard = crate::llm::env_guard();
-    let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
-    unsafe {
-        std::env::set_var("HARN_DEFAULT_PROVIDER", "ollama");
-    }
+    let env = crate::test_env::test_env_guard();
+    env.set("HARN_DEFAULT_PROVIDER", "ollama");
 
     let unknown = resolve_model_info("mystery-model-xyz");
     let known_family = resolve_model_info("deepseek-mystery-model");
-
-    unsafe {
-        match prev_default_provider {
-            Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
-            None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
-        }
-    }
 
     assert_eq!(unknown.provider, "ollama");
     assert_eq!(unknown.family, "unknown");

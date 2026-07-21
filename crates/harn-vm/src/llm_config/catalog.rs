@@ -792,9 +792,9 @@ pub fn default_model_for_provider(provider: &str) -> String {
         return "default".to_string();
     }
     match provider {
-        "local" => std::env::var("LOCAL_LLM_MODEL")
-            .or_else(|_| std::env::var("HARN_LLM_MODEL"))
-            .unwrap_or_else(|_| "gemma-4-26b-a4b-it".to_string()),
+        "local" => crate::test_env::env_var_seamed("LOCAL_LLM_MODEL")
+            .or_else(|| crate::test_env::env_var_seamed("HARN_LLM_MODEL"))
+            .unwrap_or_else(|| "gemma-4-26b-a4b-it".to_string()),
         "mlx" => std::env::var("MLX_MODEL_ID")
             .unwrap_or_else(|_| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
         "openai" => "gpt-4o-mini".to_string(),
