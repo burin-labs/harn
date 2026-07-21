@@ -21,6 +21,7 @@ mod expressions;
 mod flow;
 mod generic_bindings;
 mod hitl;
+mod literal_union;
 mod pipe;
 mod statements;
 mod subtyping;
