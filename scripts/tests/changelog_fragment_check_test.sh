@@ -117,4 +117,47 @@ commit_all "$req_repo" "bump python dependency"
 req_output=$(expect_pass "$req_repo" "$req_base")
 grep -q "only dependency manifest/lockfile paths touched" <<<"$req_output"
 
+# A test-only change under a crate's nested `tests/` directory must pass
+# without a fragment. The ignore pattern used to root-anchor every
+# alternative, so `crates/*/tests/` never matched `tests?/` and every
+# crate-level test-only PR was forced to carry a `no-changelog-needed` label.
+nested_tests_repo=$(new_repo nested_tests)
+mkdir -p "$nested_tests_repo/crates/harn-hostlib/tests"
+printf 'fn t() {}\n' > "$nested_tests_repo/crates/harn-hostlib/tests/proc_e2e.rs"
+commit_all "$nested_tests_repo" base
+nested_tests_base=$(git -C "$nested_tests_repo" rev-parse HEAD)
+printf 'fn t() { assert!(true); }\n' > "$nested_tests_repo/crates/harn-hostlib/tests/proc_e2e.rs"
+commit_all "$nested_tests_repo" "edit a nested crate test"
+nested_tests_output=$(expect_pass "$nested_tests_repo" "$nested_tests_base")
+grep -q "only docs/test/CI paths touched" <<<"$nested_tests_output"
+
+# Documentation/agent files are documentation wherever they live: a nested
+# `AGENTS.md` (e.g. `scripts/AGENTS.md`) and a nested `docs/` file must pass
+# without a fragment, not just their repo-root counterparts.
+nested_docs_repo=$(new_repo nested_docs)
+mkdir -p "$nested_docs_repo/scripts" "$nested_docs_repo/crates/harn-cli/docs"
+printf 'guidance\n' > "$nested_docs_repo/scripts/AGENTS.md"
+printf 'notes\n' > "$nested_docs_repo/crates/harn-cli/docs/design.md"
+commit_all "$nested_docs_repo" base
+nested_docs_base=$(git -C "$nested_docs_repo" rev-parse HEAD)
+printf 'updated guidance\n' > "$nested_docs_repo/scripts/AGENTS.md"
+printf 'updated notes\n' > "$nested_docs_repo/crates/harn-cli/docs/design.md"
+commit_all "$nested_docs_repo" "edit nested docs and AGENTS.md"
+nested_docs_output=$(expect_pass "$nested_docs_repo" "$nested_docs_base")
+grep -q "only docs/test/CI paths touched" <<<"$nested_docs_output"
+
+# Guard against over-broadening: a source file whose path segment merely
+# ends with an ignorable directory name (e.g. `contests/`) must still require
+# a fragment. The `(^|/)` segment guard keeps `tests?/` from matching inside
+# `contests/`.
+contests_repo=$(new_repo contests)
+mkdir -p "$contests_repo/crates/harn-vm/src/contests"
+printf 'pub fn v() -> u8 { 1 }\n' > "$contests_repo/crates/harn-vm/src/contests/mod.rs"
+commit_all "$contests_repo" base
+contests_base=$(git -C "$contests_repo" rev-parse HEAD)
+printf 'pub fn v() -> u8 { 2 }\n' > "$contests_repo/crates/harn-vm/src/contests/mod.rs"
+commit_all "$contests_repo" "edit a contests-prefixed source file"
+contests_output=$(expect_fail "$contests_repo" "$contests_base")
+grep -q "crates/harn-vm/src/contests/mod.rs" <<<"$contests_output"
+
 echo "changelog_fragment_check_test: ok"
