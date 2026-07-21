@@ -1,0 +1,65 @@
+/**
+ * A package imports the context-eval manifest and report contracts, builds a
+ * manifest through the typed builders, forwards it through a helper that
+ * names `ContextEvalManifest`, and materializes `ContextEvalReport` through
+ * schema validation across the imported module — with no `dict` escape
+ * hatches and no local schema copy.
+ *
+ * The four report cases the contract must distinguish are covered here: a
+ * valid report, a missing required identity field, a deterministic score
+ * given model-authored text, and an unknown forward-compatible extension.
+ */
+import {
+  ContextEvalReport,
+  context_eval_manifest,
+  context_eval_mode,
+  context_eval_task,
+} from "std/context/eval"
+import {
+  accept_manifest,
+  accept_report,
+  sample_aggregate,
+  sample_report_core,
+} from "context_eval_contracts_lib"
+
+pipeline test(task) {
+  // Typed builders return concrete contracts, not `dict`.
+  const mode = context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
+  const t = context_eval_task(
+    "incident",
+    "Find the failing service",
+    {expected: {required_terms: ["pagerduty"]}},
+  )
+  const manifest = context_eval_manifest([t], [mode], {id: "repo-context-smoke"})
+  assert(accept_manifest(manifest) == "repo-context-smoke", "manifest id via typed boundary")
+  assert(len(manifest.modes) == 1, "mode retained on the typed manifest")
+  assert(manifest.tasks[0].objective == "Find the failing service", "task objective retained")
+  // A valid report materializes through the imported contract and reads
+  // through a typed boundary.
+  const valid: any = sample_report_core() + {manifest_id: "repo-context-smoke"}
+  assert(schema_report(valid, ContextEvalReport).ok, "valid report satisfies the imported contract")
+  assert(accept_report(valid) == 1.0, "aggregate score read through the typed boundary")
+  // A required identity field cannot be dropped.
+  const missing_identity: any = sample_report_core()
+  assert(
+    !schema_report(missing_identity, ContextEvalReport).ok,
+    "missing manifest_id identity is rejected",
+  )
+  // A deterministic score given model-authored text is rejected.
+  const wrong_score: any = sample_report_core()
+    + {
+    manifest_id: "m1",
+    aggregate: sample_aggregate() + {mean_final_correctness: "high"},
+  }
+  assert(
+    !schema_report(wrong_score, ContextEvalReport).ok,
+    "non-numeric deterministic score is rejected",
+  )
+  // Unknown, forward-compatible fields are accepted by the open contract.
+  const with_extension: any = sample_report_core() + {manifest_id: "m1", experimental_signal: 0.42}
+  assert(
+    schema_report(with_extension, ContextEvalReport).ok,
+    "unknown compatible extension is accepted",
+  )
+  log("context_eval_contracts ok")
+}

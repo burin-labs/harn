@@ -73,7 +73,6 @@
 # count    1  crates/harn-stdlib/src/stdlib/cli/models/batch_transport.harn
 # count    5  crates/harn-stdlib/src/stdlib/cli/models/lora_render.harn
 # count    3  crates/harn-stdlib/src/stdlib/cli/render.harn
-# count    4  crates/harn-stdlib/src/stdlib/context/eval.harn
 # count    1  crates/harn-stdlib/src/stdlib/context/maintenance.harn
 # count    2  crates/harn-stdlib/src/stdlib/dashboard/jobs.harn
 # count    1  crates/harn-stdlib/src/stdlib/edit/capabilities.harn
@@ -708,10 +707,6 @@ crates/harn-stdlib/src/stdlib/cli/models/lora_render.harn::render_trainer_identi
 crates/harn-stdlib/src/stdlib/cli/render.harn::print_list
 crates/harn-stdlib/src/stdlib/cli/render.harn::render_command
 crates/harn-stdlib/src/stdlib/cli/render.harn::write_envelope
-crates/harn-stdlib/src/stdlib/context/eval.harn::context_eval_manifest
-crates/harn-stdlib/src/stdlib/context/eval.harn::context_eval_mode
-crates/harn-stdlib/src/stdlib/context/eval.harn::context_eval_report_schema
-crates/harn-stdlib/src/stdlib/context/eval.harn::context_eval_task
 crates/harn-stdlib/src/stdlib/context/maintenance.harn::context_maintenance_replay_decision
 crates/harn-stdlib/src/stdlib/dashboard/jobs.harn::dashboard_jobs_snapshot
 crates/harn-stdlib/src/stdlib/dashboard/jobs.harn::dashboard_jobs_view
