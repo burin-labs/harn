@@ -1,6 +1,19 @@
 use serde_json::Value as JsonValue;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+/// Largest `Content-Length`-framed body we will allocate for. A peer that
+/// announces more than this is malfunctioning or hostile, so we reject the
+/// frame at header-parse time rather than allocate an attacker-chosen
+/// buffer.
+///
+/// `harn-dap`'s `framing` module frames the same base wire format
+/// (Content-Length + CRLF) and enforces the identical 16 MiB bound as its
+/// own `MAX_DAP_FRAME_BYTES`. The two are deliberately *not* shared: this
+/// reader is async (`tokio::io::AsyncBufRead`) while that one is
+/// synchronous `std::io::BufRead`, and no crate both depend on is a natural
+/// home for stdio-transport framing. Keep the bounds in lockstep by hand.
+const MAX_JSONRPC_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum JsonRpcStdioFrameStyle {
     #[default]
@@ -101,6 +114,11 @@ fn content_length_from_header_line(line: &str) -> Result<Option<usize>, String> 
         .trim()
         .parse::<usize>()
         .map_err(|error| format!("invalid MCP Content-Length header: {error}"))?;
+    if length > MAX_JSONRPC_FRAME_BYTES {
+        return Err(format!(
+            "MCP Content-Length {length} exceeds limit {MAX_JSONRPC_FRAME_BYTES} bytes"
+        ));
+    }
     Ok(Some(length))
 }
 
@@ -169,6 +187,31 @@ mod tests {
 
         assert_eq!(frame.style, JsonRpcStdioFrameStyle::ContentLength);
         assert_eq!(frame.parse_json().expect("json")["id"], json!(7));
+    }
+
+    #[tokio::test]
+    async fn oversized_content_length_is_rejected_without_allocating() {
+        // A hostile peer announces a huge body but sends almost none. The
+        // reader must reject at header-parse time rather than allocate the
+        // announced buffer (previously an unbounded `vec![0; length]`).
+        let declared = MAX_JSONRPC_FRAME_BYTES + 1;
+        let input = format!("Content-Length: {declared}\r\n\r\nabc");
+        let mut reader = BufReader::new(Cursor::new(input.into_bytes()));
+        let error = read_jsonrpc_stdio_frame(&mut reader)
+            .await
+            .expect_err("oversized frame rejected");
+        assert!(error.contains("exceeds limit"), "unexpected error: {error}");
+    }
+
+    #[tokio::test]
+    async fn content_length_at_the_limit_is_accepted() {
+        // Header exactly at the bound parses; a full-size body is not
+        // allocated here, only the header path is exercised.
+        let line = format!("Content-Length: {MAX_JSONRPC_FRAME_BYTES}");
+        assert_eq!(
+            content_length_from_header_line(&line).expect("at limit"),
+            Some(MAX_JSONRPC_FRAME_BYTES)
+        );
     }
 
     #[tokio::test]
