@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, OnceLock};
 use std::thread;
 
+use rusqlite::Connection;
 use tempfile::TempDir;
 
 use super::*;
