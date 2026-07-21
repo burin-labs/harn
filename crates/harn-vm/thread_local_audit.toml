@@ -684,12 +684,6 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/waitpoints.rs"
-statics = ["WAITPOINT_TEST_REPLAY_OVERRIDE"]
-category = "thread_private"
-plan = "thread_private_test"
-
-[[thread_local]]
 path = "src/stdlib/workflow/state.rs"
 statics = ["WORKFLOW_RUN_STATES"]
 category = "runtime_registry"
@@ -748,6 +742,12 @@ path = "src/triggers/dispatcher/state.rs"
 statics = ["ACTIVE_DISPATCHER_STATE", "ACTIVE_DISPATCH_CONTEXT", "ACTIVE_DISPATCH_WAIT_LEASE", "TEST_INBOX_DEQUEUED_SIGNAL"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
+
+[[thread_local]]
+path = "src/triggers/dispatcher/state.rs"
+statics = ["TEST_REPLAY_OVERRIDE"]
+category = "thread_private"
+plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/triggers/registry.rs"

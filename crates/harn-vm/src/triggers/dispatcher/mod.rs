@@ -55,7 +55,7 @@ mod flow_control;
 mod persona;
 mod predicate_eval;
 pub mod retry;
-mod state;
+pub(crate) mod state;
 mod types;
 pub mod uri;
 mod util;
@@ -82,7 +82,7 @@ pub fn build_batched_event_public(
 }
 
 pub(crate) use state::{
-    current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
+    current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease, is_replay,
 };
 pub(crate) use types::{DispatchContext, DispatchWaitLease, TriggerInboxTopicScope};
 

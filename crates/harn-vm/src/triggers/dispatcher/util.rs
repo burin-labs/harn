@@ -342,6 +342,8 @@ pub fn clear_dispatcher_state() {
     ACTIVE_DISPATCH_WAIT_LEASE.with(|slot| {
         *slot.borrow_mut() = None;
     });
+    #[cfg(test)]
+    super::state::reset_test_replay_override();
 }
 
 pub(super) fn dispatch_error_from_vm_error(error: VmError) -> DispatchError {

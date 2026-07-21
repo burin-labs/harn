@@ -32,11 +32,6 @@ thread_local! {
     static WAITPOINT_WAIT_SEQUENCE: RefCell<SequenceState> = RefCell::new(SequenceState::default());
 }
 
-#[cfg(test)]
-thread_local! {
-    static WAITPOINT_TEST_REPLAY_OVERRIDE: RefCell<Option<bool>> = const { RefCell::new(None) };
-}
-
 #[derive(Default)]
 struct SequenceState {
     instance_key: String,
@@ -138,10 +133,6 @@ pub(crate) fn reset_waitpoint_state() {
     });
     WAITPOINT_WAIT_SEQUENCE.with(|slot| {
         *slot.borrow_mut() = SequenceState::default();
-    });
-    #[cfg(test)]
-    WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| {
-        *slot.borrow_mut() = None;
     });
 }
 
@@ -579,41 +570,7 @@ fn cancelled_vm_error() -> VmError {
 }
 
 fn is_replay() -> bool {
-    crate::triggers::dispatcher::current_dispatch_is_replay()
-        || test_replay_override()
-        || std::env::var("HARN_REPLAY")
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty() && value != "0")
-}
-
-#[cfg(test)]
-fn test_replay_override() -> bool {
-    WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| slot.borrow().unwrap_or(false))
-}
-
-#[cfg(not(test))]
-fn test_replay_override() -> bool {
-    false
-}
-
-#[cfg(test)]
-struct TestReplayOverrideGuard {
-    previous: Option<bool>,
-}
-
-#[cfg(test)]
-impl Drop for TestReplayOverrideGuard {
-    fn drop(&mut self) {
-        WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| {
-            *slot.borrow_mut() = self.previous;
-        });
-    }
-}
-
-#[cfg(test)]
-fn install_test_replay_override(value: bool) -> TestReplayOverrideGuard {
-    let previous = WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| slot.borrow_mut().replace(value));
-    TestReplayOverrideGuard { previous }
+    crate::triggers::dispatcher::is_replay()
 }
 
 fn now_rfc3339() -> String {
@@ -642,6 +599,7 @@ mod tests {
     use crate::event_log::{
         install_active_event_log, install_memory_for_current_thread, AnyEventLog, EventLog, Topic,
     };
+    use crate::triggers::dispatcher::state::install_test_replay_override;
     use crate::waitpoints::WAITPOINT_WAITS_TOPIC;
     use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
     use std::sync::Arc;

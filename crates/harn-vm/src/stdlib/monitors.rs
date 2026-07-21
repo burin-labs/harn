@@ -17,9 +17,7 @@ use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
 use crate::stdlib::options::{duration_from_value, ErrorKind};
-use crate::triggers::dispatcher::{
-    current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
-};
+use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
@@ -643,10 +641,7 @@ fn ensure_monitor_event_log() -> RcOrArcEventLog {
 }
 
 fn is_replay() -> bool {
-    current_dispatch_is_replay()
-        || std::env::var("HARN_REPLAY")
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty() && value != "0")
+    crate::triggers::dispatcher::is_replay()
 }
 
 fn duration_ms(duration: StdDuration) -> u64 {
