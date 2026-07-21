@@ -369,7 +369,6 @@ test-pr-gate-scripts:
 	./scripts/tests/hook_rust_gate_test.sh
 	./scripts/tests/hook_timing_instrument_test.sh
 	./scripts/tests/hook_registry_harn_bin_test.sh
-	./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	./scripts/tests/pre_push_validation_range_test.sh
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
@@ -402,6 +401,7 @@ test-pr-gate-post-warm-integrations:
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
 
