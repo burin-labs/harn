@@ -423,15 +423,6 @@ async fn orchestrator_lifecycle(
     )
     .await?;
 
-    listener.mark_ready();
-    eprintln!("[harn] HTTP listener ready on {}", listener.url());
-    tracing::info!(
-        component = "orchestrator",
-        trace_id = "",
-        listener_url = %listener.url(),
-        "HTTP listener ready"
-    );
-
     write_state_snapshot(
         &state_dir.join(STATE_SNAPSHOT_FILE),
         &ServeStateSnapshot {
@@ -496,6 +487,23 @@ async fn orchestrator_lifecycle(
         }),
     )
     .await?;
+
+    // Announce readiness only after startup housekeeping is durably recorded:
+    // the state snapshot is written and the `startup` / `startup_stranded_envelopes`
+    // lifecycle events are appended. Both the `/readyz` flag and the readiness
+    // log therefore mean "started and recorded", so an observer that reacts to
+    // readiness (a supervisor, or a test waiting on the readiness log before
+    // reading the event log) never races the durability of those startup events.
+    // The listener has been accepting connections since it bound; this gates the
+    // readiness *signal*, not request serving.
+    listener.mark_ready();
+    eprintln!("[harn] HTTP listener ready on {}", listener.url());
+    tracing::info!(
+        component = "orchestrator",
+        trace_id = "",
+        listener_url = %listener.url(),
+        "HTTP listener ready"
+    );
 
     // Signal that the harness is ready.
     let _ = ready_tx.send(Ok(ReadyState {

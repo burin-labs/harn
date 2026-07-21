@@ -3,7 +3,6 @@ use std::path::Path;
 use std::process::{ExitStatus, Output, Stdio};
 use std::time::Duration;
 
-use futures::StreamExt;
 use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic};
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader, Lines};
@@ -177,6 +176,16 @@ pub fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// Read the file-backed event log for a `topic_name` event matching `predicate`.
+///
+/// The event is produced by a *separate* orchestrator process. That process
+/// announces readiness only after durably appending its startup lifecycle
+/// events (see `orchestrator_lifecycle`), and the caller waits for the readiness
+/// log before invoking this. So a single read is deterministic: the event is
+/// already on disk. We deliberately do **not** use `subscribe` — its live tail
+/// is an *in-process* broadcast that cannot observe another process's appends,
+/// and its stream closes as soon as this throwaway handle drops, which is
+/// exactly the cross-process race that made this helper flaky (harn#5399).
 pub async fn wait_for_topic_event(
     state_dir: &Path,
     topic_name: &str,
@@ -190,24 +199,15 @@ pub async fn wait_for_topic_event(
     }
     let log = harn_vm::event_log::open_event_log(&config).unwrap();
     let topic = Topic::new(topic_name).unwrap();
-    let existing = log.read_range(&topic, None, usize::MAX).await.unwrap();
-    if let Some((_, event)) = existing.iter().find(|(_, event)| predicate(event)) {
-        return event.clone();
-    }
-    let after = existing.last().map(|(sequence, _)| *sequence);
-    let mut events = log.subscribe(&topic, after).await.unwrap();
-    tokio::time::timeout(PROCESS_EXIT_TIMEOUT, async {
-        loop {
-            let (_, event) = events
-                .next()
-                .await
-                .expect("event stream closed")
-                .expect("event stream read");
-            if predicate(&event) {
-                return event;
-            }
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting for matching {topic_name} event"))
+    let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
+    events
+        .into_iter()
+        .find(|(_, event)| predicate(event))
+        .map(|(_, event)| event)
+        .unwrap_or_else(|| {
+            panic!(
+                "no matching `{topic_name}` event on disk after orchestrator readiness \
+                 (the orchestrator records startup events before signalling ready)"
+            )
+        })
 }
