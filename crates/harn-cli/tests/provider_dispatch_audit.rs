@@ -140,7 +140,7 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
     assert_eq!(plan["matrix"]["case_count"], 1);
     assert_eq!(plan["matrix"]["mode_count"], 1);
     assert_eq!(plan["matrix"]["live_request_profile_count"], 1);
-    assert_eq!(plan["matrix"]["excluded_request_profile_count"], 1);
+    assert_eq!(plan["matrix"]["request_audit_profile_count"], 1);
     assert_eq!(plan["matrix"]["readiness_command_count"], 1);
     assert_eq!(plan["matrix"]["command_count"], 1);
     assert_eq!(plan["matrix"]["not_applicable_count"], 0);
@@ -156,7 +156,7 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
         serde_json::json!(["catalog_default"])
     );
     assert_eq!(
-        plan["excluded_request_profiles"],
+        plan["request_audit_profiles"],
         serde_json::json!(["parameter_edges"])
     );
     assert_eq!(plan["repeat"], 2);
