@@ -1,0 +1,40 @@
+import { agent_build_turn_messages } from "std/agent/preflight"
+import { agent_session_inject_feedback } from "std/agent/state"
+
+fn feedback_session() {
+  const session = agent_session_open("runtime-feedback-collapse-" + uuid())
+  agent_session_inject(session, {role: "user", content: "Fix the failing test."})
+  return session
+}
+
+pipeline test_repeated_runtime_feedback_keeps_latest_with_count(task) {
+  const session = feedback_session()
+  agent_session_inject_feedback(session, "verify_completion", "same verify residual\nline two")
+  agent_session_inject(session, {role: "assistant", content: "Trying another repair."})
+  agent_session_inject_feedback(session, "verify_completion", " same verify residual   line two ")
+  agent_session_inject_feedback(session, "step_judge", "same verify residual line two")
+  agent_session_inject_feedback(session, "verify_completion", "same verify residual line two")
+  agent_session_inject_feedback(session, "verify_completion", "different residual")
+  const raw = agent_session_snapshot(session).messages
+  const collapsed = agent_build_turn_messages({session_id: session}, {}, 0)
+  assert_eq(len(raw), 7, "the audit transcript retains every injected copy")
+  assert_eq(len(collapsed), 5, "two earlier equivalent copies are removed from the prompt")
+  assert_eq(collapsed[0].content, "Fix the failing test.")
+  assert_eq(collapsed[1].content, "Trying another repair.")
+  assert(contains(collapsed[2].content, "kind=\"step_judge\""))
+  assert(contains(collapsed[3].content, "same verify residual line two"))
+  assert(contains(collapsed[3].content, "repeated 3 times"))
+  assert(contains(collapsed[3].content, "earlier copies collapsed"))
+  assert(contains(collapsed[4].content, "different residual"))
+  agent_session_close(session)
+}
+
+pipeline test_unique_and_non_feedback_messages_are_unchanged(task) {
+  const session = feedback_session()
+  agent_session_inject(session, {role: "assistant", content: "working"})
+  agent_session_inject_feedback(session, "parse_guidance", "emit valid JSON")
+  agent_session_inject(session, {role: "tool", content: "ok"})
+  const raw = agent_session_snapshot(session).messages
+  assert_eq(agent_build_turn_messages({session_id: session}, {}, 0), raw)
+  agent_session_close(session)
+}
