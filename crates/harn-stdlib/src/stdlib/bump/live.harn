@@ -1,40 +1,33 @@
 /**
  * std/bump/live — the live [`BumpAdapter`] that binds std/bump/runtime's pure
- * state machine to real effects: git and the caller's validation entrypoint
- * via `std/command`, and GitHub through the first-party `std/connectors/github`
- * connector (typed helpers plus its `api_call` REST/GraphQL escape hatch).
+ * state machine to real effects: git and the caller's validation entrypoint via
+ * `std/command`, and GitHub through the `gh` CLI (also via `std/command`).
+ *
+ * GitHub access goes through `gh api` rather than `std/connectors/github`: the
+ * stdlib connector's `connector_call("github", …)` requires an ACTIVE connector
+ * client, which is only installed in hosted/orchestrator runtimes — in the plain
+ * `harn run` the reusable bump workflow uses, no github connector is active, so
+ * every connector call throws `connector 'github' is not active`. `gh` is
+ * present and works in that runtime, matching how the rest of the fleet
+ * (`lib/github`) reaches GitHub.
  *
  * This module is deliberately branch-free. It performs the I/O the orchestrator
  * asks for and normalizes the result; ALL control flow lives in
  * `std/bump/runtime`, which is exercised by the in-process fixtures. That seam
  * is why the fixtures need no network: they replace this adapter wholesale, so
- * none of the connector calls below run under `harn test`. The live
- * GitHub-mutation surface here (ref lease reset, signed `createCommitOnBranch`,
- * PR upsert, auto-merge arm/disarm) is first exercised against real GitHub in
- * CI, by construction.
+ * none of the `gh` calls below run under `harn test`. The live GitHub-mutation
+ * surface here (ref lease reset, signed `createCommitOnBranch`, PR upsert,
+ * auto-merge arm/disarm) is first exercised against real GitHub in CI.
  *
- * Auth is the GitHub App installation token, set once via the connector's
- * module-level `configure`. Signed commits use the GraphQL `createCommitOnBranch`
- * mutation (through the connector's `api_call`) rather than a local `git commit`
- * + push: commits created through the App token are signed by GitHub, satisfying
- * an org `required_signatures` ruleset that an unsigned local push would violate.
- *
- * `std/connectors/github` has no typed helper for creating refs, signed commits,
- * pull requests, or disabling auto-merge, so those go through the connector's
- * `api_call` (raw REST / GraphQL). Typed helpers cover release lookup, PR edit,
- * PR close, and enabling auto-merge.
+ * Auth is the GitHub App installation token, passed to `gh` via GH_TOKEN (see
+ * `__gh_spec`). Signed commits use the GraphQL `createCommitOnBranch` mutation
+ * rather than a local `git commit` + push: commits created through the App token
+ * are signed by GitHub, satisfying an org `required_signatures` ruleset that an
+ * unsigned local push would violate.
  */
 import { BumpAdapter } from "std/bump/runtime"
 import { command_run } from "std/command"
-import {
-  api_call,
-  close_pr,
-  configure,
-  enable_auto_merge,
-  latest_release,
-  pr_edit,
-  release_view,
-} from "std/connectors/github"
+import { merge } from "std/json"
 import { poll_until } from "std/poll"
 import { is_v_semver } from "std/semver"
 
@@ -78,6 +71,44 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
   }
 }
 
+/**
+ * GitHub App installation token used to authenticate the `gh` CLI. Set once by
+ * the live adapter builder. The bump runs one repo per process, so a
+ * module-level value needs no per-call threading.
+ */
+let __bump_gh_token = ""
+
+/**
+ * Build a command_run spec for a `gh` invocation. GH_TOKEN is patched INTO the
+ * inherited environment (env_mode "patch") so gh keeps PATH/HOME/its config —
+ * the default env_mode is "replace", which would wipe them.
+ */
+fn __gh_spec(argv: list<string>, stdin_body = nil) {
+  let spec = {argv: argv}
+  if trim(__bump_gh_token) != "" {
+    spec = merge(spec, {env: {GH_TOKEN: __bump_gh_token}, env_mode: "patch"})
+  }
+  if stdin_body != nil {
+    spec = merge(spec, {stdin: stdin_body})
+  }
+  return spec
+}
+
+fn __json_or_nil(text) {
+  const t = trim(to_string(text ?? ""))
+  if t == "" {
+    return nil
+  }
+  const parsed = try {
+    json_parse(t)
+  }
+  return if is_err(parsed) {
+    nil
+  } else {
+    parsed
+  }
+}
+
 fn __git(argv: list<string>) {
   return command_run(argv)
 }
@@ -86,27 +117,84 @@ fn __shell(command: string) {
   return command_run({mode: "shell", command: command})
 }
 
-/** One REST call through the connector; nil on any connector-reported failure. */
+/**
+ * One REST call through the `gh` CLI, authenticated by the App token in
+ * GH_TOKEN. Returns the parsed JSON body, or nil on any non-zero exit —
+ * preserving the previous adapter's fail-soft contract. Unlike
+ * std/connectors/github (whose connector client is NOT active in a plain
+ * `harn run`), `gh` works in the bump workflow's runtime.
+ */
 fn __rest(method: string, path: string, body = nil) {
-  const result = try {
-    api_call(path, method, body)
-  }
-  return if is_err(result) {
-    nil
+  const spec = if body == nil {
+    __gh_spec(["gh", "api", path, "-X", method])
   } else {
-    result
+    __gh_spec(["gh", "api", path, "-X", method, "--input", "-"], json_stringify(body))
+  }
+  const result = command_run(spec)
+  return if result.success ?? false {
+    __json_or_nil(result.stdout ?? "")
+  } else {
+    nil
   }
 }
 
-/** One GraphQL call through the connector's api_call escape hatch. */
+/** One GraphQL call through `gh api /graphql`; nil on failure. */
 fn __graphql(query: string, variables: dict) {
-  const result = try {
-    api_call("/graphql", "POST", {query: query, variables: variables})
-  }
-  return if is_err(result) {
-    nil
+  const spec = __gh_spec(
+    ["gh", "api", "/graphql", "-X", "POST", "--input", "-"],
+    json_stringify({query: query, variables: variables}),
+  )
+  const result = command_run(spec)
+  return if result.success ?? false {
+    __json_or_nil(result.stdout ?? "")
   } else {
-    result
+    nil
+  }
+}
+
+/** Release lookup normalized to the `{ok, ...release}` shape the adapter reads. */
+fn __release_view(repo: string, tag: string) {
+  const release = __rest("GET", "/repos/${repo}/releases/tags/${tag}")
+  return if release == nil {
+    {ok: false}
+  } else {
+    merge(release, {ok: true})
+  }
+}
+
+/** Close a PR (commenting first when a comment is given); `{ok}` mirrors the old helper. */
+fn __close_pr(repo: string, number, comment) {
+  if trim(to_string(comment ?? "")) != "" {
+    __rest("POST", "/repos/${repo}/issues/${number}/comments", {body: comment})
+  }
+  const closed = __rest("PATCH", "/repos/${repo}/pulls/${number}", {state: "closed"})
+  return {ok: closed != nil}
+}
+
+/** Arm squash auto-merge via GraphQL; `{ok, state, error}` mirrors the old helper. */
+fn __enable_auto_merge(repo: string, number) {
+  const pr = __rest("GET", "/repos/${repo}/pulls/${number}")
+  const node_id = to_string(pr?.node_id ?? "")
+  if node_id == "" {
+    return {ok: false, state: "", error: "could not resolve PR node id"}
+  }
+  const mutation =
+    "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { autoMergeRequest { enabledAt } } } }"
+  const result = __graphql(mutation, {id: node_id})
+  const enabled = result?.data?.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt
+    != nil
+  return {
+    ok: enabled,
+    state: if enabled {
+      "armed"
+    } else {
+      ""
+    },
+    error: if enabled {
+      nil
+    } else {
+      result?.errors ?? "auto-merge not enabled"
+    },
   }
 }
 
@@ -118,7 +206,7 @@ fn __release_finalized(release) -> bool {
   return !draft && !prerelease && len(missing) == 0
 }
 
-/** Connector `api_call` has no typed PR list; fetch the open bump PR raw. */
+/** Fetch the open bump PR via the REST list endpoint (there is no typed helper). */
 fn __find_open_pr(cfg: LiveBumpConfig, owner: string) {
   const list = __rest(
     "GET",
@@ -137,8 +225,8 @@ fn __find_open_pr(cfg: LiveBumpConfig, owner: string) {
 pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
   const cfg = live_bump_config(config)
   const owner = split(cfg.repo, "/")[0] ?? ""
-  // Authenticate every connector call as the GitHub App for this run.
-  configure({token: cfg.token})
+  // Authenticate every `gh` CLI call as the GitHub App for this run.
+  __bump_gh_token = cfg.token
   return {
     resolve_target_tag: fn(tag) {
       const requested = trim(tag ?? "")
@@ -148,7 +236,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         }
         return requested
       }
-      const latest = latest_release(cfg.repo)
+      const latest = __rest("GET", "/repos/${cfg.repo}/releases/latest")
       const resolved = trim(to_string(latest?.tag_name ?? ""))
       if !is_v_semver(resolved) {
         throw "std/bump/live: could not resolve a semver latest release for ${cfg.repo}"
@@ -161,7 +249,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       const found = poll_until(
         { ->
           attempts = attempts + 1
-          const view = release_view(cfg.repo, target)
+          const view = __release_view(cfg.repo, target)
           const ready = view.ok && __release_finalized(view)
           lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
           return if ready {
@@ -326,7 +414,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       const body =
         "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
       if existing != nil {
-        pr_edit(cfg.repo, existing.number, {title: title, body: body})
+        __rest("PATCH", "/repos/${cfg.repo}/pulls/${existing.number}", {title: title, body: body})
         const detail = __rest("GET", "/repos/${cfg.repo}/pulls/${existing.number}")
         return {
           number: existing.number,
@@ -348,11 +436,11 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       }
     },
     close_pr: fn(number, comment) {
-      const result = close_pr(cfg.repo, number, comment)
+      const result = __close_pr(cfg.repo, number, comment)
       return result.ok
     },
     enable_auto_merge: fn(number, _head) {
-      const result = enable_auto_merge(cfg.repo, number, {method: "squash"})
+      const result = __enable_auto_merge(cfg.repo, number)
       const ok = result.ok
       return {
         enabled: ok,
