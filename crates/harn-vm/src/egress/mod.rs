@@ -1,11 +1,11 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-#[cfg(test)]
-use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::net::IpAddr;
+use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use ipnet::IpNet;
 use serde_json::json;
@@ -34,6 +34,10 @@ pub const HARN_EGRESS_ALLOW_LOOPBACK_ENV: &str = "HARN_EGRESS_ALLOW_LOOPBACK";
 pub const EGRESS_AUDIT_TOPIC: &str = "connectors.egress.audit";
 
 thread_local! {
+    static EGRESS_POLICY_CONTEXT: RefCell<Option<EgressPolicyContext>> = const { RefCell::new(None) };
+    #[cfg(test)]
+    static TEST_EGRESS_POLICY_CONTEXT: EgressPolicyContext =
+        EgressPolicyContext(Arc::new(RwLock::new(EgressState::default())));
     static REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH: RefCell<usize> = const { RefCell::new(0) };
     static REQUIRE_SSRF_GUARD_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
@@ -82,16 +86,10 @@ enum EgressMatcher {
     Cidr(IpNet),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct EgressState {
-    #[cfg(not(test))]
     env_checked: bool,
-    #[cfg(not(test))]
     policy: Option<ConfiguredPolicy>,
-    #[cfg(test)]
-    test_env_checked: HashSet<std::thread::ThreadId>,
-    #[cfg(test)]
-    test_policies: HashMap<std::thread::ThreadId, ConfiguredPolicy>,
 }
 
 #[derive(Clone, Debug)]
@@ -111,19 +109,48 @@ pub struct EgressBlocked {
 
 static EGRESS_STATE: OnceLock<RwLock<EgressState>> = OnceLock::new();
 
-fn state() -> &'static RwLock<EgressState> {
-    EGRESS_STATE.get_or_init(|| {
-        RwLock::new(EgressState {
-            #[cfg(not(test))]
-            env_checked: false,
-            #[cfg(not(test))]
-            policy: None,
-            #[cfg(test)]
-            test_env_checked: HashSet::new(),
-            #[cfg(test)]
-            test_policies: HashMap::new(),
-        })
-    })
+fn global_state() -> &'static RwLock<EgressState> {
+    EGRESS_STATE.get_or_init(|| RwLock::new(EgressState::default()))
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct EgressPolicyContext(Arc<RwLock<EgressState>>);
+
+fn current_policy_context() -> Option<EgressPolicyContext> {
+    let explicit = EGRESS_POLICY_CONTEXT.with(|context| context.borrow().clone());
+    if explicit.is_some() {
+        return explicit;
+    }
+    #[cfg(test)]
+    {
+        Some(TEST_EGRESS_POLICY_CONTEXT.with(Clone::clone))
+    }
+    #[cfg(not(test))]
+    {
+        None
+    }
+}
+
+fn with_state_read<T>(read: impl FnOnce(&EgressState) -> T) -> T {
+    if let Some(context) = current_policy_context() {
+        let guard = context.0.read().expect("egress policy state poisoned");
+        read(&guard)
+    } else {
+        let guard = global_state().read().expect("egress policy state poisoned");
+        read(&guard)
+    }
+}
+
+fn with_state_write<T>(write: impl FnOnce(&mut EgressState) -> T) -> T {
+    if let Some(context) = current_policy_context() {
+        let mut guard = context.0.write().expect("egress policy state poisoned");
+        write(&mut guard)
+    } else {
+        let mut guard = global_state()
+            .write()
+            .expect("egress policy state poisoned");
+        write(&mut guard)
+    }
 }
 
 pub fn register_egress_builtins(vm: &mut Vm) {
@@ -281,20 +308,68 @@ pub fn connector_error_for_url(
 }
 
 pub fn reset_egress_policy_for_host() {
-    let mut guard = state().write().expect("egress policy state poisoned");
-    #[cfg(test)]
-    {
-        let thread_id = std::thread::current().id();
-        guard.test_env_checked.remove(&thread_id);
-        guard.test_policies.remove(&thread_id);
-    }
-    #[cfg(not(test))]
-    {
-        guard.env_checked = false;
-        guard.policy = None;
-    }
+    with_state_write(|state| *state = EgressState::default());
     clear_explicit_egress_policy_requirement_for_host();
     clear_ssrf_guard_requirement_for_host();
+}
+
+fn configured_policy() -> Option<ConfiguredPolicy> {
+    with_state_read(|state| state.policy.clone())
+}
+
+/// Create an isolated egress-policy context on the current worker thread.
+/// `harn test` holds this scope around each pipeline, and connector workers
+/// explicitly inherit the same context. Ordinary `harn run` remains
+/// process-scoped.
+#[must_use]
+pub fn scope_egress_policy_for_current_thread() -> EgressPolicyScope {
+    scope_egress_policy_context_for_current_thread(Some(EgressPolicyContext(Arc::new(
+        RwLock::new(EgressState::default()),
+    ))))
+}
+
+pub(crate) fn swap_policy_context(
+    context: Option<EgressPolicyContext>,
+) -> Option<EgressPolicyContext> {
+    EGRESS_POLICY_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), context))
+}
+
+fn with_egress_policy_context<T>(
+    context: Option<EgressPolicyContext>,
+    run: impl FnOnce() -> T,
+) -> T {
+    let _scope = scope_egress_policy_context_for_current_thread(context);
+    run()
+}
+
+pub(crate) fn bind_policy_context<T>(run: impl FnOnce() -> T + Send) -> impl FnOnce() -> T + Send {
+    let context = current_policy_context();
+    move || with_egress_policy_context(context, run)
+}
+
+#[must_use]
+fn scope_egress_policy_context_for_current_thread(
+    context: Option<EgressPolicyContext>,
+) -> EgressPolicyScope {
+    let previous = swap_policy_context(context);
+    EgressPolicyScope {
+        previous,
+        _thread_bound: PhantomData,
+    }
+}
+
+#[derive(Debug)]
+pub struct EgressPolicyScope {
+    previous: Option<EgressPolicyContext>,
+    _thread_bound: PhantomData<Rc<()>>,
+}
+
+impl Drop for EgressPolicyScope {
+    fn drop(&mut self) {
+        EGRESS_POLICY_CONTEXT.with(|current| {
+            *current.borrow_mut() = self.previous.take();
+        });
+    }
 }
 
 pub(crate) fn clear_explicit_egress_policy_requirement_for_host() {
@@ -313,9 +388,9 @@ pub fn reset_egress_policy_for_tests() {
 /// configuration (a developer's `HARN_EGRESS_BLOCK_PRIVATE=off`, a CI
 /// wrapper's allowlist) can never seed a policy a test did not ask for.
 /// Env-derived-policy tests inject values through
-/// [`EgressTestEnvGuard::set`], which matches the per-thread keying of the
-/// rest of the `cfg(test)` egress state and keeps tests parallel-safe without
-/// any cross-test lock.
+/// [`EgressTestEnvGuard::set`], which matches the per-thread fallback context
+/// used by `cfg(test)` egress state and keeps tests parallel-safe without any
+/// cross-test lock.
 fn egress_env_var(key: &str) -> Option<String> {
     #[cfg(test)]
     {
@@ -357,9 +432,7 @@ mod test_env_overrides {
 /// Gives a test a clean egress universe with hermetic edges: on both creation
 /// and drop it clears this thread's env overrides (see [`egress_env_var`])
 /// and resets this thread's policy state, so neither ambient configuration
-/// nor a sibling test's leftovers can leak in, and nothing leaks out. All
-/// `cfg(test)` egress state is thread-keyed, so no cross-test serialization
-/// is needed and the guard is safe to hold across `await` points.
+/// nor a sibling test's leftovers can leak in, and nothing leaks out.
 ///
 /// This governs only the *inputs* to policy installation;
 /// `egress_policy(...)`'s deliberate refuse-to-override behavior is
@@ -489,20 +562,7 @@ fn ssrf_guard_scope_active() -> bool {
 pub fn current_ssrf_client_settings() -> (bool, bool) {
     // Best-effort: seed env so a process configured purely via env is honored.
     let _ = ensure_env_seeded();
-    let configured = {
-        let guard = state().read().expect("egress policy state poisoned");
-        #[cfg(test)]
-        {
-            guard
-                .test_policies
-                .get(&std::thread::current().id())
-                .cloned()
-        }
-        #[cfg(not(test))]
-        {
-            guard.policy.clone()
-        }
-    };
+    let configured = configured_policy();
     let (mode, allow_loopback) = effective_ssrf_settings(configured.as_ref().map(|c| &c.policy));
     (mode == SsrfMode::BlockPrivate, allow_loopback)
 }
@@ -597,20 +657,7 @@ fn resolved_ip_rules_for(policy: &EgressPolicy) -> ResolvedIpRules {
 /// caught for URL-literal IPs.
 pub fn current_resolved_ip_rules() -> ResolvedIpRules {
     let _ = ensure_env_seeded();
-    let configured = {
-        let guard = state().read().expect("egress policy state poisoned");
-        #[cfg(test)]
-        {
-            guard
-                .test_policies
-                .get(&std::thread::current().id())
-                .cloned()
-        }
-        #[cfg(not(test))]
-        {
-            guard.policy.clone()
-        }
-    };
+    let configured = configured_policy();
     configured
         .as_ref()
         .map(|c| resolved_ip_rules_for(&c.policy))
@@ -728,18 +775,7 @@ pub(crate) fn check_url(surface: &str, raw_url: &str) -> Result<Option<EgressBlo
 
 fn check_url_decision(surface: &str, raw_url: &str) -> Result<SyncCheck, VmError> {
     ensure_env_seeded()?;
-    let configured = {
-        let guard = state().read().expect("egress policy state poisoned");
-        #[cfg(test)]
-        {
-            let thread_id = std::thread::current().id();
-            guard.test_policies.get(&thread_id).cloned()
-        }
-        #[cfg(not(test))]
-        {
-            guard.policy.clone()
-        }
-    };
+    let configured = configured_policy();
     let (ssrf_mode, allow_loopback) =
         effective_ssrf_settings(configured.as_ref().map(|c| &c.policy));
     let require_explicit_policy =
@@ -853,18 +889,7 @@ async fn check_url_host_resolution(
     raw_url: &str,
     resolution_required: bool,
 ) -> Result<Option<EgressBlocked>, VmError> {
-    let configured = {
-        let guard = state().read().expect("egress policy state poisoned");
-        #[cfg(test)]
-        {
-            let thread_id = std::thread::current().id();
-            guard.test_policies.get(&thread_id).cloned()
-        }
-        #[cfg(not(test))]
-        {
-            guard.policy.clone()
-        }
-    };
+    let configured = configured_policy();
     let (ssrf_mode, _allow_loopback) =
         effective_ssrf_settings(configured.as_ref().map(|c| &c.policy));
     let block_private = ssrf_mode == SsrfMode::BlockPrivate;
@@ -1047,32 +1072,16 @@ fn audit_blocked_background(blocked: EgressBlocked) {
 
 fn install_policy(policy: EgressPolicy, source: &'static str) -> Result<(), VmError> {
     ensure_env_seeded()?;
-    let mut guard = state().write().expect("egress policy state poisoned");
-    #[cfg(test)]
-    {
-        let thread_id = std::thread::current().id();
-        if let Some(existing) = guard.test_policies.get(&thread_id) {
+    with_state_write(|state| {
+        if let Some(existing) = &state.policy {
             return Err(vm_error(format!(
                 "egress_policy: policy already configured from {}",
                 existing.source
             )));
         }
-        guard
-            .test_policies
-            .insert(thread_id, ConfiguredPolicy { source, policy });
+        state.policy = Some(ConfiguredPolicy { source, policy });
         Ok(())
-    }
-    #[cfg(not(test))]
-    {
-        if let Some(existing) = &guard.policy {
-            return Err(vm_error(format!(
-                "egress_policy: policy already configured from {}",
-                existing.source
-            )));
-        }
-        guard.policy = Some(ConfiguredPolicy { source, policy });
-        Ok(())
-    }
+    })
 }
 
 /// Installs a deny-by-default egress policy with the given allow rules for
@@ -1096,39 +1105,16 @@ pub(crate) fn install_deny_by_default_policy(allow: &[String]) -> Result<(), VmE
         source: "testbench",
         policy,
     };
-    let mut guard = state().write().expect("egress policy state poisoned");
-    #[cfg(test)]
-    {
-        let thread_id = std::thread::current().id();
-        guard.test_env_checked.insert(thread_id);
-        guard.test_policies.insert(thread_id, configured);
-    }
-    #[cfg(not(test))]
-    {
-        guard.env_checked = true;
-        guard.policy = Some(configured);
-    }
+    with_state_write(|state| {
+        state.env_checked = true;
+        state.policy = Some(configured);
+    });
     Ok(())
 }
 
 fn ensure_env_seeded() -> Result<(), VmError> {
-    {
-        let guard = state().read().expect("egress policy state poisoned");
-        #[cfg(test)]
-        {
-            if guard
-                .test_env_checked
-                .contains(&std::thread::current().id())
-            {
-                return Ok(());
-            }
-        }
-        #[cfg(not(test))]
-        {
-            if guard.env_checked {
-                return Ok(());
-            }
-        }
+    if with_state_read(|state| state.env_checked) {
+        return Ok(());
     }
 
     let allow = egress_env_var(HARN_EGRESS_ALLOW_ENV);
@@ -1154,41 +1140,20 @@ fn ensure_env_seeded() -> Result<(), VmError> {
                 .unwrap_or(false),
         })
     };
-    let mut guard = state().write().expect("egress policy state poisoned");
-    #[cfg(test)]
-    {
-        let thread_id = std::thread::current().id();
-        if guard.test_env_checked.contains(&thread_id) {
+    with_state_write(|state| {
+        if state.env_checked {
             return Ok(());
         }
-        guard.test_env_checked.insert(thread_id);
+        state.env_checked = true;
         if !any_set {
             return Ok(());
         }
-        guard.test_policies.insert(
-            thread_id,
-            ConfiguredPolicy {
-                source: "environment",
-                policy: build_policy()?,
-            },
-        );
-        Ok(())
-    }
-    #[cfg(not(test))]
-    {
-        if guard.env_checked {
-            return Ok(());
-        }
-        guard.env_checked = true;
-        if !any_set {
-            return Ok(());
-        }
-        guard.policy = Some(ConfiguredPolicy {
+        state.policy = Some(ConfiguredPolicy {
             source: "environment",
             policy: build_policy()?,
         });
         Ok(())
-    }
+    })
 }
 
 fn policy_from_config(config: &crate::value::DictMap) -> Result<EgressPolicy, VmError> {
@@ -1273,20 +1238,7 @@ fn parse_default_action(raw: &str) -> Result<DefaultAction, VmError> {
 }
 
 fn policy_summary() -> VmValue {
-    let configured = {
-        let guard = state().read().expect("egress policy state poisoned");
-        #[cfg(test)]
-        {
-            guard
-                .test_policies
-                .get(&std::thread::current().id())
-                .cloned()
-        }
-        #[cfg(not(test))]
-        {
-            guard.policy.clone()
-        }
-    };
+    let configured = configured_policy();
     let mut dict = BTreeMap::new();
     if let Some(configured) = configured {
         dict.insert("configured".to_string(), VmValue::Bool(true));

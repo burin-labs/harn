@@ -70,7 +70,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/egress/mod.rs"
-statics = ["REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH", "REQUIRE_SSRF_GUARD_DEPTH"]
+statics = ["EGRESS_POLICY_CONTEXT", "TEST_EGRESS_POLICY_CONTEXT", "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH", "REQUIRE_SSRF_GUARD_DEPTH"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

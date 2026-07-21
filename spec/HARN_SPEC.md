@@ -5592,7 +5592,7 @@ provider integrations.
 | Function | Description |
 |---|---|
 | `connector_call(provider, method, params?)` | Invoke the active outbound connector client for `provider` and return JSON-like result data |
-| `egress_policy(config)` | Install a process egress policy for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. `block_private: "private"` blocks DNS-resolved loopback, private, link-local, metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `block_private: "off"` opts out, and `allow_loopback: true` opens only loopback. The same axes can be seeded with `HARN_EGRESS_BLOCK_PRIVATE` and `HARN_EGRESS_ALLOW_LOOPBACK`. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}` |
+| `egress_policy(config)` | Install an egress policy for HTTP, SSE, WebSocket, and Rust-backed connector outbound calls. The policy is process-scoped under `harn run` and isolated per pipeline under `harn test`. Rules support exact hosts, `*.suffix` hosts, IP literals/CIDR, optional `:port`, and `default: "deny"` allowlist mode. `block_private: "private"` blocks DNS-resolved loopback, private, link-local, metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `block_private: "off"` opts out, and `allow_loopback: true` opens only loopback. The same axes can be seeded with `HARN_EGRESS_BLOCK_PRIVATE` and `HARN_EGRESS_ALLOW_LOOPBACK`. Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}` |
 | `secret_get(secret_id)` | Read a secret from the active connector context. Only available while executing a Harn-backed connector export such as `normalize_inbound` or `call` |
 | `event_log_emit(topic, kind, payload, headers?)` | Append an event to the active event log from a Harn-backed connector export |
 | `metrics_inc(name, amount?)` | Increment a connector-owned Prometheus counter from a Harn-backed connector export |
@@ -7581,15 +7581,18 @@ in the built-in method table for the full rule syntax.
 | Variable | Description |
 |---|---|
 | `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`, Windows AppContainer) is unavailable: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
-| `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the process egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
+| `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
 | `HARN_EGRESS_DENY` | Comma-separated egress deny rules, same syntax as `HARN_EGRESS_ALLOW`. Deny wins over allow. |
 | `HARN_EGRESS_DEFAULT` | Action for destinations matching no rule: `allow` (default) or `deny` (allowlist mode). |
 | `HARN_EGRESS_BLOCK_PRIVATE` | Private-address (SSRF) guard. `private`/`on`/`block`/`true` block DNS-resolved loopback, private, link-local, cloud-metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `off`/`false`/`none` opts out. Under default `harn run` this guard is already on; configured LLM provider endpoints on loopback or a private LAN remain reachable, while link-local and cloud-metadata ranges stay blocked. |
 | `HARN_EGRESS_ALLOW_LOOPBACK` | Set to `1`/`true` to permit loopback destinations while the private-address guard otherwise stays engaged. Default `false`. |
 
 Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`.
-Any of these variables being set seeds a process-wide egress policy; `egress_policy(config)`
-overrides them at runtime.
+Any of these variables being set seeds the egress policy before
+`egress_policy(config)` runs, so a script that also declares a policy fails with
+`policy already configured from environment`. `harn run` keeps that policy
+process-wide. `harn test` seeds an isolated copy for each test pipeline, including
+under `--parallel`, so one pipeline cannot alter another's policy.
 
 ## Known limitations and future work
 
