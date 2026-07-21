@@ -2646,8 +2646,8 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_error() {
     }
     let outside = tempfile::tempdir_in(outside_base).unwrap();
     let outside_file = outside.path().join("blocked.txt");
-    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
-    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
+    sandbox_env.set("enforce");
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([(
@@ -2663,10 +2663,6 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_error() {
         outside_file.display()
     );
     let err = run_harn_with_policy(&source, policy).unwrap_err();
-    match previous {
-        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
-        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
-    }
 
     assert!(matches!(
         err,
@@ -2692,8 +2688,8 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
     std::fs::write(&outside_file, "secret").unwrap();
     std::fs::write(&allowed_file, "allowed").unwrap();
 
-    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
-    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
+    sandbox_env.set("enforce");
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([
@@ -2767,10 +2763,6 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
         );
     }
 
-    match previous {
-        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
-        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
-    }
     assert!(outside_file.exists());
     assert!(!outside_new.exists());
     assert!(!outside_copy.exists());
@@ -2782,8 +2774,8 @@ fn test_linux_process_sandbox_catches_ten_process_escapes() {
 fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
     let allowed = tempfile::tempdir().unwrap();
     let allowed_file = allowed.path().join("allowed.txt");
-    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
-    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
+    sandbox_env.set("enforce");
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([
@@ -2801,11 +2793,6 @@ fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
     );
     let result = run_harn_with_policy(&source, policy);
 
-    match previous {
-        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
-        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
-    }
-
     result.unwrap();
     assert!(allowed_file.exists());
 }
@@ -2814,8 +2801,8 @@ fn test_windows_process_sandbox_allows_process_exec_in_workspace() {
 #[test]
 fn test_windows_process_sandbox_allows_exec_argv0() {
     let allowed = tempfile::tempdir().unwrap();
-    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
-    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
+    sandbox_env.set("enforce");
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([(
@@ -2831,11 +2818,6 @@ fn test_windows_process_sandbox_allows_exec_argv0() {
         policy,
     );
 
-    match previous {
-        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
-        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
-    }
-
     result.unwrap();
 }
 
@@ -2845,8 +2827,8 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
     let allowed = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let outside_file = outside.path().join("blocked.txt");
-    let previous = std::env::var("HARN_HANDLER_SANDBOX").ok();
-    std::env::set_var("HARN_HANDLER_SANDBOX", "enforce");
+    let sandbox_env = crate::stdlib::sandbox::handler_sandbox_test_guard();
+    sandbox_env.set("enforce");
 
     let policy = crate::orchestration::CapabilityPolicy {
         capabilities: std::collections::BTreeMap::from([
@@ -2863,11 +2845,6 @@ fn test_windows_process_sandbox_denies_write_outside_workspace() {
         harn_string_escape(&command)
     );
     let err = run_harn_with_policy(&source, policy).unwrap_err();
-
-    match previous {
-        Some(value) => std::env::set_var("HARN_HANDLER_SANDBOX", value),
-        None => std::env::remove_var("HARN_HANDLER_SANDBOX"),
-    }
 
     assert!(matches!(
         err,
