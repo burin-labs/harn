@@ -828,6 +828,94 @@ pipeline test_serial_two(task) {}
 }
 
 #[tokio::test]
+async fn parallel_pipelines_isolate_egress_policy_and_http_mocks() {
+    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _egress_env = [
+        harn_vm::egress::HARN_EGRESS_ALLOW_ENV,
+        harn_vm::egress::HARN_EGRESS_DENY_ENV,
+        harn_vm::egress::HARN_EGRESS_DEFAULT_ENV,
+        harn_vm::egress::HARN_EGRESS_BLOCK_PRIVATE_ENV,
+        harn_vm::egress::HARN_EGRESS_ALLOW_LOOPBACK_ENV,
+    ]
+    .map(ScopedEnvVar::unset);
+    let temp = TempTestDir::new();
+    let source = (0..32)
+        .map(|index| {
+            format!(
+                r#"
+pipeline test_policy_{index}(_task) {{
+  const url = "https://case-{index}.example.test/data"
+  egress_policy({{default: "deny", allow: ["case-{index}.example.test"]}})
+  http_mock("GET", url, {{status: 200, body: "case-{index}", headers: {{}}}})
+  const response = http_get(url)
+  assert_eq(response.body, "case-{index}")
+}}
+"#
+            )
+        })
+        .collect::<String>();
+    temp.write("suite/test_egress_parallel.harn", &source);
+
+    let opts = RunOptions {
+        parallel: true,
+        jobs: Some(8),
+        ..RunOptions::new(5_000)
+    };
+    let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
+
+    assert_eq!(
+        summary.failed,
+        0,
+        "parallel egress state leaked: {:?}",
+        summary
+            .results
+            .iter()
+            .filter(|result| !result.passed)
+            .map(|result| (&result.name, &result.error))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(summary.passed, 32);
+}
+
+#[tokio::test]
+async fn environment_egress_policy_precedes_each_pipeline_policy() {
+    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _allow = ScopedEnvVar::unset(harn_vm::egress::HARN_EGRESS_ALLOW_ENV);
+    let _deny = ScopedEnvVar::unset(harn_vm::egress::HARN_EGRESS_DENY_ENV);
+    let _default = ScopedEnvVar::set(harn_vm::egress::HARN_EGRESS_DEFAULT_ENV, "deny");
+    let _block_private = ScopedEnvVar::unset(harn_vm::egress::HARN_EGRESS_BLOCK_PRIVATE_ENV);
+    let _allow_loopback = ScopedEnvVar::unset(harn_vm::egress::HARN_EGRESS_ALLOW_LOOPBACK_ENV);
+    let temp = TempTestDir::new();
+    temp.write(
+        "suite/test_egress_environment.harn",
+        r#"
+pipeline test_environment_one(_task) {
+  egress_policy({default: "allow"})
+}
+
+pipeline test_environment_two(_task) {
+  egress_policy({default: "allow"})
+}
+"#,
+    );
+    let opts = RunOptions {
+        parallel: true,
+        jobs: Some(2),
+        ..RunOptions::new(5_000)
+    };
+
+    let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
+
+    assert_eq!(summary.failed, 2);
+    assert!(summary.results.iter().all(|result| {
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("policy already configured from environment"))
+    }));
+}
+
+#[tokio::test]
 async fn parallel_scheduler_persists_timings_cache() {
     let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
     let temp = TempTestDir::new();

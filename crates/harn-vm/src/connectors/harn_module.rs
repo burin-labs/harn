@@ -325,10 +325,10 @@ impl HarnConnectorWorker {
         effect_policies: HarnConnectorEffectPolicies,
     ) -> Result<Arc<Self>, ConnectorError> {
         let (tx, rx) = mpsc::channel();
-        let thread_name = format!("harn-connector-{}", provider_id.as_str());
+        let run = crate::egress::bind_policy_context(move || run_worker_loop(module_path, rx));
         let join = std::thread::Builder::new()
-            .name(thread_name)
-            .spawn(move || run_worker_loop(module_path, rx))
+            .name(format!("harn-connector-{}", provider_id.as_str()))
+            .spawn(run)
             .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
         Ok(Arc::new(Self {
             tx,
@@ -1550,7 +1550,7 @@ fn raw_inbound_to_json(raw: &crate::RawInbound) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    mod egress_context;
     use tempfile::TempDir;
 
     use crate::event_log::{AnyEventLog, MemoryEventLog};

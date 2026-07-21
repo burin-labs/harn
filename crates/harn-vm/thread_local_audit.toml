@@ -76,9 +76,9 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/egress/mod.rs"
-statics = ["OVERRIDES"]
-category = "thread_private"
-plan = "thread_private_test"
+statics = ["EGRESS_POLICY_CONTEXT", "TEST_EGRESS_POLICY_CONTEXT", "OVERRIDES"]
+category = "logical_task"
+plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/event_log/mod.rs"

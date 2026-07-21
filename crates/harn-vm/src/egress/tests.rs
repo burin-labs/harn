@@ -9,6 +9,8 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Once};
 
+static_assertions::assert_not_impl_any!(EgressPolicyScope: Send, Sync);
+
 fn install(config: &[(&str, VmValue)]) -> EgressTestEnvGuard {
     // `test_env_guard` clears ambient `HARN_EGRESS_*` and resets policy.
     let guard = test_env_guard();
@@ -160,6 +162,30 @@ fn env_seeding_is_honored() {
     assert!(check_url("http_get", "https://blocked-env.example.com")
         .unwrap()
         .is_some());
+}
+
+#[test]
+fn policy_context_propagates_only_to_bound_worker_threads() {
+    let _scope = scope_egress_policy_for_current_thread();
+    let _guard = install(&[("default", VmValue::String(arcstr::ArcStr::from("deny")))]);
+    let inherited = std::thread::spawn(bind_policy_context(|| {
+        check_url("connector", "https://blocked.example.test")
+            .unwrap()
+            .is_some()
+    }))
+    .join()
+    .unwrap();
+    let unrelated = std::thread::spawn(|| {
+        let _guard = test_env_guard();
+        check_url("connector", "https://blocked.example.test")
+            .unwrap()
+            .is_some()
+    })
+    .join()
+    .unwrap();
+
+    assert!(inherited);
+    assert!(!unrelated);
 }
 
 #[tokio::test]
