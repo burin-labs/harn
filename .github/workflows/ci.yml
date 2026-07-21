@@ -1294,40 +1294,14 @@ jobs:
           test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
           harn --version
 
-  e2e:
-    name: Slow E2E suite
-    runs-on: ubuntu-latest
-    if: >
-      github.event_name == 'pull_request' &&
-      contains(github.event.pull_request.labels.*.name, 'e2e')
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: ./.github/actions/rust-toolchain
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        # sccache is a build-cache optimization, not a build requirement. The
-        # upstream action sometimes fails on merge_group / restricted-token
-        # events with "Bad credentials" when api.github.com gates the release
-        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
-        continue-on-error: true
-      - uses: ./.github/actions/configure-cargo-sccache
-      - uses: ./.github/actions/rust-cache
-        continue-on-error: true
-        with:
-          shared-key: e2e
-          cache-bin: false
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
-        with:
-          tool: nextest@0.9.132
-      - run: make test-e2e
-        env:
-          NEXTEST_PROFILE: e2e
-      # Gracefully stop the sccache daemon so the post-job orphan-cleanup phase
-      # has nothing to terminate (see the Stop-sccache note in rust-builds).
-      - name: Stop sccache server
-        if: always()
-        shell: bash
-        run: '"${SCCACHE_PATH:-sccache}" --stop-server || true'
+  # The Slow E2E suite lives in its own workflow (`.github/workflows/e2e.yml`),
+  # which owns the nightly schedule, the `e2e`-label PR trigger, and manual
+  # dispatch. It is a slow subprocess-spawning tier, not a per-PR gate, so it
+  # is intentionally NOT part of the required `ci-status` aggregate below. A
+  # duplicate copy of this job used to live here and feed `ci-status`, which
+  # meant applying the `e2e` label blocked the PR on the slow tier while the
+  # nightly failures (a separate check context) blocked nothing — remove the
+  # duplicate so `e2e.yml` is the single owner.
 
   ci-status:
     name: CI status
@@ -1353,7 +1327,6 @@ jobs:
         docs-site,
         actions,
         setup-harn-action,
-        e2e,
       ]
     steps:
       - name: Verify required CI jobs
@@ -1513,15 +1486,6 @@ jobs:
           echo "Setup Harn action: $setup_harn_result"
           if [ "$setup_harn_result" != "success" ] && [ "$setup_harn_result" != "skipped" ]; then
             echo "::error::Setup Harn action failed."
-            exit 1
-          fi
-
-          # The E2E job only runs on PRs with the `e2e` label. Treat `skipped`
-          # as passing so regular PRs and merge-group batches are not blocked.
-          e2e_result="${{ needs.e2e.result }}"
-          echo "Slow E2E suite: $e2e_result"
-          if [ "$e2e_result" != "success" ] && [ "$e2e_result" != "skipped" ]; then
-            echo "::error::E2E job failed."
             exit 1
           fi
 

@@ -59,3 +59,52 @@ jobs:
       # runs automatically once that env is supplied.
       - name: Postgres hostlib loadgen
         run: make loadgen-postgres
+
+  # Keep the nightly from rotting silently. A label-gated slow tier with a
+  # scheduled run but no failure signal is indistinguishable from no run at
+  # all — which is exactly how a broken `harn models batch prepare` sat on the
+  # nightly unnoticed. This job opens (and later auto-closes) a single tracking
+  # issue so a red nightly raises a durable, deduplicated alarm.
+  notify:
+    name: Surface nightly result
+    runs-on: ubuntu-latest
+    needs: e2e
+    # Only the scheduled run manages the tracking issue. Label/dispatch runs
+    # are watched live by whoever triggered them and must not file issues.
+    if: always() && github.event_name == 'schedule' && github.repository == 'burin-labs/harn'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or resolve the nightly-failure tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.e2e.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: Nightly E2E suite is failing
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --state open --search "\"$TITLE\" in:title" \
+            --json number,title --jq "[.[] | select(.title == \"$TITLE\")][0].number // empty")
+          case "$RESULT" in
+            success)
+              if [ -n "$existing" ]; then
+                gh issue comment "$existing" --body "Nightly E2E suite is green again: $RUN_URL — closing."
+                gh issue close "$existing"
+              fi
+              ;;
+            failure | cancelled | timed_out)
+              if [ -n "$existing" ]; then
+                gh issue comment "$existing" --body "Still failing (\`$RESULT\`): $RUN_URL"
+              else
+                gh issue create --title "$TITLE" --body \
+                  "The scheduled nightly E2E suite did not pass (\`$RESULT\`): $RUN_URL
+
+          Opened and closed automatically by \`.github/workflows/e2e.yml\`; stays open until a nightly run is green."
+              fi
+              ;;
+            *)
+              echo "e2e result is '$RESULT' — no tracking-issue action."
+              ;;
+          esac
