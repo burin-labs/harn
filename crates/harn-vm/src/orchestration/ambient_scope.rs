@@ -45,6 +45,7 @@ use crate::agent_sessions::swap_current_session_stack;
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
 use crate::connectors::ConnectorCtx;
+use crate::egress::{swap_egress_policy_context, EgressPolicyContext};
 use crate::llm::agent_observe::{swap_llm_transcript_ambient, LlmTranscriptAmbient};
 use crate::llm::capabilities::{
     swap_user_overrides as swap_capability_overrides, CapabilitiesFile,
@@ -77,6 +78,8 @@ pub(crate) struct AmbientExecutionScope {
     /// Inline fixtures and observations shared by one VM execution tree.
     llm_mock: LlmMockContext,
     connector_ctx: Vec<ConnectorCtx>,
+    /// Outbound-network policy shared by one pipeline execution tree.
+    egress_policy: Option<EgressPolicyContext>,
     /// Provider catalog overlay for this execution. An ACP host can install a
     /// verified endpoint without mutating the process or a sibling server.
     provider_overrides: Option<ProvidersConfig>,
@@ -186,6 +189,7 @@ impl AmbientExecutionScope {
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
             llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
             llm_mock: current_llm_mock_context(),
+            egress_policy: clone_via_swap(swap_egress_policy_context),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
@@ -241,6 +245,7 @@ impl AmbientExecutionScope {
             llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
             llm_mock: current_llm_mock_context(),
             connector_ctx: clone_via_swap(swap_active_harn_connector_ctx),
+            egress_policy: clone_via_swap(swap_egress_policy_context),
             session_stack: clone_via_swap(swap_current_session_stack),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
@@ -276,6 +281,7 @@ impl AmbientExecutionScope {
             llm_transcript: swap_llm_transcript_ambient(self.llm_transcript),
             llm_mock: swap_llm_mock_context(self.llm_mock),
             connector_ctx: swap_active_harn_connector_ctx(self.connector_ctx),
+            egress_policy: swap_egress_policy_context(self.egress_policy),
             session_stack: swap_current_session_stack(self.session_stack),
             execution_context: swap_thread_execution_context(self.execution_context),
             source_dir: swap_source_dir(self.source_dir),
@@ -414,6 +420,8 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     ("LLM_CAPABILITY_OVERRIDES_CONTEXT", AmbientScoping::Captured),
     // Inline fixture state follows the VM execution tree across every await.
     ("LLM_MOCK_CONTEXT", AmbientScoping::Captured),
+    // A test pipeline's egress policy follows all inline and delegated work.
+    ("EGRESS_POLICY_CONTEXT", AmbientScoping::Captured),
     // Verdict execution-scope owner: INHERITED (unlike the session stack) because
     // a fan-out worker runs the same program run and its run_test must record /
     // issue under that run's owner. See observability/execution_scope.rs.
@@ -1277,6 +1285,7 @@ mod tests {
             "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
             "LLM_CAPABILITY_OVERRIDES_CONTEXT",
             "LLM_MOCK_CONTEXT",
+            "EGRESS_POLICY_CONTEXT",
             "ACTIVE_EXECUTION_SCOPE_STACK",
             "TRANSCRIPT_DIR_STACK",
         ]

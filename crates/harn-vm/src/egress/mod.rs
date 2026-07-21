@@ -332,6 +332,12 @@ fn capture_egress_policy_context() -> Option<EgressPolicyContext> {
     current_policy_context()
 }
 
+pub(crate) fn swap_egress_policy_context(
+    context: Option<EgressPolicyContext>,
+) -> Option<EgressPolicyContext> {
+    EGRESS_POLICY_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), context))
+}
+
 fn with_egress_policy_context<T>(
     context: Option<EgressPolicyContext>,
     run: impl FnOnce() -> T,
@@ -349,8 +355,7 @@ pub(crate) fn bind_policy_context<T>(run: impl FnOnce() -> T + Send) -> impl FnO
 fn scope_egress_policy_context_for_current_thread(
     context: Option<EgressPolicyContext>,
 ) -> EgressPolicyScope {
-    let previous = EGRESS_POLICY_CONTEXT
-        .with(|current| std::mem::replace(&mut *current.borrow_mut(), context));
+    let previous = swap_egress_policy_context(context);
     EgressPolicyScope {
         previous,
         _thread_bound: PhantomData,

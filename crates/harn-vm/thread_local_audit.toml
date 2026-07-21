@@ -70,15 +70,15 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/egress/mod.rs"
-statics = ["REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH", "REQUIRE_SSRF_GUARD_DEPTH"]
+statics = ["EGRESS_POLICY_CONTEXT", "TEST_EGRESS_POLICY_CONTEXT", "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH", "REQUIRE_SSRF_GUARD_DEPTH"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/egress/mod.rs"
-statics = ["EGRESS_POLICY_CONTEXT", "TEST_EGRESS_POLICY_CONTEXT", "OVERRIDES"]
-category = "logical_task"
-plan = "task_local_or_explicit"
+statics = ["OVERRIDES"]
+category = "thread_private"
+plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/event_log/mod.rs"
