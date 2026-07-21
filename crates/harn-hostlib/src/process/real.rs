@@ -141,6 +141,8 @@ fn prepare_command(
         command.env(key, value);
     }
 
+    log_spawn_context(&command, spec.env_mode);
+
     if spec.configure_process_group {
         configure_background_process_group(&mut command);
     }
@@ -185,6 +187,55 @@ fn prepare_command(
     });
 
     Ok((command, cleanup_token))
+}
+
+/// Record only the non-secret facts needed to diagnose command-resolution
+/// failures. Arguments and the rest of the environment may contain credentials
+/// or user data, so this boundary intentionally logs neither.
+fn log_spawn_context(command: &Command, env_mode: EnvMode) {
+    let program = command.get_program().to_string_lossy();
+    let cwd = command
+        .get_current_dir()
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok());
+    let path = resolved_env_value(command, "PATH", env_mode)
+        .map(|value| value.to_string_lossy().into_owned());
+    tracing::debug!(
+        target: "harn_hostlib::process",
+        shell_or_program = %program,
+        cwd = %cwd.as_deref().map_or_else(|| "<unresolved>".into(), std::path::Path::to_string_lossy),
+        path = %path.as_deref().unwrap_or("<unset>"),
+        env_mode = ?env_mode,
+        "resolved command spawn context"
+    );
+}
+
+fn resolved_env_value(
+    command: &Command,
+    name: &str,
+    env_mode: EnvMode,
+) -> Option<std::ffi::OsString> {
+    for (key, value) in command.get_envs() {
+        if env_key_eq(key, name) {
+            return value.map(std::ffi::OsStr::to_os_string);
+        }
+    }
+    if env_mode == EnvMode::Replace {
+        None
+    } else {
+        std::env::var_os(name)
+    }
+}
+
+fn env_key_eq(key: &std::ffi::OsStr, expected: &str) -> bool {
+    #[cfg(windows)]
+    {
+        key.to_string_lossy().eq_ignore_ascii_case(expected)
+    }
+    #[cfg(not(windows))]
+    {
+        key == expected
+    }
 }
 
 fn map_spawn_error(error: io::Error) -> ProcessError {
@@ -422,5 +473,36 @@ pub(crate) fn configure_background_process_group(command: &mut std::process::Com
     #[cfg(not(unix))]
     {
         let _ = command;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolved_path_prefers_the_child_override() {
+        let mut command = Command::new("shell");
+        command.env("PATH", "/resolved/toolchain/bin");
+
+        assert_eq!(
+            resolved_env_value(&command, "PATH", EnvMode::Patch),
+            Some(std::ffi::OsString::from("/resolved/toolchain/bin"))
+        );
+    }
+
+    #[test]
+    fn resolved_path_honors_an_explicit_removal() {
+        let mut command = Command::new("shell");
+        command.env_remove("PATH");
+
+        assert_eq!(resolved_env_value(&command, "PATH", EnvMode::Patch), None);
+    }
+
+    #[test]
+    fn replace_mode_does_not_report_an_inherited_path() {
+        let command = Command::new("shell");
+
+        assert_eq!(resolved_env_value(&command, "PATH", EnvMode::Replace), None);
     }
 }
