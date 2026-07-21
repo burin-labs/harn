@@ -27,7 +27,8 @@ command arguments, executes the resolved binary.
 Environment:
   HARN_BIN           explicit executable to validate and use
   HARN_BIN_NO_BUILD  set to 1 to forbid implicit Cargo builds
-  CARGO_TARGET_DIR   target directory for --no-build worktree lookup
+  CARGO_TARGET_DIR                 target directory for --no-build worktree lookup
+  HARN_BIN_CARGO_TIMEOUT_SECONDS   Cargo probe deadline in seconds (default: 600)
 EOF
 }
 
