@@ -17,13 +17,17 @@ fn tool_message_count(session_id) {
 }
 
 pipeline default() {
+  let dispatches = 0
   let tools = tool_registry()
   tools = tool_define(
     tools,
     "noop",
     "Return the same harmless result",
     {
-      handler: { _args -> return "noop" },
+      handler: { _args ->
+        dispatches = dispatches + 1
+        return "noop"
+      },
       parameters: {},
       returns: {type: "string"},
       annotations: {kind: "read"},
@@ -54,6 +58,7 @@ pipeline default() {
             max_iterations: 4,
             session_id: session,
             stall_diagnostics: {threshold: 3, inject_feedback: true, max_feedback: 1},
+            verify_completion_judge: {max_invocations: 1},
             done_judge: {cadence: {when: "stalled"}},
           },
         ) },
@@ -66,8 +71,19 @@ pipeline default() {
       __io_println(len(judges))
       __io_println(judges[0].trigger)
       __io_println(judges[0].verdict)
+      __io_println(
+        "completion.invocations=" + to_string(captured.result.completion_judge.invocations),
+      )
+      __io_println("completion.vetoes=" + to_string(captured.result.completion_judge.vetoes))
+      __io_println("completion.max=" + to_string(captured.result.completion_judge.max_invocations))
+      __io_println(
+        "completion.cap_reached=" + to_string(captured.result.completion_judge.cap_reached),
+      )
+      __io_println("done.cap_reached=" + to_string(captured.result.done_judge.cap_reached))
       __io_println(tool_message_count(session))
+      __io_println(dispatches)
       __io_println(contains(messages, "Stall diagnostic"))
+      __io_println(contains(messages, "change approach"))
       __io_println(len(llm_mock_calls()))
     },
   )
