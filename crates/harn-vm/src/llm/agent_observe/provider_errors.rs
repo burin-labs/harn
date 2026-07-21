@@ -643,6 +643,7 @@ pub(super) fn emit_empty_completion_retry(
 pub(super) struct ProviderCallErrorObservation<'a> {
     pub(super) iteration: usize,
     pub(super) call_id: &'a str,
+    /// One-based number of the provider attempt that produced this error.
     pub(super) attempt: usize,
     pub(super) status: &'a str,
     pub(super) opts: &'a super::api::LlmCallOptions,

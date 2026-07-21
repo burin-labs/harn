@@ -1,0 +1,30 @@
+import { AgentLoopOptions } from "std/agent/options"
+import { read_jsonl } from "std/jsonl"
+import { with_llm_script } from "std/testing"
+
+pipeline main() {
+  with_llm_script(
+    [{error: {category: "transient_network", message: "connection reset by peer"}}],
+    { ->
+      const transcript_dir = path_join(
+        harness.fs.temp_dir(),
+        "harn-provider-call-error-telemetry-" + uuid(),
+      )
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        model: "mock",
+        loop_until_done: true,
+        max_iterations: 1,
+        llm_transcript_dir: transcript_dir,
+      }
+      agent_loop("Return a short answer.", nil, opts)
+      const records = read_jsonl(path_join(transcript_dir, "llm_transcript.jsonl"), {strict: true})
+      const errors = records.filter({ record -> record.type == "provider_call_error" })
+      __io_println(len(errors) == 1)
+      __io_println(errors[0].attempt)
+      __io_println(errors[0].status)
+      __io_println(errors[0].retryable)
+      __io_println(errors[0].status != "retries_exhausted")
+    },
+  )
+}
