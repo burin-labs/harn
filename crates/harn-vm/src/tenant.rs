@@ -14,7 +14,8 @@ use crate::event_log::{
 };
 use crate::orchestration::CapabilityPolicy;
 use crate::secrets::{
-    RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
+    ensure_scoped_secret_access_allowed, RotationHandle, SecretBytes, SecretDeleteRequest,
+    SecretError, SecretId, SecretMeta, SecretProvider,
 };
 use crate::TenantId;
 
@@ -401,6 +402,17 @@ impl SecretProvider for TenantSecretProvider {
 
     async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
         self.inner.list(&self.scoped_id(prefix)?).await
+    }
+
+    async fn delete_scoped(&self, request: SecretDeleteRequest) -> Result<(), SecretError> {
+        ensure_scoped_secret_access_allowed("delete", &request.id)?;
+        self.inner
+            .delete_scoped(SecretDeleteRequest {
+                id: self.scoped_id(&request.id)?,
+                scope: request.scope,
+                audit: request.audit,
+            })
+            .await
     }
 
     fn namespace(&self) -> &str {

@@ -16,21 +16,67 @@
  * Backends:
  *   - memory()                              ephemeral, per-session
  *   - file(path, encryption_key)            local disk, AES-256-GCM
+ *   - secrets({provider})                   `harness.secrets` host store
  *   - harn_cloud_session()                  cloud-managed, per-session
  *   - harn_cloud_org()                      cloud-managed, org-scoped
  *   - custom({get, set, delete, with_refresh_lock?}) user-supplied (vault, KMS)
  *
  * `storage()` returns the namespace dict matching the `OAuth.Storage.*`
  * shape from the OAuth epic: `memory` / `harn_cloud_*` as ready
- * handles, `file` / `custom` as factory closures.
+ * handles, `file` / `secrets` / `custom` as factory closures.
+ *
+ * ## Choosing a backend: local vs cloud
+ *
+ * - `memory()` — tests and one-shot scripts; nothing survives the VM.
+ * - `file(path, key)` — a single local process that owns its own
+ *   encrypted token file (you manage the encryption key).
+ * - `secrets({provider})` — a local harness that already authenticates
+ *   through `harness.secrets` (OS keyring / env chain, or the same store
+ *   `harn connect` writes). This is the drop-in for "I already have a
+ *   secret host; stop hand-rolling a cache adapter per provider." It
+ *   composes with `harn connect` by reading/writing the connector's
+ *   canonical `<provider>/oauth-token` secret id.
+ * - `harn_cloud_session()` / `harn_cloud_org()` — a hosted deployment
+ *   where the embedder (cloud platform) owns tenant-scoped, durable,
+ *   cross-worker storage and cross-process refresh locking.
+ * - `custom({...})` — anything else (Vault, KMS, a bespoke DB).
  */
-type TokenSet = {
+import { redact } from "std/oauth/redaction"
+
+const __SECRETS_DEFAULT_TOKEN_NAME = "oauth-token"
+
+const __SECRETS_TOKEN_FIELDS = [
+  "access_token",
+  "refresh_token",
+  "expires_at_unix",
+  "expires_in",
+  "issued_at_unix",
+  "token_type",
+  "scopes",
+  "issued_token_type",
+  "token_exchange_mode",
+  "subject_token_type",
+  "actor_token_type",
+  "requested_token_type",
+]
+
+/**
+ * The canonical OAuth token envelope every storage backend serializes. It is
+ * the public contract consumers annotate their own token variables with rather
+ * than re-declaring the shape. Deterministic fields (`access_token`,
+ * `expires_at_unix`, `token_type`, `scopes`) are named distinctly from the
+ * open `metadata` bag; `...rest` carries forward-compatible and `harn connect`
+ * provenance fields (e.g. `token_endpoint`, `client_id`) that a shared
+ * canonical secret round-trips without this contract having to enumerate them.
+ */
+pub type TokenSet = {
   access_token: string,
   refresh_token?: string,
   expires_at_unix?: int,
   token_type?: string,
   scopes?: list<string>,
   metadata?: dict,
+  ...rest,
 }
 
 /**
@@ -171,6 +217,227 @@ pub fn custom(handlers) -> Storage {
   return base + {with_refresh_lock: with_lock}
 }
 
+fn __secrets_split_scopes(text) {
+  let out = []
+  for raw in split(to_string(text), " ") {
+    const part = trim(to_string(raw ?? ""))
+    if part != "" {
+      out = out + [part]
+    }
+  }
+  return out
+}
+
+fn __secrets_is_missing(err) {
+  // A caught `harness.secrets` NotFound means the secret is simply absent —
+  // the storage protocol wants `nil`, not an error. A completely unbound
+  // secret host is also `not_found`-categorized but is a configuration bug
+  // the caller must see, so it is deliberately NOT treated as "missing".
+  if type_of(err) != "dict" {
+    return false
+  }
+  if err?.category != "not_found" {
+    return false
+  }
+  const message = to_string(err?.message ?? "")
+  return !contains(message, "no secret provider bound")
+}
+
+fn __secrets_secret_name(cfg, key) {
+  // Map a storage key to a `harness.secrets` id. Absolute connector ids
+  // (`namespace/name` or `harn-secret://…`) pass through verbatim so a
+  // client can be pointed straight at an existing credential. The default
+  // key (the client sets `storage_key` to the provider id) and the bare
+  // token name both resolve to the canonical `<provider>/<token_name>` so
+  // the backend composes with `harn connect` out of the box; any other key
+  // becomes a distinct `<provider>/<key_prefix><key>` identity.
+  const key_text = to_string(key ?? "")
+  if contains(key_text, "/") {
+    return key_text
+  }
+  const leaf = if key_text == "" || key_text == cfg.provider || key_text == cfg.token_name {
+    cfg.token_name
+  } else {
+    cfg.key_prefix + key_text
+  }
+  return cfg.provider + "/" + leaf
+}
+
+fn __secrets_read_raw(cfg, name) {
+  return try {
+    harness.secrets.read(name, cfg.scope)
+  } catch (err) {
+    if __secrets_is_missing(err) {
+      nil
+    } else {
+      throw err
+    }
+  }
+}
+
+fn __secrets_parse(cfg, name, raw) {
+  return try {
+    json_parse(raw)
+  } catch (err) {
+    // Never echo the raw secret bytes; redact the parser detail as a
+    // defense-in-depth reuse of the OAuth redaction catalog.
+    throw "std/oauth/storage: secrets value for `" + name
+      + "` is not valid TokenSet JSON: "
+      + redact(to_string(err?.message ?? err))
+  }
+}
+
+fn __secrets_get(cfg, key) {
+  const name = __secrets_secret_name(cfg, key)
+  const raw = __secrets_read_raw(cfg, name)
+  if raw == nil || trim(to_string(raw)) == "" {
+    return nil
+  }
+  const parsed = __secrets_parse(cfg, name, raw)
+  if type_of(parsed) != "dict" {
+    return nil
+  }
+  // `harn connect` stores `scopes` as a space-joined string; normalize to
+  // the list<string> the OAuth client expects.
+  if type_of(parsed?.scopes) == "string" {
+    return parsed + {scopes: __secrets_split_scopes(parsed.scopes)}
+  }
+  return parsed
+}
+
+fn __secrets_merge(prev, incoming) {
+  if type_of(prev) != "dict" {
+    return incoming
+  }
+  // Preserve non-token metadata already in the secret (e.g. the
+  // `harn connect` fields token_endpoint / client_id / resource) so a
+  // shared canonical secret round-trips; our fresh token fields win.
+  const extras = __dict_omit(prev, __SECRETS_TOKEN_FIELDS)
+  let out = extras + incoming
+  // Never drop a refresh token on update: keep the stored one when the
+  // new set omits it; a newly-issued refresh token rotates it out.
+  const new_refresh = incoming?.refresh_token
+  const prev_refresh = prev?.refresh_token
+  if (new_refresh == nil || to_string(new_refresh) == "")
+    && prev_refresh != nil
+    && to_string(prev_refresh) != "" {
+    out = out + {refresh_token: to_string(prev_refresh)}
+  }
+  return out
+}
+
+fn __secrets_set(cfg, key, token_set) {
+  if type_of(token_set) != "dict" {
+    throw "std/oauth/storage: secrets backend set expects a TokenSet dict"
+  }
+  const name = __secrets_secret_name(cfg, key)
+  const prev = __secrets_get_stored(cfg, name)
+  const merged = __secrets_merge(prev, token_set)
+  // Deterministic serialization: `json_stringify` emits keys in sorted
+  // order (dicts are ordered maps), so equal TokenSets encode identically.
+  const payload = json_stringify(merged)
+  // TTL is carried inside the TokenSet (`expires_at_unix`); canonical
+  // secret stores (OS keyring) reject write-level TTLs, so none is set.
+  const _ = harness.secrets.write(name, payload, cfg.scope)
+  return nil
+}
+
+fn __secrets_get_stored(cfg, name) {
+  const raw = __secrets_read_raw(cfg, name)
+  if raw == nil || trim(to_string(raw)) == "" {
+    return nil
+  }
+  return __secrets_parse(cfg, name, raw)
+}
+
+fn __secrets_delete(cfg, key) {
+  const name = __secrets_secret_name(cfg, key)
+  try {
+    const _ = harness.secrets.delete(name, cfg.scope)
+  } catch (err) {
+    // Already-absent is the desired post-delete state.
+    if !__secrets_is_missing(err) {
+      throw err
+    }
+  }
+  return nil
+}
+
+/**
+ * secrets returns a storage handle backed by the ambient
+ * `harness.secrets` host capability (OS keyring, env chain, or a
+ * cloud-provided secret host — whatever the harness is bound to). It is
+ * the drop-in for local harnesses that already authenticate through
+ * `harness.secrets` and would otherwise hand-roll a cache/serialization
+ * adapter per provider.
+ *
+ * `opts`:
+ *   - provider:   required connector/provider id, e.g. "github". Used as
+ *                 the secret-id namespace so tokens land under the same
+ *                 canonical ids `harn connect` uses (`<provider>/…`).
+ *   - token_name: canonical leaf name for the default single identity;
+ *                 defaults to "oauth-token" (the connector's combined
+ *                 token secret), so a one-identity client composes with
+ *                 `harn connect` with no extra wiring.
+ *   - key_prefix: prefix applied to additional named identities
+ *                 (`storage_key` other than the provider id) so several
+ *                 accounts can coexist under one provider. Default "".
+ *   - scope:      `harness.secrets` scope (nil | string | dict) applied to
+ *                 every read/write/delete for access-control + audit.
+ *                 Default nil → the ambient tenant scope.
+ *
+ * Semantics:
+ *   - Deterministic TokenSet serialization (sorted-key JSON).
+ *   - Rotating refresh tokens are preserved: an update that omits a
+ *     refresh token keeps the stored one; a newly-issued one rotates it.
+ *   - Non-token fields already in a shared secret (e.g. `harn connect`
+ *     metadata) are preserved on write.
+ *   - Token material never appears in the handle or in diagnostics.
+ *   - Refreshes are single-flight per (provider, key) in-process, so
+ *     concurrent TTL / 401 / explicit refreshes coalesce. Durable
+ *     cross-process single-flight requires a backend with its own lock
+ *     (`file` / `harn_cloud_*`); the secret host exposes no lock
+ *     primitive, so this backend coalesces within the process only.
+ *
+ * @effects: [host_call]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: secrets({provider: "github"})
+ */
+pub fn secrets(opts) -> Storage {
+  if type_of(opts) != "dict" {
+    throw "std/oauth/storage: secrets opts must be a dict"
+  }
+  const provider = trim(to_string(opts?.provider ?? ""))
+  if provider == "" {
+    throw "std/oauth/storage: secrets opts.provider is required"
+  }
+  const token_name = trim(to_string(opts?.token_name ?? __SECRETS_DEFAULT_TOKEN_NAME))
+  if token_name == "" {
+    throw "std/oauth/storage: secrets opts.token_name must be non-empty"
+  }
+  const cfg = {
+    provider: provider,
+    token_name: token_name,
+    key_prefix: to_string(opts?.key_prefix ?? ""),
+    scope: opts?.scope,
+    // In-process refresh lock; `kind: "custom"` routes the lock builtin
+    // to its process-local mutex path (no file / cloud lease).
+    lock_handle: {_namespace: "oauth_storage", kind: "custom", id: "secrets:" + provider},
+  }
+  return {
+    _namespace: "oauth_storage",
+    kind: "secrets",
+    provider: provider,
+    get: { key -> __secrets_get(cfg, key) },
+    set: { key, token_set, ttl_seconds = nil -> __secrets_set(cfg, key, token_set) },
+    delete: { key -> __secrets_delete(cfg, key) },
+    with_refresh_lock: { key, body ->
+      __oauth_storage_with_refresh_lock(cfg.lock_handle, key, body)
+    },
+  }
+}
+
 /**
  * storage returns the `OAuth.Storage.*` namespace dict matching the
  * epic API surface. `memory` / `harn_cloud_session` /
@@ -186,6 +453,7 @@ pub fn storage() {
   return {
     memory: memory(),
     file: { path, encryption_key -> file(path, encryption_key) },
+    secrets: { opts -> secrets(opts) },
     harn_cloud_session: harn_cloud_session(),
     harn_cloud_org: harn_cloud_org(),
     custom: { handlers -> custom(handlers) },

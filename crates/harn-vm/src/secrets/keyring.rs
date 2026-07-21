@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 
 use super::{
-    emit_secret_access_event, RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta,
-    SecretProvider,
+    emit_secret_access_event, ensure_scoped_secret_access_allowed, RotationHandle, SecretBytes,
+    SecretDeleteRequest, SecretError, SecretId, SecretMeta, SecretProvider,
 };
 
 #[derive(Debug)]
@@ -108,6 +108,11 @@ impl SecretProvider for KeyringSecretProvider {
             provider: "keyring".to_string(),
             operation: "rotate",
         })
+    }
+
+    async fn delete_scoped(&self, request: SecretDeleteRequest) -> Result<(), SecretError> {
+        ensure_scoped_secret_access_allowed("delete", &request.id)?;
+        self.delete(&request.id).await
     }
 
     async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
