@@ -365,7 +365,10 @@ fn provider_tool_probe_dry_run_request_large_case_is_offline_and_deterministic()
         "tool-probe dry-run JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 3);
+    assert_eq!(
+        harn_value["schema_version"],
+        harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION
+    );
     assert_eq!(harn_value["probe_case"], "large_string_argument");
     assert!(
         harn_value["expected_value"]
@@ -415,7 +418,10 @@ fn provider_tool_probe_audit_validates_catalog_requests_in_process() {
         "tool-probe audit JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 3);
+    assert_eq!(
+        harn_value["schema_version"],
+        harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_REQUEST_AUDIT_SCHEMA_VERSION
+    );
     assert_eq!(
         harn_value["request_profiles"],
         serde_json::json!(["catalog_default", "parameter_edges"])

@@ -37,7 +37,10 @@ fn provider_dispatch_audit_explains_selected_route_variants_in_process() {
         "dispatch audit JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 3);
+    assert_eq!(
+        harn_value["schema_version"],
+        harn_cli::DISPATCH_AUDIT_SCHEMA_VERSION
+    );
     assert!(
         harn_value["catalog"]["hash_blake3"]
             .as_str()
@@ -114,7 +117,10 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
     );
     let harn_value = parse_json(&harn.stdout, "harn");
     let plan = &harn_value["tool_probe_plan"];
-    assert_eq!(plan["schema_version"], 3);
+    assert_eq!(
+        plan["schema_version"],
+        harn_cli::DISPATCH_AUDIT_SCHEMA_VERSION
+    );
     assert!(
         plan["plan_id"].as_str().unwrap_or_default().len() >= 16,
         "tool-probe plan should carry a stable id: {}",
@@ -366,7 +372,10 @@ fn provider_dispatch_audit_tool_probe_plan_marks_signed_thinking_not_applicable(
     assert_eq!(plan["matrix"]["readiness_command_count"], 1);
     assert_eq!(plan["command_count"], 0);
     assert_eq!(plan["matrix"]["command_count"], 0);
-    assert_eq!(plan["matrix"]["not_applicable_count"], 2);
+    // One not-applicable (case, mode) pair, expanded across both request
+    // profiles (live + request-audit) the plan now enumerates — bump this if the
+    // profile set changes, not the schema.
+    assert_eq!(plan["matrix"]["not_applicable_count"], 4);
     assert_eq!(
         plan["readiness_commands"][0]["route"],
         "ollama:devstral-small-2:24b"

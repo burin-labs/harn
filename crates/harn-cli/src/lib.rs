@@ -23,6 +23,7 @@ pub mod test_timing;
 #[doc(hidden)]
 pub mod tests;
 mod typecheck_imports;
+pub use commands::dispatch_explain::DISPATCH_AUDIT_SCHEMA_VERSION;
 pub(crate) use compiler_context::{
     compiler_for_source, compiler_with_imported_enum_candidates,
     ensure_builtin_signatures_installed, imported_enum_candidates_for_source,
