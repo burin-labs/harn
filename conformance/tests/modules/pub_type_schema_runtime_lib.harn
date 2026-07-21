@@ -16,7 +16,9 @@ type Wrap<T> = {tag?: string} | T
 
 type Middle = {leaves?: dict<string, Wrap<Leaf>>}
 
-// Reuses the generic `Wrap<_>` at distinct arguments nested inside dicts
-// (`Wrap<Middle>` containing `Wrap<Leaf>`), which used to abort materialization
-// and drop this alias's runtime binding.
+/**
+ * Reuses the generic `Wrap<_>` at distinct arguments nested inside dicts
+ * (`Wrap<Middle>` containing `Wrap<Leaf>`), which used to abort materialization
+ * and drop this alias's runtime binding.
+ */
 pub type NestedReuse = {mids?: dict<string, Wrap<Middle>>}
