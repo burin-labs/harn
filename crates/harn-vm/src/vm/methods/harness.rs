@@ -796,6 +796,28 @@ impl crate::vm::Vm {
                     .map_err(secret_error_to_vm)?;
                 Ok(secret_rotation_receipt_value(receipt))
             }
+            "delete" => {
+                if args.len() > 2 {
+                    return Err(VmError::TypeError(format!(
+                        "{}.delete expects name and optional scope",
+                        handle.type_name()
+                    )));
+                }
+                let name = secret_name_arg(handle, method, args.first())?;
+                let scope = secret_scope_arg(args.get(1))?;
+                let id = secret_id_for_scope(&name, &scope)?;
+                crate::secrets::ensure_scoped_secret_access_allowed(method, &id)
+                    .map_err(secret_error_to_vm)?;
+                provider
+                    .delete_scoped(crate::secrets::SecretDeleteRequest {
+                        id,
+                        scope,
+                        audit: secret_audit_context(),
+                    })
+                    .await
+                    .map_err(secret_error_to_vm)?;
+                Ok(VmValue::Nil)
+            }
             "lease" | "lease_bytes" => {
                 if args.len() > 3 {
                     return Err(VmError::TypeError(format!(

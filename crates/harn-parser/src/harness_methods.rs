@@ -138,7 +138,7 @@ pub fn harness_llm_ambient(method: &str) -> Option<&'static str> {
 
 pub fn harness_secrets_ambient(method: &str) -> Option<&'static str> {
     match method {
-        "read" | "read_bytes" | "write" | "rotate" | "lease" | "lease_bytes" => None,
+        "read" | "read_bytes" | "write" | "delete" | "rotate" | "lease" | "lease_bytes" => None,
         _ => None,
     }
 }

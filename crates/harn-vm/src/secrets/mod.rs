@@ -264,6 +264,13 @@ pub struct SecretReadRequest {
 }
 
 #[derive(Debug)]
+pub struct SecretDeleteRequest {
+    pub id: SecretId,
+    pub scope: SecretScope,
+    pub audit: SecretAuditContext,
+}
+
+#[derive(Debug)]
 pub struct SecretWriteRequest {
     pub id: SecretId,
     pub scope: SecretScope,
@@ -537,6 +544,15 @@ pub trait SecretProvider: Send + Sync {
         })
     }
 
+    async fn delete_scoped(&self, request: SecretDeleteRequest) -> Result<(), SecretError> {
+        ensure_scoped_secret_access_allowed("delete", &request.id)?;
+        let _ = request;
+        Err(SecretError::Unsupported {
+            provider: self.namespace().to_string(),
+            operation: "delete",
+        })
+    }
+
     async fn rotate_scoped(
         &self,
         request: SecretRotateRequest,
@@ -701,6 +717,40 @@ impl SecretProvider for ChainSecretProvider {
         }
 
         Ok(merged.into_values().collect())
+    }
+
+    async fn delete_scoped(&self, request: SecretDeleteRequest) -> Result<(), SecretError> {
+        ensure_scoped_secret_access_allowed("delete", &request.id)?;
+        if self.providers.is_empty() {
+            return Err(SecretError::NoProviders {
+                namespace: self.namespace.clone(),
+            });
+        }
+
+        // Delete from every backend that supports it so a stale copy in one
+        // provider can't resurrect a credential the caller asked to revoke.
+        // A `NotFound` counts as success — the secret is already gone there.
+        let mut errors = Vec::new();
+        let mut any_ok = false;
+        for provider in &self.providers {
+            match provider
+                .delete_scoped(SecretDeleteRequest {
+                    id: request.id.clone(),
+                    scope: request.scope.clone(),
+                    audit: request.audit.clone(),
+                })
+                .await
+            {
+                Ok(()) | Err(SecretError::NotFound { .. }) => any_ok = true,
+                Err(error) => errors.push(error),
+            }
+        }
+
+        if any_ok {
+            Ok(())
+        } else {
+            Err(SecretError::All(errors))
+        }
     }
 
     fn namespace(&self) -> &str {

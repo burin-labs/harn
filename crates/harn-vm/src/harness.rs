@@ -1322,6 +1322,36 @@ mod tests {
             })
         }
 
+        async fn delete_scoped(
+            &self,
+            request: crate::secrets::SecretDeleteRequest,
+        ) -> Result<(), crate::secrets::SecretError> {
+            self.record(
+                "delete",
+                &request.id,
+                &request.scope,
+                &request.audit,
+                None,
+                None,
+                None,
+            );
+            let removed = self
+                .inner
+                .versions
+                .lock()
+                .expect("versions lock poisoned")
+                .remove(&request.id)
+                .is_some();
+            if removed {
+                Ok(())
+            } else {
+                Err(crate::secrets::SecretError::NotFound {
+                    provider: self.namespace().to_string(),
+                    id: request.id,
+                })
+            }
+        }
+
         fn namespace(&self) -> &'static str {
             "recording"
         }
@@ -1590,6 +1620,97 @@ fn main(harness: Harness) {
                 crate::secrets::connector_refresh_token_id("google_workspace"),
                 crate::secrets::connector_refresh_token_id("google_workspace"),
             ]
+        );
+    }
+
+    // End-to-end fixture for the `std/oauth/storage` `secrets({provider})`
+    // backend, driven entirely in-process against the fake secret host —
+    // no network, no real keyring. Exercises roundtrip, rotating-refresh
+    // preservation, delete, and `harn connect` composition (connector-shaped
+    // scopes string + preserved connector metadata).
+    #[test]
+    fn secrets_backed_oauth_storage_roundtrips_and_preserves_refresh() {
+        let provider = RecordingSecretProvider::default();
+        let harness = Harness::real().with_secret_provider(Arc::new(provider.clone()));
+
+        let source = r#"
+import { secrets } from "std/oauth/storage"
+
+fn assert_true(label, cond) {
+  if !cond { throw label }
+}
+
+fn main(harness: Harness) {
+  const store = secrets({provider: "github"})
+
+  // Absent key -> nil (NotFound is swallowed by the backend).
+  assert_true("missing-nil", store.get("github") == nil)
+
+  // Roundtrip: the client default storage_key is the provider id.
+  store.set(
+    "github",
+    {access_token: "a1", refresh_token: "r1", expires_at_unix: 100, scopes: ["repo", "read:user"]},
+  )
+  const t1 = store.get("github")
+  assert_true("t1-access", t1.access_token == "a1")
+  assert_true("t1-refresh", t1.refresh_token == "r1")
+  assert_true("t1-scopes", join(t1.scopes, ",") == "repo,read:user")
+
+  // Update omitting the refresh token must NOT drop it.
+  store.set("github", {access_token: "a2", expires_at_unix: 200})
+  const t2 = store.get("github")
+  assert_true("t2-access", t2.access_token == "a2")
+  assert_true("t2-refresh-preserved", t2.refresh_token == "r1")
+
+  // A newly-issued refresh token rotates the stored one.
+  store.set("github", {access_token: "a3", refresh_token: "r2"})
+  assert_true("t3-refresh-rotated", store.get("github").refresh_token == "r2")
+
+  // Delete clears the credential.
+  store.delete("github")
+  assert_true("deleted-nil", store.get("github") == nil)
+
+  // Compose with `harn connect`: seed the canonical <provider>/oauth-token
+  // secret with a connector-shaped payload (scopes as a space-joined string
+  // plus connector-only metadata).
+  const seed = json_stringify(
+    {
+      access_token: "conn-a",
+      refresh_token: "conn-r",
+      scopes: "repo read:user",
+      token_endpoint: "https://github.com/login/oauth/access_token",
+      client_id: "cid",
+    },
+  )
+  harness.secrets.write("github/oauth-token", seed)
+
+  const c1 = store.get("github")
+  assert_true("compose-access", c1.access_token == "conn-a")
+  assert_true("compose-scopes-normalized", join(c1.scopes, ",") == "repo,read:user")
+
+  // A refresh writing a fresh token must preserve the connector metadata.
+  store.set("github", {access_token: "conn-a2", refresh_token: "conn-r2", expires_at_unix: 300})
+  const reparsed = json_parse(harness.secrets.read("github/oauth-token"))
+  assert_true("compose-access2", reparsed.access_token == "conn-a2")
+  assert_true(
+    "compose-endpoint-preserved",
+    reparsed.token_endpoint == "https://github.com/login/oauth/access_token",
+  )
+  assert_true("compose-client-id-preserved", reparsed.client_id == "cid")
+
+  __io_println("secrets-storage-ok")
+}
+"#;
+        let output = run_harness_source(source, harness).expect("dispatch succeeds");
+        assert_eq!(output, "secrets-storage-ok\n");
+
+        // The token blob is stored under the connector's canonical id.
+        assert!(
+            provider
+                .calls()
+                .iter()
+                .any(|call| call.id == crate::secrets::connector_oauth_token_id("github")),
+            "expected writes under the canonical github/oauth-token id"
         );
     }
 

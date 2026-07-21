@@ -154,6 +154,7 @@
 1	stdlib/jsonl_helpers.harn	HARN-LNT-016
 1	stdlib/jsonl_helpers.harn	HARN-LNT-018
 1	stdlib/logging_levels.harn	HARN-LNT-014
+5	stdlib/oauth/oauth_storage_secrets.harn	HARN-LNT-025
 1	stdlib/oauth/oauth_token_exchange_capability_overlay.harn	HARN-LNT-051
 3	stdlib/persona_output_style.harn	HARN-LNT-019
 3	stdlib/poll_until_helpers.harn	HARN-LNT-018
