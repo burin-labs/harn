@@ -1,12 +1,17 @@
 name: Release smoke
 
-# Cross-platform release smoke matrix. Release tag smokes run after the
-# build-release-binaries workflow completes, then validate the official GitHub
-# release artifacts exactly as users download them. Manual runs can pass a tag
-# to smoke already-published artifacts; scheduled/manual source-health runs
-# without a tag build a native release `harn` binary first. That keeps the
-# release gate tied to shipped bytes without holding an idle runner while
-# release assets are still being built.
+# Cross-platform release smoke matrix. Artifact smokes run after
+# build-release-binaries finalizes a GitHub release (SHA256SUMS +
+# release-assets.json + make_latest), then validate the official artifacts
+# exactly as users download them. Manual runs can pass a tag to smoke
+# already-published artifacts; scheduled/manual source-health runs without a
+# tag build a native release `harn` binary first.
+#
+# Trigger note: softprops/finalize uses GITHUB_TOKEN, so a `release:` event
+# would not chain. `workflow_run` is the supported post-finalize hook. The
+# resolve job further requires the triggering run's "Create GitHub release"
+# job to have succeeded, so warm-cache / partial recovery builds never enter
+# artifact mode.
 #
 # The post-merge `windows` job in `ci.yml` and the tag-push release binary
 # build cover Windows-specific compile breaks. This job is the explicit
@@ -16,7 +21,7 @@ name: Release smoke
 on:
   schedule:
     - cron: '17 9 * * *'
-  workflow_run: # zizmor: ignore[dangerous-triggers] bounded post-build artifact smoke trigger
+  workflow_run: # zizmor: ignore[dangerous-triggers] bounded post-finalize artifact smoke trigger
     workflows: ["Build release binaries"]
     types: [completed]
   workflow_dispatch:
@@ -25,6 +30,11 @@ on:
         description: 'Optional release tag to artifact-smoke, e.g. v0.8.57. Empty keeps source-health mode.'
         required: false
         type: string
+
+# Surface the candidate tag (or source-health) in the Actions run list so
+# operators can tell a real publication smoke from a skipped warm trigger.
+run-name: >-
+  Release smoke (${{ inputs.tag || github.event.workflow_run.head_branch || 'source-health' }})
 
 permissions:
   contents: read
@@ -42,12 +52,19 @@ env:
 jobs:
   resolve:
     name: Resolve release smoke input
+    # Do not require workflow_run.event == 'push': recovery publishes and
+    # release-attempt dispatches that finalize a release must also smoke.
+    # Restrict to release-shaped refs so main/schedule warm completions stay
+    # skipped at the job level (no idle runner, no green no-op clutter).
     if: >-
       github.event_name != 'workflow_run' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push' &&
-        startsWith(github.event.workflow_run.head_branch, 'v')
+        (
+          startsWith(github.event.workflow_run.head_branch, 'v') ||
+          startsWith(github.event.workflow_run.head_branch, 'release/v') ||
+          startsWith(github.event.workflow_run.head_branch, 'release-attempt/v')
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -62,14 +79,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
           EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
 
+          extract_release_tag() {
+            local ref="$1"
+            if [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              printf '%s\n' "$ref"
+            elif [[ "$ref" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              printf 'v%s\n' "${BASH_REMATCH[1]}"
+            elif [[ "$ref" =~ ^release-attempt/v([0-9]+\.[0-9]+\.[0-9]+)/ ]]; then
+              printf 'v%s\n' "${BASH_REMATCH[1]}"
+            fi
+          }
+
           if [[ -n "${INPUT_TAG:-}" ]]; then
             tag="$INPUT_TAG"
           elif [[ "${EVENT_NAME}" == "workflow_run" ]]; then
-            tag="$WORKFLOW_RUN_HEAD_BRANCH"
+            # Only artifact-smoke runs that actually finalized the GitHub
+            # release. Partial recovery builds (and any future warm path that
+            # lands on a release-shaped ref) leave "Create GitHub release"
+            # skipped — those must not enter artifact mode or fail the gate.
+            finalize_conclusion="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${WORKFLOW_RUN_ID}/jobs" \
+                --jq '.jobs[] | select(.name == "Create GitHub release") | .conclusion' \
+                | head -n1
+            )"
+            if [[ "$finalize_conclusion" != "success" ]]; then
+              echo "mode=noop" >> "$GITHUB_OUTPUT"
+              echo "tag=" >> "$GITHUB_OUTPUT"
+              echo "::notice::Triggering build-release-binaries run did not finalize a GitHub release (Create GitHub release conclusion='${finalize_conclusion:-missing}'); skipping artifact smoke."
+              exit 0
+            fi
+
+            tag="$(extract_release_tag "$WORKFLOW_RUN_HEAD_BRANCH")"
+            if [[ -z "$tag" ]]; then
+              echo "::error::Could not extract release tag vX.Y.Z from workflow_run head_branch '$WORKFLOW_RUN_HEAD_BRANCH'"
+              exit 1
+            fi
           elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             tag="${GITHUB_REF_NAME}"
           else
@@ -103,7 +152,7 @@ jobs:
           done
 
           if (( ${#missing[@]} > 0 )); then
-            printf '::error::Missing release assets for %s after build-release-binaries completed: %s\n' "$tag" "${missing[*]}"
+            printf '::error::Missing release assets for %s after release finalization: %s\n' "$tag" "${missing[*]}"
             exit 1
           fi
 
@@ -114,7 +163,12 @@ jobs:
   smoke:
     name: Release smoke (${{ matrix.platform }})
     needs: resolve
-    if: needs.resolve.result == 'success'
+    if: >-
+      needs.resolve.result == 'success' &&
+      (
+        needs.resolve.outputs.mode == 'artifact' ||
+        needs.resolve.outputs.mode == 'source'
+      )
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false

@@ -5,13 +5,13 @@ name: Install channels smoke
 #   * `cargo install harn-cli` (crates.io)
 #   * the `install.sh` GitHub-release download path
 #
-# `release-smoke.yml` validates the exact release bytes at tag-cut time but
-# never re-installs afterwards, so it cannot see drift that appears *between*
-# releases: a transitive dependency that stops building on crates.io, a
-# yanked crate, or `install.sh` OS/arch detection regressing against a live
-# release. This job re-walks both install paths from scratch on a schedule
-# and then runs the cross-platform smoke driver against whatever got
-# installed (pinned to the matching release tag via
+# `release-smoke.yml` validates the exact release bytes when a GitHub
+# release is finalized, but never re-installs afterwards, so it cannot see
+# drift that appears *between* releases: a transitive dependency that stops
+# building on crates.io, a yanked crate, or `install.sh` OS/arch detection
+# regressing against a live release. This job re-walks both install paths
+# from scratch on a schedule and then runs the cross-platform smoke driver
+# against whatever got installed (pinned to the matching release tag via
 # scripts/smoke_installed_binary.sh).
 #
 # Cold `cargo install` builds are slow, so this runs weekly rather than
