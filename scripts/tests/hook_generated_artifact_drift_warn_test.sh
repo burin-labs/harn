@@ -16,6 +16,17 @@ fail() {
 # shellcheck source=/dev/null
 source "$repo_root/.githooks/lib.sh"
 
+# Preserve the ambient CI/worktree binary before stubbing HARN_BIN for wiring checks.
+saved_harn_bin=${HARN_BIN:-}
+real_harn=$saved_harn_bin
+if [ -z "$real_harn" ] || [ ! -x "$real_harn" ]; then
+  real_harn=$(command -v harn || true)
+fi
+if [ -z "$real_harn" ] || [ ! -x "$real_harn" ]; then
+  real_harn="$repo_root/target/debug/harn"
+fi
+[ -x "$real_harn" ] || fail "need an executable harn (HARN_BIN or PATH) to exercise pre-commit advisory"
+
 record="$tmp_root/record.txt"
 fake_harn="$tmp_root/fake-harn"
 cat > "$fake_harn" <<'SH'
@@ -25,7 +36,6 @@ SH
 chmod +x "$fake_harn"
 
 export HOOK_DRIFT_RECORD="$record"
-export HARN_BIN="$fake_harn"
 
 # Run from a fake repo root so the hook can stage the path list under .harn/tmp.
 wire_root="$tmp_root/wire-root"
@@ -37,16 +47,16 @@ printf '%s\n' 'crates/harn-lexer/src/token.rs' > "$staged"
 : > "$record"
 (
   cd "$wire_root"
-  hook_warn_generated_artifact_drift "$staged"
+  HARN_BIN="$fake_harn" hook_warn_generated_artifact_drift "$staged"
 )
 if ! grep -Eq '^run:run scripts/warn_generated_artifact_drift\.harn -- --staged-files .*/\.harn/tmp/staged-paths\.' "$record"; then
   fail "hook should invoke Harn warner with in-repo staged list; got: $(cat "$record")"
 fi
 
 # Missing binary must not fail the commit path.
-unset HARN_BIN
 set +e
 (
+  unset HARN_BIN
   PATH="/nonexistent"
   cd "$tmp_root"
   # No scripts/warn… here and no harn on PATH.
@@ -73,16 +83,6 @@ set -euo pipefail
 exit 0
 SH
 chmod +x "$fake_bin/cargo"
-
-# Prefer CI/worktree HARN_BIN, then PATH, then a local debug build.
-real_harn=${HARN_BIN:-}
-if [ -z "$real_harn" ] || [ ! -x "$real_harn" ]; then
-  real_harn=$(command -v harn || true)
-fi
-if [ -z "$real_harn" ] || [ ! -x "$real_harn" ]; then
-  real_harn="$repo_root/target/debug/harn"
-fi
-[ -x "$real_harn" ] || fail "need an executable harn (HARN_BIN or PATH) to exercise pre-commit advisory"
 
 cat > "$work/Cargo.toml" <<'TOML'
 [workspace]
