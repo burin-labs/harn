@@ -1175,6 +1175,58 @@ log(reopened.paths.facts)
 log(transcript)
 ```
 
+### std/artifacts/typed
+
+Versioned typed contracts and bounded readers for durable artifacts. Layers a
+single explicit concept — a schema `version` — on top of `std/schema` contracts,
+`std/run_artifacts` descriptors, and `std/jsonl` page reads, so harnesses stop
+treating durable results as permissive dicts. Every read collapses to one
+`ArtifactReadFailure` whose `kind` keeps the six failure modes distinct:
+`missing`, `malformed`, `version_mismatch`, `schema_invalid`, `rule_failed`,
+`rule_error`.
+
+| Function | Description |
+|---|---|
+| `versioned_contract<T>(id, version, contract, options?)` | Bind a `SchemaContract<T>` to a stable id + version with `{supported?, version_field?, absent_version?}` |
+| `versioned_descriptor<T>(name, versioned)` | Bind a traversal-safe artifact name to a versioned contract (reuses `artifact_descriptor`) |
+| `check_versioned<T>(value, versioned)` | Version-select then structurally validate a value without touching the filesystem |
+| `read_versioned_json_result<T>(path, versioned)` | Read one versioned JSON artifact, preserving source bytes on `raw` |
+| `discriminated_spec(discriminant, families)` | Build a tagged-event decode spec from a discriminant field + per-family versioned contracts |
+| `decode_event(value, spec)` | Decode one record into a recognized typed event or an explicit `unknown` envelope |
+| `read_typed_events_page_result(path, spec, options?)` | Read one bounded page of tagged JSONL events, decoding each record |
+
+Unknown future event families flow through the `unknown` envelope
+(`{recognized: false, tag, value}`) — a distinct typed value that names the
+unrecognized discriminant and preserves the whole record, never a raw-dict
+fallback. Artifacts written before typing carry no version field; set
+`absent_version` so they read as their original (legacy) version rather than
+failing `version_mismatch`.
+
+### std/agent/artifacts
+
+Typed contracts, descriptors, and readers for the durable artifacts a Harn
+agent run leaves on disk: `agent-result.json`, the
+`agent-llm/llm_transcript.jsonl` observability event stream, and the transcript
+context derived from it. Types mirror the runtime's serialized shapes
+field-for-field, typing deterministic runtime facts (ids, timestamps, stop
+reasons, token/cost counts) distinctly from provider/model-authored prose
+(assistant text, thinking, the system prompt). Each type's fields are annotated
+GUARANTEED / OPTIONAL / MODEL / REDACTED / UNSTABLE in the module source.
+
+| Function | Description |
+|---|---|
+| `agent_result_contract()` / `agent_result_descriptor(name?)` | Versioned contract + descriptor for `agent-result.json` |
+| `read_agent_result_result(path)` | Read a durable agent-result artifact, keeping all six failure kinds distinct |
+| `transcript_event_spec()` | Discriminated decode spec for every stable `llm_transcript.jsonl` event family |
+| `read_transcript_events_page_result(path, options?)` | Read one bounded page of typed transcript events |
+| `transcript_context_contract()` / `read_transcript_context_result(path, options?)` | Contract + bounded fold reconstructing provider/model/system context |
+| `agent_transcript_path(run, name?)` | Resolve the standard `agent-llm/llm_transcript.jsonl` path for a run |
+
+Stable event families: `system_prompt`, `tool_schemas`, `routing_decision`,
+`provider_call_request`, `provider_call_response`, `resolved_dispatch`. Legacy
+transcripts and results (no `schema_version`) read as version 1; the current
+typed contract is version 2.
+
 ### std/os
 
 Environment and host diagnostic helpers:

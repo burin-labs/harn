@@ -1,0 +1,122 @@
+import "std/agent/artifacts"
+import "std/artifacts/typed"
+
+// Runtime-produced agent-result.json bytes (legacy: no schema_version field).
+const LEGACY_RESULT =
+  "{\"final_status\":\"done\",\"session_id\":\"s-1\",\"status\":\"done\",\"stop_reason\":\"end_turn\"}"
+
+const V2_RESULT =
+  "{\"final_status\":\"done\",\"schema_version\":2,\"session_id\":\"s-2\",\"status\":\"done\",\"stop_reason\":\"end_turn\"}"
+
+const WRONG_VERSION_RESULT =
+  "{\"final_status\":\"done\",\"schema_version\":99,\"session_id\":\"s-9\",\"status\":\"done\",\"stop_reason\":\"end_turn\"}"
+
+// Valid JSON, legacy version, but missing the required session_id field.
+const INVALID_RESULT =
+  "{\"final_status\":\"done\",\"status\":\"done\",\"stop_reason\":\"end_turn\"}"
+
+// llm_transcript.jsonl lines mirroring the runtime observability writer.
+const EVENT_SYSTEM =
+  "{\"content\":\"you are helpful\",\"content_hash\":\"c1\",\"hash\":\"h1\",\"timestamp\":\"1.0\",\"type\":\"system_prompt\"}"
+
+const EVENT_REQUEST =
+  "{\"call_id\":\"c1\",\"iteration\":1,\"message_count\":2,\"model\":\"m\",\"provider\":\"p\",\"timestamp\":\"2.0\",\"tool_format\":\"native\",\"type\":\"provider_call_request\"}"
+
+const EVENT_RESPONSE =
+  "{\"call_id\":\"c1\",\"input_tokens\":10,\"iteration\":1,\"model\":\"m\",\"output_tokens\":5,\"provider\":\"p\",\"stop_reason\":\"end_turn\",\"text\":\"hi\",\"timestamp\":\"3.0\",\"type\":\"provider_call_response\"}"
+
+const EVENT_FUTURE = "{\"payload\":123,\"timestamp\":\"4.0\",\"type\":\"future_event\"}"
+
+const EVENT_MALFORMED = "{bad"
+
+const EVENT_BAD_SCHEMA =
+  "{\"call_id\":\"c2\",\"input_tokens\":\"lots\",\"iteration\":2,\"model\":\"m\",\"output_tokens\":5,\"provider\":\"p\",\"timestamp\":\"6.0\",\"type\":\"provider_call_response\"}"
+
+const EVENT_BAD_VERSION =
+  "{\"content\":\"x\",\"content_hash\":\"c\",\"hash\":\"h\",\"schema_version\":99,\"timestamp\":\"7.0\",\"type\":\"system_prompt\"}"
+
+pipeline test(task) {
+  const root = path_join(harness.fs.temp_dir(), "harn-agent-artifacts-" + uuid_v7())
+  harness.fs.mkdir(root)
+  // ---- Agent result JSON reader: the six distinct outcomes + byte round trip.
+  const legacy_path = path_join(root, "agent-result.json")
+  harness.fs.write_text(legacy_path, LEGACY_RESULT)
+  const legacy = read_agent_result_result(legacy_path)
+  __io_println(is_ok(legacy))
+  __io_println(to_string(unwrap(legacy).version))
+  __io_println(unwrap(legacy).value.status)
+  __io_println(unwrap(legacy).value.session_id)
+  __io_println(unwrap(legacy).raw == LEGACY_RESULT)
+  const v2_path = path_join(root, "v2.json")
+  harness.fs.write_text(v2_path, V2_RESULT)
+  __io_println(to_string(unwrap(read_agent_result_result(v2_path)).version))
+  const wrong_path = path_join(root, "wrong.json")
+  harness.fs.write_text(wrong_path, WRONG_VERSION_RESULT)
+  const wrong = read_agent_result_result(wrong_path)
+  __io_println(unwrap_err(wrong).kind)
+  __io_println(to_string(unwrap_err(wrong).found_version))
+  const invalid_path = path_join(root, "invalid.json")
+  harness.fs.write_text(invalid_path, INVALID_RESULT)
+  __io_println(unwrap_err(read_agent_result_result(invalid_path)).kind)
+  const malformed_path = path_join(root, "malformed.json")
+  harness.fs.write_text(malformed_path, EVENT_MALFORMED)
+  __io_println(unwrap_err(read_agent_result_result(malformed_path)).kind)
+  __io_println(unwrap_err(read_agent_result_result(path_join(root, "missing.json"))).kind)
+  // ---- Transcript JSONL: recognized families, unknown envelope, per-record issues.
+  const transcript_path = path_join(root, "llm_transcript.jsonl")
+  harness.fs.write_text(
+    transcript_path,
+    EVENT_SYSTEM
+      + "\n"
+      + EVENT_REQUEST
+      + "\n"
+      + EVENT_RESPONSE
+      + "\n"
+      + EVENT_FUTURE
+      + "\n"
+      + EVENT_MALFORMED
+      + "\n"
+      + EVENT_BAD_SCHEMA
+      + "\n"
+      + EVENT_BAD_VERSION
+      + "\n",
+  )
+  const page = unwrap(read_transcript_events_page_result(transcript_path))
+  __io_println(to_string(len(page.events)))
+  __io_println(to_string(len(page.issues)))
+  __io_println(to_string(page.events[0].recognized) + ":" + page.events[0].tag)
+  __io_println(to_string(page.events[0].version))
+  __io_println(page.events[0].raw == EVENT_SYSTEM)
+  __io_println(to_string(page.events[3].recognized) + ":" + page.events[3].tag)
+  __io_println(page.events[3].raw == EVENT_FUTURE)
+  __io_println(page.issues[0].kind + ":" + to_string(page.issues[0].line))
+  __io_println(page.issues[1].kind + ":" + to_string(page.issues[1].line))
+  __io_println(
+    page.issues[2].kind
+      + ":"
+      + to_string(page.issues[2].line)
+      + ":"
+      + to_string(page.issues[2].found_version),
+  )
+  __io_println(to_string(page.done))
+  // ---- Derived transcript context, folded from the same stream.
+  const context = unwrap(read_transcript_context_result(transcript_path))
+  __io_println(to_string(context.version))
+  __io_println(to_string(context.value.event_count))
+  __io_println(context.value.system_prompt)
+  __io_println(to_string(context.value.provider) + ":" + to_string(context.value.model))
+  __io_println(context.value.tool_format)
+  __io_println(
+    to_string(context.value.request_count)
+      + ":"
+      + to_string(context.value.response_count)
+      + ":"
+      + to_string(context.value.unknown_count),
+  )
+  // ---- Pure contract check surfaces the same distinct kinds without a file.
+  const parsed_ok = check_versioned(json_parse(LEGACY_RESULT), agent_result_contract())
+  __io_println(is_ok(parsed_ok))
+  const parsed_bad = check_versioned(json_parse(WRONG_VERSION_RESULT), agent_result_contract())
+  __io_println(unwrap_err(parsed_bad).kind)
+  harness.fs.delete(root)
+}

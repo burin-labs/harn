@@ -1,0 +1,383 @@
+import { FsFailure } from "std/fs"
+// std/artifacts/typed - versioned typed contracts and bounded readers for
+// durable runtime artifacts.
+//
+// This is the general layer that harnesses reuse instead of treating durable
+// agent-result JSON and transcript JSONL as permissive dicts. It composes three
+// existing primitives and adds exactly one new concept — an explicit schema
+// VERSION — on top of them:
+//
+//   - `std/schema` structural schemas + validation rules (`SchemaContract<T>`),
+//   - `std/run_artifacts` `ArtifactDescriptor<T>` name/contract binding,
+//   - `std/jsonl` bounded, resumable page reads.
+//
+// Every read collapses to one `ArtifactReadFailure` whose `kind` keeps the six
+// failure modes distinct: `missing`, `malformed`, `version_mismatch`,
+// `schema_invalid`, `rule_failed`, and `rule_error`. The last three are the
+// contract kinds from `std/schema`; the first two come from the filesystem and
+// JSON layers; `version_mismatch` is owned here.
+//
+// Forward compatibility is explicit, never a raw-dict escape hatch: a JSONL
+// stream of tagged event families decodes each record into either a recognized,
+// version-checked typed value OR a distinct `unknown` envelope that names the
+// unrecognized discriminant and preserves the whole record. Unknown future
+// event families therefore survive a round trip without a schema change and
+// without being silently mixed in with recognized events.
+import { JsonlCursor, JsonlPageOptions, read_jsonl_page_result } from "std/jsonl"
+import { ArtifactDescriptor, artifact_descriptor } from "std/run_artifacts"
+import { SchemaContract, ValidationIssue, schema_contract_check } from "std/schema"
+
+// -------------------------------------------------------------------------------------------------
+// Failure taxonomy
+// -------------------------------------------------------------------------------------------------
+
+pub type ArtifactReadFailureKind = "missing" \
+  | "malformed" \
+  | "version_mismatch" \
+  | "schema_invalid" \
+  | "rule_failed" \
+  | "rule_error"
+
+pub type ArtifactReadFailure = {
+  kind: ArtifactReadFailureKind,
+  detail: string,
+  path?: string,
+  line?: int,
+  offset?: int,
+  raw?: string,
+  found_version?: int,
+  supported_versions?: list<int>,
+  issues?: list<ValidationIssue>,
+}
+
+// -------------------------------------------------------------------------------------------------
+// Versioned contracts
+// -------------------------------------------------------------------------------------------------
+
+pub type VersionedContractOptions = {
+  supported?: list<int>,
+  version_field?: string,
+  absent_version?: int,
+}
+
+pub type VersionedContract<T> = {
+  id: string,
+  version: int,
+  supported: list<int>,
+  version_field: string,
+  absent_version: int,
+  contract: SchemaContract<T>,
+}
+
+pub type VersionedValue<T> = {id: string, version: int, value: T, raw?: string}
+
+fn __list_has_int(values: list<int>, target: int) -> bool {
+  for value in values ?? [] {
+    if to_int(value) == target {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Bind a schema contract to a stable artifact id and schema version.
+ *
+ * `supported` lists every version this reader accepts (the current `version` is
+ * always included). `version_field` names the record field carrying the
+ * version; `absent_version` is the version assumed when that field is missing —
+ * durable artifacts written before typing carry no version field, so they are
+ * read as the original (legacy) version rather than rejected.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @example: versioned_contract("harn.agent_result", 2, contract, {supported: [1, 2]})
+ */
+pub fn versioned_contract<T>(
+  id: string,
+  version: int,
+  contract: SchemaContract<T>,
+  options: VersionedContractOptions = {},
+) -> VersionedContract<T> {
+  const clean_id = trim(id)
+  if clean_id == "" {
+    throw "std/artifacts/typed: versioned contract id is required"
+  }
+  if version < 1 {
+    throw "std/artifacts/typed: versioned contract version must be >= 1"
+  }
+  const opts = options ?? {}
+  const field = trim(to_string(opts.version_field ?? "schema_version"))
+  if field == "" {
+    throw "std/artifacts/typed: version_field must be a non-empty field name"
+  }
+  const absent = to_int(opts.absent_version) ?? version
+  const declared = opts.supported ?? [version]
+  const supported = if __list_has_int(declared, version) {
+    declared
+  } else {
+    declared + [version]
+  }
+  return {
+    id: clean_id,
+    version: version,
+    supported: supported,
+    version_field: field,
+    absent_version: absent,
+    contract: contract,
+  }
+}
+
+/**
+ * Bind one traversal-safe artifact name to a versioned contract, reusing the
+ * `std/run_artifacts` descriptor so producers and consumers never repeat the
+ * name or the schema.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @example: versioned_descriptor("agent-result.json", agent_result_contract())
+ */
+pub fn versioned_descriptor<T>(
+  name: string,
+  versioned: VersionedContract<T>,
+) -> ArtifactDescriptor<T> {
+  return artifact_descriptor(name, versioned.contract)
+}
+
+fn __version_of(value, versioned) -> int? {
+  if type_of(value) != "dict" {
+    return versioned.absent_version
+  }
+  const found = value[versioned.version_field]
+  if found == nil {
+    return versioned.absent_version
+  }
+  return to_int(found)
+}
+
+/**
+ * Structurally check a value against a versioned contract without touching the
+ * filesystem. Version selection runs before structural validation so a
+ * `version_mismatch` is never masked by unrelated schema drift.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: check_versioned(value, agent_result_contract())
+ */
+pub fn check_versioned<T>(
+  value: unknown,
+  versioned: VersionedContract<T>,
+) -> Result<VersionedValue<T>, ArtifactReadFailure> {
+  const found = __version_of(value, versioned)
+  if found == nil || !__list_has_int(versioned.supported, found) {
+    const failure: ArtifactReadFailure = {
+      kind: "version_mismatch",
+      detail: versioned.id
+        + ": unsupported schema version "
+        + to_string(found ?? "nil"),
+      found_version: found,
+      supported_versions: versioned.supported,
+    }
+    return Err(failure)
+  }
+  const checked = schema_contract_check(value, versioned.contract)
+  if !is_ok(checked) {
+    const contract_failure = unwrap_err(checked)
+    const failure: ArtifactReadFailure = {
+      kind: contract_failure.kind,
+      detail: contract_failure.detail,
+      issues: contract_failure.issues,
+    }
+    return Err(failure)
+  }
+  const resolved_version = to_int(found) ?? versioned.version
+  return Ok({id: versioned.id, version: resolved_version, value: unwrap(checked)})
+}
+
+// -------------------------------------------------------------------------------------------------
+// Typed JSON reads
+// -------------------------------------------------------------------------------------------------
+
+fn __missing_failure(path: string, failure: FsFailure) -> ArtifactReadFailure {
+  return {kind: "missing", detail: path + ": " + to_string(failure.message), path: path}
+}
+
+fn __malformed_failure(path: string, raw: string, detail: string) -> ArtifactReadFailure {
+  return {kind: "malformed", detail: path + ": " + detail, path: path, raw: raw}
+}
+
+/**
+ * Read one versioned JSON artifact, preserving the exact source bytes for
+ * byte-for-byte round trips.
+ *
+ * The six read outcomes stay distinct on the returned `ArtifactReadFailure`:
+ * `missing` (absent/unreadable file), `malformed` (invalid JSON),
+ * `version_mismatch`, `schema_invalid`, `rule_failed`, `rule_error`.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ * @example: read_versioned_json_result(path, agent_result_contract())
+ */
+pub fn read_versioned_json_result<T>(
+  path: string,
+  versioned: VersionedContract<T>,
+) -> Result<VersionedValue<T>, ArtifactReadFailure> {
+  const read = harness.fs.read_text_result(path)
+  if !is_ok(read) {
+    return Err(__missing_failure(path, unwrap_err(read)))
+  }
+  const raw = unwrap(read)
+  const parsed = try {
+    json_parse(raw)
+  }
+  if !is_ok(parsed) {
+    const error = unwrap_err(parsed)
+    return Err(__malformed_failure(path, raw, to_string(error?.message ?? error)))
+  }
+  const checked = check_versioned(unwrap(parsed), versioned)
+  if !is_ok(checked) {
+    const failure = unwrap_err(checked)
+    return Err(failure + {path: path, raw: raw})
+  }
+  return Ok(unwrap(checked) + {raw: raw})
+}
+
+// -------------------------------------------------------------------------------------------------
+// Discriminated JSONL event decoding
+// -------------------------------------------------------------------------------------------------
+
+pub type EventFamily = {tag: string, versioned: VersionedContract<unknown>}
+
+pub type DiscriminatedSpec = {discriminant: string, families: list<EventFamily>}
+
+pub type DecodedEvent = {
+  recognized: bool,
+  tag: string,
+  version?: int,
+  value: unknown,
+  raw?: string,
+  line?: int,
+  offset?: int,
+}
+
+pub type TypedEventPage = {
+  events: list<DecodedEvent>,
+  issues: list<ArtifactReadFailure>,
+  next_cursor: JsonlCursor,
+  done: bool,
+}
+
+pub type TypedEventPageResult = Result<TypedEventPage, FsFailure>
+
+/**
+ * Build a discriminated event spec: the record field that names the event
+ * family plus the versioned contract for each recognized family.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @example: discriminated_spec("type", [{tag: "system_prompt", versioned: ...}])
+ */
+pub fn discriminated_spec(discriminant: string, families: list<EventFamily>) -> DiscriminatedSpec {
+  const field = trim(discriminant)
+  if field == "" {
+    throw "std/artifacts/typed: discriminant field is required"
+  }
+  return {discriminant: field, families: families ?? []}
+}
+
+fn __find_family(families: list<EventFamily>, tag: string) -> EventFamily? {
+  for family in families ?? [] {
+    if family.tag == tag {
+      return family
+    }
+  }
+  return nil
+}
+
+/**
+ * Decode one already-parsed record into either a recognized, version-checked
+ * typed event or an explicit `unknown` envelope.
+ *
+ * A record whose discriminant matches no known family is preserved verbatim as
+ * `{recognized: false, tag, value}` — a distinct typed envelope, never a
+ * raw-dict fallback silently mixed in with recognized events. Structural,
+ * rule, and version failures surface as an `ArtifactReadFailure`.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: decode_event(record.value, transcript_event_spec())
+ */
+pub fn decode_event(
+  value: unknown,
+  spec: DiscriminatedSpec,
+) -> Result<DecodedEvent, ArtifactReadFailure> {
+  if type_of(value) != "dict" {
+    return Err({kind: "schema_invalid", detail: "event record is not an object"})
+  }
+  const tag = to_string(value[spec.discriminant] ?? "")
+  const family = __find_family(spec.families, tag)
+  if family == nil {
+    return Ok({recognized: false, tag: tag, value: value})
+  }
+  const checked = check_versioned(value, family.versioned)
+  if !is_ok(checked) {
+    return Err(unwrap_err(checked))
+  }
+  const resolved = unwrap(checked)
+  return Ok({recognized: true, tag: tag, version: resolved.version, value: resolved.value})
+}
+
+/**
+ * Read one bounded page of tagged JSONL events, decoding each record through
+ * `decode_event`. Memory stays bounded by `max_records`/`max_bytes`; resume
+ * with `page.next_cursor`.
+ *
+ * Recognized and unknown events land in `page.events` (each carrying its source
+ * `raw`, `line`, and `offset`); malformed rows and structural/rule/version
+ * failures land in `page.issues`. Blank lines advance the cursor without
+ * producing an event.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ * @example: read_typed_events_page_result(path, transcript_event_spec(), {max_records: 128})
+ */
+pub fn read_typed_events_page_result(
+  path: string,
+  spec: DiscriminatedSpec,
+  options: JsonlPageOptions = {},
+) -> TypedEventPageResult {
+  const source = read_jsonl_page_result(path, options)
+  if !is_ok(source) {
+    return Err(unwrap_err(source))
+  }
+  const page = unwrap(source)
+  let events: list<DecodedEvent> = []
+  let issues: list<ArtifactReadFailure> = []
+  for issue in page.issues {
+    issues = issues
+      + [
+      {
+        kind: issue.kind,
+        detail: issue.detail,
+        path: path,
+        line: issue.line,
+        offset: issue.offset,
+        raw: issue.raw,
+      },
+    ]
+  }
+  for record in page.records {
+    const decoded = decode_event(record.value, spec)
+    if !is_ok(decoded) {
+      const failure = unwrap_err(decoded)
+      issues = issues
+        + [
+        failure + {path: path, line: record.line, offset: record.offset, raw: record.raw},
+      ]
+      continue
+    }
+    events = events
+      + [unwrap(decoded) + {raw: record.raw, line: record.line, offset: record.offset}]
+  }
+  return Ok({events: events, issues: issues, next_cursor: page.next_cursor, done: page.done})
+}
