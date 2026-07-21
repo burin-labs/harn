@@ -43,15 +43,46 @@ pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<()
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<JsonValue>();
     let output_style = Arc::new(Mutex::new(JsonRpcStdioFrameStyle::default()));
     let writer_style = output_style.clone();
+    // Explicit shutdown signal for the writer. We must not couple the
+    // writer's lifetime to "every `out_tx` clone has been dropped": a
+    // background task (notably an MCP task-mode tool spawned by
+    // `create_tool_task`) can hold a progress sender past connection
+    // shutdown, which would leave `out_rx.recv()` pending forever and wedge
+    // the awaited `writer` join at EOF — an intermittent, load-dependent
+    // hang to the nextest slow-test cap (harn#5397). On shutdown we instead
+    // tell the writer to flush what is already queued and exit.
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let writer = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
-        while let Some(message) = out_rx.recv().await {
-            let style = *writer_style.lock().expect("stdio frame style poisoned");
-            if write_jsonrpc_stdio_message(&mut stdout, &message, style)
-                .await
-                .is_err()
-            {
-                break;
+        loop {
+            tokio::select! {
+                message = out_rx.recv() => match message {
+                    Some(message) => {
+                        let style = *writer_style.lock().expect("stdio frame style poisoned");
+                        if write_jsonrpc_stdio_message(&mut stdout, &message, style)
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    None => break,
+                },
+                _ = &mut shutdown_rx => {
+                    // Drain anything already queued so a final response is
+                    // never truncated, then exit without waiting on stray
+                    // sender clones.
+                    while let Ok(message) = out_rx.try_recv() {
+                        let style = *writer_style.lock().expect("stdio frame style poisoned");
+                        if write_jsonrpc_stdio_message(&mut stdout, &message, style)
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    break;
+                }
             }
         }
     });
@@ -118,11 +149,14 @@ pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<()
         }
     }
 
-    // Drop both senders for `out_tx` (the loop's clone and the
-    // ProgressBus's clone, held by the install guard) so the writer
-    // task observes a closed channel and exits — otherwise it would
-    // block on `recv()` forever and the awaited join would hang.
+    // Signal the writer to flush and exit. Dropping the two senders we
+    // hold here (the loop's clone and the ProgressBus's clone in the
+    // install guard) is not sufficient on its own, because a detached
+    // background task can still hold a progress sender; the explicit
+    // shutdown makes teardown independent of that. See the writer's
+    // construction above for the full rationale (harn#5397).
     drop(_bus_guard);
+    let _ = shutdown_tx.send(());
     drop(out_tx);
     let _ = writer.await;
     input_reader.abort();
