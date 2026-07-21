@@ -1,9 +1,16 @@
-budget_exhausted
+verify_capped
 1
 1
 stalled
 continue
+completion.invocations=1
+completion.vetoes=1
+completion.max=1
+completion.cap_reached=true
+done.cap_reached=false
 3
+2
+false
 true
 5
 budget_exhausted

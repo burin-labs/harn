@@ -103,7 +103,8 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(task) {
         { event -> event.reason == "thrash_recovery_continue" },
       )
       assert_eq(len(decisions), 1)
-      assert_eq(decisions[0].action, "extend")
+      assert_eq(decisions[0].action, "thrash_rescue")
+      assert_eq(decisions[0].old_limit, decisions[0].new_limit)
       let iteration_ends = events_of(captured.events, "iteration_end").filter(
         { event -> event.iteration_info?.skip_reason == "thrash_recovery" },
       )
@@ -162,7 +163,8 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(task) {
         { event -> event.reason == "monologue_recovery_continue" },
       )
       assert_eq(len(decisions), 1)
-      assert_eq(decisions[0].action, "extend")
+      assert_eq(decisions[0].action, "thrash_rescue")
+      assert_eq(decisions[0].old_limit, decisions[0].new_limit)
       const iteration_ends = events_of(captured.events, "iteration_end").filter(
         { event -> event.iteration_info?.skip_reason == "monologue_recovery" },
       )
@@ -174,7 +176,7 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(task) {
       const receipt = receipts[0].checkpoint
       assert_eq(receipt.receipt_kind, "thrash_hard_stop_recovery")
       assert_eq(receipt.status, "fired")
-      assert_eq(receipt.action, "extend")
+      assert_eq(receipt.action, "thrash_rescue")
       assert_eq(receipt.reason, "monologue_recovery_continue")
       assert_eq(receipt.warning.pattern, "no_progress_monologue")
       assert_eq(receipt.tool_count, 0)

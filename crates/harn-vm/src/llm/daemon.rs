@@ -51,7 +51,7 @@ impl DaemonSnapshot {
             self.type_name = "daemon_snapshot".to_string();
         }
         if self.saved_at.is_empty() {
-            self.saved_at = crate::orchestration::now_rfc3339();
+            self.saved_at = crate::orchestration::now_unix_seconds_text();
         }
         if self.daemon_state.is_empty() {
             self.daemon_state = "active".to_string();

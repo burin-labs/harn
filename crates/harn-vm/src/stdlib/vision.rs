@@ -654,7 +654,7 @@ async fn audit_vision_ocr_active(
         "options": options,
         "output": structured,
         "error": error,
-        "observed_at": crate::orchestration::now_rfc3339(),
+        "observed_at": crate::orchestration::now_unix_seconds_text(),
     });
     let topic = Topic::new(VISION_OCR_AUDIT_TOPIC).expect("vision OCR topic is valid");
     let kind = if error.is_some() {

@@ -7,6 +7,7 @@
 // (`verdict_host_test.harn`) and the Rust issuance-boundary tests; here we lock the
 // pure disposition helpers that take no harness.
 import {
+  Verdict,
   verdict_disposition,
   verdict_evidence_ref,
   verdict_fail,
@@ -21,6 +22,14 @@ pipeline test_fail_disposition(_task) {
   assert_eq(verdict_is_pass(v), false)
   assert_eq(verdict_is_indeterminate(v), false)
   assert_eq(verdict_evidence_ref(v), "")
+  match v {
+    Verdict.Fail(reason, detail) -> {
+      assert_eq(reason, "evidence_red")
+      assert_eq(detail, "2 tests failing")
+    }
+    Verdict.Pass(_proof, _evidence_ref) -> { unreachable("fail is not pass") }
+    Verdict.Indeterminate(_cause, _detail) -> { unreachable("fail is not indeterminate") }
+  }
 }
 
 pipeline test_indeterminate_disposition(_task) {
@@ -29,6 +38,14 @@ pipeline test_indeterminate_disposition(_task) {
   assert_eq(verdict_is_indeterminate(v), true)
   assert_eq(verdict_is_pass(v), false)
   assert_eq(verdict_evidence_ref(v), "")
+  match v {
+    Verdict.Indeterminate(cause, detail) -> {
+      assert_eq(cause, "judge_unavailable")
+      assert_eq(detail, "model 503")
+    }
+    Verdict.Pass(_proof, _evidence_ref) -> { unreachable("indeterminate is not pass") }
+    Verdict.Fail(_reason, _detail) -> { unreachable("indeterminate is not fail") }
+  }
 }
 
 pipeline test_fail_and_indeterminate_are_distinct_from_pass(_task) {

@@ -68,8 +68,7 @@ fn json_map_to_vm_dict(map: &BTreeMap<String, serde_json::Value>) -> crate::valu
 }
 
 fn non_empty_env(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
+    crate::test_env::env_var_seamed(key)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }

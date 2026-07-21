@@ -815,9 +815,9 @@ fn parse_time_ms_ok(raw: &str) -> Option<i64> {
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_default()
+    // Was `unwrap_or_default()`; the shared helper falls back to the epoch so
+    // a DLQ record never carries an empty timestamp.
+    harn_vm::clock::system_now_rfc3339()
 }
 
 fn sanitize_rate_limit(value: Option<f64>) -> f64 {

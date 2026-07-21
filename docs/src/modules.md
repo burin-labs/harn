@@ -1010,6 +1010,7 @@ relative-path boilerplate that release scripts and harnesses tend to carry:
 | Function | Description |
 |---|---|
 | `ensure_parent_dir(path)` | Create the parent directory for a file path when needed |
+| `read_lines_page_result(path, options?)` | Read a bounded page of complete UTF-8 lines and return a byte-and-line cursor or typed filesystem failure |
 | `read_json(path)` | Read required JSON, throwing `StructuredReadFailure` for absent, unreadable, malformed, or over-depth input |
 | `read_json_result(path)` | Read JSON as `Result<unknown, StructuredReadFailure>` without erasing failure kind, path, or parser location |
 | `read_json_typed<T>(path, schema: Schema<T>, apply_defaults?) -> T` | Read required JSON and validate it against a schema, throwing the typed read or schema failure |
@@ -1057,6 +1058,50 @@ One missing or unreadable root yields a partial receipt without discarding other
 roots. `max_matches` is global; `max_matches_per_root` prevents one root from
 consuming unbounded memory before deterministic global truncation.
 
+### std/jsonl
+
+Use bounded pages for logs, transcripts, and other JSONL files that may be
+large or actively growing. A page cursor contains the exact byte offset and
+next physical line number, so callers can persist it and resume without
+rescanning earlier records.
+
+| Function | Description |
+|---|---|
+| `read_jsonl_page_result(path, options?)` | Read at most `max_records` physical lines and `max_bytes`, preserving malformed rows as per-record issues |
+| `read_jsonl_page(path, options?)` | Throwing filesystem-failure form of the bounded raw reader |
+| `read_jsonl_contract_page_result<T>(path, contract, options?)` | Apply structural schema validation and named rules to each parsed record, preserving all record failures |
+| `read_jsonl_contract_page<T>(path, contract, options?)` | Throwing filesystem-failure form of the bounded contract reader |
+| `fold_jsonl_file(path, initial, reducer, options?)` | Fold a file without materializing its complete contents |
+| `read_jsonl(path, options?)` | Compatibility helper that materializes records while reading the file in bounded pages |
+| `parse_jsonl(text, options?)` / `fold_jsonl(text, initial, reducer, options?)` | Process JSONL already held in memory |
+| `write_jsonl(path, items)` / `append_jsonl(path, item)` | Replace or append JSONL output |
+
+Contract pages distinguish malformed JSON, invalid structure, violated rules,
+and broken rule implementations as `malformed`, `schema_invalid`,
+`rule_failed`, and `rule_error`. Record issues retain the source line, byte
+offset, and raw text. A line larger than `max_bytes` fails the page with
+`file_too_large`; it is never returned partially.
+
+```harn
+import { read_jsonl_contract_page_result } from "std/jsonl"
+import { schema_contract } from "std/schema"
+
+const contract = schema_contract(schema_of(Event), [])
+let cursor = {offset: 0, line: 1}
+while true {
+  const page = unwrap(
+    read_jsonl_contract_page_result("events.jsonl", contract, {cursor: cursor}),
+  )
+  for record in page.records {
+    handle(record.value)
+  }
+  if page.done {
+    break
+  }
+  cursor = page.next_cursor
+}
+```
+
 ### std/run_artifacts
 
 Directory-backed run artifact helpers for harness-local outputs. The default
@@ -1077,16 +1122,13 @@ support boundary.
 | `run_artifacts_from_dir(kind, dir)` | Reconstruct the basic run artifact shape for recovery/chat/review flows without writing |
 | `run_artifacts_list(kind, options?)` | List recent run directories newest-first with `{root?, namespace?, limit?}` |
 | `run_artifact_path(run, name)` | Resolve a relative artifact path inside `run.dir`, rejecting absolute paths and `..` traversal |
-| `run_artifact_write_json(run, name, value, options?)` | Write JSON through `std/fs.write_json` conventions |
-| `run_artifact_write_json_contract_result<T>(run, name, value, contract, options?)` | Validate structural and relational rules before replacing JSON; leave the destination unchanged on failure |
-| `run_artifact_write_json_contract<T>(run, name, value, contract, options?)` | Throwing convenience wrapper over the same validate-before-write boundary |
-| `run_artifact_read_json_contract_result<T>(run, name, contract)` | Read contract-bound JSON without erasing read, schema, or rule failures |
-| `run_artifact_read_json_contract<T>(run, name, contract)` | Read required contract-bound JSON and throw its typed failure |
-| `run_artifact_write_json_typed<T>(run, name, value, schema, options?)` | Validate JSON before writing, leaving the prior artifact unchanged on contract failure |
-| `run_artifact_read_json(run, name)` | Read a required JSON artifact through `std/fs.read_json` |
-| `run_artifact_read_json_typed<T>(run, name, schema, apply_defaults?)` | Read required JSON and validate the consumer-owned artifact shape |
-| `run_artifact_read_json_typed_result<T>(run, name, schema, apply_defaults?)` | Read optional JSON as a typed Result that preserves read and schema failure details |
-| `run_artifact_read_json_result(run, name)` | Read an optional JSON artifact while preserving typed failure detail |
+| `artifact_descriptor<T>(name, contract)` | Bind one traversal-safe artifact name to its `SchemaContract<T>` |
+| `run_artifact_write_json<T>(run, descriptor, value, options?)` | Validate and conditionally replace descriptor-bound JSON, returning the file receipt |
+| `run_artifact_write_json_result<T>(run, descriptor, value, options?)` | Preserve validation and filesystem failures without mutating on invalid or stale input |
+| `run_artifact_read_json<T>(run, descriptor)` | Read required JSON through the descriptor's structural schema and validation rules |
+| `run_artifact_read_json_result<T>(run, descriptor)` | Preserve absence, malformed JSON, schema, rule, and broken-rule failures |
+| `run_artifact_write_json_raw` / `run_artifact_write_json_raw_result` | Low-level untyped JSON write escape hatch |
+| `run_artifact_read_json_raw` / `run_artifact_read_json_raw_result` | Low-level untyped JSON read escape hatch |
 | `run_artifact_write_text(run, name, text, options?)` | Write text with parent-directory and trailing-newline behavior |
 | `run_artifact_read_text(run, name, fallback?)` | Read text with a fallback for missing or unreadable files |
 | `run_artifact_transcript_dir(run, name?)` | Return a transcript sidecar directory such as `agent-llm` or `chat-llm` |
@@ -1096,25 +1138,94 @@ support boundary.
 `run_artifacts_list` returns `list<RunArtifactsRun>`. The nested
 `RunArtifactPaths` shape contains the standard local artifact names: `facts`,
 `audit`, `review`, `agent_result`, `agent_trace`, and
-`agent_llm_transcript`.
+`agent_llm_transcript`. `ArtifactWriteOptions.replace` accepts the
+`std/fs.FileReplaceOptions` lease and durability policy. Descriptor writes
+validate before entering that conditional-replacement boundary.
 
 ```harn
 import {
+  artifact_descriptor,
+  run_artifact_read_json,
   run_artifact_transcript_path,
   run_artifact_write_json,
   run_artifacts_from_dir,
   run_artifacts_open,
 } from "std/run_artifacts"
+import { schema_contract } from "std/schema"
+
+type EvaluationFacts = {status: "complete", checks: int}
 
 const run = run_artifacts_open("eval", {run_id: "smoke-001"})
-run_artifact_write_json(run, "facts.json", {status: "ok"}, {pretty: true})
-run_artifact_write_json(run, "agent-result.json", {summary: "complete"})
+const facts_artifact = artifact_descriptor(
+  "facts.json",
+  schema_contract(schema_of(EvaluationFacts), []),
+)
+const written = run_artifact_write_json(
+  run,
+  facts_artifact,
+  {status: "complete", checks: 7},
+  {pretty: true},
+)
+const facts: EvaluationFacts = run_artifact_read_json(run, facts_artifact)
 
 const transcript = run_artifact_transcript_path(run)
 const reopened = run_artifacts_from_dir("eval", run.dir)
+log(written.status + ":" + facts.status)
 log(reopened.paths.facts)
 log(transcript)
 ```
+
+### std/artifacts/typed
+
+Versioned typed contracts and bounded readers for durable artifacts. Layers a
+single explicit concept — a schema `version` — on top of `std/schema` contracts,
+`std/run_artifacts` descriptors, and `std/jsonl` page reads, so harnesses stop
+treating durable results as permissive dicts. Every read collapses to one
+`ArtifactReadFailure` whose `kind` keeps the six failure modes distinct:
+`missing`, `malformed`, `version_mismatch`, `schema_invalid`, `rule_failed`,
+`rule_error`.
+
+| Function | Description |
+|---|---|
+| `versioned_contract<T>(id, version, contract, options?)` | Bind a `SchemaContract<T>` to a stable id + version with `{supported?, version_field?, absent_version?}` |
+| `versioned_descriptor<T>(name, versioned)` | Bind a traversal-safe artifact name to a versioned contract (reuses `artifact_descriptor`) |
+| `check_versioned<T>(value, versioned)` | Version-select then structurally validate a value without touching the filesystem |
+| `read_versioned_json_result<T>(path, versioned)` | Read one versioned JSON artifact, preserving source bytes on `raw` |
+| `discriminated_spec(discriminant, families)` | Build a tagged-event decode spec from a discriminant field + per-family versioned contracts |
+| `decode_event(value, spec)` | Decode one record into a recognized typed event or an explicit `unknown` envelope |
+| `read_typed_events_page_result(path, spec, options?)` | Read one bounded page of tagged JSONL events, decoding each record |
+
+Unknown future event families flow through the `unknown` envelope
+(`{recognized: false, tag, value}`) — a distinct typed value that names the
+unrecognized discriminant and preserves the whole record, never a raw-dict
+fallback. Artifacts written before typing carry no version field; set
+`absent_version` so they read as their original (legacy) version rather than
+failing `version_mismatch`.
+
+### std/agent/artifacts
+
+Typed contracts, descriptors, and readers for the durable artifacts a Harn
+agent run leaves on disk: `agent-result.json`, the
+`agent-llm/llm_transcript.jsonl` observability event stream, and the transcript
+context derived from it. Types mirror the runtime's serialized shapes
+field-for-field, typing deterministic runtime facts (ids, timestamps, stop
+reasons, token/cost counts) distinctly from provider/model-authored prose
+(assistant text, thinking, the system prompt). Each type's fields are annotated
+GUARANTEED / OPTIONAL / MODEL / REDACTED / UNSTABLE in the module source.
+
+| Function | Description |
+|---|---|
+| `agent_result_contract()` / `agent_result_descriptor(name?)` | Versioned contract + descriptor for `agent-result.json` |
+| `read_agent_result_result(path)` | Read a durable agent-result artifact, keeping all six failure kinds distinct |
+| `transcript_event_spec()` | Discriminated decode spec for every stable `llm_transcript.jsonl` event family |
+| `read_transcript_events_page_result(path, options?)` | Read one bounded page of typed transcript events |
+| `transcript_context_contract()` / `read_transcript_context_result(path, options?)` | Contract + bounded fold reconstructing provider/model/system context |
+| `agent_transcript_path(run, name?)` | Resolve the standard `agent-llm/llm_transcript.jsonl` path for a run |
+
+Stable event families: `system_prompt`, `tool_schemas`, `routing_decision`,
+`provider_call_request`, `provider_call_response`, `resolved_dispatch`. Legacy
+transcripts and results (no `schema_version`) read as version 1; the current
+typed contract is version 2.
 
 ### std/os
 

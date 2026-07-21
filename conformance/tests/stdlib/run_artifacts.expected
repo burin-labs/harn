@@ -5,10 +5,11 @@ true
 facts.json
 ok
 2
-true
+schema_invalid
 before
 1
 schema_invalid
+stale:after
 true
 absent
 malformed
@@ -17,6 +18,7 @@ agent-llm
 chat-llm/llm_transcript.jsonl
 run-a
 agent-result.json
+true
 true
 true
 true

@@ -644,6 +644,7 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 |---|---|---|---|
 | `read_file(path)` | path: string | string | Read entire file as UTF-8 string, or return raw source for embedded `std/...harn.prompt` assets. Filesystem I/O failures throw structured `{error: "io_error", kind, message}`; policy denials remain categorized runtime errors. **Deprecated in favor of `read_file_result` for new code; the throwing form remains supported.** |
 | `read_file_result(path)` | path: string | `Result<string, {error, kind, message}>` | Non-throwing read: returns content or a structured `{error: "io_error", kind, message}` failure. Shares `read_file`'s cache and supports embedded `std/...harn.prompt` assets |
+| `read_lines_page_result(path, options?)` | path: string, options?: dict | `Result<{lines, next_offset, next_line, done}, {error, kind, message}>` | Read a byte- and line-bounded page of complete UTF-8 lines. Options are `offset`, `line`, `max_lines`, and `max_bytes`; oversized lines are rejected rather than split |
 | `package_snapshot_open(project_root)` | project_root: string | `{handle, generation, packages_root, lock_path, lock_digest, packages}` or nil | Acquire the current immutable package generation and exact locked package names while holding its reader lease. Pair every non-nil receipt with `package_snapshot_close(receipt.handle)`, normally in `defer` |
 | `package_snapshot_close(handle)` | handle: string | bool | Release a package-generation reader lease; returns false when the handle was not open |
 | `write_file(path, content)` | path: string, content: string | nil | Write string to file. Throws on failure |
@@ -1083,7 +1084,7 @@ pipeline summarize() {
 | `http_delete(url, options?)` | url: string, options: dict | dict | DELETE request |
 | `http_request(method, url, options?)` | method: string, url: string, options: dict | dict | Generic HTTP request |
 | `http_download(url, dst_path, options?)` | url: string, dst_path: string, options: dict | dict | Stream a response body to a file |
-| `egress_policy(config)` | config: dict | dict | Install the process egress policy used by HTTP, SSE, WebSocket, and connector outbound calls, including DNS-resolved private-address blocking |
+| `egress_policy(config)` | config: dict | dict | Install the run- or test-pipeline-scoped egress policy used by HTTP, SSE, WebSocket, and connector outbound calls, including DNS-resolved private-address blocking |
 | `security_policy(config)` | config: dict | dict | Install the prompt-injection defense policy (spotlighting of untrusted output + lethal-trifecta gate + MCP schema pinning + `local-ml` injection detection). See `std/security`. |
 | `http_server_tls_plain()` | none | dict | Build HTTP-server TLS config for intentional cleartext/local listener mode |
 | `http_server_tls_edge(options?)` | options: dict | dict | Build HTTP-server TLS config for edge-terminated HTTPS; local listener stays plain and HSTS is enabled by default |
@@ -1161,11 +1162,13 @@ routes through an existing session when one is provided. `http_post`,
 when you want to send multipart without a separate string body.
 
 `egress_policy({allow, deny, default, block_private, allow_loopback})` installs
-a process-scoped outbound network policy before user code opens real
-connections. Rules accept exact hosts (`api.example.com`), suffix wildcards
-(`*.example.com`), IP literals or CIDR ranges (`127.0.0.0/8`), and optional
-port restrictions (`api.example.com:443`). Deny rules override allow rules;
-`default: "deny"` turns the policy into an allowlist.
+an outbound network policy before user code opens real connections. The policy
+is process-scoped under `harn run` and isolated per pipeline under `harn test`,
+including with `--parallel`. Rules accept exact hosts (`api.example.com`),
+suffix wildcards (`*.example.com`), IP literals or CIDR ranges
+(`127.0.0.0/8`), and optional port restrictions (`api.example.com:443`). Deny
+rules override allow rules; `default: "deny"` turns the policy into an
+allowlist.
 
 `block_private: "private"` blocks loopback, RFC 1918, link-local and cloud
 metadata addresses, multicast, documentation, CGNAT, benchmark, and equivalent
@@ -1177,6 +1180,9 @@ metadata and other private ranges remain blocked.
 Operators can seed the same policy without editing scripts via comma-separated
 `HARN_EGRESS_ALLOW`, `HARN_EGRESS_DENY`, `HARN_EGRESS_DEFAULT=deny`,
 `HARN_EGRESS_BLOCK_PRIVATE=private|off`, and `HARN_EGRESS_ALLOW_LOOPBACK=1`.
+Environment policy is installed first; a subsequent `egress_policy(...)` call
+fails rather than replacing it. Each `harn test` pipeline receives its own
+deterministic environment-derived policy.
 Under default `harn run`, the worktree sandbox denies network side effects
 before destination policy is consulted; use `egress_policy(...)` for
 network-enabled host policies or explicit `--no-sandbox` runs.

@@ -133,7 +133,7 @@ pub fn parse_anchor_dict_with_default_mount_mode(
 
     let anchored_at = match dict.get("anchored_at") {
         Some(VmValue::String(s)) if !s.trim().is_empty() => s.to_string(),
-        Some(VmValue::Nil) | None => crate::orchestration::now_rfc3339(),
+        Some(VmValue::Nil) | None => crate::orchestration::now_unix_seconds_text(),
         _ => return Err("workspace_anchor.anchored_at must be a string".to_string()),
     };
 
@@ -185,7 +185,7 @@ fn parse_mounted_root_value(
 
     let mounted_at = match dict.get("mounted_at") {
         Some(VmValue::String(s)) if !s.trim().is_empty() => s.to_string(),
-        Some(VmValue::Nil) | None => crate::orchestration::now_rfc3339(),
+        Some(VmValue::Nil) | None => crate::orchestration::now_unix_seconds_text(),
         _ => {
             return Err(
                 "workspace_anchor.additional_roots[*].mounted_at must be a string".to_string(),

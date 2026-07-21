@@ -1,0 +1,526 @@
+// std/agent/artifacts - typed contracts, descriptors, and readers for the
+// durable artifacts a Harn agent run leaves on disk.
+//
+// The runtime writes three durable artifacts a later harness inspects:
+//
+//   - `agent-result.json`         the top-level result of one agent run,
+//   - `agent-llm/llm_transcript.jsonl`  the per-call observability event stream,
+//   - (derived) transcript context  provider/model/system reconstructed from
+//                                    that event stream.
+//
+// This module mirrors the runtime's serialized shapes field-for-field and binds
+// each to a versioned contract from `std/artifacts/typed`, so harnesses stop
+// treating these as permissive dicts. Deterministic runtime facts (ids,
+// timestamps, stop reasons, token/cost counts) are typed DISTINCTLY from
+// provider/model-authored prose (assistant text, thinking, the system prompt),
+// and unknown future transcript event families flow through an explicit
+// `unknown` envelope rather than a raw-dict fallback.
+//
+// Field guarantees, per contract:
+//   - GUARANTEED: always present on a runtime-produced artifact; safe to require.
+//   - OPTIONAL:   may be absent on some runs or older artifacts.
+//   - MODEL:      provider/model-authored text; NOT a deterministic fact.
+//   - REDACTED:   a stable hash of redacted content, never the content itself.
+//   - UNSTABLE:   provider-specific/experimental; shape may change between runs.
+//
+// Legacy artifacts written before typing carry no `schema_version` field and
+// are read as schema version 1; the current typed contract is version 2.
+import {
+  ArtifactReadFailure,
+  DiscriminatedSpec,
+  EventFamily,
+  TypedEventPage,
+  VersionedContract,
+  VersionedValue,
+  discriminated_spec,
+  read_typed_events_page_result,
+  read_versioned_json_result,
+  versioned_contract,
+  versioned_descriptor,
+} from "std/artifacts/typed"
+import { FsFailure } from "std/fs"
+import { JsonlCursor, JsonlPageOptions } from "std/jsonl"
+import { ArtifactDescriptor, run_artifact_transcript_path } from "std/run_artifacts"
+import { SchemaContract, schema_contract } from "std/schema"
+
+const ARTIFACT_VERSION = 2
+
+const SUPPORTED_VERSIONS = [1, 2]
+
+// -------------------------------------------------------------------------------------------------
+// Agent result (agent-result.json)
+// -------------------------------------------------------------------------------------------------
+
+// Typed terminal outcome. GUARANTEED trio derived by the runtime from the raw
+// stop reason (harn#4568): `owner` pins the responsible party.
+pub type AgentTerminal = {kind: string, reason: string, owner: string}
+
+// Deterministic per-run LLM counters. GUARANTEED whenever `llm` is present.
+pub type AgentLlmUsage = {
+  iterations: int,
+  duration_ms: int,
+  input_tokens: int,
+  output_tokens: int,
+  cache_read_tokens: int,
+  cache_write_tokens: int,
+}
+
+// Deterministic tool-dispatch tallies. GUARANTEED whenever `tools` is present.
+pub type AgentToolTotals = {calls: int, successful: int, rejected: int, mode?: string}
+
+// Deterministic run-trace rollup. Every field is a count/rollup, never prose.
+pub type AgentTraceSummary = {
+  status: string,
+  iterations: int,
+  total_duration_ms: int,
+  llm_calls: int,
+  tool_executions: int,
+  tool_rejections: int,
+  interventions?: int,
+  compactions?: int,
+  empty_completion_retries?: int,
+  models_advances?: int,
+  typed_checkpoints?: int,
+  typed_checkpoint_failures?: int,
+  total_input_tokens?: int,
+  total_output_tokens?: int,
+  total_llm_duration_ms?: int,
+  total_tool_duration_ms?: int,
+  tools_used?: list<string>,
+}
+
+pub type AgentResult = {
+  // GUARANTEED deterministic facts.
+  status: string,
+  final_status: string,
+  stop_reason: string,
+  session_id: string,
+  // OPTIONAL deterministic facts.
+  acp_stop_reason?: string,
+  terminal_class?: string?,
+  terminal?: AgentTerminal,
+  error?: unknown,
+  llm?: AgentLlmUsage,
+  tools?: AgentToolTotals,
+  trace?: AgentTraceSummary,
+  tokens_used?: int | float,
+  cost_usd?: int | float,
+  started_at?: int | float | string,
+  daemon_state?: string?,
+  daemon_snapshot_path?: string?,
+  // MODEL-authored text; not deterministic.
+  text?: string,
+  visible_text?: string,
+  private_reasoning?: string?,
+  thinking_summary?: string?,
+  // The literal task the run was given (caller-authored).
+  task?: string,
+  // Version marker; absent on legacy artifacts (read as version 1).
+  schema_version?: int,
+}
+
+/**
+ * Versioned contract for the top-level agent-result JSON.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: read_versioned_json_result(path, agent_result_contract())
+ */
+pub fn agent_result_contract() -> VersionedContract<AgentResult> {
+  return versioned_contract(
+    "harn.agent_result",
+    ARTIFACT_VERSION,
+    schema_contract(schema_of(AgentResult), []),
+    {supported: SUPPORTED_VERSIONS, absent_version: 1},
+  )
+}
+
+/**
+ * Descriptor binding `agent-result.json` to its versioned contract.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @example: run_artifact_read_json_result(run, agent_result_descriptor())
+ */
+pub fn agent_result_descriptor(
+  name: string = "agent-result.json",
+) -> ArtifactDescriptor<AgentResult> {
+  return versioned_descriptor(name, agent_result_contract())
+}
+
+/**
+ * Read and validate a durable agent-result JSON artifact, keeping `missing`,
+ * `malformed`, `version_mismatch`, `schema_invalid`, `rule_failed`, and
+ * `rule_error` distinct. The exact source bytes are returned on `raw` for
+ * byte-for-byte round trips.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ * @example: read_agent_result_result(run.paths.agent_result)
+ */
+pub fn read_agent_result_result(
+  path: string,
+) -> Result<VersionedValue<AgentResult>, ArtifactReadFailure> {
+  return read_versioned_json_result(path, agent_result_contract())
+}
+
+// -------------------------------------------------------------------------------------------------
+// Transcript JSONL event families (agent-llm/llm_transcript.jsonl)
+// -------------------------------------------------------------------------------------------------
+
+// Deterministic reasoning-budget configuration echoed onto request/dispatch
+// events. `mode` is one of disabled/enabled/adaptive/effort/off.
+pub type ThinkingConfig = {mode: string, enabled: bool, budget_tokens?: int?, level?: string}
+
+// Self-describing served-context receipt (`harn.llm.served_context.v1`). Every
+// hash is REDACTED content, never the content itself.
+pub type ServedContext = {
+  schema: string,
+  redaction: string,
+  system_prompt_content_hash: string,
+  system_prompt_bytes: int,
+  messages_content_hash: string,
+  message_count: int,
+  tool_schemas_content_hash: string,
+  tool_schema_count: int,
+  native_tools_content_hash: string,
+  native_tool_count: int,
+}
+
+// The redaction/change-detection hash carried by content checkpoint events.
+// `content` on a system-prompt event is MODEL/config-authored text;
+// `content_hash` is its REDACTED digest.
+pub type SystemPromptEvent = {
+  type: "system_prompt",
+  timestamp: string,
+  span_id?: int?,
+  hash: string,
+  content_hash: string,
+  content: string,
+  schema_version?: int,
+}
+
+pub type ToolSchemasEvent = {
+  type: "tool_schemas",
+  timestamp: string,
+  span_id?: int?,
+  hash: string,
+  content_hash: string,
+  schemas: unknown,
+  schema_version?: int,
+}
+
+pub type RoutingDecisionEvent = {
+  type: "routing_decision",
+  timestamp: string,
+  span_id?: int?,
+  iteration: int,
+  call_id: string,
+  policy?: string,
+  requested_quality?: string?,
+  selected_provider?: string?,
+  selected_model?: string?,
+  fallback_chain?: unknown,
+  alternatives?: unknown,
+  schema_version?: int,
+}
+
+pub type ProviderCallRequestEvent = {
+  // GUARANTEED deterministic facts.
+  type: "provider_call_request",
+  timestamp: string,
+  iteration: int,
+  call_id: string,
+  model: string,
+  provider: string,
+  message_count: int,
+  tool_format: string,
+  // OPTIONAL deterministic facts.
+  span_id?: int?,
+  max_tokens?: int?,
+  temperature?: int | float | nil,
+  thinking?: ThinkingConfig,
+  tool_choice?: unknown,
+  native_tool_count?: int,
+  served_context?: ServedContext,
+  route_policy?: string?,
+  // UNSTABLE / experimental payloads.
+  context_token_breakdown?: unknown,
+  structural_experiment?: unknown,
+  fallback_chain?: unknown,
+  routing_decision?: unknown,
+  // MODEL/caller-authored full prompt snapshot; present only in verbose mode.
+  request_snapshot?: unknown,
+  schema_version?: int,
+}
+
+pub type ProviderCallResponseEvent = {
+  // GUARANTEED deterministic facts.
+  type: "provider_call_response",
+  timestamp: string,
+  iteration: int,
+  call_id: string,
+  provider: string,
+  model: string,
+  input_tokens: int,
+  output_tokens: int,
+  // OPTIONAL deterministic facts.
+  span_id?: int?,
+  cost_usd?: int | float | nil,
+  cache_read_tokens?: int,
+  cache_write_tokens?: int,
+  cache_hit_ratio?: int | float | nil,
+  cache_hit?: bool,
+  stop_reason?: string?,
+  response_ms?: int,
+  tool_calls?: unknown,
+  parsed_tool_calls?: unknown,
+  raw_tool_calls?: unknown,
+  // MODEL-authored text; not deterministic.
+  text?: string,
+  thinking?: string?,
+  thinking_summary?: string?,
+  // UNSTABLE provider-specific telemetry.
+  provider_telemetry?: unknown,
+  structural_experiment?: unknown,
+  schema_version?: int,
+}
+
+pub type ResolvedDispatchEvent = {
+  type: "resolved_dispatch",
+  timestamp: string,
+  iteration: int,
+  call_id: string,
+  provider: string,
+  model: string,
+  wire_format: string,
+  tool_format: string,
+  span_id?: int?,
+  thinking?: ThinkingConfig,
+  stop?: unknown,
+  base_url_host?: string?,
+  provenance?: unknown,
+  outcome?: unknown,
+  outcome_kind?: string,
+  schema_version?: int,
+}
+
+// The discriminated union of every STABLE transcript event family. A record
+// whose `type` is outside this set is preserved through the explicit `unknown`
+// envelope from `std/artifacts/typed`, never dropped or coerced.
+pub type TranscriptEvent = SystemPromptEvent \
+  | ToolSchemasEvent \
+  | RoutingDecisionEvent \
+  | ProviderCallRequestEvent \
+  | ProviderCallResponseEvent \
+  | ResolvedDispatchEvent
+
+fn __event_family(tag, id, schema) -> EventFamily {
+  return {
+    tag: tag,
+    versioned: versioned_contract(
+      id,
+      ARTIFACT_VERSION,
+      schema_contract(schema, []),
+      {supported: SUPPORTED_VERSIONS, absent_version: 1},
+    ),
+  }
+}
+
+/**
+ * The discriminated decode spec for `llm_transcript.jsonl`: every stable event
+ * family keyed on the `type` discriminant. Feed it to
+ * `read_transcript_events_page_result` or the general
+ * `read_typed_events_page_result`.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @example: read_typed_events_page_result(path, transcript_event_spec())
+ */
+pub fn transcript_event_spec() -> DiscriminatedSpec {
+  return discriminated_spec(
+    "type",
+    [
+      __event_family(
+        "system_prompt",
+        "harn.transcript.system_prompt",
+        schema_of(SystemPromptEvent),
+      ),
+      __event_family("tool_schemas", "harn.transcript.tool_schemas", schema_of(ToolSchemasEvent)),
+      __event_family(
+        "routing_decision",
+        "harn.transcript.routing_decision",
+        schema_of(RoutingDecisionEvent),
+      ),
+      __event_family(
+        "provider_call_request",
+        "harn.transcript.provider_call_request",
+        schema_of(ProviderCallRequestEvent),
+      ),
+      __event_family(
+        "provider_call_response",
+        "harn.transcript.provider_call_response",
+        schema_of(ProviderCallResponseEvent),
+      ),
+      __event_family(
+        "resolved_dispatch",
+        "harn.transcript.resolved_dispatch",
+        schema_of(ResolvedDispatchEvent),
+      ),
+    ],
+  )
+}
+
+/**
+ * Read one bounded page of typed transcript events. Recognized events carry
+ * their version-checked typed value; unrecognized `type` values arrive as the
+ * explicit `unknown` envelope; malformed/structural/rule/version failures land
+ * in `page.issues`. Resume with `page.next_cursor`.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ * @example: read_transcript_events_page_result(run.paths.agent_llm_transcript)
+ */
+pub fn read_transcript_events_page_result(
+  path: string,
+  options: JsonlPageOptions = {},
+) -> Result<TypedEventPage, FsFailure> {
+  return read_typed_events_page_result(path, transcript_event_spec(), options)
+}
+
+// -------------------------------------------------------------------------------------------------
+// Transcript context (derived from the event stream)
+// -------------------------------------------------------------------------------------------------
+
+// Deterministic reconstruction of the provider/model/system context a
+// transcript ran under, folded from its event stream in bounded pages.
+pub type TranscriptContext = {
+  system_prompt?: string,
+  provider?: string,
+  model?: string,
+  tool_format?: string,
+  event_count: int,
+  request_count: int,
+  response_count: int,
+  unknown_count: int,
+  schema_version?: int,
+}
+
+/**
+ * Versioned contract for a persisted transcript-context summary.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: check_versioned(value, transcript_context_contract())
+ */
+pub fn transcript_context_contract() -> VersionedContract<TranscriptContext> {
+  return versioned_contract(
+    "harn.transcript_context",
+    ARTIFACT_VERSION,
+    schema_contract(schema_of(TranscriptContext), []),
+    {supported: SUPPORTED_VERSIONS, absent_version: 1},
+  )
+}
+
+fn __context_ingest(context: TranscriptContext, event) -> TranscriptContext {
+  if !event.recognized {
+    return context + {unknown_count: context.unknown_count + 1}
+  }
+  const value = event.value
+  match event.tag {
+    "system_prompt" -> {
+      const content = to_string(value?.content ?? "")
+      if trim(content) == "" {
+        return context
+      }
+      return context + {system_prompt: content}
+    }
+    "provider_call_request" -> {
+      let next = context + {request_count: context.request_count + 1}
+      next = next + {provider: to_string(value?.provider ?? next.provider ?? "")}
+      next = next + {model: to_string(value?.model ?? next.model ?? "")}
+      const tool_format = value?.tool_format
+      if tool_format != nil {
+        next = next + {tool_format: to_string(tool_format)}
+      }
+      return next
+    }
+    "provider_call_response" -> {
+      let next = context + {response_count: context.response_count + 1}
+      if next.provider == nil {
+        next = next + {provider: to_string(value?.provider ?? "")}
+      }
+      if next.model == nil {
+        next = next + {model: to_string(value?.model ?? "")}
+      }
+      return next
+    }
+    _ -> { return context }
+  }
+}
+
+/**
+ * Fold a transcript JSONL sidecar into a typed `TranscriptContext`, reading the
+ * file in bounded pages. Returns the reconstructed provider/model/system
+ * context plus recognized/unknown event counts. Per-record decode failures are
+ * skipped (use `read_transcript_events_page_result` when you need them).
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ * @example: read_transcript_context_result(run.paths.agent_llm_transcript)
+ */
+pub fn read_transcript_context_result(
+  path: string,
+  options: JsonlPageOptions = {},
+) -> Result<VersionedValue<TranscriptContext>, ArtifactReadFailure> {
+  const opts = options ?? {}
+  let context: TranscriptContext = {
+    event_count: 0,
+    request_count: 0,
+    response_count: 0,
+    unknown_count: 0,
+  }
+  let cursor: JsonlCursor = opts.cursor ?? {offset: 0, line: 1}
+  while true {
+    const page_options: JsonlPageOptions = opts + {cursor: cursor}
+    const page = read_transcript_events_page_result(path, page_options)
+    if !is_ok(page) {
+      const failure = unwrap_err(page)
+      return Err(
+        {
+          kind: if failure.kind == "not_found" {
+            "missing"
+          } else {
+            "malformed"
+          },
+          detail: path + ": " + to_string(failure.message),
+          path: path,
+        },
+      )
+    }
+    const value = unwrap(page)
+    for event in value.events {
+      context = __context_ingest(context, event) + {event_count: context.event_count + 1}
+    }
+    cursor = value.next_cursor
+    if value.done {
+      break
+    }
+  }
+  return Ok({id: "harn.transcript_context", version: ARTIFACT_VERSION, value: context})
+}
+
+// -------------------------------------------------------------------------------------------------
+// Convenience: resolve the standard transcript path from a run.
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Resolve the standard `agent-llm/llm_transcript.jsonl` path for a run.
+ *
+ * @effects: []
+ * @errors: [validation]
+ * @example: read_transcript_events_page_result(agent_transcript_path(run))
+ */
+pub fn agent_transcript_path(run, name: string = "agent-llm") -> string {
+  return run_artifact_transcript_path(run, name)
+}

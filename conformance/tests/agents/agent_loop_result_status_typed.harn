@@ -1,0 +1,77 @@
+import {
+  __tool_result_dispatch_rejection,
+  __tool_result_ok,
+  __tool_result_product_error,
+} from "std/agent/loop_result_status"
+
+pipeline test() {
+  // Host denial envelope: typed error_category on the outer result, rejection
+  // code nested under `result.error`. No prose sniffing required.
+  const denied = {
+    ok: false,
+    status: "error",
+    tool_name: "write",
+    error: "missing required parameter `path`",
+    error_category: "schema_validation",
+    result: {error: "invalid_arguments", tool: "write", reason: "missing path"},
+    rendered_result: "{\"error\" : \"invalid_arguments\"}",
+  }
+  assert_eq(__tool_result_dispatch_rejection(denied), true)
+  assert_eq(__tool_result_product_error(denied), true)
+  assert_eq(__tool_result_ok(denied), false)
+  // Quoting variant the old three-way `contains` chain missed (`"error" :`
+  // with a space before the colon). Structured nested code still classifies.
+  const spaced_json = {
+    ok: true,
+    status: "ok",
+    tool_name: "edit",
+    result: {error: "invalid_arguments"},
+    rendered_result: "{\"error\" : \"invalid_arguments\"}",
+    observation: "[result of edit]\n{\"error\" : \"invalid_arguments\"}\n[end of edit result]\n",
+  }
+  assert_eq(__tool_result_dispatch_rejection(spaced_json), true)
+  assert_eq(__tool_result_ok(spaced_json), false)
+  // Permission denial via nested structured code alone.
+  const nested_perm = {
+    ok: true,
+    status: "ok",
+    tool_name: "scaffold",
+    result: {error: "permission_denied", reason: "blocked by policy"},
+  }
+  assert_eq(__tool_result_dispatch_rejection(nested_perm), true)
+  assert_eq(__tool_result_ok(nested_perm), false)
+  // Pure prose with a quoting shape the old sniffer would also miss, and no
+  // structured code: must NOT invent a dispatch rejection.
+  const prose_only = {
+    ok: true,
+    status: "ok",
+    tool_name: "write",
+    rendered_result: "{\"error\" : \"invalid_arguments\"}",
+    observation: "{\"error\" : \"invalid_arguments\"}",
+  }
+  assert_eq(__tool_result_dispatch_rejection(prose_only), false)
+  // Producer-stamped product_error is trusted without consulting prose.
+  const stamped_fail = {ok: true, status: "ok", tool_name: "write", product_error: true}
+  assert_eq(__tool_result_product_error(stamped_fail), true)
+  assert_eq(__tool_result_ok(stamped_fail), false)
+  const stamped_clean = {
+    ok: true,
+    status: "ok",
+    tool_name: "write",
+    product_error: false,
+    rendered_result: "Error: ignored because producer stamped clean",
+  }
+  assert_eq(__tool_result_product_error(stamped_clean), false)
+  assert_eq(__tool_result_ok(stamped_clean), true)
+  // Unstamped write-tool diagnostics prose remains a product-error fallback
+  // until PR-4 deletes it behind a guaranteed producer field.
+  const diagnostics = {
+    ok: true,
+    status: "ok",
+    tool_name: "edit",
+    rendered_result: "## Diagnostics (2 errors, via tsc)",
+  }
+  assert_eq(__tool_result_product_error(diagnostics), true)
+  assert_eq(__tool_result_ok(diagnostics), false)
+  log("agent loop result status typed ok")
+}

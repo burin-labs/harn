@@ -32,13 +32,16 @@ in the built-in method table for the full rule syntax.
 | Variable | Description |
 |---|---|
 | `HARN_HANDLER_SANDBOX` | How the `worktree` sandbox profile reacts when the platform's OS confinement mechanism (Linux Landlock + seccomp, macOS `sandbox-exec`, Windows AppContainer) is unavailable: `enforce`/`required`/`1`/`true` fail the spawn, `warn` (default) logs once and continues with workspace-root path enforcement but **without** OS confinement, and `off`/`none`/`0`/`false` disables the OS portion silently. Workspace-root path enforcement for file builtins is unaffected either way. The `os_hardened` profile always enforces and ignores this variable. |
-| `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the process egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
+| `HARN_EGRESS_ALLOW` | Comma-separated egress allow rules seeding the egress policy. Rules accept exact hosts, `*.suffix` wildcards, IP literals/CIDR, and an optional `:port`. |
 | `HARN_EGRESS_DENY` | Comma-separated egress deny rules, same syntax as `HARN_EGRESS_ALLOW`. Deny wins over allow. |
 | `HARN_EGRESS_DEFAULT` | Action for destinations matching no rule: `allow` (default) or `deny` (allowlist mode). |
 | `HARN_EGRESS_BLOCK_PRIVATE` | Private-address (SSRF) guard. `private`/`on`/`block`/`true` block DNS-resolved loopback, private, link-local, cloud-metadata, multicast, documentation, CGNAT, benchmark, and equivalent IPv6 ranges; `off`/`false`/`none` opts out. Under default `harn run` this guard is already on; configured LLM provider endpoints on loopback or a private LAN remain reachable, while link-local and cloud-metadata ranges stay blocked. |
 | `HARN_EGRESS_ALLOW_LOOPBACK` | Set to `1`/`true` to permit loopback destinations while the private-address guard otherwise stays engaged. Default `false`. |
 
 Blocked calls throw `{type: "EgressBlocked", category: "egress_blocked", host, port, reason, url}`.
-Any of these variables being set seeds a process-wide egress policy; `egress_policy(config)`
-overrides them at runtime.
+Any of these variables being set seeds the egress policy before
+`egress_policy(config)` runs, so a script that also declares a policy fails with
+`policy already configured from environment`. `harn run` keeps that policy
+process-wide. `harn test` seeds an isolated copy for each test pipeline, including
+under `--parallel`, so one pipeline cannot alter another's policy.
 

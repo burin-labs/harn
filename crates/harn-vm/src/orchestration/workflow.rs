@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    new_id, now_rfc3339, redact_transcript_visibility, ArtifactRecord, AutoCompactPolicy,
+    new_id, now_unix_seconds_text, redact_transcript_visibility, ArtifactRecord, AutoCompactPolicy,
     BranchSemantics, CapabilityPolicy, ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy,
     MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract,
 };
@@ -1431,7 +1431,7 @@ pub fn complete_prepared_stage_node(
         text: Some(visible_text),
         data: Some(llm_result.clone()),
         source: Some(node_id.to_string()),
-        created_at: now_rfc3339(),
+        created_at: now_unix_seconds_text(),
         freshness: Some("fresh".to_string()),
         priority: None,
         lineage: prepared
@@ -1496,7 +1496,7 @@ pub fn append_audit_entry(
         id: new_id("audit"),
         op: op.to_string(),
         node_id,
-        timestamp: now_rfc3339(),
+        timestamp: now_unix_seconds_text(),
         reason,
         metadata,
     });

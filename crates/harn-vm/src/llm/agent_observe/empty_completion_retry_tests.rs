@@ -31,6 +31,15 @@ fn current_thread_runtime() -> tokio::runtime::Runtime {
         .expect("runtime")
 }
 
+fn provider_call_errors(transcript_dir: &std::path::Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(transcript_dir.join("llm_transcript.jsonl"))
+        .expect("provider error transcript")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("valid transcript JSON"))
+        .filter(|event: &serde_json::Value| event["type"] == "provider_call_error")
+        .collect()
+}
+
 fn empty_turn() -> FakeLlmTurn {
     FakeLlmTurn::stream(vec![FakeLlmEvent::Done(FakeStopReason::EndTurn)])
 }
@@ -241,6 +250,8 @@ fn billed_noncommittal_completion_surfaces_contract_violation_after_budget_exhau
     // a host eval layer can classify it as infra, not capability.
     current_thread_runtime().block_on(async {
         reset_agent_trace_state();
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
         let _guard = install_fake_llm_script(
             FakeLlmScript::new()
                 .push(billed_noncommittal_turn())
@@ -249,6 +260,7 @@ fn billed_noncommittal_completion_surfaces_contract_violation_after_budget_exhau
         let err = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
             .await
             .expect_err("exhausted billed-noncommittal retries must surface the loud error");
+        pop_llm_transcript_dir();
         let message = err.to_string();
         assert!(
             message.contains("upstream contract violation"),
@@ -264,6 +276,14 @@ fn billed_noncommittal_completion_surfaces_contract_violation_after_budget_exhau
             .filter(|event| matches!(event, AgentTraceEvent::EmptyCompletionRetry { .. }))
             .count();
         assert_eq!(retries, 1, "exactly one retry before the budget is spent");
+        let errors = provider_call_errors(transcript_dir.path());
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0]["attempt"], 1);
+        assert_eq!(errors[0]["status"], "retrying");
+        assert_eq!(errors[0]["retryable"], true);
+        assert_eq!(errors[1]["attempt"], 2);
+        assert_eq!(errors[1]["status"], "retries_exhausted");
+        assert_eq!(errors[1]["retryable"], false);
         reset_agent_trace_state();
     });
 }

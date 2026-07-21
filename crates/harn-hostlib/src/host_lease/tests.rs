@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier, OnceLock};
 use std::thread;
 
+use rusqlite::Connection;
 use tempfile::TempDir;
 
 use super::*;
@@ -785,6 +786,49 @@ fn registry_write_contention_returns_a_typed_defer_receipt() {
     let defer = receipt.defer.unwrap();
     assert_eq!(defer.deferred_reason, HostLeaseDeferReason::RegistryBusy);
     assert!(defer.active.is_none());
+}
+
+#[test]
+fn lease_database_uses_wal_journal_mode() {
+    // WAL is what lets concurrent lease acquires/releases proceed without a
+    // whole-database exclusive lock, so a briefly-contended writer no longer
+    // surfaces "database is locked" under heavy parallel load. Assert the
+    // persistent journal mode rather than the (platform-timing-dependent)
+    // contention behavior so this holds on every OS.
+    let temp = TempDir::new().unwrap();
+    let store = store(&temp);
+    let conn = store.connection(SQLITE_MUTATION_BUSY_TIMEOUT).unwrap();
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(mode.to_lowercase(), "wal");
+}
+
+#[test]
+fn concurrent_fresh_stores_survive_the_wal_conversion_race() {
+    // The first connection against a brand-new database file converts it to
+    // WAL under an exclusive lock. Stores racing to open the same fresh
+    // registry must wait that conversion out (the busy timeout is installed
+    // before the first pragma runs) rather than erroring "database is locked".
+    let temp = TempDir::new().unwrap();
+    let worker_count = 8;
+    let barrier = Arc::new(Barrier::new(worker_count));
+    let handles: Vec<_> = (0..worker_count)
+        .map(|worker| {
+            let barrier = Arc::clone(&barrier);
+            let root = temp.path().to_path_buf();
+            thread::spawn(move || {
+                barrier.wait();
+                let store = HostLeaseStore::for_root(root).unwrap();
+                store
+                    .try_acquire_once(request(&format!("owner-{worker}")), None, None)
+                    .unwrap();
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
 }
 
 static BUSY_HANDLER_BARRIERS: OnceLock<(Barrier, Barrier)> = OnceLock::new();

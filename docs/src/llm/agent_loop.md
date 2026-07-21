@@ -914,6 +914,8 @@ When `loop_until_done: true`, the system prompt is automatically extended with:
 `done_judge` adds a second gate after completion is detected. The loop renders
 the transcript for a structured judge call and expects
 `verdict: "done" | "continue"` plus optional `reasoning` and `next_step`.
+`diagnosis` is accepted as a `reasoning` alias. On a veto, the loop preserves
+`next_step`, specific gaps, and the diagnosis together as recovery feedback.
 A veto injects runtime feedback and the loop continues until the judge accepts,
 `done_judge.max_invocations` is reached, or `max_verify_attempts` is exhausted.
 Every judge call emits `JudgeDecision`
@@ -933,9 +935,10 @@ skips the first K turns; `when` accepts `"always"`, `"stalled"`, or a closure
 that receives the same loop-state shape as `loop_control`.
 When `when: "stalled"` is configured, a stall warning can fire the judge
 directly. A `done` verdict stops the loop with `stalled_done_judge` before the
-repeated tool call is dispatched; a `continue` verdict leaves the existing
-stall feedback injection path in place. The corresponding `JudgeDecision`
-event carries `trigger: "stalled"`.
+repeated tool call is dispatched. A `continue` verdict also skips that pending
+call and starts the next turn with the judge recovery; generic stall feedback is
+used only when the judge returned no recovery text. The corresponding
+`JudgeDecision` event carries `trigger: "stalled"`.
 
 ```harn
 import { AgentLoopOptions } from "std/agent/options"

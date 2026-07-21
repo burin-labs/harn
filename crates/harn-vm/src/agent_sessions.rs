@@ -205,7 +205,7 @@ impl SessionState {
             id,
             transcript,
             subscribers: Vec::new(),
-            created_at: crate::orchestration::now_rfc3339(),
+            created_at: crate::orchestration::now_unix_seconds_text(),
             last_accessed: now,
             parent_id: None,
             child_ids: Vec::new(),

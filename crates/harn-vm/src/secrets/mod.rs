@@ -759,7 +759,7 @@ pub(crate) fn emit_secret_access_event(provider: &str, id: &SecretId) {
         caller_span_id: crate::tracing::current_span_id(),
         mutation_session_id: crate::orchestration::current_mutation_session()
             .map(|session| session.session_id),
-        timestamp: crate::orchestration::now_rfc3339(),
+        timestamp: crate::orchestration::now_unix_seconds_text(),
     };
     let metadata = serde_json::to_value(event)
         .ok()

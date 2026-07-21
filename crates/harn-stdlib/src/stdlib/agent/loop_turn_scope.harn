@@ -664,7 +664,7 @@ pub fn __agent_loop_emit_thrash_recovery_checkpoint(
   old_limit,
   new_limit,
   status = "fired",
-  action = "extend",
+  action = "thrash_rescue",
   reason = "thrash_recovery_continue",
   outcome = nil,
 ) {

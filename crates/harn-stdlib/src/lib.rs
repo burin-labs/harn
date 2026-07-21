@@ -66,6 +66,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "path" => "stdlib/stdlib_path.harn",
     "fs" => "stdlib/stdlib_fs.harn",
     "run_artifacts" => "stdlib/stdlib_run_artifacts.harn",
+    "artifacts/typed" => "stdlib/artifacts/typed.harn",
     "os" => "stdlib/stdlib_os.harn",
     "json" => "stdlib/stdlib_json.harn",
     "json/stream" => "stdlib/stdlib_json_stream.harn",
@@ -171,6 +172,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/events" => "stdlib/agent/events.harn",
     "agent/completions" => "stdlib/agent/completions.harn",
     "agent/transcript" => "stdlib/agent/transcript.harn",
+    "agent/artifacts" => "stdlib/agent/artifacts.harn",
     "agent/primitives" => "stdlib/agent/primitives.harn",
     "agent/progress" => "stdlib/agent/progress.harn",
     "agent/required_tools" => "stdlib/agent/required_tools.harn",
@@ -304,6 +306,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "workflow/repair" => "stdlib/workflow/repair.harn",
     "security" => "stdlib/stdlib_security.harn",
     "pii" => "stdlib/stdlib_pii.harn",
+    "bump/runtime" => "stdlib/bump/runtime.harn",
+    "bump/live" => "stdlib/bump/live.harn",
 ]);
 
 /// Canonical normalized connector event schemas, authored as Harn `type`

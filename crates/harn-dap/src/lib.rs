@@ -8,20 +8,20 @@
 #![recursion_limit = "256"]
 
 mod debugger;
+pub mod framing;
 mod host_bridge;
 mod protocol;
 
-use std::io::{self, BufRead, Read, Write};
+use std::io;
 use std::sync::atomic::AtomicI64;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use debugger::Debugger;
+use framing::SharedWriter;
 use host_bridge::{deliver_reply, pending_map_new, DapHostBridge, DapHostCallReply, PendingMap};
 use protocol::{DapMessage, DapResponse};
-
-const MAX_DAP_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
 /// Run the Harn debug adapter over stdio until the client disconnects.
 ///
@@ -43,7 +43,7 @@ pub fn run() {
 
     // Stdout writer behind a mutex — both the main response loop and the
     // host bridge serialize their writes here.
-    let stdout: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(Box::new(io::stdout())));
+    let stdout: SharedWriter = Arc::new(Mutex::new(Box::new(io::stdout())));
     let pending: PendingMap = pending_map_new();
 
     // Stdin reader runs on its own OS thread so the bridge can block on
@@ -119,21 +119,14 @@ fn stdin_reader(request_tx: Sender<DapMessage>, pending: PendingMap) {
     let mut reader = io::BufReader::new(stdin.lock());
 
     loop {
-        let content_length = match read_content_length(&mut reader) {
-            Ok(Some(content_length)) => content_length,
+        let body_bytes = match framing::read_frame(&mut reader) {
+            Ok(Some(body_bytes)) => body_bytes,
             Ok(None) => break,
             Err(error) => {
-                eprintln!("Failed to read DAP frame header: {error}");
+                eprintln!("Failed to read DAP frame: {error}");
                 break;
             }
         };
-        if content_length == 0 {
-            continue;
-        }
-        let mut body_bytes = vec![0u8; content_length];
-        if reader.read_exact(&mut body_bytes).is_err() {
-            break;
-        }
         let body = String::from_utf8_lossy(&body_bytes);
 
         match serde_json::from_str::<DapMessage>(&body) {
@@ -164,80 +157,6 @@ fn stdin_reader(request_tx: Sender<DapMessage>, pending: PendingMap) {
     }
 }
 
-fn read_content_length<R: BufRead>(reader: &mut R) -> io::Result<Option<usize>> {
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => return Ok(None),
-            Ok(_) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    if content_length > 0 {
-                        return Ok(Some(content_length));
-                    }
-                    continue;
-                }
-                if let Some((name, val)) = trimmed.split_once(':') {
-                    if !name.eq_ignore_ascii_case("Content-Length") {
-                        continue;
-                    }
-                    if let Ok(len) = val.trim().parse::<usize>() {
-                        content_length = bounded_dap_content_length(len)?;
-                    }
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-fn bounded_dap_content_length(content_length: usize) -> io::Result<usize> {
-    if content_length > MAX_DAP_FRAME_BYTES {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "DAP Content-Length {content_length} exceeds limit {MAX_DAP_FRAME_BYTES} bytes"
-            ),
-        ))
-    } else {
-        Ok(content_length)
-    }
-}
-
-fn send_response(stdout: &Arc<Mutex<Box<dyn Write + Send>>>, response: &DapResponse) {
-    let body = match serde_json::to_string(response) {
-        Ok(b) => b,
-        Err(_) => return,
-    };
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
-    let mut guard = match stdout.lock() {
-        Ok(g) => g,
-        Err(_) => return,
-    };
-    let _ = guard.write_all(header.as_bytes());
-    let _ = guard.write_all(body.as_bytes());
-    let _ = guard.flush();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn read_content_length_accepts_case_insensitive_header() {
-        let mut reader = io::BufReader::new(b"content-length: 12\r\n\r\n".as_slice());
-        assert_eq!(
-            read_content_length(&mut reader).expect("content length"),
-            Some(12)
-        );
-    }
-
-    #[test]
-    fn read_content_length_rejects_oversized_frame() {
-        let header = format!("Content-Length: {}\r\n\r\n", MAX_DAP_FRAME_BYTES + 1);
-        let mut reader = io::BufReader::new(header.as_bytes());
-        let error = read_content_length(&mut reader).expect_err("oversized frame");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
+fn send_response(stdout: &SharedWriter, response: &DapResponse) {
+    let _ = framing::write_json_frame(stdout, response);
 }

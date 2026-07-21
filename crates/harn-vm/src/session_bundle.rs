@@ -18,8 +18,8 @@ use serde_json::{json, Value as JsonValue};
 use crate::agent_events::AgentEvent;
 use crate::event_log::sanitize_topic_component;
 use crate::orchestration::{
-    derive_run_observability, new_id, now_rfc3339, AgentSessionReplayEvent, ReplayFixture,
-    RunCheckpointRecord, RunChildRecord, RunExecutionRecord, RunHitlQuestionRecord,
+    derive_run_observability, new_id, now_unix_seconds_text, AgentSessionReplayEvent,
+    ReplayFixture, RunCheckpointRecord, RunChildRecord, RunExecutionRecord, RunHitlQuestionRecord,
     RunObservabilityRecord, RunRecord, RunTraceSpanRecord, RunTransitionRecord,
     RunVerificationOutcomeRecord, RunWorkerLineageRecord, ToolCallRecord,
 };
@@ -739,7 +739,7 @@ fn run_record_from_worker_snapshot_value(
     let started_at = snapshot_string(&value, "started_at")
         .or_else(|| snapshot_string(&value, "created_at"))
         .or_else(|| suspended_at.clone())
-        .unwrap_or_else(now_rfc3339);
+        .unwrap_or_else(now_unix_seconds_text);
     let finished_at = snapshot_string(&value, "finished_at");
     let session_id = snapshot_pointer_string(&value, &["config", "spec", "session_id"])
         .or_else(|| snapshot_pointer_string(&value, &["audit", "session_id"]));
@@ -1253,7 +1253,7 @@ fn raw_bundle_from_run(
 ) -> Result<SessionBundle, SessionBundleError> {
     let mut bundle = SessionBundle {
         bundle_id: new_id("bundle"),
-        created_at: now_rfc3339(),
+        created_at: now_unix_seconds_text(),
         producer: BundleProducer {
             name: "harn".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),

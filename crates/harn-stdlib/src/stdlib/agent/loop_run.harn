@@ -675,12 +675,11 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           structural_validator_attempts = 0
         }
         if stall_judge_due && stall_warning != nil {
-          const stall_verify_opts = turn_opts
-            + {
-            _done_judge_due: true,
-            _done_judge_trigger: "stalled",
-            _done_judge_invocations: done_judge_invocations,
-          }
+          const stall_verify_opts = __stall_judge_opts(
+            turn_opts,
+            verify_completion_judge_invocations,
+            done_judge_invocations,
+          )
           const stall_verdict = agent_verify_or_continue(
             session,
             stall_verify_opts,
@@ -688,35 +687,38 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             visible_text,
             iteration_index + 1,
           )
-          if stall_verdict?.done_judge_invoked ?? false {
-            done_judge_invocations = done_judge_invocations + 1
-          }
-          if stall_verdict?.done_judge_cap_reached ?? false {
-            final_status = "verify_capped"
-            stop_reason = "done_judge_cap_reached"
-            break
-          }
+          done_judge_invocations += __done_judge_hit(stall_verdict)
+          verify_completion_judge_invocations += __completion_judge_hit(stall_verdict)
           if stall_verdict.vetoed {
-            if stall_verdict?.done_judge_invoked ?? false {
-              done_judge_vetoes = done_judge_vetoes + 1
-            }
-            if stall_observation.feedback_deferred {
-              let _ = agent_session_pair_orphaned_tool_use(session.session_id, stall_warning)
-              stall_state = agent_stall_inject_feedback(
-                session.session_id,
-                stall_warning,
-                stall_observation.config,
-                stall_state,
-              )
-            }
+            done_judge_vetoes += __done_judge_hit(stall_verdict)
+            verify_completion_judge_vetoes += __completion_judge_hit(stall_verdict)
+            stall_state = __agent_loop_apply_stall_judge_veto(
+              session.session_id,
+              tool_calls,
+              stall_verdict,
+              stall_observation,
+              stall_warning,
+              stall_state,
+              llm_result,
+              visible_text,
+              turn_llm_opts,
+              iteration_index + 1,
+              loop_start_ms,
+            )
+            continue
+          } else if __judge_cap_reason(stall_verdict) != "" {
+            __close_stall_calls(session.session_id, tool_calls, "reached its invocation cap")
+            final_status = "verify_capped"
+            stop_reason = __judge_cap_reason(stall_verdict)
+            break
           } else {
+            __close_stall_calls(session.session_id, tool_calls, "accepted completion")
             const stall_totals = agent_session_record_usage(
               session.session_id,
               llm_result,
               turn_llm_opts,
               iteration_index + 1,
             )
-            const tool_count = len(tool_calls)
             agent_emit_event(
               session.session_id,
               "iteration_end",
@@ -725,7 +727,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
                 iteration_info: __agent_loop_iteration_info(
                   session.session_id,
                   llm_result,
-                  tool_count,
+                  len(tool_calls),
                   visible_text,
                   stall_totals,
                   loop_start_ms,
@@ -819,7 +821,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               "loop_control_decision",
               {
                 iteration: iteration_index + 1,
-                action: "extend",
+                action: "thrash_rescue",
                 old_limit: old_limit,
                 new_limit: current_max,
                 reason: recovery_reason,
@@ -834,7 +836,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               old_limit,
               current_max,
               "fired",
-              "extend",
+              "thrash_rescue",
               recovery_reason,
             )
             continue
@@ -1285,14 +1287,10 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             iteration_index,
           )
           verdict_record = reverdict
-          if reverdict?.verify_completion_judge_invoked ?? false {
-            verify_completion_judge_invocations = verify_completion_judge_invocations + 1
-          }
+          verify_completion_judge_invocations += __completion_judge_hit(reverdict)
           if reverdict.vetoed {
             verify_attempts = verify_attempts + 1
-            if reverdict?.verify_completion_judge_invoked ?? false {
-              verify_completion_judge_vetoes = verify_completion_judge_vetoes + 1
-            }
+            verify_completion_judge_vetoes += __completion_judge_hit(reverdict)
           } else {
             stall_state = stall_state + {reverify_owed: false}
             post_edit_reverify_confirmed = true
@@ -1324,28 +1322,16 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               iteration_index,
             )
             verdict_record = verdict
-            if verdict?.done_judge_invoked ?? false {
-              done_judge_invocations = done_judge_invocations + 1
-            }
-            if verdict?.verify_completion_judge_invoked ?? false {
-              verify_completion_judge_invocations = verify_completion_judge_invocations + 1
-            }
+            done_judge_invocations += __done_judge_hit(verdict)
+            verify_completion_judge_invocations += __completion_judge_hit(verdict)
             if verdict.vetoed {
               verify_attempts = verify_attempts + 1
               should_continue = true
-              if verdict?.done_judge_invoked ?? false {
-                done_judge_vetoes = done_judge_vetoes + 1
-              }
-              if verdict?.verify_completion_judge_invoked ?? false {
-                verify_completion_judge_vetoes = verify_completion_judge_vetoes + 1
-              }
-            } else if verdict?.verify_completion_judge_cap_reached ?? false {
+              done_judge_vetoes += __done_judge_hit(verdict)
+              verify_completion_judge_vetoes += __completion_judge_hit(verdict)
+            } else if __judge_cap_reason(verdict) != "" {
               final_status = "verify_capped"
-              stop_reason = "completion_judge_cap_reached"
-              break
-            } else if verdict?.done_judge_cap_reached ?? false {
-              final_status = "verify_capped"
-              stop_reason = "done_judge_cap_reached"
+              stop_reason = __judge_cap_reason(verdict)
               break
             } else {
               stall_state = stall_state + {reverify_owed: false}

@@ -17,3 +17,7 @@ disabled.stop_reason=sentinel
 disabled.invocations=2
 disabled.cap_reached=false
 disabled.judge_decisions=2
+diagnosis.status=done
+diagnosis.injected=true
+diagnosis.next_step_injected=true
+diagnosis.reasoning_observable=true

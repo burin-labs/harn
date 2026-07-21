@@ -35,7 +35,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
 use super::super::{
-    now_rfc3339, run_replay_oracle_trace, ReplayAllowlistRule, ReplayExpectation, ReplayOracleTrace,
+    now_unix_seconds_text, run_replay_oracle_trace, ReplayAllowlistRule, ReplayExpectation,
+    ReplayOracleTrace,
 };
 use super::api::{crystallize_traces, synthesize_candidate_from_trace};
 use super::types::{
@@ -710,8 +711,8 @@ pub fn turn_record(
         session_id: session_id.into(),
         success: true,
         tool_calls,
-        started_at: Some(now_rfc3339()),
-        finished_at: Some(now_rfc3339()),
+        started_at: Some(now_unix_seconds_text()),
+        finished_at: Some(now_unix_seconds_text()),
         ..AgentTurnRecord::default()
     }
 }

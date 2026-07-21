@@ -1,5 +1,6 @@
 use super::errors::PackageError;
 use super::*;
+use harn_vm::duration_parse::DurationParseError;
 
 pub(crate) fn merge_capability_overrides(
     target: &mut harn_vm::llm::capabilities::CapabilitiesFile,
@@ -472,30 +473,23 @@ pub(crate) fn parse_jmespath_expression(
 }
 
 pub(crate) fn parse_duration_millis(raw: &str) -> Result<u64, PackageError> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("duration cannot be empty".to_string().into());
-    }
-    let (value, unit) = trimmed
-        .char_indices()
-        .find(|(_, ch)| !ch.is_ascii_digit())
-        .map(|(index, _)| (&trimmed[..index], &trimmed[index..]))
-        .unwrap_or((trimmed, "ms"));
-    let amount = value
-        .parse::<u64>()
-        .map_err(|_| format!("invalid duration '{raw}'"))?;
-    let multiplier = match unit.trim() {
-        "ms" => 1,
-        "s" => 1_000,
-        "m" => 60_000,
-        "h" => 3_600_000,
-        _ => {
-            return Err(format!("invalid duration unit in '{raw}'; expected ms, s, m, or h").into())
-        }
-    };
-    amount
-        .checked_mul(multiplier)
-        .ok_or_else(|| format!("duration '{raw}' is too large").into())
+    harn_vm::duration_parse::parse_millis(raw)
+        .map_err(|error| match error {
+            DurationParseError::Empty => "duration cannot be empty".to_string(),
+            DurationParseError::NoDigits | DurationParseError::AmountOverflow => {
+                format!("invalid duration '{raw}'")
+            }
+            DurationParseError::MissingUnit => {
+                format!(
+                    "duration '{raw}' must include a unit suffix; expected ms, s, m, h, d, or w"
+                )
+            }
+            DurationParseError::UnknownUnit(_) => {
+                format!("invalid duration unit in '{raw}'; expected ms, s, m, h, d, or w")
+            }
+            DurationParseError::TooLarge => format!("duration '{raw}' is too large"),
+        })
+        .map_err(Into::into)
 }
 
 pub(crate) fn validate_static_trigger_config(
@@ -1392,10 +1386,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_duration_millis_accepts_large_plain_milliseconds() {
-        assert_eq!(
-            parse_duration_millis("18446744073709551615").unwrap(),
-            u64::MAX
+    fn parse_duration_millis_requires_a_unit_suffix() {
+        // Breaking: a bare number used to be read as milliseconds here, while
+        // the CLI rejected the same string. The grammar is now uniform.
+        let err = parse_duration_millis("18446744073709551615").unwrap_err();
+        assert!(
+            err.to_string().contains("must include a unit suffix"),
+            "{err}"
         );
+    }
+
+    #[test]
+    fn parse_duration_millis_accepts_days_and_weeks() {
+        // Widened to match the one shared vocabulary; `d`/`w` used to be
+        // rejected here but accepted by `harn` CLI arguments.
+        assert_eq!(parse_duration_millis("7d").unwrap(), 7 * 86_400_000);
+        assert_eq!(parse_duration_millis("2w").unwrap(), 2 * 604_800_000);
     }
 }

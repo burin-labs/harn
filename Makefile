@@ -380,6 +380,7 @@ test-pr-gate-scripts:
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/release_smoke_workflow_test.sh
+	./scripts/tests/check_release_smoke_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
@@ -401,6 +402,7 @@ test-pr-gate-post-warm-integrations:
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/claude_dev_setup_once_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/publish_script_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
+	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
 	./scripts/tests/embedded_asset_rebuild_test.sh
 

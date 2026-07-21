@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::duration_parse::DurationParseError;
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
@@ -1749,34 +1750,28 @@ fn auto_resume_timeout_event(
 }
 
 fn parse_duration_millis(raw: &str) -> Result<u64, VmError> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err(VmError::Runtime(
-            "trigger_register: when_budget.timeout cannot be empty".to_string(),
-        ));
-    }
-    let (value, unit) = trimmed
-        .char_indices()
-        .find(|(_, ch)| !ch.is_ascii_digit())
-        .map(|(index, _)| (&trimmed[..index], &trimmed[index..]))
-        .unwrap_or((trimmed, "ms"));
-    let amount = value.parse::<u64>().map_err(|_| {
-        VmError::Runtime(format!(
-            "trigger_register: invalid when_budget.timeout '{raw}'"
-        ))
-    })?;
-    let multiplier = match unit.trim() {
-        "ms" => 1,
-        "s" => 1_000,
-        "m" => 60_000,
-        "h" => 3_600_000,
-        _ => {
-            return Err(VmError::Runtime(format!(
-                "trigger_register: unsupported when_budget.timeout unit in '{raw}'"
-            )))
-        }
-    };
-    Ok(amount.saturating_mul(multiplier))
+    // The CLI manifest validator parses this same field via
+    // `package::validation::parse_duration_millis`; both now share one grammar,
+    // so a `when_budget.timeout` cannot be accepted here and rejected there.
+    crate::duration_parse::parse_millis(raw).map_err(|error| {
+        VmError::Runtime(match error {
+            DurationParseError::Empty => {
+                "trigger_register: when_budget.timeout cannot be empty".to_string()
+            }
+            DurationParseError::MissingUnit => format!(
+                "trigger_register: when_budget.timeout '{raw}' must include a unit suffix; expected ms, s, m, h, d, or w"
+            ),
+            DurationParseError::UnknownUnit(_) => {
+                format!("trigger_register: unsupported when_budget.timeout unit in '{raw}'")
+            }
+            DurationParseError::TooLarge => {
+                format!("trigger_register: when_budget.timeout '{raw}' is too large")
+            }
+            DurationParseError::NoDigits | DurationParseError::AmountOverflow => {
+                format!("trigger_register: invalid when_budget.timeout '{raw}'")
+            }
+        })
+    })
 }
 
 fn parse_autonomy_tier(value: &VmValue) -> Result<AutonomyTier, VmError> {

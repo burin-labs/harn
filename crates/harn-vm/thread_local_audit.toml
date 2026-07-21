@@ -70,9 +70,15 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/egress/mod.rs"
-statics = ["REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH", "REQUIRE_SSRF_GUARD_DEPTH"]
+statics = ["EGRESS_POLICY_CONTEXT", "TEST_EGRESS_POLICY_CONTEXT", "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH", "REQUIRE_SSRF_GUARD_DEPTH"]
 category = "logical_task"
 plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/egress/mod.rs"
+statics = ["OVERRIDES"]
+category = "thread_private"
+plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/event_log/mod.rs"
@@ -606,6 +612,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/stdlib/sandbox/handler_env.rs"
+statics = ["OVERRIDE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/stdlib/supervisor.rs"
 statics = ["SUPERVISORS", "SUPERVISOR_COUNTER"]
 category = "runtime_registry"
@@ -678,12 +690,6 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/waitpoints.rs"
-statics = ["WAITPOINT_TEST_REPLAY_OVERRIDE"]
-category = "thread_private"
-plan = "thread_private_test"
-
-[[thread_local]]
 path = "src/stdlib/workflow/state.rs"
 statics = ["WORKFLOW_RUN_STATES"]
 category = "runtime_registry"
@@ -744,6 +750,12 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
+path = "src/triggers/dispatcher/state.rs"
+statics = ["TEST_REPLAY_OVERRIDE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/triggers/registry.rs"
 statics = ["TRIGGER_REGISTRY"]
 category = "runtime_registry"
@@ -782,5 +794,11 @@ plan = "arc_registry_scope"
 [[thread_local]]
 path = "src/vm/execution.rs"
 statics = ["SCOPE_INTERRUPT_ASYNC_DISPATCHES"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/test_env.rs"
+statics = ["OVERRIDES"]
 category = "thread_private"
 plan = "thread_private_test"

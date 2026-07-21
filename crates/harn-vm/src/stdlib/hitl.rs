@@ -8,7 +8,6 @@ use std::time::Duration as StdDuration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use sha2::Digest;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -1839,9 +1838,7 @@ fn now_rfc3339() -> String {
 }
 
 fn format_rfc3339(timestamp: OffsetDateTime) -> String {
-    timestamp
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| timestamp.to_string())
+    harn_clock::format_rfc3339(timestamp)
 }
 
 fn deadline_after(requested_at: OffsetDateTime, duration: StdDuration) -> Option<String> {

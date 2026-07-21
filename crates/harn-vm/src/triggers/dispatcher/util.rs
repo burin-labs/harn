@@ -342,6 +342,8 @@ pub fn clear_dispatcher_state() {
     ACTIVE_DISPATCH_WAIT_LEASE.with(|slot| {
         *slot.borrow_mut() = None;
     });
+    #[cfg(test)]
+    super::state::reset_test_replay_override();
 }
 
 pub(super) fn dispatch_error_from_vm_error(error: VmError) -> DispatchError {
@@ -507,9 +509,8 @@ pub(super) fn maybe_fail_before_outbox() {
 }
 
 pub(super) fn now_rfc3339() -> String {
-    crate::triggers::test_util::clock::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    // Keeps reading the mockable trigger clock; only the rendering is shared.
+    harn_clock::format_rfc3339(crate::triggers::test_util::clock::now_utc())
 }
 
 pub(super) fn next_budget_reset_rfc3339(binding: &TriggerBinding) -> String {
@@ -521,9 +522,7 @@ pub(super) fn next_budget_reset_rfc3339(binding: &TriggerBinding) -> String {
         let next_day = ((now.unix_timestamp() / 86_400) + 1) * 86_400;
         time::OffsetDateTime::from_unix_timestamp(next_day).unwrap_or(now)
     };
-    reset
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    harn_clock::format_rfc3339(reset)
 }
 
 pub(super) fn now_unix_ms() -> i64 {

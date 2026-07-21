@@ -59,6 +59,7 @@ pub(super) async fn execute_case(
     prepared_module_cache: &harn_vm::PreparedModuleCache,
     stdio_available: bool,
 ) -> TestResult {
+    let _egress_scope = harn_vm::egress::scope_egress_policy_for_current_thread();
     harn_vm::reset_thread_local_state();
     let _stdio_guard = (!stdio_available).then(harn_vm::reserve_stdio_for_current_thread);
     reset_hostlib_state();

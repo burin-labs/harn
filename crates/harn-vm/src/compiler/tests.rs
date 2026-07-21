@@ -113,6 +113,39 @@ pipeline default() {
 }
 
 #[test]
+fn public_type_schema_initializer_lowers_bare_row_variable_open_shape() {
+    // A free row variable (`...rest`) marks the record open. It carries no
+    // concrete schema to merge, so it must be skipped during lowering rather
+    // than aborting the whole alias — otherwise the alias never materializes a
+    // runtime schema and imported `schema_report(x, Alias)` uses stay unbound.
+    let source = r"
+pub type OpenRow = {id: string, score?: float, ...rest}
+";
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let chunk = Compiler::compile_public_type_schema_initializers(&program, None)
+        .unwrap()
+        .expect("open-row alias materializes a schema initializer");
+    let strings = chunk
+        .constants
+        .iter()
+        .filter_map(|constant| match constant {
+            Constant::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    // The alias binds, the required identity field is preserved, and the open
+    // tail does not leak a phantom `rest` property.
+    assert!(strings.contains(&"OpenRow"), "{strings:?}");
+    assert!(strings.contains(&"id"), "{strings:?}");
+    assert!(strings.contains(&"required"), "{strings:?}");
+    assert!(!strings.contains(&"rest"), "{strings:?}");
+}
+
+#[test]
 fn oversized_function_chunk_is_a_compile_error_not_a_miscompile() {
     // Jump operands are u16 chunk offsets; a body that compiles past
     // 64 KiB used to silently truncate jump targets (`loop_start as

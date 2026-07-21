@@ -131,9 +131,10 @@ fn trace_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(sig = "llm_info() -> dict", category = "tracing")]
 fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let raw_model = std::env::var("HARN_LLM_MODEL").unwrap_or_default();
+    let raw_model = crate::test_env::env_var_seamed("HARN_LLM_MODEL").unwrap_or_default();
     let resolved = crate::llm_config::resolve_model_info(&raw_model);
-    let provider = std::env::var("HARN_LLM_PROVIDER").unwrap_or(resolved.provider);
+    let provider =
+        crate::test_env::env_var_seamed("HARN_LLM_PROVIDER").unwrap_or(resolved.provider);
     let model = if raw_model.is_empty() {
         String::new()
     } else {

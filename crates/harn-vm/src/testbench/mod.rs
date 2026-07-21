@@ -137,12 +137,13 @@ pub enum NetworkConfig {
     /// Use whatever egress policy the host has already installed.
     #[default]
     Real,
-    /// Deny outbound requests unless `allow` matches. Routes through
-    /// [`crate::egress`] using the same env-var format that
-    /// `HARN_EGRESS_*` accepts.
+    /// Deny outbound requests unless `allow` matches. Installs a typed
+    /// [`crate::egress`] policy that replaces any prior configuration —
+    /// including ambient `HARN_EGRESS_*` environment — for the session's
+    /// lifetime.
     DenyByDefault {
-        /// Comma-separated allow rules (e.g. `"github.com,*.openai.com"`).
-        /// Empty means deny everything.
+        /// Allow rules in the `HARN_EGRESS_ALLOW` syntax (e.g.
+        /// `"github.com"`, `"*.openai.com"`). Empty means deny everything.
         allow: Vec<String>,
     },
 }
@@ -291,17 +292,9 @@ pub struct TestbenchSession {
     subprocess_tape_path: Option<PathBuf>,
     #[cfg(feature = "testbench-wasi")]
     _wasi_toolchain: Option<wasi_process::WasiToolchainGuard>,
-    /// Saved env state (`HARN_EGRESS_DEFAULT`, `_ALLOW`, `_DENY`) for
-    /// restoration on drop. `None` means the testbench did not override
-    /// network policy this run.
-    saved_egress_env: Option<SavedEgressEnv>,
-}
-
-#[derive(Debug, Clone)]
-struct SavedEgressEnv {
-    default: Option<String>,
-    allow: Option<String>,
-    deny: Option<String>,
+    /// Whether this session installed a deny-by-default egress policy that
+    /// must be torn down on drop.
+    egress_policy_installed: bool,
 }
 
 impl TestbenchSession {
@@ -376,26 +369,12 @@ impl TestbenchSession {
             }
         };
 
-        let saved_egress_env = match bench.network {
-            NetworkConfig::Real => None,
+        let egress_policy_installed = match bench.network {
+            NetworkConfig::Real => false,
             NetworkConfig::DenyByDefault { allow } => {
-                let saved = SavedEgressEnv {
-                    default: std::env::var("HARN_EGRESS_DEFAULT").ok(),
-                    allow: std::env::var("HARN_EGRESS_ALLOW").ok(),
-                    deny: std::env::var("HARN_EGRESS_DENY").ok(),
-                };
-                // Reset any prior policy so install_policy doesn't trip the
-                // "policy already configured" guard, then install via env-var
-                // so the host_policy and stdlib paths see the same view.
-                reset_egress_policy_for_host();
-                std::env::set_var("HARN_EGRESS_DEFAULT", "deny");
-                if allow.is_empty() {
-                    std::env::remove_var("HARN_EGRESS_ALLOW");
-                } else {
-                    std::env::set_var("HARN_EGRESS_ALLOW", allow.join(","));
-                }
-                std::env::remove_var("HARN_EGRESS_DENY");
-                Some(saved)
+                crate::egress::install_deny_by_default_policy(&allow)
+                    .map_err(|error| TestbenchError::Network(error.to_string()))?;
+                true
             }
         };
 
@@ -435,7 +414,7 @@ impl TestbenchSession {
             subprocess_tape_path,
             #[cfg(feature = "testbench-wasi")]
             _wasi_toolchain: wasi_guard,
-            saved_egress_env,
+            egress_policy_installed,
         })
     }
 
@@ -520,21 +499,11 @@ impl TestbenchSession {
 
 impl Drop for TestbenchSession {
     fn drop(&mut self) {
-        if let Some(saved) = self.saved_egress_env.take() {
-            restore_env("HARN_EGRESS_DEFAULT", saved.default);
-            restore_env("HARN_EGRESS_ALLOW", saved.allow);
-            restore_env("HARN_EGRESS_DENY", saved.deny);
+        if self.egress_policy_installed {
             reset_egress_policy_for_host();
         }
         // The remaining `_clock`/`_overlay`/`_process` guards drop in
         // field-declared order, restoring the prior thread-local state.
-    }
-}
-
-fn restore_env(key: &str, prior: Option<String>) {
-    match prior {
-        Some(value) => std::env::set_var(key, value),
-        None => std::env::remove_var(key),
     }
 }
 
@@ -564,6 +533,7 @@ pub struct EmittedTape {
 pub enum TestbenchError {
     Subprocess(String),
     Tape(String),
+    Network(String),
 }
 
 impl std::fmt::Display for TestbenchError {
@@ -571,6 +541,7 @@ impl std::fmt::Display for TestbenchError {
         match self {
             Self::Subprocess(msg) => write!(f, "testbench subprocess: {msg}"),
             Self::Tape(msg) => write!(f, "testbench tape: {msg}"),
+            Self::Network(msg) => write!(f, "testbench network: {msg}"),
         }
     }
 }
@@ -611,11 +582,20 @@ mod tests {
     #[test]
     fn deny_by_default_blocks_egress_until_drop() {
         serial(|| {
+            let _env = crate::egress::test_env_guard();
             let bench = Testbench::builder().deny_network().build();
             let session = bench.activate().expect("activate");
-            assert_eq!(std::env::var("HARN_EGRESS_DEFAULT").as_deref(), Ok("deny"));
+            assert!(
+                crate::egress::check_url("testbench", "https://example.com/x")
+                    .expect("policy check")
+                    .is_some()
+            );
             drop(session);
-            assert!(std::env::var("HARN_EGRESS_DEFAULT").is_err());
+            assert!(
+                crate::egress::check_url("testbench", "https://example.com/x")
+                    .expect("policy check")
+                    .is_none()
+            );
         });
     }
 

@@ -109,7 +109,8 @@ pub fn __agent_loop_project_final_result(result, message, session, state) -> dic
         invocations: state.verify_completion_judge_invocations,
         vetoes: state.verify_completion_judge_vetoes,
         max_invocations: agent_verify_completion_judge_cap(opts?.verify_completion_judge),
-        cap_reached: final_status == "verify_capped",
+        cap_reached: final_status == "verify_capped"
+          && stop_reason == "completion_judge_cap_reached",
       },
     }
   }

@@ -17,13 +17,17 @@ fn tool_message_count(session_id) {
 }
 
 pipeline default() {
+  let dispatches = 0
   let tools = tool_registry()
   tools = tool_define(
     tools,
     "noop",
     "Return the same harmless result",
     {
-      handler: { _args -> return "noop" },
+      handler: { _args ->
+        dispatches += 1
+        return "noop"
+      },
       parameters: {},
       returns: {type: "string"},
       annotations: {kind: "read"},
@@ -65,6 +69,7 @@ pipeline default() {
       __io_println(judges[0].verdict)
       __io_println(judges[0].iteration == stalls[0].warning.iteration)
       __io_println(tool_message_count(session))
+      __io_println(dispatches)
       __io_println(len(llm_mock_calls()))
     },
   )

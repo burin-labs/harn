@@ -406,6 +406,105 @@ pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason
   )
 }
 
+pub fn __stall_judge_opts(turn_opts, completion_judge_invocations, done_judge_invocations) -> dict {
+  return turn_opts
+    + {
+    _done_judge_due: true,
+    _done_judge_trigger: "stalled",
+    _done_judge_invocations: done_judge_invocations,
+    _verify_completion_judge_trigger: "stalled",
+    _verify_completion_judge_invocations: completion_judge_invocations,
+    _defer_judge_feedback: true,
+  }
+}
+
+pub fn __done_judge_hit(verdict) -> int {
+  if verdict?.done_judge_invoked ?? false {
+    return 1
+  }
+  return 0
+}
+
+pub fn __completion_judge_hit(verdict) -> int {
+  if verdict?.verify_completion_judge_invoked ?? false {
+    return 1
+  }
+  return 0
+}
+
+pub fn __judge_cap_reason(verdict) -> string {
+  if verdict?.verify_completion_judge_cap_reached ?? false {
+    return "completion_judge_cap_reached"
+  }
+  if verdict?.done_judge_cap_reached ?? false {
+    return "done_judge_cap_reached"
+  }
+  return ""
+}
+
+pub fn __close_stall_calls(session_id, tool_calls, reason) -> nil {
+  agent_session_record_undispatched_tool_results(
+    session_id,
+    tool_calls,
+    "skipped",
+    "not dispatched: stall judge " + reason,
+  )
+  return nil
+}
+
+pub fn __agent_loop_apply_stall_judge_veto(
+  session_id,
+  tool_calls,
+  stall_verdict,
+  stall_observation,
+  stall_warning,
+  stall_state,
+  llm_result,
+  visible_text,
+  turn_llm_opts,
+  iteration,
+  loop_start_ms,
+) -> dict {
+  const recovery = trim(to_string(stall_verdict?.feedback ?? ""))
+  if len(tool_calls) > 0 {
+    agent_session_record_undispatched_tool_results(
+      session_id,
+      tool_calls,
+      "skipped",
+      "not dispatched: stall judge requested a different recovery step",
+    )
+  }
+  let next_stall_state = stall_state
+  if recovery != "" {
+    agent_session_inject_feedback(session_id, "verify_completion", recovery)
+  } else if stall_observation.feedback_deferred {
+    next_stall_state = agent_stall_inject_feedback(
+      session_id,
+      stall_warning,
+      stall_observation.config,
+      stall_state,
+    )
+  }
+  const totals = agent_session_record_usage(session_id, llm_result, turn_llm_opts, iteration)
+  agent_emit_event(
+    session_id,
+    "iteration_end",
+    {
+      iteration: iteration,
+      iteration_info: __agent_loop_iteration_info(
+        session_id,
+        llm_result,
+        len(tool_calls),
+        visible_text,
+        totals,
+        loop_start_ms,
+      )
+        + {dispatch_skipped: true, skip_reason: "stall_judge_continue"},
+    },
+  )
+  return next_stall_state
+}
+
 pub fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_limit, new_limit) {
   return decisions.push(
     {

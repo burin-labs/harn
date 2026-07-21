@@ -1,11 +1,17 @@
 /**
- * std/context/eval - helpers for Harn context-engineering eval manifests.
+ * std/context/eval - typed contracts for Harn context-engineering evals.
  *
- * The CLI runner owns execution. These helpers keep Harn-authored fixtures,
- * package evals, and host UI code aligned on the same portable data shape.
+ * The CLI runner (`crates/harn-vm/src/orchestration/context_eval.rs`) owns
+ * manifest loading and report production; these types are the single Harn
+ * vocabulary for the same portable data, so Harn-authored fixtures, package
+ * evals, and host UI code name one manifest/report shape instead of `dict`.
+ *
+ * Deterministic scores, thresholds, identifiers, and evidence lists are
+ * named distinctly from model/human-authored prose (objectives, reference
+ * answers, descriptions, final responses). Required identity and score
+ * fields stay required; optional and extension fields (plus `...rest`)
+ * carry forward compatibility without weakening that spine.
  */
-import { filter_nil } from "std/collections"
-
 const CONTEXT_EVAL_MANIFEST_SCHEMA = "harn.context_eval.manifest.v1"
 
 const CONTEXT_EVAL_REPORT_SCHEMA = "harn.context_eval.report.v1"
@@ -48,6 +54,361 @@ fn __context_eval_string_list(value, field) {
   return out.sort()
 }
 
+// -------------------------------------------------------------------------------------------------
+
+// Manifest data contracts (mirrors the serde twins in
+// `crates/harn-vm/src/orchestration/context_eval.rs`).
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * One transcript message on a context-eval task. `content` is captured /
+ * model-authored text; `role` and `estimated_tokens` are deterministic.
+ */
+pub type ContextEvalTranscriptMessage = {
+  role: string,
+  content: string,
+  estimated_tokens?: int,
+  ...rest,
+}
+
+/**
+ * A tool declared to a context-eval task. `description` is human-authored;
+ * `name`, `capability`, and `deterministic` are deterministic identifiers.
+ */
+pub type ContextEvalTool = {
+  name: string,
+  description?: string,
+  capability?: string,
+  deterministic?: bool,
+  ...rest,
+}
+
+/** A recorded tool invocation. All fields are deterministic evidence. */
+pub type ContextEvalToolEvent = {
+  name: string,
+  order?: int,
+  phase?: string,
+  success?: bool,
+  quality?: string,
+  recovery?: bool,
+  ...rest,
+}
+
+/**
+ * Deterministic expectation spine for a task. Evidence lists default empty
+ * (absent = no expectation), so they are optional; the values are never
+ * model-authored prose.
+ */
+pub type ContextEvalExpected = {
+  required_terms?: list<string>,
+  expected_artifact_ids?: list<string>,
+  expected_tools?: list<string>,
+  max_input_tokens?: int,
+  ...rest,
+}
+
+/**
+ * Observed measurements for a task or mode run. `final_response` is the
+ * model-authored answer text; every other field is a deterministic metric.
+ */
+pub type ContextEvalObserved = {
+  final_response?: string,
+  latency_ms?: int,
+  input_tokens?: int,
+  output_tokens?: int,
+  cost_usd?: float,
+  cache_hit?: bool,
+  compaction_count?: int,
+  metadata?: dict,
+  ...rest,
+}
+
+/**
+ * A context-assembly mode. `id`/`kind` are the required identity; `name`
+ * and `description` are human-authored labels; the remaining fields are
+ * deterministic knobs and thresholds.
+ */
+pub type ContextEvalMode = {
+  id: string,
+  kind: string,
+  name?: string,
+  description?: string,
+  artifact_ids?: list<string>,
+  include_artifact_kinds?: list<string>,
+  exclude_artifact_kinds?: list<string>,
+  budget_tokens?: int,
+  assemble_strategy?: string,
+  dedup?: string,
+  microcompact_threshold?: int,
+  semantic_overlap?: float,
+  projection_policy?: string,
+  transcript_keep_last?: int,
+  tool_disclosure?: string,
+  tool_allowlist?: list<string>,
+  expected_cache_hit?: bool,
+  cache_namespace?: string,
+  compaction_policy?: any,
+  preprocessing?: string,
+  metadata?: dict,
+  ...rest,
+}
+
+/**
+ * A context-eval task. `id`/`objective` are the required identity/prompt;
+ * `objective` and `reference_answer` are model/human-authored prose. Raw
+ * artifact payloads stay dynamic (`list`); the rest reuse the nested
+ * deterministic contracts above.
+ */
+pub type ContextEvalTask = {
+  id: string,
+  name?: string,
+  objective: string,
+  reference_answer?: string,
+  artifacts?: list,
+  transcript?: list<ContextEvalTranscriptMessage>,
+  tools?: list<ContextEvalTool>,
+  tool_events?: list<ContextEvalToolEvent>,
+  expected?: ContextEvalExpected,
+  observed?: ContextEvalObserved,
+  mode_observations?: dict<string, ContextEvalObserved>,
+  metadata?: dict,
+  ...rest,
+}
+
+/**
+ * A portable context-eval manifest for `harn eval context`. `_type`,
+ * `version`, and `id` are the required identity spine.
+ */
+pub type ContextEvalManifest = {
+  _type: string,
+  version: int,
+  id: string,
+  name?: string,
+  description?: string,
+  modes: list<ContextEvalMode>,
+  tasks: list<ContextEvalTask>,
+  metadata?: dict,
+  ...rest,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Report data contracts (mirrors the serde twins; the runner is the
+// producer, these types are the consumer/validation vocabulary).
+
+// -------------------------------------------------------------------------------------------------
+
+/** Deterministic preprocessing summary for a mode/run. */
+pub type ContextEvalPreprocessing = {mode: string, llm_enabled: bool, ...rest}
+
+/**
+ * Final-answer correctness for a run. `score` is a deterministic [0,1]
+ * measure; the term/artifact lists are deterministic evidence.
+ */
+pub type ContextEvalCorrectness = {
+  passed: bool,
+  score: float,
+  required_terms_present: list<string>,
+  required_terms_missing: list<string>,
+  expected_artifact_ids_present: list<string>,
+  expected_artifact_ids_missing: list<string>,
+  source: string,
+  ...rest,
+}
+
+/**
+ * Tool-call quality for a run. `score` is a deterministic [0,1] measure;
+ * the tool lists are deterministic evidence.
+ */
+pub type ContextEvalToolQuality = {
+  score: float,
+  expected_tools: list<string>,
+  observed_tools: list<string>,
+  matched_tools: list<string>,
+  missing_tools: list<string>,
+  unnecessary_tools: list<string>,
+  ...rest,
+}
+
+/** Deterministic transcript-projection accounting for a run. */
+pub type ContextEvalProjectionReport = {
+  policy: string,
+  source_message_count: int,
+  retained_message_count: int,
+  retained_tokens: int,
+  ...rest,
+}
+
+/** Deterministic assembled-context accounting for a run. */
+pub type ContextEvalContextReport = {
+  projection_policy: string,
+  tool_disclosure: string,
+  artifact_count: int,
+  selected_artifact_ids: list<string>,
+  dropped_artifact_ids: list<string>,
+  rendered_bytes: int,
+  rendered_tokens: int,
+  budget_tokens: int,
+  assemble_strategy: string,
+  dedup: string,
+  exposed_tools: list<string>,
+  ...rest,
+}
+
+/** Deterministic cache-key accounting for a run. */
+pub type ContextEvalCacheReport = {
+  namespace: string,
+  key: string,
+  stable_input_hash: string,
+  deterministic_order: bool,
+  hit?: bool,
+  ...rest,
+}
+
+/**
+ * One evaluated task×mode case. `run_id`/`task_id`/`mode_id` are the
+ * required identity; scores and counts are deterministic; `failures`
+ * carries the deterministic finding identifiers for the case.
+ */
+pub type ContextEvalRunReport = {
+  run_id: string,
+  task_id: string,
+  mode_id: string,
+  mode_kind: string,
+  status: string,
+  passed: bool,
+  final_correctness: ContextEvalCorrectness,
+  reads_before_first_edit: int,
+  tool_call_quality: ContextEvalToolQuality,
+  latency_ms: int,
+  input_tokens: int,
+  output_tokens: int,
+  cost_usd: float,
+  compaction_count: int,
+  projection: ContextEvalProjectionReport,
+  context: ContextEvalContextReport,
+  cache: ContextEvalCacheReport,
+  error_recovery_count: int,
+  preprocessing: ContextEvalPreprocessing,
+  failures: list<string>,
+  ...rest,
+}
+
+/** Deterministic run-level aggregates across a report. */
+pub type ContextEvalAggregate = {
+  mean_final_correctness: float,
+  mean_tool_call_quality: float,
+  total_latency_ms: int,
+  total_input_tokens: int,
+  total_output_tokens: int,
+  total_cost_usd: float,
+  total_compaction_count: int,
+  total_error_recovery_count: int,
+  ...rest,
+}
+
+/** Deterministic per-mode summary in a report. */
+pub type ContextEvalModeSummary = {
+  id: string,
+  kind: string,
+  projection_policy: string,
+  tool_disclosure: string,
+  preprocessing: ContextEvalPreprocessing,
+  ...rest,
+}
+
+/** Deterministic per-task summary in a report. `name` is a human label. */
+pub type ContextEvalTaskSummary = {
+  id: string,
+  name?: string,
+  required_terms: list<string>,
+  expected_artifact_ids: list<string>,
+  expected_tools: list<string>,
+  ...rest,
+}
+
+/**
+ * The context-eval report consumed by a cloud platform and local host UIs.
+ * `_type`, `schema_version`, `manifest_id`, `pass`, and the run/task/mode
+ * counts are the required identity/score spine; nested cases reuse the
+ * deterministic contracts above.
+ */
+pub type ContextEvalReport = {
+  _type: string,
+  schema_version: int,
+  manifest_id: string,
+  manifest_name?: string,
+  pass: bool,
+  total_runs: int,
+  passed_runs: int,
+  failed_runs: int,
+  total_tasks: int,
+  total_modes: int,
+  aggregate: ContextEvalAggregate,
+  modes: list<ContextEvalModeSummary>,
+  tasks: list<ContextEvalTaskSummary>,
+  runs: list<ContextEvalRunReport>,
+  metadata?: dict,
+  ...rest,
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Builder option contracts. One canonical key per field — no compatibility
+// aliases — plus `...rest` for forward-compatible additions.
+
+// -------------------------------------------------------------------------------------------------
+
+/** Options accepted by `context_eval_mode`. */
+pub type ContextEvalModeOptions = {
+  kind?: string,
+  name?: string,
+  description?: string,
+  artifact_ids?: list<string>,
+  include_artifact_kinds?: list<string>,
+  exclude_artifact_kinds?: list<string>,
+  budget_tokens?: int,
+  assemble_strategy?: string,
+  dedup?: string,
+  microcompact_threshold?: int,
+  semantic_overlap?: float,
+  projection_policy?: string,
+  transcript_keep_last?: int,
+  tool_disclosure?: string,
+  tool_allowlist?: list<string>,
+  expected_cache_hit?: bool,
+  cache_namespace?: string,
+  compaction_policy?: any,
+  preprocessing?: string,
+  metadata?: dict,
+  ...rest,
+}
+
+/** Options accepted by `context_eval_task`. */
+pub type ContextEvalTaskOptions = {
+  name?: string,
+  reference_answer?: string,
+  artifacts?: list,
+  transcript?: list<ContextEvalTranscriptMessage>,
+  tools?: list<ContextEvalTool>,
+  tool_events?: list<ContextEvalToolEvent>,
+  expected?: ContextEvalExpected,
+  observed?: ContextEvalObserved,
+  mode_observations?: dict<string, ContextEvalObserved>,
+  metadata?: dict,
+  ...rest,
+}
+
+/** Options accepted by `context_eval_manifest`. */
+pub type ContextEvalManifestOptions = {
+  id?: string,
+  name?: string,
+  description?: string,
+  metadata?: dict,
+  ...rest,
+}
+
 /**
  * Build a context-eval mode declaration.
  *
@@ -55,50 +416,48 @@ fn __context_eval_string_list(value, field) {
  * @errors: []
  * @example: context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
  */
-pub fn context_eval_mode(id: string, kind = nil, options = nil) {
+pub fn context_eval_mode(
+  id: string,
+  kind: string? = nil,
+  options: ContextEvalModeOptions? = nil,
+) -> ContextEvalMode {
   const opts = options ?? {}
   const mode_id = __context_eval_required_text(id, "mode id")
-  const mode_kind = __context_eval_text(kind ?? opts?.kind ?? mode_id)
-  return filter_nil(
-    opts
-      + {
-      id: mode_id,
-      kind: if mode_kind == "" {
-        mode_id
-      } else {
-        mode_kind
-      },
-      name: opts?.name,
-      description: opts?.description,
-      artifact_ids: __context_eval_string_list(
-        opts?.artifact_ids ?? opts?.artifacts,
-        "artifact_ids",
-      ),
-      include_artifact_kinds: __context_eval_string_list(
-        opts?.include_artifact_kinds ?? opts?.include_kinds,
-        "include_artifact_kinds",
-      ),
-      exclude_artifact_kinds: __context_eval_string_list(
-        opts?.exclude_artifact_kinds ?? opts?.exclude_kinds,
-        "exclude_artifact_kinds",
-      ),
-      budget_tokens: opts?.budget_tokens ?? opts?.max_tokens,
-      assemble_strategy: opts?.assemble_strategy ?? opts?.strategy,
-      dedup: opts?.dedup,
-      projection_policy: opts?.projection_policy ?? opts?.projection,
-      transcript_keep_last: opts?.transcript_keep_last ?? opts?.keep_last,
-      tool_disclosure: opts?.tool_disclosure,
-      tool_allowlist: __context_eval_string_list(
-        opts?.tool_allowlist ?? opts?.tools,
-        "tool_allowlist",
-      ),
-      expected_cache_hit: opts?.expected_cache_hit,
-      cache_namespace: opts?.cache_namespace,
-      compaction_policy: opts?.compaction_policy,
-      preprocessing: opts?.preprocessing ?? "deterministic",
-      metadata: opts?.metadata ?? {},
-    },
-  )
+  const mode_kind_raw = __context_eval_text(kind ?? opts?.kind ?? mode_id)
+  const mode_kind = if mode_kind_raw == "" {
+    mode_id
+  } else {
+    mode_kind_raw
+  }
+  return {
+    id: mode_id,
+    kind: mode_kind,
+    name: opts?.name,
+    description: opts?.description,
+    artifact_ids: __context_eval_string_list(opts?.artifact_ids, "artifact_ids"),
+    include_artifact_kinds: __context_eval_string_list(
+      opts?.include_artifact_kinds,
+      "include_artifact_kinds",
+    ),
+    exclude_artifact_kinds: __context_eval_string_list(
+      opts?.exclude_artifact_kinds,
+      "exclude_artifact_kinds",
+    ),
+    budget_tokens: opts?.budget_tokens,
+    assemble_strategy: opts?.assemble_strategy,
+    dedup: opts?.dedup,
+    microcompact_threshold: opts?.microcompact_threshold,
+    semantic_overlap: opts?.semantic_overlap,
+    projection_policy: opts?.projection_policy,
+    transcript_keep_last: opts?.transcript_keep_last,
+    tool_disclosure: opts?.tool_disclosure,
+    tool_allowlist: __context_eval_string_list(opts?.tool_allowlist, "tool_allowlist"),
+    expected_cache_hit: opts?.expected_cache_hit,
+    cache_namespace: opts?.cache_namespace,
+    compaction_policy: opts?.compaction_policy,
+    preprocessing: opts?.preprocessing ?? "deterministic",
+    metadata: opts?.metadata ?? {},
+  }
 }
 
 /**
@@ -108,43 +467,37 @@ pub fn context_eval_mode(id: string, kind = nil, options = nil) {
  * @errors: []
  * @example: context_eval_task("incident", "Find the failing service", {artifacts: []})
  */
-pub fn context_eval_task(id: string, objective: string, options = nil) {
+pub fn context_eval_task(
+  id: string,
+  objective: string,
+  options: ContextEvalTaskOptions? = nil,
+) -> ContextEvalTask {
   const opts = options ?? {}
   const task_id = __context_eval_required_text(id, "task id")
   const task_objective = __context_eval_required_text(objective, "objective")
   const expected = opts?.expected ?? {}
-  return filter_nil(
-    opts
-      + {
-      id: task_id,
-      name: opts?.name,
-      objective: task_objective,
-      reference_answer: opts?.reference_answer,
-      artifacts: __context_eval_list(opts?.artifacts, "artifacts"),
-      transcript: __context_eval_list(opts?.transcript, "transcript"),
-      tools: __context_eval_list(opts?.tools, "tools"),
-      tool_events: __context_eval_list(opts?.tool_events, "tool_events"),
-      expected: expected
-        + {
-        required_terms: __context_eval_string_list(
-          expected?.required_terms ?? opts?.required_terms,
-          "required_terms",
-        ),
-        expected_artifact_ids: __context_eval_string_list(
-          expected?.expected_artifact_ids ?? opts?.expected_artifact_ids,
-          "expected_artifact_ids",
-        ),
-        expected_tools: __context_eval_string_list(
-          expected?.expected_tools ?? opts?.expected_tools,
-          "expected_tools",
-        ),
-        max_input_tokens: expected?.max_input_tokens ?? opts?.max_input_tokens,
-      },
-      observed: opts?.observed ?? {},
-      mode_observations: opts?.mode_observations ?? {},
-      metadata: opts?.metadata ?? {},
+  return {
+    id: task_id,
+    name: opts?.name,
+    objective: task_objective,
+    reference_answer: opts?.reference_answer,
+    artifacts: __context_eval_list(opts?.artifacts, "artifacts"),
+    transcript: __context_eval_list(opts?.transcript, "transcript"),
+    tools: __context_eval_list(opts?.tools, "tools"),
+    tool_events: __context_eval_list(opts?.tool_events, "tool_events"),
+    expected: {
+      required_terms: __context_eval_string_list(expected?.required_terms, "required_terms"),
+      expected_artifact_ids: __context_eval_string_list(
+        expected?.expected_artifact_ids,
+        "expected_artifact_ids",
+      ),
+      expected_tools: __context_eval_string_list(expected?.expected_tools, "expected_tools"),
+      max_input_tokens: expected?.max_input_tokens,
     },
-  )
+    observed: opts?.observed ?? {},
+    mode_observations: opts?.mode_observations ?? {},
+    metadata: opts?.metadata ?? {},
+  }
 }
 
 /**
@@ -154,20 +507,22 @@ pub fn context_eval_task(id: string, objective: string, options = nil) {
  * @errors: []
  * @example: context_eval_manifest(tasks, modes, {id: "repo-context-smoke"})
  */
-pub fn context_eval_manifest(tasks = [], modes = [], options = nil) {
+pub fn context_eval_manifest(
+  tasks: list<ContextEvalTask> = [],
+  modes: list<ContextEvalMode> = [],
+  options: ContextEvalManifestOptions? = nil,
+) -> ContextEvalManifest {
   const opts = options ?? {}
-  return filter_nil(
-    {
-      _type: CONTEXT_EVAL_MANIFEST_SCHEMA,
-      version: CONTEXT_EVAL_VERSION,
-      id: __context_eval_text(opts?.id ?? "context-eval"),
-      name: opts?.name,
-      description: opts?.description,
-      modes: __context_eval_list(modes, "modes"),
-      tasks: __context_eval_list(tasks, "tasks"),
-      metadata: opts?.metadata ?? {},
-    },
-  )
+  return {
+    _type: CONTEXT_EVAL_MANIFEST_SCHEMA,
+    version: CONTEXT_EVAL_VERSION,
+    id: __context_eval_text(opts?.id ?? "context-eval"),
+    name: opts?.name,
+    description: opts?.description,
+    modes: modes,
+    tasks: tasks,
+    metadata: opts?.metadata ?? {},
+  }
 }
 
 /**
@@ -176,6 +531,6 @@ pub fn context_eval_manifest(tasks = [], modes = [], options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn context_eval_report_schema() {
+pub fn context_eval_report_schema() -> string {
   return CONTEXT_EVAL_REPORT_SCHEMA
 }

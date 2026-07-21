@@ -6,8 +6,6 @@ use std::time::Duration as StdDuration;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -17,9 +15,7 @@ use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
 use crate::stdlib::options::{duration_from_value, ErrorKind};
-use crate::triggers::dispatcher::{
-    current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
-};
+use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
@@ -643,10 +639,7 @@ fn ensure_monitor_event_log() -> RcOrArcEventLog {
 }
 
 fn is_replay() -> bool {
-    current_dispatch_is_replay()
-        || std::env::var("HARN_REPLAY")
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty() && value != "0")
+    crate::triggers::dispatcher::is_replay()
 }
 
 fn duration_ms(duration: StdDuration) -> u64 {
@@ -654,9 +647,7 @@ fn duration_ms(duration: StdDuration) -> u64 {
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| OffsetDateTime::now_utc().to_string())
+    harn_clock::system_now_rfc3339()
 }
 
 fn log_error(error: impl std::fmt::Display) -> VmError {

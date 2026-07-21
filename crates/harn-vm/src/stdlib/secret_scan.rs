@@ -153,7 +153,7 @@ pub async fn append_secret_scan_audit<L: EventLog + ?Sized>(
                 })
             })
             .collect::<Vec<_>>(),
-        "observed_at": crate::orchestration::now_rfc3339(),
+        "observed_at": crate::orchestration::now_unix_seconds_text(),
     });
     let topic = Topic::new(SECRET_SCAN_AUDIT_TOPIC).expect("secret scan audit topic is valid");
     let kind = if findings.is_empty() {

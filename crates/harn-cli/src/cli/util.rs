@@ -3,6 +3,7 @@ use std::ffi::OsStr;
 use std::time::Duration as StdDuration;
 
 use clap::builder::{PossibleValue, StringValueParser, TypedValueParser};
+use harn_vm::duration_parse::DurationParseError;
 
 #[derive(Clone)]
 pub(crate) struct CompletionValueParser {
@@ -70,55 +71,23 @@ fn trigger_provider_candidates() -> Vec<String> {
 
 pub(crate) fn parse_duration_arg(raw: &str) -> Result<StdDuration, String> {
     let raw = raw.trim();
-    if raw.is_empty() {
-        return Err("duration cannot be empty".to_string());
-    }
-
-    let (digits, unit) = raw
-        .chars()
-        .position(|ch| !ch.is_ascii_digit())
-        .map(|index| raw.split_at(index))
-        .ok_or_else(|| {
-            "duration must include a unit suffix like ms, s, m, h, d, or w".to_string()
-        })?;
-    if digits.is_empty() || unit.is_empty() {
-        return Err("duration must be formatted like 30s, 5m, 2h, or 7d".to_string());
-    }
-
-    let value = digits
-        .parse::<u64>()
-        .map_err(|error| format!("invalid duration '{raw}': {error}"))?;
-    match unit {
-        "ms" => Ok(StdDuration::from_millis(value)),
-        "s" => Ok(StdDuration::from_secs(value)),
-        "m" => Ok(StdDuration::from_secs(checked_duration_product(
-            raw, value, 60,
-        )?)),
-        "h" => Ok(StdDuration::from_secs(checked_duration_product(
-            raw,
-            value,
-            60 * 60,
-        )?)),
-        "d" => Ok(StdDuration::from_secs(checked_duration_product(
-            raw,
-            value,
-            60 * 60 * 24,
-        )?)),
-        "w" => Ok(StdDuration::from_secs(checked_duration_product(
-            raw,
-            value,
-            60 * 60 * 24 * 7,
-        )?)),
-        _ => Err(format!(
-            "unsupported duration unit '{unit}'; expected ms, s, m, h, d, or w"
-        )),
-    }
-}
-
-fn checked_duration_product(raw: &str, value: u64, multiplier: u64) -> Result<u64, String> {
-    value
-        .checked_mul(multiplier)
-        .ok_or_else(|| format!("duration '{raw}' is too large"))
+    harn_vm::duration_parse::parse_millis(raw)
+        .map(StdDuration::from_millis)
+        .map_err(|error| match error {
+            DurationParseError::Empty => "duration cannot be empty".to_string(),
+            DurationParseError::MissingUnit => {
+                "duration must include a unit suffix like ms, s, m, h, d, or w".to_string()
+            }
+            DurationParseError::NoDigits => {
+                "duration must be formatted like 30s, 5m, 2h, or 7d".to_string()
+            }
+            DurationParseError::AmountOverflow | DurationParseError::TooLarge => {
+                format!("duration '{raw}' is too large")
+            }
+            DurationParseError::UnknownUnit(unit) => {
+                format!("unsupported duration unit '{unit}'; expected ms, s, m, h, d, or w")
+            }
+        })
 }
 
 #[cfg(test)]
@@ -137,5 +106,34 @@ mod tests {
             parse_duration_arg("18446744073709551615ms").unwrap(),
             StdDuration::from_millis(u64::MAX)
         );
+    }
+
+    #[test]
+    fn parse_duration_arg_still_requires_a_unit_suffix() {
+        // The CLI's distinguishing policy: unlike the config-file parsers, a
+        // bare number is a typo here, not an implicit millisecond count.
+        let err = parse_duration_arg("30").unwrap_err();
+        assert!(err.contains("must include a unit suffix"), "{err}");
+    }
+
+    #[test]
+    fn parse_duration_arg_spans_the_full_unit_vocabulary() {
+        // Compare in seconds: `from_days`/`from_weeks` are unstable, and
+        // `from_secs(7 * 86_400)` would trip a clippy unit lint.
+        assert_eq!(parse_duration_arg("7d").unwrap().as_secs(), 7 * 86_400);
+        assert_eq!(parse_duration_arg("2w").unwrap().as_secs(), 2 * 7 * 86_400);
+    }
+
+    #[test]
+    fn parse_duration_arg_reports_unknown_units_and_digitless_input() {
+        assert!(parse_duration_arg("5y")
+            .unwrap_err()
+            .contains("unsupported duration unit"));
+        assert!(parse_duration_arg("abc")
+            .unwrap_err()
+            .contains("must be formatted like"));
+        assert!(parse_duration_arg("  ")
+            .unwrap_err()
+            .contains("cannot be empty"));
     }
 }

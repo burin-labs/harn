@@ -741,12 +741,8 @@ mod tests {
 
     fn with_mock_provider<T>(f: impl FnOnce() -> T) -> T {
         let _guard = crate::llm::env_guard();
-        let prev_provider = std::env::var("HARN_LLM_PROVIDER").ok();
-        let prev_model = std::env::var("HARN_LLM_MODEL").ok();
-        unsafe {
-            std::env::set_var("HARN_LLM_PROVIDER", "mock");
-            std::env::remove_var("HARN_LLM_MODEL");
-        }
+        let env = crate::test_env::test_env_guard();
+        env.set("HARN_LLM_PROVIDER", "mock");
         crate::llm::mock::reset_llm_mock_state();
         crate::event_log::reset_active_event_log();
         crate::stdlib::reset_stdlib_state();
@@ -754,16 +750,6 @@ mod tests {
         crate::llm::mock::reset_llm_mock_state();
         crate::event_log::reset_active_event_log();
         crate::stdlib::reset_stdlib_state();
-        unsafe {
-            match prev_provider {
-                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
-                None => std::env::remove_var("HARN_LLM_PROVIDER"),
-            }
-            match prev_model {
-                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
-                None => std::env::remove_var("HARN_LLM_MODEL"),
-            }
-        }
         result
     }
 

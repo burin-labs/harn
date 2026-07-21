@@ -1,0 +1,22 @@
+import { ArtifactDescriptor, artifact_descriptor } from "std/run_artifacts"
+import { SchemaContract, schema_contract } from "std/schema"
+
+type Envelope<T> = {payload: T}
+
+type Receipt = {id: string}
+
+type ReceiptEnvelope = Envelope<Receipt>
+
+type EnvelopeArtifact<T> = ArtifactDescriptor<Envelope<T>>
+
+fn preserve_descriptor<T>(descriptor: EnvelopeArtifact<T>) -> EnvelopeArtifact<T> {
+  return descriptor
+}
+
+pipeline test(task) {
+  const contract: SchemaContract<ReceiptEnvelope> = schema_contract(schema_of(ReceiptEnvelope), [])
+  const descriptor: EnvelopeArtifact<Receipt> = preserve_descriptor(
+    artifact_descriptor("receipt.json", contract),
+  )
+  __io_println(descriptor.name)
+}

@@ -23,8 +23,8 @@
     "smol-toml": "1.6.1"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.38.0",
+    "@redocly/cli": "^2.39.0",
     "concurrently": "^10.0.3",
-    "markdownlint-cli2": "^0.23.0"
+    "markdownlint-cli2": "^0.23.1"
   }
 }

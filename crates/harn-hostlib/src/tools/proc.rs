@@ -25,7 +25,6 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use harn_vm::VmValue;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::error::HostlibError;
 use crate::process::{
@@ -725,9 +724,7 @@ pub(crate) fn next_command_id() -> String {
 }
 
 pub(crate) fn now_rfc3339() -> String {
-    let now: OffsetDateTime = SystemTime::now().into();
-    now.format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    harn_vm::clock::system_now_rfc3339()
 }
 
 pub(crate) fn inline_output(

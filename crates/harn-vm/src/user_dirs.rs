@@ -14,7 +14,7 @@
 //! environment that production code calls.
 
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn non_empty(value: Option<&OsStr>) -> Option<PathBuf> {
     value.filter(|v| !v.is_empty()).map(PathBuf::from)
@@ -39,12 +39,67 @@ pub fn home_dir() -> Option<PathBuf> {
     )
 }
 
+/// Prefixes that stand in for the home directory, longest first so `"$HOME/"`
+/// is tried before the bare `"$HOME"`.
+const HOME_PREFIXES: &[&str] = &["~/", "$HOME/", "~", "$HOME"];
+
+/// Expand a leading home-directory reference in `raw`.
+///
+/// Recognises `~`, `~/…`, `$HOME`, and `$HOME/…`. Anything else — including a
+/// `~user` reference, which needs a passwd lookup this module deliberately
+/// does not do — is returned unchanged, as is any input when no home directory
+/// resolves. Only a *leading* reference is expanded; this is not a shell.
+///
+/// The pure core takes `home` explicitly so every prefix and both platforms'
+/// env shapes are unit-testable on any host. [`expand_home`] is the wrapper
+/// over the live environment.
+pub fn expand_home_from(raw: &str, home: Option<&Path>) -> PathBuf {
+    let Some(home) = home else {
+        return PathBuf::from(raw);
+    };
+    for prefix in HOME_PREFIXES {
+        let Some(rest) = raw.strip_prefix(prefix) else {
+            continue;
+        };
+        // A bare `~` / `$HOME` only matches when nothing follows; otherwise
+        // `~alice` and `$HOMEBREW` would silently expand.
+        if !prefix.ends_with('/') && !rest.is_empty() {
+            continue;
+        }
+        return if rest.is_empty() {
+            home.to_path_buf()
+        } else {
+            home.join(rest)
+        };
+    }
+    PathBuf::from(raw)
+}
+
+/// Expand a leading `~` / `$HOME` reference against the current user's home
+/// directory, resolved portably (see [`home_dir`]).
+pub fn expand_home(raw: &str) -> PathBuf {
+    expand_home_from(raw, home_dir().as_deref())
+}
+
+/// [`expand_home`] for an existing `Path`. Paths that are not valid UTF-8
+/// cannot contain a `~`/`$HOME` prefix we could act on, so they pass through.
+pub fn expand_home_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(raw) => expand_home(raw),
+        None => path.to_path_buf(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn os(value: &str) -> Option<&OsStr> {
         Some(OsStr::new(value))
+    }
+
+    fn home() -> Option<&'static Path> {
+        Some(Path::new("/home/ada"))
     }
 
     #[test]
@@ -87,5 +142,56 @@ mod tests {
     fn none_when_both_unset_or_empty() {
         assert_eq!(home_dir_from(None, None), None);
         assert_eq!(home_dir_from(os(""), os("")), None);
+    }
+
+    #[test]
+    fn expands_every_home_prefix() {
+        // Before consolidation each call site supported a different subset of
+        // these four; the owner supports all of them.
+        for raw in ["~", "$HOME"] {
+            assert_eq!(expand_home_from(raw, home()), PathBuf::from("/home/ada"));
+        }
+        for raw in ["~/.config/harn", "$HOME/.config/harn"] {
+            assert_eq!(
+                expand_home_from(raw, home()),
+                PathBuf::from("/home/ada/.config/harn")
+            );
+        }
+    }
+
+    #[test]
+    fn leaves_non_home_paths_alone() {
+        for raw in ["/etc/harn", "relative/path", ""] {
+            assert_eq!(expand_home_from(raw, home()), PathBuf::from(raw));
+        }
+    }
+
+    #[test]
+    fn bare_prefixes_do_not_swallow_longer_tokens() {
+        // `~alice` needs a passwd lookup we do not do, and `$HOMEBREW` is an
+        // unrelated variable. Neither may expand.
+        for raw in ["~alice", "~alice/bin", "$HOMEBREW", "$HOMEBREW_PREFIX"] {
+            assert_eq!(expand_home_from(raw, home()), PathBuf::from(raw));
+        }
+    }
+
+    #[test]
+    fn only_leading_references_expand() {
+        assert_eq!(
+            expand_home_from("/opt/~/cache", home()),
+            PathBuf::from("/opt/~/cache")
+        );
+    }
+
+    #[test]
+    fn unresolvable_home_returns_input_unchanged() {
+        assert_eq!(expand_home_from("~/cache", None), PathBuf::from("~/cache"));
+        assert_eq!(expand_home_from("~", None), PathBuf::from("~"));
+    }
+
+    #[test]
+    fn expand_home_path_passes_through_non_utf8() {
+        let raw = PathBuf::from("/etc/harn");
+        assert_eq!(expand_home_path(&raw), raw);
     }
 }

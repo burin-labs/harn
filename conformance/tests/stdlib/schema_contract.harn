@@ -93,26 +93,22 @@ pipeline default(task) {
   __io_println(broken_failure.kind + ":" + broken_failure.issues[0].rule)
   const root = path_join(harness.fs.temp_dir(), "harn-schema-contract-" + uuid_v7())
   const run = run_artifacts_open("contract", {root: root, run_id: "run-a"})
+  const receipt_artifact = artifact_descriptor("receipt.json", contract)
   const written = unwrap(
-    run_artifact_write_json_contract_result(
+    run_artifact_write_json_result(
       run,
-      "receipt.json",
+      receipt_artifact,
       {id: "v2-stored", version: 2, payload: {count: 3}},
-      contract,
     ),
   )
-  const reread = unwrap(run_artifact_read_json_contract_result(run, "receipt.json", contract))
-  __io_println(written.mode + ":" + reread.id)
-  const rejected = run_artifact_write_json_contract_result(
-    run,
-    "receipt.json",
-    {id: "bad", version: 2, payload: {count: 3}},
-    contract,
-  )
+  const reread = unwrap(run_artifact_read_json_result(run, receipt_artifact))
+  __io_println(written.status + ":" + reread.mode + ":" + reread.id)
+  const invalid_receipt: any = {id: "bad", version: 2, payload: {count: 3}}
+  const rejected = run_artifact_write_json_result(run, receipt_artifact, invalid_receipt)
   __io_println(
     unwrap_err(rejected).kind
       + ":"
-      + run_artifact_read_json_contract(run, "receipt.json", contract).id,
+      + run_artifact_read_json(run, receipt_artifact).id,
   )
   harness.fs.delete(root)
 }

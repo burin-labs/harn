@@ -46,7 +46,6 @@
 //! pending map and a single stdout mutex.
 
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -55,6 +54,7 @@ use std::time::Duration;
 use harn_vm::{HostCallBridge, VmError, VmValue};
 use serde_json::{json, Value};
 
+use crate::framing::{write_json_frame, SharedWriter};
 use crate::protocol::DapResponse;
 
 /// Default reverse-request timeout. Generous because the client may need
@@ -95,7 +95,7 @@ pub struct DapHostBridge {
     /// Shared seq counter for adapter-initiated messages.
     seq: Arc<AtomicI64>,
     /// Stdout writer, locked for framing serialization.
-    stdout: Arc<Mutex<Box<dyn Write + Send>>>,
+    stdout: SharedWriter,
     /// Pending reverse requests, keyed by their outgoing seq.
     pending: PendingMap,
     /// Set of ops we should *always* forward to the client. When None,
@@ -109,11 +109,7 @@ pub struct DapHostBridge {
 }
 
 impl DapHostBridge {
-    pub fn new(
-        seq: Arc<AtomicI64>,
-        stdout: Arc<Mutex<Box<dyn Write + Send>>>,
-        pending: PendingMap,
-    ) -> Self {
+    pub fn new(seq: Arc<AtomicI64>, stdout: SharedWriter, pending: PendingMap) -> Self {
         Self {
             seq,
             stdout,
@@ -141,14 +137,7 @@ impl DapHostBridge {
                 "output": format!("{text}\n"),
             }
         });
-        if let Ok(body) = serde_json::to_string(&event) {
-            let header = format!("Content-Length: {}\r\n\r\n", body.len());
-            if let Ok(mut guard) = self.stdout.lock() {
-                let _ = guard.write_all(header.as_bytes());
-                let _ = guard.write_all(body.as_bytes());
-                let _ = guard.flush();
-            }
-        }
+        let _ = write_json_frame(&self.stdout, &event);
     }
 
     fn send_reverse_request(
@@ -181,18 +170,7 @@ impl DapHostBridge {
                 "params": params_json,
             },
         });
-        let body = serde_json::to_string(&frame)
-            .map_err(|e| VmError::Runtime(format!("DAP encode: {e}")))?;
-
-        let mut stdout = self
-            .stdout
-            .lock()
-            .map_err(|_| VmError::Runtime("DapHostBridge stdout mutex poisoned".into()))?;
-        let header = format!("Content-Length: {}\r\n\r\n", body.len());
-        stdout
-            .write_all(header.as_bytes())
-            .and_then(|_| stdout.write_all(body.as_bytes()))
-            .and_then(|_| stdout.flush())
+        write_json_frame(&self.stdout, &frame)
             .map_err(|e| VmError::Runtime(format!("DAP write: {e}")))?;
 
         Ok(rx)
@@ -395,32 +373,22 @@ fn json_to_vm_value(value: Value) -> VmValue {
 // Re-export DapResponse to keep main.rs imports tidy when forwarding
 // stdout writes through the same lock used by the bridge.
 #[allow(dead_code)]
-pub fn write_dap_response(
-    stdout: &Arc<Mutex<Box<dyn Write + Send>>>,
-    response: &DapResponse,
-) -> std::io::Result<()> {
-    let body = serde_json::to_string(response)
-        .map_err(|e| std::io::Error::other(format!("encode: {e}")))?;
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
-    let mut guard = stdout
-        .lock()
-        .map_err(|_| std::io::Error::other("stdout mutex poisoned"))?;
-    guard.write_all(header.as_bytes())?;
-    guard.write_all(body.as_bytes())?;
-    guard.flush()
+pub fn write_dap_response(stdout: &SharedWriter, response: &DapResponse) -> std::io::Result<()> {
+    write_json_frame(stdout, response)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::thread;
     use std::time::Duration;
 
     /// `Write` adapter that appends to a shared `Vec<u8>` so the test
     /// can read what the bridge wrote to "stdout" without downcasting
     /// through `dyn Write`.
-    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
-    impl Write for SharedWriter {
+    struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+    impl Write for SharedBuffer {
         fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(data);
             Ok(data.len())
@@ -436,29 +404,10 @@ mod tests {
     /// the frame they're asserting on instead of assuming the first
     /// one.
     fn parse_lsp_frames(bytes: &[u8]) -> Vec<serde_json::Value> {
+        let mut reader = std::io::BufReader::new(bytes);
         let mut frames = Vec::new();
-        let mut cursor = 0;
-        while cursor < bytes.len() {
-            let Some(header_end_rel) = bytes[cursor..].windows(4).position(|w| w == b"\r\n\r\n")
-            else {
-                break;
-            };
-            let header_bytes = &bytes[cursor..cursor + header_end_rel];
-            let header_str = match std::str::from_utf8(header_bytes) {
-                Ok(s) => s,
-                Err(_) => break,
-            };
-            let content_length = header_str
-                .lines()
-                .find_map(|line| line.strip_prefix("Content-Length:"))
-                .and_then(|v| v.trim().parse::<usize>().ok())
-                .expect("header has Content-Length");
-            let body_start = cursor + header_end_rel + 4;
-            let body_end = body_start + content_length;
-            let frame: serde_json::Value =
-                serde_json::from_slice(&bytes[body_start..body_end]).expect("valid JSON body");
-            frames.push(frame);
-            cursor = body_end;
+        while let Some(body) = crate::framing::read_frame(&mut reader).expect("well-formed frame") {
+            frames.push(serde_json::from_slice(&body).expect("valid JSON body"));
         }
         frames
     }
@@ -478,8 +427,7 @@ mod tests {
 
     fn rig() -> (DapHostBridge, Arc<Mutex<Vec<u8>>>, PendingMap) {
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let stdout: Arc<Mutex<Box<dyn Write + Send>>> =
-            Arc::new(Mutex::new(Box::new(SharedWriter(Arc::clone(&buf)))));
+        let stdout: SharedWriter = Arc::new(Mutex::new(Box::new(SharedBuffer(Arc::clone(&buf)))));
         let pending: PendingMap = pending_map_new();
         let seq = Arc::new(AtomicI64::new(1));
         let bridge = DapHostBridge::new(seq, stdout, Arc::clone(&pending));

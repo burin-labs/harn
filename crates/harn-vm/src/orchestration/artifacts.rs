@@ -9,7 +9,7 @@ use crate::stdlib::xml::escape_xml_text;
 
 use super::{
     handoff_artifact_record, handoff_from_json_value, microcompact_tool_output, new_id,
-    normalize_handoff_artifact_json, now_rfc3339, ContextPolicy, StageContract,
+    normalize_handoff_artifact_json, now_unix_seconds_text, ContextPolicy, StageContract,
     VerificationContract,
 };
 
@@ -222,7 +222,7 @@ impl ArtifactRecord {
             self.id = new_id("artifact");
         }
         if self.created_at.is_empty() {
-            self.created_at = now_rfc3339();
+            self.created_at = now_unix_seconds_text();
         }
         if self.kind.is_empty() {
             self.kind = "artifact".to_string();
