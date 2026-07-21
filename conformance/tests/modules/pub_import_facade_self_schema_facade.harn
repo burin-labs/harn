@@ -1,0 +1,18 @@
+// A facade re-exports `Contract` for downstream callers AND reuses it as a
+// runtime schema value inside its own body: directly via `schema_is`, and by
+// passing the lowered schema to a local generic `Schema<T>` helper. Both must
+// resolve to the re-exported type's runtime schema binding, not a bare
+// (undefined) variable load.
+pub import { Contract } from "pub_import_facade_self_schema_inner"
+
+pub fn validate(value: unknown) -> bool {
+  return schema_is(value, Contract)
+}
+
+fn schema_kind<T>(schema: Schema<T>) -> string {
+  return schema.type
+}
+
+pub fn contract_kind() -> string {
+  return schema_kind(schema_of(Contract))
+}
