@@ -12,7 +12,12 @@ type BatchLifecycleState = BatchActiveState \
   | "dry_run" \
   | "skipped"
 
-type BatchLifecyclePhase = "submit" | "status" | "cancel" | "download"
+/**
+ * The batch modes that attach a lifecycle receipt. `prepare` is the first
+ * such mode (`harn models batch prepare`); `plan`/`manifest` run earlier and
+ * do not produce lifecycle facts, so they are intentionally absent.
+ */
+type BatchLifecyclePhase = "prepare" | "submit" | "status" | "cancel" | "download"
 
 type BatchJobLifecycle = {
   phase: BatchLifecyclePhase,

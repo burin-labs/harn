@@ -16,6 +16,7 @@ mod exhaustiveness;
 mod imports;
 mod interfaces;
 mod lexical_capture;
+mod literal_union_args;
 mod main_signature;
 mod narrowing;
 mod nested_generic_alias_inference;
