@@ -741,7 +741,7 @@ fn x_mcp_header_validation_filters_invalid_tools_and_encodes_values() {
     );
 }
 
-async fn connect_stdio_test_script(
+pub(super) async fn connect_stdio_test_script(
     script: &str,
     protocol_mode: McpProtocolMode,
     protocol_version: String,

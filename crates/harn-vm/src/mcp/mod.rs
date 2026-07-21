@@ -46,6 +46,14 @@ const X_MCP_HEADER: &str = "x-mcp-header";
 const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = 8;
 
 /// Default timeout for MCP requests (60 seconds).
+///
+/// For a stdio request this is the **cumulative** budget for the entire
+/// response wait, not a per-read timeout. A server that interleaves
+/// notifications (or dribbles output) can no longer keep an agent turn open
+/// indefinitely by resetting a per-read clock; a single synchronous MCP call
+/// is bounded end to end, and genuinely long-running work must use the
+/// task/progress-polling pattern rather than a call held open for minutes
+/// (harn#4390).
 const MCP_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
 #[derive(Clone, Debug, Deserialize)]
@@ -97,6 +105,11 @@ pub(crate) struct StdioMcpClientInner {
     next_id: u64,
     protocol_mode: McpProtocolMode,
     protocol_version: String,
+    /// Cumulative budget for one request's response wait; defaults to
+    /// [`MCP_TIMEOUT`]. A field (rather than a bare use of the constant)
+    /// keeps the deadline injectable so tests can prove the cumulative bound
+    /// without waiting the full production budget (harn#4390).
+    response_deadline: std::time::Duration,
 }
 
 pub(crate) struct HttpMcpClientInner {
@@ -232,6 +245,16 @@ impl VmMcpClientHandle {
             }
         }
         Ok(())
+    }
+
+    /// Shorten the stdio cumulative response deadline so a test can prove
+    /// the end-to-end bound without waiting the full production budget.
+    #[cfg(test)]
+    pub(crate) async fn set_stdio_response_deadline_for_test(&self, deadline: std::time::Duration) {
+        let mut guard = self.inner.lock().await;
+        if let Some(McpClientInner::Stdio(inner)) = guard.as_mut() {
+            inner.response_deadline = deadline;
+        }
     }
 
     pub(crate) async fn call(
@@ -480,3 +503,6 @@ pub(crate) struct McpInputRound {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_stdio_deadline;
