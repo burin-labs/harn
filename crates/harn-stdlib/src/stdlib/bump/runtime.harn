@@ -187,7 +187,7 @@ pub fn bump_is_current(previous: string, target: string) -> bool {
  * @errors: []
  */
 pub fn bump_changeset_empty(changeset: BumpChangeSet) -> bool {
-  return len(changeset?.additions ?? []) == 0 && len(changeset?.deletions ?? []) == 0
+  return len(changeset.additions) == 0 && len(changeset.deletions) == 0
 }
 
 fn __bump_receipt_base(options, target, previous, readiness) -> BumpReceipt {

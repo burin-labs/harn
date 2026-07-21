@@ -250,7 +250,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       return {
         number: first.number,
         head_oid: first.head?.sha ?? "",
-        auto_merge_enabled: (detail.json?.auto_merge ?? nil) != nil,
+        auto_merge_enabled: detail.json?.auto_merge != nil,
         url: first.html_url ?? "",
         state: first.state ?? "open",
       }
@@ -352,7 +352,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       __gh_rest(cfg, "POST", "/repos/${cfg.repo}/issues/${number}/comments", {body: comment})
       return __gh_rest(cfg, "PATCH", "/repos/${cfg.repo}/pulls/${number}", {state: "closed"}).ok
     },
-    enable_auto_merge: fn(number, head) {
+    enable_auto_merge: fn(number, _head) {
       const detail = __pull_node(cfg, number)
       const node_id = detail.json?.node_id ?? ""
       if node_id == "" {

@@ -16,9 +16,11 @@ import {
 } from "std/bump/runtime"
 import { assert, assert_eq } from "std/testing"
 
-// A recorder threads a mutable call log through the fake adapter so tests can
-// assert not just the receipt but the exact effect sequence (lease disarm,
-// branch reset, commit, PR upsert, auto-merge).
+/**
+ * A recorder threads a mutable call log through the fake adapter so tests can
+ * assert not just the receipt but the exact effect sequence (lease disarm,
+ * branch reset, commit, PR upsert, auto-merge).
+ */
 fn make_fake(config = {}) {
   let calls = []
   const record = fn(name, arg) { calls = calls + [{name: name, arg: arg}] }
