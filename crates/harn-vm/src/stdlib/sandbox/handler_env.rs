@@ -6,7 +6,6 @@
 //! can never flip a test's sandbox outcome. See [`handler_sandbox_env`].
 
 use super::SandboxFallback;
-#[cfg(not(test))]
 use super::HANDLER_SANDBOX_ENV;
 use crate::orchestration::SandboxProfile;
 
@@ -31,10 +30,10 @@ pub(crate) fn effective_fallback(profile: SandboxProfile) -> SandboxFallback {
 }
 
 /// Reads the `HARN_HANDLER_SANDBOX` fallback selector for
-/// [`effective_fallback`].
+/// [`effective_fallback`] through the shared env seam.
 ///
 /// Under `cfg(test)` the process environment is structurally invisible: the
-/// value comes from a thread-local override instead, so an ambient
+/// value comes from a per-thread override instead, so an ambient
 /// `HARN_HANDLER_SANDBOX` exported in a developer's shell or a CI wrapper can
 /// never flip a test's sandbox outcome. The exec-path tests in
 /// `vm::tests_runtime` that need a specific selector inject it through
@@ -43,69 +42,37 @@ pub(crate) fn effective_fallback(profile: SandboxProfile) -> SandboxFallback {
 /// the same-thread `new_current_thread` runtime those tests drive, so no
 /// cross-test lock is needed. In production this is a plain env read.
 fn handler_sandbox_env() -> Option<String> {
-    #[cfg(test)]
-    {
-        test_env::get()
-    }
-    #[cfg(not(test))]
-    {
-        std::env::var(HANDLER_SANDBOX_ENV).ok()
-    }
+    crate::test_env::env_var_seamed(HANDLER_SANDBOX_ENV)
 }
 
-/// Gives a test a hermetic `HARN_HANDLER_SANDBOX` universe: creation and drop
-/// both clear this thread's override, so neither ambient configuration nor a
+/// Gives a test a hermetic `HARN_HANDLER_SANDBOX` universe by wrapping the
+/// shared env seam ([`crate::test_env::test_env_guard`]): creation and drop
+/// both clear this thread's overrides, so neither ambient configuration nor a
 /// sibling test's leftover selector can leak in or out. Inject a selector for
 /// the duration of the test with [`HandlerSandboxTestGuard::set`].
 #[cfg(test)]
 #[must_use]
 pub(crate) fn handler_sandbox_test_guard() -> HandlerSandboxTestGuard {
-    test_env::clear();
-    HandlerSandboxTestGuard {}
+    HandlerSandboxTestGuard {
+        inner: crate::test_env::test_env_guard(),
+    }
 }
 
 /// Guard returned by [`handler_sandbox_test_guard`]. Injects a
 /// `HARN_HANDLER_SANDBOX` selector for this thread via
-/// [`HandlerSandboxTestGuard::set`] and clears it on drop.
+/// [`HandlerSandboxTestGuard::set`]; the inner shared guard clears it on drop.
+/// This domain wrapper exists only to keep the single-variable `set(value)`
+/// ergonomics — there is no extra drop behavior to layer on.
 #[cfg(test)]
-pub(crate) struct HandlerSandboxTestGuard {}
+pub(crate) struct HandlerSandboxTestGuard {
+    inner: crate::test_env::TestEnvGuard,
+}
 
 #[cfg(test)]
 impl HandlerSandboxTestGuard {
     /// Sets the `HARN_HANDLER_SANDBOX` selector for this thread only, visible
     /// to [`handler_sandbox_env`] readers on the same thread.
     pub(crate) fn set(&self, value: &str) {
-        test_env::set(value);
-    }
-}
-
-#[cfg(test)]
-impl Drop for HandlerSandboxTestGuard {
-    fn drop(&mut self) {
-        test_env::clear();
-    }
-}
-
-/// Per-thread override for `HARN_HANDLER_SANDBOX`, replacing the process
-/// environment as the read source under `cfg(test)` (see
-/// [`handler_sandbox_env`]).
-#[cfg(test)]
-mod test_env {
-    use std::cell::RefCell;
-
-    thread_local! {
-        static OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
-    }
-
-    pub(super) fn get() -> Option<String> {
-        OVERRIDE.with(|slot| slot.borrow().clone())
-    }
-
-    pub(super) fn set(value: &str) {
-        OVERRIDE.with(|slot| *slot.borrow_mut() = Some(value.to_owned()));
-    }
-
-    pub(super) fn clear() {
-        OVERRIDE.with(|slot| *slot.borrow_mut() = None);
+        self.inner.set(HANDLER_SANDBOX_ENV, value);
     }
 }

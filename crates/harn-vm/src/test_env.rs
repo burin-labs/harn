@@ -26,17 +26,15 @@
 //!
 //! # Convergence
 //!
-//! This module is the shared owner for the keyed-override seam pattern. Two
-//! domain-local seams predate it and should converge here once their PRs land:
-//!   - `egress::egress_env_var` / `EgressTestEnvGuard` (the `HARN_EGRESS_*`
-//!     family, PR #5368)
-//!   - `stdlib::sandbox::handler_env` (the single `HARN_HANDLER_SANDBOX`
-//!     variable, PR #5379)
-//!
-//! Both additionally reset domain policy state on guard lifecycle; a converged
-//! design would layer that domain reset over this generic core rather than
-//! duplicate the thread-local map. Doing that consolidation is intentionally
-//! out of scope until those PRs merge.
+//! This module is the sole owner of the keyed-override seam pattern. Two
+//! domain-local seams predated it and now converge here, reading through
+//! [`env_var_seamed`] and layering any domain lifecycle over [`test_env_guard`]
+//! rather than duplicating the thread-local map:
+//!   - `egress`'s `EgressTestEnvGuard` (the `HARN_EGRESS_*` family) owns a
+//!     [`TestEnvGuard`] and adds an egress-policy reset on its own lifecycle.
+//!   - `stdlib::sandbox::handler_env`'s `HandlerSandboxTestGuard` (the single
+//!     `HARN_HANDLER_SANDBOX` variable) owns a [`TestEnvGuard`] purely to keep
+//!     the single-variable `set(value)` ergonomics; it adds no extra behavior.
 
 /// Reads one process-environment variable through the test seam.
 ///

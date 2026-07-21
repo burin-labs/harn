@@ -75,12 +75,6 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/egress/mod.rs"
-statics = ["OVERRIDES"]
-category = "thread_private"
-plan = "thread_private_test"
-
-[[thread_local]]
 path = "src/event_log/mod.rs"
 statics = ["ACTIVE_EVENT_LOG", "PENDING_DEFAULT_EVENT_LOG"]
 category = "runtime_registry"
@@ -610,12 +604,6 @@ path = "src/stdlib/sandbox/mod.rs"
 statics = ["WARNED_KEYS"]
 category = "thread_private"
 plan = "thread_private_cache"
-
-[[thread_local]]
-path = "src/stdlib/sandbox/handler_env.rs"
-statics = ["OVERRIDE"]
-category = "thread_private"
-plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/stdlib/supervisor.rs"
