@@ -1,4 +1,6 @@
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::OnceLock;
+
+use tokio::sync::{Mutex, MutexGuard};
 
 static HARN_STATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -28,7 +30,27 @@ const LEAKY_STATE_ENV_VARS: &[&str] = &[
     "HARN_MCP_OAUTH_SCOPES",
 ];
 
-/// Serialize tests that mutate harn_vm process-global state.
+/// Clear the process-global env vars that leak state between tests. Run
+/// on every lock acquisition so each test starts from a clean env
+/// instead of inheriting a previous test's absolute state path.
+fn clear_leaky_state_env() {
+    for name in LEAKY_STATE_ENV_VARS {
+        std::env::remove_var(name);
+    }
+}
+
+/// The `tokio::sync::Mutex` backing both the sync and async acquire
+/// paths. A `tokio` mutex (rather than `std::sync::Mutex`) lets async
+/// tests hold the guard across `.await` points without tripping
+/// `clippy::await_holding_lock`, while still offering a blocking acquire
+/// for the handful of plain `#[test]` callers.
+fn state_mutex() -> &'static Mutex<()> {
+    HARN_STATE_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Serialize plain `#[test]` callers that mutate harn_vm process-global
+/// state. Async tests must use [`lock_harn_state_async`] instead —
+/// `blocking_lock` panics when called from within a tokio runtime.
 ///
 /// Covers:
 /// - `HARN_STATE_DIR` and sibling env vars read by
@@ -44,18 +66,16 @@ const LEAKY_STATE_ENV_VARS: &[&str] = &[
 /// Tests grabbing this lock should not assume the global state is clean
 /// on entry — always call `reset_active_event_log()` +
 /// `harn_vm::clear_trigger_registry()` as applicable.
-///
-/// Poison recovery: a prior panic may poison the mutex. We recover the
-/// guard because each test resets the state on entry, so the mutex's
-/// `()` payload is irrelevant and propagating `PoisonError` would
-/// cascade a single legitimate failure across every downstream test.
 pub fn lock_harn_state() -> MutexGuard<'static, ()> {
-    let guard = HARN_STATE_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    for name in LEAKY_STATE_ENV_VARS {
-        std::env::remove_var(name);
-    }
+    let guard = state_mutex().blocking_lock();
+    clear_leaky_state_env();
+    guard
+}
+
+/// Async variant for `#[tokio::test]` callers that hold the state guard
+/// across `.await`. Same env-clearing semantics as [`lock_harn_state`].
+pub async fn lock_harn_state_async() -> MutexGuard<'static, ()> {
+    let guard = state_mutex().lock().await;
+    clear_leaky_state_env();
     guard
 }

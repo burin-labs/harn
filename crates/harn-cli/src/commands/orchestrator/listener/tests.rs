@@ -24,7 +24,7 @@ use sha2::Sha256;
 use tempfile::{tempdir, TempDir};
 
 use crate::commands::orchestrator::origin_guard::OriginAllowList;
-use crate::tests::common::harn_state_lock::lock_harn_state;
+use crate::tests::common::harn_state_lock::lock_harn_state_async;
 
 fn manifest_binding_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
     TriggerBindingSpec {
@@ -341,7 +341,7 @@ async fn claim_events(log: &Arc<AnyEventLog>) -> Vec<(u64, harn_vm::event_log::L
 
 #[tokio::test(flavor = "current_thread")]
 async fn readyz_tracks_listener_readiness_gate() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
     let (listener, _log, _dir) = start_acp_test_listener().await;
     let url = format!("{}/readyz", listener.url());
@@ -370,7 +370,7 @@ async fn readyz_tracks_listener_readiness_gate() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn listener_auth_accepts_durable_session_bearer() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let session_id = "harn_sess_listener_abcdefghijklmnopqrstuvwxyz0123456789";
     let log = Arc::new(AnyEventLog::Memory(
         harn_vm::event_log::MemoryEventLog::new(32),
@@ -416,7 +416,7 @@ async fn listener_auth_accepts_durable_session_bearer() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_requires_configured_bearer_auth() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let (listener, _log, _dir) = start_acp_test_listener_with_env(
@@ -480,7 +480,7 @@ async fn acp_websocket_requires_configured_bearer_auth() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_active_session() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let (listener, _log, _dir) = start_acp_test_listener_with_env(
@@ -535,7 +535,7 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let dir = tempdir().expect("tempdir");
@@ -607,7 +607,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_multi_client_observer_attaches_to_live_session() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let (listener, _log, _dir) = start_acp_test_listener_with_env(
@@ -694,7 +694,7 @@ async fn acp_websocket_multi_client_observer_attaches_to_live_session() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_routes_host_requests_only_to_host_owner() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let (listener, _log, _dir) = start_acp_test_listener_with_env(
@@ -791,7 +791,7 @@ async fn acp_websocket_routes_host_requests_only_to_host_owner() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prompt() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let (listener, _log, _dir) = start_acp_test_listener_with_env(
@@ -882,7 +882,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let (listener, _log, _dir) = start_acp_test_listener_with_env(
@@ -958,10 +958,9 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
     reset_active_event_log();
 }
 
-#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "current_thread")]
 async fn reload_swaps_routes_without_losing_inflight_request() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
     harn_vm::clear_trigger_registry();
 
@@ -1091,7 +1090,7 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn webhook_first_delivery_is_appended() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
@@ -1159,7 +1158,7 @@ async fn webhook_first_delivery_is_appended() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn webhook_ingest_saturation_returns_retry_after() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
     let dir = tempdir().expect("tempdir");
@@ -1244,7 +1243,7 @@ async fn webhook_ingest_saturation_returns_retry_after() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn webhook_duplicate_delivery_is_dropped() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");
@@ -1319,7 +1318,7 @@ async fn webhook_duplicate_delivery_is_dropped() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn webhook_dedupe_claim_uses_route_retention_days() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     reset_active_event_log();
     let dir = tempdir().expect("tempdir");
     let log = install_default_for_base_dir(dir.path()).expect("install event log");

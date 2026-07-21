@@ -1,9 +1,3 @@
-// `lock_harn_state()` returns a sync `MutexGuard` that is intentionally held
-// across the test's `.await` points (the trigger registry is process-global
-// and must stay locked for the duration of seed dispatch + replay). The
-// in-crate `commands::trigger::replay::tests` module uses the same allow.
-#![allow(clippy::await_holding_lock)]
-
 //! In-process coverage of `harn trigger replay` and `harn trigger cancel`.
 //!
 //! Tier 1H follow-up (#1129, parent #1106) of the de-flake epic (#1057):
@@ -222,7 +216,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {{
     );
 
     let report = run_in_harn_runtime(move || async move {
-        let _state_guard = harn_state_lock::lock_harn_state();
+        let _state_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let event_log = install_default_for_base_dir(&workspace_root).expect("install event log");
@@ -282,7 +276,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 
     let workspace_root_clone = workspace_root;
     let report = run_in_harn_runtime(move || async move {
-        let _state_guard = harn_state_lock::lock_harn_state();
+        let _state_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let event_log =
@@ -345,7 +339,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 
     let workspace_root_clone = workspace_root;
     let (acme_event_id, value) = run_in_harn_runtime(move || async move {
-        let _state_guard = harn_state_lock::lock_harn_state();
+        let _state_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let event_log =
@@ -400,7 +394,7 @@ pub fn on_issue(event: TriggerEvent) -> dict {
 
     let workspace_root_clone = workspace_root;
     let (event_id, report) = run_in_harn_runtime(move || async move {
-        let _state_guard = harn_state_lock::lock_harn_state();
+        let _state_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let event_log =

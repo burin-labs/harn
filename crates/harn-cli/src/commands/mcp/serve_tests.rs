@@ -1,11 +1,6 @@
 // Tests here mutate harn_vm process-global state (`HARN_STATE_DIR` env,
 // thread-local `ACTIVE_EVENT_LOG`, trigger registry) through the shared
-// `lock_harn_state` guard in `crate::tests::common::harn_state_lock`.
-// The guard is a `std::sync::Mutex` held across `.await` points; it is
-// dropped when each `#[tokio::test]` future resolves, so holding across
-// awaits is safe in practice despite the clippy lint.
-#![allow(clippy::await_holding_lock)]
-
+// `lock_harn_state_async` guard in `crate::tests::common::harn_state_lock`.
 use super::*;
 use axum::body::{to_bytes, Body};
 use axum::extract::Form;
@@ -20,7 +15,7 @@ use tower::ServiceExt;
 
 use crate::env_guard::ScopedEnvVar;
 use crate::tests::common::env_lock::lock_env;
-use crate::tests::common::harn_state_lock::lock_harn_state;
+use crate::tests::common::harn_state_lock::lock_harn_state_async;
 
 #[path = "serve_tests/pagination.rs"]
 mod pagination;
@@ -349,7 +344,7 @@ fn severity_for_event_honors_explicit_header_then_kind_then_default() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn logging_set_level_updates_session_and_validates_input() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -393,7 +388,7 @@ async fn logging_set_level_updates_session_and_validates_input() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn audit_events_emit_log_notifications_with_logger_and_level() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -432,7 +427,7 @@ async fn audit_events_emit_log_notifications_with_logger_and_level() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn resource_template_and_empty_prompt_lists_roundtrip() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -494,7 +489,7 @@ async fn resource_template_and_empty_prompt_lists_roundtrip() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn file_backed_prompts_list_render_and_notify_changes() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     write_file(temp.path(), "pixel.png", "fake");
@@ -609,7 +604,7 @@ Updated: {{ code }}
 
 #[tokio::test(flavor = "current_thread")]
 async fn package_metadata_changes_notify_tools_resources_and_prompts() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -642,7 +637,7 @@ version = "0.1.0"
 
 #[tokio::test(flavor = "current_thread")]
 async fn tools_list_advertises_tool_metadata_per_tool() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -675,7 +670,7 @@ async fn tools_list_advertises_tool_metadata_per_tool() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn tool_call_rejects_task_augmentation() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -701,7 +696,7 @@ async fn tool_call_rejects_task_augmentation() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -775,7 +770,7 @@ async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn trigger_list_tool_returns_manifest_bindings() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -794,7 +789,7 @@ async fn trigger_list_tool_returns_manifest_bindings() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn secret_scan_tool_returns_findings_and_audits_them() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -824,7 +819,7 @@ async fn secret_scan_tool_returns_findings_and_audits_them() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn trigger_fire_roundtrip_records_event_resource_and_action_graph() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -864,7 +859,7 @@ async fn trigger_fire_roundtrip_records_event_resource_and_action_graph() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn resource_subscription_notifies_when_event_log_topic_changes() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -930,7 +925,7 @@ async fn resource_subscription_notifies_when_event_log_topic_changes() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn trigger_replay_tool_replays_event() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -955,7 +950,7 @@ async fn trigger_replay_tool_replays_event() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn dlq_tools_roundtrip_and_resource_read() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -993,7 +988,7 @@ async fn dlq_tools_roundtrip_and_resource_read() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn queue_and_inspect_tools_return_snapshots() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1021,7 +1016,7 @@ async fn queue_and_inspect_tools_return_snapshots() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn eval_inspect_run_reports_artifacts_and_event_chain() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let bundle = temp.path().join("eval-run");
@@ -1114,7 +1109,7 @@ async fn eval_inspect_run_reports_artifacts_and_event_chain() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn trust_query_returns_filtered_trace_groups() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1180,7 +1175,7 @@ async fn trust_query_returns_filtered_trace_groups() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn manifest_resource_reads_raw_manifest() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
@@ -1194,7 +1189,7 @@ async fn manifest_resource_reads_raw_manifest() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn streamable_http_endpoint_supports_sse_get_delete_and_session_headers() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1356,7 +1351,7 @@ async fn oauth_metadata_and_challenge_are_served_when_configured() {
     // bindings in reverse declaration order, so env vars must be
     // declared *after* the lock to be cleared before another test
     // can acquire `lock_harn_state()` and read leaked OAuth config.
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let _auth_servers = ScopedEnvVar::set(
         "HARN_MCP_OAUTH_AUTHORIZATION_SERVERS",
         "https://auth.example.test",
@@ -1435,7 +1430,7 @@ async fn oauth_metadata_and_challenge_are_served_when_configured() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn mcp_json_descriptor_advertises_streamable_http_endpoint() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1519,7 +1514,7 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
     // are dropped (cleared) before another test can re-enter the
     // lock — see the matching comment in
     // `oauth_metadata_and_challenge_are_served_when_configured`.
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let auth_server_url = format!("http://{auth_addr}");
     let introspection_url = format!("{auth_server_url}/introspect");
     let _auth_servers = ScopedEnvVar::set("HARN_MCP_OAUTH_AUTHORIZATION_SERVERS", &auth_server_url);
@@ -1622,7 +1617,7 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_sse_routes_are_marked_deprecated() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1686,7 +1681,7 @@ fn rc_meta() -> JsonValue {
 
 #[tokio::test(flavor = "current_thread")]
 async fn server_discover_returns_capabilities_and_skips_initialize() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1728,7 +1723,7 @@ async fn server_discover_returns_capabilities_and_skips_initialize() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn rc_tools_list_returns_result_type_and_cache_hint_without_initialize() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1770,7 +1765,7 @@ async fn rc_tools_list_returns_result_type_and_cache_hint_without_initialize() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn rc_request_with_unsupported_protocol_version_returns_minus_32004() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1805,7 +1800,7 @@ async fn rc_request_with_unsupported_protocol_version_returns_minus_32004() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_initialize_still_negotiates_stable_protocol_version() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1836,7 +1831,7 @@ async fn legacy_initialize_still_negotiates_stable_protocol_version() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn http_rc_request_returns_no_session_id_and_negotiates_draft_version() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1894,7 +1889,7 @@ async fn http_rc_request_returns_no_session_id_and_negotiates_draft_version() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn http_rc_request_rejects_method_header_mismatch() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -1940,7 +1935,7 @@ async fn http_rc_request_rejects_method_header_mismatch() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn rc_http_get_stream_works_without_session_id() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
@@ -2005,7 +2000,7 @@ async fn rc_http_get_stream_works_without_session_id() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_initialize_http_path_still_returns_session_id() {
-    let _guard = lock_harn_state();
+    let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);

@@ -9,11 +9,6 @@
 // See `docs/dev/windows-test-coverage.md` for the full inventory and
 // disposition tracker (issue #946).
 #![cfg(unix)]
-// Orchestrator HTTP tests previously serialized CLI child processes with a
-// cross-process file lock; the `.await` boundaries were held by the lock
-// guard. The lock has since been retired (see `support::process`), but the
-// `#[allow]` is left in place for incremental migrations.
-#![allow(clippy::await_holding_lock)]
 
 #[path = "orchestrator_http/support.rs"]
 mod support;

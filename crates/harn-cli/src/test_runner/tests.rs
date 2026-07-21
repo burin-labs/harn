@@ -995,14 +995,13 @@ pipeline test_b_clock_is_fresh(task) {
     assert_eq!(summary.passed, 2);
 }
 
-// The synchronous guard serializes process-global state that Harn worker threads
+// The state guard serializes process-global state that Harn worker threads
 // consult while this async test runs; dropping it before the runner completes
 // would reintroduce the cross-test state race this fixture covers.
-#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "current_thread")]
 async fn user_tests_isolate_persistent_runtime_state_per_case() {
     let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
-    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state();
+    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let ambient_state = tempfile::tempdir().expect("ambient state tempdir");
     let _ambient_state_guard = ScopedEnvVar::set(
         harn_vm::runtime_paths::HARN_STATE_DIR_ENV,

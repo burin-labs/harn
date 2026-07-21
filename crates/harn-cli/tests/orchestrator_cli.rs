@@ -1,14 +1,6 @@
 // Most tests in this file run the orchestrator in-process via
 // [`OrchestratorHarness`]. Process exit, signal, and raw stderr contracts live
 // in the `orchestrator_cli_e2e` integration target.
-//
-// `harn_state_lock` returns a `std::sync::MutexGuard`, which is held
-// across `.await` points in tests that read the on-disk event log
-// after the harness shuts down. The lock only protects process-wide
-// env vars from concurrent flips — it never crosses thread boundaries
-// while held — so the `await_holding_lock` lint is intentionally
-// silenced here.
-#![allow(clippy::await_holding_lock)]
 
 mod test_util;
 
@@ -823,7 +815,7 @@ pub fn on_event(event: TriggerEvent) {
     // test's `state_dir` up-front so seed reads and harness reads
     // resolve to the same SQLite path.
     let _envs = lock_env_with(&[]).await;
-    let _state_lock = harn_state_lock::lock_harn_state();
+    let _state_lock = harn_state_lock::lock_harn_state_async().await;
     let state_dir = temp.path().join("state");
     fs::create_dir_all(&state_dir).unwrap();
     let _state_dir_var = ScopedEnvVar::set(
