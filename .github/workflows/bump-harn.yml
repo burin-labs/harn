@@ -75,18 +75,12 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      # The orchestration script and the checksum-verifying setup-harn action
-      # both live in burin-labs/harn. Checking the repo out at this workflow's
-      # own commit SHA pins both to the exact immutable version the caller
-      # referenced — no separately-maintained action SHA to drift.
-      - name: Checkout Harn runtime orchestration
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: burin-labs/harn
-          ref: ${{ github.workflow_sha }}
-          path: .harn-runtime
-          persist-credentials: false
-
+      # Resolve which Harn to INSTALL *before* checking out the orchestration,
+      # so we can pin that checkout to the exact target release tag. This must
+      # precede the orchestration checkout — an external caller cannot reference
+      # this reusable workflow's own commit (github.workflow_sha resolves to the
+      # CALLER's commit, which does not exist in burin-labs/harn), so the ref has
+      # to be a burin-labs/harn ref we can compute here.
       - name: Resolve target and short-circuit when already current
         id: resolve
         env:
@@ -109,6 +103,19 @@ jobs:
             exit 1
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # The orchestration script and the checksum-verifying setup-harn action
+      # both live in burin-labs/harn. Pin this checkout to the resolved target
+      # release tag: it is always a valid burin-labs/harn ref (works for every
+      # external caller) and keeps the orchestration + setup-harn code
+      # version-consistent with the Harn being installed below.
+      - name: Checkout Harn runtime orchestration
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: burin-labs/harn
+          ref: ${{ steps.resolve.outputs.version }}
+          path: .harn-runtime
+          persist-credentials: false
 
       # Install the TARGET Harn through the checksum-verifying setup-harn
       # action. The target release embeds std/bump/*, so the orchestration runs
