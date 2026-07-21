@@ -1,13 +1,12 @@
 mod test_util;
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
+use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
 fn write_file(root: &Path, relative: &str, contents: &str) {
     let path = root.join(relative);
@@ -17,33 +16,23 @@ fn write_file(root: &Path, relative: &str, contents: &str) {
     fs::write(path, contents).unwrap();
 }
 
-fn spawn_worker() -> (Child, ChildStdin, BufReader<ChildStdout>) {
-    let mut child = harn_e2e_command()
-        .args(["serve", "test"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("spawn test worker");
-    let stdin = child.stdin.take().expect("worker stdin");
-    let stdout = BufReader::new(child.stdout.take().expect("worker stdout"));
-    (child, stdin, stdout)
+fn spawn_worker() -> StdioJsonRpcClient {
+    let mut command = harn_e2e_command();
+    command.args(["serve", "test"]);
+    StdioJsonRpcClient::spawn("harn serve test", command)
 }
 
-fn request(stdin: &mut ChildStdin, stdout: &mut BufReader<ChildStdout>, value: Value) -> Value {
-    writeln!(stdin, "{}", serde_json::to_string(&value).unwrap()).unwrap();
-    stdin.flush().unwrap();
-
-    let mut line = String::new();
-    let read = stdout.read_line(&mut line).unwrap();
-    assert!(read > 0, "test worker closed before responding");
-    serde_json::from_str(line.trim()).unwrap()
+/// The worker is strict request/response: one JSON line back per request, no
+/// interleaved notifications. `recv` reads exactly that response, bounded by
+/// the client deadline instead of the old unbounded `read_line` (harn#5401).
+fn request(client: &mut StdioJsonRpcClient, value: Value) -> Value {
+    client.send(&value);
+    client.recv()
 }
 
-fn initialize_worker(stdin: &mut ChildStdin, stdout: &mut BufReader<ChildStdout>) -> Value {
+fn initialize_worker(client: &mut StdioJsonRpcClient) -> Value {
     request(
-        stdin,
-        stdout,
+        client,
         json!({
             "jsonrpc": "2.0",
             "id": "init",
@@ -53,15 +42,9 @@ fn initialize_worker(stdin: &mut ChildStdin, stdout: &mut BufReader<ChildStdout>
     )
 }
 
-fn run_suite(
-    id: i64,
-    path: &Path,
-    stdin: &mut ChildStdin,
-    stdout: &mut BufReader<ChildStdout>,
-) -> Value {
+fn run_suite(id: i64, path: &Path, client: &mut StdioJsonRpcClient) -> Value {
     request(
-        stdin,
-        stdout,
+        client,
         json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -71,10 +54,9 @@ fn run_suite(
     )
 }
 
-fn shutdown_worker(stdin: &mut ChildStdin, stdout: &mut BufReader<ChildStdout>) -> Value {
+fn shutdown_worker(client: &mut StdioJsonRpcClient) -> Value {
     request(
-        stdin,
-        stdout,
+        client,
         json!({"jsonrpc": "2.0", "id": "stop", "method": "shutdown"}),
     )
 }
@@ -117,9 +99,9 @@ pipeline test_counter(_task) {{
 fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
     let temp = TempDir::new().unwrap();
     let suite = write_counter_suite(&temp, 0);
-    let (mut child, mut stdin, mut stdout) = spawn_worker();
+    let mut client = spawn_worker();
 
-    let initialized = initialize_worker(&mut stdin, &mut stdout);
+    let initialized = initialize_worker(&mut client);
     assert_eq!(initialized["result"]["protocol_version"], "1");
     assert!(initialized["result"]["server_version"].is_string());
     assert_eq!(
@@ -127,8 +109,8 @@ fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
         3
     );
 
-    let first = run_suite(1, &suite, &mut stdin, &mut stdout);
-    let second = run_suite(2, &suite, &mut stdin, &mut stdout);
+    let first = run_suite(1, &suite, &mut client);
+    let second = run_suite(2, &suite, &mut client);
 
     assert_eq!(
         first["result"]["worker_id"],
@@ -160,7 +142,7 @@ fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
     );
 
     write_counter_suite(&temp, 40);
-    let after_edit = run_suite(3, &suite, &mut stdin, &mut stdout);
+    let after_edit = run_suite(3, &suite, &mut client);
     assert_eq!(after_edit["result"]["summary"]["passed"], 1);
     assert!(
         after_edit["result"]["cache_after"]["insertions"]
@@ -171,15 +153,13 @@ fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
                 .unwrap()
     );
 
-    let shutdown = shutdown_worker(&mut stdin, &mut stdout);
+    let shutdown = shutdown_worker(&mut client);
     assert_eq!(shutdown["result"]["run_count"], 3);
     assert_eq!(
         shutdown["result"]["worker_id"],
         initialized["result"]["worker_id"]
     );
-    drop(stdin);
-    let status = child.wait().expect("wait for test worker");
-    assert!(status.success(), "test worker exited with {status}");
+    client.shutdown_expect_success();
 }
 
 #[test]
@@ -204,12 +184,12 @@ from = "merge_captain"
 route = [{ target = "missing_persona", when = "always" }]
 "#,
     );
-    let (mut child, mut stdin, mut stdout) = spawn_worker();
+    let mut client = spawn_worker();
 
-    let initialized = initialize_worker(&mut stdin, &mut stdout);
+    let initialized = initialize_worker(&mut client);
     assert_eq!(initialized["result"]["protocol_version"], "1");
 
-    let invalid = run_suite(1, &suite, &mut stdin, &mut stdout);
+    let invalid = run_suite(1, &suite, &mut client);
     assert_eq!(invalid["result"]["summary"]["failed"], 1);
     assert!(invalid["result"]["summary"]["results"][0]["error"]
         .as_str()
@@ -217,18 +197,16 @@ route = [{ target = "missing_persona", when = "always" }]
         .contains("failed to load runtime extensions"));
 
     fs::remove_file(temp.path().join("harn.toml")).unwrap();
-    let recovered = run_suite(2, &suite, &mut stdin, &mut stdout);
+    let recovered = run_suite(2, &suite, &mut client);
     assert_eq!(recovered["result"]["summary"]["passed"], 1);
 
-    let shutdown = shutdown_worker(&mut stdin, &mut stdout);
+    let shutdown = shutdown_worker(&mut client);
     assert_eq!(shutdown["result"]["run_count"], 2);
     assert_eq!(
         shutdown["result"]["worker_id"],
         initialized["result"]["worker_id"]
     );
-    drop(stdin);
-    let status = child.wait().expect("wait for test worker");
-    assert!(status.success(), "test worker exited with {status}");
+    client.shutdown_expect_success();
 }
 
 #[test]
@@ -252,19 +230,14 @@ pipeline test_stdin(_task) {
 "#,
     );
     let suite = temp.path().join("test_stdin.harn");
-    let (mut child, mut stdin, mut stdout) = spawn_worker();
+    let mut client = spawn_worker();
 
-    initialize_worker(&mut stdin, &mut stdout);
-    let result = run_suite(1, &suite, &mut stdin, &mut stdout);
+    initialize_worker(&mut client);
+    let result = run_suite(1, &suite, &mut client);
     assert_eq!(result["result"]["summary"]["passed"], 1);
-    assert_eq!(
-        shutdown_worker(&mut stdin, &mut stdout)["result"]["run_count"],
-        1
-    );
+    assert_eq!(shutdown_worker(&mut client)["result"]["run_count"], 1);
 
-    drop(stdin);
-    let status = child.wait().expect("wait for test worker");
-    assert!(status.success(), "test worker exited with {status}");
+    client.shutdown_expect_success();
 }
 
 #[test]
@@ -290,25 +263,20 @@ pipeline test_manifest_mock(_task) {
 "#,
     );
     let suite = temp.path().join("test_manifest_mock.harn");
-    let (mut child, mut stdin, mut stdout) = spawn_worker();
+    let mut client = spawn_worker();
 
-    initialize_worker(&mut stdin, &mut stdout);
-    let declared = run_suite(1, &suite, &mut stdin, &mut stdout);
+    initialize_worker(&mut client);
+    let declared = run_suite(1, &suite, &mut client);
     assert_eq!(declared["result"]["summary"]["passed"], 1);
 
     write_file(temp.path(), "harn.toml", "[check]\n");
-    let removed = run_suite(2, &suite, &mut stdin, &mut stdout);
+    let removed = run_suite(2, &suite, &mut client);
     assert_eq!(removed["result"]["summary"]["failed"], 1);
     assert!(removed["result"]["summary"]["results"][0]["error"]
         .as_str()
         .unwrap()
         .contains("unregistered host operation"));
-    assert_eq!(
-        shutdown_worker(&mut stdin, &mut stdout)["result"]["run_count"],
-        2
-    );
+    assert_eq!(shutdown_worker(&mut client)["result"]["run_count"], 2);
 
-    drop(stdin);
-    let status = child.wait().expect("wait for test worker");
-    assert!(status.success(), "test worker exited with {status}");
+    client.shutdown_expect_success();
 }

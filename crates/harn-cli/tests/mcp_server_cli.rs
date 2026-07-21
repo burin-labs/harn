@@ -3,8 +3,6 @@
 // (TerminateProcess on Windows / SIGKILL on Unix), so it does not rely on
 // POSIX signals or platform-specific shellouts.
 
-#[path = "support/mcp.rs"]
-mod mcp_support;
 mod test_util;
 
 use std::fs;
@@ -13,19 +11,15 @@ use std::process::Stdio;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use mcp_support::StdioMcpClient;
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
+use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
 // See `harn_serve_mcp_cli::PROCESS_READY_TIMEOUT` for the rationale on the 60s
 // budget — cold-starting the debug `harn` binary takes 30–40s under full
 // nextest load.
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
-
-fn lock_mcp_cli_tests() -> mcp_support::HarnProcessTestNoLock {
-    mcp_support::lock_mcp_process_tests()
-}
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -96,7 +90,7 @@ fn stdio_serve_command(temp: &TempDir) -> std::process::Command {
 }
 
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
-    mcp_support::wait_for_child_log_suffix(
+    test_util::stdio_jsonrpc::wait_for_child_log_suffix(
         child,
         rx,
         "MCP HTTP listener ready on ",
@@ -118,15 +112,14 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
 /// toward the nextest slow-test cap under load (harn#5397). The smoke keeps
 /// exactly the coverage the binary surface uniquely owns — framing, real
 /// dispatch, resource read, and lifecycle — via the bounded, self-diagnosing
-/// [`StdioMcpClient`].
+/// [`StdioJsonRpcClient`].
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn mcp_server_stdio_roundtrips_tools_and_resources() {
-    let _guard = lock_mcp_cli_tests();
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut client = StdioMcpClient::spawn(stdio_serve_command(&temp));
+    let mut client = StdioJsonRpcClient::spawn("harn mcp serve", stdio_serve_command(&temp));
 
     let init = client.request(json!({
         "jsonrpc": "2.0",
@@ -188,15 +181,14 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
 /// Progress notifications interleaved with a tool response are a
 /// wire-specific behavior (the stdio writer funnels progress lines and the
 /// final response through one ordered channel), so this stays a binary-
-/// surface test — but bounded and self-diagnosing via [`StdioMcpClient`].
+/// surface test — but bounded and self-diagnosing via [`StdioJsonRpcClient`].
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn mcp_server_stdio_emits_progress_for_trigger_fire() {
-    let _guard = lock_mcp_cli_tests();
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut client = StdioMcpClient::spawn(stdio_serve_command(&temp));
+    let mut client = StdioJsonRpcClient::spawn("harn mcp serve", stdio_serve_command(&temp));
 
     let _init = client.request(json!({
         "jsonrpc": "2.0",
@@ -256,7 +248,6 @@ fn mcp_server_stdio_emits_progress_for_trigger_fire() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn mcp_server_http_roundtrips_initialize_and_fire() {
-    let _guard = lock_mcp_cli_tests();
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
@@ -278,7 +269,7 @@ async fn mcp_server_http_roundtrips_initialize_and_fire() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
+    let (rx, handle) = test_util::stdio_jsonrpc::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
@@ -352,7 +343,8 @@ async fn mcp_server_http_roundtrips_initialize_and_fire() {
 fn stdio_client_diagnoses_a_hung_server_instead_of_blocking() {
     let mut command = std::process::Command::new("sleep");
     command.arg("120");
-    let mut client = StdioMcpClient::spawn(command).with_timeout(Duration::from_secs(1));
+    let mut client =
+        StdioJsonRpcClient::spawn("hung server", command).with_timeout(Duration::from_secs(1));
     // `sleep` ignores stdin and never writes stdout, so the response read
     // must trip the deadline and panic with the diagnostic.
     let _ = client.request(json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }));

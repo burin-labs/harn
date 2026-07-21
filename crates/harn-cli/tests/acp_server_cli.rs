@@ -5,14 +5,13 @@
 mod test_util;
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
+use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
 static ACP_CLI_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -57,46 +56,31 @@ pub pipeline main() {
     );
 }
 
+/// Spawn `harn serve acp <fixture>` behind the bounded, self-diagnosing stdio
+/// client so a wedged agent surfaces its stderr instead of consuming the
+/// nextest slow-test cap (harn#5401).
+fn spawn_acp(temp: &TempDir, fixture: &str) -> StdioJsonRpcClient {
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("acp")
+        .arg(fixture);
+    StdioJsonRpcClient::spawn("harn serve acp", command)
+}
+
+/// Send one client→agent request and read until its response, answering the
+/// agent's `host/capabilities` request inline and collecting `session/update`
+/// notifications along the way. Returns `(notifications, response)`.
 fn send_request(
-    stdin: &mut impl Write,
-    stdout: &mut BufReader<impl std::io::Read>,
+    client: &mut StdioJsonRpcClient,
     request: JsonValue,
 ) -> (Vec<JsonValue>, JsonValue) {
-    let request_id = request["id"].clone();
-    writeln!(stdin, "{}", serde_json::to_string(&request).unwrap()).unwrap();
-    stdin.flush().unwrap();
-
-    let mut notifications = Vec::new();
-    loop {
-        let mut line = String::new();
-        let read = stdout.read_line(&mut line).unwrap();
-        assert!(read > 0, "ACP server closed stdout before responding");
-        let message: JsonValue = serde_json::from_str(line.trim()).unwrap();
-        if message.get("method").is_some() && message.get("id").is_some() {
-            let method = message["method"].as_str().unwrap_or_default();
-            let result = match method {
-                "host/capabilities" => json!({}),
-                other => panic!("unexpected ACP server request: {other}"),
-            };
-            writeln!(
-                stdin,
-                "{}",
-                serde_json::to_string(&json!({
-                    "jsonrpc": "2.0",
-                    "id": message["id"].clone(),
-                    "result": result,
-                }))
-                .unwrap()
-            )
-            .unwrap();
-            stdin.flush().unwrap();
-            continue;
-        }
-        if message.get("id") == Some(&request_id) {
-            return (notifications, message);
-        }
-        notifications.push(message);
-    }
+    let exchange = client.exchange(request, |method| match method {
+        "host/capabilities" => json!({}),
+        other => panic!("unexpected ACP server request: {other}"),
+    });
+    (exchange.notifications, exchange.response)
 }
 
 fn latest_prompt_summary(notifications: &[JsonValue], session_id: &str) -> JsonValue {
@@ -126,23 +110,10 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = harn_e2e_command()
-        .current_dir(temp.path())
-        .arg("serve")
-        .arg("acp")
-        .arg("acp_fixture.harn")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut client = spawn_acp(&temp, "acp_fixture.harn");
 
     let (_, init) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -191,8 +162,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert!(!session_capabilities.contains_key("fork"));
 
     let (_, created) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -205,8 +175,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
 
     let (alpha_notifications, alpha_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 3,
@@ -222,8 +191,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(alpha_summary["len"], 1);
 
     let (beta_notifications, beta_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 4,
@@ -242,8 +210,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
 
     let branch_id = "branch-left";
     let (fork_notifications, fork_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 5,
@@ -286,8 +253,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     );
 
     let (list_notifications, listed) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 6,
@@ -307,8 +273,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(listed_branch["_meta"]["parent_id"], session_id);
 
     let (child_notifications, child_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 7,
@@ -331,8 +296,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(child_summary["messages"][1]["content"], "child");
 
     let (parent_notifications, parent_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 8,
@@ -349,9 +313,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(parent_summary["messages"][0]["content"], "alpha");
     assert_eq!(parent_summary["messages"][1]["content"], "beta");
 
-    drop(stdin);
-    let status = child.wait().unwrap();
-    assert!(status.success(), "status={status}");
+    client.shutdown_expect_success();
 }
 
 /// Round-trip the v1 mid-session model swap: pin a model via
@@ -382,23 +344,10 @@ pub pipeline main() {
 "#,
     );
 
-    let mut child = harn_e2e_command()
-        .current_dir(temp.path())
-        .arg("serve")
-        .arg("acp")
-        .arg("pin_fixture.harn")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut client = spawn_acp(&temp, "pin_fixture.harn");
 
     let (_, _init) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -408,8 +357,7 @@ pub pipeline main() {
     );
 
     let (_, created) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -429,8 +377,7 @@ pub pipeline main() {
     assert_eq!(model_option["currentValue"], "@inherit");
 
     let (_pin_notifications, pin_ack) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 3,
@@ -455,8 +402,7 @@ pub pipeline main() {
     // the notification buffer of the *next* request rather than the
     // one that triggered it.
     let (prompt_notifications, prompt_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 4,
@@ -489,9 +435,7 @@ pub pipeline main() {
         "set_config_option(model) must emit config_option_update reflecting the pin"
     );
 
-    drop(stdin);
-    let status = child.wait().unwrap();
-    assert!(status.success(), "status={status}");
+    client.shutdown_expect_success();
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
@@ -501,23 +445,10 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = harn_e2e_command()
-        .current_dir(temp.path())
-        .arg("serve")
-        .arg("acp")
-        .arg("acp_fixture.harn")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut client = spawn_acp(&temp, "acp_fixture.harn");
 
     let (_, created) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -530,8 +461,7 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
 
     let (alpha_notifications, alpha_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -549,8 +479,7 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
     );
 
     let (beta_notifications, beta_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 3,
@@ -568,8 +497,7 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
     );
 
     let (truncate_notifications, truncate_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 4,
@@ -596,8 +524,7 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
     assert_eq!(truncate_update["params"]["update"]["reason"], "user_edit");
 
     let (snapshot_notifications, snapshot_response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 5,
@@ -613,9 +540,7 @@ fn acp_session_truncate_mutates_runtime_state_in_place() {
     assert_eq!(snapshot["len"], 1);
     assert_eq!(snapshot["messages"][0]["content"], "alpha");
 
-    drop(stdin);
-    let status = child.wait().unwrap();
-    assert!(status.success(), "status={status}");
+    client.shutdown_expect_success();
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
@@ -633,23 +558,10 @@ default_provider = "openai"
 "#,
     );
 
-    let mut child = harn_e2e_command()
-        .current_dir(temp.path())
-        .arg("serve")
-        .arg("acp")
-        .arg("acp_fixture.harn")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut client = spawn_acp(&temp, "acp_fixture.harn");
 
     let (_, init) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -668,8 +580,7 @@ default_provider = "openai"
     );
 
     let (_, created) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -682,8 +593,7 @@ default_provider = "openai"
     let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
 
     let (notifications, response) = send_request(
-        &mut stdin,
-        &mut stdout,
+        &mut client,
         json!({
             "jsonrpc": "2.0",
             "id": 3,
@@ -698,9 +608,7 @@ default_provider = "openai"
     let summary = latest_prompt_summary(&notifications, &session_id);
     assert_eq!(summary["messages"][0]["content"], "packaged");
 
-    drop(stdin);
-    let status = child.wait().unwrap();
-    assert!(status.success(), "status={status}");
+    client.shutdown_expect_success();
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
@@ -710,25 +618,12 @@ fn serve_acp_stdio_closes_sessions_with_close_and_stop_spellings() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = harn_e2e_command()
-        .current_dir(temp.path())
-        .arg("serve")
-        .arg("acp")
-        .arg("acp_fixture.harn")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut client = spawn_acp(&temp, "acp_fixture.harn");
 
     for (index, method) in ["session/close", "session/stop"].into_iter().enumerate() {
         let request_base = 10 + (index as i64 * 10);
         let (_, created) = send_request(
-            &mut stdin,
-            &mut stdout,
+            &mut client,
             json!({
                 "jsonrpc": "2.0",
                 "id": request_base,
@@ -741,8 +636,7 @@ fn serve_acp_stdio_closes_sessions_with_close_and_stop_spellings() {
         let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
 
         let (_, closed) = send_request(
-            &mut stdin,
-            &mut stdout,
+            &mut client,
             json!({
                 "jsonrpc": "2.0",
                 "id": request_base + 1,
@@ -755,8 +649,7 @@ fn serve_acp_stdio_closes_sessions_with_close_and_stop_spellings() {
         assert_eq!(closed["result"], json!({}));
 
         let (_, listed) = send_request(
-            &mut stdin,
-            &mut stdout,
+            &mut client,
             json!({
                 "jsonrpc": "2.0",
                 "id": request_base + 2,
@@ -770,7 +663,5 @@ fn serve_acp_stdio_closes_sessions_with_close_and_stop_spellings() {
             .all(|entry| entry["sessionId"].as_str() != Some(session_id.as_str())));
     }
 
-    drop(stdin);
-    let status = child.wait().unwrap();
-    assert!(status.success(), "status={status}");
+    client.shutdown_expect_success();
 }

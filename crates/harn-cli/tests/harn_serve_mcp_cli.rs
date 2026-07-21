@@ -3,8 +3,6 @@
 // `std::process::Child::kill` (TerminateProcess on Windows / SIGKILL on Unix),
 // so it does not rely on POSIX signals or platform-specific shellouts.
 
-#[path = "support/mcp.rs"]
-mod mcp_support;
 mod test_util;
 
 use std::fs;
@@ -32,10 +30,6 @@ use tokio::sync::oneshot;
 // budget tight so logic regressions surface quickly.
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
 const TEST_TIMEOUT: Duration = Duration::from_secs(2);
-
-fn lock_harn_serve_mcp_tests() -> mcp_support::HarnProcessTestNoLock {
-    mcp_support::lock_mcp_process_tests()
-}
 
 fn write_fixture(temp: &TempDir) {
     fs::write(
@@ -179,7 +173,7 @@ where
 }
 
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
-    mcp_support::wait_for_child_log_suffix(
+    test_util::stdio_jsonrpc::wait_for_child_log_suffix(
         child,
         rx,
         "MCP workflow server ready on ",
@@ -241,7 +235,6 @@ async fn collect_sse_body_after_progress(
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
-    let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
@@ -258,7 +251,8 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
 
     let mut stdin = child.stdin.take().unwrap();
     let (rx, stdout_handle) = spawn_stdout_reader(child.stdout.take().unwrap());
-    let (_stderr_rx, _stderr_handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
+    let (_stderr_rx, _stderr_handle) =
+        test_util::stdio_jsonrpc::spawn_line_reader(child.stderr.take().unwrap());
 
     writeln!(
         stdin,
@@ -393,7 +387,6 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn serve_mcp_preserves_explicit_pipeline_exit_code() {
-    let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
     fs::write(
         temp.path().join("exit.harn"),
@@ -422,7 +415,6 @@ fn serve_mcp_preserves_explicit_pipeline_exit_code() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn serve_mcp_stdio_exposes_script_registered_surface() {
-    let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
     write_script_surface_fixture(&temp);
 
@@ -441,7 +433,8 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
 
     let mut stdin = child.stdin.take().unwrap();
     let (rx, stdout_handle) = spawn_stdout_reader(child.stdout.take().unwrap());
-    let (_stderr_rx, _stderr_handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
+    let (_stderr_rx, _stderr_handle) =
+        test_util::stdio_jsonrpc::spawn_line_reader(child.stderr.take().unwrap());
 
     let init = send_stdio_request(
         &mut stdin,
@@ -647,7 +640,6 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
-    let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
@@ -668,7 +660,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
+    let (rx, handle) = test_util::stdio_jsonrpc::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
@@ -835,7 +827,6 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
 async fn serve_mcp_http_exposes_script_registered_surface() {
-    let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
     write_script_surface_fixture(&temp);
 
@@ -856,7 +847,7 @@ async fn serve_mcp_http_exposes_script_registered_surface() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
+    let (rx, handle) = test_util::stdio_jsonrpc::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
@@ -1062,7 +1053,6 @@ where
 // moment the POST was processed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_mcp_http_elicits_when_tools_call_beats_the_get_stream() {
-    let _guard = lock_harn_serve_mcp_tests();
     let temp = TempDir::new().unwrap();
     write_elicit_fixture(&temp);
 
@@ -1081,7 +1071,7 @@ async fn serve_mcp_http_elicits_when_tools_call_beats_the_get_stream() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
+    let (rx, handle) = test_util::stdio_jsonrpc::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
@@ -1144,7 +1134,7 @@ async fn serve_mcp_http_elicits_when_tools_call_beats_the_get_stream() {
     // dependence: on the racy implementation the elicitation failed
     // instead of queueing, so this line never appears. The blocking wait
     // is safe because the spawned POST progresses on the second worker.
-    mcp_support::wait_for_child_log_suffix(
+    test_util::stdio_jsonrpc::wait_for_child_log_suffix(
         &mut child,
         &rx,
         "queueing a server-to-client request",
