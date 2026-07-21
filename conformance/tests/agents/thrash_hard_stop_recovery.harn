@@ -90,6 +90,8 @@ pipeline default() {
       __io_println(receipts[0].checkpoint.reason)
       __io_println(receipts[0].checkpoint.warning.pattern)
       __io_println(len(decisions))
+      __io_println(decisions[0].action)
+      __io_println(decisions[0].old_limit == decisions[0].new_limit)
     },
   )
 }

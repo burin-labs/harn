@@ -819,7 +819,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               "loop_control_decision",
               {
                 iteration: iteration_index + 1,
-                action: "extend",
+                action: "thrash_rescue",
                 old_limit: old_limit,
                 new_limit: current_max,
                 reason: recovery_reason,
@@ -834,7 +834,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
               old_limit,
               current_max,
               "fired",
-              "extend",
+              "thrash_rescue",
               recovery_reason,
             )
             continue

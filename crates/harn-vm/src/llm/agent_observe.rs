@@ -756,6 +756,7 @@ pub(crate) async fn observed_llm_call(
         .await;
         drop(rate_limit_permit);
         let duration_ms = start.elapsed().as_millis() as u64;
+        let attempt_count = attempt + 1;
 
         // Release the governor slot reserved above and drive AIMD + the circuit
         // (no-op when the flag is off). Runs once per gated attempt, BEFORE the
@@ -849,7 +850,6 @@ pub(crate) async fn observed_llm_call(
                     }
                     continue;
                 }
-                let attempt_count = attempt + 1;
                 let provider_under_throttle = provider_was_throttled_during_call
                     || crate::llm::rate_governor::provider_already_throttled(
                         &opts.provider,
@@ -884,7 +884,7 @@ pub(crate) async fn observed_llm_call(
                     append_provider_call_error_observability(ProviderCallErrorObservation {
                         iteration: iteration.unwrap_or(0),
                         call_id: &call_id,
-                        attempt,
+                        attempt: attempt_count,
                         status,
                         opts,
                         category: &category,
@@ -1137,27 +1137,28 @@ pub(crate) async fn observed_llm_call(
                     || stream_transport_degrade;
                 let status = if can_retry {
                     "retrying"
-                } else if retryable {
+                } else if empty_completion_error {
                     "retries_exhausted"
                 } else {
                     "error"
                 };
+                let event_retryable = can_retry || (status == "error" && retryable);
                 annotate_current_span(&[
                     ("status", serde_json::json!(status)),
                     ("error", serde_json::json!(message.as_str())),
-                    ("retryable", serde_json::json!(retryable)),
+                    ("retryable", serde_json::json!(event_retryable)),
                     ("attempt", serde_json::json!(attempt)),
                 ]);
                 append_provider_call_error_observability(ProviderCallErrorObservation {
                     iteration: iteration.unwrap_or(0),
                     call_id: &call_id,
-                    attempt,
+                    attempt: attempt_count,
                     status,
                     opts,
                     category: &category,
                     classified: &classified,
                     message: &message,
-                    retryable,
+                    retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,
                 });
@@ -1170,7 +1171,7 @@ pub(crate) async fn observed_llm_call(
                         status,
                         serde_json::json!({
                             "error": error.to_string(),
-                            "retryable": retryable,
+                            "retryable": event_retryable,
                             "attempt": attempt,
                             "user_visible": user_visible,
                         }),
@@ -1183,7 +1184,7 @@ pub(crate) async fn observed_llm_call(
                         Some(provider_exhausted_error(
                             opts,
                             empty_completion_reason.expect("empty reason accompanies empty error"),
-                            attempt + 1,
+                            attempt_count,
                             Some(duration_ms),
                             message.clone(),
                         ))

@@ -4,3 +4,5 @@ true
 thrash_recovery_continue
 repeated_same_observation
 1
+thrash_rescue
+true
