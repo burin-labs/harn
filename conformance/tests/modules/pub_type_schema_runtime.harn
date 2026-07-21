@@ -4,6 +4,7 @@ import {
   DirectTarget,
   GenericNested,
   ImportedNested,
+  NestedReuse,
   OpenExtras,
 } from "pub_type_schema_runtime_lib"
 
@@ -37,4 +38,7 @@ pipeline default() {
   __io_println(schema_of(OpenExtras).additional_properties.type)
   __io_println(schema_is({model: "gpt-5"}, AgentLoopOptions))
   __io_println(schema_is({model: 5}, AgentLoopOptions))
+  __io_println(schema_of(NestedReuse).type)
+  __io_println(schema_of(NestedReuse).properties.mids.union[0].type)
+  __io_println(schema_is({mids: {}}, NestedReuse))
 }

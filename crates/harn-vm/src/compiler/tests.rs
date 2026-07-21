@@ -55,6 +55,64 @@ pub type Open = {name: string, ...dict<string, int>}
 }
 
 #[test]
+fn generic_alias_reused_at_distinct_args_keeps_its_binding() {
+    // A generic alias reused at distinct arguments on one path
+    // (`RefOr<Header>` nesting `RefOr<Example>`) used to abort materialization
+    // and drop the alias's runtime binding, surfacing later as a misleading
+    // `Undefined variable`. The alias must materialize and keep its binding:
+    // the inner reuse degrades to an unconstrained dict at the nearest
+    // tolerant position (inline fragments cannot afford one copy per
+    // instantiation — see `schema_fragment_under_guard`), but the outer
+    // structure, its field names, and the dict constraints all survive.
+    let source = r"
+type Reference = {summary?: string}
+type RefOr<T> = Reference | T
+type Example = {value?: string}
+type Header = {examples?: dict<string, RefOr<Example>>}
+pub type Doc = {headers?: dict<string, RefOr<Header>>}
+";
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let chunk = Compiler::compile_public_type_schema_initializers(&program, None)
+        .unwrap()
+        .expect("schema initializer");
+    let strings = chunk
+        .constants
+        .iter()
+        .filter_map(|constant| match constant {
+            Constant::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(strings.contains(&"Doc"), "{strings:?}");
+    // The inner `RefOr<Example>` materialized rather than being dropped, so its
+    // leaf field survives in the emitted schema.
+    assert!(strings.contains(&"examples"), "{strings:?}");
+    assert!(strings.contains(&"additional_properties"), "{strings:?}");
+}
+
+#[test]
+fn recursive_generic_alias_terminates_and_denies_cleanly() {
+    // A genuinely unbounded-recursive generic must not hang or overflow the
+    // stack during materialization; reaching this test's assertion at all
+    // proves termination. Because the schema cannot be materialized, the value
+    // use site denies cleanly at compile time and names the alias.
+    let source = r"
+type Box<T> = {value: T}
+type Rec = Box<Rec>
+pipeline default() {
+  let s = schema_of(Rec)
+  __io_println(s.type)
+}
+";
+    let err = try_compile(source).expect_err("recursive generic must be rejected");
+    assert!(err.message.contains("Rec"), "{}", err.message);
+}
+
+#[test]
 fn public_type_schema_initializer_lowers_bare_row_variable_open_shape() {
     // A free row variable (`...rest`) marks the record open. It carries no
     // concrete schema to merge, so it must be skipped during lowering rather

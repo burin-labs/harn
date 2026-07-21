@@ -9,3 +9,16 @@ pub type ImportedNested = {transport: LlmCallerTransport}
 pub type GenericNested = Box<LlmCallerTransport>
 
 pub type OpenExtras = {name: string, ...dict<string, int>}
+
+type Leaf = {value?: string}
+
+type Wrap<T> = {tag?: string} | T
+
+type Middle = {leaves?: dict<string, Wrap<Leaf>>}
+
+/**
+ * Reuses the generic `Wrap<_>` at distinct arguments nested inside dicts
+ * (`Wrap<Middle>` containing `Wrap<Leaf>`), which used to abort materialization
+ * and drop this alias's runtime binding.
+ */
+pub type NestedReuse = {mids?: dict<string, Wrap<Middle>>}
