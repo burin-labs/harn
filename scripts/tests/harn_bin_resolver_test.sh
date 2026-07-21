@@ -44,7 +44,28 @@ set -euo pipefail
   printf 'args=%s\n' "$*"
   printf 'CARGO_TARGET_DIR=%s\n' "${CARGO_TARGET_DIR-__unset__}"
   printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
+  printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
+  printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
 } >> "$FAKE_CARGO_RECORD"
+
+case "${FAKE_CARGO_MODE:-success}" in
+  ordinary-failure)
+    echo "ordinary cargo failure" >&2
+    exit 17
+    ;;
+  wrapper-timeout|wrapper-timeout-retry-failure)
+    if [[ -n "${RUSTC_WRAPPER:-}" || -n "${CARGO_BUILD_RUSTC_WRAPPER:-}" ]]; then
+      tail -f /dev/null &
+      printf '%s\n' "$!" > "${FAKE_CARGO_CHILD_PID_FILE:?}"
+      wait "$!"
+    fi
+    if [[ "$FAKE_CARGO_MODE" = "wrapper-timeout-retry-failure" ]]; then
+      echo "retry cargo failure" >&2
+      exit 19
+    fi
+    ;;
+esac
+
 case "$*" in
   "run --quiet --bin harn -- __internal-executable-path")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
@@ -153,6 +174,110 @@ fi
 if ! grep -Fq "HARN_BIN_NO_BUILD must be 0 or 1" "$tmp_root/env-no-build-invalid.err"; then
   echo "invalid HARN_BIN_NO_BUILD error was not attributable" >&2
   cat "$tmp_root/env-no-build-invalid.err" >&2
+  exit 1
+fi
+
+: > "$record"
+if CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=ordinary-failure \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/ordinary-failure.out" \
+  2> "$tmp_root/ordinary-failure.err"; then
+  echo "harn_bin resolver accepted an ordinary Cargo failure" >&2
+  exit 1
+else
+  status=$?
+fi
+if [[ "$status" -ne 17 ]]; then
+  echo "ordinary Cargo failure status changed: expected 17, got $status" >&2
+  cat "$tmp_root/ordinary-failure.err" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 1 ]]; then
+  echo "ordinary Cargo failure was retried" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+: > "$record"
+child_pid_file="$tmp_root/timeout-child.pid"
+RUSTC_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=wrapper-timeout \
+  FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/timeout-recovery.out" \
+  2> "$tmp_root/timeout-recovery.err"
+if ! grep -Fxq "$expected_bin" "$tmp_root/timeout-recovery.out"; then
+  echo "harn_bin resolver did not recover from a compiler-wrapper timeout" >&2
+  cat "$tmp_root/timeout-recovery.err" >&2
+  exit 1
+fi
+if ! grep -Fq "retrying Cargo harn binary probe with the compiler wrapper disabled" "$tmp_root/timeout-recovery.err"; then
+  echo "compiler-wrapper timeout recovery was not attributable" >&2
+  cat "$tmp_root/timeout-recovery.err" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 2 ]]; then
+  echo "compiler-wrapper timeout did not run exactly one retry" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
+  echo "compiler-wrapper timeout retry did not clear RUSTC_WRAPPER" >&2
+  cat "$record" >&2
+  exit 1
+fi
+timed_out_child_pid=$(cat "$child_pid_file")
+if kill -0 "$timed_out_child_pid" 2>/dev/null; then
+  echo "compiler-wrapper timeout left a descendant process alive: $timed_out_child_pid" >&2
+  exit 1
+fi
+
+: > "$record"
+child_pid_file="$tmp_root/retry-failure-child.pid"
+if RUSTC_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=wrapper-timeout-retry-failure \
+  FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/retry-failure.out" \
+  2> "$tmp_root/retry-failure.err"; then
+  echo "harn_bin resolver accepted a failed wrapper-disabled retry" >&2
+  exit 1
+else
+  status=$?
+fi
+if [[ "$status" -ne 19 ]]; then
+  echo "wrapper-disabled retry failure status changed: expected 19, got $status" >&2
+  cat "$tmp_root/retry-failure.err" >&2
+  exit 1
+fi
+
+if HARN_BIN_CARGO_TIMEOUT_SECONDS=invalid \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/invalid-timeout.out" \
+  2> "$tmp_root/invalid-timeout.err"; then
+  echo "harn_bin resolver accepted an invalid Cargo probe timeout" >&2
+  exit 1
+else
+  status=$?
+fi
+if [[ "$status" -ne 2 ]] || ! grep -Fq "must be a positive number" "$tmp_root/invalid-timeout.err"; then
+  echo "invalid Cargo probe timeout was not reported with status 2" >&2
+  cat "$tmp_root/invalid-timeout.err" >&2
   exit 1
 fi
 
