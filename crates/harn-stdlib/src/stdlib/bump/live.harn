@@ -17,21 +17,11 @@
  * are signed by GitHub, satisfying an org `required_signatures` ruleset that an
  * unsigned local push would violate.
  */
+import { BumpAdapter } from "std/bump/runtime"
 import { command_run } from "std/command"
 import { graphql_request } from "std/graphql"
 import { poll_until } from "std/poll"
 import { is_v_semver } from "std/semver"
-import {
-  BumpAdapter,
-  BumpApplyOutcome,
-  BumpAutoMerge,
-  BumpChangeSet,
-  BumpCommitRequest,
-  BumpCommitResult,
-  BumpPrState,
-  BumpPrUpsert,
-  ReleaseReadiness,
-} from "std/bump/runtime"
 
 /** Everything the live adapter needs to reach git, GitHub, and validation. */
 pub type LiveBumpConfig = {
@@ -118,9 +108,7 @@ fn __release_finalized(release) -> bool {
   const draft = release?.draft ?? true
   const prerelease = release?.prerelease ?? true
   const asset_names = (release?.assets ?? []).map({ a -> a.name }).to_list()
-  const missing = REQUIRED_RELEASE_ASSETS
-    .filter({ name -> !contains(asset_names, name) })
-    .to_list()
+  const missing = REQUIRED_RELEASE_ASSETS.filter({ name -> !contains(asset_names, name) }).to_list()
   return !draft && !prerelease && len(missing) == 0
 }
 
@@ -139,7 +127,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
   const cfg = live_bump_config(config)
   const owner = split(cfg.repo, "/")[0] ?? ""
   return {
-    resolve_target_tag: fn(tag) -> string {
+    resolve_target_tag: fn(tag) {
       const requested = trim(tag ?? "")
       if requested != "" {
         if !is_v_semver(requested) {
@@ -154,7 +142,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       }
       return resolved
     },
-    release_ready: fn(target) -> ReleaseReadiness {
+    release_ready: fn(target) {
       let attempts = 0
       let lines = []
       const found = poll_until(
@@ -187,18 +175,16 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         attempt_lines: lines,
       }
     },
-    read_current_version: fn() -> string {
+    read_current_version: fn() {
       const result = __shell("cat ${cfg.version_file} 2>/dev/null || true")
       return trim(result.stdout ?? "")
     },
-    base_sha: fn() -> string {
-      return trim((__git(["git", "rev-parse", "HEAD"])).stdout ?? "")
-    },
-    apply_version: fn(target) -> BumpApplyOutcome {
+    base_sha: fn() { return trim(__git(["git", "rev-parse", "HEAD"]).stdout ?? "") },
+    apply_version: fn(target) {
       __shell("printf '%s\\n' '${target}' > ${cfg.version_file}")
       const refresh = __shell(cfg.refresh_command)
-      const changed = !((__git(["git", "diff", "--quiet"])).success ?? false)
-      const names = trim((__git(["git", "diff", "--name-only"])).stdout ?? "")
+      const changed = !(__git(["git", "diff", "--quiet"]).success ?? false)
+      const names = trim(__git(["git", "diff", "--name-only"]).stdout ?? "")
       const refreshed = if names == "" {
         []
       } else {
@@ -230,11 +216,13 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         },
       }
     },
-    working_changes: fn() -> BumpChangeSet {
+    working_changes: fn() {
       const adds = trim(
-        (__git(["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"])).stdout ?? "",
+        __git(["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout ?? "",
       )
-      const dels = trim((__git(["git", "diff", "--name-only", "--diff-filter=D", "HEAD"])).stdout ?? "")
+      const dels = trim(
+        __git(["git", "diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout ?? "",
+      )
       return {
         additions: if adds == "" {
           []
@@ -248,7 +236,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         },
       }
     },
-    find_bump_pr: fn() -> BumpPrState? {
+    find_bump_pr: fn() {
       const list = __gh_rest(
         cfg,
         "GET",
@@ -267,7 +255,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         state: first.state ?? "open",
       }
     },
-    disable_auto_merge: fn(number) -> bool {
+    disable_auto_merge: fn(number) {
       const detail = __pull_node(cfg, number)
       const node_id = detail.json?.node_id ?? ""
       if node_id == "" {
@@ -280,22 +268,20 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       )
       return result.ok ?? false
     },
-    reset_branch: fn(base_sha) -> bool {
+    reset_branch: fn(base_sha) {
       const ref = "/repos/${cfg.repo}/git/refs/heads/${cfg.branch}"
       const existing = __gh_rest(cfg, "GET", ref)
       if existing.ok {
-        return (__gh_rest(cfg, "PATCH", ref, {sha: base_sha, force: true})).ok
+        return __gh_rest(cfg, "PATCH", ref, {sha: base_sha, force: true}).ok
       }
-      return (
-        __gh_rest(
-          cfg,
-          "POST",
-          "/repos/${cfg.repo}/git/refs",
-          {ref: "refs/heads/${cfg.branch}", sha: base_sha},
-        )
+      return __gh_rest(
+        cfg,
+        "POST",
+        "/repos/${cfg.repo}/git/refs",
+        {ref: "refs/heads/${cfg.branch}", sha: base_sha},
       ).ok
     },
-    create_signed_commit: fn(request: BumpCommitRequest) -> BumpCommitResult {
+    create_signed_commit: fn(request) {
       let additions = []
       for path in request.additions {
         const encoded = __shell("base64 -w0 < '${path}' || base64 < '${path}' | tr -d '\\n'")
@@ -317,20 +303,23 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       const commit = result.data?.createCommitOnBranch?.commit
       if commit == nil {
         throw "std/bump/live: createCommitOnBranch returned no commit; errors="
-          + json_stringify(result.errors ?? [])
+          + json_stringify(
+          result.errors ?? [],
+        )
       }
       return {oid: commit.oid, url: commit.url ?? ""}
     },
-    branch_matches_base: fn() -> bool {
+    branch_matches_base: fn() {
       const branch = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/commits/${cfg.branch}")
       const base = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/commits/${cfg.base}")
       const branch_tree = branch.json?.commit?.tree?.sha ?? "branch"
       const base_tree = base.json?.commit?.tree?.sha ?? "base"
       return branch_tree == base_tree
     },
-    upsert_pr: fn(existing: BumpPrState?) -> BumpPrUpsert {
+    upsert_pr: fn(existing) {
       const title = "Bump Harn runtime"
-      const body = "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
+      const body =
+        "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
       if existing != nil {
         __gh_rest(
           cfg,
@@ -359,16 +348,11 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         created: true,
       }
     },
-    close_pr: fn(number, comment) -> bool {
-      __gh_rest(
-        cfg,
-        "POST",
-        "/repos/${cfg.repo}/issues/${number}/comments",
-        {body: comment},
-      )
-      return (__gh_rest(cfg, "PATCH", "/repos/${cfg.repo}/pulls/${number}", {state: "closed"})).ok
+    close_pr: fn(number, comment) {
+      __gh_rest(cfg, "POST", "/repos/${cfg.repo}/issues/${number}/comments", {body: comment})
+      return __gh_rest(cfg, "PATCH", "/repos/${cfg.repo}/pulls/${number}", {state: "closed"}).ok
     },
-    enable_auto_merge: fn(number, head) -> BumpAutoMerge {
+    enable_auto_merge: fn(number, head) {
       const detail = __pull_node(cfg, number)
       const node_id = detail.json?.node_id ?? ""
       if node_id == "" {

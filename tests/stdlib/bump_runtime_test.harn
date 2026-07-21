@@ -21,9 +21,7 @@ import { assert, assert_eq } from "std/testing"
 // branch reset, commit, PR upsert, auto-merge).
 fn make_fake(config = {}) {
   let calls = []
-  const record = fn(name, arg) {
-    calls = calls + [{name: name, arg: arg}]
-  }
+  const record = fn(name, arg) { calls = calls + [{name: name, arg: arg}] }
   const cfg = {
     target: "v0.10.30",
     ready: true,
@@ -42,27 +40,19 @@ fn make_fake(config = {}) {
   }
     + config
   const adapter: BumpAdapter = {
-    resolve_target_tag: fn(tag) {
-      return if trim(tag ?? "") != "" {
-        tag
-      } else {
-        cfg.target
-      }
-    },
-    release_ready: fn(_target) {
-      return {
-        ready: cfg.ready,
-        detail: cfg.readiness_detail,
-        attempts: 1,
-        attempt_lines: ["attempt 1: ${cfg.readiness_detail}"],
-      }
-    },
-    read_current_version: fn() {
-      return cfg.current
-    },
-    base_sha: fn() {
-      return "base000"
-    },
+    resolve_target_tag: fn(tag) { return if trim(tag ?? "") != "" {
+      tag
+    } else {
+      cfg.target
+    } },
+    release_ready: fn(_target) { return {
+      ready: cfg.ready,
+      detail: cfg.readiness_detail,
+      attempts: 1,
+      attempt_lines: ["attempt 1: ${cfg.readiness_detail}"],
+    } },
+    read_current_version: fn() { return cfg.current },
+    base_sha: fn() { return "base000" },
     apply_version: fn(_target) {
       record("apply_version", _target)
       return {changed: cfg.apply_changed, refreshed: cfg.refreshed, detail: ""}
@@ -75,12 +65,8 @@ fn make_fake(config = {}) {
         detail: cfg.validation_detail,
       }
     },
-    working_changes: fn() {
-      return {additions: cfg.additions, deletions: cfg.deletions}
-    },
-    find_bump_pr: fn() {
-      return cfg.existing_pr
-    },
+    working_changes: fn() { return {additions: cfg.additions, deletions: cfg.deletions} },
+    find_bump_pr: fn() { return cfg.existing_pr },
     disable_auto_merge: fn(number) {
       record("disable_auto_merge", number)
       return true
@@ -93,9 +79,7 @@ fn make_fake(config = {}) {
       record("create_signed_commit", request)
       return {oid: cfg.commit_oid, url: "https://example.test/commit/${cfg.commit_oid}"}
     },
-    branch_matches_base: fn() {
-      return cfg.branch_matches
-    },
+    branch_matches_base: fn() { return cfg.branch_matches },
     upsert_pr: fn(existing) {
       record("upsert_pr", existing)
       const number = existing?.number ?? 4242
@@ -142,7 +126,7 @@ pipeline test_pure_predicates_are_v_insensitive(task) {
   assert_eq(bump_changeset_empty({additions: ["x"], deletions: []}), false)
 }
 
-// 1. No-op: the pin already matches the target. Zero mutation.
+/** 1. No-op: the pin already matches the target. Zero mutation. */
 pipeline test_already_current_is_a_clean_noop(task) {
   const fake = make_fake({current: "v0.10.30", target: "v0.10.30"})
   const receipt = run_bump(opts(), fake.adapter)
@@ -151,7 +135,7 @@ pipeline test_already_current_is_a_clean_noop(task) {
   assert_eq(call_names(fake.calls()), [])
 }
 
-// 2. Delayed asset publication: readiness gate stops before any change.
+/** 2. Delayed asset publication: readiness gate stops before any change. */
 pipeline test_release_not_ready_stops_before_mutation(task) {
   const fake = make_fake({ready: false, readiness_detail: "missing release assets: SHA256SUMS"})
   const receipt = run_bump(opts(), fake.adapter)
@@ -162,8 +146,10 @@ pipeline test_release_not_ready_stops_before_mutation(task) {
   assert_eq(call_names(fake.calls()), [])
 }
 
-// 3. Lockfile regeneration flows through to a created PR with the refreshed
-//    files recorded on the receipt.
+/**
+ * 3. Lockfile regeneration flows through to a created PR with the refreshed
+ * files recorded on the receipt.
+ */
 pipeline test_lockfile_refresh_produces_committed_pr(task) {
   const fake = make_fake({refreshed: ["harn.lock", "generated/schema.json"]})
   const receipt = run_bump(opts(), fake.adapter)
@@ -175,7 +161,7 @@ pipeline test_lockfile_refresh_produces_committed_pr(task) {
   assert(contains(call_names(fake.calls()), "create_signed_commit"))
 }
 
-// 4. Validation failure: no commit, no PR, ok=false.
+/** 4. Validation failure: no commit, no PR, ok=false. */
 pipeline test_validation_failure_blocks_commit(task) {
   const fake = make_fake({validation_ok: false, validation_detail: "harn check failed"})
   const receipt = run_bump(opts(), fake.adapter)
@@ -186,8 +172,10 @@ pipeline test_validation_failure_blocks_commit(task) {
   assert_eq(contains(call_names(fake.calls()), "create_signed_commit"), false)
 }
 
-// 5. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
-//    BEFORE the branch is reset, then refreshed. Order matters.
+/**
+ * 5. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
+ * BEFORE the branch is reset, then refreshed. Order matters.
+ */
 pipeline test_stale_lease_is_disarmed_before_reset(task) {
   const stale: BumpPrState = {
     number: 71,
@@ -209,8 +197,10 @@ pipeline test_stale_lease_is_disarmed_before_reset(task) {
   assert(disable_idx < reset_idx)
 }
 
-// 6. Existing PR refresh: an open PR without armed auto-merge is edited in
-//    place, not recreated, and NOT disarmed.
+/**
+ * 6. Existing PR refresh: an open PR without armed auto-merge is edited in
+ * place, not recreated, and NOT disarmed.
+ */
 pipeline test_existing_pr_is_refreshed_in_place(task) {
   const open: BumpPrState = {
     number: 88,
@@ -228,7 +218,7 @@ pipeline test_existing_pr_is_refreshed_in_place(task) {
   assert_eq(contains(call_names(fake.calls()), "disable_auto_merge"), false)
 }
 
-// 7. Successful auto-merge: a fresh bump creates a PR and arms auto-merge.
+/** 7. Successful auto-merge: a fresh bump creates a PR and arms auto-merge. */
 pipeline test_successful_bump_arms_auto_merge(task) {
   const fake = make_fake({})
   const receipt = run_bump(opts(), fake.adapter)
@@ -240,9 +230,11 @@ pipeline test_successful_bump_arms_auto_merge(task) {
   assert_eq(enable_calls[0].arg.number, 4242)
 }
 
-// Bonus: a refreshed branch whose tree matches base closes a stale PR instead
-// of opening an empty one — the concurrency-safe "someone already landed it"
-// path.
+/**
+ * Bonus: a refreshed branch whose tree matches base closes a stale PR instead
+ * of opening an empty one — the concurrency-safe "someone already landed it"
+ * path.
+ */
 pipeline test_branch_matching_base_closes_stale_pr(task) {
   const stale: BumpPrState = {
     number: 12,

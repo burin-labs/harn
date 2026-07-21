@@ -1,4 +1,6 @@
 #!/usr/bin/env harn
+import { live_bump_adapter } from "std/bump/live"
+import { bump_options, run_bump } from "std/bump/runtime"
 //
 // Entry point for the reusable `bump-harn` workflow (harn#5299).
 //
@@ -21,8 +23,6 @@
 //   HARN_BUMP_ENABLE_AUTOMERGE  "false" to skip arming auto-merge
 //   HARN_BUMP_READINESS_*     optional poll bounds (attempts/interval_ms/timeout_ms)
 import { gha_append_summary, gha_write_output } from "std/gha"
-import { live_bump_adapter } from "std/bump/live"
-import { bump_options, run_bump } from "std/bump/runtime"
 
 fn env_or(name: string, fallback: string) -> string {
   const value = trim(harness.env.get_or(name, ""))
@@ -47,7 +47,6 @@ pipeline main() {
   const branch = env_or("HARN_BUMP_BRANCH", "automation/bump-harn-runtime")
   const base = env_or("HARN_BUMP_BASE", "main")
   const enable_auto_merge = env_or("HARN_BUMP_ENABLE_AUTOMERGE", "true") != "false"
-
   const adapter = live_bump_adapter(
     {
       repo: repo,
@@ -61,7 +60,6 @@ pipeline main() {
       readiness_timeout_ms: env_int("HARN_BUMP_READINESS_TIMEOUT_MS", 20000),
     },
   )
-
   const options = bump_options(
     {
       repo: repo,
@@ -71,9 +69,7 @@ pipeline main() {
       enable_auto_merge: enable_auto_merge,
     },
   )
-
   const receipt = run_bump(options, adapter)
-
   harness.stdio.println(json_stringify_pretty(receipt))
   gha_write_output("outcome", receipt.outcome)
   gha_write_output("ok", receipt.ok)

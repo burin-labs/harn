@@ -176,7 +176,8 @@ pub fn bump_options(overrides: dict = {}) -> BumpOptions {
  */
 pub fn bump_is_current(previous: string, target: string) -> bool {
   return strip_v(trim(previous ?? "")) == strip_v(trim(target ?? ""))
-    && strip_v(trim(target ?? "")) != ""
+    && strip_v(trim(target ?? ""))
+    != ""
 }
 
 /**
@@ -228,37 +229,45 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   const readiness = adapter.release_ready(target)
   const previous = trim(adapter.read_current_version())
   let receipt = __bump_receipt_base(options, target, previous, readiness)
-
   // Phase 1 — release readiness gate. A target that is still publishing its
   // assets is not an error; the scheduled rerun will pick it up.
   if !readiness.ready {
-    return receipt + {outcome: "not_ready", ok: true, notes: ["target release is not fully published yet"]}
+    return receipt
+      + {
+      outcome: "not_ready",
+      ok: true,
+      notes: ["target release is not fully published yet"],
+    }
   }
-
   // Phase 2 — idempotent no-op. Concurrent/scheduled reruns land here once the
   // pin already matches, so the common steady state does zero mutation.
   if bump_is_current(previous, target) {
     return receipt
       + {outcome: "already_current", ok: true, notes: ["pin already matches ${target}"]}
   }
-
   // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
   const apply = adapter.apply_version(target)
   receipt = receipt + {changed: apply.changed, refreshed: apply.refreshed}
   if !apply.changed {
     return receipt
-      + {outcome: "already_current", ok: true, notes: ["writing ${target} produced no change"]}
+      + {
+      outcome: "already_current",
+      ok: true,
+      notes: ["writing ${target} produced no change"],
+    }
   }
-
   // Phase 4 — the caller's single declared validation entrypoint. A failure
   // stops before any commit so a broken bump never reaches a PR.
   const validation = adapter.run_validation()
   receipt = receipt + {validation: validation}
   if !validation.ok {
     return receipt
-      + {outcome: "validation_failed", ok: false, notes: ["validation failed: ${validation.detail}"]}
+      + {
+      outcome: "validation_failed",
+      ok: false,
+      notes: ["validation failed: ${validation.detail}"],
+    }
   }
-
   // Phase 5 — nothing to commit? Treat as a clean no-op rather than an empty PR.
   const changeset = adapter.working_changes()
   receipt = receipt + {changeset: changeset}
@@ -266,7 +275,6 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     return receipt
       + {outcome: "no_changes", ok: true, notes: ["no file changes after refresh"]}
   }
-
   // Phase 6 — branch/PR lease reconciliation. Disarm a stale PR's auto-merge
   // BEFORE the branch is force-reset so it cannot merge mid-refresh and race a
   // duplicate onto main; then reset the bump branch to the observed base.
@@ -281,7 +289,6 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   const base_sha = trim(adapter.base_sha())
   adapter.reset_branch(base_sha)
   receipt = receipt + {lease_recovered: lease_recovered}
-
   // Phase 7 — one signed commit via the App identity (GitHub signs
   // createCommitOnBranch mutations, satisfying required_signatures).
   const commit = adapter.create_signed_commit(
@@ -294,12 +301,14 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     },
   )
   receipt = receipt + {commit_oid: commit.oid}
-
   // Phase 8 — if the refreshed branch tree already matches base, the bump is a
   // true no-op: close any stale PR instead of opening an empty one.
   if adapter.branch_matches_base() {
     if existing != nil {
-      adapter.close_pr(existing.number, "Closing: the refreshed Harn bump already matches ${options.base}.")
+      adapter.close_pr(
+        existing.number,
+        "Closing: the refreshed Harn bump already matches ${options.base}.",
+      )
       return receipt
         + {
         outcome: "closed_noop",
@@ -310,9 +319,12 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
       }
     }
     return receipt
-      + {outcome: "no_changes", ok: true, notes: notes + ["branch tree matches ${options.base}; no PR needed"]}
+      + {
+      outcome: "no_changes",
+      ok: true,
+      notes: notes + ["branch tree matches ${options.base}; no PR needed"],
+    }
   }
-
   // Phase 9 — create or refresh the PR.
   const upsert = adapter.upsert_pr(existing)
   const pr_action = if upsert.created {
@@ -321,7 +333,6 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
     "refreshed"
   }
   receipt = receipt + {pr_action: pr_action, pr_number: upsert.number, pr_url: upsert.url}
-
   // Phase 10 — arm auto-merge so the merge queue owns the final landing.
   let auto_merge = nil
   if options.enable_auto_merge {
@@ -335,6 +346,5 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
       },
     ]
   }
-
   return receipt + {outcome: "committed", ok: true, auto_merge: auto_merge, notes: notes}
 }
