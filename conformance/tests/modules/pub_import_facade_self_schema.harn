@@ -1,0 +1,19 @@
+// Regression coverage for #5281: a `pub import`-ed type alias must be usable as
+// a runtime schema value inside the facade that re-exports it, matching the
+// downstream behavior of importing the same name through the facade.
+import { Contract, validate, contract_kind } from "pub_import_facade_self_schema_facade"
+
+fn downstream_ok(value: unknown) -> bool {
+  return schema_is(value, Contract)
+}
+
+pipeline default() {
+  // Facade self-use of the re-exported type via `schema_is`.
+  __io_println(validate({label: "ok"}))
+  __io_println(validate({label: 12}))
+  // Facade self-use via `schema_of` passed to a local generic `Schema<T>` helper.
+  __io_println(contract_kind())
+  // Downstream use of the same re-exported type through the facade.
+  __io_println(downstream_ok({label: "down"}))
+  __io_println(downstream_ok({label: 12}))
+}
