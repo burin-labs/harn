@@ -12,6 +12,7 @@ use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 
 mod acp_ambient_globals;
 mod coalesce;
+mod enum_construct;
 mod exhaustiveness;
 mod imports;
 mod interfaces;
