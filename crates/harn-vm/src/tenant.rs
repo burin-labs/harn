@@ -7,7 +7,6 @@ use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
-use time::OffsetDateTime;
 
 use crate::event_log::{
     AnyEventLog, CompactReport, ConsumerId, EventId, EventLog, EventLogDescription, LogError,
@@ -476,9 +475,7 @@ fn api_key_prefix(value: &str) -> String {
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    harn_clock::system_now_rfc3339()
 }
 
 #[cfg(test)]

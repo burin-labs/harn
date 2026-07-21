@@ -851,9 +851,9 @@ fn default_log_path(base_dir: &Path, provider: &str) -> Result<PathBuf, String> 
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&time::format_description::well_known::Rfc3339)
-        .unwrap_or_else(|_| String::new())
+    // Was `unwrap_or_else(|_| String::new())`; the shared helper falls back to
+    // the epoch so launch state never records an empty timestamp.
+    harn_vm::clock::system_now_rfc3339()
 }
 
 fn host_from_base_url(base_url: &str) -> Option<String> {
@@ -863,20 +863,8 @@ fn host_from_base_url(base_url: &str) -> Option<String> {
 }
 
 fn expand_home(value: &str) -> String {
-    let Some(home) = std::env::var_os("HOME") else {
-        return value.to_string();
-    };
-    let home = PathBuf::from(home);
-    if value == "~" {
-        return home.display().to_string();
-    }
-    if let Some(rest) = value.strip_prefix("~/") {
-        return home.join(rest).display().to_string();
-    }
-    if let Some(rest) = value.strip_prefix("$HOME/") {
-        return home.join(rest).display().to_string();
-    }
-    value.to_string()
+    // Was a bare `$HOME` read, which resolved to nothing on Windows.
+    harn_vm::user_dirs::expand_home(value).display().to_string()
 }
 
 #[cfg(test)]

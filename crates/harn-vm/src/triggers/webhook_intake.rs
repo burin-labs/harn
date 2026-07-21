@@ -36,7 +36,6 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -628,7 +627,7 @@ fn normalize_header(name: &str) -> String {
 }
 
 fn format_rfc3339(value: OffsetDateTime) -> String {
-    value.format(&Rfc3339).unwrap_or_default()
+    harn_clock::format_rfc3339(value)
 }
 
 fn ensure_event_log() -> Arc<crate::event_log::AnyEventLog> {

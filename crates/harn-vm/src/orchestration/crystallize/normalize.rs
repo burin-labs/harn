@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::Value as JsonValue;
 
 use super::super::new_id;
-use super::super::now_rfc3339;
+use super::super::now_unix_seconds_text;
 use super::shadow::{confidence_for, estimate_savings, infer_workflow_name};
 use super::types::{
     CrystallizationAction, CrystallizationSideEffect, CrystallizationTrace, CrystallizationUsage,
@@ -335,7 +335,7 @@ pub(super) fn mine_candidates(
                 .collect(),
             author: options.author.clone(),
             approver: options.approver.clone(),
-            created_at: now_rfc3339(),
+            created_at: now_unix_seconds_text(),
             version: "0.1.0".to_string(),
             package_name,
             capability_set: capabilities,

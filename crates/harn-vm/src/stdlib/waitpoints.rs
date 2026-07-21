@@ -4,8 +4,6 @@ use std::time::Duration as StdDuration;
 
 use futures::{pin_mut, stream::SelectAll, StreamExt};
 use serde::Serialize;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -617,9 +615,7 @@ fn install_test_replay_override(value: bool) -> TestReplayOverrideGuard {
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| OffsetDateTime::now_utc().to_string())
+    harn_clock::system_now_rfc3339()
 }
 
 fn log_error(error: impl std::fmt::Display) -> VmError {

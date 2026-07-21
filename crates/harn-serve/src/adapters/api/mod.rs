@@ -863,9 +863,9 @@ fn api_error(status: StatusCode, code: &str, message: &str) -> Response {
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+    // No `Clock` reaches these handlers; threading one through the axum state
+    // would be invasive. See `harn_clock::system_now_rfc3339`.
+    harn_clock::system_now_rfc3339()
 }
 
 fn event_seq(id: &str) -> u64 {

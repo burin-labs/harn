@@ -335,7 +335,7 @@ pub fn add_workspace_root(
     reason: Option<String>,
 ) -> Result<String, String> {
     let normalized_root = validate_workspace_root_path(root)?;
-    let mounted_at = crate::orchestration::now_rfc3339();
+    let mounted_at = crate::orchestration::now_unix_seconds_text();
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {

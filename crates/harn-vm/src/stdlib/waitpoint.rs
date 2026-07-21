@@ -1189,7 +1189,7 @@ fn parse_timestamp(raw: &str) -> Option<OffsetDateTime> {
 }
 
 fn format_timestamp(value: OffsetDateTime) -> String {
-    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+    harn_clock::format_rfc3339(value)
 }
 
 fn now_rfc3339() -> String {

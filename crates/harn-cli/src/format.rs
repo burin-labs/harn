@@ -7,13 +7,12 @@
 use std::path::Path;
 use std::time::Duration as StdDuration;
 
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-/// Render a UTC instant as RFC3339, falling back to `Display` if formatting
-/// fails (which `time` only does on internally inconsistent components).
+/// Render a UTC instant as RFC3339. Thin alias over the workspace-wide
+/// renderer so the CLI cannot drift from the runtime's timestamp shape.
 pub(crate) fn format_timestamp_rfc3339(value: OffsetDateTime) -> String {
-    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+    harn_vm::clock::format_rfc3339(value)
 }
 
 /// Render a unix-epoch millisecond timestamp as RFC3339.

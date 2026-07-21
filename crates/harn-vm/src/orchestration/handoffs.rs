@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    current_mutation_session, effect_record_summary, effect_subset_violations, new_id, now_rfc3339,
-    ArtifactRecord, CapabilityPolicy, EffectRecord, RunRecord,
+    current_mutation_session, effect_record_summary, effect_subset_violations, new_id,
+    now_unix_seconds_text, ArtifactRecord, CapabilityPolicy, EffectRecord, RunRecord,
 };
 
 const HANDOFF_TYPE: &str = "handoff_artifact";
@@ -160,7 +160,7 @@ impl HandoffRouteDecisionRecord {
         }
         self.selected_at = self.selected_at.trim().to_string();
         if self.selected_at.is_empty() {
-            self.selected_at = now_rfc3339();
+            self.selected_at = now_unix_seconds_text();
         }
         self.dispatch_kind = normalize_target_kind(&self.dispatch_kind);
         self.dispatch_status = self
@@ -301,7 +301,7 @@ impl HandoffArtifact {
             self.id = new_id("handoff");
         }
         if self.created_at.is_empty() {
-            self.created_at = now_rfc3339();
+            self.created_at = now_unix_seconds_text();
         }
         if self.parent_run_id.is_none() {
             self.parent_run_id = current_mutation_session().and_then(|session| session.run_id);
@@ -695,7 +695,7 @@ pub fn handoff_artifact_record(
             .or_else(|| Some(handoff.source_persona.clone())),
         created_at: existing
             .map(|artifact| artifact.created_at.clone())
-            .unwrap_or_else(now_rfc3339),
+            .unwrap_or_else(now_unix_seconds_text),
         freshness: existing
             .and_then(|artifact| artifact.freshness.clone())
             .or_else(|| Some("fresh".to_string())),

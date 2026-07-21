@@ -39,8 +39,8 @@ pub(crate) struct RunArgs {
     pub allow_process_network: bool,
     /// Interrupt the run after this duration and hard-exit with code 124 if it
     /// does not unwind within Harn's subprocess cleanup grace. Supports
-    /// integer durations with ms, s, m, or h suffixes, for example `500ms`,
-    /// `8s`, `2m`.
+    /// integer durations with ms, s, m, h, d, or w suffixes, for example
+    /// `500ms`, `8s`, `2m`. Must be greater than zero.
     #[arg(
         long = "timeout",
         value_name = "DURATION",
@@ -230,39 +230,34 @@ pub(crate) struct RunArgs {
     pub argv: Vec<String>,
 }
 
+/// Parse the `--timeout` argument for `harn run`.
+///
+/// Uses the shared duration grammar (`harn_vm::duration_parse`), then applies
+/// one additional rule that is specific to this flag: **zero is rejected**. A
+/// `--timeout 0` would arm a deadline that has already expired, killing the
+/// run before it starts; that is always a mistake rather than an instruction,
+/// so it is caught here rather than obeyed. The check lives at this call site
+/// on purpose — it is a property of this flag, not of the duration grammar,
+/// and other durations (a zero-length debounce, say) are legitimately zero.
 pub(crate) fn parse_run_timeout(raw: &str) -> Result<Duration, String> {
-    let value = raw.trim();
-    if value.is_empty() {
-        return Err("duration must not be empty".to_string());
-    }
-    let Some((number, unit)) = value
-        .strip_suffix("ms")
-        .map(|number| (number, "ms"))
-        .or_else(|| value.strip_suffix('s').map(|number| (number, "s")))
-        .or_else(|| value.strip_suffix('m').map(|number| (number, "m")))
-        .or_else(|| value.strip_suffix('h').map(|number| (number, "h")))
-    else {
-        return Err("duration must use an ms, s, m, or h suffix".to_string());
-    };
-    let amount = number
-        .parse::<u64>()
-        .map_err(|_| "duration amount must be a positive integer".to_string())?;
-    if amount == 0 {
+    use harn_vm::duration_parse::DurationParseError;
+
+    let millis = harn_vm::duration_parse::parse_millis(raw).map_err(|error| match error {
+        DurationParseError::Empty => "duration must not be empty".to_string(),
+        DurationParseError::MissingUnit => {
+            "duration must use an ms, s, m, h, d, or w suffix".to_string()
+        }
+        DurationParseError::NoDigits => "duration amount must be a positive integer".to_string(),
+        DurationParseError::UnknownUnit(_) => {
+            "duration must use an ms, s, m, h, d, or w suffix".to_string()
+        }
+        DurationParseError::AmountOverflow | DurationParseError::TooLarge => {
+            "duration is too large".to_string()
+        }
+    })?;
+    if millis == 0 {
         return Err("duration must be greater than zero".to_string());
     }
-    let millis = match unit {
-        "ms" => amount,
-        "s" => amount
-            .checked_mul(1_000)
-            .ok_or_else(|| "duration is too large".to_string())?,
-        "m" => amount
-            .checked_mul(60_000)
-            .ok_or_else(|| "duration is too large".to_string())?,
-        "h" => amount
-            .checked_mul(3_600_000)
-            .ok_or_else(|| "duration is too large".to_string())?,
-        _ => unreachable!("duration suffix matched above"),
-    };
     Ok(Duration::from_millis(millis))
 }
 
@@ -296,5 +291,25 @@ mod tests {
         assert!(parse_run_timeout("8").is_err());
         assert!(parse_run_timeout("0s").is_err());
         assert!(parse_run_timeout("1.5s").is_err());
+    }
+
+    #[test]
+    fn parse_run_timeout_accepts_the_shared_vocabulary() {
+        // `d` and `w` were rejected by this flag's private parser; the shared
+        // grammar accepts them everywhere. Compare in seconds: `from_days` is
+        // unstable, and `from_secs(2 * 86_400)` would trip a clippy unit lint.
+        assert_eq!(parse_run_timeout("2d").expect("days").as_secs(), 2 * 86_400);
+        assert_eq!(
+            parse_run_timeout("1w").expect("weeks").as_secs(),
+            7 * 86_400
+        );
+    }
+
+    #[test]
+    fn parse_run_timeout_still_rejects_zero_in_every_unit() {
+        // The one rule this flag keeps beyond the shared grammar.
+        for raw in ["0ms", "0s", "0m", "0h", "0d", "0w"] {
+            assert!(parse_run_timeout(raw).is_err(), "{raw} must be rejected");
+        }
     }
 }

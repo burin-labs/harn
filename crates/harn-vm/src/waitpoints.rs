@@ -2,8 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 use crate::event_log::{
     sanitize_topic_component, AnyEventLog, EventLog, LogError, LogEvent, Topic,
@@ -421,9 +419,9 @@ fn waitpoint_headers(record: &WaitpointRecord) -> BTreeMap<String, String> {
 }
 
 fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| OffsetDateTime::now_utc().to_string())
+    // Was a second `now_utc().to_string()` on the unreachable format error,
+    // which is not RFC3339 at all; the shared helper emits the epoch instead.
+    harn_clock::system_now_rfc3339()
 }
 
 #[cfg(test)]

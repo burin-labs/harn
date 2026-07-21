@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::super::{default_run_dir, new_id, now_rfc3339, parse_json_payload, sync_run_handoffs};
+use super::super::{
+    default_run_dir, new_id, now_unix_seconds_text, parse_json_payload, sync_run_handoffs,
+};
 use super::action_graph::{publish_action_graph_event, refresh_run_observability};
 use super::eval_pack::replay_fixture_from_run;
 use super::json::json_usize;
@@ -418,7 +420,7 @@ pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
         run.id = new_id("run");
     }
     if run.started_at.is_empty() {
-        run.started_at = now_rfc3339();
+        run.started_at = now_unix_seconds_text();
     }
     if run.status.is_empty() {
         run.status = "running".to_string();

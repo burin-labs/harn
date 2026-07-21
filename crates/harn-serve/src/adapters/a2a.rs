@@ -31,8 +31,6 @@ use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{json, Value as JsonValue};
 use sha2::Sha256;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::{

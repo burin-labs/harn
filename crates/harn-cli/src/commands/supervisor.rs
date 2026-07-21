@@ -177,7 +177,7 @@ async fn run_start(args: SupervisorStartArgs) -> OrchestratorResult<()> {
     let mut child = command
         .spawn()
         .map_err(|error| format!("failed to start workflow supervisor: {error}"))?;
-    let started_at = now_rfc3339()?;
+    let started_at = now_rfc3339();
     state.schema_version = 1;
     state.updated_at = Some(started_at.clone());
     state.process = Some(WorkflowSupervisorProcess {
@@ -203,7 +203,7 @@ async fn run_start(args: SupervisorStartArgs) -> OrchestratorResult<()> {
     if let Some(process) = state.process.as_mut() {
         process.status = status.to_string();
     }
-    state.updated_at = Some(now_rfc3339()?);
+    state.updated_at = Some(now_rfc3339());
     write_supervisor_state(&state_dir, &state)?;
 
     let process = state.process.as_ref().map(process_snapshot);
@@ -254,7 +254,7 @@ async fn run_stop(args: SupervisorStopArgs) -> OrchestratorResult<()> {
     }
     let stopped = wait_for_process_exit(pid, Duration::from_secs(10)).await;
     process.status = if stopped { "stopped" } else { "stopping" }.to_string();
-    process.stopped_at = Some(now_rfc3339()?);
+    process.stopped_at = Some(now_rfc3339());
     state.updated_at = process.stopped_at.clone();
     write_supervisor_state(&state_dir, &state)?;
     let process = state.process.as_ref().map(process_snapshot);

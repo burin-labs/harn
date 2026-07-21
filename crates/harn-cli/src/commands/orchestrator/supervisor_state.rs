@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 
 use super::errors::OrchestratorError;
 
@@ -126,7 +124,7 @@ pub(crate) fn set_workflow_status(
     status: &str,
     reason: Option<String>,
 ) -> Result<WorkflowSupervisorWorkflow, OrchestratorError> {
-    let updated_at = now_rfc3339()?;
+    let updated_at = now_rfc3339();
     let workflow = WorkflowSupervisorWorkflow {
         workflow_id: workflow_id.to_string(),
         status: status.to_string(),
@@ -149,10 +147,13 @@ pub(crate) fn workflow_override<'a>(
     state.workflows.get(workflow_id)
 }
 
-pub(crate) fn now_rfc3339() -> Result<String, OrchestratorError> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .map_err(|error| error.to_string().into())
+/// Current UTC time as RFC3339.
+///
+/// Was `Result<String, OrchestratorError>`; the shared helper is infallible
+/// (see `harn_vm::clock::format_rfc3339`) so callers no longer propagate an
+/// error that could not occur.
+pub(crate) fn now_rfc3339() -> String {
+    harn_vm::clock::system_now_rfc3339()
 }
 
 pub(crate) fn workflow_notification_hint(

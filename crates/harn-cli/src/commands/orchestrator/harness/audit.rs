@@ -7,8 +7,6 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 use tokio::sync::watch;
 
 use harn_vm::event_log::{AnyEventLog, EventLog};
@@ -153,10 +151,10 @@ pub(super) fn admission_delay(occurred_at_ms: i64) -> Duration {
     Duration::from_millis(now.saturating_sub(occurred_at_ms).max(0) as u64)
 }
 
-pub(super) fn now_rfc3339() -> Result<String, OrchestratorError> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .map_err(|error| OrchestratorError::Serve(format!("failed to format timestamp: {error}")))
+/// Current UTC time as RFC3339. Infallible; see
+/// `harn_vm::clock::format_rfc3339` for why the old `Result` was vestigial.
+pub(super) fn now_rfc3339() -> String {
+    harn_vm::clock::system_now_rfc3339()
 }
 
 pub(super) fn write_state_snapshot(

@@ -160,7 +160,7 @@ pub(super) async fn graceful_shutdown(
         .await
         .map_err(|error| format!("failed to drain dispatcher: {error}"))?;
 
-    let stopped_at = now_rfc3339()?;
+    let stopped_at = now_rfc3339();
     let timed_out = !drain_report.drained;
     if timed_out {
         dispatcher.shutdown();

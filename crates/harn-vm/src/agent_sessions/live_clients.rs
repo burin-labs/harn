@@ -15,7 +15,7 @@ pub fn attach_live_client(id: &str, request: AttachLiveClient) -> Result<LiveCli
             return Err(format!("agent session '{id}' does not exist"));
         };
         let client_id = validate_live_client_id(request.client_id)?;
-        let now = crate::orchestration::now_rfc3339();
+        let now = crate::orchestration::now_unix_seconds_text();
         let previous_clients = state.live_clients.clone();
         let previous_controller_id = state.live_controller_id.clone();
 
@@ -112,7 +112,7 @@ pub fn detach_live_client(
         let Some(mut client) = state.live_clients.remove(&client_id) else {
             return Err(format!("live client '{client_id}' is not attached"));
         };
-        client.last_seen_at = crate::orchestration::now_rfc3339();
+        client.last_seen_at = crate::orchestration::now_unix_seconds_text();
         if state.live_controller_id.as_deref() == Some(client_id.as_str()) {
             state.live_controller_id = None;
         }
@@ -153,7 +153,7 @@ pub fn heartbeat_live_client(
         let Some(client) = state.live_clients.get_mut(&client_id) else {
             return Err(format!("live client '{client_id}' is not attached"));
         };
-        client.last_seen_at = crate::orchestration::now_rfc3339();
+        client.last_seen_at = crate::orchestration::now_unix_seconds_text();
         if !metadata.is_null() {
             client.metadata = metadata.clone();
         }
