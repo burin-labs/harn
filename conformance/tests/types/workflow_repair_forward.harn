@@ -10,7 +10,6 @@ import { summarize_repair } from "workflow_repair_forward_lib"
 
 pipeline test(task) {
   const token = "GOTOKEN"
-
   // Success after a repair: the inline executor emits the pass token only once
   // it has seen it threaded through the prior attempt's findings (attempt 2).
   const passing: WorkflowRepairResult = workflow_run_repair(
@@ -33,7 +32,6 @@ pipeline test(task) {
   assert(passing.ok, "success variant settled")
   assert(len(passing.attempts) == 2, "recorded both attempts")
   assert(contains(summary, "1:failed"), "first attempt failed before the repair")
-
   // Exhausted: a never-satisfiable verifier stops at the attempt cap.
   const exhausted: WorkflowRepairResult = workflow_run_repair(
     {
@@ -44,20 +42,22 @@ pipeline test(task) {
     },
   )
   assert(!exhausted.ok, "exhausted variant representable")
-
   // Execution error: a throwing executor is a contained failed attempt.
   const boom: WorkflowRepairResult = workflow_run_repair(
     {
       task: "b",
-      executor: { ctx -> throw "boom " + to_string(ctx.attempt) },
+      executor: { ctx ->
+        throw "boom " + to_string(ctx.attempt)
+      },
       verify: { r -> return {ok: false, findings: []} },
       max_attempts: 1,
     },
   )
   assert(!boom.ok, "execution-error variant representable")
-
   log(
     "workflow_repair_forward " + summary + " | " + to_string(len(exhausted.attempts)) + " | "
-      + to_string(len(boom.attempts)),
+      + to_string(
+      len(boom.attempts),
+    ),
   )
 }
