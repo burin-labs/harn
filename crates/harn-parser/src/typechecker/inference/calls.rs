@@ -610,6 +610,9 @@ impl TypeChecker {
             else {
                 continue;
             };
+            if self.check_literal_union_arg(i, param_name, arg, expected, call_scope) {
+                continue;
+            }
             let Some(actual) = self.infer_type(arg, scope) else {
                 continue;
             };

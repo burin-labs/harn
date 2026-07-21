@@ -61,8 +61,12 @@ pipeline default() {
   __io_println(skipped.receipt.error)
   const included = context_maintenance_replay_decision(succeeded, {mode: "include"})
   __io_println(included.should_run)
+  // `status` is validated at runtime. A statically-known-invalid literal is
+  // now a check-time error (the literal-union arg check), so exercise the
+  // runtime guard with a `string`-typed value the checker treats as dynamic.
+  const bad_status: string = "paused"
   const invalid = try {
-    context_maintenance_receipt("context.refresh", "paused", {})
+    context_maintenance_receipt("context.refresh", bad_status, {})
   }
   __io_println(is_err(invalid))
   const key_a = context_maintenance_dedupe_key(
