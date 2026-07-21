@@ -124,7 +124,7 @@ fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
     assert!(initialized["result"]["server_version"].is_string());
     assert_eq!(
         initialized["result"]["capabilities"]["test_run"]["schema_version"],
-        2
+        3
     );
 
     let first = run_suite(1, &suite, &mut stdin, &mut stdout);
@@ -141,7 +141,7 @@ fn stdio_worker_reuses_prepared_modules_without_leaking_state() {
     assert_eq!(first["result"]["summary"]["passed"], 1);
     assert_eq!(second["result"]["summary"]["passed"], 1);
     assert_eq!(second["result"]["run_count"], 2);
-    assert_eq!(second["result"]["schema_version"], 2);
+    assert_eq!(second["result"]["schema_version"], 3);
     assert_eq!(
         second["result"]["summary"]["results"][0]["phases"]["modules"]["modules_compiled"],
         0
