@@ -9,12 +9,12 @@ mod mcp_support;
 mod test_util;
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
+use mcp_support::StdioMcpClient;
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
@@ -83,25 +83,17 @@ pub fn on_fail(event: TriggerEvent) -> any {
     );
 }
 
-fn send_request(
-    stdin: &mut impl Write,
-    stdout: &mut BufReader<impl std::io::Read>,
-    request: JsonValue,
-) -> JsonValue {
-    let request_id = request.get("id").cloned();
-    writeln!(stdin, "{}", serde_json::to_string(&request).unwrap()).unwrap();
-    stdin.flush().unwrap();
-    loop {
-        let mut line = String::new();
-        stdout.read_line(&mut line).unwrap();
-        let response: JsonValue = serde_json::from_str(line.trim()).unwrap();
-        if request_id
-            .as_ref()
-            .is_none_or(|id| response.get("id") == Some(id))
-        {
-            return response;
-        }
-    }
+fn stdio_serve_command(temp: &TempDir) -> std::process::Command {
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("mcp")
+        .arg("serve")
+        .arg("--config")
+        .arg("harn.toml")
+        .arg("--state-dir")
+        .arg("./state");
+    command
 }
 
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
@@ -114,6 +106,20 @@ fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>
     )
 }
 
+/// Wire-level smoke for the stdio transport: prove that a real `harn mcp
+/// serve` process frames JSON-RPC correctly, dispatches a tool call, reads a
+/// resource, and shuts down cleanly on EOF.
+///
+/// This deliberately does *not* re-assert the per-tool contract of every
+/// orchestrator tool (dlq, retry, replay, queue, inspect, trust, …). Those
+/// are covered exhaustively and deterministically in-process against
+/// `handle_request` in `serve_tests.rs`, where there is no process spawn, no
+/// pipe timing, and no cold-start to flake. Duplicating them here only
+/// created golden-value rot and a slow binary gauntlet that could drift
+/// toward the nextest slow-test cap under load (harn#5397). The smoke keeps
+/// exactly the coverage the binary surface uniquely owns — framing, real
+/// dispatch, resource read, and lifecycle — via the bounded, self-diagnosing
+/// [`StdioMcpClient`].
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn mcp_server_stdio_roundtrips_tools_and_resources() {
@@ -121,264 +127,69 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = harn_e2e_command()
-        .current_dir(temp.path())
-        .arg("mcp")
-        .arg("serve")
-        .arg("--config")
-        .arg("harn.toml")
-        .arg("--state-dir")
-        .arg("./state")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut client = StdioMcpClient::spawn(stdio_serve_command(&temp));
 
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
-
-    let init = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {},
-                "clientInfo": { "name": "integration", "version": "1.0.0" }
-            }
-        }),
-    );
+    let init = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "integration", "version": "1.0.0" }
+        }
+    }));
     assert_eq!(init["result"]["serverInfo"]["name"], "harn-orchestrator");
 
-    let tools = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/list",
-            "params": {}
-        }),
-    );
-    assert!(tools["result"]["tools"]
+    let tools = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    }));
+    let tool_names: Vec<&str> = tools["result"]["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|tool| tool["name"] == "harn.trigger.fire"));
-    assert!(tools["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|tool| tool["name"] == "harn.secret_scan"));
-
-    let scan = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 22,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.secret_scan",
-                "arguments": {
-                    "content": r#"token = "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB""#
-                }
-            }
-        }),
-    );
-    assert_eq!(
-        scan["result"]["structuredContent"][0]["detector"],
-        json!("github-token")
-    );
-
-    let dlq_fire = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.trigger.fire",
-                "arguments": { "trigger_id": "cron-fail", "payload": {} }
-            }
-        }),
-    );
-    assert_eq!(
-        dlq_fire["result"]["structuredContent"]["status"],
-        json!("dlq")
-    );
-    let dlq_entry_id = dlq_fire["result"]["structuredContent"]["dlq_entry_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let dlq_list = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.orchestrator.dlq.list",
-                "arguments": {}
-            }
-        }),
-    );
-    assert_eq!(
-        dlq_list["result"]["structuredContent"]["entries"][0]["id"],
-        dlq_entry_id
-    );
-
-    let dlq_retry = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 5,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.orchestrator.dlq.retry",
-                "arguments": { "entry_id": dlq_entry_id }
-            }
-        }),
-    );
-    assert_eq!(
-        dlq_retry["result"]["structuredContent"]["entry_id"],
-        json!(dlq_entry_id)
-    );
-
-    let ok_fire = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 6,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.trigger.fire",
-                "arguments": { "trigger_id": "cron-ok", "payload": {} }
-            }
-        }),
-    );
-    assert_eq!(
-        ok_fire["result"]["structuredContent"]["status"],
-        json!("dispatched")
-    );
-    let ok_event_id = ok_fire["result"]["structuredContent"]["event_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let replay = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 7,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.trigger.replay",
-                "arguments": { "event_id": ok_event_id }
-            }
-        }),
-    );
-    assert_eq!(
-        replay["result"]["structuredContent"]["status"],
-        json!("dispatched")
-    );
-
-    let queue = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 8,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.orchestrator.queue",
-                "arguments": {}
-            }
-        }),
-    );
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
     assert!(
-        queue["result"]["structuredContent"]["outbox"]["count"]
-            .as_u64()
-            .unwrap()
-            >= 1
+        tool_names.contains(&"harn.trigger.fire") && tool_names.contains(&"harn.secret_scan"),
+        "tools/list must advertise the orchestrator tools over the wire, got {tool_names:?}"
     );
 
-    let inspect = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 9,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.orchestrator.inspect",
-                "arguments": {}
-            }
-        }),
-    );
+    let fire = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "harn.trigger.fire",
+            "arguments": { "trigger_id": "cron-ok", "payload": {} }
+        }
+    }));
     assert_eq!(
-        inspect["result"]["structuredContent"]["triggers"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
+        fire["result"]["structuredContent"]["status"],
+        json!("dispatched")
     );
 
-    let trust = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 10,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.trust.query",
-                "arguments": { "agent": "cron-ok", "limit": 2 }
-            }
-        }),
-    );
-    assert_eq!(
-        trust["result"]["structuredContent"]["grouped_by_trace"],
-        json!(false)
-    );
-    let trust_results = trust["result"]["structuredContent"]["results"]
-        .as_array()
-        .unwrap();
-    assert_eq!(trust_results.len(), 2);
-    assert!(trust_results
-        .iter()
-        .all(|record| record["agent"] == json!("cron-ok")));
-
-    let manifest = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 11,
-            "method": "resources/read",
-            "params": { "uri": "harn://manifest" }
-        }),
-    );
+    let manifest = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "resources/read",
+        "params": { "uri": "harn://manifest" }
+    }));
     assert!(manifest["result"]["contents"][0]["text"]
         .as_str()
         .unwrap()
         .contains("cron-ok"));
 
-    drop(stdin);
-    let status = child.wait().unwrap();
-    assert!(status.success(), "status={status}");
+    client.shutdown_expect_success();
 }
 
+/// Progress notifications interleaved with a tool response are a
+/// wire-specific behavior (the stdio writer funnels progress lines and the
+/// final response through one ordered channel), so this stays a binary-
+/// surface test — but bounded and self-diagnosing via [`StdioMcpClient`].
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn mcp_server_stdio_emits_progress_for_trigger_fire() {
@@ -386,73 +197,43 @@ fn mcp_server_stdio_emits_progress_for_trigger_fire() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
-    let mut child = harn_e2e_command()
-        .current_dir(temp.path())
-        .arg("mcp")
-        .arg("serve")
-        .arg("--config")
-        .arg("harn.toml")
-        .arg("--state-dir")
-        .arg("./state")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut client = StdioMcpClient::spawn(stdio_serve_command(&temp));
 
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let _init = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "progress-test", "version": "1.0.0" }
+        }
+    }));
 
-    let _init = send_request(
-        &mut stdin,
-        &mut stdout,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {},
-                "clientInfo": { "name": "progress-test", "version": "1.0.0" }
-            }
-        }),
-    );
-
-    // Drain everything for id=2 while collecting any earlier
-    // notifications/progress lines for the same token.
-    writeln!(
-        &mut stdin,
-        "{}",
-        serde_json::to_string(&json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.trigger.fire",
-                "arguments": { "trigger_id": "cron-ok", "payload": {} },
-                "_meta": { "progressToken": "fire-1" }
-            }
-        }))
-        .unwrap()
-    )
-    .unwrap();
-    stdin.flush().unwrap();
+    // Read everything until the id=2 response, collecting any progress
+    // notifications for our token that arrive first.
+    client.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "harn.trigger.fire",
+            "arguments": { "trigger_id": "cron-ok", "payload": {} },
+            "_meta": { "progressToken": "fire-1" }
+        }
+    }));
 
     let mut progress_messages = Vec::new();
-    let response = loop {
-        let mut line = String::new();
-        stdout.read_line(&mut line).unwrap();
-        let value: JsonValue = serde_json::from_str(line.trim()).unwrap();
-        if value.get("method") == Some(&json!("notifications/progress"))
-            && value["params"]["progressToken"] == json!("fire-1")
-        {
-            progress_messages.push(value);
-            continue;
-        }
-        if value.get("id") == Some(&json!(2)) {
-            break value;
-        }
-    };
+    let response = client.recv_until(
+        |message| {
+            if message.get("method") == Some(&json!("notifications/progress"))
+                && message["params"]["progressToken"] == json!("fire-1")
+            {
+                progress_messages.push(message.clone());
+            }
+        },
+        |message| message.get("id") == Some(&json!(2)),
+    );
     assert_eq!(
         response["result"]["structuredContent"]["status"],
         json!("dispatched")
@@ -470,9 +251,7 @@ fn mcp_server_stdio_emits_progress_for_trigger_fire() {
         "progress values must strictly increase, got {progress_values:?}"
     );
 
-    drop(stdin);
-    let status = child.wait().unwrap();
-    assert!(status.success(), "status={status}");
+    client.shutdown_expect_success();
 }
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
@@ -500,7 +279,7 @@ async fn mcp_server_http_roundtrips_initialize_and_fire() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
@@ -560,4 +339,22 @@ async fn mcp_server_http_roundtrips_initialize_and_fire() {
     child.kill().unwrap();
     child.wait().unwrap();
     handle.join().unwrap();
+}
+
+/// The safety net itself: a server that never answers must be diagnosed
+/// within the bound, not blocked on until the nextest slow-test cap. Uses a
+/// plain hung process (`sleep`) so the check is hermetic and fast — no
+/// `harn` cold-start — and asserts the client kills it and reports rather
+/// than hanging. This is the mechanism that prevents a recurrence of the
+/// 180s opaque timeout (harn#5397).
+#[cfg(unix)]
+#[test]
+#[should_panic(expected = "timed out")]
+fn stdio_client_diagnoses_a_hung_server_instead_of_blocking() {
+    let mut command = std::process::Command::new("sleep");
+    command.arg("120");
+    let mut client = StdioMcpClient::spawn(command).with_timeout(Duration::from_secs(1));
+    // `sleep` ignores stdin and never writes stdout, so the response read
+    // must trip the deadline and panic with the diagnostic.
+    let _ = client.request(json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }));
 }

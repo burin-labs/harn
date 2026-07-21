@@ -259,8 +259,7 @@ fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
 
     let mut stdin = child.stdin.take().unwrap();
     let (rx, stdout_handle) = spawn_stdout_reader(child.stdout.take().unwrap());
-    let (_stderr_rx, _stderr_handle) =
-        mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let (_stderr_rx, _stderr_handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
 
     writeln!(
         stdin,
@@ -443,8 +442,7 @@ fn serve_mcp_stdio_exposes_script_registered_surface() {
 
     let mut stdin = child.stdin.take().unwrap();
     let (rx, stdout_handle) = spawn_stdout_reader(child.stdout.take().unwrap());
-    let (_stderr_rx, _stderr_handle) =
-        mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let (_stderr_rx, _stderr_handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
 
     let init = send_stdio_request(
         &mut stdin,
@@ -671,7 +669,7 @@ async fn serve_mcp_http_streams_progress_and_enforces_api_keys() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
@@ -859,7 +857,7 @@ async fn serve_mcp_http_exposes_script_registered_surface() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
@@ -1084,7 +1082,7 @@ async fn serve_mcp_http_elicits_when_tools_call_beats_the_get_stream() {
         .spawn()
         .unwrap();
 
-    let (rx, handle) = mcp_support::spawn_stderr_reader(child.stderr.take().unwrap());
+    let (rx, handle) = mcp_support::spawn_line_reader(child.stderr.take().unwrap());
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
