@@ -731,7 +731,7 @@ jobs:
 
       - name: Install cargo-bloat
         if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'
-        uses: taiki-e/install-action@2ca9b94c269419b7b0c711c09d0b21c4e1d51145 # v2.83.1
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: cargo-bloat
 
@@ -1470,7 +1470,7 @@ jobs:
         # are present. The per-arch archives were already uploaded incrementally
         # by each build leg; re-listing them here is a harmless idempotent
         # overwrite that also covers any leg whose inline upload was retried.
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.setup.outputs.ref }}
           body_path: release-notes.md
