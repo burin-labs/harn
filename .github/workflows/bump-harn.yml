@@ -93,6 +93,11 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           INPUT_VERSION: ${{ inputs.version }}
         shell: bash
+        # Bootstrap only: resolve which Harn to INSTALL. The target release
+        # embeds std/bump/*, so the orchestration (including the already-current
+        # no-op) runs under it — this step decides the install version, it does
+        # not duplicate any orchestration/no-op logic, which lives in the Harn
+        # harness.
         run: |
           set -euo pipefail
           VERSION="${INPUT_VERSION:-}"
@@ -104,26 +109,17 @@ jobs:
             exit 1
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          CURRENT="$(cat .harn-version 2>/dev/null || true)"
-          if [ "${CURRENT}" = "${VERSION}" ]; then
-            echo "already-current=true" >> "$GITHUB_OUTPUT"
-            echo "Harn pin already matches ${VERSION}; nothing to do." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "already-current=false" >> "$GITHUB_OUTPUT"
-          fi
 
       # Install the TARGET Harn through the checksum-verifying setup-harn
       # action. The target release embeds std/bump/*, so the orchestration runs
       # under it and the lockfile refresh + validation use the version we are
       # bumping to. setup-harn's bounded retry absorbs still-publishing assets.
       - name: Install target Harn
-        if: steps.resolve.outputs.already-current != 'true'
         uses: ./.harn-runtime/.github/actions/setup-harn
         with:
           version: ${{ steps.resolve.outputs.version }}
 
       - name: Run bump orchestration
-        if: steps.resolve.outputs.already-current != 'true'
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}

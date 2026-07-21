@@ -1,25 +1,40 @@
 /**
  * std/bump/live — the live [`BumpAdapter`] that binds std/bump/runtime's pure
  * state machine to real effects: git and the caller's validation entrypoint
- * via std/command, and GitHub via HTTP/GraphQL over the net capability using a
- * GitHub App installation token.
+ * via `std/command`, and GitHub through the first-party `std/connectors/github`
+ * connector (typed helpers plus its `api_call` REST/GraphQL escape hatch).
  *
  * This module is deliberately branch-free. It performs the I/O the orchestrator
  * asks for and normalizes the result; ALL control flow lives in
- * `std/bump/runtime`, which is exercised by the in-process fixtures. This seam
- * is why the fixtures need no network: they replace this adapter wholesale. The
- * live GitHub-mutation surface here (ref lease reset, signed
- * `createCommitOnBranch`, PR upsert, auto-merge arm/disarm) is first exercised
- * against real GitHub in CI, by construction.
+ * `std/bump/runtime`, which is exercised by the in-process fixtures. That seam
+ * is why the fixtures need no network: they replace this adapter wholesale, so
+ * none of the connector calls below run under `harn test`. The live
+ * GitHub-mutation surface here (ref lease reset, signed `createCommitOnBranch`,
+ * PR upsert, auto-merge arm/disarm) is first exercised against real GitHub in
+ * CI, by construction.
  *
- * Signed commits use the GraphQL `createCommitOnBranch` mutation rather than a
- * local `git commit` + push: commits created through the App installation token
- * are signed by GitHub, satisfying an org `required_signatures` ruleset that an
- * unsigned local push would violate.
+ * Auth is the GitHub App installation token, set once via the connector's
+ * module-level `configure`. Signed commits use the GraphQL `createCommitOnBranch`
+ * mutation (through the connector's `api_call`) rather than a local `git commit`
+ * + push: commits created through the App token are signed by GitHub, satisfying
+ * an org `required_signatures` ruleset that an unsigned local push would violate.
+ *
+ * `std/connectors/github` has no typed helper for creating refs, signed commits,
+ * pull requests, or disabling auto-merge, so those go through the connector's
+ * `api_call` (raw REST / GraphQL). Typed helpers cover release lookup, PR edit,
+ * PR close, and enabling auto-merge.
  */
 import { BumpAdapter } from "std/bump/runtime"
 import { command_run } from "std/command"
-import { graphql_request } from "std/graphql"
+import {
+  api_call,
+  close_pr,
+  configure,
+  enable_auto_merge,
+  latest_release,
+  pr_edit,
+  release_view,
+} from "std/connectors/github"
 import { poll_until } from "std/poll"
 import { is_v_semver } from "std/semver"
 
@@ -32,7 +47,6 @@ pub type LiveBumpConfig = {
   version_file: string,
   refresh_command: string,
   validation_command: string,
-  api_base: string,
   readiness_max_attempts: int,
   readiness_interval_ms: int,
   readiness_timeout_ms: int,
@@ -57,7 +71,6 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
     version_file: ".harn-version",
     refresh_command: "harn install --locked || harn install",
     validation_command: "",
-    api_base: "https://api.github.com",
     readiness_max_attempts: 1,
     readiness_interval_ms: 20000,
     readiness_timeout_ms: 20000,
@@ -73,47 +86,45 @@ fn __shell(command: string) {
   return command_run({mode: "shell", command: command})
 }
 
-fn __gh_rest(cfg: LiveBumpConfig, method: string, path: string, body = nil) {
-  let options = {
-    headers: {
-      Authorization: "Bearer ${cfg.token}",
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "harn-bump-runtime",
-    },
+/** One REST call through the connector; nil on any connector-reported failure. */
+fn __rest(method: string, path: string, body = nil) {
+  const result = try {
+    api_call(path, method, body)
   }
-  if body != nil {
-    options = options + {body: json_stringify(body)}
-  }
-  const response = harness.net.request(method, cfg.api_base + path, options)
-  const parsed = try {
-    json_parse(response.body ?? "")
-  }
-  return {
-    ok: response.ok ?? false,
-    status: response.status ?? 0,
-    json: if is_err(parsed) {
-      nil
-    } else {
-      parsed
-    },
+  return if is_err(result) {
+    nil
+  } else {
+    result
   }
 }
 
-fn __gh_graphql(cfg: LiveBumpConfig, query: string, variables: dict) {
-  return graphql_request(cfg.api_base + "/graphql", query, variables, {auth: cfg.token})
+/** One GraphQL call through the connector's api_call escape hatch. */
+fn __graphql(query: string, variables: dict) {
+  const result = try {
+    api_call("/graphql", "POST", {query: query, variables: variables})
+  }
+  return if is_err(result) {
+    nil
+  } else {
+    result
+  }
 }
 
 fn __release_finalized(release) -> bool {
   const draft = release?.draft ?? true
   const prerelease = release?.prerelease ?? true
-  const asset_names = (release?.assets ?? []).map({ a -> a.name }).to_list()
+  const asset_names = release?.asset_names ?? (release?.assets ?? []).map({ a -> a.name }).to_list()
   const missing = REQUIRED_RELEASE_ASSETS.filter({ name -> !contains(asset_names, name) }).to_list()
   return !draft && !prerelease && len(missing) == 0
 }
 
-fn __pull_node(cfg: LiveBumpConfig, number: int) {
-  return __gh_rest(cfg, "GET", "/repos/${cfg.repo}/pulls/${number}")
+/** Connector `api_call` has no typed PR list; fetch the open bump PR raw. */
+fn __find_open_pr(cfg: LiveBumpConfig, owner: string) {
+  const list = __rest(
+    "GET",
+    "/repos/${cfg.repo}/pulls?head=${owner}:${cfg.branch}&base=${cfg.base}&state=open",
+  )
+  return (list ?? [])[0]
 }
 
 /**
@@ -126,6 +137,8 @@ fn __pull_node(cfg: LiveBumpConfig, number: int) {
 pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
   const cfg = live_bump_config(config)
   const owner = split(cfg.repo, "/")[0] ?? ""
+  // Authenticate every connector call as the GitHub App for this run.
+  configure({token: cfg.token})
   return {
     resolve_target_tag: fn(tag) {
       const requested = trim(tag ?? "")
@@ -135,8 +148,8 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         }
         return requested
       }
-      const latest = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/releases/latest")
-      const resolved = trim(to_string(latest.json?.tag_name ?? ""))
+      const latest = latest_release(cfg.repo)
+      const resolved = trim(to_string(latest?.tag_name ?? ""))
       if !is_v_semver(resolved) {
         throw "std/bump/live: could not resolve a semver latest release for ${cfg.repo}"
       }
@@ -148,11 +161,11 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       const found = poll_until(
         { ->
           attempts = attempts + 1
-          const view = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/releases/tags/${target}")
-          const ready = view.ok && __release_finalized(view.json)
+          const view = release_view(cfg.repo, target)
+          const ready = (view?.ok ?? false) && __release_finalized(view)
           lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
           return if ready {
-            view.json
+            view
           } else {
             nil
           }
@@ -237,49 +250,42 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       }
     },
     find_bump_pr: fn() {
-      const list = __gh_rest(
-        cfg,
-        "GET",
-        "/repos/${cfg.repo}/pulls?head=${owner}:${cfg.branch}&base=${cfg.base}&state=open",
-      )
-      const first = (list.json ?? [])[0]
+      const first = __find_open_pr(cfg, owner)
       if first == nil {
         return nil
       }
-      const detail = __pull_node(cfg, first.number)
       return {
         number: first.number,
         head_oid: first.head?.sha ?? "",
-        auto_merge_enabled: detail.json?.auto_merge != nil,
+        auto_merge_enabled: first.auto_merge != nil,
         url: first.html_url ?? "",
         state: first.state ?? "open",
       }
     },
     disable_auto_merge: fn(number) {
-      const detail = __pull_node(cfg, number)
-      const node_id = detail.json?.node_id ?? ""
+      const detail = __rest("GET", "/repos/${cfg.repo}/pulls/${number}")
+      const node_id = detail?.node_id ?? ""
       if node_id == "" {
         return false
       }
-      const result = __gh_graphql(
-        cfg,
+      const result = __graphql(
         "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }",
         {id: node_id},
       )
-      return result.ok ?? false
+      return result != nil && len(result?.errors ?? []) == 0
     },
     reset_branch: fn(base_sha) {
       const ref = "/repos/${cfg.repo}/git/refs/heads/${cfg.branch}"
-      const existing = __gh_rest(cfg, "GET", ref)
-      if existing.ok {
-        return __gh_rest(cfg, "PATCH", ref, {sha: base_sha, force: true}).ok
+      const existing = __rest("GET", ref)
+      if existing != nil {
+        return __rest("PATCH", ref, {sha: base_sha, force: true}) != nil
       }
-      return __gh_rest(
-        cfg,
+      return __rest(
         "POST",
         "/repos/${cfg.repo}/git/refs",
         {ref: "refs/heads/${cfg.branch}", sha: base_sha},
-      ).ok
+      )
+        != nil
     },
     create_signed_commit: fn(request) {
       let additions = []
@@ -288,8 +294,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         additions = additions + [{path: path, contents: trim(encoded.stdout ?? "")}]
       }
       const deletions = request.deletions.map({ p -> {path: p} }).to_list()
-      const result = __gh_graphql(
-        cfg,
+      const result = __graphql(
         "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
         {
           input: {
@@ -300,20 +305,20 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
           },
         },
       )
-      const commit = result.data?.createCommitOnBranch?.commit
+      const commit = result?.data?.createCommitOnBranch?.commit
       if commit == nil {
         throw "std/bump/live: createCommitOnBranch returned no commit; errors="
           + json_stringify(
-          result.errors ?? [],
+          result?.errors ?? [],
         )
       }
       return {oid: commit.oid, url: commit.url ?? ""}
     },
     branch_matches_base: fn() {
-      const branch = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/commits/${cfg.branch}")
-      const base = __gh_rest(cfg, "GET", "/repos/${cfg.repo}/commits/${cfg.base}")
-      const branch_tree = branch.json?.commit?.tree?.sha ?? "branch"
-      const base_tree = base.json?.commit?.tree?.sha ?? "base"
+      const branch = __rest("GET", "/repos/${cfg.repo}/commits/${cfg.branch}")
+      const base = __rest("GET", "/repos/${cfg.repo}/commits/${cfg.base}")
+      const branch_tree = branch?.commit?.tree?.sha ?? "branch"
+      const base_tree = base?.commit?.tree?.sha ?? "base"
       return branch_tree == base_tree
     },
     upsert_pr: fn(existing) {
@@ -321,52 +326,38 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       const body =
         "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
       if existing != nil {
-        __gh_rest(
-          cfg,
-          "PATCH",
-          "/repos/${cfg.repo}/pulls/${existing.number}",
-          {title: title, body: body},
-        )
-        const detail = __pull_node(cfg, existing.number)
+        pr_edit(cfg.repo, existing.number, {title: title, body: body})
+        const detail = __rest("GET", "/repos/${cfg.repo}/pulls/${existing.number}")
         return {
           number: existing.number,
-          head_oid: detail.json?.head?.sha ?? existing.head_oid,
-          url: detail.json?.html_url ?? existing.url,
+          head_oid: detail?.head?.sha ?? existing.head_oid,
+          url: detail?.html_url ?? existing.url,
           created: false,
         }
       }
-      const created = __gh_rest(
-        cfg,
+      const created = __rest(
         "POST",
         "/repos/${cfg.repo}/pulls",
         {title: title, head: cfg.branch, base: cfg.base, body: body},
       )
       return {
-        number: created.json?.number ?? 0,
-        head_oid: created.json?.head?.sha ?? "",
-        url: created.json?.html_url ?? "",
+        number: created?.number ?? 0,
+        head_oid: created?.head?.sha ?? "",
+        url: created?.html_url ?? "",
         created: true,
       }
     },
     close_pr: fn(number, comment) {
-      __gh_rest(cfg, "POST", "/repos/${cfg.repo}/issues/${number}/comments", {body: comment})
-      return __gh_rest(cfg, "PATCH", "/repos/${cfg.repo}/pulls/${number}", {state: "closed"}).ok
+      const result = close_pr(cfg.repo, number, comment)
+      return result?.ok ?? false
     },
     enable_auto_merge: fn(number, _head) {
-      const detail = __pull_node(cfg, number)
-      const node_id = detail.json?.node_id ?? ""
-      if node_id == "" {
-        return {enabled: false, state: "failed", detail: "no pull request node id"}
-      }
-      const result = __gh_graphql(
-        cfg,
-        "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }",
-        {id: node_id},
-      )
-      const ok = result.ok ?? false
+      const result = enable_auto_merge(cfg.repo, number, {method: "squash"})
+      const ok = result?.ok ?? false
       return {
         enabled: ok,
-        state: if ok {
+        state: result?.state
+          ?? if ok {
           "enabled"
         } else {
           "failed"
@@ -374,7 +365,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         detail: if ok {
           ""
         } else {
-          json_stringify(result.errors ?? [])
+          json_stringify(result?.error ?? "auto-merge not enabled")
         },
       }
     },

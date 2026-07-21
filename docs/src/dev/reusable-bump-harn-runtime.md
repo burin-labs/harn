@@ -8,7 +8,8 @@ declared validation command.
 
 - Workflow: `.github/workflows/bump-harn.yml` (`workflow_call`).
 - Orchestration: `scripts/bump_harn_runtime.harn` → `std/bump/runtime` (pure
-  state machine) → `std/bump/live` (git + GitHub effects).
+  state machine) → `std/bump/live` (git via `std/command`, GitHub via the
+  first-party `std/connectors/github` connector).
 - Receipt schema: `harn-bump-runtime-v1` (printed to stdout; key fields also
   land as step outputs and a step-summary block).
 
@@ -97,6 +98,8 @@ release, so this holds in practice.)
   they need verified through the single `validate-command`; the shared workflow
   only sequences it. Consumers copy no implementation scripts.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
-  because it must reach git, the GitHub API, and the caller's validation
-  command. It carries no secret beyond the scoped installation token, which is
-  passed via the environment and never written to the repo.
+  because it must reach git, the GitHub API (through the `std/connectors/github`
+  connector, authenticated with the App installation token via `configure`), and
+  the caller's validation command. It carries no secret beyond the scoped
+  installation token, which is passed via the environment and never written to
+  the repo.
