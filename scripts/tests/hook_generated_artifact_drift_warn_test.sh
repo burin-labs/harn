@@ -74,12 +74,15 @@ exit 0
 SH
 chmod +x "$fake_bin/cargo"
 
-# Real harn binary for the advisory script (PATH fake cargo only).
-real_harn=$(command -v harn || true)
-if [ -z "$real_harn" ]; then
+# Prefer CI/worktree HARN_BIN, then PATH, then a local debug build.
+real_harn=${HARN_BIN:-}
+if [ -z "$real_harn" ] || [ ! -x "$real_harn" ]; then
+  real_harn=$(command -v harn || true)
+fi
+if [ -z "$real_harn" ] || [ ! -x "$real_harn" ]; then
   real_harn="$repo_root/target/debug/harn"
 fi
-[ -x "$real_harn" ] || fail "need an executable harn to exercise pre-commit advisory"
+[ -x "$real_harn" ] || fail "need an executable harn (HARN_BIN or PATH) to exercise pre-commit advisory"
 
 cat > "$work/Cargo.toml" <<'TOML'
 [workspace]
