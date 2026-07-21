@@ -186,6 +186,19 @@ pub(crate) async fn read_stdio_response(
     drained: Vec<serde_json::Value>,
     mut line_buf: Vec<u8>,
 ) -> Result<serde_json::Value, VmError> {
+    // One cumulative deadline for the whole response wait. Reading each line
+    // under its own `MCP_TIMEOUT` let a server that interleaves notifications
+    // reset the clock indefinitely, blocking an agent turn far beyond the
+    // budget (harn#4390). The deadline is fixed once here so notifications no
+    // longer extend it; a single synchronous call is bounded end to end.
+    let deadline = tokio::time::Instant::now() + inner.response_deadline;
+    let budget_secs = inner.response_deadline.as_secs();
+    let timed_out = || {
+        VmError::Runtime(format!(
+            "MCP: server did not respond to '{method}' within {budget_secs}s"
+        ))
+    };
+
     // Messages drained while the request write was in flight come first, in
     // arrival order.
     for msg in drained {
@@ -194,19 +207,18 @@ pub(crate) async fn read_stdio_response(
         }
     }
     loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(timed_out());
+        }
         // `line_buf` may still hold a partial line left over from the write
         // drain; the first read resumes it.
         let bytes_read = tokio::time::timeout(
-            MCP_TIMEOUT,
+            remaining,
             read_line_capped(&mut inner.reader, &mut line_buf, MCP_STDIO_MAX_LINE_BYTES),
         )
         .await
-        .map_err(|_| {
-            VmError::Runtime(format!(
-                "MCP: server did not respond to '{method}' within {}s",
-                MCP_TIMEOUT.as_secs()
-            ))
-        })??;
+        .map_err(|_| timed_out())??;
 
         if bytes_read == 0 {
             return Err(VmError::Runtime("MCP: server closed connection".into()));

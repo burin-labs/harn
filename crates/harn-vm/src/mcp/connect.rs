@@ -40,6 +40,7 @@ pub(crate) async fn mcp_connect_stdio_impl(
                 next_id: 1,
                 protocol_mode,
                 protocol_version,
+                response_deadline: MCP_TIMEOUT,
             },
         )))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
