@@ -37,7 +37,10 @@ fn provider_dispatch_audit_explains_selected_route_variants_in_process() {
         "dispatch audit JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
-    assert_eq!(harn_value["schema_version"], 3);
+    assert_eq!(
+        harn_value["schema_version"],
+        harn_cli::DISPATCH_AUDIT_SCHEMA_VERSION
+    );
     assert!(
         harn_value["catalog"]["hash_blake3"]
             .as_str()
@@ -114,7 +117,10 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
     );
     let harn_value = parse_json(&harn.stdout, "harn");
     let plan = &harn_value["tool_probe_plan"];
-    assert_eq!(plan["schema_version"], 3);
+    assert_eq!(
+        plan["schema_version"],
+        harn_cli::DISPATCH_AUDIT_SCHEMA_VERSION
+    );
     assert!(
         plan["plan_id"].as_str().unwrap_or_default().len() >= 16,
         "tool-probe plan should carry a stable id: {}",
@@ -134,7 +140,7 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
     assert_eq!(plan["matrix"]["case_count"], 1);
     assert_eq!(plan["matrix"]["mode_count"], 1);
     assert_eq!(plan["matrix"]["live_request_profile_count"], 1);
-    assert_eq!(plan["matrix"]["excluded_request_profile_count"], 1);
+    assert_eq!(plan["matrix"]["request_audit_profile_count"], 1);
     assert_eq!(plan["matrix"]["readiness_command_count"], 1);
     assert_eq!(plan["matrix"]["command_count"], 1);
     assert_eq!(plan["matrix"]["not_applicable_count"], 0);
@@ -150,7 +156,7 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
         serde_json::json!(["catalog_default"])
     );
     assert_eq!(
-        plan["excluded_request_profiles"],
+        plan["request_audit_profiles"],
         serde_json::json!(["parameter_edges"])
     );
     assert_eq!(plan["repeat"], 2);
@@ -366,44 +372,45 @@ fn provider_dispatch_audit_tool_probe_plan_marks_signed_thinking_not_applicable(
     assert_eq!(plan["matrix"]["readiness_command_count"], 1);
     assert_eq!(plan["command_count"], 0);
     assert_eq!(plan["matrix"]["command_count"], 0);
-    assert_eq!(plan["matrix"]["not_applicable_count"], 2);
+    // One not-applicable (case, mode) pair, expanded across both request
+    // profiles (live + request-audit) the plan now enumerates — bump this if the
+    // profile set changes, not the schema.
+    assert_eq!(plan["matrix"]["not_applicable_count"], 4);
     assert_eq!(
         plan["readiness_commands"][0]["route"],
         "ollama:devstral-small-2:24b"
     );
+    // One route x one case x two modes x two request profiles, every cell
+    // not-applicable for the same reason. Assert the shape and coverage as
+    // sets rather than fragile per-index positions that reorder when the
+    // request-profile set grows.
+    let not_applicable = plan["not_applicable_commands"]
+        .as_array()
+        .expect("not_applicable_commands is array");
+    assert_eq!(not_applicable.len(), 4);
+    let modes: std::collections::BTreeSet<&str> = not_applicable
+        .iter()
+        .map(|c| c["mode"].as_str().unwrap_or_default())
+        .collect();
     assert_eq!(
-        plan["not_applicable_commands"]
-            .as_array()
-            .expect("not_applicable_commands is array")
-            .len(),
-        2
+        modes,
+        std::collections::BTreeSet::from(["non_streaming", "streaming"])
     );
+    let profiles: std::collections::BTreeSet<&str> = not_applicable
+        .iter()
+        .map(|c| c["request_profile"].as_str().unwrap_or_default())
+        .collect();
     assert_eq!(
-        plan["not_applicable_commands"][0]["route"],
-        "ollama:devstral-small-2:24b"
+        profiles,
+        std::collections::BTreeSet::from(["catalog_default", "parameter_edges"])
     );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["case"],
-        "signed_thinking_tool_result_followup"
-    );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["structured_output"],
-        "format_kw"
-    );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["structured_output_mode"],
-        "delimited"
-    );
-    assert_eq!(
-        plan["not_applicable_commands"][0]["request_profile"],
-        "catalog_default"
-    );
-    assert_eq!(plan["not_applicable_commands"][0]["mode"], "non_streaming");
-    assert_eq!(plan["not_applicable_commands"][1]["mode"], "streaming");
-    assert_eq!(
-        plan["not_applicable_commands"][0]["reason"],
-        "route_has_no_signed_thinking_tool_history_surface"
-    );
+    assert!(not_applicable.iter().all(|c| {
+        c["route"] == "ollama:devstral-small-2:24b"
+            && c["case"] == "signed_thinking_tool_result_followup"
+            && c["structured_output"] == "format_kw"
+            && c["structured_output_mode"] == "delimited"
+            && c["reason"] == "route_has_no_signed_thinking_tool_history_surface"
+    }));
 }
 
 #[test]

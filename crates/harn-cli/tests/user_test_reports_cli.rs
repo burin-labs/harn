@@ -74,7 +74,10 @@ fn junit_and_json_out_written_for_passing_user_tests() {
 
     let json: Value = serde_json::from_str(&std::fs::read_to_string(&json_out).expect("read JSON"))
         .expect("parse JSON");
-    assert_eq!(json["schemaVersion"], 2);
+    assert_eq!(
+        json["schemaVersion"],
+        harn_cli::test_report::USER_TEST_REPORT_SCHEMA_VERSION
+    );
     assert_eq!(json["summary"]["total"], 1);
     assert_eq!(json["summary"]["passed"], 1);
     assert_eq!(json["summary"]["failed"], 0);

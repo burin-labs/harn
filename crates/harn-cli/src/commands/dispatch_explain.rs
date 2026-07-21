@@ -18,7 +18,13 @@ use crate::cli::{
     ProviderToolProbeCaseArg,
 };
 
-const SCHEMA_VERSION: u8 = 4;
+/// Schema version stamped on every `provider dispatch-audit` envelope (the
+/// report and its embedded tool-probe plan). Re-exported from the crate root as
+/// the single source of truth so integration tests reference it instead of
+/// duplicating the number — the duplication that let this rot silently while the
+/// slow-E2E tier was unwatched. The in-crate `audit` unit tests still pin the
+/// literal value, so an intentional bump remains a deliberate, reviewed change.
+pub const DISPATCH_AUDIT_SCHEMA_VERSION: u8 = 4;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub(crate) struct DispatchExplanation {
@@ -392,7 +398,7 @@ fn audit(args: &ProviderDispatchAuditArgs) -> DispatchAuditReport {
         None
     };
     DispatchAuditReport {
-        schema_version: SCHEMA_VERSION,
+        schema_version: DISPATCH_AUDIT_SCHEMA_VERSION,
         catalog,
         route_count: selected_routes.len(),
         variant_count: variants.len(),
@@ -552,7 +558,7 @@ fn tool_probe_plan(
         not_applicable_count: not_applicable_commands.len(),
     };
     DispatchAuditToolProbePlan {
-        schema_version: SCHEMA_VERSION,
+        schema_version: DISPATCH_AUDIT_SCHEMA_VERSION,
         plan_id,
         catalog_hash_blake3: catalog_hash.to_string(),
         matrix,
