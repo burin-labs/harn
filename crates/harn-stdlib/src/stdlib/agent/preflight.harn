@@ -686,6 +686,85 @@ fn __agent_apply_projection(session_id, messages, opts) {
   return projection?.messages ?? messages
 }
 
+fn __agent_runtime_feedback(message) {
+  const content = message?.content
+  if message?.role != "user" || type_of(content) != "string" {
+    return nil
+  }
+  const captures = regex_captures(
+    "^<runtime_feedback kind=\"([^\"]+)\">\n([\\s\\S]*)\n</runtime_feedback>$",
+    content,
+  )
+    ?? []
+  if len(captures) != 1 {
+    return nil
+  }
+  const groups = captures[0]?.groups ?? []
+  if len(groups) < 2 {
+    return nil
+  }
+  const body = groups[1]
+  const normalized = regex_replace("\\s+", " ", trim(body))
+  return {kind: groups[0], body: body, signature: sha256(groups[0] + "\n" + normalized)}
+}
+
+/**
+ * Collapse equivalent runtime feedback only on the model-facing prompt surface.
+ * The canonical transcript retains every injected note for audit and replay,
+ * while the latest equivalent note carries a repeat count instead of resending
+ * the full block once per stalled turn. Whitespace-only differences are treated
+ * as equivalent; distinct feedback kinds or substantive content stay separate.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+fn __agent_collapse_repeated_runtime_feedback(messages: list) -> list {
+  let counts = {}
+  for message in messages {
+    const feedback = __agent_runtime_feedback(message)
+    if feedback != nil {
+      counts = counts
+        + {[feedback.signature]: (to_int(counts[feedback.signature] ?? 0) ?? 0) + 1}
+    }
+  }
+  let remaining = counts
+  let out = []
+  for message in messages {
+    const feedback = __agent_runtime_feedback(message)
+    if feedback == nil {
+      out = out.push(message)
+      continue
+    }
+    const left = (to_int(remaining[feedback.signature] ?? 1) ?? 1) - 1
+    remaining = remaining + {[feedback.signature]: left}
+    if left > 0 {
+      continue
+    }
+    const repeat_count = to_int(counts[feedback.signature] ?? 1) ?? 1
+    if repeat_count == 1 {
+      out = out.push(message)
+      continue
+    }
+    const summary = "[Equivalent runtime feedback repeated "
+      + to_string(repeat_count)
+      + " times; earlier copies collapsed.]"
+    out = out.push(
+      message
+        + {
+        content: "<runtime_feedback kind=\""
+          + feedback.kind
+          + "\">\n"
+          + feedback.body
+          + "\n\n"
+          + summary
+          + "\n</runtime_feedback>",
+      },
+    )
+  }
+  return out
+}
+
 /**
  * agent_build_turn_messages.
  *
@@ -696,14 +775,15 @@ fn __agent_apply_projection(session_id, messages, opts) {
 pub fn agent_build_turn_messages(session, opts, iteration) {
   const raw_messages = agent_session_messages(session.session_id)
   const projected_messages = __agent_apply_projection(session.session_id, raw_messages, opts)
+  const collapsed_messages = __agent_collapse_repeated_runtime_feedback(projected_messages)
   const decorator = opts?.message_decorator ?? opts?.decorate_message
   if !(opts?.timestamp_messages ?? opts?.message_timestamps ?? false) && decorator == nil {
-    return projected_messages
+    return collapsed_messages
   }
   const timestamp = date_now_iso()
   let out = []
   let index = 0
-  for message in projected_messages {
+  for message in collapsed_messages {
     out = out.push(
       __agent_decorate_turn_message(message, opts, session, iteration, index, timestamp),
     )
