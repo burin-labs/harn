@@ -52,6 +52,7 @@ use paths::{
     path_is_within,
 };
 
+mod handler_env;
 #[cfg(target_os = "linux")]
 mod linux;
 mod locked_append;
@@ -65,6 +66,9 @@ mod replace;
 #[cfg(target_os = "windows")]
 mod windows;
 
+pub(crate) use handler_env::effective_fallback;
+#[cfg(test)]
+pub(crate) use handler_env::handler_sandbox_test_guard;
 pub(crate) use locked_append::AppendLockOptions;
 pub(crate) use policy::allows_network as policy_allows_network;
 pub(crate) use replace::{
@@ -1764,26 +1768,6 @@ fn spawn_error(error: std::io::Error) -> VmError {
     VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
         format!("process spawn failed: {error}"),
     )))
-}
-
-/// Resolve the fallback policy for the requested profile. `OsHardened`
-/// always enforces — that is the entire point of the profile, so the
-/// `HARN_HANDLER_SANDBOX` env var cannot weaken it. `Worktree` honors
-/// the env var (default `warn`).
-pub(crate) fn effective_fallback(profile: SandboxProfile) -> SandboxFallback {
-    if matches!(profile, SandboxProfile::OsHardened) {
-        return SandboxFallback::Enforce;
-    }
-    match std::env::var(HANDLER_SANDBOX_ENV)
-        .unwrap_or_else(|_| "warn".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "0" | "false" | "off" | "none" => SandboxFallback::Off,
-        "1" | "true" | "enforce" | "required" => SandboxFallback::Enforce,
-        _ => SandboxFallback::Warn,
-    }
 }
 
 pub(crate) fn warn_once(key: &str, message: &str) {

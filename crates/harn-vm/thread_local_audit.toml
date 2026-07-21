@@ -606,6 +606,12 @@ category = "thread_private"
 plan = "thread_private_cache"
 
 [[thread_local]]
+path = "src/stdlib/sandbox/handler_env.rs"
+statics = ["OVERRIDE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/stdlib/supervisor.rs"
 statics = ["SUPERVISORS", "SUPERVISOR_COUNTER"]
 category = "runtime_registry"
