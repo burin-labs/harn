@@ -335,18 +335,24 @@ fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
   )
     .to_list()
   if len(reporters) != 1 {
-    return errors
+    errors = errors
       + [
       "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must run ${CACHE_BUDGET_SCRIPT} exactly once",
     ]
   }
-  if reporters[0]?.["continue-on-error"] ?? false {
+  const tolerant_reporters = reporters.filter({ step -> step?.["continue-on-error"] ?? false })
+    .to_list()
+  if len(tolerant_reporters) > 0 {
     errors = errors
       + [
       "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must fail when cache telemetry fails",
     ]
   }
-  if trim(reporters[0]?.env?.HARN_PRUNE_SUPERSEDED_RELEASE_CACHES ?? "") != "1" {
+  const pruning_reporters = reporters.filter(
+    { step -> trim(step?.env?.HARN_PRUNE_SUPERSEDED_RELEASE_CACHES ?? "") == "1" },
+  )
+    .to_list()
+  if len(pruning_reporters) != 1 {
     errors = errors
       + [
       "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must prune superseded release caches",

@@ -76,12 +76,16 @@ static SESSION_MCP_CLIENTS: LazyLock<Mutex<BTreeMap<String, BTreeMap<String, VmM
 
 #[derive(Default)]
 struct ToolLifecycleStarts {
-    /// `(session_id, tool_call_id)` → `tool_name` for every tool call that has
-    /// emitted a `ToolCall` start but not yet a terminal
-    /// `ToolCallUpdate { Completed | Failed }`. The `tool_name` is retained so a
-    /// terminal update synthesized at session finalize (harn#4733) carries the
-    /// same name as the original start.
-    live: BTreeMap<(String, String), String>,
+    /// Every tool call that has emitted a start but not yet a terminal update.
+    /// Retaining the latest parsed input makes a synthesized loop-exit terminal
+    /// as diagnostic as a normal terminal update instead of discarding the
+    /// command that was already dispatched.
+    live: BTreeMap<(String, String), LiveToolCall>,
+}
+
+struct LiveToolCall {
+    name: String,
+    raw_input: serde_json::Value,
 }
 
 impl ToolLifecycleStarts {
@@ -91,17 +95,30 @@ impl ToolLifecycleStarts {
                 session_id,
                 tool_call_id,
                 tool_name,
+                raw_input,
                 ..
             } => {
                 if tool_call_id.trim().is_empty() {
                     return true;
                 }
-                self.live
-                    .insert(
-                        (session_id.clone(), tool_call_id.clone()),
-                        tool_name.clone(),
-                    )
-                    .is_none()
+                let key = (session_id.clone(), tool_call_id.clone());
+                match self.live.entry(key) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(LiveToolCall {
+                            name: tool_name.clone(),
+                            raw_input: raw_input.clone(),
+                        });
+                        true
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut entry) => {
+                        let live = entry.get_mut();
+                        if !tool_name.trim().is_empty() {
+                            live.name.clone_from(tool_name);
+                        }
+                        live.raw_input.clone_from(raw_input);
+                        false
+                    }
+                }
             }
             AgentEvent::ToolCallUpdate {
                 session_id,
@@ -113,23 +130,42 @@ impl ToolLifecycleStarts {
                     .remove(&(session_id.clone(), tool_call_id.clone()));
                 true
             }
+            AgentEvent::ToolCallUpdate {
+                session_id,
+                tool_call_id,
+                tool_name,
+                raw_input,
+                ..
+            } => {
+                if let Some(live) = self
+                    .live
+                    .get_mut(&(session_id.clone(), tool_call_id.clone()))
+                {
+                    if !tool_name.trim().is_empty() {
+                        live.name.clone_from(tool_name);
+                    }
+                    if let Some(raw_input) = raw_input {
+                        live.raw_input.clone_from(raw_input);
+                    }
+                }
+                true
+            }
             _ => true,
         }
     }
 
     /// Remove every still-in-flight call for `session_id`, returning
-    /// `(tool_call_id, tool_name)` for each so the caller can synthesize a
+    /// `(tool_call_id, tool_name, raw_input)` for each so the caller can synthesize a
     /// terminal update. Callers that only need to release the entries (e.g.
     /// tests) use [`Self::clear_session`].
-    fn drain_session(&mut self, session_id: &str) -> Vec<(String, String)> {
+    fn drain_session(&mut self, session_id: &str) -> Vec<(String, String, serde_json::Value)> {
         let live = std::mem::take(&mut self.live);
         let mut drained = Vec::new();
-        for ((active_session_id, tool_call_id), tool_name) in live {
+        for ((active_session_id, tool_call_id), call) in live {
             if active_session_id == session_id {
-                drained.push((tool_call_id, tool_name));
+                drained.push((tool_call_id, call.name, call.raw_input));
             } else {
-                self.live
-                    .insert((active_session_id, tool_call_id), tool_name);
+                self.live.insert((active_session_id, tool_call_id), call);
             }
         }
         drained
@@ -356,7 +392,7 @@ pub(crate) fn fire_session_end_hooks(session_id: &str, abandon_in_flight: bool) 
             Vec::new()
         }
     };
-    for (tool_call_id, tool_name) in abandoned {
+    for (tool_call_id, tool_name, raw_input) in abandoned {
         emit_agent_event_sync(&AgentEvent::ToolCallUpdate {
             session_id: session_id.to_string(),
             tool_call_id,
@@ -371,7 +407,7 @@ pub(crate) fn fire_session_end_hooks(session_id: &str, abandon_in_flight: bool) 
             changed_paths: None,
             executor: None,
             parsing: None,
-            raw_input: None,
+            raw_input: Some(raw_input),
             raw_input_partial: None,
             audit: None,
         });
@@ -507,6 +543,31 @@ mod tests {
         }
     }
 
+    fn pending_input(
+        session_id: &str,
+        tool_call_id: &str,
+        raw_input: serde_json::Value,
+    ) -> AgentEvent {
+        AgentEvent::ToolCallUpdate {
+            session_id: session_id.to_string(),
+            tool_call_id: tool_call_id.to_string(),
+            tool_name: "verify".to_string(),
+            status: ToolCallStatus::Pending,
+            raw_output: None,
+            error: None,
+            duration_ms: None,
+            execution_duration_ms: None,
+            error_category: None,
+            mutation_status: ToolMutationStatus::Unknown,
+            changed_paths: None,
+            executor: None,
+            parsing: None,
+            raw_input: Some(raw_input),
+            raw_input_partial: None,
+            audit: None,
+        }
+    }
+
     #[test]
     fn session_end_hook_process_global_lifetime_is_guard_owned_across_resets() {
         const SESSION_ID: &str = "hook-registration-lifetime";
@@ -597,12 +658,24 @@ mod tests {
         // Two calls go in flight for this session; a third belongs to a
         // *different* session and must survive this session's finalize.
         emit_agent_event_sync(&start(SESSION_ID, "call-a"));
+        emit_agent_event_sync(&pending_input(
+            SESSION_ID,
+            "call-a",
+            json!({"cmd": "cargo test"}),
+        ));
         emit_agent_event_sync(&start(SESSION_ID, "call-b"));
         emit_agent_event_sync(&start(OTHER_SESSION, "call-c"));
 
         fire_session_end_hooks(SESSION_ID, true);
 
-        let abandoned: Vec<(String, String, String, Option<String>)> = {
+        type AbandonedCall = (
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<serde_json::Value>,
+        );
+        let abandoned: Vec<AbandonedCall> = {
             let events = sink.events.lock().expect("recorded events");
             events
                 .iter()
@@ -613,6 +686,7 @@ mod tests {
                         tool_name,
                         status: ToolCallStatus::Failed,
                         error,
+                        raw_input,
                         error_category: Some(ToolCallErrorCategory::AbandonedAtLoopExit),
                         ..
                     } => Some((
@@ -620,6 +694,7 @@ mod tests {
                         tool_call_id.clone(),
                         tool_name.clone(),
                         error.clone(),
+                        raw_input.clone(),
                     )),
                     _ => None,
                 })
@@ -631,7 +706,7 @@ mod tests {
             2,
             "both in-flight calls for the finalizing session get one terminal update each"
         );
-        for (session_id, _id, tool_name, error) in &abandoned {
+        for (session_id, _id, tool_name, error, _) in &abandoned {
             assert_eq!(session_id, SESSION_ID);
             assert_eq!(
                 tool_name, "verify",
@@ -642,7 +717,18 @@ mod tests {
                 "the abandoned call carries a human-readable reason"
             );
         }
-        let resolved: BTreeSet<&str> = abandoned.iter().map(|(_, id, _, _)| id.as_str()).collect();
+        assert_eq!(
+            abandoned
+                .iter()
+                .find(|(_, id, _, _, _)| id == "call-a")
+                .and_then(|(_, _, _, _, raw_input)| raw_input.as_ref()),
+            Some(&json!({"cmd": "cargo test"})),
+            "the terminal update preserves the latest parsed input observed before dispatch"
+        );
+        let resolved: BTreeSet<&str> = abandoned
+            .iter()
+            .map(|(_, id, _, _, _)| id.as_str())
+            .collect();
         assert_eq!(
             resolved,
             BTreeSet::from(["call-a", "call-b"]),
