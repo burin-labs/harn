@@ -9,7 +9,196 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.30
+
+### Breaking
+
+- **Diff artifacts now render as standard unified diffs.** `artifact_diff(path, before, after)` previously emitted an
+  `--- a/… / +++ b/…` header followed by *every* line of the file, annotated — no `@@` hunk headers and no context
+  limiting, so a one-line change in a thousand-line artifact produced a thousand-line body. It now emits real
+  unified-diff output: `@@` hunks with bounded surrounding context and `\ No newline at end of file` markers, and an
+  empty string for identical inputs instead of a header over every unchanged line. The artifact's `kind`, `title`,
+  `metadata`, and `data` fields are unchanged; only the rendered `body` text differs. (#5334)
+- **One diff engine for the whole workspace.** Two independent hand-rolled Myers implementations (the orchestration
+  run-record renderer and the `ast.dry_run` preview renderer, each keeping a full per-step edit-graph snapshot) and
+  the `git diff --no-index` subprocess behind `harn package publish`'s index preview now all route through a single
+  `similar`-crate-backed owner using the Histogram algorithm. `ast.dry_run` output is byte-for-byte unchanged;
+  `harn package publish` no longer shells out to `git` or writes temp files to render its index preview. (#5334)
+- **One project-root walk for every frontend.** "Which `harn.toml` governs
+  this file?" was answered by nine separate hand-rolled directory walks (in the
+  CLI package layer, the LSP, `harn doctor`, `harn mcp`, `harn config`, the VM
+  runtime, and the asset resolver) that disagreed with each other. They now all
+  delegate to a single walk in `harn-modules` (`manifest_walk`), so every
+  frontend resolves the same project root for the same file. Behavior changes
+  users may notice:
+  - **The `.git` boundary is now enforced everywhere.** The LSP rule loader,
+    `harn doctor`, `harn mcp`, and the VM runtime `find_project_root` (used for
+    `@`-asset resolution, MCP roots, and `ln`) previously walked past a `.git`
+    directory to the filesystem root, so a stray `harn.toml` in an enclosing
+    repository or in `$HOME` could be silently adopted as your project. All of
+    them now stop at the first `.git` boundary, matching what `harn check`
+    already did. A project whose manifest legitimately sat *above* a `.git`
+    directory will no longer be found across that boundary.
+  - **A directory named `harn.toml` is no longer treated as a manifest.** The
+    asset resolver and VM runtime matched any entry (`.exists()`); the walk now
+    requires a regular file.
+  - **A malformed `harn.toml` is no longer silently ignored.** The CLI's
+    manifest loader printed a warning and returned "not found" on a parse
+    error, so a broken manifest was indistinguishable from no manifest across
+    ~17 call sites — your config was quietly dropped. Locating and parsing are
+    now distinct: callers that can surface an error (dependency materialization,
+    runtime-extension/persona/eval-pack loading, `harn rules`) propagate the
+    parse failure; callers that cannot (rule-directory discovery, skills/check
+    config) report it to stderr and then fall back, but never swallow it
+    silently.
+- Migrate `std/agent/verdict`'s `Verdict` from a `kind`-tagged shape union to a
+  real `enum` (`Pass` / `Fail` / `Indeterminate`). Helpers keep the same
+  string dispositions (`"pass"` / `"fail"` / `"indeterminate"`); consumers that
+  matched on `v.kind` or constructed `{kind: "…"}` shapes must match/construct
+  `Verdict` variants instead. The unforgeable host-issued `verdict_receipt` on
+  `Pass` is unchanged.
+- Typecheck `EnumName.Variant(args)` payload fields (the live MethodCall
+  lowering), so declared field types — including opaque host names like
+  `verdict_receipt` — reject forgeries at `harn check` rather than only via
+  shape-union assignment.
+- **Duration strings now use one grammar everywhere.** Five call sites had
+  forked the `<number><unit>` parser and disagreed on what the same string
+  meant. Most sharply, `when_budget.timeout` was parsed by *both* the CLI
+  manifest validator and the runtime `trigger_register`, which disagreed on
+  overflow — the same value was rejected at validation but accepted and
+  silently clamped at registration. The single grammar requires a unit suffix,
+  accepts `ms`/`s`/`m`/`h`/`d`/`w` case-insensitively, and reports oversized
+  values instead of clamping them. It now matches the Harn language's own
+  duration literals. Behaviour changes by call site:
+  - `when_budget.timeout` in a package manifest (`harn` CLI validation) and in
+    `trigger_register` (runtime): a bare number such as `timeout = "500"` was
+    read as 500ms and is now an error — write `"500ms"`. `d` and `w` suffixes
+    are now accepted. An oversized value is now an error at
+    `trigger_register`, where it previously saturated to `u64::MAX` and
+    presented to the user as a hang.
+  - `harn run --timeout`: `d` and `w` suffixes are now accepted. This flag
+    keeps its own rule that the value must be greater than zero, since a
+    zero-length run deadline is always a mistake rather than an instruction;
+    that check is documented at the call site rather than folded into the
+    shared grammar.
+  - All duration arguments across the CLI: units are now matched
+    case-insensitively (`"5M"`) and a space before the suffix is tolerated
+    (`"5 m"`).
+
+  No shipped manifest, fixture, conformance test, or documented example used a
+  bare number for these fields — every one already wrote an explicit unit — so
+  this affects hand-written configs only.
+- `word_wrap` and the PDF document renderer (`document_render_pdf`) now measure
+  text in terminal **display columns** instead of grapheme/character counts.
+  Wide glyphs — CJK ideographs and most emoji — count as two columns and
+  combining marks as zero, matching how the text actually occupies a line. For
+  ASCII input the measurement is unchanged (a column equals a character), but
+  wrapping of non-ASCII text now breaks in different, correct places.
+- `harn_parser::diagnostic::edit_distance` has been removed. It was a plain
+  Levenshtein implementation with no in-tree callers outside the ranking wrapper
+  that replaced it; embedders needing the same metric should depend on `strsim`
+  directly, which is what the crate now uses internally.
+  `harn_parser::diagnostic::find_closest_match` — the suggestion API that actually
+  encodes Harn's ranking policy — is unchanged.
+
+### Added
+
+- **Pre-commit warns when staged edits touch a generated-artifact source
+  without staging its mirror (#5141).** A Harn script matches staged paths
+  against `scripts/generated_artifacts.toml` and names the exact
+  `make gen-*` / `make sync-*` command; the warning never blocks the
+  commit (CI remains the drift authority).
+- Add `ArtifactDescriptor<T>` so run-artifact producers and consumers share one
+  name and schema contract, with leased atomic JSON writes and typed read/write
+  failures.
+- Added versioned typed contracts, artifact descriptors, and bounded typed
+  readers for durable agent artifacts. `std/artifacts/typed` publishes a general
+  `VersionedContract<T>` layer — version-aware JSON reads, discriminated
+  JSONL event decoding with an explicit `unknown` extension envelope, and a
+  single `ArtifactReadFailure` that keeps `missing`, `malformed`,
+  `version_mismatch`, `schema_invalid`, `rule_failed`, and `rule_error` distinct.
+  `std/agent/artifacts` builds on it to type the agent-result JSON, transcript
+  context, and every stable `llm_transcript.jsonl` event family, with reusable
+  descriptors so consumers stop treating durable results as permissive dicts.
+- **`bytes_from_base64url(text) -> bytes` (#5285).** Binary-safe URL-safe
+  base64 decode that accepts padded or unpadded input, rejects the standard
+  `+`/`/` alphabet, and round-trips arbitrary octets with `bytes_to_base64url`
+  / `base64url_encode`. Prefer this over `base64url_decode` when the payload
+  is not UTF-8 text (that builtin still returns a lossy string).
+- **`std/oauth/storage` secrets backend — `secrets({provider})` (#5286).**
+  A `harness.secrets`-backed OAuth token store for local harnesses that
+  already authenticate through the secret host, replacing the per-provider
+  cache/serialization adapters they used to hand-roll. It serializes each
+  `TokenSet` deterministically (sorted-key JSON), preserves rotating refresh
+  tokens (never drops one on update; rotates when a new one is issued),
+  coalesces concurrent refreshes single-flight per `(provider, key)`, keeps
+  token material out of the handle and diagnostics, and composes with
+  `harn connect` by reading/writing the connector's canonical
+  `<provider>/oauth-token` secret id. Also exposed as `storage().secrets`.
+  Adds a `harness.secrets.delete(name, scope?)` surface (with a
+  `SecretProvider::delete_scoped` capability) so a revoked token can be
+  removed rather than left as a tombstone.
+- **Typed context-evaluation manifests and reports (#5291).**
+  `std/context/eval` now exports one typed vocabulary for the whole
+  context-engineering eval surface — `ContextEvalManifest`, `ContextEvalMode`,
+  `ContextEvalTask`, `ContextEvalReport`, and their nested case/finding
+  contracts (`ContextEvalRunReport`, `ContextEvalCorrectness`,
+  `ContextEvalToolQuality`, `ContextEvalAggregate`, and friends) — mirroring
+  the serde twins in `crates/harn-vm/src/orchestration/context_eval.rs`.
+  `context_eval_mode`, `context_eval_task`, `context_eval_manifest`, and
+  `context_eval_report_schema` now have concrete input and return contracts
+  with no `dict` escape hatches and no compatibility aliases. Required
+  identity and score fields stay required; optional and `...rest` extension
+  fields preserve forward compatibility, and deterministic scores /
+  thresholds / identifiers / evidence stay distinct from model-authored
+  prose. The exported types materialize as runtime schemas through imported
+  modules, so schema validation and docs consume them directly.
+- **`workflow_run_repair` exports a typed result and attempt contract (#5296).**
+  `std/workflow/repair` now exports `WorkflowRepairResult` (the stable
+  `ok` / `status` / `text` / `findings` / `verification` / `attempts` /
+  `result` / `run` envelope) and `WorkflowRepairAttempt`, and annotates
+  `workflow_run_repair` with the result type. Success, exhausted, and
+  execution-error runs are all representable through the same envelope, while
+  the raw executor `result` and workflow `run` stay dynamic (`any`) so
+  arbitrary payloads are never narrowed. A strict-type conformance fixture
+  forwards the result through the installed public package boundary without
+  recreating the schema.
+- **`GitCommandResult` is consumable through the `std/git` public API (#5297).**
+  `import { GitCommandResult } from "std/git"` resolves from an installed Harn
+  package, and the type is a structural superset of the shared
+  `std/command::CommandResult` envelope — so a `git_run` result flows anywhere
+  the common command-result contract is expected while keeping its
+  git-specific capture fields (argv, cwd, combined output, output refs) with no
+  downstream copy of the schema. A strict-type conformance fixture forwards
+  `git_run` through a named runner/result contract across an installed-package
+  boundary.
+- **One reusable "bump Harn runtime" workflow (#5299).** Harn now publishes a
+  single immutable-ref `workflow_call` workflow (`.github/workflows/bump-harn.yml`)
+  that every package repo can call to roll its pinned Harn runtime forward. A
+  consumer needs only a small trigger wrapper plus its own declared validation
+  command — no copied implementation scripts. The orchestration is Harn code,
+  not shell: the new embedded `std/bump/runtime` module is a pure, adapter-injected
+  state machine (resolve target, readiness gate, idempotent no-op, pin write,
+  deterministic lockfile refresh, single declared validation entrypoint,
+  branch/PR lease reconciliation against stale heads, signed `createCommitOnBranch`,
+  PR create/refresh, auto-merge) that emits a machine-readable `harn-bump-runtime-v1`
+  receipt. `std/bump/live` binds it to git and GitHub (HTTP/GraphQL) for CI. The
+  whole state machine is covered by no-network, in-process `harn test` fixtures
+  (no sleeps, no wall-clock assertions) for every path: already-current no-op,
+  delayed asset publication, lockfile regeneration, validation failure, stale
+  branch/PR leases, existing-PR refresh, and successful auto-merge.
+- **Typed agent chat-loop contracts (#5304).** `std/agent/chat` now exports
+  `AgentModelTurn` (the normalized model-turn result), `AgentChatLoopResult`
+  (the aggregate loop result), the `AgentModelTurnCallback` signature, and the
+  `AgentChatLoopOptions` surface. `agent_chat_loop` is annotated with the
+  options and result contracts, and its `on_model_turn` callback names the
+  typed model turn — so packages can accept or forward the callback and read
+  the aggregate result without `dict`/`any` or a duplicated local schema. Raw
+  provider/tool payloads (`tools.calls`, `transcript`, `llm`, `trace`) stay
+  dynamic, and the deterministic fields carry `...rest` for forward
+  compatibility.
+- Added bounded, resumable JSONL page readers with typed filesystem failures and
+  per-record schema and validation-rule diagnostics.
 
 ### Changed
 
@@ -17,6 +206,348 @@ keeps condensed series summaries instead of full per-patch history.
   the registry type returned by `tool_registry()`, use it on public function
   boundaries, and pass it through typed tool helpers and agent/LLM option
   surfaces without widening to `dict`/`any` or copying the registry shape.
+
+- **Agent-loop tool-result status reads dispatch rejections from typed
+  envelope fields (#5202).** `__tool_result_ok` / product-error classification
+  use `agent_tool_result_outcome` and structured `error` / `error_category`
+  (including the nested host body) instead of the three-variant
+  `invalid_arguments` / `permission_denied` prose `contains` chain. Write-tool
+  diagnostics / `[edit rejected]` prose remains a fallback until producers
+  guarantee a stamped `product_error` field.
+- **CI executes the Rust suite from an exact-SHA nextest archive (#5301).**
+  The behavior producer compiles the workspace suite once and ships one
+  digest-bound `all()` archive plus the `harn` CLI. Neutral and Landlock
+  consumers verify the source, toolchain, nextest version, build flags,
+  checksums, and size budget, then filter at execution time — so the bundle
+  does not ship duplicate multi-GB binaries or force a second cold compile.
+  Harn-only audit lanes consume a separate checksum-bound CLI artifact instead
+  of downloading the multi-gigabyte test archive, while every Linux topology —
+  Blacksmith and GitHub-hosted alike — executes the archive rather than
+  skipping or rerunning the suite in the producer.
+  The compressed bundle budget is 9 GiB to match the current workspace
+  nextest archive size under `line-tables-only` debuginfo.
+- Converge Windows `\\?\` verbatim-path handling onto a single owner
+  (`harn_vm::windows_path`). The two duplicated prefix-strip helpers (in the
+  temp-directory builtins and in hardware disk detection) and the paired
+  prefix-add helper for `MoveFileExW` now live in one module, so the `\\?\` /
+  `\\?\UNC\` rules have one source of truth. Pure code motion, no behavior
+  change (harn#5375).
+- **One owner for RFC3339 timestamps and for `~`/`$HOME` expansion.**
+  - `harn-clock` now owns RFC3339 rendering (`format_rfc3339`, `now_rfc3339`,
+    `system_now_rfc3339`). Roughly twenty hand-rolled `now_rfc3339` copies
+    across the VM, CLI, hostlib, and serve adapters route through it, so a
+    `PausedClock` pins the rendered timestamp wherever a `Clock` is in scope.
+    The renderer is infallible: `time`'s formatter cannot fail for a wall-clock
+    UTC instant, and the copies that papered over that branch with an empty
+    string, a `Display` rendering, or a random UUID now all emit
+    `1970-01-01T00:00:00Z`.
+  - `harn_vm::user_dirs` now owns home-directory expansion (`expand_home`,
+    `expand_home_from`, `expand_home_path`) and handles the full `~`, `~/`,
+    `$HOME`, `$HOME/` set. `harn local launch` and LoRA path normalization read
+    `$HOME` directly and so resolved nothing on Windows; both are fixed.
+    `~alice` and `$HOMEBREW` are held back from expanding.
+- Dropped the unmaintained `fs2` dependency in favour of the standard library's
+  file-locking API, stable since Rust 1.89. Contention is now detected through
+  the typed `std::fs::TryLockError::WouldBlock` variant instead of comparing raw
+  OS error codes, and available disk space is reported through `sysinfo`.
+- Host hardware detection now has a single owner. `harn doctor` and `harn quickstart` each carried their own RAM, GPU,
+  and free-disk probes alongside the ones in `commands/hardware.rs` — three independent implementations that disagreed
+  on both source and semantics. Both now read the shared snapshot, so `harn doctor`, `harn quickstart`, `harn local *`,
+  and `harn models recommend` cannot drift apart. Total RAM and free disk come from `sysinfo` instead of shelling out to
+  `sysctl`, `df`, and `/proc/meminfo`; the `vm_stat`/`/proc/meminfo`/`df` text parsing and their `#[cfg(target_os)]`
+  arms are gone.
+
+  Free disk is now `sysinfo`'s "space you could realistically write" figure rather than the raw free-block count
+  (`f_bfree`, which `fs2::free_space` returned), and THE PRINTED NUMBER CHANGES. On macOS `sysinfo` returns
+  `AvailableCapacityForImportantUsage`, which counts purgeable caches and local snapshots the OS reclaims under
+  pressure — so `harn doctor` free disk reads HIGHER than before (measured 308 GB -> 325 GB on one host), matching what
+  Finder's "Available" shows. On Linux/BSD it is `f_bavail`, which excludes root-reserved blocks, so there it reads
+  slightly LOWER than the raw free count. Both are the space a normal writer actually gets, which is what `df` and the
+  doctor output already claim to report. The `harn doctor` hardware check still warns under 5 GB and fails under 1 GB;
+  on macOS the higher figure makes it marginally less likely to warn on a nearly-full disk, which is correct because
+  that purgeable space is genuinely reclaimable.
+
+  Available RAM on macOS deliberately keeps its `vm_stat` reclaimable-pages estimate rather than moving to
+  `sysinfo::available_memory()`. That figure is `active + inactive + free` — pages processes are currently resident in,
+  not pages reclaimable under pressure — and measured ~2x higher on a loaded 48 GiB machine (32.5 vs 16.5 GiB). Both
+  `harn local launch` (its OOM gate) and `harn models recommend` (its RAM bucketing) treat this number as a headroom
+  budget, so the inflated value would silently disable both guards. Linux available RAM does move to `sysinfo`, where it
+  is `MemAvailable` and byte-identical to the previous parse.
+- **Process-liveness probes use maintained `libc` bindings.** The host-lease liveness probe and the VM's
+  process-cleanup wait no longer hand-declare `extern "C" { fn kill }`, and the macOS process-generation
+  identity no longer carries a hand-transcribed 22-field `repr(C)` copy of `proc_bsdinfo`. Both now use the
+  `libc` crate's bindings. Behavior is unchanged on every platform — the `ESRCH`-only definition of "dead"
+  and the microsecond-resolution start-time identity that defends against PID reuse are both preserved
+  exactly — but the Apple struct layout is now maintained upstream instead of being a local transcription
+  that could silently drift from the system header and yield a wrong lease-owner identity.
+- **One owner for shared text utilities.** Truncation, ANSI stripping, and identifier
+  case conversion moved to `harn_vm::text`, replacing eight ad-hoc truncators, three
+  hand-written Levenshtein implementations (now `strsim`), and four private case
+  converters. Behavioral consequences: case conversion outside the `strings` builtins
+  now follows the same word-splitting rules those builtins use, so acronyms convert as
+  one word (`HTTPServer` → `http_server`, not `h_t_t_p_server`) — this affects linter
+  rename suggestions, connector event discriminators, and import-path guessing. The
+  three "did you mean" ranking policies (typechecker snake-segment reordering,
+  length-tiered VM name suggestions, host-operation matching) are unchanged.
+
+### Fixed
+
+- Bounded a stdio MCP tool call by a single **cumulative** response deadline
+  instead of a per-read timeout. Previously each read reset the 60s clock, so
+  a server that interleaved notifications (or dribbled output) could hold an
+  agent turn open far beyond the budget. A single synchronous MCP call is now
+  bounded end to end; genuinely long-running work should use the
+  task/progress-polling pattern rather than a call held open for minutes
+  (harn#4390).
+- Make public struct and enum exports consistent across module checking and runtime imports.
+- Isolate the per-test performance ratchet from concurrent audit fanout and
+  refresh its macOS calibration so release checks measure workload regressions
+  instead of runner contention or stale baselines.
+- Reset playground VM state between in-process runs and make harn-cli leak
+  attribution diagnostic for both library and integration test targets.
+- Lock importer-side construction and match of an imported enum's variants
+  (harn#5203) with a conformance fixture that defines the enum in a dependency
+  and exercises `ImportedEnum.Variant(...)` only in the importing module.
+- Release smoke no longer requires `workflow_run.event == 'push'`, so recovery
+  and `release-attempt/*` finalizations that publish GitHub release assets are
+  smoked too. Resolve now keys artifact mode on the triggering run's
+  `Create GitHub release` success, surfaces the candidate ref in the Actions
+  run name, and `scripts/check_release_smoke.sh` gates the release verification
+  checklist on a successful smoke for that tag.
+- **Completion-judge diagnoses now drive targeted recovery (#5171).** Structured
+  `diagnosis`, `next_step`, and gap output is preserved in recovery feedback;
+  stall-judge vetoes also skip the repeated pending tool call.
+- Collapse repeated equivalent runtime feedback in stalled agent prompts to the
+  latest copy plus a repeat count, bounding context growth while retaining the
+  full audit transcript.
+- Made loop-control and provider-error telemetry report the decision and completed attempt accurately.
+- Stop `HARN-LNT-022` from reporting bare enum-variant match patterns as
+  undefined functions. Match-arm patterns are no longer walked as call
+  expressions, so a valid `Circle(radius)` arm is clean and call-shaped lint
+  rules no longer fire on pattern heads.
+- Reject a bare match pattern naming an *imported* enum's variant at check time
+  (`HARN-MAT-003`) instead of accepting it and failing at runtime. The VM
+  resolves bare variants only against locally declared enums, so imported
+  variants must be qualified; the error now names the `Enum.Variant(...)` form
+  to use.
+- Isolate egress-policy state per `harn test` pipeline so policy-declaring,
+  HTTP-mocked suites run reliably with `--parallel`.
+- Run the host-lease SQLite database in WAL journal mode (with
+  `synchronous = NORMAL`) and give a briefly-contended registry writer more
+  headroom before it errors. Under the default rollback journal a writer took a
+  whole-database exclusive lock, so under heavy parallel load (for example a CI
+  host running the entire test workspace at once) concurrent lease
+  acquire/release could fail with `database is locked`. The one-time WAL
+  conversion of a fresh database also now retries within the busy budget, since
+  SQLite bypasses the busy handler for that exclusive-lock upgrade — otherwise
+  connections racing to create the same brand-new registry still errored on
+  Windows, where file locking is mandatory (harn#5351).
+- Repaired the slow-E2E provider dispatch-audit, tool-probe, and user-test-report
+  contract tests, which had silently rotted against merged schema and behavior
+  changes while the tier was unwatched. The schema-version assertions now
+  reference the owning `pub const` (one source of truth) instead of duplicating a
+  literal that drifts out of date, so an intentional bump propagates in one place
+  (harn#5387).
+- **One owner for the test env-override seam.** The egress (`HARN_EGRESS_*`)
+  and handler-sandbox (`HARN_HANDLER_SANDBOX`) modules read the environment
+  through the shared `test_env` seam instead of carrying their own thread-local
+  override maps. Their test guards now wrap the shared guard, layering only
+  domain behavior (the egress policy reset) on top.
+- Made the `harn mcp serve` stdio test surface deterministic and
+  self-diagnosing. A single bounded `StdioMcpClient` now owns the JSON-RPC
+  round trip: every read has a deadline and every failure kills the child
+  and reports its captured stderr plus the in-flight request, so a wedged
+  server can no longer silently consume the nextest slow-test cap as an
+  opaque 180s timeout. The exhaustive per-tool contract already lives
+  deterministically in the in-process `serve_tests` suite, so the binary
+  smoke was trimmed to the coverage the wire surface uniquely owns —
+  framing, dispatch, resource read, and lifecycle (harn#5397).
+- Hardened the stdio server's own shutdown: the outbound writer now exits on
+  an explicit signal and a final drain rather than waiting for every
+  progress-sender clone to drop, so a detached background task can never
+  wedge connection teardown at EOF (harn#5397).
+- Report free disk space correctly on Windows. `harn doctor`/hardware detection
+  canonicalized the probe path (which yields an extended-length `\\?\` verbatim
+  path on Windows) and then matched it against sysinfo's plain `C:\` mount
+  points; the verbatim prefix never prefix-matched, so free space read as
+  unavailable on every Windows machine. The path is now de-verbatimed before the
+  volume comparison.
+- **One canonical-JSON owner for every hash and signature input.** Seven
+  near-identical canonicalizers across the VM (`mcp_host`, channels,
+  `llm::cache`, lifecycle receipts, merge-captain audit, `project.enrich`, and
+  transcript projection) each swallowed serialization failures with
+  `unwrap_or_default()`, so an encoding error would have silently contributed an
+  *empty* string to a hash instead of surfacing. All seven now route through a
+  single `canonical_json` module that delegates to the session-store encoder
+  already used to sign session events, leaving the runtime with exactly one
+  canonicalizer — VM hashes and session signatures can no longer drift apart.
+  Three further digest inputs with the same silent-empty fallback (plan ids,
+  LLM mock fixture naming, and agent-observation hashing) were switched to the
+  same owner, which also makes them key-order stable. The one genuinely
+  fallible boundary — canonicalizing an arbitrary `Serialize` value — now
+  returns an error that callers propagate. Encoded bytes are unchanged, so
+  existing signed receipts, `input_hash` replay checks, transcript `prefix_hash`
+  chains, and on-disk enrichment cache entries all remain valid.
+- **CI: stop the behavior-payload jobs from running out of disk.** The
+  `Rust test` and `Rust security proof` jobs kept the ~8.4 GiB compressed
+  behavior bundle on disk after extracting an equally large copy, and nextest
+  then unpacked a third, uncompressed copy — a total that hosted runners do
+  not reliably fit, failing runs with `No space left on device`. Both jobs now
+  drop the compressed bundle as soon as the checksummed restore has consumed
+  it. The behavior-artifact scripts also compare archive listings under
+  `LC_ALL=C`, so their gate tests no longer fail on machines whose locale
+  sorts uppercase names differently.
+- Correct the `std/async` `circuit_call` doc comment: it claimed the
+  half-open state "allows one call through as a probe", but the underlying
+  named-circuit primitive is a pure check-then-act API with no probe
+  reservation, so after the cooldown it admits every caller as a probe rather
+  than gating to a single concurrent one. The comment now says so, removing a
+  latent trap for callers that might have relied on single-probe exclusivity.
+- **MCP JSON-RPC stdio framing now bounds `Content-Length` before allocating.** A peer (or a launched MCP
+  subprocess) that announced an oversized `Content-Length` header previously drove an unbounded
+  `vec![0; length]` allocation in `harn-serve`'s stdio transport before a single body byte arrived, so a
+  hostile or malfunctioning peer could exhaust memory. The reader now rejects any frame larger than 16 MiB at
+  header-parse time. The `harn-dap` debug adapter's `Content-Length` framing — previously reimplemented six
+  times across the crate — is consolidated into one internal `framing` module that enforces the same bound on
+  every read path, matches header names case-insensitively, and rejects a malformed or overflowing
+  `Content-Length` instead of silently ignoring it.
+- **Egress tests are hermetic against ambient `HARN_EGRESS_*` configuration.**
+  Under `cfg(test)` the egress policy engine now reads `HARN_EGRESS_*` through
+  a thread-local override seam instead of the process environment, so a
+  developer's or sandbox's exported egress settings can no longer seed a
+  policy a test never asked for (previously the whole `egress::`/`http::`
+  SSRF-guard test family failed under an ambient
+  `HARN_EGRESS_BLOCK_PRIVATE=off`). All `cfg(test)` egress state is now
+  thread-keyed, so the old cross-test env mutex is gone and the tests are
+  parallel-safe under plain `cargo test` as well as nextest. The testbench's
+  `NetworkConfig::DenyByDefault` now installs a typed egress policy directly
+  instead of mutating process-global `HARN_EGRESS_*` variables — which also
+  fixes a latent mix where its env-var install overrode only three of the
+  five variables and silently combined with ambient `HARN_EGRESS_BLOCK_PRIVATE`
+  / `HARN_EGRESS_ALLOW_LOOPBACK` settings.
+- **Package git fetches no longer depend on the process working directory.** The
+  hardened git runner spawned remote operations (`ls-remote`, `clone <url>
+  <dest>`) without setting a working directory, so `git` inherited the process
+  CWD and aborted with `fatal: Unable to read current working directory` if that
+  directory had been removed — e.g. a `git`-backed dependency install running
+  while another thread deleted the directory the process happened to sit in. The
+  runner now takes an explicit `Cwd::In(path)` / `Cwd::Detached` choice, with
+  remote operations detached to a neutral, guaranteed-to-exist directory;
+  inheriting the process CWD is no longer expressible.
+- **Handler-sandbox tests are hermetic against ambient `HARN_HANDLER_SANDBOX`
+  configuration.** Under `cfg(test)` the sandbox fallback selector
+  (`effective_fallback`) now reads `HARN_HANDLER_SANDBOX` through a
+  thread-local override seam instead of the process environment, so a
+  developer's or CI wrapper's exported `HARN_HANDLER_SANDBOX=off`/`enforce`
+  can no longer flip the sandbox outcome of a test that never asked for it
+  (previously the exec-path tests in `vm::tests_runtime` observed the ambient
+  value directly). The five tests that need `enforce` now inject it through a
+  `handler_sandbox_test_guard()` that clears the override on creation and drop,
+  replacing the old manual `set_var`/restore dance; every other exec test sees
+  the built-in `warn` default deterministically. The override is thread-keyed,
+  matching the same-thread `new_current_thread` runtime those tests drive, so
+  no cross-test lock is needed and the suite stays parallel-safe under both
+  `cargo test` and nextest.
+- Back the harn-cli `lock_harn_state` test helper with a `tokio::sync::Mutex`
+  and expose an async `lock_harn_state_async` acquire alongside the blocking
+  one, matching the sibling `cwd`/`run_event_sink` test locks. Async tests now
+  hold the state guard across `.await` legitimately, so every scattered
+  `#[allow(clippy::await_holding_lock)]` this lock (and the already-retired
+  cross-process CLI lock) forced is removed.
+- **`harn check` now rejects an out-of-set literal passed to a string/int
+  literal-union parameter.** Passing e.g. `"prepare"` where a parameter is
+  typed `"submit" | "status" | "cancel" | "download"` was accepted statically
+  and only failed at runtime with a `TypeError`. The checker now reproduces the
+  VM's decision at check time — firing exactly when the value is a compile-time
+  literal and the parameter is a homogeneous literal union (the shape the VM
+  lowers to an `enum` schema), so runtime-valued data keeps its gradual-typing
+  concession. This surfaced (and this release fixes) a latent bug where
+  `harn models batch prepare` crashed because the stdlib passed `"prepare"` to
+  a phase parameter whose type omitted it.
+- **Hermetic reads of the LLM provider-config env family.** Every `harn-vm`
+  production read of `HARN_DEFAULT_PROVIDER`, `HARN_LLM_PROVIDER`,
+  `HARN_LLM_MODEL`, `LOCAL_LLM_MODEL`, and `LOCAL_LLM_BASE_URL` now goes through
+  a shared `test_env::env_var_seamed` seam instead of `std::env::var`. Under
+  `cfg(not(test))` it is exactly `std::env::var(key).ok()`; under `cfg(test)`
+  the process environment is structurally invisible and reads come from a
+  per-thread override map, so ambient shell configuration or a CI wrapper's
+  provider default can no longer leak into a test that did not ask for it. LLM
+  provider/model resolution tests inject values through a `TestEnvGuard` that
+  clears the map on creation and drop, replacing the hand-rolled
+  save/`set_var`/restore boilerplate that previously had to remember every
+  variable it touched. This is the third consumer of the keyed-override seam
+  pattern (after the unmerged `HARN_EGRESS_*` and `HARN_HANDLER_SANDBOX` seams),
+  so the mechanism now lives in one shared owner they can converge onto.
+- **Test isolation: the persona portal-status test takes the harn-state
+  lock.** `api_personas_exposes_runtime_status` mutated event-log state
+  governed by `HARN_EVENT_LOG_*` env vars without holding `lock_harn_state`,
+  so a concurrent lock-holder's environment could route its pause event into
+  the wrong log and the test would flakily read the persona as idle.
+- Fixed a flaky `harn-cli` test failure under parallel `cargo test`. The
+  `playground` pipeline tests ran through the process-global `run_events` sink
+  while holding only `env_lock`, not the `run_event_sink_lock` that every
+  sink-touching test is required to hold, so a concurrent `--json` run test could
+  capture their stdout — e.g. an `llm_call_safe` error envelope bleeding into a
+  neighbor's NDJSON buffer. The tests now take both locks in a single documented
+  order. Test-only; no runtime behavior change. (CI itself was unaffected because
+  the nextest runner process-isolates each test.)
+- Pass `CARGO_REGISTRY_TOKEN` through the closed-env allowlist when the
+  release publisher spawns `cargo publish`.
+- `scripts/publish.harn` stages `cargo metadata` JSON through a temp file so
+  crates.io finalize is not truncated by the ~50 KiB hostlib stdout capture
+  limit (which blocked publishing v0.10.29).
+- Use `harness.stdio.print`/`eprint` in the crates.io publisher so recovery
+  against older tagged Harn binaries typechecks (there is no `stdio.write`).
+- **Make monitor replay detection hermetic under an ambient `HARN_REPLAY`.**
+  The monitor and waitpoint stdlib primitives now share one replay-detection
+  owner in the dispatcher, which combines the active dispatch signal, the
+  `#[cfg(test)]` override seam, and the `HARN_REPLAY` env read. Previously only
+  waitpoints had the test seam, so an inherited `HARN_REPLAY` in the invoking
+  shell silently flipped monitor tests into replay mode.
+- The formatter now measures line width in terminal display columns rather than
+  character counts, so a line holding CJK or emoji is wrapped and its overflow
+  reported against the width it actually occupies. ASCII source formats
+  identically to before.
+- `harn demo` no longer wraps its scenario descriptions by byte length, which
+  broke lines far too early for any non-ASCII text; the listing now wraps on
+  display columns.
+- **Grounded-review context no longer leaks terminal escape sequences.** Captured tool
+  output forwarded into LLM context was cleaned by a hand-rolled scanner that only
+  understood `ESC [` CSI sequences terminated by an ASCII letter, so OSC (`ESC ]`,
+  e.g. window-title sequences), DCS, and 8-bit CSI introducers passed through verbatim.
+  Stripping is now done by a real VT parser (`strip-ansi-escapes`). Stripping also runs
+  *before* the byte budget is applied rather than after, so escape bytes no longer
+  consume the budget or get cut mid-sequence.
+- **Truncated text no longer overruns its own budget.** Several surfaces took `max`
+  units of text and *then* appended an ellipsis, producing output one to three units
+  longer than the stated limit — most visibly in `ast/symbols` signature extraction,
+  which capped signatures at 80 characters and emitted 81. Truncation now lives in one
+  place (`harn_vm::text::truncate`) where the ellipsis is charged against the budget, so
+  a result is never longer than the caller asked for. A zero budget yields empty output
+  instead of a bare ellipsis, and the byte-budgeted variant still cuts on a UTF-8
+  boundary.
+- Write local dependency paths into `harn.toml` with POSIX separators so a
+  manifest authored on Windows stays portable to Unix checkouts instead of
+  embedding backslashes that fail to resolve.
+- Return temp-directory builtin paths (`mkdtemp`, `mkdtemp_in_workspace`,
+  `workspace_temp_dir`) in OS-normal form on Windows. A canonicalized workspace
+  root carries a `\\?\` verbatim prefix in which `/` is a literal character, so
+  the documented `mkdtemp_in_workspace(...) + "/child"` pattern previously failed
+  with a path-not-found error.
+- Retry the Windows atomic-replace step (`harn_vm::atomic_io`) on transient
+  sharing-violation / access-denied errors so a virus scanner, indexer, or
+  lagging handle close briefly holding a destination open no longer fails a
+  durable write of transcripts, run records, snapshots, or other persistent
+  state.
+- Make `harn_vm::atomic_io` durable writes robust to long Windows paths. The
+  temp sibling's name is now bounded so it can never be longer than the
+  destination it replaces (its previous name embedded the full destination name,
+  so a destination that fits under the 260-char `MAX_PATH` could still produce an
+  overflowing temp path), and the atomic replace now applies the `\\?\`
+  extended-length prefix to its `MoveFileExW` operands — matching what the
+  standard library already does for its own file APIs — so a destination longer
+  than `MAX_PATH` (for example a deeply nested filesystem snapshot body) no
+  longer fails with a path-not-found error.
 
 ## v0.10.29
 

@@ -17,8 +17,8 @@ quote = "1"
 proc-macro2 = "1"
 
 [dev-dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.29" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.29" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.30" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.30" }
 
 [lints]
 workspace = true

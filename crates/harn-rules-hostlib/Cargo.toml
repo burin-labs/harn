@@ -9,16 +9,16 @@ homepage.workspace = true
 description = "Host capability exposing the harn-rules declarative rule engine to Harn (`rules.search` / `rules.report` / `rules.apply`)."
 
 [dependencies]
-harn-rules = { path = "../harn-rules", version = "=0.10.29" }
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.29", default-features = false, features = ["ast"] }
-harn-vm = { path = "../harn-vm", version = "=0.10.29" }
+harn-rules = { path = "../harn-rules", version = "=0.10.30" }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.30", default-features = false, features = ["ast"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.30" }
 # Formatter for the codemod fmt post-pass (#2847): normalize rewritten .harn so
 # a batch lands fmt-stable. harn-fmt has no harn-rules dep, so no cycle.
-harn-fmt = { path = "../harn-fmt", version = "=0.10.29" }
+harn-fmt = { path = "../harn-fmt", version = "=0.10.30" }
 # The linter, exposed to Harn as the `lint.run` builtin (#2851). harn-lint
 # depends on harn-rules (not on this crate), so no cycle.
-harn-lint = { path = "../harn-lint", version = "=0.10.29" }
-harn-parser = { path = "../harn-parser", version = "=0.10.29" }
+harn-lint = { path = "../harn-lint", version = "=0.10.30" }
+harn-parser = { path = "../harn-parser", version = "=0.10.30" }
 serde_json = "1"
 arcstr = { version = "1", features = ["serde", "std"] }
 
