@@ -111,7 +111,9 @@ fn __json_or_nil(text) {
   return if is_err(parsed) {
     nil
   } else {
-    parsed
+    // unwrap: returning the raw try-result leaked an Ok enum into record
+    // positions (merge() in __release_view), which the typed runtime rejects.
+    unwrap(parsed)
   }
 }
 
