@@ -36,6 +36,8 @@ const STICKY_DISK_PIN = "useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a
 
 const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
 
+const SELFHOSTED_DISABLE_VAR = "HARN_CI_DISABLE_SELFHOSTED_LINUX"
+
 const PERSISTENT_SCCACHE_SIZE = "15G"
 
 // Hang backstop for the archived-behavior consumer lanes. These lanes never
@@ -526,6 +528,12 @@ fn persistent_sccache_job_errors(
       "ci.yml:${job_name} must use ${expected_runner} behind ${BLACKSMITH_DISABLE_VAR}",
     ]
   }
+  if !contains(runner, SELFHOSTED_DISABLE_VAR) || !contains(runner, "self-hosted") {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must keep self-hosted routing behind ${SELFHOSTED_DISABLE_VAR}",
+    ]
+  }
   if trim(job?.env?.SCCACHE_CACHE_SIZE ?? "") != PERSISTENT_SCCACHE_SIZE {
     errors = errors
       + ["ci.yml:${job_name} must cap persistent sccache at ${PERSISTENT_SCCACHE_SIZE}"]
@@ -536,8 +544,18 @@ fn persistent_sccache_job_errors(
   const caches = matching_steps(job, SCCACHE_ACTION)
   if len(caches) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure ${SCCACHE_ACTION} exactly once"]
-  } else if !contains(trim(caches[0]?.with?.sticky ?? ""), BLACKSMITH_DISABLE_VAR) {
-    errors = errors + ["ci.yml:${job_name} sticky cache must follow ${BLACKSMITH_DISABLE_VAR}"]
+  } else {
+    const sticky = trim(caches[0]?.with?.sticky ?? "")
+    if !contains(sticky, BLACKSMITH_DISABLE_VAR) {
+      errors = errors + ["ci.yml:${job_name} sticky cache must follow ${BLACKSMITH_DISABLE_VAR}"]
+    }
+    if !contains(sticky, "runner.environment != 'self-hosted'") {
+      errors = errors + ["ci.yml:${job_name} must disable sticky storage on self-hosted runners"]
+    }
+    const gha_backend = trim(caches[0]?.with?.["gha-backend"] ?? "")
+    if !contains(gha_backend, "runner.environment != 'self-hosted'") {
+      errors = errors + ["ci.yml:${job_name} must disable GHA sccache on self-hosted runners"]
+    }
   }
   const fallback = matching_steps(job, "./.github/actions/rust-cache")
   if len(fallback) != 1 || trim(fallback[0]?.if ?? "") != fallback_condition {
@@ -656,18 +674,21 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
       "${SCCACHE_ACTION_PATH} must own pinned sccache setup and wrapper configuration",
     ]
   }
+  // rust-cache is the hosted-runner fallback only: self-hosted runners carry
+  // a persistent local SCCACHE_DIR, and restoring the GitHub cache there
+  // would both waste quota and clobber the warmer local state.
   errors = errors
     + persistent_sccache_job_errors(
     workflow,
     "package-audit",
     "blacksmith-4vcpu-ubuntu-2404",
-    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true' && runner.environment != 'self-hosted'",
   )
     + persistent_sccache_job_errors(
     workflow,
     "rust-builds",
     "matrix.runner",
-    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true' && runner.environment != 'self-hosted'",
   )
   const rust_job = workflow?.jobs?.["rust-builds"]
   const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
@@ -682,13 +703,15 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   const kinds = matrix.map({ row -> trim(row?.kind ?? "") }).to_list()
   const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
   const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
+  const selfhosted = matrix.map({ row -> row?.selfhosted ?? false }).to_list()
   if kinds != ["lint", "behavior"]
     || runners
     != [
     "blacksmith-4vcpu-ubuntu-2404",
     "blacksmith-8vcpu-ubuntu-2404",
   ]
-    || cache_keys != ["workspace-lint", "workspace-behavior"] {
+    || cache_keys != ["workspace-lint", "workspace-behavior"]
+    || selfhosted != [true, false] {
     errors = errors
       + [
       "ci.yml:rust-builds must keep compile lanes on distinct policy-sized persistent caches",

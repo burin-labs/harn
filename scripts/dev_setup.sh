@@ -360,7 +360,8 @@ if [[ -x ./scripts/prune_stale_targets.sh ]]; then
   fi
 fi
 
-if [[ "${SETUP_PROFILE}" == "full" ]] && command -v npm >/dev/null 2>&1; then
+if [[ "${SETUP_PROFILE}" == "full" && -f package.json ]] \
+  && command -v npm >/dev/null 2>&1; then
   root_node_fp="$(hash_setup_inputs root-node package.json package-lock.json)"
   run_setup_step \
     "Installing repo-local Node tooling" \
