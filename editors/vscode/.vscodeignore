@@ -2,3 +2,4 @@
 src/**
 tsconfig.json
 node_modules/**
+# ci skip-proof: selective-execution editors/** gate (#5417) — DO NOT MERGE
