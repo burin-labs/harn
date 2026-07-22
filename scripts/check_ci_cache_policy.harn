@@ -656,18 +656,21 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
       "${SCCACHE_ACTION_PATH} must own pinned sccache setup and wrapper configuration",
     ]
   }
+  // rust-cache is the hosted-runner fallback only: self-hosted runners carry
+  // a persistent local SCCACHE_DIR, and restoring the GitHub cache there
+  // would both waste quota and clobber the warmer local state.
   errors = errors
     + persistent_sccache_job_errors(
     workflow,
     "package-audit",
     "blacksmith-4vcpu-ubuntu-2404",
-    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true' && runner.environment != 'self-hosted'",
   )
     + persistent_sccache_job_errors(
     workflow,
     "rust-builds",
     "matrix.runner",
-    "vars.${BLACKSMITH_DISABLE_VAR} == 'true'",
+    "vars.${BLACKSMITH_DISABLE_VAR} == 'true' && runner.environment != 'self-hosted'",
   )
   const rust_job = workflow?.jobs?.["rust-builds"]
   const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)

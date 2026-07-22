@@ -530,7 +530,20 @@ mkdir -p "$fake_tools_without_npm"
 for tool in cargo make npx rg harn-plan; do
   ln -s "$fake_tools/$tool" "$fake_tools_without_npm/$tool"
 done
-no_npm_path="$fake_tools_without_npm:/usr/bin:/bin"
+# Shadow the real utility directories minus npm instead of assuming npm does
+# not live in /usr/bin — on self-hosted runners it does, and the simulation
+# must stay hermetic regardless of where the host installed Node.
+real_bin_without_npm="$tmp_root/real-bin-without-npm"
+mkdir -p "$real_bin_without_npm"
+for dir in /usr/bin /bin; do
+  for tool in "$dir"/*; do
+    name="$(basename "$tool")"
+    [[ "$name" == "npm" ]] && continue
+    [[ -e "$real_bin_without_npm/$name" || -L "$real_bin_without_npm/$name" ]] \
+      || ln -s "$tool" "$real_bin_without_npm/$name"
+  done
+done
+no_npm_path="$fake_tools_without_npm:$real_bin_without_npm"
 if PATH="$no_npm_path" command -v npm >/dev/null 2>&1; then
   echo "test environment unexpectedly exposes npm outside the fake tool directory" >&2
   exit 1

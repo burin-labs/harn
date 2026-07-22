@@ -48,7 +48,7 @@ fn workflow() {
     gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
     gha_expression("matrix.cache_key"),
     "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'",
   )
   const rust_with_flags = {
     ...rust,
@@ -78,7 +78,7 @@ fn workflow() {
         gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
         "package-audit",
         "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'",
       ),
       "rust-builds": {
         ...rust_with_flags,
