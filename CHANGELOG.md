@@ -9,6 +9,47 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.34
+
+### Changed
+
+- CI: the environment-neutral Rust suite now executes inside the warm
+  Behavior build leg instead of a standalone consumer lane, and the security
+  proof consumes a single-package `harn-vm` archive instead of the ~8.6 GB
+  workspace bundle. The multi-gigabyte behavior payload is no longer built or
+  uploaded on the default path, removing 1.5-16.5 m of per-run artifact
+  transfer variance. Kill switch: setting the repo variable
+  `HARN_CI_DISABLE_COLOCATED_TESTS=true` restores the previous
+  producer/consumer topology (standalone Rust test lane included) unchanged.
+- CI: heavy Linux lanes (package audit, Rust lint, audit scripts) now route to
+  idle self-hosted runners when available, overflowing to hosted runners when
+  the probe observes the pool busy or offline, or the workflow is a fork PR
+  (which never receives the probe credentials). The availability check is a
+  snapshot rather than a reservation. The behavior-payload lanes (Behavior
+  build, Rust test) stay on hosted runners because Actions artifact storage
+  throughput to the boxes cannot move the multi-gigabyte payload quickly. Kill
+  switch: `HARN_CI_DISABLE_SELFHOSTED_LINUX=true`.
+- Tests: `harn-hostlib`'s 33 integration-test binaries are consolidated into
+  one (`harn_hostlib`), cutting total link time and shrinking the behavior
+  archive; the 829-test suite and its nextest concurrency semantics are
+  unchanged.
+- CI: the Windows lane gains two independently-toggleable, default-off
+  experiments — `HARN_WINDOWS_LLD=on` links with the toolchain-bundled
+  rust-lld instead of MSVC link.exe, and `HARN_WINDOWS_DEVDRIVE=on` places
+  Cargo state on a ReFS Dev Drive. Both mirror byte-identically across the
+  nightly cache writer and the CI consumer; `MEASUREMENT.md` documents the
+  A/B protocol, predictions, and refuted alternatives.
+
+### Fixed
+
+- `std/bump/live`: `__json_or_nil` now unwraps its `try` result instead of
+  leaking the Ok enum into record positions, which made every REST helper —
+  including the release-readiness poll that gates live bumps — fail with
+  "parameter `a` expects {...R1}, got enum" under the typed runtime.
+- Allow workflow stage policies to carry the agent loop's documented nested
+  `require_successful_tools` OR groups instead of rejecting them while parsing
+  the graph as `list<string>`.
+
 ## v0.10.33
 
 ### Fixed
