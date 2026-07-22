@@ -519,21 +519,44 @@ jobs:
         env:
           RUN_PROMPT_PROSE_RATCHET: ${{ needs.changes.outputs.prompt_prose }}
         run: ./scripts/ci/run_rust_lint_lane.sh
+      # When co-located tests are active (the default), the multi-gigabyte
+      # neutral archive is neither built nor uploaded: the suite executes in
+      # this leg's warm workspace below, and the security lane consumes its
+      # own single-package archive. Flipping HARN_CI_DISABLE_COLOCATED_TESTS
+      # to 'true' restores the full producer/consumer artifact path.
       - name: Build portable behavior payload
         id: release-audit-behavior-build
         if: matrix.kind == 'behavior'
         env:
           CARGO_BUILD_JOBS: "4"
+          HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0' }}
         run: >-
           ./scripts/ci/behavior_artifact.sh build
           "$RUNNER_TEMP/harn-behavior.tar.zst"
           "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-security.tar.zst"
           "$GITHUB_SHA"
+      # The workspace test binaries are already compiled and sitting on this
+      # runner's disk; executing them here removes the archive-compress →
+      # artifact-upload → artifact-download → extract round trip (measured
+      # 1.5-16.5 m of pure transfer variance per run) that the standalone
+      # Rust test lane pays. The Landlock escape proof stays excluded — it is
+      # environment-specific and owned by rust-security on GitHub Ubuntu.
+      - name: Run full environment-neutral test suite
+        id: release-audit-rust-test
+        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
+        env:
+          CARGO_BUILD_JOBS: "4"
+          HARN_LLM_CALLS_DISABLED: "1"
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --locked --workspace --profile ci
+          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
       - name: Start portable behavior payload upload timer
-        if: matrix.kind == 'behavior'
+        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         run: echo "HARN_BEHAVIOR_UPLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - name: Upload portable behavior payload
-        if: matrix.kind == 'behavior'
+        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harn-behavior.tar.zst
@@ -550,8 +573,17 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      - name: Report portable behavior payload upload
+      - name: Upload security test archive
         if: matrix.kind == 'behavior'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-security.tar.zst
+          path: ${{ runner.temp }}/harn-security.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - name: Report portable behavior payload upload
+        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         run: |
           duration=$(($(date +%s) - HARN_BEHAVIOR_UPLOAD_STARTED_AT))
           bytes=$(wc -c < "$RUNNER_TEMP/harn-behavior.tar.zst" | tr -d ' ')
@@ -573,15 +605,20 @@ jobs:
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
-  # The producer owns compilation. This consumer verifies the exact-SHA bundle
-  # and only executes its environment-neutral nextest archive on every Linux
-  # topology — Blacksmith and GitHub-hosted alike. Do not gate this job on
-  # Blacksmith availability: the archive exists precisely so hosted runners can
-  # prove the suite without a second cold compile.
+  # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
+  # inside the warm Behavior build leg (see rust-builds), so this job skips and
+  # no multi-gigabyte archive crosses Actions artifact storage. Setting the
+  # repo variable HARN_CI_DISABLE_COLOCATED_TESTS='true' restores this
+  # standalone consumer exactly as it ran before co-location: rust-builds
+  # resumes producing the neutral archive and this job verifies and executes
+  # it on a fresh hosted runner. ci-status enforces the pairing: a rust-test
+  # skip only passes while co-location is active.
   rust-test:
     name: Rust test
     needs: [changes, rust-builds]
-    if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    if: >-
+      needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+      && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
     # Never self-hosted: this lane downloads the ~8.6 GB behavior payload from
     # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
     # (a routed attempt stalled past the 35 m timeout still mid-download) even
@@ -663,15 +700,11 @@ jobs:
     needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     runs-on: ubuntu-latest
-    # Hang backstop, not a performance gate. The Landlock proof itself runs in
-    # ~2m; the budget must absorb the "Download portable behavior payload" step,
-    # which — on the hosted path since Blacksmith was disabled — varies from
-    # ~1.5m to ~16.5m (GitHub artifact throughput). At the old 20m cap a slow
-    # download starved the proof and the job was killed mid-test (conclusion
-    # "cancelled", which reads as flake instead of failing loudly). Match the
-    # sibling that downloads the same payload (Rust test, 35m) less its longer
-    # suite: 30m covers the worst observed download plus setup and the proof.
-    timeout-minutes: 30
+    # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,
+    # and the single-package security archive it consumes downloads in seconds
+    # (the old path pulled the full ~8.6 GB behavior payload, whose hosted
+    # artifact throughput varied from ~1.5m to ~16.5m and forced a 30m cap).
+    timeout-minutes: 15
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
@@ -688,29 +721,25 @@ jobs:
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.132
-      - name: Download portable behavior payload
+      - name: Download security test archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: harn-behavior.tar.zst
+          name: harn-security.tar.zst
           path: ${{ runner.temp }}
           skip-decompress: true
-      - name: Verify portable behavior payload
+      - name: Verify security test archive
         env:
           HARN_VERIFY_RUST_RUNTIME: "1"
         run: >-
-          ./scripts/ci/behavior_artifact.sh restore
-          "$RUNNER_TEMP/harn-behavior.tar.zst"
-          "$RUNNER_TEMP/harn-behavior"
+          ./scripts/ci/behavior_artifact.sh restore-security
+          "$RUNNER_TEMP/harn-security.tar.zst"
+          "$RUNNER_TEMP/harn-security"
           "$GITHUB_SHA"
-      # Same disk math as rust-test: bundle + extracted copy + nextest's
-      # uncompressed unpack do not reliably fit a hosted runner together.
-      - name: Drop compressed payload after restore
-        run: rm -f "$RUNNER_TEMP/harn-behavior.tar.zst"
       - name: Run Landlock escape proof on GitHub Ubuntu
         id: release-audit-rust-security
         run: >-
           cargo nextest run --profile ci
-          --archive-file "$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst"
+          --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
           -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
 
@@ -1438,7 +1467,7 @@ jobs:
       - name: Verify required CI jobs
         env:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
-          BLACKSMITH_DISABLED: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX }}
+          COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
         run: |
           # The runner probe is hard-required: if it hard-fails, every lane
           # that `needs` it skips, and those skips are otherwise tolerated
@@ -1496,11 +1525,23 @@ jobs:
             exit 1
           fi
 
+          # With co-location active the environment-neutral suite proof lives
+          # INSIDE the Behavior build leg, so a Rust-lane-relevant run must
+          # see rust-builds succeed outright — a skip would silently drop the
+          # suite proof that rust-test no longer provides.
+          if [ "$COLOCATED_TESTS_DISABLED" != "true" ] \
+            && [ "${{ needs.changes.outputs.rust }}" = "true" ] \
+            && [ "$rust_builds_result" != "success" ]; then
+            echo "::error::Rust build group must succeed when it owns the co-located suite proof."
+            exit 1
+          fi
+
           rust_test_result="${{ needs['rust-test'].result }}"
           echo "Rust test: $rust_test_result"
           if [ "$rust_test_result" != "success" ]; then
             if [ "$rust_test_result" = "skipped" ] \
-              && { [ "${{ needs.changes.outputs.rust }}" != "true" ] || [ "$BLACKSMITH_DISABLED" = "true" ]; }; then
+              && { [ "${{ needs.changes.outputs.rust }}" != "true" ] \
+                || [ "$COLOCATED_TESTS_DISABLED" != "true" ]; }; then
               :
             else
               echo "::error::Rust test failed or skipped while Rust proof was required."
