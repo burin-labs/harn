@@ -13,7 +13,7 @@ use tower_lsp::lsp_types::request::{
 use tower_lsp::lsp_types::*;
 
 use crate::constants::is_builtin;
-use crate::helpers::{span_to_full_range, word_at_position};
+use crate::helpers::{infer_dot_receiver_name, span_to_full_range, word_at_position};
 use crate::references::{find_references, identifier_token_spans_within};
 use crate::source_text::SourceText;
 use crate::symbols::HarnSymbolKind;
@@ -71,6 +71,12 @@ impl HarnLsp {
                     range,
                 })));
             }
+        }
+
+        // Namespace import: `alias.member` → export definition; bare `alias`
+        // → the imported module file.
+        if let Some(loc) = resolve_namespace_definition(uri, &source, position, &word) {
+            return Ok(Some(GotoDefinitionResponse::Scalar(loc)));
         }
 
         // Cross-file: the module graph transitively follows imports from
@@ -430,6 +436,44 @@ fn span_contains_offset(span: &Span, offset: usize) -> bool {
 
 fn node_children(node: &SNode) -> Vec<&SNode> {
     harn_parser::visit::immediate_children(node)
+}
+
+/// Resolve a namespace import alias or `alias.member` to its definition.
+fn resolve_namespace_definition(
+    uri: &Url,
+    source: &SourceText,
+    position: Position,
+    word: &str,
+) -> Option<Location> {
+    let current_path = uri.to_file_path().ok()?;
+    let module_graph = harn_modules::build(std::slice::from_ref(&current_path));
+    let namespaces = module_graph.namespace_imports_for_file(&current_path)?;
+
+    // Prefer `alias.member` when the cursor is on the member after a dot.
+    if let Some(alias) = infer_dot_receiver_name(source, position) {
+        if namespaces.iter().any(|ns| ns.alias == alias) {
+            let def = module_graph.namespace_member_lookup(&current_path, &alias, word)?;
+            let imported_source = SourceText::new(std::fs::read_to_string(&def.file).ok()?);
+            let imported_uri = Url::from_file_path(&def.file).ok()?;
+            return Some(Location {
+                uri: imported_uri,
+                range: span_to_full_range(&def.span, &imported_source),
+            });
+        }
+    }
+
+    // Bare alias → jump to the target module file (start of file).
+    let ns = namespaces.iter().find(|ns| ns.alias == word)?;
+    let module_path = ns.resolved_path.as_ref()?;
+    let imported_source = SourceText::new(std::fs::read_to_string(module_path).ok()?);
+    let imported_uri = Url::from_file_path(module_path).ok()?;
+    Some(Location {
+        uri: imported_uri,
+        range: span_to_full_range(
+            &harn_lexer::Span::with_offsets(0, 0, 1, 1),
+            &imported_source,
+        ),
+    })
 }
 
 /// Resolve the symbol through the current document's imported modules using

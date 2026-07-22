@@ -1,0 +1,6 @@
+import * as lib from "namespace_import_lib"
+
+pipeline default() {
+  __io_println(lib.greet("world"))
+  __io_println(lib.answer())
+}

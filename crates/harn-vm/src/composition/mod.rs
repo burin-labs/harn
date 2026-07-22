@@ -959,7 +959,9 @@ fn validate_composition_program(
             return;
         }
         match &node.node {
-            Node::ImportDecl { .. } | Node::SelectiveImport { .. } => {
+            Node::ImportDecl { .. }
+            | Node::SelectiveImport { .. }
+            | Node::NamespaceImport { .. } => {
                 error = Some("composition snippets cannot import modules".to_string());
             }
             Node::SpawnExpr { .. } | Node::Parallel { .. } => {

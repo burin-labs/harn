@@ -287,6 +287,7 @@ fn collect_ast_ranges(
         }
         Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
+        | Node::NamespaceImport { .. }
         | Node::DurationLiteral(_)
         | Node::StringLiteral(_)
         | Node::RawStringLiteral(_)

@@ -1,0 +1,5 @@
+import * as lib from "namespace_import_lib"
+
+pipeline default() {
+  lib.does_not_exist()
+}

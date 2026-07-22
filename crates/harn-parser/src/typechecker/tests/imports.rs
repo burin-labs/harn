@@ -300,3 +300,100 @@ fn describe(s: Shape) -> string {
         "a local enum shadowing an import keeps bare patterns legal: {errors:?}"
     );
 }
+
+#[test]
+fn namespace_import_rejects_unknown_members() {
+    use std::collections::BTreeSet;
+
+    use crate::NamespaceImportBinding;
+
+    let program = parse_program(
+        r"
+pipeline t(task) {
+  let value = lib.absent
+  lib.missing()
+}
+",
+    );
+    let mut members = BTreeSet::new();
+    members.insert("greet".into());
+    members.insert("other".into());
+    let diagnostics = TypeChecker::new()
+        .with_imported_names(std::iter::once("lib".into()).collect())
+        .with_namespace_imports([(
+            "lib".into(),
+            NamespaceImportBinding {
+                module_path: "./lib".into(),
+                members,
+            },
+        )])
+        .check(&program);
+    let errors: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .collect();
+    assert!(
+        errors.iter().any(|error| {
+            error.code == crate::typechecker::Code::UnknownField
+                && error
+                    .message
+                    .contains("module `./lib` has no exported member `absent`")
+        }),
+        "expected namespace property error, got: {errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| {
+            error.code == crate::typechecker::Code::UnknownMethod
+                && error
+                    .message
+                    .contains("module `./lib` has no exported member `missing`")
+        }),
+        "expected namespace method error, got: {errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| {
+            error.message.contains("did you mean")
+                || error
+                    .help
+                    .as_deref()
+                    .is_some_and(|help| help.contains("exported members"))
+        }),
+        "expected suggestion/help context, got: {errors:?}"
+    );
+}
+
+#[test]
+fn namespace_import_accepts_known_member_call() {
+    use std::collections::BTreeSet;
+
+    use crate::NamespaceImportBinding;
+
+    let program = parse_program(
+        r"
+pipeline t(task) {
+  lib.greet()
+}
+",
+    );
+    let mut members = BTreeSet::new();
+    members.insert("greet".into());
+    let diagnostics = TypeChecker::new()
+        .with_imported_names(std::iter::once("lib".into()).collect())
+        .with_namespace_imports([(
+            "lib".into(),
+            NamespaceImportBinding {
+                module_path: "./lib".into(),
+                members,
+            },
+        )])
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        !errors.iter().any(|e| e.contains("no exported member")),
+        "known namespace member should not error: {errors:?}"
+    );
+}

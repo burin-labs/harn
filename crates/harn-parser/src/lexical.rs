@@ -784,6 +784,7 @@ pub fn is_deferred_module_declaration(node: &SNode) -> bool {
             | Node::TypeDecl { .. }
             | Node::ImportDecl { .. }
             | Node::SelectiveImport { .. }
+            | Node::NamespaceImport { .. }
     )
 }
 

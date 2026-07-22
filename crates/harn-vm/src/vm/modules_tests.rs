@@ -631,3 +631,62 @@ pub fn touch() {
         "module state should drop with its VM"
     );
 }
+
+#[test]
+fn namespace_import_binds_alias_dict_not_flattened_members() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let lib = temp.path().join("lib.harn");
+    std::fs::write(
+        &lib,
+        "pub fn greet(name) { return \"hi \" + name }\npub fn other() { return 1 }\n",
+    )
+    .expect("write lib");
+
+    let result = runtime.block_on(async {
+        let mut vm = Vm::new();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        vm.set_source_dir(temp.path());
+        vm.execute_namespace_import_bind("./lib", "lib")
+            .await
+            .expect("namespace import binds");
+        assert!(
+            vm.env.get("greet").is_none(),
+            "members must not flatten into caller"
+        );
+        let Some(VmValue::Dict(map)) = vm.env.get("lib") else {
+            panic!("alias should bind a dict, got {:?}", vm.env.get("lib"));
+        };
+        assert!(matches!(map.get("_namespace"), Some(VmValue::String(_))));
+        assert!(map.get("greet").is_some());
+        assert!(map.get("other").is_some());
+
+        // Call through the namespace object.
+        let chunk_source = r#"
+import * as lib from "./lib"
+pipeline default() {
+  return lib.greet("world")
+}
+"#;
+        let mut lexer = harn_lexer::Lexer::new(chunk_source);
+        let tokens = lexer.tokenize().expect("lex");
+        let mut parser = harn_parser::Parser::new(tokens);
+        let program = parser.parse().expect("parse");
+        let compiler = crate::Compiler::new();
+        let chunk = compiler.compile(&program).expect("compile");
+        let mut run_vm = Vm::new();
+        crate::stdlib::register_vm_stdlib(&mut run_vm);
+        run_vm.set_source_dir(temp.path());
+        run_vm
+            .execute(&chunk)
+            .await
+            .expect("execute namespace call")
+    });
+    assert!(
+        matches!(result, VmValue::String(ref value) if value.as_str() == "hi world"),
+        "unexpected result: {result:?}"
+    );
+}

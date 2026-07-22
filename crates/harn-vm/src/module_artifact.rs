@@ -33,6 +33,10 @@ fn imported_enum_cache() -> &'static Mutex<ImportedEnumCache> {
 pub struct ModuleImportSpec {
     pub path: String,
     pub selected_names: Option<Vec<String>>,
+    /// When set, bind `import * as alias from path` as a namespace dict
+    /// instead of flattening exports into the caller.
+    #[serde(default)]
+    pub namespace_alias: Option<String>,
     pub is_pub: bool,
 }
 
@@ -127,6 +131,7 @@ fn compile_module_artifact_with_imported_enums(
             harn_parser::Node::ImportDecl { path, is_pub } => Some(ModuleImportSpec {
                 path: path.clone(),
                 selected_names: None,
+                namespace_alias: None,
                 is_pub: *is_pub,
             }),
             harn_parser::Node::SelectiveImport {
@@ -136,6 +141,17 @@ fn compile_module_artifact_with_imported_enums(
             } => Some(ModuleImportSpec {
                 path: path.clone(),
                 selected_names: Some(names.clone()),
+                namespace_alias: None,
+                is_pub: *is_pub,
+            }),
+            harn_parser::Node::NamespaceImport {
+                alias,
+                path,
+                is_pub,
+            } => Some(ModuleImportSpec {
+                path: path.clone(),
+                selected_names: None,
+                namespace_alias: Some(alias.clone()),
                 is_pub: *is_pub,
             }),
             _ => None,

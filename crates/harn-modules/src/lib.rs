@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::package_imports::{acquire_package_snapshots, resolve_import_path_with_snapshots};
+use crate::package_imports::acquire_package_snapshots;
 use crate::package_snapshot::PackageSnapshot;
 use harn_lexer::Span;
 use harn_parser::{Node, Parser, SNode};
@@ -9,7 +9,9 @@ use harn_parser::{Node, Parser, SNode};
 pub mod asset_paths;
 mod declarations;
 pub mod fingerprint;
+mod import_recording;
 pub mod manifest_walk;
+mod namespace_imports;
 pub mod package_execution;
 mod package_imports;
 pub mod package_snapshot;
@@ -19,6 +21,7 @@ mod stdlib;
 
 use declarations::pattern_names;
 pub use declarations::{public_declarations, DefKind, PublicDeclaration};
+pub use namespace_imports::NamespaceImportInfo;
 pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
 };
@@ -85,6 +88,13 @@ struct ModuleInfo {
     /// the canonical path of a module whose entire public export surface
     /// this module re-exports.
     wildcard_re_export_paths: Vec<PathBuf>,
+    /// Namespace re-exports introduced by `pub import * as alias from "..."`.
+    /// Maps the published alias to the canonical target module path. Unlike
+    /// wildcard re-exports, members are **not** flattened into this module's
+    /// public surface — only the alias object itself is exported
+    /// (`DefKind::Variable`). Folded into [`exports`] / [`declarations`] at
+    /// collection time so graph finalization needs no second pass.
+    namespace_re_exports: HashMap<String, PathBuf>,
     /// Names introduced by selective imports across this module.
     selective_import_names: HashSet<String>,
     /// Import references encountered in this file.
@@ -95,6 +105,8 @@ struct ModuleInfo {
     /// (importing file path missing). Prevents `imported_names_for_file`
     /// from returning a partial answer when any import is broken.
     has_unresolved_selective_import: bool,
+    /// True when at least one namespace import could not be resolved.
+    has_unresolved_namespace_import: bool,
     /// Top-level type-like declarations that can be imported into a caller's
     /// static type environment.
     type_declarations: Vec<SNode>,
@@ -141,6 +153,9 @@ struct ImportRef {
     raw_path: String,
     path: Option<PathBuf>,
     selective_names: Option<HashSet<String>>,
+    /// When set, this is `import * as alias from "..."` — only the alias is
+    /// bound in the importer (members stay under the namespace object).
+    namespace_alias: Option<String>,
     import_span: Span,
 }
 
@@ -151,8 +166,10 @@ pub struct ModuleImport {
     pub raw_path: String,
     /// Resolved module path when the import could be resolved.
     pub resolved_path: Option<PathBuf>,
-    /// `None` for wildcard imports; otherwise the selected names.
+    /// `None` for wildcard / namespace imports; otherwise the selected names.
     pub selective_names: Option<Vec<String>>,
+    /// When set, this is a namespace import (`import * as alias from "..."`).
+    pub namespace_alias: Option<String>,
 }
 
 /// Return the source for a resolved module path.
@@ -440,6 +457,7 @@ impl ModuleGraph {
                     raw_path: import.raw_path.clone(),
                     resolved_path: import.path.as_ref().map(|path| normalize_path(path)),
                     selective_names,
+                    namespace_alias: import.namespace_alias.clone(),
                 }
             })
             .collect();
@@ -447,6 +465,7 @@ impl ModuleGraph {
             left.raw_path
                 .cmp(&right.raw_path)
                 .then_with(|| left.selective_names.cmp(&right.selective_names))
+                .then_with(|| left.namespace_alias.cmp(&right.namespace_alias))
                 .then_with(|| left.resolved_path.cmp(&right.resolved_path))
         });
         imports
@@ -550,12 +569,20 @@ impl ModuleGraph {
     pub fn imported_names_for_file(&self, file: &Path) -> Option<HashSet<String>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
-        if module.has_unresolved_wildcard_import || module.has_unresolved_selective_import {
+        if module.has_unresolved_wildcard_import
+            || module.has_unresolved_selective_import
+            || module.has_unresolved_namespace_import
+        {
             return None;
         }
 
         let mut names = HashSet::new();
         for import in &module.imports {
+            // Namespace imports bind only the alias — never flatten members.
+            if let Some(alias) = &import.namespace_alias {
+                names.insert(alias.clone());
+                continue;
+            }
             let import_path = import.path.as_ref()?;
             let imported = self
                 .modules
@@ -606,12 +633,19 @@ impl ModuleGraph {
     ) -> Option<HashSet<String>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
-        if module.has_unresolved_wildcard_import || module.has_unresolved_selective_import {
+        if module.has_unresolved_wildcard_import
+            || module.has_unresolved_selective_import
+            || module.has_unresolved_namespace_import
+        {
             return None;
         }
 
         let mut names = HashSet::new();
         for import in &module.imports {
+            // Namespace aliases are variables, not flattened member kinds.
+            if import.namespace_alias.is_some() {
+                continue;
+            }
             let import_path = import.path.as_ref()?;
             let imported_names: Vec<String> = match &import.selective_names {
                 Some(selective) => selective.iter().cloned().collect(),
@@ -639,12 +673,19 @@ impl ModuleGraph {
     pub fn imported_type_declarations_for_file(&self, file: &Path) -> Option<Vec<SNode>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
-        if module.has_unresolved_wildcard_import || module.has_unresolved_selective_import {
+        if module.has_unresolved_wildcard_import
+            || module.has_unresolved_selective_import
+            || module.has_unresolved_namespace_import
+        {
             return None;
         }
 
         let mut decls = Vec::new();
         for import in &module.imports {
+            // Namespace imports do not flatten type names into the caller.
+            if import.namespace_alias.is_some() {
+                continue;
+            }
             let import_path = import.path.as_ref()?;
             let imported = self
                 .modules
@@ -692,12 +733,19 @@ impl ModuleGraph {
     pub fn imported_callable_declarations_for_file(&self, file: &Path) -> Option<Vec<SNode>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
-        if module.has_unresolved_wildcard_import || module.has_unresolved_selective_import {
+        if module.has_unresolved_wildcard_import
+            || module.has_unresolved_selective_import
+            || module.has_unresolved_namespace_import
+        {
             return None;
         }
 
         let mut decls = Vec::new();
         for import in &module.imports {
+            // Namespace imports keep callables under the alias object.
+            if import.namespace_alias.is_some() {
+                continue;
+            }
             let import_path = import.path.as_ref()?;
             let imported = self
                 .modules
@@ -889,9 +937,9 @@ impl ModuleGraph {
             }
         }
 
-        // Private wildcard imports.
+        // Private wildcard imports (not namespace — those bind only the alias).
         for import in &current.imports {
-            if import.selective_names.is_some() {
+            if import.selective_names.is_some() || import.namespace_alias.is_some() {
                 continue;
             }
             if let Some(path) = &import.path {
@@ -1316,55 +1364,7 @@ fn collect_module_info(
                 );
             }
         }
-        Node::ImportDecl { path, is_pub } => {
-            let import_path = resolve_import_path_with_snapshots(file, path, package_snapshots);
-            if import_path.is_none() {
-                module.has_unresolved_wildcard_import = true;
-            }
-            if *is_pub {
-                if let Some(resolved) = &import_path {
-                    module
-                        .wildcard_re_export_paths
-                        .push(normalize_path(resolved));
-                }
-            }
-            module.imports.push(ImportRef {
-                raw_path: path.clone(),
-                path: import_path,
-                selective_names: None,
-                import_span: snode.span,
-            });
-        }
-        Node::SelectiveImport {
-            names,
-            path,
-            is_pub,
-        } => {
-            let import_path = resolve_import_path_with_snapshots(file, path, package_snapshots);
-            if import_path.is_none() {
-                module.has_unresolved_selective_import = true;
-            }
-            if *is_pub {
-                if let Some(resolved) = &import_path {
-                    let canonical = normalize_path(resolved);
-                    for name in names {
-                        module
-                            .selective_re_exports
-                            .entry(name.clone())
-                            .or_default()
-                            .push(canonical.clone());
-                    }
-                }
-            }
-            let names: HashSet<String> = names.iter().cloned().collect();
-            module.selective_import_names.extend(names.iter().cloned());
-            module.imports.push(ImportRef {
-                raw_path: path.clone(),
-                path: import_path,
-                selective_names: Some(names),
-                import_span: snode.span,
-            });
-        }
+        _ if import_recording::record_import_node(module, file, snode, package_snapshots) => {}
         _ => {}
     }
 }

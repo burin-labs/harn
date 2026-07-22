@@ -36,6 +36,7 @@ impl TypeChecker {
             DeclOrigin::Imported,
         );
         Self::register_imported_callable_signatures_into(scope_mut, &self.imported_callable_decls);
+        Self::register_namespace_imports_into(scope_mut, &self.namespace_imports);
         // First pass: collect declarations (type/enum/struct/interface) into scope
         // before type-checking bodies so forward references resolve.
         for nodes in crate::lexical::module_scope_node_slices(program) {
@@ -407,6 +408,23 @@ impl TypeChecker {
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn register_namespace_imports_into(
+        scope: &mut TypeScope,
+        imports: &std::collections::HashMap<String, super::super::NamespaceImportBinding>,
+    ) {
+        for (alias, binding) in imports {
+            let fields: Vec<ShapeField> = binding
+                .members
+                .iter()
+                .map(|name| {
+                    ShapeField::synthetic(name.clone(), TypeExpr::Named("any".into()), false)
+                })
+                .collect();
+            scope.define_var(alias, Some(TypeExpr::Shape(fields)));
+            scope.mark_annotated(alias);
         }
     }
 

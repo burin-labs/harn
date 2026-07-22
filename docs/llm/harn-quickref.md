@@ -54,7 +54,8 @@ logs and progress always go to stderr.
 - Run: `harn run script.harn`.
 - Inline: `harn run -e 'log("hi")'`. The snippet is wrapped in
   `pipeline main(task) { ... }`; leading `import "..."` /
-  `import { x } from "..."` / `pub import { x } from "..."` lines are
+  `import { x } from "..."` / `import * as ns from "..."` /
+  `pub import { x } from "..."` lines are
   hoisted out of the wrapper. The temp file lives in the current
   directory so relative imports (`import "./lib"`) and `harn.toml`
   discovery resolve against your project, e.g.

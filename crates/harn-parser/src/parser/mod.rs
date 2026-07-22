@@ -228,6 +228,44 @@ mod tests {
     }
 
     #[test]
+    fn parses_namespace_import() {
+        let nodes = parse_source(r#"import * as artifacts from "std/run_artifacts""#)
+            .expect("namespace import parses");
+
+        match &nodes[0].node {
+            Node::NamespaceImport {
+                alias,
+                path,
+                is_pub,
+            } => {
+                assert_eq!(alias, "artifacts");
+                assert_eq!(path, "std/run_artifacts");
+                assert!(!*is_pub);
+            }
+            other => panic!("expected namespace import, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_pub_namespace_import() {
+        let nodes = parse_source(r#"pub import * as math from "./lib""#)
+            .expect("pub namespace import parses");
+
+        match &nodes[0].node {
+            Node::NamespaceImport {
+                alias,
+                path,
+                is_pub,
+            } => {
+                assert_eq!(alias, "math");
+                assert_eq!(path, "./lib");
+                assert!(*is_pub);
+            }
+            other => panic!("expected namespace import, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_match_expression_with_let_in_arm_body() {
         let source = r"
 pipeline p() {

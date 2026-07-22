@@ -24,7 +24,8 @@ pub use stdlib_metadata::{
 };
 pub use typechecker::{
     block_definitely_exits, format_type, stmt_definitely_exits, substitute_type_expr,
-    DiagnosticDetails, DiagnosticSeverity, InlayHintInfo, TypeChecker, TypeDiagnostic,
+    DiagnosticDetails, DiagnosticSeverity, InlayHintInfo, NamespaceImportBinding, TypeChecker,
+    TypeDiagnostic,
 };
 
 pub use builtin_signatures::install_builtin_signatures;

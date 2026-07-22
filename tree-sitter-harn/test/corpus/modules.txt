@@ -192,6 +192,38 @@ pub import "lib/shared"
       (string_delimiter))))
 
 ==================
+Namespace Import
+==================
+
+import * as helpers from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    alias: (identifier)
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
+
+==================
+Public Namespace Re-Export
+==================
+
+pub import * as helpers from "lib/helpers"
+
+---
+
+(source_file
+  (import_declaration
+    alias: (identifier)
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter))))
+
+==================
 Public Selective Re-Export
 ==================
 

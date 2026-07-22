@@ -741,9 +741,10 @@ fn push_rust_import(
 }
 
 fn extract_harn_imports(path: &str, source: &str) -> Vec<ImportRef> {
-    let import_re =
-        Regex::new(r#"(?m)^\s*(?:pub\s+)?import\s+(?:\{[^}]*\}\s+from\s+)?["']([^"']+)["']"#)
-            .expect("static regex parses");
+    let import_re = Regex::new(
+        r#"(?m)^\s*(?:pub\s+)?import\s+(?:(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_][A-Za-z0-9_]*)\s+from\s+)?["']([^"']+)["']"#,
+    )
+    .expect("static regex parses");
     let mut out = Vec::new();
     for capture in import_re.captures_iter(source) {
         let raw = capture.get(0).unwrap().as_str().trim().to_string();

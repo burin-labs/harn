@@ -358,6 +358,14 @@ impl Formatter<'_> {
                 );
                 self.writeln(&format!("{prefix}{line}"));
             }
+            Node::NamespaceImport {
+                alias,
+                path,
+                is_pub,
+            } => {
+                let prefix = if *is_pub { "pub " } else { "" };
+                self.writeln(&format!("{prefix}import * as {alias} from \"{path}\""));
+            }
             Node::MatchExpr { value, arms } => {
                 let val = self.format_expr(value, self.indent, self.indent * 2 + 7);
                 self.writeln(&format!("match {val} {{"));

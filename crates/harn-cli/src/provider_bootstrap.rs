@@ -254,7 +254,9 @@ fn import_paths(source: &str) -> Vec<String> {
 
 fn collect_import_path(node: &SNode, paths: &mut Vec<String>) {
     match &node.node {
-        Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
+        Node::ImportDecl { path, .. }
+        | Node::SelectiveImport { path, .. }
+        | Node::NamespaceImport { path, .. } => {
             paths.push(path.clone());
         }
         Node::AttributedDecl { inner, .. } => collect_import_path(inner, paths),
@@ -489,6 +491,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
         }
         Node::ImportDecl { .. }
         | Node::SelectiveImport { .. }
+        | Node::NamespaceImport { .. }
         | Node::EnumDecl { .. }
         | Node::StructDecl { .. }
         | Node::InterfaceDecl { .. }

@@ -900,32 +900,32 @@ fn scan_node_preflight(
     diagnostics: &mut Vec<PreflightDiagnostic>,
 ) {
     match &node.node {
-        Node::ImportDecl { path, .. } | Node::SelectiveImport { path, .. } => {
-            match resolve_import_path(file_path, path) {
-                Some(import_path) => {
-                    if let Some(parsed) = parse_resolved_module(&import_path) {
-                        scan_program_preflight(
-                            &import_path,
-                            &parsed.0,
-                            &parsed.1,
-                            config,
-                            host_capabilities,
-                            visited,
-                            diagnostics,
-                        );
-                    }
+        Node::ImportDecl { path, .. }
+        | Node::SelectiveImport { path, .. }
+        | Node::NamespaceImport { path, .. } => match resolve_import_path(file_path, path) {
+            Some(import_path) => {
+                if let Some(parsed) = parse_resolved_module(&import_path) {
+                    scan_program_preflight(
+                        &import_path,
+                        &parsed.0,
+                        &parsed.1,
+                        config,
+                        host_capabilities,
+                        visited,
+                        diagnostics,
+                    );
                 }
-                None => diagnostics.push(PreflightDiagnostic {
-                    code: Code::ModuleImportUnresolved,
-                    path: file_path.display().to_string(),
-                    source: source.to_string(),
-                    span: node.span,
-                    message: format!("preflight: unresolved import '{path}'"),
-                    help: Some("verify the import path and packaged module layout".to_string()),
-                    tags: None,
-                }),
             }
-        }
+            None => diagnostics.push(PreflightDiagnostic {
+                code: Code::ModuleImportUnresolved,
+                path: file_path.display().to_string(),
+                source: source.to_string(),
+                span: node.span,
+                message: format!("preflight: unresolved import '{path}'"),
+                help: Some("verify the import path and packaged module layout".to_string()),
+                tags: None,
+            }),
+        },
         Node::FunctionCall { name, args, .. } if name == "render" || name == "render_prompt" => {
             if let Some(template_path) = args.first().and_then(literal_template_path) {
                 if scan_stdlib_prompt_target(

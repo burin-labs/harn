@@ -1880,6 +1880,39 @@ import { extract_paths, parse_cells } from "std/text"
 import std::personas::prelude::{verify_then_act}
 ```
 
+### Namespace imports
+
+Bind a module's public surface under a single alias without flattening
+members into the caller scope:
+
+```harn,ignore
+import * as text from "std/text"
+
+pipeline default() {
+  __io_println(text.truncate_middle(long_text, 80))
+}
+```
+
+- Only the alias is introduced locally (`text` above). Member names like
+  `truncate_middle` are **not** available as bare identifiers.
+- Access exports with `alias.member` / `alias.member(...)`. This is a
+  namespace object (a closed dict with a `"_namespace"` marker), not a
+  receiver-method call on an arbitrary value — unknown members fail at
+  check time with the module path and nearby export suggestions.
+- Selective, wildcard, and namespace imports may appear together in the
+  same file.
+
+`pub import * as ns from "module"` re-exports the **alias namespace
+object** on this module's public surface. It does **not** flatten the
+target's members into the facade (contrast `pub import "module"`).
+
+Namespace imports are not receiver methods on handles or class-style
+APIs. They are a compile-time module binding: the alias names a closed
+export set from the module graph. Prefer a structural `harn codemod`
+rule when migrating a family of long prefixed calls
+(`run_artifact_read_json_contract_result(...)`) to shorter names under a
+namespace import once a module publishes those shorter exports.
+
 ### Exporting type aliases
 
 `pub type` exports a type alias so importers can use it in annotations
@@ -1924,6 +1957,8 @@ pub import "shared"
 - `pub import "module"` re-exports every public name from the target
   module — the wildcard form.
 - `pub import { name } from "module"` re-exports only the listed names.
+- `pub import * as alias from "module"` re-exports the namespace alias
+  object itself (not the flattened members).
 
 Re-exports compose: a facade can re-export from another facade and the
 chain is followed transitively. `harn check` flags re-export conflicts

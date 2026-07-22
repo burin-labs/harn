@@ -105,6 +105,19 @@ Imports specific names from a module.
 import { helper, util } from "shared/lib.harn"
 ```
 
+### `NamespaceImport`
+
+```rust
+NamespaceImport { alias: String, path: String, is_pub: bool }
+```
+
+Binds a module under a single alias without flattening exports into the
+caller. `pub` re-exports the alias object itself.
+
+```harn
+import * as helpers from "shared/lib.harn"
+```
+
 ### `TypeDecl`
 
 ```rust

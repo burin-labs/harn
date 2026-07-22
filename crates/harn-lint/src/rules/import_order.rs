@@ -75,11 +75,18 @@ pub(crate) fn check_import_order(
 
 fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
     match &node.node {
+        // Kind order: wildcard=0, namespace=1, selective=2.
         Node::ImportDecl { path, .. } => (
             u8::from(!path.starts_with("std/")),
             path.clone(),
             0,
             String::new(),
+        ),
+        Node::NamespaceImport { alias, path, .. } => (
+            u8::from(!path.starts_with("std/")),
+            path.clone(),
+            1,
+            alias.clone(),
         ),
         Node::SelectiveImport { names, path, .. } => {
             let mut sorted_names = names.clone();
@@ -87,11 +94,11 @@ fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
             (
                 u8::from(!path.starts_with("std/")),
                 path.clone(),
-                1,
+                2,
                 sorted_names.join(","),
             )
         }
-        _ => (2, String::new(), 2, String::new()),
+        _ => (3, String::new(), 3, String::new()),
     }
 }
 

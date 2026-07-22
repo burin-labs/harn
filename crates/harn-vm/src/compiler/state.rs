@@ -408,7 +408,9 @@ impl Compiler {
 
         for sn in program {
             match &sn.node {
-                Node::ImportDecl { .. } | Node::SelectiveImport { .. } => {
+                Node::ImportDecl { .. }
+                | Node::SelectiveImport { .. }
+                | Node::NamespaceImport { .. } => {
                     self.compile_node(sn)?;
                 }
                 _ => {}
@@ -453,7 +455,9 @@ impl Compiler {
                 .filter(|sn| {
                     !matches!(
                         &sn.node,
-                        Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+                        Node::ImportDecl { .. }
+                            | Node::SelectiveImport { .. }
+                            | Node::NamespaceImport { .. }
                     )
                 })
                 .collect();
@@ -524,7 +528,9 @@ impl Compiler {
         for sn in program {
             if matches!(
                 &sn.node,
-                Node::ImportDecl { .. } | Node::SelectiveImport { .. }
+                Node::ImportDecl { .. }
+                    | Node::SelectiveImport { .. }
+                    | Node::NamespaceImport { .. }
             ) {
                 self.compile_node(sn)?;
             }

@@ -167,6 +167,16 @@ pub enum Node {
         /// module's public surface.
         is_pub: bool,
     },
+    /// Namespace import: `import * as alias from "module"`.
+    ///
+    /// Binds a single statically resolved module namespace rather than
+    /// flattening public exports into the caller scope. When `is_pub` is
+    /// true, the alias itself is re-exported (not the flattened members).
+    NamespaceImport {
+        alias: String,
+        path: String,
+        is_pub: bool,
+    },
     EnumDecl {
         name: String,
         type_params: Vec<TypeParam>,

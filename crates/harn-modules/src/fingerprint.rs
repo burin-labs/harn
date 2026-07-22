@@ -190,6 +190,11 @@ fn canonicalize_top_level(snode: &SNode) -> Option<String> {
             sorted.sort();
             format!("pub_import_selective:{path}::{}", sorted.join(","))
         }),
+        Node::NamespaceImport {
+            alias,
+            path,
+            is_pub,
+        } => is_pub.then(|| format!("pub_import_namespace:{path}::{alias}")),
         _ => None,
     }
 }

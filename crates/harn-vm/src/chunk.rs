@@ -708,8 +708,8 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         Jump | JumpIfFalse | JumpIfTrue | IterNext | Return | TailCall | Throw | TryCatchSetup
         | Spawn | Pipe | Parallel | ParallelMap | ParallelMapStream | ParallelSettle
         | SyncMutexEnter | SyncMutexEnterKeyed | TaskScopeEnter | TaskScopeExit | Import
-        | SelectiveImport | DeadlineSetup | DeadlineEnd | BuildEnum | MatchEnum | Yield
-        | CallSpread | CallBuiltinSpread | MethodCallSpread => return None,
+        | SelectiveImport | NamespaceImport | DeadlineSetup | DeadlineEnd | BuildEnum
+        | MatchEnum | Yield | CallSpread | CallBuiltinSpread | MethodCallSpread => return None,
     })
 }
 

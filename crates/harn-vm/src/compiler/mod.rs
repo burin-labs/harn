@@ -687,6 +687,20 @@ impl Compiler {
                 self.chunk.lines.push(self.line);
                 self.chunk.columns.push(self.column);
             }
+            Node::NamespaceImport { alias, path, .. } => {
+                let path_idx = self.string_constant(path);
+                let alias_idx = self.string_constant(alias);
+                self.chunk
+                    .emit_u16(Op::NamespaceImport, path_idx, self.line);
+                let hi = (alias_idx >> 8) as u8;
+                let lo = alias_idx as u8;
+                self.chunk.code.push(hi);
+                self.chunk.code.push(lo);
+                self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
+                self.chunk.lines.push(self.line);
+                self.chunk.columns.push(self.column);
+            }
             Node::TryOperator { operand } => {
                 self.compile_node(operand)?;
                 self.chunk.emit(Op::TryUnwrap, self.line);

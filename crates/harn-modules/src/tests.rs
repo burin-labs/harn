@@ -721,3 +721,102 @@ fn cross_directory_cycle_does_not_explode_module_count() {
         .expect("cyclic imports still resolve to known exports");
     assert!(imported.contains("b_fn"));
 }
+
+#[test]
+fn namespace_import_binds_alias_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "lib.harn",
+        "pub fn greet() { \"hi\" }\npub fn other() { 1 }\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import * as lib from \"./lib\"\nlib.greet()\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let imported = graph
+        .imported_names_for_file(&entry)
+        .expect("namespace import should resolve");
+    assert!(imported.contains("lib"), "alias missing: {imported:?}");
+    assert!(
+        !imported.contains("greet") && !imported.contains("other"),
+        "namespace members must not flatten into caller scope: {imported:?}"
+    );
+
+    let namespaces = graph
+        .namespace_imports_for_file(&entry)
+        .expect("namespace info");
+    assert_eq!(namespaces.len(), 1);
+    assert_eq!(namespaces[0].alias, "lib");
+    assert!(namespaces[0].member_names.contains(&"greet".to_string()));
+    assert!(namespaces[0].member_names.contains(&"other".to_string()));
+
+    let def = graph
+        .namespace_member_lookup(&entry, "lib", "greet")
+        .expect("member lookup");
+    assert!(def.file.ends_with("lib.harn"));
+}
+
+#[test]
+fn pub_namespace_import_reexports_alias_not_members() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "src.harn",
+        "pub fn alpha() { 1 }\npub fn beta() { 2 }\n",
+    );
+    write_file(root, "facade.harn", "pub import * as src from \"./src\"\n");
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import { src } from \"./facade\"\nsrc.alpha()\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let facade = root.join("facade.harn");
+    let facade_exports = graph.exports_for_module(&facade);
+    assert!(
+        facade_exports.contains(&"src".to_string()),
+        "alias should be on facade public surface: {facade_exports:?}"
+    );
+    assert!(
+        !facade_exports.contains(&"alpha".to_string())
+            && !facade_exports.contains(&"beta".to_string()),
+        "namespace re-export must not flatten members: {facade_exports:?}"
+    );
+
+    let imported = graph
+        .imported_names_for_file(&entry)
+        .expect("entry should resolve");
+    assert!(imported.contains("src"));
+    assert!(!imported.contains("alpha"));
+}
+
+#[test]
+fn namespace_import_coexists_with_selective() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "lib.harn",
+        "pub fn alpha() { 1 }\npub fn beta() { 2 }\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import * as lib from \"./lib\"\nimport { beta } from \"./lib\"\nlib.alpha()\nbeta()\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let imported = graph
+        .imported_names_for_file(&entry)
+        .expect("mixed imports should resolve");
+    assert!(imported.contains("lib"));
+    assert!(imported.contains("beta"));
+    assert!(!imported.contains("alpha"));
+}

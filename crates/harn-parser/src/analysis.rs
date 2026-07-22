@@ -100,6 +100,7 @@ pub struct TypeCheckConfig {
     pub imported_names: Option<HashSet<String>>,
     pub imported_type_decls: Vec<SNode>,
     pub imported_callable_decls: Vec<SNode>,
+    pub namespace_imports: Vec<(String, crate::NamespaceImportBinding)>,
 }
 
 impl TypeCheckConfig {
@@ -127,6 +128,14 @@ impl TypeCheckConfig {
         self
     }
 
+    pub fn with_namespace_imports(
+        mut self,
+        namespace_imports: Vec<(String, crate::NamespaceImportBinding)>,
+    ) -> Self {
+        self.namespace_imports = namespace_imports;
+        self
+    }
+
     fn cache_key(&self) -> TypeCheckCacheKey {
         let mut imported_names = self
             .imported_names
@@ -135,11 +144,18 @@ impl TypeCheckConfig {
         if let Some(names) = &mut imported_names {
             names.sort();
         }
+        let mut namespace_aliases: Vec<String> = self
+            .namespace_imports
+            .iter()
+            .map(|(alias, _)| alias.clone())
+            .collect();
+        namespace_aliases.sort();
         TypeCheckCacheKey {
             strict_types: self.strict_types,
             imported_names,
             imported_type_decls_digest: debug_digest(&self.imported_type_decls),
             imported_callable_decls_digest: debug_digest(&self.imported_callable_decls),
+            namespace_imports_digest: debug_digest(&namespace_aliases),
         }
     }
 
@@ -154,6 +170,9 @@ impl TypeCheckConfig {
         if !self.imported_callable_decls.is_empty() {
             checker = checker.with_imported_callable_decls(self.imported_callable_decls.clone());
         }
+        if !self.namespace_imports.is_empty() {
+            checker = checker.with_namespace_imports(self.namespace_imports.clone());
+        }
         checker
     }
 }
@@ -164,6 +183,7 @@ struct TypeCheckCacheKey {
     imported_names: Option<Vec<String>>,
     imported_type_decls_digest: u64,
     imported_callable_decls_digest: u64,
+    namespace_imports_digest: u64,
 }
 
 #[derive(Debug, Clone)]

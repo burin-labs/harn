@@ -1257,6 +1257,15 @@ impl<'a> Linter<'a> {
                 });
             }
 
+            Node::NamespaceImport { alias, is_pub, .. } => {
+                self.known_functions.insert(alias.clone());
+                self.imports.push(ImportInfo {
+                    names: vec![alias.clone()],
+                    invalid_names: Default::default(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                });
+            }
             Node::ImportDecl { .. } => {
                 if !self.use_module_graph_for_wildcards {
                     self.has_wildcard_import = true;

@@ -37,9 +37,11 @@ impl HarnLsp {
         let mut items = Vec::new();
 
         if char_before_position(&source, position) == Some('.') {
-            return Ok(Some(CompletionResponse::Array(dot_completion_items(
-                &source, position, &symbols,
-            ))));
+            let mut items = namespace_dot_completion_items(uri, &source, position);
+            if items.is_empty() {
+                items = dot_completion_items(&source, position, &symbols);
+            }
+            return Ok(Some(CompletionResponse::Array(items)));
         }
 
         // Discriminator-value completion: when the cursor sits inside
@@ -179,6 +181,38 @@ fn resolve_kind_of(item: &CompletionItem) -> Option<ResolveKind> {
         "keyword" => Some(ResolveKind::Keyword),
         _ => None,
     }
+}
+
+fn namespace_dot_completion_items(
+    uri: &Url,
+    source: &SourceText,
+    position: Position,
+) -> Vec<CompletionItem> {
+    let Some(alias) = infer_dot_receiver_name(source, position) else {
+        return Vec::new();
+    };
+    let Ok(current_path) = uri.to_file_path() else {
+        return Vec::new();
+    };
+    let module_graph = harn_modules::build(std::slice::from_ref(&current_path));
+    let Some(namespaces) = module_graph.namespace_imports_for_file(&current_path) else {
+        return Vec::new();
+    };
+    let Some(ns) = namespaces.iter().find(|ns| ns.alias == alias) else {
+        return Vec::new();
+    };
+    let mut items: Vec<CompletionItem> = ns
+        .member_names
+        .iter()
+        .map(|name| CompletionItem {
+            label: name.clone(),
+            kind: Some(CompletionItemKind::FIELD),
+            detail: Some(format!("export from {}", ns.raw_path)),
+            ..Default::default()
+        })
+        .collect();
+    items.sort_by(|a, b| a.label.cmp(&b.label));
+    items
 }
 
 pub(super) fn dot_completion_items(
