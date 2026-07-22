@@ -73,6 +73,8 @@ fn workflow() {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
     needs: ["changes", "rust-builds"],
+    if:
+      "needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
     "timeout-minutes": 35,
     steps: [
       {
@@ -126,11 +128,34 @@ fn workflow() {
             name: "Build portable behavior payload",
             id: "release-audit-behavior-build",
             if: "matrix.kind == 'behavior'",
-            env: {CARGO_BUILD_JOBS: "4"},
+            env: {
+              CARGO_BUILD_JOBS: "4",
+              HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: gha_expression(
+                "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0'",
+              ),
+            },
+          },
+          {
+            name: "Run full environment-neutral test suite",
+            id: "release-audit-rust-test",
+            if: "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+            env: {HARN_LLM_CALLS_DISABLED: "1"},
+            run:
+              "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(landlock)'",
           },
         ],
       },
       "rust-test": rust_test,
+      "ci-status": {
+        steps: [
+          {
+            name: "Verify required CI jobs",
+            env: {COLOCATED_TESTS_DISABLED: gha_expression("vars.HARN_CI_DISABLE_COLOCATED_TESTS")},
+            run:
+              "if [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
+          },
+        ],
+      },
     },
   }
 }
@@ -208,6 +233,58 @@ pipeline test_rejects_recompiling_behavior_consumer(task) {
   assert(errors.contains("ci.yml:rust-test must verify the archived Rust runtime contract"))
   assert(errors.contains("ci.yml:rust-test must execute only the remapped nextest archive"))
   assert(errors.contains("ci.yml:rust-test must not configure compile fan-out"))
+}
+
+@test
+pipeline test_rejects_co_location_without_fail_closed_fallback(task) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-builds"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-builds": {
+        ...rust_job,
+        steps: rust_job.steps.filter(
+          { step -> step?.name != "Run full environment-neutral test suite" },
+        )
+          .map(
+            { step ->
+              if step?.name != "Build portable behavior payload" {
+                return step
+              }
+              return {...step, env: {...step.env, HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: "1"}}
+            },
+          )
+          .to_list(),
+      },
+      "rust-test": {...valid.jobs["rust-test"], if: "false"},
+      "ci-status": {
+        steps: [
+          {
+            name: "Verify required CI jobs",
+            env: {BLACKSMITH_DISABLED: "true"},
+            run: "[ \"$BLACKSMITH_DISABLED\" = true ]",
+          },
+        ],
+      },
+    },
+  }
+  const errors = ci_sccache_policy_errors(sccache_action(), invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-builds must skip the neutral archive only while co-located tests are active",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:rust-builds must own the exact co-located environment-neutral Rust proof",
+    ),
+  )
+  assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
+  assert(
+    errors.contains("ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"),
+  )
 }
 
 @test

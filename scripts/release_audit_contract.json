@@ -51,21 +51,13 @@
         {
           "id": "release-audit-behavior-build",
           "condition": "matrix.kind == 'behavior'",
-          "run": "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$GITHUB_SHA\""
-        }
-      ]
-    },
-    {
-      "name": "Rust test",
-      "job_id": "rust-test",
-      "matrix_kind": "",
-      "proofs": ["rust-audit"],
-      "steps": [
+          "run": "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$RUNNER_TEMP/harn-security.tar.zst\" \"$GITHUB_SHA\""
+        },
         {
           "id": "release-audit-rust-test",
-          "condition": "",
+          "condition": "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
+          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
         }
       ]
     },
@@ -78,7 +70,7 @@
         {
           "id": "release-audit-rust-security",
           "condition": "",
-          "run": "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'"
+          "run": "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'"
         }
       ]
     },

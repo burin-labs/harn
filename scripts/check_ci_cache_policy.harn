@@ -38,6 +38,8 @@ const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
 
 const SELFHOSTED_DISABLE_VAR = "HARN_CI_DISABLE_SELFHOSTED_LINUX"
 
+const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
+
 const PERSISTENT_SCCACHE_SIZE = "15G"
 
 // Hang backstop for the archived-behavior consumer lanes. These lanes never
@@ -636,6 +638,66 @@ fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string>
   return errors
 }
 
+fn colocated_rust_proof_errors(workflow) -> list<string> {
+  let errors: list<string> = []
+  const rust_job = workflow?.jobs?.["rust-builds"]
+  const build_step = step_by_name(rust_job?.steps ?? [], "Build portable behavior payload")
+  const skip_neutral = trim(build_step?.env?.HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE ?? "")
+  if !contains(skip_neutral, COLOCATED_TESTS_DISABLE_VAR)
+    || !contains(skip_neutral, "!= 'true'") {
+    errors = errors
+      + [
+      "ci.yml:rust-builds must skip the neutral archive only while co-located tests are active",
+    ]
+  }
+  const colocated_step = step_by_name(
+    rust_job?.steps ?? [],
+    "Run full environment-neutral test suite",
+  )
+  const colocated_command = trim(colocated_step?.run ?? "")
+  if trim(colocated_step?.id ?? "") != "release-audit-rust-test"
+    || trim(colocated_step?.if ?? "")
+    != "matrix.kind == 'behavior' && vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
+    || trim(
+    colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "",
+  )
+    != "1"
+    || !contains(colocated_command, "cargo nextest run --locked --workspace --profile ci")
+    || contains(
+    colocated_command,
+    "--archive-file",
+  ) {
+    errors = errors
+      + [
+      "ci.yml:rust-builds must own the exact co-located environment-neutral Rust proof",
+    ]
+  }
+  const rust_test_if = trim(workflow?.jobs?.["rust-test"]?.if ?? "")
+  if !contains(rust_test_if, COLOCATED_TESTS_DISABLE_VAR)
+    || !contains(rust_test_if, "== 'true'") {
+    errors = errors
+      + ["ci.yml:rust-test must run only as the co-location kill-switch fallback"]
+  }
+  const status_step = step_by_name(
+    workflow?.jobs?.["ci-status"]?.steps ?? [],
+    "Verify required CI jobs",
+  )
+  const status_command = trim(status_step?.run ?? "")
+  if !contains(
+    trim(status_step?.env?.COLOCATED_TESTS_DISABLED ?? ""),
+    COLOCATED_TESTS_DISABLE_VAR,
+  )
+    || !contains(status_command, "$COLOCATED_TESTS_DISABLED")
+    || contains(
+    status_command,
+    "$BLACKSMITH_DISABLED",
+  ) {
+    errors = errors
+      + ["ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"]
+  }
+  return errors
+}
+
 /** Validate the persistent local sccache action and every authorized heavy CI consumer. */
 pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   let errors: list<string> = []
@@ -727,6 +789,7 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
       + ["ci.yml:rust-builds behavior build must keep four-way fan-out on the producer"]
   }
   errors = errors + archived_behavior_consumer_errors(workflow, "rust-test")
+  errors = errors + colocated_rust_proof_errors(workflow)
   const allowed = ["package-audit", "rust-builds"]
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     if len(matching_steps(job, SCCACHE_ACTION)) > 0 && !allowed.contains(job_name) {

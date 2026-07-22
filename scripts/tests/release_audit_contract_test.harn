@@ -65,20 +65,12 @@ fn contract() -> ReleaseAuditContract {
           proof_step(
             "release-audit-behavior-build",
             "matrix.kind == 'behavior'",
-            "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$GITHUB_SHA\"",
+            "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$RUNNER_TEMP/harn-security.tar.zst\" \"$GITHUB_SHA\"",
           ),
-        ],
-      },
-      {
-        name: "Rust test",
-        job_id: "rust-test",
-        matrix_kind: "",
-        proofs: ["rust-audit"],
-        steps: [
           proof_step(
             "release-audit-rust-test",
-            "",
-            "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+            "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+            "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
             {HARN_LLM_CALLS_DISABLED: "1"},
           ),
         ],
@@ -92,7 +84,7 @@ fn contract() -> ReleaseAuditContract {
           proof_step(
             "release-audit-rust-security",
             "",
-            "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+            "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           ),
         ],
       },
@@ -134,13 +126,6 @@ fn jobs() {
       id: 7,
       name: "Behavior build",
       url: "https://github.com/burin-labs/harn/actions/runs/123/job/7",
-      status: "completed",
-      conclusion: "success",
-    },
-    {
-      id: 2,
-      name: "Rust test",
-      url: "https://github.com/burin-labs/harn/actions/runs/123/job/2",
       status: "completed",
       conclusion: "success",
     },
@@ -205,7 +190,7 @@ pipeline test_release_audit_contract_and_receipts(task) {
   assert_eq(
     release_audit_receipt_plan(
       cfg,
-      {...merge_receipt(), jobs: jobs().filter({ job -> job.name != "Rust test" }).to_list()},
+      {...merge_receipt(), jobs: jobs().filter({ job -> job.name != "Behavior build" }).to_list()},
       SHA,
       BINARY_SHA,
     ).reason,
@@ -296,7 +281,6 @@ pipeline test_release_audit_contract_reads_typed_result_from_disk(task) {
           "Package audit",
           "Rust lint",
           "Behavior build",
-          "Rust test",
           "Rust security proof",
           "Harn conformance + audit",
         ],
@@ -335,18 +319,14 @@ pipeline test_release_audit_ci_contract_drift(task) {
             id: "release-audit-behavior-build",
             if: "matrix.kind == 'behavior'",
             run:
-              "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$GITHUB_SHA\"",
+              "./scripts/ci/behavior_artifact.sh build \"$RUNNER_TEMP/harn-behavior.tar.zst\" \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$RUNNER_TEMP/harn-security.tar.zst\" \"$GITHUB_SHA\"",
           },
-        ],
-      },
-      "rust-test": {
-        name: "Rust test",
-        steps: [
           {
             id: "release-audit-rust-test",
+            if: "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
             env: {HARN_LLM_CALLS_DISABLED: "1"},
             run:
-              "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+              "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           },
         ],
       },
@@ -356,7 +336,7 @@ pipeline test_release_audit_ci_contract_drift(task) {
           {
             id: "release-audit-rust-security",
             run:
-              "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
+              "cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'",
           },
         ],
       },
@@ -374,9 +354,9 @@ pipeline test_release_audit_ci_contract_drift(task) {
         ...ci,
         jobs: {
           ...ci.jobs,
-          "rust-test": {
-            ...ci.jobs["rust-test"],
-            steps: ci.jobs["rust-test"].steps.map(
+          "rust-builds": {
+            ...ci.jobs["rust-builds"],
+            steps: ci.jobs["rust-builds"].steps.map(
               { step ->
                 if step.id == "release-audit-rust-test" {
                   {...step, run: "make test-affected"}
@@ -399,9 +379,9 @@ pipeline test_release_audit_ci_contract_drift(task) {
         ...ci,
         jobs: {
           ...ci.jobs,
-          "rust-test": {
-            ...ci.jobs["rust-test"],
-            steps: ci.jobs["rust-test"].steps.map(
+          "rust-builds": {
+            ...ci.jobs["rust-builds"],
+            steps: ci.jobs["rust-builds"].steps.map(
               { step ->
                 if step.id == "release-audit-rust-test" {
                   {...step, env: {}}
