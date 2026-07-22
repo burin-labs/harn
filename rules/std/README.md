@@ -36,7 +36,7 @@ Each rule ships with an annotation fixture (`<rule>.ts`, the Semgrep
 harn rule test rules/std
 ```
 
-The rules are also covered by `crates/harn-rules/tests/seed_pack.rs`, which
+The rules are also covered by `crates/harn-rules/tests/harn_rules/seed_pack.rs`, which
 loads each shipped `*.toml` and asserts its behavior (a CI gate today, before
 `harn rule test` lands on `main`).
 

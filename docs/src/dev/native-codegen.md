@@ -109,7 +109,7 @@ production JITs (V8's Smi overflow path, for instance).
 `call` / `evaluate` therefore return a `NativeOutcome` — either `Value(v)` (in
 the subset) or `Deopt(reason)` — while genuine runtime errors (integer divide by
 zero, which the VM raises too) stay on the `Err(NativeTrap)` channel.
-`tests/vm_fidelity.rs` confirms the contract against the real VM: at the exact
+`tests/harn_codegen/vm_fidelity.rs` confirms the contract against the real VM: at the exact
 inputs where the JIT deopts, the VM does promote to `float`; elsewhere the
 values match bit-for-bit.
 
@@ -162,11 +162,11 @@ harn-nativec kernel.harn score --run 12 3
 ## Tests
 
 The tests are in-process and deterministic — no wall clock, no external
-toolchain. `tests/native.rs` is a differential suite that compiles real Harn
+toolchain. `tests/harn_codegen/native.rs` is a differential suite that compiles real Harn
 source and asserts the JIT agrees with the reference interpreter across input
 grids (including overflow deopts, divide-by-zero traps, `i64::MIN / -1`, and NaN
-comparisons); `tests/aot.rs` checks object emission without invoking a linker;
-`tests/vm_fidelity.rs` runs the same functions on the **real `harn-vm`
+comparisons); `tests/harn_codegen/aot.rs` checks object emission without invoking a linker;
+`tests/harn_codegen/vm_fidelity.rs` runs the same functions on the **real `harn-vm`
 interpreter** (through a dev-only current-thread Tokio runtime) to prove the
 native compiler's value/deopt/trap boundaries match the VM's actual
 promote-on-overflow semantics.

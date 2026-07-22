@@ -174,10 +174,10 @@ protocol-conformance:
 #
 # Failures are scoped per surface so CI breakage attribution is
 # unambiguous:
-#   - tests/client.rs           — fake-server self-consistency
-#   - tests/generic_server.rs   — generic harn-serve MCP server
-#   - tests/legacy_compat.rs    — 2025-11-25 wire compat regression
-#   - tests/artifacts.rs        — published fixtures + recursive $defs
+#   - tests/harn_mcp_rc_compat/client.rs         — fake-server self-consistency
+#   - tests/harn_mcp_rc_compat/generic_server.rs — generic harn-serve MCP server
+#   - tests/harn_mcp_rc_compat/legacy_compat.rs  — 2025-11-25 wire compat regression
+#   - tests/harn_mcp_rc_compat/artifacts.rs      — published fixtures + recursive $defs
 #   - harn-cli mcp_rc_compat_tests — orchestrator MCP server
 #
 # This target is a developer-convenience entry point for local iteration
