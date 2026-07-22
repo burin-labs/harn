@@ -132,6 +132,7 @@
 - [Pipeline lifecycle](./pipeline-lifecycle.md)
 - [Pipeline lifecycle presets](./stdlib/lifecycle.md)
 - [Observability stdlib](./stdlib/observability.md)
+- [Run-record observability outputs](./observability/run-record-outputs.md)
 - [Timing stdlib](./stdlib/timing.md)
 - [Verification stdlib](./stdlib/verification.md)
 - [Agent governors and detectors](./stdlib/governors.md)

@@ -276,6 +276,7 @@ pub type ProviderCallResponseEvent = {
   tool_calls?: unknown,
   parsed_tool_calls?: unknown,
   raw_tool_calls?: unknown,
+  loop_state?: unknown,
   // MODEL-authored text; not deterministic.
   text?: string,
   thinking?: string?,

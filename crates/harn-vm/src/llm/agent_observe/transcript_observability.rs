@@ -472,6 +472,7 @@ pub(super) fn dump_llm_response(
         .unwrap_or(serde_json::Value::Null);
     let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
     let parsed_tool_calls = raw_tool_receipts::merged_tool_calls_for_observability(result, tools);
+    let loop_state = decode_loop_state(&result.text);
     let mut event = serde_json::json!({
         "type": "provider_call_response",
         "iteration": iteration,
@@ -491,6 +492,10 @@ pub(super) fn dump_llm_response(
         // does NOT touch the request-construction / history path — the model's
         // next-turn payload is unchanged.
         "parsed_tool_calls": parsed_tool_calls,
+        // Some agent prompts emit a machine-readable LOOP_STATE block in the
+        // response text. Decode it once at Harn's transcript boundary so
+        // observability consumers do not each maintain their own text parser.
+        "loop_state": loop_state,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "cost_usd": result.priced_cost_usd(),
@@ -529,6 +534,44 @@ pub(super) fn dump_llm_response(
     });
     raw_tool_receipts::project_onto_event(&mut event, result);
     append_llm_transcript_entry(&event);
+}
+
+pub(super) fn decode_loop_state(text: &str) -> Option<serde_json::Value> {
+    let (_, remainder) = text.split_once("## LOOP_STATE")?;
+    let (block, _) = remainder.split_once("## END_LOOP_STATE")?;
+    let mut fields = serde_json::Map::new();
+    for line in block.lines() {
+        let Some((key, raw_value)) = line.trim().split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        fields.insert(key.to_string(), loop_state_value(raw_value.trim()));
+    }
+    (!fields.is_empty()).then_some(serde_json::Value::Object(fields))
+}
+
+fn loop_state_value(value: &str) -> serde_json::Value {
+    match value {
+        "true" => serde_json::Value::Bool(true),
+        "false" => serde_json::Value::Bool(false),
+        "null" | "nil" => serde_json::Value::Null,
+        _ => {
+            if let Ok(integer) = value.parse::<i64>() {
+                return serde_json::Value::from(integer);
+            }
+            if let Some(number) = value
+                .parse::<f64>()
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+            {
+                return serde_json::Value::Number(number);
+            }
+            serde_json::Value::String(value.to_string())
+        }
+    }
 }
 
 /// Emit the self-contained `resolved_dispatch` transcript record for one LLM

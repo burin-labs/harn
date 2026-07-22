@@ -131,14 +131,24 @@ fn deterministic_replay_preserves_worker_child_run_metadata() {
 fn snapshot_trace_spans_returns_completed_trace_tree() {
     set_tracing_enabled(true);
     let parent = span_start(SpanKind::Pipeline, "workflow".to_string());
-    let child = span_start(SpanKind::ToolCall, "read".to_string());
+    let child = span_start(SpanKind::LlmCall, "llm_call".to_string());
+    crate::tracing::span_attach_metadata_if_absent(
+        child,
+        crate::llm::first_token::FIRST_TOKEN_METADATA_KEY,
+        serde_json::json!(87),
+    );
     span_end(child);
     span_end(parent);
 
     let spans = snapshot_trace_spans();
     assert_eq!(spans.len(), 2);
-    assert_eq!(spans[0].kind, "tool_call");
+    assert_eq!(spans[0].kind, "llm_call");
     assert_eq!(spans[0].parent_id, Some(parent));
+    assert_eq!(spans[0].ttft_ms, Some(87));
+    assert_eq!(
+        spans[0].metadata[crate::llm::first_token::FIRST_TOKEN_METADATA_KEY],
+        serde_json::json!(87)
+    );
     assert_eq!(spans[1].kind, "pipeline");
 
     set_tracing_enabled(false);
