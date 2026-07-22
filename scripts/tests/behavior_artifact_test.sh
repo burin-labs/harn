@@ -164,6 +164,18 @@ run_artifact restore-cli "$skip_cli_bundle" "$tmpdir/restored-skip-cli" "$commit
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-security "$skip_security_bundle" \
   "$tmpdir/restored-skip-security" "$commit"
 
+# CLI-only producer mode: builds just the harn binary bundle, restorable by
+# the same restore-cli consumers.
+cli_only_bundle="$tmpdir/out/cli-only.tar.zst"
+run_artifact build-cli "$cli_only_bundle" "$commit"
+run_artifact restore-cli "$cli_only_bundle" "$tmpdir/restored-cli-only" "$commit"
+"$tmpdir/restored-cli-only/harn" | grep -Fxq harn
+tar --zstd -tf "$cli_only_bundle" | sort | diff -u - <(printf '%s\n' \
+  CLI_SHA256SUMS harn manifest | sort)
+FAKE_COMMIT_OVERRIDE=fedcba9876543210fedcba9876543210fedcba98 \
+  expect_failure "build-cli accepted a commit that did not match checkout HEAD" \
+  run_artifact build-cli "$tmpdir/out/cli-only-wrong.tar.zst" "$commit"
+
 expect_failure "restore accepted a bundle for the wrong commit" \
   run_artifact restore "$bundle" "$tmpdir/wrong-commit" fedcba9876543210fedcba9876543210fedcba98
 

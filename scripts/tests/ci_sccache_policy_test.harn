@@ -55,9 +55,12 @@ fn workflow() {
   const hosted_fallback = disable + " && runner.environment != 'self-hosted'"
   const rust = persistent_job(
     gha_expression(
-      "matrix.selfhosted && "
-        + selfhosted
-        + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-stable\"]') || ("
+      "vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true' && (matrix.selfhosted == 'stable'"
+        + " && needs.runner-availability.outputs.linux == 'true'"
+        + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-stable\"]')"
+        + " || matrix.selfhosted == 'big'"
+        + " && needs.runner-availability.outputs.linux_big == 'true'"
+        + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-big\"]')) || ("
         + disable
         + " && 'ubuntu-latest' || matrix.runner)",
     ),
@@ -111,13 +114,13 @@ fn workflow() {
                 kind: "lint",
                 runner: "blacksmith-4vcpu-ubuntu-2404",
                 cache_key: "workspace-lint",
-                selfhosted: true,
+                selfhosted: "stable",
               },
               {
                 kind: "behavior",
                 runner: "blacksmith-8vcpu-ubuntu-2404",
                 cache_key: "workspace-behavior",
-                selfhosted: false,
+                selfhosted: "big",
               },
             ],
           },
@@ -129,7 +132,9 @@ fn workflow() {
             id: "release-audit-behavior-build",
             if: "matrix.kind == 'behavior'",
             env: {
-              CARGO_BUILD_JOBS: "4",
+              CARGO_BUILD_JOBS: gha_expression(
+                "runner.environment == 'self-hosted' && '12' || '4'",
+              ),
               HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: gha_expression(
                 "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0'",
               ),
