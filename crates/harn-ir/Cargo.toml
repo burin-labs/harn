@@ -9,9 +9,9 @@ homepage.workspace = true
 description = "CFG and invariant analysis for the Harn programming language"
 
 [dependencies]
-harn-glob = { path = "../harn-glob", version = "=0.10.30", default-features = false }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.30" }
-harn-parser = { path = "../harn-parser", version = "=0.10.30" }
+harn-glob = { path = "../harn-glob", version = "=0.10.31", default-features = false }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.31" }
+harn-parser = { path = "../harn-parser", version = "=0.10.31" }
 
 [lints]
 workspace = true
