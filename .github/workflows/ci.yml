@@ -31,8 +31,10 @@ env:
 jobs:
   # Detect idle self-hosted Linux capacity via the org detector shared with
   # burin-code/harn-cloud. Overflow guardrails: a busy or offline pool reports
-  # unavailable, so every consumer lane falls back to its hosted runner instead
-  # of queueing behind local work. Fork PRs receive no secrets, so on a fork PR
+  # unavailable at probe time, so every consumer lane falls back to its hosted
+  # runner. The probe is a snapshot, not a reservation: simultaneous workflows
+  # can still race for the same runner and briefly queue. Fork PRs receive no
+  # secrets, so on a fork PR
   # the probe reports false and the lanes can never route to self-hosted
   # hardware (repo policy additionally requires approval for ALL outside-
   # collaborator workflow runs). Kill switch: set the repo/org variable

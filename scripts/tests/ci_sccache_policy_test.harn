@@ -34,7 +34,13 @@ fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback
     steps: [
       {
         uses: "./.github/actions/sccache",
-        with: {"cache-key": cache_key, sticky: gha_expression(sticky_if)},
+        with: {
+          "cache-key": cache_key,
+          sticky: gha_expression(sticky_if),
+          "gha-backend": gha_expression(
+            "runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'",
+          ),
+        },
       },
       {uses: "./.github/actions/rust-cache", if: fallback_if},
       {run: "./scripts/ci/finalize_sccache.sh", if: "always()"},
@@ -44,11 +50,20 @@ fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback
 
 fn workflow() {
   const disable = "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'"
+  const selfhosted =
+    "vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true' && needs.runner-availability.outputs.linux == 'true'"
+  const hosted_fallback = disable + " && runner.environment != 'self-hosted'"
   const rust = persistent_job(
-    gha_expression(disable + " && 'ubuntu-latest' || matrix.runner"),
+    gha_expression(
+      "matrix.selfhosted && "
+        + selfhosted
+        + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-stable\"]') || ("
+        + disable
+        + " && 'ubuntu-latest' || matrix.runner)",
+    ),
     gha_expression("matrix.cache_key"),
-    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-    "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'",
+    "runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    hosted_fallback,
   )
   const rust_with_flags = {
     ...rust,
@@ -75,21 +90,32 @@ fn workflow() {
   return {
     jobs: {
       "package-audit": persistent_job(
-        gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'"),
+        gha_expression(
+          selfhosted
+            + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\", \"harn-ci-stable\"]') || ("
+            + disable
+            + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404')",
+        ),
         "package-audit",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'",
+        "runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+        hosted_fallback,
       ),
       "rust-builds": {
         ...rust_with_flags,
         strategy: {
           matrix: {
             include: [
-              {kind: "lint", runner: "blacksmith-4vcpu-ubuntu-2404", cache_key: "workspace-lint"},
+              {
+                kind: "lint",
+                runner: "blacksmith-4vcpu-ubuntu-2404",
+                cache_key: "workspace-lint",
+                selfhosted: true,
+              },
               {
                 kind: "behavior",
                 runner: "blacksmith-8vcpu-ubuntu-2404",
                 cache_key: "workspace-behavior",
+                selfhosted: false,
               },
             ],
           },
@@ -209,6 +235,62 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
   )
   assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 15G"))
   assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
+}
+
+@test
+pipeline test_rejects_selfhosted_cache_backend_leaks(task) {
+  const valid = workflow()
+  const package_job = valid.jobs["package-audit"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "package-audit": {
+        ...package_job,
+        steps: package_job.steps.map(
+          { step ->
+            if step?.uses != "./.github/actions/sccache" {
+              return step
+            }
+            return {...step, with: {...step.with, sticky: "true", "gha-backend": "true"}}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_sccache_policy_errors(sccache_action(), invalid)
+  assert(errors.contains("ci.yml:package-audit must disable sticky storage on self-hosted runners"))
+  assert(errors.contains("ci.yml:package-audit must disable GHA sccache on self-hosted runners"))
+}
+
+@test
+pipeline test_rejects_unguarded_selfhosted_routing(task) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-builds"]
+  const matrix = rust_job.strategy.matrix.include
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "package-audit": {...valid.jobs["package-audit"], "runs-on": "blacksmith-4vcpu-ubuntu-2404"},
+      "rust-builds": {
+        ...rust_job,
+        strategy: {matrix: {include: [matrix[0], {...matrix[1], selfhosted: true}]}},
+      },
+    },
+  }
+  const errors = ci_sccache_policy_errors(sccache_action(), invalid)
+  assert(
+    errors.contains(
+      "ci.yml:package-audit must keep self-hosted routing behind HARN_CI_DISABLE_SELFHOSTED_LINUX",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:rust-builds must keep compile lanes on distinct policy-sized persistent caches",
+    ),
+  )
 }
 
 @test
