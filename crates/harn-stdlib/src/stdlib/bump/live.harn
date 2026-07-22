@@ -34,6 +34,7 @@ import { is_v_semver } from "std/semver"
 /** Everything the live adapter needs to reach git, GitHub, and validation. */
 pub type LiveBumpConfig = {
   repo: string,
+  release_repo: string,
   token: string,
   branch: string,
   base: string,
@@ -59,6 +60,11 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
   const o = overrides ?? {}
   return {
     repo: to_string(o.repo ?? ""),
+    // Where the target's releases are published. Defaults to the consumer repo
+    // itself (same-repo bump semantics); the Harn runtime bump overrides this
+    // with burin-labs/harn, because readiness must gate on the HARN release,
+    // not on releases of the repo being bumped.
+    release_repo: to_string(o.release_repo ?? to_string(o.repo ?? "")),
     token: to_string(o.token ?? ""),
     branch: to_string(o.branch ?? "automation/bump-harn-runtime"),
     base: to_string(o.base ?? "main"),
@@ -236,10 +242,10 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         }
         return requested
       }
-      const latest = __rest("GET", "/repos/${cfg.repo}/releases/latest")
+      const latest = __rest("GET", "/repos/${cfg.release_repo}/releases/latest")
       const resolved = trim(to_string(latest?.tag_name ?? ""))
       if !is_v_semver(resolved) {
-        throw "std/bump/live: could not resolve a semver latest release for ${cfg.repo}"
+        throw "std/bump/live: could not resolve a semver latest release for ${cfg.release_repo}"
       }
       return resolved
     },
@@ -249,7 +255,7 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       const found = poll_until(
         { ->
           attempts = attempts + 1
-          const view = __release_view(cfg.repo, target)
+          const view = __release_view(cfg.release_repo, target)
           const ready = view.ok && __release_finalized(view)
           lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
           return if ready {

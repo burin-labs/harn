@@ -15,6 +15,7 @@ import { bump_options, run_bump } from "std/bump/runtime"
 //
 // Configuration (all via env, GitHub Actions style):
 //   GITHUB_REPOSITORY        owner/name of the package repo being bumped
+//   HARN_BUMP_RELEASE_REPO   repo whose releases gate readiness (default burin-labs/harn)
 //   HARN_BUMP_TOKEN          GitHub App installation token (contents+PRs write)
 //   HARN_BUMP_TARGET_TAG     optional target tag vX.Y.Z; empty => latest release
 //   HARN_BUMP_VALIDATE       the caller's single declared validation command
@@ -50,6 +51,9 @@ pipeline main() {
   const adapter = live_bump_adapter(
     {
       repo: repo,
+      // Readiness + latest-release resolution gate on the HARN release repo,
+      // not the consumer repo being bumped (which may publish no releases).
+      release_repo: env_or("HARN_BUMP_RELEASE_REPO", "burin-labs/harn"),
       token: token,
       branch: branch,
       base: base,
