@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Contract lock for the `agent_fanout(requests, options)` stdlib primitive
 //! (crates/harn-stdlib/src/stdlib/agent/workers.harn).
 //!

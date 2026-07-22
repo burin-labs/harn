@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Integration tests for the runtime-introspection tool bundle (harn#2188).
 //!
 //! Covers the full opt-in surface from a Harn script:

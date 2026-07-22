@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Regression tests for the synchronous-builtin fast path on `Op::CallBuiltin`.
 //!
 //! `execute_call_builtin_sync` dispatches synchronous builtins directly instead

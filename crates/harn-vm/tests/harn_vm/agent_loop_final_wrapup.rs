@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Coverage for the forced terminal wrap-up turn (agent-loop-wrapup).
 //!
 //! When the agent loop terminates on iteration/budget exhaustion *while the

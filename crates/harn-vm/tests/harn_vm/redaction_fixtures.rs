@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! End-to-end fixture coverage for [`harn_vm::redact`].
 //!
 //! These tests stage representative secrets — Stripe keys, GitHub

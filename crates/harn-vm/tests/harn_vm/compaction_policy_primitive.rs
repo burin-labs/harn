@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Integration tests for the `compaction.{policy,check,run}` primitive
 //! (#2505 / epic A.8). Walks the spec triad — `defer` under threshold,
 //! `compact_now` once tokens cross, and `compaction.run` driving the

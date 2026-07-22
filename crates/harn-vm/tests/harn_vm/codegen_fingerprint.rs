@@ -1,4 +1,4 @@
-#[path = "../build_support/codegen_fingerprint.rs"]
+#[path = "../../build_support/codegen_fingerprint.rs"]
 mod codegen_fingerprint;
 
 use std::fs;

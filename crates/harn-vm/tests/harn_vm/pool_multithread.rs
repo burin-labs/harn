@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use harn_vm::value::VmError;
 
 fn run_on_multithread(source: &str) -> Result<Vec<String>, String> {

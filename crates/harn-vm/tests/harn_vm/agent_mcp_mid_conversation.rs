@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Coverage for mid-conversation MCP mounting (`agent_mcp_mount_additional`).
 //!
 //! When a skill activates mid-conversation and declares MCP servers, the agent

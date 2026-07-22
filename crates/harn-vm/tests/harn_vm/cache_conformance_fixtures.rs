@@ -10,8 +10,8 @@ use harn_vm::llm::cache_conformance::{
 };
 
 const ANTHROPIC_FIXTURE: &str =
-    include_str!("fixtures/cache_conformance/anthropic_cache_capable.json");
-const NO_CACHE_FIXTURE: &str = include_str!("fixtures/cache_conformance/local_no_cache.json");
+    include_str!("../fixtures/cache_conformance/anthropic_cache_capable.json");
+const NO_CACHE_FIXTURE: &str = include_str!("../fixtures/cache_conformance/local_no_cache.json");
 
 #[test]
 fn anthropic_repeat_run_reads_from_cache() {
