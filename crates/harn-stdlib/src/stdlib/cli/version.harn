@@ -8,7 +8,7 @@
  * version that built this binary.
  *
  * The banner and JSON envelope shapes are pinned by
- * crates/harn-cli/tests/version_dispatch.rs.
+ * crates/harn-cli/tests/harn_cli_e2e/version_dispatch.rs.
  */
 fn render_banner(version: string) -> string {
   return "\n ╱▔▔╲\n ╱    ╲    harn v" + version

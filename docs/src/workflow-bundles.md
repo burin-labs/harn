@@ -215,7 +215,7 @@ harn run examples/skill-packs/workflow-authoring/eval.harn -- \
   --provider ollama --model qwen3:4b
 ```
 
-`crates/harn-cli/tests/workflow_authoring_eval.rs` is the CI regression gate.
+`crates/harn-cli/tests/harn_cli_e2e/workflow_authoring_eval.rs` is the CI regression gate.
 It validates every recipe golden and every case's structural assertions, so a
 new case automatically extends the gate.
 

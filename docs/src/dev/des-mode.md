@@ -132,7 +132,7 @@ concern that doesn't belong inside the host-capability composition.
 - `docs/src/dev/tape-format.md` — unified tape schema and fidelity
   oracle modes.
 - `conformance/tests/testbench/` — `testbench_*` regression cases.
-- `crates/harn-cli/tests/test_bench_cli.rs` — `des_runtime_*` tests.
+- `crates/harn-cli/tests/harn_cli_fast/test_bench_cli.rs` — `des_runtime_*` tests.
 - Issue [#1444][issue] — exploratory scope and acceptance criteria.
 
 [issue]: https://github.com/burin-labs/harn/issues/1444

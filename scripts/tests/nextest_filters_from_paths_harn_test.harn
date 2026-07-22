@@ -76,6 +76,36 @@ pipeline test_filter_for_paths_preserves_binary_and_package_mapping(task) {
   )
 }
 
+// Consolidated layout: many former per-file test binaries merged into one whose
+// root is `tests/<dir>/main.rs` (e.g. `harn_cli_fast`, `harn_cli_e2e`,
+// `harn_vm`). A change to any submodule under `<dir>/` — including a nested
+// companion dir — maps to `binary(<dir>)`; a shared helper dir with no `main.rs`
+// falls back to the package.
+@test
+pipeline test_filter_for_consolidated_main_rs_binary(task) {
+  with_temp_dir(
+    { root ->
+      write_text(root, "crates/harn-cli/tests/harn_cli_fast/main.rs", "")
+      assert_eq(
+        filter_for_path("crates/harn-cli/tests/harn_cli_fast/check_cli.rs", PACKAGES, root),
+        "binary(harn_cli_fast)",
+      )
+      assert_eq(
+        filter_for_path(
+          "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/slack.rs",
+          PACKAGES,
+          root,
+        ),
+        "binary(harn_cli_fast)",
+      )
+      assert_eq(
+        filter_for_path("crates/harn-cli/tests/test_util/process.rs", PACKAGES, root),
+        "package(harn-cli)",
+      )
+    },
+  )
+}
+
 @test
 pipeline test_nextest_filter_for_paths_dedupes_in_order(task) {
   with_temp_dir(

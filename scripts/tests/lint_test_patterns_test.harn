@@ -23,7 +23,7 @@ pipeline test_base_name(task) {
 // --- is_test_rs_path --------------------------------------------------------
 @test
 pipeline test_test_path_under_tests_dir(task) {
-  assert_eq(is_test_rs_path("crates/harn-cli/tests/foo.rs"), true)
+  assert_eq(is_test_rs_path("crates/harn-cli/tests/harn_cli_e2e/foo.rs"), true)
   assert_eq(is_test_rs_path("crates/harn-cli/tests/nested/deep.rs"), true)
 }
 
@@ -65,22 +65,37 @@ pipeline test_runtime_path_excludes_other_crates(task) {
 // --- is_e2e_subprocess_path -------------------------------------------------
 @test
 pipeline test_e2e_exact_entry(task) {
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/check_strict_cli.rs"), true)
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/orchestrator_cli.rs"), true)
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/persona_activation_cli_e2e.rs"), true)
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/run_eval_cleanup_e2e.rs"), true)
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/test_worker_cli_e2e.rs"), true)
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/check_strict_cli.rs"), true)
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli.rs"), true)
+  assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/persona_activation_cli_e2e.rs"),
+    true,
+  )
+  assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/run_eval_cleanup_e2e.rs"),
+    true,
+  )
+  assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/test_worker_cli_e2e.rs"),
+    true,
+  )
 }
 
 @test
 pipeline test_e2e_orchestrator_http_prefix(task) {
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/orchestrator_http/support.rs"), true)
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/orchestrator_http/deep/x.rs"), true)
+  assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs"),
+    true,
+  )
+  assert_eq(
+    is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_fast/orchestrator_http/deep/x.rs"),
+    true,
+  )
 }
 
 @test
 pipeline test_e2e_non_member(task) {
-  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/other_cli.rs"), false)
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/harn_cli_e2e/other_cli.rs"), false)
 }
 
 // --- find_hits: one hit per matching line, 1-based numbering ----------------
@@ -148,8 +163,11 @@ pipeline test_harn_e2e_helper_pattern_covers_builder_and_runner(task) {
 pipeline test_direct_harn_binary_ratchet(task) {
   const direct = "env!(\"CARGO_BIN_EXE_harn\")\noption_env!(\"CARGO_BIN_EXE_harn\")\n"
   assert_eq(find_hits(direct, direct_harn_binary_pattern()).count, 2)
-  assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/codemod_dispatch.rs"), 3)
-  assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/models_dispatch.rs"), 0)
+  assert_eq(
+    direct_harn_binary_baseline("crates/harn-cli/tests/harn_cli_e2e/codemod_dispatch.rs"),
+    3,
+  )
+  assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/harn_cli_e2e/models_dispatch.rs"), 0)
   assert_eq(direct_harn_binary_baseline_duplicates(), [])
   assert_eq(
     duplicate_baseline_paths(

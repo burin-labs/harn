@@ -41,7 +41,7 @@ The checked-in Harn test suite also guards the local copy:
   server.
 - `crates/harn-serve/src/auth.rs` proves an empty local auth policy advertises
   a non-empty ACP `authMethods` array with `type: "agent"`.
-- `crates/harn-cli/tests/acp_registry_manifest.rs` keeps this manifest pinned
+- `crates/harn-cli/tests/harn_cli_e2e/acp_registry_manifest.rs` keeps this manifest pinned
   to the current Harn version, five published binary targets, and the
   `["serve", "acp"]` launch arguments.
 

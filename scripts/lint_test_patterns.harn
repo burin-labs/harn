@@ -34,7 +34,7 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
   // Physical lease-ownership e2e: waits for an orphaned Cargo PID to become
   // observable/dead across exact SIGKILL boundaries.
-  "crates/harn-cli/tests/host_lease_crash_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
   // Pre-existing interrupt-preemption test for a real subprocess: a spawned
   // thread sleeps briefly to stage a delayed cancel-token flip (the shape a
   // scope cancellation / deadline expiry takes mid-wait), proving the wait
@@ -56,7 +56,7 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/orchestration/tests.rs",
   "crates/harn-vm/src/agent_sessions_tests.rs",
-  "crates/harn-cli/tests/orchestrator_http/support.rs",
+  "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",
 ]
 
 // Wall-clock `Instant::now() < deadline` comparisons inside any loop or
@@ -65,7 +65,7 @@ const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
-  "crates/harn-cli/tests/host_lease_crash_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
 ]
 
 // SystemTime::now() in test files — use injected clock / MockClock instead.
@@ -125,42 +125,42 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 
 // E2E subprocess test files where `harn_e2e_command` / `spawn_orchestrator`
 // are the intended surface. Mirrors the bash `is_e2e_subprocess_path` case
-// arms; `crates/harn-cli/tests/orchestrator_http/` is a prefix match.
+// arms; `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/` is a prefix match.
 const E2E_SUBPROCESS_PATHS: list<string> = [
-  "crates/harn-cli/tests/attributed_decl_cli.rs",
-  "crates/harn-cli/tests/acp_server_cli.rs",
-  "crates/harn-cli/tests/burin_mini_playground.rs",
-  "crates/harn-cli/tests/check_result_cache.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/attributed_decl_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/acp_server_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/burin_mini_playground.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/check_result_cache.rs",
   // Strictness is an exit-status contract whose text and JSON renderings must
   // stay identical to advisory checks; only the real CLI process proves all three.
-  "crates/harn-cli/tests/check_strict_cli.rs",
-  "crates/harn-cli/tests/demo_cli_e2e.rs",
-  "crates/harn-cli/tests/doctor_dispatch.rs",
-  "crates/harn-cli/tests/models_dispatch.rs",
-  "crates/harn-cli/tests/providers_dispatch.rs",
-  "crates/harn-cli/tests/routes_graph_dispatch.rs",
-  "crates/harn-cli/tests/flow_ship_cli.rs",
-  "crates/harn-cli/tests/host_lease_cli.rs",
-  "crates/harn-cli/tests/host_lease_crash_cli.rs",
-  "crates/harn-cli/tests/harn_serve_mcp_cli.rs",
-  "crates/harn-cli/tests/llm_mock_cli.rs",
-  "crates/harn-cli/tests/mcp_server_cli.rs",
-  "crates/harn-cli/tests/orchestrator_cli.rs",
-  "crates/harn-cli/tests/orchestrator_cli_e2e.rs",
-  "crates/harn-cli/tests/orchestrator_cli_e2e/support.rs",
-  "crates/harn-cli/tests/persona_activation_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/check_strict_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/demo_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/doctor_dispatch.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/models_dispatch.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/providers_dispatch.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/routes_graph_dispatch.rs",
+  "crates/harn-cli/tests/harn_cli_fast/flow_ship_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/llm_mock_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/mcp_server_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e/support.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/persona_activation_cli_e2e.rs",
   // Cross-process package lease coverage must exercise two real commands
   // against the same installed generation.
-  "crates/harn-cli/tests/package_generation_concurrency_cli_e2e.rs",
-  "crates/harn-cli/tests/persona_cli.rs",
-  "crates/harn-cli/tests/test_worker_cli_e2e.rs",
-  "crates/harn-cli/tests/run_eval_cleanup_e2e.rs",
-  "crates/harn-cli/tests/run_eval_imports.rs",
-  "crates/harn-cli/tests/run_exit_codes.rs",
-  "crates/harn-cli/tests/skills_cli.rs",
-  "crates/harn-cli/tests/trigger_replay_cli.rs",
-  "crates/harn-cli/tests/user_test_reports_cli.rs",
-  "crates/harn-cli/tests/orchestrator_http.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/package_generation_concurrency_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_fast/persona_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/test_worker_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/run_eval_cleanup_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/run_eval_imports.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/run_exit_codes.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/skills_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/trigger_replay_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/user_test_reports_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/orchestrator_http.rs",
   "crates/harn-cli/tests/test_util/process.rs",
 ]
 
@@ -168,49 +168,49 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
 // Delete a row when its test migrates to `test_util::process`; any increase,
 // including inside an existing file, fails the lint.
 const DIRECT_HARN_BINARY_BASELINE = [
-  {path: "crates/harn-cli/tests/agent_run_command_argv_coercion.rs", count: 1},
-  {path: "crates/harn-cli/tests/canon_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/check_fmt_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/codemod_dispatch.rs", count: 3},
-  {path: "crates/harn-cli/tests/conformance_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/coverage_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/dev_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/dispatch_snapshot.rs", count: 1},
-  {path: "crates/harn-cli/tests/doctor_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/eval_cluster_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/eval_coding_agent_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/eval_prompt_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/explain_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/graph_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_script_lint_rules_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/json_schemas_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/lint_fix_exit_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/lint_replay_version_upgrade_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/lint_strict_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/native_rule_libraries.rs", count: 1},
-  {path: "crates/harn-cli/tests/parse_tokens_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/pg_codegen_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/precompile_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/replay_session_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/routes_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/rule_discovery_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/rule_pack_install_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/rule_test_dispatch.rs", count: 4},
-  {path: "crates/harn-cli/tests/run_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/runs_view_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/scaffold_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/scan_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/sidecar_version_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/supervisor_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/time_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/trace_import_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/try_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/usage_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/user_test_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/version_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/workflow_authoring_eval.rs", count: 1},
-  {path: "crates/harn-cli/tests/workflow_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/workflow_patch_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/agent_run_command_argv_coercion.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/canon_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/check_fmt_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/codemod_dispatch.rs", count: 3},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/conformance_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/coverage_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/dev_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/dispatch_snapshot.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/doctor_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_cluster_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_coding_agent_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_prompt_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/explain_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/graph_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/harn_script_lint_rules_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/json_schemas_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_fix_exit_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_replay_version_upgrade_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_strict_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/native_rule_libraries.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/parse_tokens_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/pg_codegen_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/precompile_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/replay_session_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/routes_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_discovery_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_pack_install_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_test_dispatch.rs", count: 4},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/run_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/runs_view_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/scaffold_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/scan_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/sidecar_version_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/supervisor_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/time_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/trace_import_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/try_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/usage_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/user_test_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/version_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_authoring_eval.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_patch_cli.rs", count: 1},
 ]
 
 // Runtime files allowed to read host time directly (#1439). Each entry is a
@@ -538,7 +538,7 @@ pub fn is_runtime_rs_path(rel: string) -> bool {
 
 /** True when `rel` is one of the sanctioned E2E subprocess test files. */
 pub fn is_e2e_subprocess_path(rel: string) -> bool {
-  if rel.starts_with("crates/harn-cli/tests/orchestrator_http/") {
+  if rel.starts_with("crates/harn-cli/tests/harn_cli_fast/orchestrator_http/") {
     return true
   }
   return E2E_SUBPROCESS_PATHS.contains(rel)

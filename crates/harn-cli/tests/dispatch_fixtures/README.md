@@ -1,7 +1,7 @@
 # CLI dispatch snapshot fixtures
 
 Golden-file fixtures consumed by the dispatch snapshot harness
-(`crates/harn-cli/tests/dispatch_snapshot.rs`).
+(`crates/harn-cli/tests/harn_cli_e2e/dispatch_snapshot.rs`).
 
 Each fixture is a directory under `<command>/<scenario>/` with:
 
@@ -21,7 +21,7 @@ When adding fixture coverage for an embedded CLI script:
 1. Add fixture directories under
    `crates/harn-cli/tests/dispatch_fixtures/<cmd>/<scenario>/`.
 2. Record the expected stdout, stderr, and exit code.
-3. Register the fixture under `crates/harn-cli/tests/dispatch_snapshot.rs`
+3. Register the fixture under `crates/harn-cli/tests/harn_cli_e2e/dispatch_snapshot.rs`
    so `cargo test -p harn-cli --test dispatch_snapshot` picks it up.
 
 ## Recording new snapshots

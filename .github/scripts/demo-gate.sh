@@ -179,7 +179,7 @@ echo "To resolve, pick one of:"
 echo "  1. Add a demo scenario under \`${DEMO_DIR}/<id>/\` exercising the new"
 echo "     primitive(s), wire it into \`SCENARIOS\` in"
 echo "     \`crates/harn-cli/src/commands/demo.rs\`, and add a smoke test in"
-echo "     \`crates/harn-cli/tests/demo_cli.rs\`. See CONTRIBUTING.md \"Demo gate\"."
+echo "     \`crates/harn-cli/tests/harn_cli_fast/demo_cli.rs\`. See CONTRIBUTING.md \"Demo gate\"."
 echo "  2. If this PR is hygiene-only or a pure refactor, add the"
 echo "     \`no-demo-needed\` label."
 exit 1
