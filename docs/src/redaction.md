@@ -129,7 +129,7 @@ the ceiling.
 ## Verification
 
 End-to-end fixture coverage lives in
-[`crates/harn-vm/tests/redaction_fixtures.rs`](../../crates/harn-vm/tests/redaction_fixtures.rs).
+[`crates/harn-vm/tests/harn_vm/redaction_fixtures.rs`](../../crates/harn-vm/tests/harn_vm/redaction_fixtures.rs).
 Each test stages a representative secret (Stripe, GitHub PAT, AWS
 access key, Bearer token, URL with userinfo) through one persistence
 surface and asserts the secret never appears in the rendered JSON.

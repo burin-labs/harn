@@ -204,7 +204,7 @@ outputs = [
 ]
 sources = [
   "crates/harn-vm/src/orchestration/records/view.rs",
-  "crates/harn-vm/tests/run_view_fixtures.rs",
+  "crates/harn-vm/tests/harn_vm/run_view_fixtures.rs",
   "spec/run-view-fixtures/cases/",
 ]
 # The Rust `run_view_fixtures` integration test executes this same snapshot

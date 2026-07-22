@@ -4,7 +4,7 @@
  *
  * Mid-flight cancellation (which depends on tokio task scheduling) is
  * covered by harn-vm integration tests under
- * `crates/harn-vm/tests/tool_call_cancellation.rs`. The conformance
+ * `crates/harn-vm/tests/harn_vm/tool_call_cancellation.rs`. The conformance
  * surface focuses on the deterministic return shape so the wire
  * contract stays observable.
  */

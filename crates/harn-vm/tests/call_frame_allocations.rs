@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! Deterministic allocation-regression guard for the user-function call path.
 //!
 //! Entering a closure frame is the dominant cost of an orchestration-heavy

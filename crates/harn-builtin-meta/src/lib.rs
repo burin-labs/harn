@@ -151,7 +151,7 @@ impl core::fmt::Display for Ty {
     /// Round-trip target: parsing the output through the proc-macro's
     /// sig parser yields a structurally-equal [`Ty`] (modulo whitespace and
     /// canonical operator spacing). See the drift test in
-    /// `crates/harn-vm/tests/builtin_signature_text_drift.rs`.
+    /// `crates/harn-vm/tests/harn_vm/builtin_signature_text_drift.rs`.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Ty::Named(s) | Ty::Generic(s) => f.write_str(s),

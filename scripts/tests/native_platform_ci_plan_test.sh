@@ -104,6 +104,10 @@ write_paths swift_protocol_paths \
 assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/swift_protocol_paths"
 
+write_paths vm_macos_sandbox_test crates/harn-vm/tests/harn_vm/sandbox_hardened.rs
+assert_plan false --platform windows --event pull_request --changed-files "$tmp_dir/vm_macos_sandbox_test"
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_macos_sandbox_test"
+
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md
 assert_plan false --platform windows --event push --changed-files "$tmp_dir/release_meta"
 assert_plan false --platform macos --event push --changed-files "$tmp_dir/release_meta"

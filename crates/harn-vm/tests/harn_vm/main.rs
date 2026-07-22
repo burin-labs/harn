@@ -1,10 +1,11 @@
 //! Consolidated integration-test binary for the `harn-vm` crate.
 //!
-//! Every `harn-vm` integration test compiles into this single binary. Each
-//! former `tests/<name>.rs` file is now a submodule at
-//! `tests/harn_vm/<name>.rs`, declared below. Collapsing ~39 separate test
-//! binaries into one cuts link time and shrinks the nextest archive; the
-//! binary name `harn_vm` is load-bearing (CI filters use
+//! Most `harn-vm` integration tests compile into this single binary. Each
+//! consolidated `tests/<name>.rs` file is now a submodule at
+//! `tests/harn_vm/<name>.rs`, declared below. Collapsing 36 separate test
+//! binaries into one cuts link time and shrinks the nextest archive. Three
+//! tests remain separate because they rely on process isolation for global
+//! allocator or inbox state. The binary name `harn_vm` is load-bearing (CI filters use
 //! `package(harn-vm) and binary(harn_vm)`).
 //!
 //! `recursion_limit` is set here at the crate root because it is a
@@ -18,7 +19,6 @@
 mod support;
 
 mod agent_fanout;
-mod agent_inbox_e2e;
 mod agent_loop_final_wrapup;
 mod agent_loop_output_schema;
 mod agent_loop_steering_seams;
@@ -29,9 +29,7 @@ mod builtin_call_dispatch;
 mod builtin_registry_alignment;
 mod builtin_signature_text_drift;
 mod cache_conformance_fixtures;
-mod call_frame_allocations;
 mod codegen_fingerprint;
-mod command_ledger_hold_paused_clock;
 mod compaction_policy_primitive;
 mod connector_testkit_public_api;
 mod flow_backend;

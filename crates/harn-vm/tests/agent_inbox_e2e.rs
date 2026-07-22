@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! End-to-end coverage for the unified agent inbox.
 //!
 //! These tests exercise the public host-builtin surface

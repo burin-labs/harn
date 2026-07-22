@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 //! PausedClock integration proof for `command_ledger_hold` — the orchestration
 //! that PARKS the whole agent loop while a long-running command is awaited.
 //!
