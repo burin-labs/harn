@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 //! Integration tests for the supervised MCP host primitive
 //! (`harn_vm::mcp_host`, #2504, A.7).
 //!
