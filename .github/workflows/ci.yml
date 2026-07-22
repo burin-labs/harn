@@ -29,6 +29,25 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # Detect idle self-hosted Linux capacity via the org detector shared with
+  # burin-code/harn-cloud. Overflow guardrails: a busy or offline pool reports
+  # unavailable at probe time, so every consumer lane falls back to its hosted
+  # runner. The probe is a snapshot, not a reservation: simultaneous workflows
+  # can still race for the same runner and briefly queue. Fork PRs receive no
+  # secrets, so on a fork PR
+  # the probe reports false and the lanes can never route to self-hosted
+  # hardware (repo policy additionally requires approval for ALL outside-
+  # collaborator workflow runs). Kill switch: set the repo/org variable
+  # HARN_CI_DISABLE_SELFHOSTED_LINUX=true to pin every lane back to hosted.
+  # The probe is hard-required by ci-status: a probe hard-failure must fail
+  # the aggregate, because the lanes that `needs` it would all skip and their
+  # skips are otherwise tolerated.
+  runner-availability:
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@58ce2d8794ad2a4cbea88e176bd5c79cadda09d1
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
   # Decide whether the heavy Linux Rust lanes (rust-builds, audit-scripts) need
   # to run at all.
   #
@@ -306,14 +325,20 @@ jobs:
 
   package-audit:
     name: Package audit
-    needs: changes
+    needs: [changes, runner-availability]
     # Cargo package verification is a release/package correctness proof, not a
     # formatting proof. Keep it out of the always-on fmt lane so workflow,
     # docs, and prompt-only PRs do not pay a 9-minute cargo package/check tail.
     # It still runs for package-relevant PRs and unconditionally on merge_group
     # unless the speculative merge diff is a proven docs-only tail.
     if: needs.changes.outputs.package_audit == 'true'
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    # Self-hosted when an idle runner exists, else Blacksmith when enabled,
+    # else the free hosted runner.
+    runs-on: >-
+      ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+        && needs.runner-availability.outputs.linux == 'true'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
+        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404') }}
     # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
     # Hosted `ubuntu-latest` completes this lane in up to ~16m — the prior 20m
     # budget was calibrated for the faster paid runner and left ~4m of
@@ -329,14 +354,16 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           cache-key: package-audit
-          sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
           # On the hosted path (Blacksmith off) sccache has no sticky disk, so
           # back it with the free GitHub Actions cache. Independent kill switch
           # HARN_CI_DISABLE_SCCACHE_GHA restores the backendless 0%-hit path
           # without re-enabling Blacksmith.
-          gha-backend: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
+          # Never on self-hosted: the box's persistent local SCCACHE_DIR is
+          # the better backend there, and SCCACHE_GHA_ENABLED would clobber it.
+          gha-backend: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
       - uses: ./.github/actions/rust-cache
-        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'
         continue-on-error: true
         with:
           shared-key: package-audit
@@ -374,12 +401,21 @@ jobs:
   # target reuse on either Blacksmith or GitHub-hosted runners.
   rust-builds:
     name: ${{ matrix.name }}
-    needs: changes
+    needs: [changes, runner-availability]
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || matrix.runner }}
+    # Self-hosted when the leg allows it and an idle runner exists, else
+    # Blacksmith when enabled, else the free hosted runner. The behavior leg
+    # never routes self-hosted: it uploads the ~8.6 GB payload, and residential
+    # uplink makes that the bottleneck.
+    runs-on: >-
+      ${{ matrix.selfhosted
+        && vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+        && needs.runner-availability.outputs.linux == 'true'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
+        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || matrix.runner) }}
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -408,17 +444,25 @@ jobs:
             cache_key: workspace-lint
             fetch_depth: 1
             rust_components: clippy
+            selfhosted: true
           - kind: behavior
             name: Behavior build
             runner: blacksmith-8vcpu-ubuntu-2404
             cache_key: workspace-behavior
             fetch_depth: 1
             rust_components: ""
+            # Producer of the ~8.6 GB behavior payload — must stay on hosted
+            # runners where artifact upload is fast (see runs-on above).
+            selfhosted: false
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: ${{ matrix.fetch_depth }}
+      # Hosted-image SDK reclaim only: on a self-hosted box this would rm -rf
+      # system paths and docker-prune live local images. Self-hosted disk
+      # hygiene is owned by the box's cleanup cron instead.
       - uses: ./.github/actions/free-disk-space
+        if: runner.environment != 'self-hosted'
       # Install mold and steer rustc at it via RUSTFLAGS above. apt's `mold`
       # only drops the binary in PATH; it does NOT replace /usr/bin/ld, so the
       # stock linker stays intact and rustc opts in explicitly through the
@@ -439,12 +483,14 @@ jobs:
       - uses: ./.github/actions/sccache
         with:
           cache-key: ${{ matrix.cache_key }}
-          sticky: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
           # Hosted path: back sccache with the free GitHub Actions cache (see the
           # package-audit lane). HARN_CI_DISABLE_SCCACHE_GHA is the kill switch.
-          gha-backend: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
+          # Never on self-hosted: the box's persistent local SCCACHE_DIR is
+          # the better backend there, and SCCACHE_GHA_ENABLED would clobber it.
+          gha-backend: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
       - uses: ./.github/actions/rust-cache
-        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'
         continue-on-error: true
         with:
           # Both legs restore the behavior cache and only the behavior leg
@@ -536,6 +582,12 @@ jobs:
     name: Rust test
     needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
+    # Never self-hosted: this lane downloads the ~8.6 GB behavior payload from
+    # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
+    # (a routed attempt stalled past the 35 m timeout still mid-download) even
+    # though the same boxes pull the GitHub release CDN at ~29 MB/s. Artifact
+    # up/downloads pin the payload lanes to hosted runners until the payload
+    # itself shrinks or moves.
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
     # Hang backstop, not a performance gate (the perf gate re-measures wall
     # time separately). Worst observed hosted-runner run is ~17m on a cold
@@ -719,11 +771,17 @@ jobs:
 
   audit-scripts:
     name: Audit scripts
-    needs: [changes, rust-builds]
+    needs: [changes, rust-builds, runner-availability]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
     # This is now an execution-only consumer of the exact Harn CLI built by
     # rust-builds. Four CPUs are ample once the duplicate Cargo graph is gone.
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    # Self-hosted when an idle runner exists (small CLI artifact only — safe on
+    # either box's link), else Blacksmith when enabled, else hosted.
+    runs-on: >-
+      ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+        && needs.runner-availability.outputs.linux == 'true'
+        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
+        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404') }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -1394,6 +1452,7 @@ jobs:
     needs:
       [
         changes,
+        runner-availability,
         fmt,
         package-audit,
         lint-md,
@@ -1419,8 +1478,14 @@ jobs:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           BLACKSMITH_DISABLED: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX }}
         run: |
+          # The runner probe is hard-required: if it hard-fails, every lane
+          # that `needs` it skips, and those skips are otherwise tolerated
+          # below — without this the aggregate would go green with zero Rust
+          # proof. The probe itself exits 0 on all detection failures (falling
+          # back to hosted runners), so a red probe means real infra breakage.
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
+            ["Runner availability probe"]="${{ needs['runner-availability'].result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
