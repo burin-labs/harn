@@ -215,6 +215,14 @@ fn wildcard_sink_snapshot() -> Vec<Arc<dyn AgentEventSink>> {
     }
 }
 
+pub(super) fn session_has_live_subscriber(session_id: &str) -> bool {
+    session_sink_snapshot(session_id)
+        .into_iter()
+        .chain(wildcard_sink_snapshot())
+        .any(|sink| !sink.is_persistence_sink())
+        || crate::agent_sessions::subscriber_count(session_id) > 0
+}
+
 fn next_wildcard_handle() -> WildcardSinkHandle {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(1);

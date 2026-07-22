@@ -110,6 +110,74 @@ fn skips_text_parsing_candidates() {
     assert!(!persisted.contains("text-cand-0"));
 }
 
+fn partial_tool_args(session_id: &str) -> AgentEvent {
+    AgentEvent::ToolCallUpdate {
+        session_id: session_id.into(),
+        tool_call_id: "call-streaming".into(),
+        tool_name: "read_file".into(),
+        status: ToolCallStatus::Pending,
+        raw_output: None,
+        error: None,
+        duration_ms: None,
+        execution_duration_ms: None,
+        error_category: None,
+        mutation_status: ToolMutationStatus::Unknown,
+        changed_paths: None,
+        executor: None,
+        parsing: None,
+        raw_input: Some(serde_json::json!({"path": "src/"})),
+        raw_input_partial: None,
+        audit: None,
+    }
+}
+
+#[test]
+fn skips_partial_tool_args_without_a_live_subscriber() {
+    let session_id = "headless-stream";
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    let sink = EventLogSink::new(log.clone(), session_id);
+    register_sink(session_id, sink);
+    emit_event(&partial_tool_args(session_id));
+    emit_event(&AgentEvent::ToolCall {
+        session_id: session_id.into(),
+        tool_call_id: "call-streaming".into(),
+        tool_name: "read_file".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: serde_json::json!({"path": "src/lib.rs"}),
+        parsing: None,
+        audit: None,
+    });
+
+    let topic = Topic::new("observability.agent_events.headless-stream").unwrap();
+    let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
+    clear_session_sinks(session_id);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].1.kind, "tool_call");
+    assert_eq!(
+        events[0].1.payload["event"]["raw_input"]["path"],
+        "src/lib.rs"
+    );
+}
+
+#[test]
+fn persists_partial_tool_args_for_a_live_subscriber() {
+    let session_id = "live-stream";
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    let sink = EventLogSink::new(log.clone(), session_id);
+    let flushed = Arc::new(Mutex::new(Vec::new()));
+    register_sink(session_id, sink);
+    register_sink(session_id, flush_probe("live", None, &flushed));
+
+    emit_event(&partial_tool_args(session_id));
+
+    let topic = Topic::new("observability.agent_events.live-stream").unwrap();
+    let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
+    clear_session_sinks(session_id);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].1.kind, "tool_call_update");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn flush_waits_for_queued_appends_without_polling() {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
