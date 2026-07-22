@@ -13,7 +13,23 @@ fn should_persist_event(event: &AgentEvent) -> bool {
         // Text-mode parsing candidates are live UX signals, not durable tool-call
         // lifecycle records for replay/audit consumers.
         AgentEvent::ToolCall { parsing, .. } | AgentEvent::ToolCallUpdate { parsing, .. } => {
-            parsing.is_none()
+            if parsing.is_some() {
+                return false;
+            }
+            if let AgentEvent::ToolCallUpdate {
+                status: super::ToolCallStatus::Pending,
+                raw_input,
+                raw_input_partial,
+                ..
+            } = event
+            {
+                if raw_input.is_some() || raw_input_partial.is_some() {
+                    // The settled ToolCall that follows carries the complete input.
+                    // Partial states are durable only when they describe a live view.
+                    return super::registry::session_has_live_subscriber(event.session_id());
+                }
+            }
+            true
         }
         _ => true,
     }
@@ -23,6 +39,11 @@ fn should_persist_event(event: &AgentEvent) -> bool {
 /// which translates events into JSON-RPC notifications).
 pub trait AgentEventSink: Send + Sync {
     fn handle_event(&self, event: &AgentEvent);
+
+    /// Whether this sink is a durable record rather than a live consumer.
+    fn is_persistence_sink(&self) -> bool {
+        false
+    }
 
     /// Wait until every event accepted before this call has reached the sink's
     /// durable boundary. Synchronous sinks are complete when `handle_event`
@@ -373,6 +394,10 @@ impl AgentEventSink for JsonlEventSink {
                 .map_err(|error| AgentEventSinkError::new("jsonl_event", error))
         })
     }
+
+    fn is_persistence_sink(&self) -> bool {
+        true
+    }
 }
 
 impl AgentEventSink for EventLogSink {
@@ -419,6 +444,10 @@ impl AgentEventSink for EventLogSink {
 
     fn flush(&self) -> AgentEventSinkFlush<'_> {
         Box::pin(EventLogSink::flush(self))
+    }
+
+    fn is_persistence_sink(&self) -> bool {
+        true
     }
 }
 
