@@ -81,6 +81,12 @@ write_paths windows_source crates/harn-hostlib/src/lib.rs
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_source"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_source"
 
+write_paths native_hostlib_tests \
+  crates/harn-hostlib/tests/harn_hostlib/secret_store_os_native.rs \
+  crates/harn-hostlib/tests/harn_hostlib/sandbox_npm_offline_install.rs
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/native_hostlib_tests"
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/native_hostlib_tests"
+
 write_paths windows_selector scripts/ci/affected_crate_args.sh
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_selector"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_selector"

@@ -149,5 +149,5 @@ The full walk-through lives at
 - [Ground-truth recall fixture][recall-fixture] — the 30 Q&A pairs the librarian
   inherits from #2434.
 
-[reg-test]: https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/tests/registration.rs
+[reg-test]: https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/tests/harn_hostlib/registration.rs
 [recall-fixture]: https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/tests/fixtures/code_index_queries/queries.json

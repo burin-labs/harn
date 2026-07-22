@@ -2,7 +2,7 @@ import "std/code_librarian"
 
 /**
  * Uses the same minimal Rust corpus as the #2434 graph-surface test
- * (crates/harn-hostlib/tests/code_index_graph_surface.rs) so canned
+ * (crates/harn-hostlib/tests/harn_hostlib/code_index_graph_surface.rs) so canned
  * Cypher queries land on the same node shapes.
  */
 fn seed_corpus(root: string) {

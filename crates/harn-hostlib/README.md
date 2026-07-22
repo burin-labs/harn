@@ -124,7 +124,7 @@ Structural-diff before/after fixtures live under
 To regenerate after a deliberate change, run
 
 ```text
-HARN_AST_UPDATE_GOLDEN=1 cargo test -p harn-hostlib --test ast_fixtures
+HARN_AST_UPDATE_GOLDEN=1 cargo test -p harn-hostlib --test harn_hostlib ast_fixtures
 ```
 
 and commit the updated goldens.
@@ -446,6 +446,7 @@ crates/harn-hostlib/
 2. Drop `<method>.request.json` and `<method>.response.json` into
    `schemas/<module>/`.
 3. Append two `include_str!` entries to `SCHEMAS` in `src/schemas.rs`.
-4. Add the method name to the `assert_eq!` list in `tests/registration.rs`.
+4. Add the method name to the `assert_eq!` list in
+   `tests/harn_hostlib/registration.rs`.
 
 The integration tests catch any drift between the four locations.

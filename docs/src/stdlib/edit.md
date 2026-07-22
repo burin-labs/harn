@@ -951,10 +951,11 @@ ticket:
 4. **Rename projection** *(optional)* — add an arm to
    `Language::rename_identifier_kinds` to enable `rename_symbol`.
 5. **Fixture** — drop `tests/fixtures/ast/<name>/source.<ext>` and run
-   `HARN_AST_UPDATE_GOLDEN=1 cargo test -p harn-hostlib --test ast_fixtures`
+   `HARN_AST_UPDATE_GOLDEN=1 cargo test -p harn-hostlib --test harn_hostlib ast_fixtures`
    to generate the goldens.
 6. **Conformance** — add an `EditCase` row to
-   `tests/ast_language_coverage.rs` proving a real edit round-trips.
+   `tests/harn_hostlib/ast_language_coverage.rs` proving a real edit
+   round-trips.
 
 The capability matrix (`Language::edit_capabilities`) and the
 `every_language_has_a_fixture` test then keep the new language honest.

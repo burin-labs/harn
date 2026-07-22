@@ -7,7 +7,7 @@
 //!    `harn_vm::process_sandbox`), so the active orchestration capability
 //!    policy applies (Linux seccomp/landlock, macOS `sandbox-exec`,
 //!    workspace-root cwd enforcement). Tests install a mock spawner so
-//!    every test in `tests/process_tools.rs` is deterministic and
+//!    every test in `tests/harn_hostlib/process_tools.rs` is deterministic and
 //!    free of wall-clock dependence.
 //! 2. Pipe drains run on background threads so >64 KB output never
 //!    deadlocks `wait()`.
