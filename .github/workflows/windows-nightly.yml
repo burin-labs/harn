@@ -49,8 +49,29 @@ jobs:
     runs-on: windows-latest
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
+    env:
+      # Cache WRITER half of the rust-lld experiment — MUST stay byte-identical
+      # to ci.yml's `windows` job (the restore-only consumer) or the shared-cache
+      # policy's consumer/producer input comparison fails. Toggled together via
+      # the single HARN_WINDOWS_LLD repo variable. See the ci.yml windows job for
+      # the full rationale. Overrides the workflow-level `-D warnings`.
+      RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # Cache WRITER half of the Dev Drive experiment — MUST stay byte-identical
+      # to ci.yml's `windows` job (same position, action pin, and env-mapping) or
+      # the shared-cache policy's pre-cache step-sequence comparison fails.
+      # Toggled together via the single HARN_WINDOWS_DEVDRIVE repo variable. See
+      # the ci.yml windows job for the full rationale.
+      - name: Set up Dev Drive
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
+        uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
+        with:
+          drive-size: 25GB
+          drive-format: ReFS
+          env-mapping: |
+            CARGO_HOME,{{ DEV_DRIVE }}/.cargo
+            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/rust-cache
         continue-on-error: true

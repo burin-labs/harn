@@ -977,6 +977,23 @@ jobs:
     # backstop plus the full windows-nightly.yml surface so routine edits avoid
     # the 15-25 minute Windows compile long pole.
     if: needs.windows-plan.outputs.run_windows == 'true'
+    env:
+      # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
+      # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
+      # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-builds lane uses.
+      # link.exe is the Windows warm-path long pole once the dep graph is cached;
+      # rust-lld links far faster (community reports ~2x full / ~5x incremental).
+      # This is NOT a no-op: rust-lld became the default only on
+      # x86_64-unknown-linux-gnu in 1.90 — x86_64-pc-windows-msvc still defaults
+      # to link.exe on 1.95, and `-Clinker-features=+lld` is stable on linux-gnu
+      # ONLY, so the linux flag can't express it. rustc self-resolves the bundled
+      # `rust-lld` and injects the `-flavor link` (lld-link) mode for the msvc
+      # target. A job-level RUSTFLAGS FULLY REPLACES the workflow-level
+      # `-D warnings` (env vars clobber, they do not merge — see the rust-builds
+      # gotcha), so `-D warnings` is restated. Kept byte-identical to the
+      # windows-nightly.yml writer so the shared-cache policy's consumer/producer
+      # input comparison still matches (see scripts/check_ci_cache_policy.harn).
+      RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
     # Drop sccache on the Windows job. PR #2114 documented 0% cache-hit
     # rate on the harn-vm Windows compile plus periodic `os error 10054`
     # failures where the GHA backend dropped the rmeta upload mid-rustc.
@@ -996,6 +1013,27 @@ jobs:
           # Linux fast feedback. Merge-queue and main pushes keep the shallow
           # checkout because they run the full workspace unconditionally.
           fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      # EXPERIMENT (toggle via the HARN_WINDOWS_DEVDRIVE repo variable): move the
+      # Cargo home and target dir onto a ReFS Dev Drive VHDX. Windows filesystem
+      # overhead plus Defender real-time scanning of the thousands of small
+      # object/rmeta writes a cold compile emits is the classic Windows CI tax; a
+      # Dev Drive's performance mode + copy-on-write cut it. The windows-2025
+      # runner image dropped its D: drive (2025-07-14) and ships no pre-created
+      # Dev Drive, so it is created here. Placed before the toolchain and cache
+      # steps so CARGO_HOME / CARGO_TARGET_DIR are already redirected when rustup
+      # and Swatinem/rust-cache run — rust-cache follows CARGO_TARGET_DIR, so the
+      # target still round-trips through the shared cache. Kept byte-identical to
+      # the windows-nightly.yml writer so the shared-cache policy's pre-cache
+      # step-sequence comparison keeps matching.
+      - name: Set up Dev Drive
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
+        uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
+        with:
+          drive-size: 25GB
+          drive-format: ReFS
+          env-mapping: |
+            CARGO_HOME,{{ DEV_DRIVE }}/.cargo
+            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
