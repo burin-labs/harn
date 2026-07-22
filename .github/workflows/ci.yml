@@ -37,23 +37,11 @@ jobs:
   # hardware (repo policy additionally requires approval for ALL outside-
   # collaborator workflow runs). Kill switch: set the repo/org variable
   # HARN_CI_DISABLE_SELFHOSTED_LINUX=true to pin every lane back to hosted.
-  # Both probes are hard-required by ci-status: a probe hard-failure must fail
+  # The probe is hard-required by ci-status: a probe hard-failure must fail
   # the aggregate, because the lanes that `needs` it would all skip and their
   # skips are otherwise tolerated.
   runner-availability:
     uses: burin-labs/.github/.github/workflows/runner-availability.yml@58ce2d8794ad2a4cbea88e176bd5c79cadda09d1
-    secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-  # Same probe scoped to the tornadough pool. rust-test downloads the ~8.6 GB
-  # behavior payload; tornadough's measured link sustains that in ~5 min while
-  # the other Linux box would take ~30 min, so the artifact-heavy lane only
-  # ever targets tornadough-labeled runners.
-  runner-availability-tornadough:
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@58ce2d8794ad2a4cbea88e176bd5c79cadda09d1
-    with:
-      linux_runner_tag: tornadough
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -590,15 +578,15 @@ jobs:
   # prove the suite without a second cold compile.
   rust-test:
     name: Rust test
-    needs: [changes, rust-builds, runner-availability-tornadough]
+    needs: [changes, rust-builds]
     if: needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success'
-    # Tornadough only (not the generic pool): this lane downloads the ~8.6 GB
-    # behavior payload, which only tornadough's measured link absorbs quickly.
-    runs-on: >-
-      ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-        && needs.runner-availability-tornadough.outputs.linux == 'true'
-        && fromJSON('["self-hosted", "Linux", "X64", "tornadough"]')
-        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404') }}
+    # Never self-hosted: this lane downloads the ~8.6 GB behavior payload from
+    # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
+    # (a routed attempt stalled past the 35 m timeout still mid-download) even
+    # though the same boxes pull the GitHub release CDN at ~29 MB/s. Artifact
+    # up/downloads pin the payload lanes to hosted runners until the payload
+    # itself shrinks or moves.
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
     # Hang backstop, not a performance gate (the perf gate re-measures wall
     # time separately). Worst observed hosted-runner run is ~17m on a cold
     # cache; keep ~2x headroom so a slow runner day cancels nothing.
@@ -1425,7 +1413,6 @@ jobs:
       [
         changes,
         runner-availability,
-        runner-availability-tornadough,
         fmt,
         package-audit,
         lint-md,
@@ -1451,15 +1438,14 @@ jobs:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           BLACKSMITH_DISABLED: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX }}
         run: |
-          # Both runner probes are hard-required: if a probe hard-fails, every
-          # lane that `needs` it skips, and those skips are otherwise tolerated
+          # The runner probe is hard-required: if it hard-fails, every lane
+          # that `needs` it skips, and those skips are otherwise tolerated
           # below — without this the aggregate would go green with zero Rust
           # proof. The probe itself exits 0 on all detection failures (falling
           # back to hosted runners), so a red probe means real infra breakage.
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
             ["Runner availability probe"]="${{ needs['runner-availability'].result }}"
-            ["Runner availability probe (tornadough)"]="${{ needs['runner-availability-tornadough'].result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
