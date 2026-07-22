@@ -25,20 +25,22 @@ case "$1" in
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-0.9.132}"
       exit 0
     fi
-    if [[ "$#" -ne 10 || "$2" != "archive" || "$3" != "--locked" || \
-      "$4" != "--workspace" || "$5" != "--profile" || "$6" != "ci" || \
-      "$7" != "-E" || "$9" != "--archive-file" || -z "${10}" ]]; then
+    if [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
+      "$7" == "-E" && "$8" == 'all()' && "$9" == "--archive-file" && -n "${10}" ]]; then
+      printf 'tests archive\n' > "${10}"
+      : > "${CARGO_RECEIPTS:?}/nextest-tests"
+    elif [[ "$#" -eq 9 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "-p" && "$5" == "harn-vm" && "$6" == "--profile" && "$7" == "ci" && \
+      "$8" == "--archive-file" && -n "$9" ]]; then
+      printf 'security tests archive\n' > "$9"
+      : > "${CARGO_RECEIPTS:?}/nextest-security"
+    else
       printf 'unexpected cargo nextest argv:' >&2
       printf ' <%s>' "$@" >&2
       printf '\n' >&2
       exit 2
     fi
-    if [[ "$8" != 'all()' ]]; then
-      echo "unexpected nextest filter: $8" >&2
-      exit 2
-    fi
-    printf 'tests archive\n' > "${10}"
-    : > "${CARGO_RECEIPTS:?}/nextest-tests"
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -71,6 +73,7 @@ chmod +x "$tmpdir/target/debug/harn"
 commit=0123456789abcdef0123456789abcdef01234567
 bundle="$tmpdir/out/behavior.tar.zst"
 cli_bundle="$tmpdir/out/harn-cli.tar.zst"
+security_bundle="$tmpdir/out/harn-security.tar.zst"
 run_artifact() {
   (
     cd "$tmpdir/work"
@@ -85,6 +88,8 @@ run_artifact() {
       CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
       HARN_VERIFY_RUST_RUNTIME="${VERIFY_RUNTIME_OVERRIDE:-0}" \
       HARN_BEHAVIOR_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-9663676416}" \
+      HARN_SECURITY_ARTIFACT_MAX_BYTES="${SECURITY_MAX_BYTES_OVERRIDE:-3221225472}" \
+      HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE="${SKIP_NEUTRAL_OVERRIDE:-0}" \
       "$script" "$@"
   )
 }
@@ -98,9 +103,10 @@ expect_failure() {
   fi
 }
 
-run_artifact build "$bundle" "$cli_bundle" "$commit"
+run_artifact build "$bundle" "$cli_bundle" "$security_bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-tests"
+test -f "$tmpdir/receipts/nextest-security"
 
 github_env="$tmpdir/github-env"
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore "$bundle" "$tmpdir/restored" "$commit" "$github_env"
@@ -118,13 +124,52 @@ grep -Fxq "HARN_BIN=$restored_cli/harn" "$cli_github_env"
 tar --zstd -tf "$cli_bundle" | sort | diff -u - <(printf '%s\n' \
   CLI_SHA256SUMS harn manifest | sort)
 
+VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-security "$security_bundle" \
+  "$tmpdir/restored-security" "$commit"
+grep -Fxq 'security tests archive' "$tmpdir/restored-security/harn-security-tests.tar.zst"
+tar --zstd -tf "$security_bundle" | sort | diff -u - <(printf '%s\n' \
+  SHA256SUMS harn-security-tests.tar.zst manifest | sort)
+expect_failure "security restore accepted a bundle for the wrong commit" \
+  run_artifact restore-security "$security_bundle" "$tmpdir/security-wrong-commit" \
+  fedcba9876543210fedcba9876543210fedcba98
+expect_failure "security restore overwrote an existing destination" \
+  run_artifact restore-security "$security_bundle" "$tmpdir/restored-security" "$commit"
+SECURITY_MAX_BYTES_OVERRIDE=1 \
+  expect_failure "security restore accepted an over-budget bundle" \
+  run_artifact restore-security "$security_bundle" "$tmpdir/security-over-budget" "$commit"
+
+mkdir "$tmpdir/tampered-security"
+tar --zstd -xf "$security_bundle" -C "$tmpdir/tampered-security"
+printf '\nchanged=true\n' >> "$tmpdir/tampered-security/manifest"
+tar --zstd -cf "$tmpdir/out/altered-security-manifest.tar.zst" -C "$tmpdir/tampered-security" \
+  harn-security-tests.tar.zst manifest SHA256SUMS
+expect_failure "security restore accepted an altered manifest" \
+  run_artifact restore-security "$tmpdir/out/altered-security-manifest.tar.zst" \
+  "$tmpdir/altered-security-manifest" "$commit"
+
+# Co-located mode: the neutral archive and bundle are skipped; the CLI and
+# security bundles are still produced and restorable.
+skip_bundle="$tmpdir/out/skip-behavior.tar.zst"
+skip_cli_bundle="$tmpdir/out/skip-harn-cli.tar.zst"
+skip_security_bundle="$tmpdir/out/skip-harn-security.tar.zst"
+rm -f "$tmpdir/receipts/nextest-tests" "$tmpdir/receipts/nextest-security"
+SKIP_NEUTRAL_OVERRIDE=1 run_artifact build "$skip_bundle" "$skip_cli_bundle" \
+  "$skip_security_bundle" "$commit"
+test ! -e "$skip_bundle"
+test ! -f "$tmpdir/receipts/nextest-tests"
+test -f "$tmpdir/receipts/nextest-security"
+run_artifact restore-cli "$skip_cli_bundle" "$tmpdir/restored-skip-cli" "$commit"
+"$tmpdir/restored-skip-cli/harn" | grep -Fxq harn
+VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-security "$skip_security_bundle" \
+  "$tmpdir/restored-skip-security" "$commit"
+
 expect_failure "restore accepted a bundle for the wrong commit" \
   run_artifact restore "$bundle" "$tmpdir/wrong-commit" fedcba9876543210fedcba9876543210fedcba98
 
 FAKE_COMMIT_OVERRIDE=fedcba9876543210fedcba9876543210fedcba98 \
   expect_failure "build accepted a commit that did not match checkout HEAD" \
   run_artifact build "$tmpdir/out/wrong-source.tar.zst" \
-    "$tmpdir/out/wrong-source-cli.tar.zst" "$commit"
+    "$tmpdir/out/wrong-source-cli.tar.zst" "$tmpdir/out/wrong-source-security.tar.zst" "$commit"
 
 FAKE_NEXTEST_VERSION_OVERRIDE=0.9.131 VERIFY_RUNTIME_OVERRIDE=1 \
   expect_failure "restore accepted the wrong nextest version" \
@@ -183,6 +228,7 @@ mv "$tmpdir/work/rust-toolchain.toml.saved" "$tmpdir/work/rust-toolchain.toml"
 MAX_BYTES_OVERRIDE=1 \
   expect_failure "build accepted an over-budget bundle" \
   run_artifact build "$tmpdir/out/build-over-budget.tar.zst" \
-    "$tmpdir/out/build-over-budget-cli.tar.zst" "$commit"
+    "$tmpdir/out/build-over-budget-cli.tar.zst" \
+    "$tmpdir/out/build-over-budget-security.tar.zst" "$commit"
 
 echo "behavior_artifact_test: ok"
