@@ -1,5 +1,5 @@
 name: Configure Cargo sccache
-description: Enable Cargo's sccache wrapper only when it can proxy rustc cleanly.
+description: Route Cargo's rustc and cc-crate C/C++ compiles through sccache, but only when it can proxy rustc cleanly.
 
 runs:
   using: composite
@@ -13,6 +13,28 @@ runs:
         if "${SCCACHE_PATH}" "${rustc_bin}" -vV >/dev/null; then
           echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "${GITHUB_ENV}"
           echo "sccache is healthy; Cargo will use RUSTC_WRAPPER=${SCCACHE_PATH}"
+          # RUSTC_WRAPPER only caches rustc; cc-crate build scripts shell out to
+          # the C compiler directly and stay uncached. The workspace's most
+          # expensive build script is tree-sitter-harn, which cc-compiles a
+          # ~22 MB generated parser.c on every cold build. The cc crate honors
+          # CC/CXX and recognizes sccache as a compiler wrapper, so routing the
+          # C/C++ compile through the same (already-proven-healthy) sccache
+          # caches those object files across runs too. Wrap any pre-set CC/CXX
+          # rather than clobbering it, and skip if it is already an sccache
+          # wrapper to avoid double-nesting. Every consumer of this action
+          # (ci.yml's package-audit, rust-builds, macos) compiles host-native,
+          # so a host C compiler is correct here; cross-compile lanes do not use
+          # this action.
+          base_cc="${CC:-cc}"
+          base_cxx="${CXX:-c++}"
+          case "${base_cc}" in
+            *sccache*) ;;
+            *) echo "CC=${SCCACHE_PATH} ${base_cc}" >> "${GITHUB_ENV}" ;;
+          esac
+          case "${base_cxx}" in
+            *sccache*) ;;
+            *) echo "CXX=${SCCACHE_PATH} ${base_cxx}" >> "${GITHUB_ENV}" ;;
+          esac
         else
           echo "::warning::sccache could not proxy '${rustc_bin} -vV'; continuing without RUSTC_WRAPPER"
           echo "RUSTC_WRAPPER=" >> "${GITHUB_ENV}"
