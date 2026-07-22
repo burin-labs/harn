@@ -527,11 +527,11 @@ check-session-bundle-schema:
 	@echo "    Session bundle schema OK."
 
 gen-run-view-fixtures:
-	HARN_REGENERATE_RUN_VIEW_FIXTURES=1 $(HARN_CARGO_CMD) test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact
+	HARN_REGENERATE_RUN_VIEW_FIXTURES=1 $(HARN_CARGO_CMD) test -p harn-vm --test harn_vm -- run_view_fixtures::run_view_fixture_snapshots_match --exact
 
 check-run-view-fixtures:
 	@echo "=== Checking run/session view fixture snapshots ==="
-	@$(HARN_CARGO_CMD) test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact
+	@$(HARN_CARGO_CMD) test -p harn-vm --test harn_vm -- run_view_fixtures::run_view_fixture_snapshots_match --exact
 	@echo "    Run/session view fixtures OK."
 
 # Regenerate docs/src/language-spec.md from spec/HARN_SPEC.md (the

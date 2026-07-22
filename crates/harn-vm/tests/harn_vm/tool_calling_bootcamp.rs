@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Tool-calling boot camp: a deterministic, zero-live-call battery that proves
 //! Harn abstracts away provider/model tool-calling quirks behind a single
 //! `tool_format` knob, with the north-star invariant:
@@ -27,7 +26,7 @@
 //!
 //! Run with:
 //!   CARGO_TARGET_DIR=/tmp/harn-target-bootcamp \
-//!     cargo test -p harn-vm --test tool_calling_bootcamp
+//!     cargo test -p harn-vm --test harn_vm -- tool_calling_bootcamp
 
 use harn_vm::value::VmError;
 

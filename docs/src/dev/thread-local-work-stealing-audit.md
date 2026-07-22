@@ -16,7 +16,7 @@ categories:
 | `runtime_registry` | Runtime/resource registry that a VM or host owns. | Promote to an `Arc`-backed registry and scope or pass that handle into spawned work. |
 | `thread_private` | Cache, mock, warning de-dupe, or test harness state. | Keep thread-local only while it stays non-authoritative and resettable. |
 
-`crates/harn-vm/tests/thread_local_audit.rs` scans the VM source tree and
+`crates/harn-vm/tests/harn_vm/thread_local_audit.rs` scans the VM source tree and
 fails when a new `thread_local!` site is added without an audit entry. The
 same test also protects the pool worker boundary: pool registry state must
 stay `tokio::task_local!`, not regress to a process-thread-local registry.

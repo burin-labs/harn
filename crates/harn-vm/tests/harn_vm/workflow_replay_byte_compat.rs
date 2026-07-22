@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Replay byte-compat pin for the stage-loop inversion (design D5, PR-I2).
 //!
 //! `fixtures/workflow_replay/pre_inversion_run.json` is a run record
@@ -17,7 +16,7 @@
 
 use harn_vm::value::VmError;
 
-const PRE_INVERSION_RUN: &str = include_str!("fixtures/workflow_replay/pre_inversion_run.json");
+const PRE_INVERSION_RUN: &str = include_str!("../fixtures/workflow_replay/pre_inversion_run.json");
 
 /// The same graph the fixture was generated with (default retry policy,
 /// deterministic failing command verify).

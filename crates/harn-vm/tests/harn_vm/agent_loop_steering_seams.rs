@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Integration coverage for the `__agent_loop_checkpoint` seam catalog
 //! (harn#2211) and the audit-only mode rename (harn#2212).
 //!

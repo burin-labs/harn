@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Coverage for `agent_loop`'s terminal `output` gate.
 //!
 //! `output` promises the loop's FINAL answer parses against a schema.

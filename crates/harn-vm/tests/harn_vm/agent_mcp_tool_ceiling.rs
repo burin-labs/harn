@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Mechanism-fitness coverage for `agent_mcp_bootstrap_if_needed`'s tool-
 //! ceiling admission (the "Burin agent can USE an MCP server's tools" fix).
 //!

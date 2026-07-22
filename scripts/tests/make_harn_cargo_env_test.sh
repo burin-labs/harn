@@ -266,7 +266,7 @@ for expected in \
   './scripts/cargo_with_worktree_build_dir.sh build --release -p harn-cli --bin harn' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-mcp-rc-compat --tests' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_rc_compat_tests' \
-  './scripts/cargo_with_worktree_build_dir.sh test -p harn-vm --test run_view_fixtures -- run_view_fixture_snapshots_match --exact'
+  './scripts/cargo_with_worktree_build_dir.sh test -p harn-vm --test harn_vm -- run_view_fixtures::run_view_fixture_snapshots_match --exact'
 do
   if ! grep -Fq "$expected" "$make_targets"; then
     echo "Makefile target did not use the Cargo env wrapper: $expected" >&2

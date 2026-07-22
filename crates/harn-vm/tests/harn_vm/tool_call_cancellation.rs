@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Integration coverage for `cancel_in_flight_tool_call` (harn#2213).
 //!
 //! Verifies the full dispatch path: a Harn pipeline registers a slow

@@ -8,8 +8,9 @@
 //! `POST /v1/traces` containing the emitted span name, providing
 //! confidence that the wiring between `install_otel_sink_from_env`
 //! and the `opentelemetry-otlp` exporter is intact.
-
-#![cfg(feature = "otel")]
+//!
+//! The former file-level `#![cfg(feature = "otel")]` gate now lives on the
+//! `mod otel_sink_export;` declaration in the `harn_vm` test root.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};

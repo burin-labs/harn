@@ -9,7 +9,7 @@
 //! Every probe spawns the hermetic `harn-test-echo-env` helper binary directly,
 //! so the same resolver and sandbox-funnel coverage runs on every target.
 
-mod support;
+use crate::support;
 
 use harn_vm::security::session_grants::SessionProfile;
 

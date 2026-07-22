@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Proof that Harn background agent workers run CONCURRENTLY.
 //!
 //! Each agent runs an `agent_loop` whose single LLM turn is stubbed via the

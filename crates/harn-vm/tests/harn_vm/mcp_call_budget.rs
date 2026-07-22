@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! Proves the `@budget(mcp_calls: N)` ceiling is enforced at the real
 //! `mcp_host::call` charge site: once `N` calls have been issued, the
 //! `(N + 1)`-th is rejected with a `BudgetExceeded`-categorised error

@@ -1,10 +1,10 @@
-#[path = "../build_support/codegen_fingerprint.rs"]
-mod codegen_fingerprint;
+#[path = "../../build_support/codegen_fingerprint.rs"]
+mod codegen_fingerprint_impl;
 
 use std::fs;
 use std::path::Path;
 
-use codegen_fingerprint::{compiler_inputs, fingerprint_inputs, watch_roots};
+use codegen_fingerprint_impl::{compiler_inputs, fingerprint_inputs, watch_roots};
 
 #[test]
 fn codegen_fingerprint_is_checkout_path_stable() {
