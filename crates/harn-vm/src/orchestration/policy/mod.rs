@@ -35,7 +35,8 @@ pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
     ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy, JoinPolicy,
     MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessSandboxPolicy, ProcessSandboxPreset,
-    ReducePolicy, RetryPolicy, SandboxProfile, StageContract, ToolArgConstraint, TurnPolicy,
+    ReducePolicy, RequiredSuccessfulTool, RetryPolicy, SandboxProfile, StageContract,
+    ToolArgConstraint, TurnPolicy,
 };
 
 thread_local! {
