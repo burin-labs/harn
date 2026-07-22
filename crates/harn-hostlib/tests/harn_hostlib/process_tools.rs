@@ -13,7 +13,7 @@
 //! - Tests run in well under 50 ms each.
 //!
 //! End-to-end coverage of the real-process spawn path is provided by
-//! `tests/process_tools_e2e.rs`. That suite is allowed to spawn real
+//! `tests/harn_hostlib/process_tools_e2e.rs`. That suite is allowed to spawn real
 //! subprocesses; if it grows, it should move into the slow E2E job
 //! tracked by Tier 2A of the deflake epic (issue #1069).
 

@@ -1,6 +1,6 @@
 //! End-to-end smoke coverage for the real-process spawn path.
 //!
-//! `tests/process_tools.rs` exercises the process-tool builtins against
+//! `tests/harn_hostlib/process_tools.rs` exercises the process-tool builtins against
 //! a [`MockSpawner`](harn_hostlib::process::MockSpawner) and is the
 //! deterministic default. This file keeps a small smoke suite that
 //! actually spawns real subprocesses through

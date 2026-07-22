@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 //! End-to-end recall test for `std/code_librarian` against the same
 //! 30-question fixture the #2434 ground-truth recall test uses
 //! (`tests/fixtures/code_index_queries/queries.json` plus the sibling

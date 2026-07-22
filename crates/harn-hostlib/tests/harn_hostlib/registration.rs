@@ -269,7 +269,7 @@ fn scanner_capability_registers_documented_methods() {
     // Implemented scanner methods should refuse an empty payload with
     // `MissingParameter` rather than routing through `Unimplemented`.
     // The full scanner contract is exercised end-to-end in
-    // `tests/scanner_e2e.rs`.
+    // `tests/harn_hostlib/scanner_e2e.rs`.
     for name in &[
         "hostlib_scanner_scan_project",
         "hostlib_scanner_scan_incremental",

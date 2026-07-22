@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 //! Smoke test for driving every deterministic tool from a real `.harn`
 //! script through the full lexer + parser + compiler + VM pipeline.
 //!

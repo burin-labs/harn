@@ -8,7 +8,7 @@
  * the typed symbol graph fixture (#2434), then exercises every public
  * function in the library. Before the librarian landed each of these
  * lines reached for a different `hostlib_code_index_*` builtin —
- * compare with `crates/harn-hostlib/tests/smoke_harn_script.rs`.
+ * compare with `crates/harn-hostlib/tests/harn_hostlib/smoke_harn_script.rs`.
  */
 import "std/code_librarian"
 

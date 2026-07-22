@@ -74,13 +74,13 @@ this primitive. Concretely:
 ## Verifying a setup
 
 ```text
-HARN_SECRET_STORE_BACKEND=file cargo test -p harn-hostlib --test secret_store
+HARN_SECRET_STORE_BACKEND=file cargo test -p harn-hostlib --test harn_hostlib secret_store
 ```
 
-`secret_store.rs` (file backend) runs on every CI runner.
-`secret_store_os_native.rs` exercises the Keychain (macOS) and Credential
-Manager (Windows) backends end-to-end; on Linux it compiles down to nothing
-because there is no OS-native backend yet.
+`tests/harn_hostlib/secret_store.rs` (file backend) runs on every CI runner.
+`tests/harn_hostlib/secret_store_os_native.rs` exercises the Keychain (macOS)
+and Credential Manager (Windows) backends end-to-end; on Linux it compiles
+down to nothing because there is no OS-native backend yet.
 
 ## Open follow-up
 
