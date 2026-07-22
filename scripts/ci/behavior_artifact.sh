@@ -15,6 +15,7 @@ usage() {
   cat <<'EOF'
 usage:
   scripts/ci/behavior_artifact.sh build <bundle.tar.zst> <cli-bundle.tar.zst> <security-bundle.tar.zst> <commit-sha>
+  scripts/ci/behavior_artifact.sh build-cli <cli-bundle.tar.zst> <commit-sha>
   scripts/ci/behavior_artifact.sh restore <bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/behavior_artifact.sh restore-cli <cli-bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/behavior_artifact.sh restore-security <security-bundle.tar.zst> <directory> <commit-sha>
@@ -389,6 +390,40 @@ restore_bundle() {
   report_timing restore "$((SECONDS - started))" "$bytes"
 }
 
+build_cli_bundle() {
+  local cli_output=$1
+  local commit=$2
+  local cli_output_dir target_dir staging started bytes
+  started=$SECONDS
+
+  validate_commit "$commit"
+  require_source_commit "$commit"
+  require_build_contract
+  mkdir -p "$(dirname "$cli_output")"
+  cli_output_dir="$(cd "$(dirname "$cli_output")" && pwd -P)"
+  cli_output="${cli_output_dir}/$(basename "$cli_output")"
+  target_dir="$(cargo metadata --format-version 1 --no-deps | jq -er '.target_directory')"
+  staging="$(mktemp -d "${cli_output_dir}/behavior-artifact.XXXXXX")"
+  cleanup_dir="$staging"
+
+  cargo build --locked --bin harn
+
+  if [[ ! -x "$target_dir/debug/harn" ]]; then
+    echo "error: build did not produce the required harn CLI at $target_dir/debug/harn" >&2
+    exit 1
+  fi
+  install -m 0755 "$target_dir/debug/harn" "$staging/harn"
+  write_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
+  (
+    cd "$staging"
+    sha256sum harn manifest > CLI_SHA256SUMS
+    tar --zstd -cf "$cli_output.tmp" harn manifest CLI_SHA256SUMS
+  )
+  mv "$cli_output.tmp" "$cli_output"
+  bytes="$(wc -c < "$cli_output" | tr -d ' ')"
+  report_timing build "$((SECONDS - started))" "$bytes"
+}
+
 restore_security_bundle() {
   local bundle=$1
   local destination=$2
@@ -433,6 +468,10 @@ case "$command" in
   build)
     [[ $# -eq 4 ]] || { usage >&2; exit 2; }
     build_bundle "$@"
+    ;;
+  build-cli)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    build_cli_bundle "$@"
     ;;
   restore)
     [[ $# -ge 3 && $# -le 4 ]] || { usage >&2; exit 2; }

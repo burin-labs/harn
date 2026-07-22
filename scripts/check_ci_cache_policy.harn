@@ -765,7 +765,10 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   const kinds = matrix.map({ row -> trim(row?.kind ?? "") }).to_list()
   const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
   const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
-  const selfhosted = matrix.map({ row -> row?.selfhosted ?? false }).to_list()
+  // Self-hosted routing tiers: the lint leg draws from the general stable
+  // pool; the behavior leg only from the big-labeled workers (one per box)
+  // so its 60 GB persistent build workspace cannot starve the small lanes.
+  const selfhosted = matrix.map({ row -> to_string(row?.selfhosted ?? "") }).to_list()
   if kinds != ["lint", "behavior"]
     || runners
     != [
@@ -773,24 +776,28 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     "blacksmith-8vcpu-ubuntu-2404",
   ]
     || cache_keys != ["workspace-lint", "workspace-behavior"]
-    || selfhosted != [true, false] {
+    || selfhosted != ["stable", "big"] {
     errors = errors
       + [
       "ci.yml:rust-builds must keep compile lanes on distinct policy-sized persistent caches",
     ]
   }
   const build_step = step_by_name(rust_job?.steps ?? [], "Build portable behavior payload")
+  // Memory-bounded compile fan-out: 4 rustc jobs on the 8-vCPU hosted
+  // runners, 12 on the big self-hosted workers (24 cores / 61 GB).
+  const build_jobs_policy = "$"
+    + "{{ runner.environment == 'self-hosted' && '12' || '4' }}"
   if trim(build_step?.if ?? "") != "matrix.kind == 'behavior'"
     || trim(
     build_step?.env?.CARGO_BUILD_JOBS ?? "",
   )
-    != "4" {
+    != build_jobs_policy {
     errors = errors
-      + ["ci.yml:rust-builds behavior build must keep four-way fan-out on the producer"]
+      + ["ci.yml:rust-builds behavior build must keep memory-bounded compile fan-out"]
   }
   errors = errors + archived_behavior_consumer_errors(workflow, "rust-test")
   errors = errors + colocated_rust_proof_errors(workflow)
-  const allowed = ["package-audit", "rust-builds"]
+  const allowed = ["package-audit", "rust-builds", "cli-build"]
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     if len(matching_steps(job, SCCACHE_ACTION)) > 0 && !allowed.contains(job_name) {
       errors = errors + ["ci.yml:${job_name} uses persistent sccache without a lane policy"]
