@@ -1035,11 +1035,17 @@ pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {
 pub struct RunTraceSpanRecord {
     pub trace_id: String,
     pub span_id: u64,
+    #[serde(rename = "parent_span_id", alias = "parent_id")]
     pub parent_id: Option<u64>,
     pub kind: String,
     pub name: String,
     pub start_ms: u64,
     pub duration_ms: u64,
+    /// Time to first streamed response token for an LLM span. This is a
+    /// first-class projection of the collector's `first_token_ms` metadata;
+    /// `None` for non-LLM and non-streaming spans.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttft_ms: Option<u64>,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub links: Vec<crate::tracing::SpanLink>,
     /// First-class per-call cost projection for `llm_call` spans, in USD.
@@ -1187,6 +1193,7 @@ mod trace_span_record_tests {
             name: "llm_call".to_string(),
             start_ms: 120,
             duration_ms: 900,
+            ttft_ms: Some(125),
             metadata: BTreeMap::from([
                 ("model".to_string(), serde_json::json!("claude-sonnet-4")),
                 ("provider".to_string(), serde_json::json!("anthropic")),
@@ -1202,6 +1209,10 @@ mod trace_span_record_tests {
         let encoded = serde_json::to_string(&span).unwrap();
         let decoded: RunTraceSpanRecord = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, span);
+        let json: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(json["parent_span_id"], serde_json::json!(3));
+        assert_eq!(json["ttft_ms"], serde_json::json!(125));
+        assert!(json.get("parent_id").is_none());
         assert_eq!(decoded.cost_usd, Some(0.0123));
         assert_eq!(
             decoded.metadata["cache_read_tokens"],
@@ -1217,7 +1228,7 @@ mod trace_span_record_tests {
         let legacy = serde_json::json!({
             "trace_id": "trace_legacy",
             "span_id": 2,
-            "parent_id": null,
+            "parent_id": 11,
             "kind": "llm_call",
             "name": "llm_call",
             "start_ms": 0,
@@ -1226,6 +1237,7 @@ mod trace_span_record_tests {
             "links": []
         });
         let decoded: RunTraceSpanRecord = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.parent_id, Some(11));
         assert_eq!(decoded.cost_usd, None);
         assert_eq!(decoded.kind, "llm_call");
         assert_eq!(decoded.metadata["model"], serde_json::json!("gpt-4o-mini"));

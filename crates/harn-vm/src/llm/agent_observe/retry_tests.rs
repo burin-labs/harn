@@ -288,7 +288,12 @@ fn template_render_event_round_trips_through_jsonl() {
 #[test]
 fn response_record_exposes_text_parsed_calls_without_touching_history() {
     use super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
+    use crate::event_log::{
+        install_active_event_log, reset_active_event_log, AnyEventLog, EventLog, SqliteEventLog,
+        Topic,
+    };
     use crate::value::VmValue;
+    use std::sync::Arc;
 
     // Minimal tool registry so the tagged parser resolves the `run` name
     // (mirrors the `tools` registry the request used).
@@ -319,7 +324,14 @@ fn response_record_exposes_text_parsed_calls_without_touching_history() {
     // A text-format completion: native tool_calls EMPTY, the call lives
     // inline as a canonical `<tool_call>` block (already canonicalized from
     // any `[[CALL]]` wire form by the time the result reaches here).
-    let text = "<tool_call>\nrun({ command: \"ls\" })\n</tool_call>";
+    let text = "<tool_call>\nrun({ command: \"ls\" })\n</tool_call>\n\
+## LOOP_STATE\n\
+phase: execute\n\
+next_phase: verify\n\
+done: false\n\
+confidence: 0.75\n\
+summary: Listed the workspace\n\
+## END_LOOP_STATE";
     let result = LlmResult {
         served_fast: false,
         text: text.to_string(),
@@ -344,6 +356,11 @@ fn response_record_exposes_text_parsed_calls_without_touching_history() {
     // 1. Observability path: the response record now exposes the parsed
     //    call via the new sidecar, while native `tool_calls` stays empty.
     let dir = tempfile::tempdir().expect("tempdir");
+    reset_active_event_log();
+    let event_log = Arc::new(AnyEventLog::Sqlite(
+        SqliteEventLog::open(dir.path().join("events.sqlite"), 16).expect("sqlite event log"),
+    ));
+    install_active_event_log(event_log.clone());
     push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
     dump_llm_response(0, "call-textfmt", &result, 42, None, Some(&tools));
     pop_llm_transcript_dir();
@@ -370,10 +387,31 @@ fn response_record_exposes_text_parsed_calls_without_touching_history() {
         "the text-parsed call must surface in the sidecar, got: {parsed:?}"
     );
     assert_eq!(parsed[0]["name"], "run");
+    assert_eq!(
+        event["loop_state"],
+        serde_json::json!({
+            "phase": "execute",
+            "next_phase": "verify",
+            "done": false,
+            "confidence": 0.75,
+            "summary": "Listed the workspace",
+        })
+    );
     // The provider-reported stop reason must ride the observability record
     // (an IDE host bug report: it was dropped here, blinding transcript mining to
     // length truncations on every provider route).
     assert_eq!(event["stop_reason"], "stop");
+
+    let topic = Topic::new("agent.transcript.llm").expect("static topic");
+    let persisted = futures::executor::block_on(event_log.read_range(&topic, None, 8))
+        .expect("read events.sqlite");
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(
+        persisted[0].1.payload["parsed_tool_calls"],
+        event["parsed_tool_calls"]
+    );
+    assert_eq!(persisted[0].1.payload["loop_state"], event["loop_state"]);
+    reset_active_event_log();
 
     // 2. Request-construction / history path is UNCHANGED: the value that
     //    feeds the assistant history envelope is `native_tool_calls`, which
@@ -407,6 +445,20 @@ fn response_record_exposes_text_parsed_calls_without_touching_history() {
         ),
         other => panic!("tool_calls must be a list, got {other:?}"),
     }
+}
+
+#[test]
+fn loop_state_decoder_requires_a_complete_block_and_preserves_colons() {
+    assert_eq!(decode_loop_state("## LOOP_STATE\nphase: execute"), None);
+    assert_eq!(
+        decode_loop_state(
+            "before\n## LOOP_STATE\nsummary: retry: with narrower scope\ndone: true\n## END_LOOP_STATE\nafter",
+        ),
+        Some(serde_json::json!({
+            "summary": "retry: with narrower scope",
+            "done": true,
+        }))
+    );
 }
 
 #[test]

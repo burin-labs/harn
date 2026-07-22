@@ -68,6 +68,10 @@ pub(super) fn snapshot_trace_spans() -> Vec<RunTraceSpanRecord> {
                 .metadata
                 .get(crate::tracing::meta::COST_USD)
                 .and_then(serde_json::Value::as_f64);
+            let ttft_ms = span
+                .metadata
+                .get(crate::llm::first_token::FIRST_TOKEN_METADATA_KEY)
+                .and_then(serde_json::Value::as_u64);
             RunTraceSpanRecord {
                 trace_id: span.trace_id,
                 span_id: span.span_id,
@@ -76,6 +80,7 @@ pub(super) fn snapshot_trace_spans() -> Vec<RunTraceSpanRecord> {
                 name: span.name,
                 start_ms: span.start_ms,
                 duration_ms: span.duration_ms,
+                ttft_ms,
                 metadata: span.metadata,
                 links: span.links,
                 cost_usd,

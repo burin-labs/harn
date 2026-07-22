@@ -17,6 +17,7 @@ fn span(span_id: u64, parent_id: Option<u64>, metadata: serde_json::Value) -> Ru
         name: format!("span-{span_id}"),
         start_ms: span_id * 10,
         duration_ms: 5,
+        ttft_ms: None,
         metadata: serde_json::from_value(metadata).unwrap_or_default(),
         links: Vec::new(),
         cost_usd: None,
