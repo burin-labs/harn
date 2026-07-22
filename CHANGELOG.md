@@ -9,6 +9,36 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.32
+
+### Added
+
+- **Namespace imports bind a module as a closed alias (#5266).**
+  `import * as artifacts from "std/run_artifacts"` (and `pub import * as …`)
+  binds one statically resolved namespace object instead of flattening exports
+  into the caller. Members are accessed as `artifacts.read_json_contract_result(...)`.
+  `pub` re-exports the alias itself, not the target's flattened names. Unknown
+  members fail in `harn check` and at runtime with the module path and closest
+  exported names. Selective and wildcard imports remain valid alongside
+  namespace imports.
+
+### Fixed
+
+- Restore runtime schema materialization for type aliases whose bodies nest a
+  shared generic wrapper (for example an OpenAPI-style `RefOr<T>`) inside
+  `dict<string, _>` values. A v0.10.29 regression collapsed the whole alias
+  when any nested position failed to lower, silently dropping the alias's
+  runtime binding, so `schema_expect(value, TypeAlias)` failed with a
+  misleading `Undefined variable`. Un-lowerable dict values now degrade to an
+  unconstrained dict again (the pre-0.10.29 contract), alias schemas are
+  bounded to a fixed emission budget by pruning the deepest schema levels to
+  permissive subtrees (validation gets coarser, never wrong), and a type alias
+  used in value position that genuinely cannot materialize is now a
+  compile-time error naming the alias instead of a runtime
+  `Undefined variable` (harn#5359).
+- Preserve the latest parsed tool arguments on loop-exit abandonment events and emit debug-level resolved program,
+  working-directory, and PATH facts at the command spawn boundary.
+
 ## v0.10.31
 
 ### Fixed
