@@ -18,7 +18,7 @@ pipeline default() {
         native_tool_fallback: "allow_once",
         tool_examples: "example",
         stop_after_successful_tools: ["edit"],
-        require_successful_tools: ["test"],
+        require_successful_tools: ["test", ["edit", "scaffold"]],
       },
       host: {env_tool_format: "text", default_tool_format: "text"},
     },
@@ -33,6 +33,7 @@ pipeline default() {
   __io_println(explicit.agent_loop_options.done_sentinel)
   __io_println(explicit.agent_loop_options.exit_when_verified)
   __io_println(explicit.agent_loop_options.stop_after_successful_tools[0])
+  __io_println(json_stringify(explicit.agent_loop_options.require_successful_tools))
   const env = workflow_stage_agent_options(
     {
       has_tools: true,

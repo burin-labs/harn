@@ -1003,6 +1003,17 @@ fn default_true() -> bool {
     true
 }
 
+/// One `require_successful_tools` clause. Every outer clause is mandatory;
+/// `AnyOf` is an alternative group where one successful tool satisfies the
+/// clause. This matches the agent-loop contract's `list<string|list<string>>`
+/// shape without weakening workflow graph validation to untyped JSON.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum RequiredSuccessfulTool {
+    Tool(String),
+    AnyOf(Vec<String>),
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct ModelPolicy {
@@ -1047,10 +1058,10 @@ pub struct ModelPolicy {
     /// workflow-owned verify loops where a productive write turn should hand
     /// control back to verification immediately.
     pub stop_after_successful_tools: Option<Vec<String>>,
-    /// When set, the stage is reported as failed unless at least one of these
-    /// tool names succeeds during the interaction. Pipelines use this to
-    /// assert a stage cannot quietly finish without running a specific tool.
-    pub require_successful_tools: Option<Vec<String>>,
+    /// When set, the stage is reported as failed unless every outer clause is
+    /// satisfied. A string requires that exact tool; a nested list is an OR
+    /// group where any one member may succeed.
+    pub require_successful_tools: Option<Vec<RequiredSuccessfulTool>>,
     /// Turn-shape constraints for action stages.
     pub turn_policy: Option<TurnPolicy>,
     /// Tool-calling contract format for the per-stage agent loop.
@@ -1232,4 +1243,30 @@ pub struct EscalationPolicy {
     pub level: Option<String>,
     pub queue: Option<String>,
     pub reason: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ModelPolicy, RequiredSuccessfulTool};
+
+    #[test]
+    fn model_policy_round_trips_required_successful_tool_or_groups() {
+        let value = serde_json::json!({
+            "require_successful_tools": ["verify", ["edit", "scaffold"]]
+        });
+
+        let policy: ModelPolicy = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            policy.require_successful_tools,
+            Some(vec![
+                RequiredSuccessfulTool::Tool("verify".to_string()),
+                RequiredSuccessfulTool::AnyOf(vec!["edit".to_string(), "scaffold".to_string()]),
+            ])
+        );
+        let serialized = serde_json::to_value(policy).unwrap();
+        assert_eq!(
+            serialized.get("require_successful_tools"),
+            value.get("require_successful_tools")
+        );
+    }
 }

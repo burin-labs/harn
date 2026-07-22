@@ -8,6 +8,7 @@ allow_once
 DONE
 true
 edit
+["test",["edit","scaffold"]]
 native
 native
 false

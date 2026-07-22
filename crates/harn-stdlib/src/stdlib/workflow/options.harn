@@ -216,7 +216,7 @@ type WorkflowModelPolicy = {
   tool_examples?: string,
   turn_policy?: WorkflowTurnPolicy,
   stop_after_successful_tools?: list<string>,
-  require_successful_tools?: list<string>,
+  require_successful_tools?: list<string | list<string>>,
   max_iterations?: int,
   iteration_budget?: any,
   max_nudges?: int,
