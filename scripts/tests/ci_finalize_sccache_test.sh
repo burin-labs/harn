@@ -28,6 +28,7 @@ chmod +x "$tmp_root/bin/sccache"
 output=$(PATH="$tmp_root/bin:$PATH" \
   SCCACHE_TEST_RECORD="$record" \
   GITHUB_STEP_SUMMARY="$summary" \
+  HARN_SHARED_SCCACHE=off \
   "$repo_root/scripts/ci/finalize_sccache.sh")
 
 [[ "$output" == *"Compile requests"* ]]
