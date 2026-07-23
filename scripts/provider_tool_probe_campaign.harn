@@ -10,6 +10,7 @@ pub import {
   provider_tool_probe_campaign_routes,
   provider_tool_probe_campaign_runtime_allows_live,
   provider_tool_probe_campaign_runtime_receipt,
+  provider_tool_probe_campaign_runtime_revision_requirement_error,
   provider_tool_probe_campaign_select_behaviors,
 } from "./provider_tool_probe_campaign/catalog"
 pub import {
@@ -48,7 +49,7 @@ const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 fn main(harness: Harness) {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--require-runtime-revision REVISION] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }

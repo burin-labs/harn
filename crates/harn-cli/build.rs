@@ -11,6 +11,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "build_support/build_revision.rs"]
+mod build_revision;
 #[path = "build_support/cli_aot_manifest.rs"]
 #[allow(dead_code)]
 mod cli_aot_manifest;
@@ -21,6 +23,7 @@ const EMBEDDED_ASSET_DIRS: &[&str] = &["assets/persona-templates", "portal-dist"
 const CLI_AOT_REQUIRED_ENV: &str = "HARN_REQUIRE_CLI_AOT";
 
 fn main() {
+    build_revision::emit();
     ensure_git_hooks_installed();
     emit_cli_script_bytecode();
     emit_demo_sibling_assets();

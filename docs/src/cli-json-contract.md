@@ -107,7 +107,7 @@ versions.
 | `harn models lora preflight --json` | Corpus readiness report before LoRA training |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
-| `harn version --json`          | CLI build metadata (`name`, `version`, `description`)    |
+| `harn version --json`          | CLI build metadata (`name`, `version`, `description`, optional `source_revision`)    |
 | `harn upgrade --json`          | Self-update probe (`--check`) or install summary         |
 
 ## Per-command notes
@@ -121,12 +121,20 @@ versions.
   "data": {
     "name": "harn-cli",
     "version": "0.8.27",
-    "description": "CLI for the Harn programming language — run, test, REPL, format, and lint"
+    "description": "CLI for the Harn programming language — run, test, REPL, format, and lint",
+    "source_revision": "0123456789abcdef0123456789abcdef01234567"
   },
   "error": null,
   "warnings": []
 }
 ```
+
+`source_revision` is an optional additive field under schema version 1. It is
+the full immutable object ID supplied when the binary was built, or `null` when
+that build carried no revision attestation. The command never guesses it from
+the caller's current directory or a runtime environment variable. Consumers
+that credit measurements to an exact revision should require a non-null exact
+match; version-only consumers may ignore the field.
 
 ### `harn upgrade --json`
 

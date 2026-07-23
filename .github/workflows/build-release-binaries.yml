@@ -657,6 +657,10 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
+      - name: Attest checked-out source revision
+        shell: bash
+        run: echo "HARN_BUILD_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
       - name: Restore target-independent CLI AOT payload
         if: needs.setup.outputs.is_release == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
