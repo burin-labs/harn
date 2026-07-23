@@ -101,7 +101,7 @@ pub fn python_files(root: string = "") -> list<string> {
     }
     out = out + [rel]
   }
-  return out.sort()
+  return out.sorted()
 }
 
 pub fn check_python_boundary(root: string = "") -> dict {

@@ -60,7 +60,7 @@ fn __agent_turn_judge_decisions(events) {
   let out = []
   for event in events {
     if event?.type == "judge_decision" {
-      out = out.push(
+      out = out.appending(
         {
           iteration: event.iteration,
           verdict: event.verdict,
@@ -87,7 +87,7 @@ fn __agent_turn_iteration_summaries(events) {
       const key = to_string(event.iteration)
       if iterations[key] == nil {
         iterations[key] = {iteration: event.iteration}
-        order = order.push(key)
+        order = order.appending(key)
       }
       let entry = iterations[key]
       entry["started"] = true
@@ -97,7 +97,7 @@ fn __agent_turn_iteration_summaries(events) {
       const key = to_string(event.iteration)
       if iterations[key] == nil {
         iterations[key] = {iteration: event.iteration}
-        order = order.push(key)
+        order = order.appending(key)
       }
       let entry = iterations[key]
       entry["ended"] = true
@@ -113,7 +113,7 @@ fn __agent_turn_iteration_summaries(events) {
   }
   let out = []
   for key in order {
-    out = out.push(iterations[key])
+    out = out.appending(iterations[key])
   }
   return out
 }

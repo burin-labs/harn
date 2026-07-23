@@ -199,7 +199,7 @@ pub fn pool_list() {
   const snapshots = __pool_list()
   let out = []
   for snapshot in snapshots {
-    out = out.push(__pool_attach_methods(snapshot))
+    out = out.appending(__pool_attach_methods(snapshot))
   }
   return out
 }

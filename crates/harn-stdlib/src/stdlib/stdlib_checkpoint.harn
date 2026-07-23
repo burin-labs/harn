@@ -372,14 +372,14 @@ pub fn typed_output_checkpoint(name, prompt, schema, options = nil, validator = 
     last_result = result
     const result_attempts = result?.attempts ?? 0
     total_llm_attempts = total_llm_attempts + result_attempts
-    raw_outputs = raw_outputs.push(result?.raw_text ?? "")
+    raw_outputs = raw_outputs.appending(result?.raw_text ?? "")
     const result_repaired = result?.repaired ?? false
     const result_extracted = result?.extracted_json ?? false
     any_repaired = any_repaired || result_repaired
     any_extracted = any_extracted || result_extracted
     if !result.ok {
       const failures = __typed_checkpoint_failure_lists(result)
-      trace = trace.push(__typed_checkpoint_attempt_record(checkpoint_attempt, result, []))
+      trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, []))
       const envelope = __typed_checkpoint_envelope(
         {
           name: name,
@@ -402,7 +402,7 @@ pub fn typed_output_checkpoint(name, prompt, schema, options = nil, validator = 
       return envelope
     }
     const errors = __typed_checkpoint_validate(result.data, validator)
-    trace = trace.push(__typed_checkpoint_attempt_record(checkpoint_attempt, result, errors))
+    trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, errors))
     if len(errors) == 0 {
       const envelope = __typed_checkpoint_envelope(
         {
@@ -497,7 +497,7 @@ pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, 
   total_attempts = total_attempts + recovered_attempts
   if !recovered.ok {
     const failures = __typed_checkpoint_failure_lists(recovered)
-    trace = trace.push(__typed_checkpoint_attempt_record(checkpoint_attempt, recovered, []))
+    trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, recovered, []))
     const envelope = __typed_checkpoint_envelope(
       {
         name: name,
@@ -523,7 +523,7 @@ pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, 
   let any_repaired = recovered.repaired ?? false
   let any_extracted = recovered.stage == "extracted"
   let errors = __typed_checkpoint_validate(recovered.data, validator)
-  trace = trace.push(__typed_checkpoint_attempt_record(checkpoint_attempt, recovered, errors))
+  trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, recovered, errors))
   while len(errors) > 0 && checkpoint_attempt <= max_validator_retries {
     validator_failures = validator_failures + errors
     checkpoint_attempt = checkpoint_attempt + 1
@@ -532,14 +532,14 @@ pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, 
     last_result = result
     const result_attempts = result?.attempts ?? 0
     total_attempts = total_attempts + result_attempts
-    raw_outputs = raw_outputs.push(result?.raw_text ?? "")
+    raw_outputs = raw_outputs.appending(result?.raw_text ?? "")
     const result_repaired = result?.repaired ?? false
     const result_extracted = result?.extracted_json ?? false
     any_repaired = any_repaired || result_repaired
     any_extracted = any_extracted || result_extracted
     if !result.ok {
       const failures = __typed_checkpoint_failure_lists(result)
-      trace = trace.push(__typed_checkpoint_attempt_record(checkpoint_attempt, result, []))
+      trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, []))
       const envelope = __typed_checkpoint_envelope(
         {
           name: name,
@@ -562,7 +562,7 @@ pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, 
       return envelope
     }
     errors = __typed_checkpoint_validate(result.data, validator)
-    trace = trace.push(__typed_checkpoint_attempt_record(checkpoint_attempt, result, errors))
+    trace = trace.appending(__typed_checkpoint_attempt_record(checkpoint_attempt, result, errors))
   }
   if len(errors) == 0 {
     const envelope = __typed_checkpoint_envelope(

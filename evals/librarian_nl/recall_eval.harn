@@ -109,7 +109,7 @@ pipeline run(task) {
       },
     ]
   }
-  const sorted_ms = latencies.sort()
+  const sorted_ms = latencies.sorted()
   const p50 = _percentile(sorted_ms, 0.5)
   const p95 = _percentile(sorted_ms, 0.95)
   const p99 = _percentile(sorted_ms, 0.99)

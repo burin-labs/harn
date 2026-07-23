@@ -39,7 +39,7 @@ fn captures_suffix(caps: dict) -> string {
   }
   let parts = []
   for name in names {
-    parts = parts.push(name + "=" + caps[name])
+    parts = parts.appending(name + "=" + caps[name])
   }
   return "  [" + join_strs(parts, " ") + "]"
 }
@@ -61,10 +61,14 @@ fn run_search(plan: list) -> dict {
     const matches = res.matches ?? []
     total = total + len(matches)
     for m in matches {
-      seen = seen.merge({[m.path]: true})
-      lines = lines.push(m.path + ":" + loc(m) + ": " + m.text + captures_suffix(m.captures ?? {}))
+      seen = seen.merging({[m.path]: true})
+      lines = lines.appending(
+        m.path + ":" + loc(m) + ": " + m.text + captures_suffix(m.captures ?? {}),
+      )
     }
-    results = results.push({language: entry.language, match_count: len(matches), matches: matches})
+    results = results.appending(
+      {language: entry.language, match_count: len(matches), matches: matches},
+    )
   }
   return {lines: lines, results: results, total: total, files: len(keys(seen))}
 }
@@ -83,10 +87,10 @@ fn run_report(plan: list) -> dict {
     total = total + summary.total_rows
     const per_file = summary.per_file ?? {}
     for path in keys(per_file) {
-      seen = seen.merge({[path]: true})
-      lines = lines.push(path + ": " + to_string(per_file[path]))
+      seen = seen.merging({[path]: true})
+      lines = lines.appending(path + ": " + to_string(per_file[path]))
     }
-    tables = tables.push(table)
+    tables = tables.appending(table)
   }
   return {lines: lines, tables: tables, total: total, files: len(keys(seen))}
 }

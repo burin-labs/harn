@@ -29,7 +29,7 @@ fn included_ids(explained) {
   let ids = []
   for frag in explained.fragments {
     if frag.included {
-      ids = ids.push(frag.id)
+      ids = ids.appending(frag.id)
     }
   }
   return ids

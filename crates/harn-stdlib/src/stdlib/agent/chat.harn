@@ -207,7 +207,7 @@ fn __chat_default_help(handlers = nil) {
   if type_of(handlers) == "dict" {
     for key in handlers.keys() {
       if starts_with(key, "/") && !contains(commands, key) {
-        commands = commands.push(key)
+        commands = commands.appending(key)
       }
     }
   }

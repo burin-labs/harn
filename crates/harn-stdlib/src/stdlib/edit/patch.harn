@@ -143,7 +143,7 @@ fn __edit_error(code, message, text, old_text, new_text, fields = nil) {
     changed_regions: [],
     provenance: {module: "std/edit"},
   }
-  return base.merge(fields ?? {})
+  return base.merging(fields ?? {})
 }
 
 fn __edit_lazy_placeholder_patterns() {
@@ -434,7 +434,7 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
     opts,
   )
   if match_kind == "structural" || match_kind == "line" {
-    return result.merge(
+    return result.merging(
       {whitespace_explanation: edit_explain_whitespace_difference(old_text, candidate.text)},
     )
   }
@@ -575,7 +575,7 @@ pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options
   const guardrail = __edit_guardrails(
     old,
     new_text ?? "",
-    (options ?? {}).merge({allow_empty_old_text: true}),
+    (options ?? {}).merging({allow_empty_old_text: true}),
   )
   if guardrail != nil {
     return __edit_error(guardrail.code, guardrail.message, source, old, new_text ?? "")
@@ -1120,7 +1120,7 @@ pub fn edit_insert_at_anchor(params) {
  */
 pub fn edit_batch_apply(params) {
   const payload = hostlib_ast_batch_apply(params ?? {}) ?? {}
-  return payload.merge(
+  return payload.merging(
     {
       ok: (payload?.summary?.files_failed ?? 1) == 0,
       provenance: {module: "std/edit", helper: "edit_batch_apply", caller: params?.provenance},

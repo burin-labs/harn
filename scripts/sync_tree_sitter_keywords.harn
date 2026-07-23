@@ -90,7 +90,7 @@ pub fn grammar_keywords(text: string) -> list<string>? {
 
 /** Render the @generated keywords.js body from a keyword list. */
 pub fn render_keywords_js(keywords: list<string>) -> string {
-  const ordered = keywords.sort()
+  const ordered = keywords.sorted()
   let lines = [
     "// @generated from crates/harn-lexer/src/token.rs (KEYWORDS).",
     "// Regenerate with `make gen-tree-sitter-keywords`; the lexer is the",
@@ -128,8 +128,8 @@ pipeline main(task) {
     __io_eprintln("error: could not find `module.exports = [ ... ]` in ${KEYWORDS_JS}")
     return 1
   }
-  const missing = difference(lexer, grammar).sort()
-  const extra = difference(grammar, lexer).sort()
+  const missing = difference(lexer, grammar).sorted()
+  const extra = difference(grammar, lexer).sorted()
   if missing.count > 0 || extra.count > 0 {
     __io_eprintln(
       "error: tree-sitter keyword list is out of sync with the lexer (crates/harn-lexer/src/token.rs KEYWORDS):",

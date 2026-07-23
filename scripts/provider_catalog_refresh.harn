@@ -224,7 +224,7 @@ pub fn normalize_observations(raw: list<dict>) -> dict {
       }
     }
   }
-  const sorted_keys = order.sort_by({ k -> k })
+  const sorted_keys = order.sorted_by({ k -> k })
   let canonical: list<dict> = []
   for k in sorted_keys {
     canonical = canonical + [grouped[k]]
@@ -275,7 +275,7 @@ fn __dict_to_pairs(value) -> list<dict> {
   for k in keys(value) {
     pairs = pairs + [{key: k, value: value[k]}]
   }
-  return pairs.sort_by({ pair -> pair.key })
+  return pairs.sorted_by({ pair -> pair.key })
 }
 
 fn __values_equal(left, right) {

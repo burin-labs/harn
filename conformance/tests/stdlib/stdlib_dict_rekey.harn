@@ -1,7 +1,7 @@
 pipeline test(task) {
   const snake_dict = {first_name: "Ada", last_name: "Lovelace", birth_year: 1815}
   // Named builtin passed by reference (no lambda wrapper needed)
-  const camel_dict = snake_dict.rekey(snake_to_camel)
+  const camel_dict = snake_dict.rekeyed(snake_to_camel)
   log(camel_dict["firstName"])
   log(camel_dict["lastName"])
   log(camel_dict["birthYear"])
@@ -15,7 +15,7 @@ pipeline test(task) {
   log(doubled["a"])
   log(doubled["b"])
   // Key collision: last write wins (sorted key order deterministic)
-  const collided = {aa: 1, bb: 2}.rekey({ k -> "same" })
+  const collided = {aa: 1, bb: 2}.rekeyed({ k -> "same" })
   log(collided["same"])
   log(len(keys(collided)))
 }

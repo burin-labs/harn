@@ -919,7 +919,7 @@ pipeline default(task) {
   let files: dict<string, string> = {}
   for item in contents {
     if item.content != "" {
-      files = files.merge({[item.path]: item.content})
+      files = files.merging({[item.path]: item.content})
     }
   }
 

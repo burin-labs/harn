@@ -54,7 +54,7 @@ pub fn workspace_packages_from_metadata(meta: dict, root: string) -> list<Worksp
     }
     packages = packages + [{dir: rel_path(dirname(manifest_path) ?? ".", root), name: name}]
   }
-  return packages.sort_by({ package -> package.dir })
+  return packages.sorted_by({ package -> package.dir })
 }
 
 fn load_workspace_packages(root: string) -> list<WorkspacePackage> {

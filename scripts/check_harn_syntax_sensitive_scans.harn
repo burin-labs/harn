@@ -52,11 +52,11 @@ pub fn harn_syntax_sensitive_files(root: string = "") -> list<string> {
     for path in find_files(resolved_root, pattern) {
       const rel = rel_path(path, resolved_root)
       if !is_skipped(rel) {
-        out = out.push(rel)
+        out = out.appending(rel)
       }
     }
   }
-  return out.unique().sort()
+  return out.unique().sorted()
 }
 
 fn git_candidate_files(root: string) -> list<string>? {
@@ -97,7 +97,7 @@ fn git_candidate_files(root: string) -> list<string>? {
   for path in result.stdout.lines() {
     const rel = path.trim()
     if rel != "" && !is_skipped(rel) {
-      files = files.push(rel)
+      files = files.appending(rel)
     }
   }
   // `git grep` intentionally avoids walking ignored build output, but a local
@@ -115,12 +115,12 @@ fn git_candidate_files(root: string) -> list<string>? {
     }
     for suffix in SCANNED_SUFFIXES {
       if rel.lower().ends_with(suffix) {
-        files = files.push(rel)
+        files = files.appending(rel)
         break
       }
     }
   }
-  return files.unique().sort()
+  return files.unique().sorted()
 }
 
 fn line_finding(path: string, line: int, kind: string, message: string) -> dict {
@@ -152,7 +152,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
     const line = lines[index]
     const line_no = index + 1
     if line_has_let_only_harn_binding_regex(line) {
-      findings = findings.push(
+      findings = findings.appending(
         line_finding(
           path,
           line_no,
@@ -162,7 +162,7 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
       )
     }
     if line_has_stale_var_tool_registry_example(line) {
-      findings = findings.push(
+      findings = findings.appending(
         line_finding(
           path,
           line_no,
@@ -189,7 +189,7 @@ pub fn check_harn_syntax_sensitive_scans(root: string = "") -> dict {
     const path = path_join(resolved_root, rel)
     const text = harness.fs.read_text(path)
     for finding in harn_syntax_sensitive_scan_text(rel, text) {
-      findings = findings.push(finding)
+      findings = findings.appending(finding)
     }
   }
   return {root: resolved_root, findings: findings, violation_count: len(findings)}
@@ -205,7 +205,7 @@ fn render_report(report: dict) -> string {
     "Use parser/codemod facts where possible. If text scanning is unavoidable, accept both current and recently migrated Harn keyword spellings or document an explicit non-Harn target.",
   ]
   for finding in report.findings {
-    lines = lines.push(
+    lines = lines.appending(
       "- "
         + to_string(finding.path)
         + ":"

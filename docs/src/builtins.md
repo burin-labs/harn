@@ -425,8 +425,8 @@ Sets also support method syntax: `my_set.union(other)`.
 | `.count()` / `.len()` | none | int | Number of elements |
 | `.empty()` | none | bool | True if set is empty |
 | `.contains(val)` | val: any | bool | Check membership |
-| `.add(val)` | val: any | set | New set with val added |
-| `.remove(val)` | val: any | set | New set with val removed |
+| `.adding(val)` | val: any | set | New set with val added |
+| `.removing(val)` | val: any | set | New set with val removed |
 | `.union(other)` | other: set | set | Union |
 | `.intersect(other)` | other: set | set | Intersection |
 | `.difference(other)` | other: set | set | Elements in self but not other |
@@ -483,7 +483,7 @@ These are called on string values with dot notation: `"hello".uppercase()`.
 | `.len()` | none | int | Character count |
 | `.upper()` / `.to_upper()` | none | string | Uppercase string |
 | `.chars()` | none | list | List of single-character strings |
-| `.reverse()` | none | string | Reversed string |
+| `.reversed()` | none | string | Reversed string |
 | `.repeat(n)` | n: int | string | Repeat n times |
 | `.pad_left(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
 | `.pad_right(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
@@ -529,7 +529,7 @@ line-, token-, or pattern-oriented scan suffices.
 | `.last(n?)` | n: int (optional) | any or list | Last element, or last n elements |
 | `.partition(fn)` | fn: closure | list | Split into `[[truthy], [falsy]]` |
 | `.group_by(fn)` | fn: closure | dict | Group into dict keyed by fn result |
-| `.sort()` / `.sort_by(fn)` | fn: closure for `.sort_by` | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sort_by({ x -> [x.a, x.b] })` sorts by `a`, then `b`. Use `sort_by` for custom keys; `sort` does not accept a comparator. |
+| `.sorted()` / `.sorted_by(fn)` | fn: closure for `.sorted_by` | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sorted_by({ x -> [x.a, x.b] })` sorts by `a`, then `b`. Use `sorted_by` for custom keys; `sorted` does not accept a comparator. |
 | `.min()` / `.max()` | none | any | Minimum/maximum value |
 | `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
 | `.chunk(size)` | size: int | list | Split into chunks of size |
@@ -545,8 +545,8 @@ line-, token-, or pattern-oriented scan suffices.
 | `.take(n)` / `.skip(n)` | n: int | list | First/remaining n elements |
 | `.sum()` | none | int or float | Sum of numeric values |
 | `.join(sep?)` | sep: string | string | Join to string |
-| `.reverse()` | none | list | Reversed list |
-| `.push(item)` / `.pop()` | item: any | list | New list with item added/removed (immutable) |
+| `.reversed()` | none | list | Reversed list |
+| `.appending(item)` / `.dropping_last()` | item: any | list | New list with item added/removed (immutable) |
 | `.contains(item)` | item: any | bool | Check if list contains item |
 | `.index_of(item)` | item: any | int | Index of item (-1 if not found) |
 | `.slice(start, end?)` | start: int, end: int | list | Slice with negative index support |

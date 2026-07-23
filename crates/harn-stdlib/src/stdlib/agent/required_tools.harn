@@ -64,7 +64,7 @@ pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<stri
   let missing = []
   for requirement in required {
     if !__agent_required_tool_satisfied(requirement, successful) {
-      missing = missing.push(__agent_required_tool_label(requirement))
+      missing = missing.appending(__agent_required_tool_label(requirement))
     }
   }
   return missing
@@ -88,7 +88,7 @@ pub fn agent_required_tools_missing_from_session(
   let missing = []
   for requirement in required {
     if __agent_required_tool_missing(requirement, successful_tools_seen) {
-      missing = missing.push(__agent_required_tool_label(requirement))
+      missing = missing.appending(__agent_required_tool_label(requirement))
     }
   }
   return missing
@@ -98,7 +98,7 @@ fn __agent_required_tools_friction_event(result: dict, opts, missing: list<strin
   const session_id = to_string(result?.session_id ?? "")
   let recurrence = ["missing_required_tools=" + to_string(len(missing))]
   if opts?.persona != nil {
-    recurrence = recurrence.push("persona=" + to_string(opts.persona))
+    recurrence = recurrence.appending("persona=" + to_string(opts.persona))
   }
   return {
     kind: "tool_gap",

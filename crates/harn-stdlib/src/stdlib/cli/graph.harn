@@ -168,7 +168,7 @@ fn __strip_absent(report: dict) -> dict {
     const symbols = __safe_list(m["public_symbols"])
     let cleaned_symbols = []
     for symbol in symbols {
-      cleaned_symbols = cleaned_symbols.push(__clean_symbol(__safe_dict(symbol)))
+      cleaned_symbols = cleaned_symbols.appending(__clean_symbol(__safe_dict(symbol)))
     }
     const entry = {
       path: __safe_string(m["path"], ""),
@@ -178,7 +178,7 @@ fn __strip_absent(report: dict) -> dict {
       effects: __safe_list(m["effects"]),
       host_calls: __safe_list(m["host_calls"]),
     }
-    cleaned_modules = cleaned_modules.push(entry)
+    cleaned_modules = cleaned_modules.appending(entry)
   }
   const graph = __safe_dict(report["graph"])
   const edges = __safe_list(graph["edges"])
@@ -186,7 +186,7 @@ fn __strip_absent(report: dict) -> dict {
   for edge in edges {
     const e = __safe_dict(edge)
     const edge_entry = {from: __safe_string(e["from"], ""), to: __safe_string(e["to"], "")}
-    cleaned_edges = cleaned_edges.push(edge_entry)
+    cleaned_edges = cleaned_edges.appending(edge_entry)
   }
   return {
     modules: cleaned_modules,

@@ -226,7 +226,7 @@ fn __append_arg_aliases(arg: ArgSpec, aliases: list<string>) -> list<string> {
     if contains(out, arg.short) {
       throw "std/cli/argparse: duplicate flag alias '" + arg.short + "'"
     }
-    out = out.push(arg.short)
+    out = out.appending(arg.short)
   }
   if arg.long != nil {
     if !starts_with(arg.long, "--") || starts_with(arg.long, "---") || len(arg.long) <= 2
@@ -240,7 +240,7 @@ fn __append_arg_aliases(arg: ArgSpec, aliases: list<string>) -> list<string> {
     if contains(out, arg.long) {
       throw "std/cli/argparse: duplicate flag alias '" + arg.long + "'"
     }
-    out = out.push(arg.long)
+    out = out.appending(arg.long)
   }
   return out
 }
@@ -274,7 +274,7 @@ pub fn parser(spec: ParserSpec) -> ParserSpec {
     if contains(names, name) {
       throw "std/cli/argparse: duplicate arg name '" + name + "'"
     }
-    names = names.push(name)
+    names = names.appending(name)
     if kind == "positional" {
       const required = arg.required ?? true
       if required && saw_optional_positional {
@@ -320,7 +320,7 @@ fn __positionals(args: list<ArgSpec>) -> list<ArgSpec> {
   let out: list<ArgSpec> = []
   for arg in args {
     if arg.kind == "positional" {
-      out = out.push(arg)
+      out = out.appending(arg)
     }
   }
   return out
@@ -330,7 +330,7 @@ fn __flags_only(args: list<ArgSpec>) -> list<ArgSpec> {
   let out: list<ArgSpec> = []
   for arg in args {
     if arg.kind == "flag" || arg.kind == "switch" {
-      out = out.push(arg)
+      out = out.appending(arg)
     }
   }
   return out
@@ -350,7 +350,7 @@ fn __argv_failure(code: CliParseCode, arg: string, message: string) -> CliParseF
 fn __schema_failure(failure) -> CliParseFailure {
   let issues: list<CliParseIssue> = []
   for issue in failure?.issues ?? [] {
-    issues = issues.push(
+    issues = issues.appending(
       {
         stage: "schema",
         code: issue?.code ?? "schema.validation",
@@ -361,7 +361,7 @@ fn __schema_failure(failure) -> CliParseFailure {
   }
   const message = failure?.message ?? "schema validation failed"
   if len(issues) == 0 {
-    issues = issues.push(
+    issues = issues.appending(
       {stage: "schema", code: "schema.validation", message: message, path: "root"},
     )
   }
@@ -379,7 +379,7 @@ fn __decode_list(value: string, separator: string) -> list<string> {
   for item in split(value, separator) {
     const normalized = trim(item)
     if normalized != "" {
-      values = values.push(normalized)
+      values = values.appending(normalized)
     }
   }
   return values
@@ -440,11 +440,11 @@ fn __record_value(
     const next = if arg.parse == "list" {
       prior + value
     } else {
-      prior.push(value)
+      prior.appending(value)
     }
-    return Ok(collected.merge({[arg.name]: next}))
+    return Ok(collected.merging({[arg.name]: next}))
   }
-  return Ok(collected.merge({[arg.name]: value}))
+  return Ok(collected.merging({[arg.name]: value}))
 }
 
 fn __apply_defaults(collected: dict, args: list<ArgSpec>) -> dict {
@@ -454,15 +454,15 @@ fn __apply_defaults(collected: dict, args: list<ArgSpec>) -> dict {
       continue
     }
     if arg.default != nil {
-      out = out.merge({[arg.name]: arg.default})
+      out = out.merging({[arg.name]: arg.default})
       continue
     }
     if arg.kind == "switch" {
-      out = out.merge({[arg.name]: false})
+      out = out.merging({[arg.name]: false})
       continue
     }
     if arg.kind == "flag" && arg.multi {
-      out = out.merge({[arg.name]: []})
+      out = out.merging({[arg.name]: []})
     }
   }
   return out
@@ -586,7 +586,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
   const positionals = __positionals(validated_spec.args)
   for arg_str in argv {
     if seen_dash_dash {
-      rest = rest.push(arg_str)
+      rest = rest.appending(arg_str)
       continue
     }
     if pending != nil {
@@ -633,7 +633,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
         if value_opt != nil {
           return Err(__argv_failure("bad_value", arg_str, "switch ${key} does not take a value"))
         }
-        collected = collected.merge({[arg.name]: true})
+        collected = collected.merging({[arg.name]: true})
         continue
       }
       if value_opt != nil {
@@ -658,7 +658,7 @@ pub fn parse(spec: ParserSpec, argv: list<string>) -> CliParseResult<dict> {
         if len(arg_str) > 2 {
           return Err(__argv_failure("bad_value", arg_str, "switch ${short} does not take a value"))
         }
-        collected = collected.merge({[arg.name]: true})
+        collected = collected.merging({[arg.name]: true})
         continue
       }
       // Flag: either inline -xVALUE or split -x VALUE
@@ -811,40 +811,40 @@ fn __help_arg_line(arg: ArgSpec) -> string {
 pub fn render_help(spec: ParserSpec) -> string {
   let lines = []
   if spec.about != nil && spec.about != "" {
-    lines = lines.push(spec.about)
-    lines = lines.push("")
+    lines = lines.appending(spec.about)
+    lines = lines.appending("")
   }
   const flags = __flags_only(spec.args)
   const positionals = __positionals(spec.args)
   let usage_tokens = ["  " + spec.name]
   if len(flags) > 0 {
-    usage_tokens = usage_tokens.push("[OPTIONS]")
+    usage_tokens = usage_tokens.appending("[OPTIONS]")
   }
   for arg in positionals {
-    usage_tokens = usage_tokens.push(__usage_token(arg))
+    usage_tokens = usage_tokens.appending(__usage_token(arg))
   }
-  lines = lines.push("USAGE:")
-  lines = lines.push(join(usage_tokens, " "))
+  lines = lines.appending("USAGE:")
+  lines = lines.appending(join(usage_tokens, " "))
   if len(positionals) > 0 {
-    lines = lines.push("")
-    lines = lines.push("ARGS:")
+    lines = lines.appending("")
+    lines = lines.appending("ARGS:")
     for arg in positionals {
-      lines = lines.push(__help_arg_line(arg))
+      lines = lines.appending(__help_arg_line(arg))
     }
   }
   if len(flags) > 0 {
-    lines = lines.push("")
-    lines = lines.push("OPTIONS:")
+    lines = lines.appending("")
+    lines = lines.appending("OPTIONS:")
     for arg in flags {
-      lines = lines.push(__help_arg_line(arg))
+      lines = lines.appending(__help_arg_line(arg))
     }
-    lines = lines.push(str_pad("  -h, --help", 32, " ") + " Print help")
+    lines = lines.appending(str_pad("  -h, --help", 32, " ") + " Print help")
   }
   if spec.examples != nil && len(spec.examples) > 0 {
-    lines = lines.push("")
-    lines = lines.push("EXAMPLES:")
+    lines = lines.appending("")
+    lines = lines.appending("EXAMPLES:")
     for ex in spec.examples {
-      lines = lines.push("  ${ex}")
+      lines = lines.appending("  ${ex}")
     }
   }
   return join(lines, "\n")

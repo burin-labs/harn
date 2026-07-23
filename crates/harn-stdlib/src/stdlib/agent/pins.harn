@@ -90,7 +90,7 @@ fn __pin_allowed_kinds(options) {
   for raw in extra {
     const k = to_string(raw ?? "")
     if k != "" && !contains(out, k) {
-      out = out.push(k)
+      out = out.appending(k)
     }
   }
   return out
@@ -150,7 +150,7 @@ pub fn unpin(pins, pin_id) {
   let out = []
   for p in pins ?? [] {
     if p?.id != pin_id {
-      out = out.push(p)
+      out = out.appending(p)
     }
   }
   return out
@@ -171,7 +171,7 @@ pub fn pin_reachability_roots(pins) {
   let roots = []
   for p in pins ?? [] {
     if type_of(p?.content) == "string" && p.content != "" {
-      roots = roots.push(p.content)
+      roots = roots.appending(p.content)
     }
   }
   return roots
@@ -207,13 +207,13 @@ fn __pin_policy_merge_lists(existing, additions) {
   for v in existing ?? [] {
     const s = to_string(v ?? "")
     if s != "" && !contains(out, s) {
-      out = out.push(s)
+      out = out.appending(s)
     }
   }
   for v in additions ?? [] {
     const s = to_string(v ?? "")
     if s != "" && !contains(out, s) {
-      out = out.push(s)
+      out = out.appending(s)
     }
   }
   return out
@@ -264,7 +264,7 @@ pub fn pin_compaction_policy(pins, opts = nil) {
   let pin_preserve = []
   for p in pins ?? [] {
     if type_of(p?.content) == "string" && p.content != "" {
-      pin_preserve = pin_preserve.push(
+      pin_preserve = pin_preserve.appending(
         "Preserve the pinned " + to_string(p?.kind ?? "note") + ": "
           + p.content,
       )
@@ -342,7 +342,7 @@ fn __pin_reminder_tags(base_tags, options) {
   let out = [ns]
   for t in base_tags {
     if !contains(out, t) {
-      out = out.push(t)
+      out = out.appending(t)
     }
   }
   return out

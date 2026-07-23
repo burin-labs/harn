@@ -188,7 +188,7 @@ fn remote_sccache_errors(value, path: string = "") -> list<string> {
     return []
   }
   let errors: list<string> = []
-  for key in value.keys().sort() {
+  for key in value.keys().sorted() {
     const child_path = if path == "" {
       key
     } else {
@@ -829,11 +829,11 @@ pub fn ci_cache_policy_errors(
     + cache_budget_reporter_errors(workflows)
     + cli_cold_start_budget_errors(workflows)
   let observed_writers: list<string> = []
-  for workflow in workflows.keys().sort() {
+  for workflow in workflows.keys().sorted() {
     const document = workflows[workflow]
     errors = errors + remote_sccache_errors(document, workflow)
     const jobs = document?.jobs ?? {}
-    for job in jobs.keys().sort() {
+    for job in jobs.keys().sorted() {
       for step in jobs[job]?.steps ?? [] {
         const uses = step_uses(step)
         if uses.starts_with(UPSTREAM_CACHE_PREFIX) {
@@ -878,7 +878,7 @@ fn main(harness: Harness) {
   const node_action = read_yaml(NODE_ACTION_PATH, nil)
   const sccache_action = read_yaml(SCCACHE_ACTION_PATH, nil)
   let workflows = {}
-  for path in harness.fs.glob(WORKFLOW_GLOB).sort() {
+  for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(path, nil)
   }
   const errors = ci_cache_policy_errors(policy, action, node_action, workflows)

@@ -242,7 +242,7 @@ fn __scratchpad_format_items(items, empty_label) {
     } else {
       " [source_ref: " + source + "]"
     }
-    lines = lines.push("- " + text + suffix)
+    lines = lines.appending("- " + text + suffix)
   }
   if len(lines) == 0 {
     return "- (" + empty_label + ")"
@@ -268,7 +268,7 @@ fn __scratchpad_format_refs(refs) {
     } else {
       ": " + label
     }
-    lines = lines.push("- " + id + " (" + kind + ")" + suffix)
+    lines = lines.appending("- " + id + " (" + kind + ")" + suffix)
   }
   if len(lines) == 0 {
     return "- (none)"
@@ -333,7 +333,7 @@ fn __scratchpad_message_refs(messages, limit) {
     const msg = values[index]
     const excerpt = __scratchpad_excerpt(msg?.content ?? msg?.text ?? "", 200)
     if excerpt != "" {
-      refs = refs.push(
+      refs = refs.appending(
         {
           id: "turn:" + to_string(index + 1),
           kind: to_string(msg?.role ?? "message"),
@@ -364,14 +364,14 @@ fn __scratchpad_merge_refs(existing, additions) {
     const id = trim(to_string(ref?.id ?? ""))
     if id != "" && !seen[id] {
       seen = seen + {[id]: true}
-      refs = refs.push(ref)
+      refs = refs.appending(ref)
     }
   }
   for ref in __scratchpad_list(additions) {
     const id = trim(to_string(ref?.id ?? ""))
     if id != "" && !seen[id] {
       seen = seen + {[id]: true}
-      refs = refs.push(ref)
+      refs = refs.appending(ref)
     }
   }
   return refs
@@ -437,7 +437,7 @@ fn __scratchpad_allowed_ref_lines(refs) {
     if id == "" {
       continue
     }
-    lines = lines.push(
+    lines = lines.appending(
       "- " + id + ": " + __scratchpad_excerpt(ref?.label ?? ref?.excerpt ?? "", 180),
     )
   }
@@ -488,23 +488,23 @@ fn __scratchpad_validate_refs(pad, allowed_refs) {
   for ref in __scratchpad_list(pad?.refs) {
     const id = trim(to_string(ref?.id ?? ""))
     if id == "" {
-      errors = errors.push("refs entries must have non-empty id")
+      errors = errors.appending("refs entries must have non-empty id")
     } else if !allowed[id] {
-      errors = errors.push("refs contains unknown source ref `" + id + "`")
+      errors = errors.appending("refs contains unknown source ref `" + id + "`")
     }
   }
   for fact in __scratchpad_list(pad?.facts) {
     const source = __scratchpad_item_source(fact)
     if source == "" {
-      errors = errors.push("facts must include source_ref")
+      errors = errors.appending("facts must include source_ref")
     } else if !returned[source] {
-      errors = errors.push("fact cites unknown source_ref `" + source + "`")
+      errors = errors.appending("fact cites unknown source_ref `" + source + "`")
     }
   }
   for item in __scratchpad_list(pad?.goals) + __scratchpad_list(pad?.open_items) {
     const source = __scratchpad_item_source(item)
     if source != "" && !returned[source] {
-      errors = errors.push("item cites unknown source_ref `" + source + "`")
+      errors = errors.appending("item cites unknown source_ref `" + source + "`")
     }
   }
   return {ok: len(errors) == 0, errors: errors}

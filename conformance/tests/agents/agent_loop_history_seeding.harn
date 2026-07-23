@@ -12,7 +12,7 @@ import { agent_session_messages } from "std/agent/state"
 fn summarize(messages) {
   let out = []
   for msg in messages {
-    out = out.push(to_string(msg?.role ?? "") + "=" + to_string(msg?.content ?? ""))
+    out = out.appending(to_string(msg?.role ?? "") + "=" + to_string(msg?.content ?? ""))
   }
   return join(out, " | ")
 }

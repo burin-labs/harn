@@ -6,8 +6,8 @@
  *
  * Harn's collections are value types (copy-on-write), so an index / property /
  * nested / struct-field assignment CHANGES the binding's value and therefore
- * requires `let`. A pure method such as `push` returns a new value and leaves
- * the receiver's value alone, so it is permitted on `const`.
+ * requires `let`. A pure method such as `appending` returns a new value and
+ * leaves the receiver's value alone, so it is permitted on `const`.
  *
  * This file exists to keep those two halves consistent with each other: every
  * collection type must answer the same way for the same mutation form.
@@ -75,19 +75,19 @@ pipeline test(task) {
   // ---- pure methods are not mutations, so `const` is fine ---------------
   // The receiver keeps its value; the new value comes back as the result.
   const base = [1]
-  const appended = base.push(2)
-  assert_eq(base.count, 1, "const list: push leaves the receiver's value alone")
-  assert_eq(appended.count, 2, "const list: push returns the new list")
+  const appended = base.appending(2)
+  assert_eq(base.count, 1, "const list: appending leaves the receiver's value alone")
+  assert_eq(appended.count, 2, "const list: appending returns the new list")
   const unsorted = [3, 1, 2]
-  assert_eq(unsorted.sort()[0], 1, "const list: sort returns a sorted copy")
-  assert_eq(unsorted[0], 3, "const list: sort leaves the receiver's value alone")
+  assert_eq(unsorted.sorted()[0], 1, "const list: sorted returns a sorted copy")
+  assert_eq(unsorted[0], 3, "const list: sorted leaves the receiver's value alone")
   const members = set([1])
-  assert_eq(len(members.add(2)), 2, "const set: add returns the new set")
-  assert_eq(len(members), 1, "const set: add leaves the receiver's value alone")
+  assert_eq(len(members.adding(2)), 2, "const set: adding returns the new set")
+  assert_eq(len(members), 1, "const set: adding leaves the receiver's value alone")
   // Rebinding a `let` to the result is how a collection is built.
   let built = []
-  built = built.push(1)
-  built = built.push(2)
+  built = built.appending(1)
+  built = built.appending(2)
   assert_eq(built.count, 2, "let list: assigning the pure result back accumulates")
   // ---- collections are value types, which is WHY the rule is what it is --
   // Copying a binding copies the value: mutating the copy cannot be observed

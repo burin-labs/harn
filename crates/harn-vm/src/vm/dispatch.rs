@@ -359,7 +359,7 @@ impl Vm {
 
     /// Invoke a value as a callable. Supports `VmValue::Closure` and
     /// `VmValue::BuiltinRef`, so builtin names passed by reference (e.g.
-    /// `dict.rekey(snake_to_camel)`) dispatch through the same code path as
+    /// `dict.rekeyed(snake_to_camel)`) dispatch through the same code path as
     /// user-defined closures.
     pub(crate) async fn call_callable_value(
         &mut self,

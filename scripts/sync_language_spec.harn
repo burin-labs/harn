@@ -54,7 +54,7 @@ const SUMMARY_END = "<!-- END generated: language-spec chapters -->"
  * separators, so the assembler owns the blank line between top-level sections.
  */
 pub fn assemble_spec() -> string {
-  const chapters = harness.fs.glob(CHAPTERS_GLOB).sort()
+  const chapters = harness.fs.glob(CHAPTERS_GLOB).sorted()
   let out = ""
   let index = 0
   for path in chapters {
@@ -74,7 +74,7 @@ pub fn render_mirror_from(spec_text: string) -> string {
 
 /** All chapter source paths in `NN-` order. */
 pub fn chapter_paths() -> list<string> {
-  return harness.fs.glob(CHAPTERS_GLOB).sort()
+  return harness.fs.glob(CHAPTERS_GLOB).sorted()
 }
 
 /** Chapter paths after the overview — each becomes its own docs page. */

@@ -93,7 +93,7 @@ pub fn matching_groups(groups: dict<string, DependabotGroup>, dependency: string
       }
     }
   }
-  return matches.sort()
+  return matches.sorted()
 }
 
 fn dependabot_pattern_is_catch_all(pattern: string) -> bool {

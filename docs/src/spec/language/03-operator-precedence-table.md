@@ -65,7 +65,7 @@ value:
 
 ```harn
 "hello world" |> split(_, " ")     // desugars to: |> { __pipe -> split(__pipe, " ") }
-[3, 1, 2] |> _.sort()             // desugars to: |> { __pipe -> __pipe.sort() }
+[3, 1, 2] |> _.sorted()             // desugars to: |> { __pipe -> __pipe.sorted() }
 items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
 ```
 

@@ -558,7 +558,12 @@ pub fn git_rebase(base_ref: string, repo = ".") -> GitRebaseReceipt {
  * @errors: []
  */
 pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> GitPushReceipt {
-  return git.push(repo, __git_ref_arg(remote, "remote"), __git_ref_arg(refspec, "refspec"), lease)
+  return git.appending(
+    repo,
+    __git_ref_arg(remote, "remote"),
+    __git_ref_arg(refspec, "refspec"),
+    lease,
+  )
 }
 
 /**
@@ -965,7 +970,7 @@ pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCata
       || __git_list_contains(disabled, entry.group) {
       continue
     }
-    out = out.push(entry)
+    out = out.appending(entry)
   }
   return out
 }
@@ -1016,13 +1021,13 @@ fn __git_insert_ranked(ranked, entry) {
   let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
-      out = out.push(entry)
+      out = out.appending(entry)
       inserted = true
     }
-    out = out.push(existing)
+    out = out.appending(existing)
   }
   if !inserted {
-    out = out.push(entry)
+    out = out.appending(entry)
   }
   return out
 }

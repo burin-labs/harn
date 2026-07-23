@@ -45,7 +45,7 @@ fn __map_filter_item_kind(artifacts, item_kind) {
   let out = []
   for artifact in artifacts {
     if artifact?.kind == item_kind {
-      out = out.push(artifact)
+      out = out.appending(artifact)
     }
   }
   return out
@@ -55,7 +55,7 @@ fn __map_artifact_ids(artifacts) {
   let ids = []
   for artifact in artifacts {
     if type_of(artifact?.id) == "string" {
-      ids = ids.push(artifact.id)
+      ids = ids.appending(artifact.id)
     }
   }
   return ids
@@ -65,7 +65,7 @@ fn __map_item_lineage(items) {
   let ids = []
   for item in items {
     if item?.kind == "artifact" && type_of(item?.artifact?.id) == "string" {
-      ids = ids.push(item.artifact.id)
+      ids = ids.appending(item.artifact.id)
     }
   }
   return ids
@@ -113,9 +113,9 @@ fn __map_collect_branch_outcomes(branches, join_target) {
       if branch?.status == "completed" && branch?.error == nil {
         const artifacts = __map_list(branch?.artifacts)
         for artifact in artifacts {
-          produced = produced.push(artifact)
+          produced = produced.appending(artifact)
         }
-        completed = completed.push(
+        completed = completed.appending(
           {
             index: __map_item_index(branch),
             status: branch.status,
@@ -124,7 +124,7 @@ fn __map_collect_branch_outcomes(branches, join_target) {
           },
         )
       } else {
-        failures = failures.push(
+        failures = failures.appending(
           {
             index: __map_item_index(branch),
             status: branch?.status ?? "failed",
@@ -133,7 +133,7 @@ fn __map_collect_branch_outcomes(branches, join_target) {
         )
       }
     } else {
-      failures = failures.push({status: "failed", error: result?.error})
+      failures = failures.appending({status: "failed", error: result?.error})
     }
     if observed >= join_target {
       break
@@ -145,7 +145,7 @@ fn __map_collect_branch_outcomes(branches, join_target) {
 fn __map_artifact_items(artifacts) {
   let items = []
   for (index, artifact) in iter(artifacts).enumerate() {
-    items = items.push({kind: "artifact", index: index, artifact: artifact})
+    items = items.appending({kind: "artifact", index: index, artifact: artifact})
   }
   return items
 }
@@ -153,7 +153,9 @@ fn __map_artifact_items(artifacts) {
 fn __map_value_items(values, artifact_kind) {
   let items = []
   for (index, value) in iter(values).enumerate() {
-    items = items.push({kind: "value", index: index, value: value, artifact_kind: artifact_kind})
+    items = items.appending(
+      {kind: "value", index: index, value: value, artifact_kind: artifact_kind},
+    )
   }
   return items
 }

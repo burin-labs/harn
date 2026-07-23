@@ -513,7 +513,7 @@ pipeline main(task) {
   let skipped = 0
   let parse_errors: list = []
   let failures: list = []
-  for md_file in md_files.sort() {
+  for md_file in md_files.sorted() {
     const text = harness.fs.read_text(md_file)
     for block in bash_blocks(text) {
       for logical in logical_lines(block.lines, block.first_line) {

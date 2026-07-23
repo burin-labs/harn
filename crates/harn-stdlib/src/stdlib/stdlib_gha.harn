@@ -70,7 +70,7 @@ pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptio
     __gha_kv("title", opts.title),
   ] {
     if pair != nil {
-      props = props.push(pair)
+      props = props.appending(pair)
     }
   }
   const suffix = if len(props) > 0 {

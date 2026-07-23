@@ -396,7 +396,7 @@ fn pl_store_observation(record: dict, options = nil) -> dict {
  */
 pub fn pattern_learning_observations(options = nil) -> list {
   pattern_learning_ensure_migrated(options)
-  return pl_record_values("observation", options).sort_by({ item -> pl_text(item?.observed_at) })
+  return pl_record_values("observation", options).sorted_by({ item -> pl_text(item?.observed_at) })
 }
 
 fn pl_forget_observation(id: string, options = nil) -> nil {
@@ -460,7 +460,7 @@ fn pl_recent_observations(observations: list, now_iso: string, window_days: int)
 fn pl_sample_prompts(observations: list) -> list {
   let seen = []
   let out = []
-  for observation in observations.sort_by({ item -> pl_text(item?.observed_at) }) {
+  for observation in observations.sorted_by({ item -> pl_text(item?.observed_at) }) {
     const prompt = pl_text(observation?.prompt)
     if prompt == "" || seen.contains(prompt) {
       continue
@@ -700,7 +700,7 @@ pub fn pattern_learning_accepted_skills(options = nil) -> list {
     if !harness.fs.exists(root) {
       continue
     }
-    for name in (harness.fs.list_dir(root) ?? []).sort() {
+    for name in (harness.fs.list_dir(root) ?? []).sorted() {
       const skill_file = path_join(root, name, "SKILL.md")
       if seen.contains(name) || !harness.fs.exists(skill_file) {
         continue
@@ -791,7 +791,7 @@ pub fn pattern_learning_refresh(options = nil) -> list {
     )
   }
   let proposals = []
-  for key in keys(prompt_groups).sort() {
+  for key in keys(prompt_groups).sorted() {
     const group = prompt_groups[key] ?? []
     if len(group) < support_threshold {
       continue
@@ -805,7 +805,7 @@ pub fn pattern_learning_refresh(options = nil) -> list {
       proposals = pl_sorted_proposal_insert(proposals, proposal)
     }
   }
-  for key in keys(tool_groups).sort() {
+  for key in keys(tool_groups).sorted() {
     const group = tool_groups[key] ?? []
     if len(group) < support_threshold {
       continue
@@ -844,7 +844,7 @@ pub fn pattern_learning_refresh(options = nil) -> list {
  */
 pub fn pattern_learning_pending(options = nil) -> list {
   pattern_learning_ensure_migrated(options)
-  return pl_record_values("pending", options).sort_by(
+  return pl_record_values("pending", options).sorted_by(
     { item -> to_string(999999 - (item?.support ?? 0)) + ":" + item.id },
   )
 }
@@ -939,7 +939,7 @@ fn pl_score_skill(skill_entry: dict, query_words: list) -> dict {
   return {
     learned_skill: skill_entry,
     score: (len(overlap) + 0.0) / (max(1, len(query_words)) + 0.0),
-    reason: "matched " + join(overlap.sort()[0:min(4, len(overlap))], ", "),
+    reason: "matched " + join(overlap.sorted()[0:min(4, len(overlap))], ", "),
   }
 }
 

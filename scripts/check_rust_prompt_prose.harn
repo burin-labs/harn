@@ -408,7 +408,7 @@ pub fn sort_by_path_parts(paths: list<string>) -> list<string> {
     decorated = decorated + [regex_replace(r"/", "\t", p) + "|" + p]
   }
   let out: list<string> = []
-  for d in decorated.sort() {
+  for d in decorated.sorted() {
     const bar = d.index_of("|")
     out = out + [d.substring(bar + 1, d.len())]
   }
@@ -491,7 +491,7 @@ pipeline main(task) {
     }
   }
   if stale.count > 0 {
-    for location in stale.sort() {
+    for location in stale.sorted() {
       __io_eprintln("${allowlist}: stale allowlist entry: ${location}")
     }
     return 1

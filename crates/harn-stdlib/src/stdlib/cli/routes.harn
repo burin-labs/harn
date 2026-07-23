@@ -261,7 +261,7 @@ fn __strip_absent(report: dict) -> dict {
     if len(events) > 0 {
       entry = entry + {events: events}
     }
-    cleaned = cleaned.push(entry)
+    cleaned = cleaned.appending(entry)
   }
   return {triggers: cleaned}
 }

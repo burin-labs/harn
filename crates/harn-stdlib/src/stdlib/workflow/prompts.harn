@@ -106,9 +106,9 @@ pub fn workflow_render_artifacts_context(artifacts = nil, policy = nil) {
   let parts = []
   for artifact in artifacts ?? [] {
     if render == "json" {
-      parts = parts.push(__workflow_render_artifact_json(artifact))
+      parts = parts.appending(__workflow_render_artifact_json(artifact))
     } else {
-      parts = parts.push(__workflow_render_artifact_xml(artifact))
+      parts = parts.appending(__workflow_render_artifact_xml(artifact))
     }
   }
   return join(parts, "\n\n")

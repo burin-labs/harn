@@ -38,7 +38,7 @@ fn __workflow_metadata_string_list(artifact, key) {
   let out = []
   for item in __workflow_list(raw) {
     if type_of(item) == "string" && trim(item) != "" {
-      out = out.push(trim(item))
+      out = out.appending(trim(item))
     }
   }
   return out
@@ -48,7 +48,7 @@ fn __workflow_push_unique(values, value) {
   if __workflow_contains(values, value) {
     return values
   }
-  return values.push(value)
+  return values.appending(value)
 }
 
 fn __workflow_fresh_changed_paths(artifacts) {
@@ -87,7 +87,7 @@ fn __workflow_drop_stale_evidence_artifacts(artifacts) {
   let out = []
   for artifact in artifacts {
     if !__workflow_artifact_has_stale_evidence(artifact, fresh_changed_paths) {
-      out = out.push(artifact)
+      out = out.appending(artifact)
     }
   }
   return out
@@ -109,7 +109,7 @@ fn __workflow_dedup_artifacts(artifacts) {
   for artifact in artifacts {
     const text = __workflow_artifact_text(artifact)
     if text == "" {
-      out = out.push(artifact)
+      out = out.appending(artifact)
       continue
     }
     let next = []
@@ -117,17 +117,17 @@ fn __workflow_dedup_artifacts(artifacts) {
     for existing in out {
       if !replaced && __workflow_artifact_text(existing) == text {
         if __workflow_artifact_priority(artifact) > __workflow_artifact_priority(existing) {
-          next = next.push(artifact)
+          next = next.appending(artifact)
         } else {
-          next = next.push(existing)
+          next = next.appending(existing)
         }
         replaced = true
       } else {
-        next = next.push(existing)
+        next = next.appending(existing)
       }
     }
     if !replaced {
-      next = next.push(artifact)
+      next = next.appending(artifact)
     }
     out = next
   }
@@ -172,7 +172,7 @@ fn __workflow_microcompact_artifacts(artifacts, policy) {
   const cap = min(max(per_artifact_budget, 500), max_tokens)
   let out = []
   for artifact in artifacts {
-    out = out.push(__workflow_microcompact_artifact(artifact, cap))
+    out = out.appending(__workflow_microcompact_artifact(artifact, cap))
   }
   return out
 }
@@ -243,13 +243,13 @@ fn __workflow_insert_artifact_sorted(sorted, artifact, policy) {
   let inserted = false
   for existing in sorted {
     if !inserted && __workflow_artifact_precedes(artifact, existing, policy) {
-      out = out.push(artifact)
+      out = out.appending(artifact)
       inserted = true
     }
-    out = out.push(existing)
+    out = out.appending(existing)
   }
   if !inserted {
-    out = out.push(artifact)
+    out = out.appending(artifact)
   }
   return out
 }
@@ -293,7 +293,7 @@ pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
   let candidates = []
   for artifact in __workflow_list(artifacts) {
     if __workflow_artifact_matches_policy(artifact, opts) {
-      candidates = candidates.push(artifact)
+      candidates = candidates.appending(artifact)
     }
   }
   const sorted = __workflow_sort_artifacts(candidates, opts)
@@ -314,7 +314,7 @@ pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
       continue
     }
     used_tokens = used_tokens + next_tokens
-    selected = selected.push(artifact)
+    selected = selected.appending(artifact)
   }
   return selected
 }

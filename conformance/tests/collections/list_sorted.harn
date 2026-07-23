@@ -1,7 +1,7 @@
 pipeline test(task) {
   const nums = [3, 1, 4, 1, 5, 9]
-  log(nums.sort())
-  log(nums.reverse())
+  log(nums.sorted())
+  log(nums.reversed())
   log([1, 2, 3].join(", "))
   log([1, 2, 3].contains(2))
   log([1, 2, 3].index_of(2))

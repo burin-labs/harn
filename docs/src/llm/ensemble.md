@@ -20,9 +20,9 @@ const result = tree_of_thoughts({
   max_depth: 4,
   expand: { state, k ->
     return [
-      {steps: state.steps.push("+1"), value: state.value + 1},
-      {steps: state.steps.push("+2"), value: state.value + 2},
-      {steps: state.steps.push("+3"), value: state.value + 3},
+      {steps: state.steps.appending("+1"), value: state.value + 1},
+      {steps: state.steps.appending("+2"), value: state.value + 2},
+      {steps: state.steps.appending("+3"), value: state.value + 3},
     ].take(k)
   },
   evaluate: { state -> state.value },

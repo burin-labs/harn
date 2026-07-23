@@ -628,14 +628,14 @@ pub fn __run_submit(harness: Harness) -> int {
   let errors = loaded.errors
   const warnings = []
   if out_path == "" {
-    errors = errors.push("--out is required")
+    errors = errors.appending("--out is required")
   }
   const prepare = loaded.artifact
   let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(prepare["jobs"]) {
       const submitted = __submit_one_job(harness, safe_dict(raw_job), dry_run)
-      jobs = jobs.push(safe_dict(submitted["job"]))
+      jobs = jobs.appending(safe_dict(submitted["job"]))
       errors = errors + safe_list(submitted["errors"])
     }
   }

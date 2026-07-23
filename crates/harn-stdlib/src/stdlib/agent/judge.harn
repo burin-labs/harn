@@ -28,7 +28,7 @@ fn __unique_names(names) {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
-      unique = unique.push(name)
+      unique = unique.appending(name)
     }
   }
   return unique
@@ -38,7 +38,7 @@ fn __session_tool_names(messages) {
   let names = []
   for message in messages {
     if message?.role == "tool" {
-      names = names.push(message?.name ?? "")
+      names = names.appending(message?.name ?? "")
     }
   }
   return __unique_names(names)
@@ -53,7 +53,7 @@ fn __judge_string_list(value) {
     for item in value {
       const text = trim(to_string(item ?? ""))
       if text != "" {
-        out = out.push(text)
+        out = out.appending(text)
       }
     }
     return out
@@ -76,15 +76,15 @@ fn __judge_recovery_feedback(next_step, specific_gaps, recovery_details, fallbac
   let parts = []
   const step = trim(to_string(next_step ?? ""))
   if step != "" {
-    parts = parts.push(step)
+    parts = parts.appending(step)
   }
   const gap_feedback = __judge_gap_feedback(specific_gaps)
   if gap_feedback != "" && !contains(parts, gap_feedback) {
-    parts = parts.push(gap_feedback)
+    parts = parts.appending(gap_feedback)
   }
   for detail in __judge_string_list(recovery_details) {
     if !contains(parts, detail) {
-      parts = parts.push(detail)
+      parts = parts.appending(detail)
     }
   }
   if len(parts) == 0 {
@@ -369,7 +369,7 @@ fn __done_contract_judge_system(opts) {
     "On `continue`, provide `reasoning` and `specific_gaps`; each gap must be concrete enough to inject as repair feedback.",
   ]
   if extra != "" {
-    lines = lines.push("Additional rubric:\n" + extra)
+    lines = lines.appending("Additional rubric:\n" + extra)
   }
   return join(lines, "\n")
 }

@@ -41,12 +41,12 @@ pipeline main() {
       for message in messages {
         if (message?.role ?? "") == "assistant" {
           for call in message?.tool_calls ?? [] {
-            pending_ids = pending_ids.push(to_string(call?.id ?? ""))
+            pending_ids = pending_ids.appending(to_string(call?.id ?? ""))
           }
         }
         if (message?.role ?? "") == "tool" {
           const call_id = to_string(message?.tool_call_id ?? "")
-          closed_ids = closed_ids.push(call_id)
+          closed_ids = closed_ids.appending(call_id)
           const content = to_string(message?.content ?? "")
           if contains(content, "was not dispatched: awaiting_resumption") {
             park_result = message

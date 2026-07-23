@@ -141,7 +141,7 @@ pub fn session_store_payloads(
   let payloads = []
   for event in session_store_events(session_id, options) {
     if event.payload != nil {
-      payloads = payloads.push(event.payload)
+      payloads = payloads.appending(event.payload)
     }
   }
   return payloads

@@ -24,7 +24,7 @@ pub fn percentile(values: list<int>, percent: int) -> int {
   if values.count == 0 {
     return 0
   }
-  const sorted = values.sort()
+  const sorted = values.sorted()
   let index = (sorted.count * percent + 99) / 100
   if index < 1 {
     index = 1
@@ -159,7 +159,7 @@ pub fn aggregate_runs(runs: list<dict>) -> dict {
       execute_values = execute_values + [sample.execute_ms]
     }
   }
-  const sorted_wall = wall_values.sort()
+  const sorted_wall = wall_values.sorted()
   return {
     max_child_wall_ms: sorted_wall[sorted_wall.count - 1] ?? 0.0,
     sum_user_ms: user_ms,
@@ -212,7 +212,7 @@ const GATED_METRIC_FLOORS = {
  */
 pub fn best_metrics(rounds: list<dict>) -> dict {
   let best = rounds[rounds.count - 1] ?? {}
-  for name in GATED_METRIC_FLOORS.keys().sort() {
+  for name in GATED_METRIC_FLOORS.keys().sorted() {
     let low = 0.0
     let seen = false
     for round in rounds {
@@ -236,7 +236,7 @@ pub fn evaluate_metrics(metrics: dict, baseline: dict) -> dict {
   let failures = []
   let warnings = []
   let limits = {}
-  for name in floors.keys().sort() {
+  for name in floors.keys().sorted() {
     const reference = number(baseline[name])
     if reference <= 0.0 {
       failures = failures + ["baseline `${name}` must be positive"]
@@ -253,7 +253,7 @@ pub fn evaluate_metrics(metrics: dict, baseline: dict) -> dict {
   }
   const telemetry_factor = number(baseline?.telemetry_warn_x ?? 4.0)
   const telemetry_baseline = baseline?.telemetry ?? {}
-  for name in telemetry_baseline.keys().sort() {
+  for name in telemetry_baseline.keys().sorted() {
     const reference = number(telemetry_baseline[name])
     const actual = number(metrics.telemetry[name])
     if reference > 0.0 && actual > reference * telemetry_factor {

@@ -14,7 +14,7 @@ fn __group_rows(rows: list) -> dict {
 fn __aggregate_rows(rows: list) -> list {
   const grouped = __group_rows(rows)
   let aggregated = []
-  for name in grouped.keys().sort() {
+  for name in grouped.keys().sorted() {
     const trials = grouped[name]
     const first = trials[0]
     aggregated = aggregated

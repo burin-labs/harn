@@ -11,7 +11,7 @@ pipeline default() {
   const local = fixture(harness, "local_job_stream")
   let events = []
   for item in local.events {
-    events = events.push(dashboard_job_event(item.kind, item))
+    events = events.appending(dashboard_job_event(item.kind, item))
   }
   const cloud_event = dashboard_job_event("run.started", fixture(harness, "cloud_managed_run"))
   const approval_requested = events.find({ event -> event.kind == "approval.requested" })
@@ -35,7 +35,7 @@ pipeline default() {
   __io_println(receipt_available.receipt_refs[0].url)
   __io_println(replay_available.replay_refs[0].id)
   const view = dashboard_jobs_view(
-    events.push(cloud_event),
+    events.appending(cloud_event),
     {generated_at: "fixture", emit: true, topic: "dashboard.jobs.test"},
   )
   __io_println(view.schema)

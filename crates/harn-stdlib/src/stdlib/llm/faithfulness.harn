@@ -46,7 +46,7 @@ fn __contexts_text(contexts) -> string {
   let parts = []
   let idx = 1
   for context in list {
-    parts = parts.push("[" + to_string(idx) + "] " + to_string(context))
+    parts = parts.appending("[" + to_string(idx) + "] " + to_string(context))
     idx = idx + 1
   }
   return join(parts, "\n\n")
@@ -110,7 +110,7 @@ fn __decompose_claims(answer, llm_opts) -> list {
   for claim in raw {
     const text = to_string(claim)
     if text != "" {
-      claims = claims.push(text)
+      claims = claims.appending(text)
     }
   }
   return claims
@@ -185,9 +185,9 @@ pub fn faithfulness_guard(answer, contexts, opts = nil) -> dict {
   let unsupported = []
   for verdict in verdicts {
     if verdict.supported {
-      supported = supported.push(verdict.claim)
+      supported = supported.appending(verdict.claim)
     } else {
-      unsupported = unsupported.push(verdict.claim)
+      unsupported = unsupported.appending(verdict.claim)
     }
   }
   return {

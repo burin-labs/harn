@@ -111,7 +111,7 @@ pub fn sum_by<T>(items: list<T>, project) {
   for item in items ?? [] {
     const value = project(item)
     if value != nil {
-      projected = projected.push(value)
+      projected = projected.appending(value)
     }
   }
   return projected.sum()

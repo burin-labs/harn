@@ -34,11 +34,11 @@ pipeline default() {
   __io_println(agent_tool_single_workspace_write_name(tools))
   __io_println(
     agent_tool_single_workspace_write_name(
-      {tools: tools.tools.push(entry("second_edit", {kind: "edit"}))},
+      {tools: tools.tools.appending(entry("second_edit", {kind: "edit"}))},
     )
       == "",
   )
-  const multiple_writers = {tools: tools.tools.push(entry("second_edit", {kind: "edit"}))}
+  const multiple_writers = {tools: tools.tools.appending(entry("second_edit", {kind: "edit"}))}
   __io_println(agent_tool_resolve_workspace_write_name(multiple_writers, nil, "edit"))
   __io_println(agent_tool_resolve_workspace_write_name(multiple_writers, nil, "read") == "")
   __io_println(

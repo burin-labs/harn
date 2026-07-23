@@ -53,27 +53,27 @@ fn __diff_ops(a, b) {
   let j = 0
   while i < len(a) && j < len(b) {
     if a[i] == b[j] {
-      ops = ops.push(__diff_op("equal", a[i], i + 1, j + 1))
+      ops = ops.appending(__diff_op("equal", a[i], i + 1, j + 1))
       i += 1
       j += 1
     } else {
       const delete_score = dp[__diff_key(i + 1, j)] ?? 0
       const insert_score = dp[__diff_key(i, j + 1)] ?? 0
       if delete_score >= insert_score {
-        ops = ops.push(__diff_op("delete", a[i], i + 1, j + 1))
+        ops = ops.appending(__diff_op("delete", a[i], i + 1, j + 1))
         i += 1
       } else {
-        ops = ops.push(__diff_op("insert", b[j], i + 1, j + 1))
+        ops = ops.appending(__diff_op("insert", b[j], i + 1, j + 1))
         j += 1
       }
     }
   }
   while i < len(a) {
-    ops = ops.push(__diff_op("delete", a[i], i + 1, j + 1))
+    ops = ops.appending(__diff_op("delete", a[i], i + 1, j + 1))
     i += 1
   }
   while j < len(b) {
-    ops = ops.push(__diff_op("insert", b[j], i + 1, j + 1))
+    ops = ops.appending(__diff_op("insert", b[j], i + 1, j + 1))
     j += 1
   }
   return ops
@@ -116,10 +116,10 @@ fn __diff_compact_ops(ops, context) {
   while idx < len(ops) {
     if keep[to_string(idx)] {
       if skipped {
-        out = out.push({kind: "skip"})
+        out = out.appending({kind: "skip"})
         skipped = false
       }
-      out = out.push(ops[idx])
+      out = out.appending(ops[idx])
     } else {
       skipped = true
     }
@@ -197,13 +197,13 @@ pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) ->
   ]
   for op in ops {
     if op.kind == "skip" {
-      lines = lines.push("...")
+      lines = lines.appending("...")
     } else if op.kind == "equal" {
-      lines = lines.push(" " + op.line)
+      lines = lines.appending(" " + op.line)
     } else if op.kind == "delete" {
-      lines = lines.push("-" + op.line)
+      lines = lines.appending("-" + op.line)
     } else if op.kind == "insert" {
-      lines = lines.push("+" + op.line)
+      lines = lines.appending("+" + op.line)
     }
   }
   return join(lines.map({ line -> __diff_color_line(line, opts) }), "\n")
@@ -259,9 +259,11 @@ pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
   } else {
     options ?? {}
   }
-  const payload = hostlib_ast_structural_diff((opts ?? {}).merge({path_a: path_a, path_b: path_b}))
+  const payload = hostlib_ast_structural_diff(
+    (opts ?? {}).merging({path_a: path_a, path_b: path_b}),
+  )
     ?? {}
-  return payload.merge(
+  return payload.merging(
     {
       ok: (payload?.result ?? "") == "ok" || (payload?.result ?? "") == "fallback",
       structural: (payload?.mode ?? "") == "structural",
@@ -284,7 +286,7 @@ pub fn render_diff_stat(entries: list, options = {}) -> string {
     } else {
       entry
     }
-    rows = rows.push(
+    rows = rows.appending(
       {
         path: entry?.path ?? entry?.file ?? "(text)",
         insertions: stat?.insertions ?? 0,

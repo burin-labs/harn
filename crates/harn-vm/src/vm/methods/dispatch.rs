@@ -197,4 +197,43 @@ mod drift_guard_tests {
             );
         }
     }
+
+    #[test]
+    fn removed_imperative_collection_names_are_rejected_by_vm() {
+        let args = sample_args();
+        let string = arcstr::ArcStr::from("hello");
+        assert!(format!(
+            "{:?}",
+            crate::vm::Vm::call_string_method(&string, "reverse", &args)
+        )
+        .contains("has no method"));
+
+        let list: Arc<Vec<VmValue>> = Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
+        for name in ["push", "pop", "sort", "sort_by", "reverse"] {
+            assert!(
+                is_no_method_rejection(crate::vm::Vm::call_list_method_sync(&list, name, &args)),
+                "list still accepts removed method `{name}`"
+            );
+        }
+
+        let VmValue::Set(set) = VmValue::set([VmValue::Int(1), VmValue::Int(2)]) else {
+            unreachable!("VmValue::set builds a Set");
+        };
+        for name in ["add", "remove", "delete"] {
+            assert!(
+                is_no_method_rejection(crate::vm::Vm::call_set_method_sync(&set, name, &args)),
+                "set still accepts removed method `{name}`"
+            );
+        }
+
+        let VmValue::Dict(map) = VmValue::dict([("k", VmValue::Int(1))]) else {
+            unreachable!("VmValue::dict builds a Dict");
+        };
+        for name in ["merge", "rekey", "remove"] {
+            assert!(
+                is_no_method_rejection(crate::vm::Vm::call_dict_method_sync(&map, name, &args)),
+                "dict still accepts removed method `{name}`"
+            );
+        }
+    }
 }

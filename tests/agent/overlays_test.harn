@@ -73,7 +73,7 @@ pipeline test_overlay_policy_preserves_existing_fragments(task) {
   const ids = []
   let out = ids
   for fragment in result.context_profile.prompt_fragments {
-    out = out.push(fragment.id)
+    out = out.appending(fragment.id)
   }
   assert(contains(out, "caller"), "caller's existing fragment survives")
   assert(contains(out, "overlay:agent"), "overlay fragment was appended")

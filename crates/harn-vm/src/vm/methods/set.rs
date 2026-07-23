@@ -15,12 +15,12 @@ impl crate::vm::Vm {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 Ok(VmValue::Bool(set.contains(needle)))
             }
-            "add" => {
+            "adding" => {
                 let mut new_set = (**set).clone();
                 new_set.insert(args.first().cloned().unwrap_or(VmValue::Nil));
                 Ok(VmValue::set_value(new_set))
             }
-            "remove" | "delete" => {
+            "removing" => {
                 let mut new_set = (**set).clone();
                 new_set.remove(args.first().unwrap_or(&VmValue::Nil));
                 Ok(VmValue::set_value(new_set))

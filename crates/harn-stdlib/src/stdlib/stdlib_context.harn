@@ -107,7 +107,7 @@ fn __context_string_list(value) {
   for item in __context_list(value) {
     const text = trim(__context_string(item))
     if text != "" && !contains(out, text) {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
   return out
@@ -118,7 +118,7 @@ fn __context_unique_strings(values) {
   for value in values ?? [] {
     const text = trim(__context_string(value))
     if text != "" && !contains(out, text) {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
   return out
@@ -740,14 +740,14 @@ pub fn context_artifact_dedupe(artifacts = nil, options = nil) {
     let merged = false
     for existing in out {
       if !merged && __context_same_artifact_identity(existing, artifact) {
-        next = next.push(context_artifact_merge(existing, artifact, options))
+        next = next.appending(context_artifact_merge(existing, artifact, options))
         merged = true
       } else {
-        next = next.push(existing)
+        next = next.appending(existing)
       }
     }
     if !merged {
-      next = next.push(artifact)
+      next = next.appending(artifact)
     }
     out = next
   }
@@ -760,13 +760,13 @@ fn __context_insert_ranked(sorted, artifact, options) {
   const score = context_artifact_rank(artifact, options)
   for existing in sorted {
     if !inserted && score > context_artifact_rank(existing, options) {
-      out = out.push(artifact)
+      out = out.appending(artifact)
       inserted = true
     }
-    out = out.push(existing)
+    out = out.appending(existing)
   }
   if !inserted {
-    out = out.push(artifact)
+    out = out.appending(artifact)
   }
   return out
 }
@@ -822,20 +822,20 @@ pub fn context_artifact_budget(artifacts = nil, options = nil) {
   let used_tokens = 0
   for artifact in ranked {
     if !__context_artifact_matches_policy(artifact, opts) {
-      dropped = dropped.push({id: artifact?.id, reason: "policy"})
+      dropped = dropped.appending({id: artifact?.id, reason: "policy"})
       continue
     }
     if max_artifacts != nil && len(selected) >= max_artifacts {
-      dropped = dropped.push({id: artifact?.id, reason: "max_artifacts"})
+      dropped = dropped.appending({id: artifact?.id, reason: "max_artifacts"})
       continue
     }
-    const tokens = __context_num(artifact?.token_estimate, 0)
-    if max_tokens != nil && used_tokens + tokens > max_tokens {
-      dropped = dropped.push({id: artifact?.id, reason: "budget_exceeded", token_estimate: tokens})
+    const n = __context_num(artifact?.token_estimate, 0)
+    if max_tokens != nil && used_tokens + n > max_tokens {
+      dropped = dropped.appending({id: artifact?.id, reason: "budget_exceeded", token_estimate: n})
       continue
     }
-    selected = selected.push(artifact)
-    used_tokens = used_tokens + tokens
+    selected = selected.appending(artifact)
+    used_tokens = used_tokens + n
   }
   return {
     artifacts: selected,
@@ -909,7 +909,7 @@ pub fn context_artifact_select_one(artifacts = nil, options = nil) {
       continue
     }
     const score = context_artifact_rank(item, opts) + altitude * altitude_weight
-    eligible = eligible.push({id: item.id, score: score, artifact: item})
+    eligible = eligible.appending({id: item.id, score: score, artifact: item})
   }
   if len(eligible) == 0 {
     const reason = if saw_stale {
@@ -929,7 +929,7 @@ pub fn context_artifact_select_one(artifacts = nil, options = nil) {
   let ties = []
   for entry in eligible {
     if best.score - entry.score <= epsilon {
-      ties = ties.push(entry.id)
+      ties = ties.appending(entry.id)
     }
   }
   if len(ties) > 1 {
@@ -1065,12 +1065,12 @@ fn __context_meta_pairs(artifact, compact = false) {
       } else {
         "`" + entry[0] + "=" + __context_one_line(entry[1]) + "`"
       }
-      pairs = pairs.push(rendered)
+      pairs = pairs.appending(rendered)
     }
   }
   if len(artifact?.source_hashes ?? []) > 0 {
     const hash = artifact.source_hashes[0]
-    pairs = pairs.push(
+    pairs = pairs.appending(
       if compact {
         "hash=" + hash
       } else {
@@ -1206,13 +1206,13 @@ pub fn context_render_artifacts(artifacts = nil, options = nil) {
   let pieces = []
   for artifact in budgeted.artifacts ?? [] {
     if variant == "markdown" {
-      pieces = pieces.push(__context_render_artifact_markdown(artifact, opts))
+      pieces = pieces.appending(__context_render_artifact_markdown(artifact, opts))
     } else if variant == "xml" {
-      pieces = pieces.push(__context_render_artifact_xml(artifact, opts))
+      pieces = pieces.appending(__context_render_artifact_xml(artifact, opts))
     } else if variant == "compact" {
-      pieces = pieces.push(__context_render_artifact_compact(artifact, opts))
+      pieces = pieces.appending(__context_render_artifact_compact(artifact, opts))
     } else {
-      pieces = pieces.push(__context_render_artifact_plain(artifact, opts))
+      pieces = pieces.appending(__context_render_artifact_plain(artifact, opts))
     }
   }
   const body = join(

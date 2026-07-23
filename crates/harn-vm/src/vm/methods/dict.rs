@@ -34,7 +34,7 @@ impl crate::vm::Vm {
                         .as_str(),
                 ),
             )),
-            "merge" => {
+            "merging" => {
                 if let Some(VmValue::Dict(other)) = args.first() {
                     if map.is_empty() {
                         return Some(Ok(VmValue::Dict(Arc::clone(other))));
@@ -49,13 +49,13 @@ impl crate::vm::Vm {
                     Ok(VmValue::Dict(Arc::clone(map)))
                 }
             }
-            "map_values" | "rekey" | "map_keys" | "filter" => {
+            "map_values" | "rekeyed" | "map_keys" | "filter" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
                 Ok(VmValue::Nil)
             }
-            "remove" => {
+            "removing" => {
                 let key = args.first().map(|a| a.display()).unwrap_or_default();
                 let mut result = (**map).clone();
                 result.remove(key.as_str());
@@ -122,7 +122,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::dict(result))
             }
-            "rekey" | "map_keys" => {
+            "rekeyed" | "map_keys" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Nil);
                 };

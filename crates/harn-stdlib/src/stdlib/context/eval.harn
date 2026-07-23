@@ -48,10 +48,10 @@ fn __context_eval_string_list(value, field) {
   for item in __context_eval_list(value, field) {
     const text = __context_eval_text(item)
     if text != "" && !out.contains(text) {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
-  return out.sort()
+  return out.sorted()
 }
 
 // -------------------------------------------------------------------------------------------------

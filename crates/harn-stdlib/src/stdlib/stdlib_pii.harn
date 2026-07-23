@@ -140,12 +140,12 @@ pub fn pii_types() -> list {
  * last accepted span (adjacent spans, where start == prev end, are kept).
  */
 fn __pii_resolve_overlaps(entities: list) -> list {
-  const sorted = entities.sort_by({ e -> e.start * 1000000 - (e.end - e.start) })
+  const sorted = entities.sorted_by({ e -> e.start * 1000000 - (e.end - e.start) })
   let result = []
   let last_end = -1
   for entity in sorted {
     if entity.start >= last_end {
-      result = result.push(entity)
+      result = result.appending(entity)
       last_end = entity.end
     }
   }
@@ -181,7 +181,7 @@ pub fn pii_detect(text, options = nil) -> list {
           pattern.validate(value) ? true : false
         }
         if accepted {
-          found = found.push(
+          found = found.appending(
             {type: pattern.type, value: value, start: capture.start, end: capture.end},
           )
         }
@@ -220,7 +220,7 @@ pub fn pii_detect(text, options = nil) -> list {
  */
 pub fn pii_redact(text, options = nil) -> dict {
   const source = to_string(text)
-  const entities = pii_detect(source, options).sort_by({ e -> e.start })
+  const entities = pii_detect(source, options).sorted_by({ e -> e.start })
   let counters = {}
   let value_token = {}
   let restore = {}
@@ -240,7 +240,7 @@ pub fn pii_redact(text, options = nil) -> dict {
     }
     clean = clean + token
     cursor = entity.end
-    annotated = annotated.push(entity + {token: token})
+    annotated = annotated.appending(entity + {token: token})
   }
   clean = clean + substring(source, cursor, len(source))
   return {clean: clean, restore: restore, entities: annotated}
@@ -258,7 +258,7 @@ pub fn pii_redact(text, options = nil) -> dict {
  */
 pub fn pii_restore(text, restore) -> string {
   let output = to_string(text)
-  const tokens = (restore ?? {}).keys().sort_by({ token -> 0 - len(token) })
+  const tokens = (restore ?? {}).keys().sorted_by({ token -> 0 - len(token) })
   for token in tokens {
     output = replace(output, token, to_string(restore[token]))
   }

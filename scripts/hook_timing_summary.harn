@@ -194,7 +194,7 @@ fn nearest_rank(values: list<int>, percentile: int) -> int {
   if values.count == 0 {
     return 0
   }
-  const sorted = values.sort_by({ value -> value })
+  const sorted = values.sorted_by({ value -> value })
   const rank = to_int(floor(((to_float(values.count * percentile) ?? 0.0) + 99.0) / 100.0)) ?? 1
   return sorted[rank - 1] ?? 0
 }
@@ -290,7 +290,7 @@ fn summarize_hook_timing_groups(
       },
     ]
   }
-  return groups.sort_by({ group -> 0 - group.total_ms })
+  return groups.sorted_by({ group -> 0 - group.total_ms })
 }
 
 pub fn summarize_hook_timings(events: list<HookTimingEvent>) -> list<HookTimingGroup> {
@@ -360,7 +360,7 @@ pub fn summarize_hook_timing_phases(events: list<HookTimingEvent>) -> list<HookT
       },
     ]
   }
-  return groups.sort_by({ group -> 0 - group.total_ms })
+  return groups.sorted_by({ group -> 0 - group.total_ms })
 }
 
 pub fn summarize_hook_timing_worktrees(events: list<HookTimingEvent>) -> list<HookTimingGroup> {
@@ -370,7 +370,7 @@ pub fn summarize_hook_timing_worktrees(events: list<HookTimingEvent>) -> list<Ho
 fn observation_window(events: list<HookTimingEvent>) -> string {
   const timestamps = events.filter({ event -> event.ts != nil }).map({ event -> event.ts ?? "" })
     .to_list()
-    .sort_by({ value -> value })
+    .sorted_by({ value -> value })
   if timestamps.count == 0 {
     return "unknown"
   }
@@ -417,7 +417,7 @@ pub fn derive_hook_timing_budgets(events: list<HookTimingEvent>) -> HookTimingBu
 }
 
 pub fn slowest_hook_timings(events: list<HookTimingEvent>, limit: int) -> list<HookTimingEvent> {
-  const sorted = events.sort_by({ event -> 0 - event.duration_ms })
+  const sorted = events.sorted_by({ event -> 0 - event.duration_ms })
   if limit <= 0 || sorted.count <= limit {
     return sorted
   }

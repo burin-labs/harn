@@ -99,7 +99,7 @@ pub fn makefile_targets(text: string) -> list {
       }
     }
   }
-  return targets.sort()
+  return targets.sorted()
 }
 
 /**
@@ -241,7 +241,7 @@ pub fn completeness_errors(
  */
 pub fn exempt_hygiene_errors(exempt: list, registered_checks: list) -> list {
   let both = []
-  for ex in exempt.sort() {
+  for ex in exempt.sorted() {
     if registered_checks.contains(ex) && !both.contains(ex) {
       both = both + [ex]
     }
@@ -279,7 +279,7 @@ pub fn preflight_dispatch_errors(targets: list, dispatch: dict) -> list {
     }
   }
   // Hygiene: every classified name must be a real target with a valid tier.
-  for name in classified.sort() {
+  for name in classified.sorted() {
     if !targets.contains(name) {
       errors = errors
         + [
@@ -368,7 +368,7 @@ fn read_workflows() -> string {
     rels = rels + [rel]
   }
   let text = ""
-  for rel in rels.sort() {
+  for rel in rels.sorted() {
     text = text + harness.fs.read_text(rel) + "\n"
   }
   // The audit CI lane runs its gate battery through this script, so a check

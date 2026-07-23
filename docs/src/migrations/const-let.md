@@ -27,8 +27,8 @@ expects.
   object is a *reference* and `const` constrains only the binding. Harn's
   collections are **values**, so `o.a = 1` changes `o`'s whole value and
   requires `let` — the same position Swift takes for the same reason. Methods
-  such as `push` return a new value and modify nothing, so they remain fine on
-  a `const`. See [Binding mutability](../language-spec.md) for the full rule.
+  such as `appending` return a new value and modify nothing, so they remain fine
+  on a `const`. See [Binding mutability](../language-spec.md) for the full rule.
 - **`const` now accepts any initializer.** Previously `const` was a strict
   compile-time constant that *rejected* impure or non-foldable initializers.
   Because `const` is now the default immutable binding, that restriction is

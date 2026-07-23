@@ -66,12 +66,14 @@ fn render_envelope_json(entry: dict) -> string {
   let related_strs = related_codes
   const related = entry["related"] ?? []
   for other in related {
-    related_strs = related_strs.push(other["code"])
+    related_strs = related_strs.appending(other["code"])
   }
   let repairs = []
   const repair = entry["repair"]
   if repair != nil {
-    repairs = repairs.push({id: repair["id"], safety: repair["safety"], summary: repair["summary"]})
+    repairs = repairs.appending(
+      {id: repair["id"], safety: repair["safety"], summary: repair["summary"]},
+    )
   }
   const envelope = {
     schemaVersion: 1,

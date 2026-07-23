@@ -73,9 +73,9 @@ pub fn publish_plan_packages_from_metadata(meta: dict) -> list<PublishPlanPackag
       }
     }
     const existing = find_package(packages, name)
-    out = out + [{deps: deps.sort(), name: existing.name, version: existing.version}]
+    out = out + [{deps: deps.sorted(), name: existing.name, version: existing.version}]
   }
-  return out.sort_by({ package -> package.name })
+  return out.sorted_by({ package -> package.name })
 }
 
 pub fn publish_plan_version(packages: list<PublishPlanPackage>) -> string {

@@ -175,7 +175,7 @@ fn __bulletin_string_list(value) -> list<string> {
   for entry in raw {
     const text = __bulletin_text(entry)
     if text != "" {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
   return out
@@ -205,7 +205,7 @@ fn __bulletin_evidence(value) -> list<BulletinEvidence> {
   const raw = __bulletin_list(value)
   let out = []
   for entry in raw {
-    out = out.push(__bulletin_evidence_entry(entry))
+    out = out.appending(__bulletin_evidence_entry(entry))
   }
   return out
 }
@@ -426,7 +426,7 @@ pub fn bulletin_dedupe(bulletins: list) -> list<ProfileBulletin> {
     const bulletin = entry?.schema == BULLETIN_SCHEMA ? entry : bulletin_propose(entry)
     if seen[bulletin.id] == nil {
       seen[bulletin.id] = true
-      out = out.push(bulletin)
+      out = out.appending(bulletin)
     }
   }
   return out
@@ -576,7 +576,7 @@ fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
   const persona = __bulletin_text(bulletin.persona)
   let tags = ["bulletin", __bulletin_text(bulletin.scope)]
   if persona != "" {
-    tags = tags.push("persona:" + persona)
+    tags = tags.appending("persona:" + persona)
   }
   const store_options = filter_nil(
     {
@@ -681,9 +681,9 @@ pub fn bulletin_apply_decisions(bulletins: list, decisions: list) -> list<Profil
   for bulletin in __bulletin_list(bulletins) {
     const decision = index[bulletin?.id]
     if decision == nil {
-      out = out.push(bulletin)
+      out = out.appending(bulletin)
     } else {
-      out = out.push(bulletin + {status: decision.status})
+      out = out.appending(bulletin + {status: decision.status})
     }
   }
   return out
@@ -704,15 +704,15 @@ pub fn bulletin_partition(bulletins: list) -> BulletinPartition {
   for bulletin in __bulletin_list(bulletins) {
     const status = __bulletin_resolve_status(bulletin?.status)
     if status == "accepted" {
-      accepted = accepted.push(bulletin)
+      accepted = accepted.appending(bulletin)
     } else if status == "rejected" {
-      rejected = rejected.push(bulletin)
+      rejected = rejected.appending(bulletin)
     } else if status == "expired" {
-      expired = expired.push(bulletin)
+      expired = expired.appending(bulletin)
     } else if status == "superseded" {
-      superseded = superseded.push(bulletin)
+      superseded = superseded.appending(bulletin)
     } else {
-      proposed = proposed.push(bulletin)
+      proposed = proposed.appending(bulletin)
     }
   }
   return {
@@ -746,7 +746,7 @@ pub fn bulletin_active(bulletins: list, now = nil) -> list<ProfileBulletin> {
   for bulletin in __bulletin_list(bulletins) {
     const status = __bulletin_resolve_status(bulletin?.status)
     if status == "accepted" && !__bulletin_expired_now(bulletin, now_iso) {
-      out = out.push(bulletin)
+      out = out.appending(bulletin)
     }
   }
   return out
@@ -785,16 +785,16 @@ pub fn bulletin_render_for_prompt(bulletins: list, options = nil) -> string {
   if len(accepted_pool) > 0 {
     let lines = ["Accepted facts:"]
     for bulletin in accepted_pool {
-      lines = lines.push(__bulletin_render_line(bulletin))
+      lines = lines.appending(__bulletin_render_line(bulletin))
     }
-    sections = sections.push(join(lines, "\n"))
+    sections = sections.appending(join(lines, "\n"))
   }
   if include_proposed && len(parts.proposed) > 0 {
     let lines = ["Proposed (pending review — do not treat as fact):"]
     for bulletin in parts.proposed {
-      lines = lines.push(__bulletin_render_line(bulletin))
+      lines = lines.appending(__bulletin_render_line(bulletin))
     }
-    sections = sections.push(join(lines, "\n"))
+    sections = sections.appending(join(lines, "\n"))
   }
   return join(sections, "\n\n")
 }

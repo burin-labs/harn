@@ -326,7 +326,7 @@ pub fn agent_preset_register(kind, spec) {
  * @errors: []
  */
 pub fn agent_preset_kinds() {
-  return __preset_registry().keys().sort()
+  return __preset_registry().keys().sorted()
 }
 
 fn __dict_or_empty(value) {
@@ -357,7 +357,7 @@ fn __preset_kind(value) {
   const registry = __preset_registry()
   if !contains(registry.keys(), kind) {
     throw "agent_preset: kind must be one of "
-      + join(registry.keys().sort(), ", ")
+      + join(registry.keys().sorted(), ", ")
       + "; got "
       + value
   }
@@ -652,22 +652,22 @@ fn __captain_tool_layers(kind, opts) {
   let layers = []
   const audit_sink = __captain_layer_value(opts, "audit_sink", nil)
   if audit_sink != nil {
-    layers = layers.push(with_audit_log(audit_sink))
+    layers = layers.appending(with_audit_log(audit_sink))
   }
   const telemetry = __captain_layer_value(opts, "telemetry", nil)
   if telemetry != nil {
-    layers = layers.push(with_telemetry(telemetry))
+    layers = layers.appending(with_telemetry(telemetry))
   }
   if kind == "merge_captain" {
     const consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
     if consent_fn != nil {
-      layers = layers.push(with_consent(consent_fn))
+      layers = layers.appending(with_consent(consent_fn))
     }
   }
   if kind == "oncall_captain" {
     const rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
     if rate_limit != nil {
-      layers = layers.push(with_rate_limit(rate_limit))
+      layers = layers.appending(with_rate_limit(rate_limit))
     }
   }
   if kind == "release_captain" {
@@ -678,12 +678,14 @@ fn __captain_tool_layers(kind, opts) {
       } else {
         {message: "release_captain preview"}
       }
-      layers = layers.push(with_dry_run(dry))
+      layers = layers.appending(with_dry_run(dry))
     }
   }
   const handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
   if handoff_sink != nil {
-    layers = layers.push(with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}))
+    layers = layers.appending(
+      with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}),
+    )
   }
   return layers
 }
@@ -711,7 +713,7 @@ fn __captain_handler_layers(opts) {
     } else {
       {sink: logging_sink}
     }
-    layers = layers.push(with_logging(logging_opts))
+    layers = layers.appending(with_logging(logging_opts))
   }
   return layers
 }
@@ -786,9 +788,9 @@ fn __preset_model_steps(models, provider) {
   let steps = []
   for model in models ?? [] {
     if type_of(model) == "dict" || provider == nil {
-      steps = steps.push(model)
+      steps = steps.appending(model)
     } else {
-      steps = steps.push({model: model, provider: provider})
+      steps = steps.appending({model: model, provider: provider})
     }
   }
   return steps

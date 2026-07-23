@@ -515,7 +515,7 @@ pub fn __stack_strip_option_keys(options, stripped, keys) {
   let removed = stripped
   for key in keys {
     if __stack_has_key(out, key) {
-      out = out.remove(key)
+      out = out.removing(key)
       removed = removed + [key]
     }
   }
@@ -536,11 +536,11 @@ pub fn __stack_sanitize_result(options, policy = nil) {
     return {options: out, stripped: stripped}
   }
   if __stack_has_key(out, "effort") && !(caps?.reasoning_effort_supported ?? false) {
-    out = out.remove("effort")
+    out = out.removing("effort")
     stripped = stripped + ["effort"]
   }
   if __stack_has_key(out, "thinking") && !__stack_thinking_supported(caps, out.thinking) {
-    out = out.remove("thinking")
+    out = out.removing("thinking")
     stripped = stripped + ["thinking"]
   }
   if !(caps?.prompt_caching ?? false) {

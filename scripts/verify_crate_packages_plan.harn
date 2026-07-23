@@ -63,7 +63,7 @@ pub fn publishable_workspace_packages_from_metadata(
       },
     ]
   }
-  return packages.sort_by({ package -> package.name })
+  return packages.sorted_by({ package -> package.name })
 }
 
 fn ensure_no_tabs(value: string, field: string) -> nil {

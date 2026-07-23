@@ -185,7 +185,7 @@ fn __web_search_tokens(query) {
   let out = []
   for token in split(trim(normalized), " ") {
     if token != "" && len(token) > 1 && !out.contains(token) {
-      out = out.push(token)
+      out = out.appending(token)
     }
   }
   return out
@@ -244,7 +244,7 @@ fn __web_search_take(items, limit) {
     if len(out) >= limit {
       return out
     }
-    out = out.push(item)
+    out = out.appending(item)
   }
   return out
 }
@@ -388,14 +388,14 @@ fn __web_search_curated(query, opts, backend) {
   for entry in opts?.index ?? opts?.results ?? backend?.index ?? [] {
     const score = __web_search_score(entry, query, tokens)
     if score > 0 || opts?.include_zero_score {
-      scored = scored.push({entry: entry, score: score})
+      scored = scored.appending({entry: entry, score: score})
     }
   }
-  const ordered = scored.sort_by({ item -> 0 - item.score })
+  const ordered = scored.sorted_by({ item -> 0 - item.score })
   let results = []
   let rank = 1
   for item in __web_search_take(ordered, limit) {
-    results = results.push(__web_search_normalize(item.entry, rank, backend, item.score))
+    results = results.appending(__web_search_normalize(item.entry, rank, backend, item.score))
     rank = rank + 1
   }
   return {
@@ -411,7 +411,7 @@ fn __web_search_provider_results(query, opts, backend) {
   let results = []
   let rank = 1
   for entry in __web_search_take(opts.provider_results ?? [], opts?.limit ?? 10) {
-    results = results.push(__web_search_normalize(entry, rank, backend))
+    results = results.appending(__web_search_normalize(entry, rank, backend))
     rank = rank + 1
   }
   return {
@@ -483,7 +483,7 @@ fn __web_search_api(query, opts, backend) {
   let rank = 1
   for item in __web_search_take(raw_results, limit) {
     const normalized = __web_search_api_item(item, api)
-    results = results.push(
+    results = results.appending(
       __web_search_normalize(
         normalized,
         rank,

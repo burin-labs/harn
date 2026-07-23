@@ -30,7 +30,9 @@ fn event_field_values(events, field) {
 fn done_turns(n) {
   let turns = []
   for i in range(0, n) {
-    turns = turns.push(llm_text("<user_response>attempt</user_response>\n<done>##DONE##</done>"))
+    turns = turns.appending(
+      llm_text("<user_response>attempt</user_response>\n<done>##DONE##</done>"),
+    )
   }
   return turns
 }

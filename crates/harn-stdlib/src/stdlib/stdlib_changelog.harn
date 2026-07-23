@@ -90,8 +90,8 @@ pub fn changelog_validate_categories(
         ),
       )
     }
-    slugs = slugs.push(slug)
-    headings = headings.push(heading)
+    slugs = slugs.appending(slug)
+    headings = headings.appending(heading)
   }
   return Ok(categories)
 }
@@ -160,7 +160,7 @@ fn __changelog_lex_compare(a: string, b: string) -> int {
   if a == b {
     return 0
   }
-  return [a, b].sort()[0] == a ? -1 : 1
+  return [a, b].sorted()[0] == a ? -1 : 1
 }
 
 fn __changelog_fragment_compare(a: ChangelogFragment, b: ChangelogFragment) -> int {
@@ -195,12 +195,12 @@ fn __changelog_insert_fragment(
   let inserted = false
   for current in sorted {
     if !inserted && __changelog_fragment_compare(fragment, current) < 0 {
-      out = out.push(fragment)
+      out = out.appending(fragment)
       inserted = true
     }
-    out = out.push(current)
+    out = out.appending(current)
   }
-  return inserted ? out : out.push(fragment)
+  return inserted ? out : out.appending(fragment)
 }
 
 /**
@@ -251,7 +251,7 @@ pub fn changelog_order_fragments(
         ),
       )
     }
-    identities = identities.push(identity)
+    identities = identities.appending(identity)
   }
   let ordered: list<ChangelogFragment> = []
   for category in categories {
@@ -294,12 +294,12 @@ pub fn changelog_normalize_fragment_body(body: string) -> ChangelogResult<string
   for line in split(content, "\n") {
     const normalized = trim(line)
     if normalized == "" {
-      lines = lines.push("")
+      lines = lines.appending("")
     } else if first {
-      lines = lines.push("- " + normalized)
+      lines = lines.appending("- " + normalized)
       first = false
     } else {
-      lines = lines.push("  " + normalized)
+      lines = lines.appending("  " + normalized)
     }
   }
   return Ok(lines.join("\n"))
@@ -327,11 +327,11 @@ pub fn changelog_assemble_fragments(
         if is_err(normalized) {
           return Err(unwrap_err(normalized))
         }
-        bodies = bodies.push(unwrap(normalized))
+        bodies = bodies.appending(unwrap(normalized))
       }
     }
     if len(bodies) > 0 {
-      parts = parts.push(__changelog_category_heading(category) + "\n\n" + bodies.join("\n"))
+      parts = parts.appending(__changelog_category_heading(category) + "\n\n" + bodies.join("\n"))
     }
   }
   return Ok(parts.join("\n\n"))
@@ -395,9 +395,9 @@ fn __changelog_scan_sections(text: string) -> ChangelogResult<list<dict>> {
             ),
           )
         }
-        seen = seen.push(heading ?? "")
+        seen = seen.appending(heading ?? "")
         if current != nil {
-          scanned = scanned.push(current + {end: byte_offset, end_char: char_offset})
+          scanned = scanned.appending(current + {end: byte_offset, end_char: char_offset})
         }
         const body_char = line_char_end + newline_width
         current = {
@@ -412,7 +412,7 @@ fn __changelog_scan_sections(text: string) -> ChangelogResult<list<dict>> {
     byte_offset = line_byte_end + newline_width
   }
   if current != nil {
-    scanned = scanned.push(current + {end: byte_offset, end_char: char_offset})
+    scanned = scanned.appending(current + {end: byte_offset, end_char: char_offset})
   }
   return Ok(scanned)
 }
@@ -429,7 +429,7 @@ pub fn changelog_parse_sections(text: string) -> ChangelogResult<list<ChangelogS
   }
   let sections: list<ChangelogSection> = []
   for section in unwrap(scanned) {
-    sections = sections.push(
+    sections = sections.appending(
       {
         heading: section.heading,
         body: trim(substring(text, section.body_char, section.end_char)),
@@ -473,16 +473,16 @@ fn __changelog_parse_subsections(body: string) -> list<dict> {
     const normalized = ends_with(line, "\r") ? substring(line, 0, len(line) - 1) : line
     if regex_match("^### [^#].*$", normalized) != nil {
       if heading != "" || trim(lines.join("\n")) != "" {
-        sections = sections.push({heading: heading, body: trim(lines.join("\n"))})
+        sections = sections.appending({heading: heading, body: trim(lines.join("\n"))})
       }
       heading = normalized
       lines = []
     } else {
-      lines = lines.push(normalized)
+      lines = lines.appending(normalized)
     }
   }
   if heading != "" || trim(lines.join("\n")) != "" {
-    sections = sections.push({heading: heading, body: trim(lines.join("\n"))})
+    sections = sections.appending({heading: heading, body: trim(lines.join("\n"))})
   }
   return sections
 }
@@ -519,22 +519,22 @@ fn __changelog_merge_bodies(
     let next: list<dict> = []
     for section in existing {
       if !merged && section.heading == added.heading {
-        next = next.push(
+        next = next.appending(
           {heading: section.heading, body: __changelog_append_unique(section.body, added.body)},
         )
         merged = true
       } else {
-        next = next.push(section)
+        next = next.appending(section)
       }
     }
     if !merged {
-      next = next.push(added)
+      next = next.appending(added)
     }
     existing = next
   }
   let rendered: list<string> = []
   if preamble != "" {
-    rendered = rendered.push(preamble)
+    rendered = rendered.appending(preamble)
   }
   let emitted: list<string> = []
   for category in categories {
@@ -546,8 +546,8 @@ fn __changelog_merge_bodies(
       }
     }
     if category_body != "" {
-      rendered = rendered.push(category_heading + "\n\n" + category_body)
-      emitted = emitted.push(category_heading)
+      rendered = rendered.appending(category_heading + "\n\n" + category_body)
+      emitted = emitted.appending(category_heading)
     }
   }
   for section in existing {
@@ -558,8 +558,8 @@ fn __changelog_merge_bodies(
           section_body = __changelog_append_unique(section_body, matching.body)
         }
       }
-      rendered = rendered.push(section.heading + "\n\n" + section_body)
-      emitted = emitted.push(section.heading)
+      rendered = rendered.appending(section.heading + "\n\n" + section_body)
+      emitted = emitted.appending(section.heading)
     }
   }
   return rendered.join("\n\n")

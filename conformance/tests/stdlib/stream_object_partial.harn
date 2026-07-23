@@ -9,7 +9,7 @@ pipeline default() {
   const chunks = ["{\"name\":\"A", "da\",\"age\"", ":30,\"tags\":[\"x", "\",\"y\"]}"]
   let partials = []
   for obj in stream_object(chunks) {
-    partials = partials.push(obj)
+    partials = partials.appending(obj)
   }
   // More than one partial was emitted as the object filled in.
   __io_println(len(partials) >= 2)

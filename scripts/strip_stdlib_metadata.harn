@@ -203,7 +203,7 @@ pipeline main(task) {
   let example_removed = 0
   let example_kept = 0
   let files_changed = 0
-  const files = harness.fs.glob("${stdlib}/**/*.harn").sort()
+  const files = harness.fs.glob("${stdlib}/**/*.harn").sorted()
   for path in files {
     const text = harness.fs.read_text(path)
     const result = process_file(text, path)

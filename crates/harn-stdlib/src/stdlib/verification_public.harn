@@ -150,7 +150,7 @@ pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadde
       skipped = skipped + [candidate.skip]
     }
   }
-  selected = selected.sort_by({ entry -> entry.sort_key })
+  selected = selected.sorted_by({ entry -> entry.sort_key })
   const limit = to_int(opts?.limit)
   if limit != nil && limit >= 0 && len(selected) > limit {
     selected = selected.slice(0, limit)

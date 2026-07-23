@@ -865,19 +865,19 @@ fn inplace_list_concat_uses_fused_opcode() {
 }
 
 #[test]
-fn list_push_assign_uses_fused_concat_opcode() {
-    // `x = x.push(i)` is the method spelling of an immutable list append, so a
+fn list_appending_assign_uses_fused_concat_opcode() {
+    // `x = x.appending(i)` is the method spelling of an immutable list append, so a
     // local list accumulator should use the same fused concat opcode as
     // `x = x + [i]` instead of dispatching through the cloning list method.
-    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x = x.push(1)\n}");
+    let chunk = compile_source("pipeline t(task) {\n  let x = []\n  x = x.appending(1)\n}");
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
-        "list push assignment should emit the fused opcode:\n{d}"
+        "list appending assignment should emit the fused opcode:\n{d}"
     );
     assert!(
         !d.contains("METHOD_CALL"),
-        "optimized list push assignment should skip method dispatch:\n{d}"
+        "optimized list appending assignment should skip method dispatch:\n{d}"
     );
 }
 

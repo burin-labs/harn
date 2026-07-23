@@ -452,12 +452,12 @@ pub fn run_artifacts_list(
     }
     if is_ok(info) && (unwrap(info)?.is_dir ?? false) {
       const stat = unwrap(info)
-      rows = rows.push(
+      rows = rows.appending(
         __run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified),
       )
     }
   }
-  return rows.sort_by(
+  return rows.sorted_by(
     { row ->
       const modified = row.modified ?? 0
       return pair(0 - modified, row.run_id ?? "")

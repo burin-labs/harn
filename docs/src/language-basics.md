@@ -63,15 +63,15 @@ const frozen = {}
 frozen["alice"] = 1    // error: `const` means this value never changes
 ```
 
-Methods never modify the receiver — `push` returns a *new* list — so they are
+Methods never modify the receiver — `appending` returns a *new* list — so they are
 fine on a `const`, and you build a collection by assigning the result back:
 
 ```harn
 let items = []
-items = items.push("a")   // `items` is now ["a"]
+items = items.appending("a")   // `items` is now ["a"]
 
 const base = []
-base.push("a")            // error[HARN-LNT-066]: no effect — `base` is still []
+base.appending("a")            // error[HARN-LNT-066]: no effect — `base` is still []
 ```
 
 See [Binding mutability](language-spec.md) in the language spec for the full
@@ -724,7 +724,7 @@ Use `_` to control where the piped value is placed in the call:
 
 ```harn
 "hello world" |> split(_, " ")       // ["hello", "world"]
-[3, 1, 2] |> _.sort()               // [1, 2, 3]
+[3, 1, 2] |> _.sorted()               // [1, 2, 3]
 items |> len(_)                      // length of items
 "world" |> replace("hello _", "_", _) // "hello world"
 ```
@@ -881,7 +881,7 @@ user.has("email")   // false
 user.keys()         // ["age", "name"] (sorted)
 user.values()       // [30, "Alice"]
 user.entries()      // [{key: "age", value: 30}, ...]
-user.merge({role: "admin"})  // new dict with merged keys
+user.merging({role: "admin"})  // new dict with merged keys
 user.map_values({ v -> to_string(v) })
 user.filter({ v -> type_of(v) == "int" })
 ```

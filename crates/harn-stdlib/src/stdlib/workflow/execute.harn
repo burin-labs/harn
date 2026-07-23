@@ -23,7 +23,7 @@ fn __workflow_execute_enqueue_unique(queue, node_id) {
       return queue
     }
   }
-  return queue.push(node_id)
+  return queue.appending(node_id)
 }
 
 fn __workflow_execute_pop_front(queue) {

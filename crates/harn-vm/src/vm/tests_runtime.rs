@@ -3131,16 +3131,16 @@ pipeline t(task) {
 }
 
 #[test]
-fn list_push_assign_preserves_alias_immutability() {
-    // The compiler lowers `x = x.push(v)` through the same fused concat opcode
+fn list_appending_assign_preserves_alias_immutability() {
+    // The compiler lowers `x = x.appending(v)` through the same fused concat opcode
     // as `x = x + [v]`. Rebinding `x` must still leave an existing alias `y`
     // pointing at the original immutable list.
     let source = r#"
 pipeline t(task) {
   let x = []
-  x = x.push(1)
+  x = x.appending(1)
   const y = x
-  x = x.push(2)
+  x = x.appending(2)
   log("${x} ${y}")
 }"#;
     assert_eq!(run_output(source), "[harn] [1, 2] [1]");

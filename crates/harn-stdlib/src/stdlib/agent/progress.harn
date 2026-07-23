@@ -251,7 +251,7 @@ fn __agent_progress_entries(value) {
     if priority != nil {
       entry = entry + {priority: priority}
     }
-    entries = entries.push(entry)
+    entries = entries.appending(entry)
   }
   return entries
 }

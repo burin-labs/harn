@@ -401,7 +401,7 @@ fn sorted_rs_files(root: string) -> list<string> {
   for path in harness.fs.glob("${root}/**/*.rs") {
     paths = paths + [path]
   }
-  return paths.sort()
+  return paths.sorted()
 }
 
 fn scan_struct_literals(name: string, root: string) -> list<string> {

@@ -65,7 +65,7 @@ pipeline test(task) {
       },
     )
     if dispatch.status == "dispatched" && dispatch.result?.pool == pool_name {
-      handles = handles.push(dispatch.result)
+      handles = handles.appending(dispatch.result)
     }
   }
   __io_println(len(handles) == 8)

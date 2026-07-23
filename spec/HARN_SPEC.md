@@ -787,7 +787,7 @@ value:
 
 ```harn
 "hello world" |> split(_, " ")     // desugars to: |> { __pipe -> split(__pipe, " ") }
-[3, 1, 2] |> _.sort()             // desugars to: |> { __pipe -> __pipe.sort() }
+[3, 1, 2] |> _.sorted()             // desugars to: |> { __pipe -> __pipe.sorted() }
 items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
 ```
 
@@ -854,20 +854,20 @@ value, changing part of it changes the binding's whole value:
   all of them require `let`. Through a `const` binding each is rejected
   identically, with `HARN-OWN-001`. Read `d["k"] = 1` as sugar for
   `d = <a new dict differing at k>` and the requirement is self-evident.
-- **Methods** such as `push`, `sort`, and `add` return a *new* value and leave
+- **Methods** such as `appending`, `sorted`, and `adding` return a *new* value and leave
   the receiver's value untouched, so they change nothing and are permitted on
   a `const` binding. They are ordinary expressions, not assignments.
 
 ```harn
 const base = [1]
-const appended = base.push(2)   // fine: base is untouched, base == [1]
+const appended = base.appending(2)   // fine: base is untouched, base == [1]
 
 let built = []
-built = built.push(1)           // this is how a collection is built up
+built = built.appending(1)           // this is how a collection is built up
 ```
 
 Because the methods are pure, discarding a result silently does nothing;
-`HARN-LNT-066` rejects that as an error. A bare `l.push(1)` leaves `l`
+`HARN-LNT-066` rejects that as an error. A bare `l.appending(1)` leaves `l`
 unchanged and is always a bug.
 
 #### Why this is Swift's rule, not TypeScript's
@@ -1299,12 +1299,12 @@ orders only against `decimal`. Two compound values order structurally:
 - `Pair` compares `.first`, then `.second` on a tie.
 - `list` compares lexicographically, element by element; if one list is a
   strict prefix of the other, the shorter list orders first. This is what
-  makes multi-key sorts like `xs.sort_by({ x -> [x.a, x.b] })` order by the
+  makes multi-key sorts like `xs.sorted_by({ x -> [x.a, x.b] })` order by the
   first key, then the second.
 
 An unordered element (a float `NaN`, directly or nested inside a pair or
 list) makes the whole comparison unordered: relational operators return
-`false`, while sorting-style total-order reductions (`sort`, `sort_by`,
+`false`, while sorting-style total-order reductions (`sorted`, `sorted_by`,
 `min`, `max`) treat the operands as equal so a stray `NaN` cannot
 destabilize a sort. Comparison between other type combinations returns 0
 (equal).
@@ -3888,7 +3888,7 @@ only in covariant positions.
 | Shape `{ field: T, ... }` | covariant per field (width subtyping) |
 
 `list` and `dict` are invariant because index assignment can *write* through
-them, which makes them read-write positions. Methods such as `push` are not a
+them, which makes them read-write positions. Methods such as `appending` are not a
 reason: they return a new collection and never modify the receiver, so they are
 covariant reads. See [Binding mutability](04-scope-rules.md#binding-mutability).
 

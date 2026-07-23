@@ -1,3 +1,0 @@
-pipeline test(task) {
-  log([3, 1, 2].sort({ item -> item }))
-}

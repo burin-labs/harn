@@ -62,7 +62,7 @@ pub fn strip_code_fences(text) {
     if starts_with(trim(line), "```") {
       continue
     }
-    out = out.push(line)
+    out = out.appending(line)
   }
   return trim(out.join("\n"))
 }
@@ -377,7 +377,7 @@ pub fn with_case_insensitive_keys(envelope) {
   if type_of(envelope) == "list" {
     let out = []
     for item in envelope {
-      out = out.push(with_case_insensitive_keys(item))
+      out = out.appending(with_case_insensitive_keys(item))
     }
     return out
   }
@@ -418,7 +418,7 @@ fn __unique_names(names) {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
-      unique = unique.push(name)
+      unique = unique.appending(name)
     }
   }
   return unique
@@ -428,7 +428,7 @@ fn __session_tool_names(messages) {
   let names = []
   for message in messages {
     if message?.role == "tool" {
-      names = names.push(message?.name ?? "")
+      names = names.appending(message?.name ?? "")
     }
   }
   return __unique_names(names)
@@ -508,7 +508,7 @@ pub fn schema_retry_nudge_for(schema, hint) {
   } else {
     []
   }
-  const sorted_required = required.sort()
+  const sorted_required = required.sorted()
   const required_line = if len(sorted_required) > 0 {
     "Required keys (lowercase): " + join(sorted_required, ", ") + "."
   } else {
@@ -523,7 +523,7 @@ pub fn schema_retry_nudge_for(schema, hint) {
     required_line,
   ]
   if hint != nil && to_string(hint) != "" {
-    lines = lines.push("Hint: " + to_string(hint))
+    lines = lines.appending("Hint: " + to_string(hint))
   }
   return join(lines, "\n")
 }

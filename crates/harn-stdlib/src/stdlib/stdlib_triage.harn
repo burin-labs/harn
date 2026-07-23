@@ -286,7 +286,7 @@ fn __triage_push_actor(actors, kind, id, display_name = nil, url = nil) {
   if actor_id == "" {
     return actors
   }
-  return actors.push(__triage_actor(kind, actor_id, display_name ?? actor_id, url))
+  return actors.appending(__triage_actor(kind, actor_id, display_name ?? actor_id, url))
 }
 
 fn __triage_github_actors(payload) {
@@ -522,7 +522,7 @@ fn __triage_related_refs(source_url, input, payload, options) -> list<TriageRela
   let refs = [{kind: "source", label: "Source", url: source_url}]
   const repo_url = __triage_first([payload?.repository?.html_url, payload?.repo?.html_url])
   if repo_url != nil && repo_url != source_url {
-    refs = refs.push(
+    refs = refs.appending(
       {
         kind: "repository",
         label: payload?.repository?.full_name ?? payload?.repo?.full_name,
@@ -676,7 +676,7 @@ pub fn triage_dedupe_events(events: list) -> list<TriageEvent> {
     const event = item?.schema == TRIAGE_EVENT_SCHEMA ? item : triage_normalize(item)
     if seen[event.dedupe_key] == nil {
       seen[event.dedupe_key] = true
-      out = out.push(event)
+      out = out.appending(event)
     }
   }
   return out
@@ -723,7 +723,7 @@ pub fn triage_start_my_day(inputs: list, options = nil) {
   let receipts = []
   if opts.emit ?? false {
     for event in events {
-      receipts = receipts.push(triage_emit(event, {topic: opts.topic ?? TRIAGE_EVENT_TOPIC}))
+      receipts = receipts.appending(triage_emit(event, {topic: opts.topic ?? TRIAGE_EVENT_TOPIC}))
     }
   }
   return {

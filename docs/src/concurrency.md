@@ -704,7 +704,7 @@ fn collect_pages(cursors) {
   let pages = []
   for result in outcome.results {
     if is_ok(result) {
-      pages = pages.push(unwrap(result).items)
+      pages = pages.appending(unwrap(result).items)
     } else {
       log("page fetch failed: ${unwrap_err(result)}")
     }

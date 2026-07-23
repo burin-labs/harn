@@ -27,7 +27,7 @@ fn __schedule_incoming_edges(graph, node_id) {
   let incoming = []
   for edge in __schedule_list(graph?.edges) {
     if edge?.to == node_id {
-      incoming = incoming.push(edge)
+      incoming = incoming.appending(edge)
     }
   }
   return incoming
@@ -96,10 +96,10 @@ pub fn workflow_next_edges(config = nil) {
       continue
     }
     if __schedule_branch_matches(edge?.branch, branch) {
-      exact = exact.push(edge)
+      exact = exact.appending(edge)
     }
     if edge?.branch == nil {
-      default_edges = default_edges.push(edge)
+      default_edges = default_edges.appending(edge)
     }
   }
   if len(exact) > 0 || branch == nil {

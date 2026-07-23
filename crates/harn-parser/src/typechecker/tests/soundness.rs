@@ -719,6 +719,41 @@ fn unknown_method_on_list_is_rejected() {
 }
 
 #[test]
+fn removed_imperative_collection_names_are_rejected() {
+    let diags = nam_005(
+        r#"fn f() {
+  const s: string = "hi"
+  s.reverse()
+  const xs: list<int> = [1, 2]
+  xs.push(3)
+  xs.pop()
+  xs.sort()
+  xs.sort_by({ x -> x })
+  xs.reverse()
+  const values: set<int> = set([1, 2])
+  values.add(3)
+  values.remove(1)
+  values.delete(1)
+}"#,
+    );
+    assert_eq!(diags.len(), 9, "got: {diags:?}");
+    for old_name in [
+        "reverse", "push", "pop", "sort", "sort_by", "add", "remove", "delete",
+    ] {
+        assert!(
+            diags.iter().any(|message| message.contains(old_name)),
+            "missing diagnostic for `{old_name}`: {diags:?}"
+        );
+    }
+    for old_name in ["merge", "remove", "rekey"] {
+        assert!(
+            !crate::typechecker::method_registry::DICT_METHODS.contains(&old_name),
+            "dict registry still accepts removed method `{old_name}`"
+        );
+    }
+}
+
+#[test]
 fn unknown_method_on_struct_is_rejected_with_suggestion() {
     let diags = nam_005(
         r"struct Point { x: int, y: int }
@@ -743,10 +778,22 @@ impl Point {
 fn f(p: Point) {
   const s: string = "hi"
   s.uppercase()
+  s.reversed()
   const xs: list<int> = [1, 2]
-  xs.reverse()
+  xs.reversed()
+  xs.sorted()
+  xs.sorted_by({ x -> x })
+  xs.appending(3)
+  xs.dropping_last()
   xs.count()
   xs.iter()
+  const values: set<int> = set([1, 2])
+  values.adding(3)
+  values.removing(1)
+  const mapping: dict<string, int> = {a: 1}
+  mapping.merging({b: 2})
+  mapping.removing("a")
+  mapping.rekeyed({ key -> key })
   p.render()
 }"#,
     );

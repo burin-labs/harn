@@ -242,8 +242,8 @@ pub fn eval_fingerprint_integrity(rows: list) -> EvalFingerprintIntegrity {
     complete: !missing,
     consistent: len(inconsistent_cases) == 0 && len(harness_fingerprints) == 1,
     case_fingerprints: case_fingerprints,
-    harness_fingerprints: harness_fingerprints.sort(),
-    inconsistent_cases: inconsistent_cases.sort(),
+    harness_fingerprints: harness_fingerprints.sorted(),
+    inconsistent_cases: inconsistent_cases.sorted(),
   }
 }
 
@@ -549,7 +549,7 @@ pub fn bootstrap_mean_ci(values: list, resamples: int, alpha: float, seed: int) 
     means = means + [sum / __float(n)]
     b = b + 1
   }
-  const sorted = means.sort()
+  const sorted = means.sorted()
   const lo_idx = __clamp_index(to_int(round(alpha / 2.0 * __float(resamples))) ?? 0, resamples)
   const hi_idx = __clamp_index(
     to_int(round((1.0 - alpha / 2.0) * __float(resamples))) ?? (resamples - 1),
@@ -882,7 +882,7 @@ pub fn axis_breakdown(rows: list, axis: string) -> EvalAxisBreakdown {
     grouped_rows = grouped_rows + {[value]: (grouped_rows[value] ?? []) + [row]}
   }
   let groups: list<EvalAxisGroup> = []
-  for value in grouped_rows.keys().sort() {
+  for value in grouped_rows.keys().sorted() {
     groups = groups + [__axis_group(value, grouped_rows[value])]
   }
   let worst: EvalAxisGroup? = nil

@@ -24,7 +24,7 @@ pipeline default() {
   }
   let handles = []
   for _i in 0 to 6 exclusive {
-    handles = handles.push(pool.submit(body))
+    handles = handles.appending(pool.submit(body))
   }
   for _i in 0 to 6 exclusive {
     send(gate, "go")

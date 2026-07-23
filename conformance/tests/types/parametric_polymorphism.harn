@@ -2,7 +2,7 @@ pipeline default() {
   fn map<T, U>(xs: list<T>, f: fn(T) -> U) -> list<U> {
     let out: list<U> = []
     for x in xs {
-      out = out.push(f(x))
+      out = out.appending(f(x))
     }
     return out
   }
@@ -10,7 +10,7 @@ pipeline default() {
     let out: list<T> = []
     for x in xs {
       if pred(x) {
-        out = out.push(x)
+        out = out.appending(x)
       }
     }
     return out

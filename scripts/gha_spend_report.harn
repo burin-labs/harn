@@ -72,13 +72,13 @@ fn sort_spend_rows(rows: list) -> list {
     let inserted = false
     for existing in out {
       if !inserted && number_value(row.usd) > number_value(existing.usd) {
-        next = next.push(row)
+        next = next.appending(row)
         inserted = true
       }
-      next = next.push(existing)
+      next = next.appending(existing)
     }
     if !inserted {
-      next = next.push(row)
+      next = next.appending(row)
     }
     out = next
   }
@@ -135,8 +135,8 @@ pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
     }
   }
   let rows = []
-  for key in keys(totals).sort() {
-    rows = rows.push(totals[key])
+  for key in keys(totals).sorted() {
+    rows = rows.appending(totals[key])
   }
   return sort_spend_rows(rows)
 }
@@ -148,7 +148,7 @@ pub fn action_run_refs(data) -> list {
     if id == nil {
       continue
     }
-    out = out.push({id: to_string(id), name: to_string(run?.name ?? "")})
+    out = out.appending({id: to_string(id), name: to_string(run?.name ?? "")})
   }
   return out
 }
@@ -181,8 +181,8 @@ pub fn run_timing_rows(samples: list) -> list {
     }
   }
   let rows = []
-  for key in keys(totals).sort() {
-    rows = rows.push(totals[key])
+  for key in keys(totals).sorted() {
+    rows = rows.appending(totals[key])
   }
   return sort_spend_rows(rows)
 }
@@ -190,7 +190,7 @@ pub fn run_timing_rows(samples: list) -> list {
 fn table_rows(rows: list) -> list {
   let out = []
   for row in rows ?? [] {
-    out = out.push(
+    out = out.appending(
       {
         workflow: row.label,
         minutes: format_float_2(row.minutes),
@@ -250,7 +250,7 @@ fn collect_run_timing_rows(org: string, repos: list<string>, runs_per_repo: int)
       if timing == nil {
         continue
       }
-      samples = samples.push({repo: repo, workflow: ref.name, timing: timing})
+      samples = samples.appending({repo: repo, workflow: ref.name, timing: timing})
     }
   }
   return run_timing_rows(samples)

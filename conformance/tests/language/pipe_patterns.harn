@@ -11,7 +11,7 @@ pipeline default() {
   }
   __io_println(3 |> add1 |> double)
   __io_println("hello world" |> split(_, " ") |> len(_))
-  __io_println([3, 1, 2] |> _.sort())
+  __io_println([3, 1, 2] |> _.sorted())
   const payload = [1, 2, 3] |> {items: _, count: len(_)}
   __io_println(payload.count)
   __io_println(payload.items)
