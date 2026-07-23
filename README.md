@@ -59,6 +59,11 @@ git clone https://github.com/burin-labs/harn.git && cd harn
 ./scripts/dev_setup.sh && cargo install --path crates/harn-cli
 ```
 
+For exact-version local automation or non-GitHub CI, use the
+[cross-platform bootstrap command](docs/src/dev/bootstrap-harn.md). It verifies
+release checksums, supports explicit cache and install directories, and prints
+a stable JSON receipt.
+
 ### More install options
 
 Shell completions:

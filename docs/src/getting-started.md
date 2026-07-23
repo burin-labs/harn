@@ -75,6 +75,12 @@ harn version
 The one-line installer and `cargo install harn-cli` do not require a
 Rust toolchain on the user's machine.
 
+For repeatable local automation and non-GitHub CI, use the
+[cross-platform exact-version bootstrap command](./dev/bootstrap-harn.md). It
+accepts an explicit version or `.harn-version`, verifies the release checksum,
+supports explicit cache/install directories and offline reuse, and emits a
+machine-readable receipt.
+
 ## See Harn in action in 30 seconds
 
 Before configuring anything, run a bundled offline demo. No API keys,
