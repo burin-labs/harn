@@ -3,9 +3,8 @@
 //! A process-global map of the paths each session has mutated, recorded at the
 //! hostlib write chokepoint and read back into a sub-agent's `files_written`
 //! receipt. It is split out of the parent module so this session-keyed global
-//! and the drains that keep a reused session id from inheriting a prior run's
-//! writes live in one small, auditable unit — the reset backstop that teardown
-//! cannot be is right next to the store it guards.
+//! and the owner-scoped drains that keep a reused session id from inheriting a
+//! prior run's writes live in one small, auditable unit.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, OnceLock};
@@ -72,16 +71,110 @@ pub fn clear_session_changed_paths(session_id: &str) {
     }
 }
 
-/// Drop EVERY session's recorded mutated paths.
+/// Drop every session's recorded mutated paths at process teardown.
 ///
-/// The per-session removals above run at teardown, which a session that errors
-/// or is abandoned never reaches — and this map is process-global while the
-/// session store beside it is thread-local, so its entries outlive the sessions
-/// that made them. A later session reusing an id would then inherit the earlier
-/// one's paths into its `files_written` receipt: a receipt reporting writes that
-/// this run did not make. Reset is the backstop teardown cannot be.
+/// Ordinary execution and thread reset must use [`clear_session_changed_paths`]
+/// for only the sessions it owns. This process-global wipe exists for lifecycle
+/// boundaries that have exclusive ownership of the whole process.
 pub fn clear_all_session_changed_paths() {
     if let Ok(mut store) = session_changed_paths_store().lock() {
         store.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn resetting_one_owner_preserves_another_owners_changed_paths() {
+        let owner_a_session = format!("changed-path-owner-a-{}", uuid::Uuid::now_v7());
+        let owner_b_session = format!("changed-path-owner-b-{}", uuid::Uuid::now_v7());
+        let owners_ready = Arc::new(Barrier::new(2));
+        let owner_b_reset = Arc::new(Barrier::new(2));
+
+        let owner_a_ready = Arc::clone(&owners_ready);
+        let owner_a_reset = Arc::clone(&owner_b_reset);
+        let owner_a = std::thread::spawn(move || {
+            super::super::open_or_create(Some(owner_a_session.clone()));
+            record_session_changed_path(&owner_a_session, "src/owner-a.rs");
+            owner_a_ready.wait();
+            owner_a_reset.wait();
+
+            assert_eq!(
+                take_session_changed_paths(&owner_a_session),
+                vec!["src/owner-a.rs".to_string()],
+                "another owner's reset must not erase this owner's receipt"
+            );
+            super::super::reset_session_store();
+        });
+
+        let owner_b_ready = Arc::clone(&owners_ready);
+        let owner_b_reset = Arc::clone(&owner_b_reset);
+        let owner_b = std::thread::spawn(move || {
+            super::super::open_or_create(Some(owner_b_session));
+            owner_b_ready.wait();
+            super::super::reset_session_store();
+            owner_b_reset.wait();
+        });
+
+        owner_a.join().expect("owner A");
+        owner_b.join().expect("owner B");
+    }
+
+    #[test]
+    fn resetting_or_closing_an_owner_removes_its_abandoned_changed_paths() {
+        let reset_session = format!("changed-path-reset-{}", uuid::Uuid::now_v7());
+        super::super::open_or_create(Some(reset_session.clone()));
+        record_session_changed_path(&reset_session, "src/reset.rs");
+        super::super::reset_session_store();
+        assert!(
+            session_changed_paths(&reset_session).is_empty(),
+            "reset must discard paths owned by the reset session"
+        );
+
+        let closed_session = format!("changed-path-close-{}", uuid::Uuid::now_v7());
+        super::super::open_or_create(Some(closed_session.clone()));
+        record_session_changed_path(&closed_session, "src/close.rs");
+        super::super::close(&closed_session);
+        assert!(
+            session_changed_paths(&closed_session).is_empty(),
+            "close must discard paths owned by the closed session"
+        );
+    }
+
+    #[test]
+    fn opening_a_reused_session_id_discards_stale_changed_paths() {
+        let session = format!("changed-path-reuse-{}", uuid::Uuid::now_v7());
+        record_session_changed_path(&session, "src/stale.rs");
+
+        super::super::open_or_create(Some(session.clone()));
+
+        assert!(
+            session_changed_paths(&session).is_empty(),
+            "a fresh session must not inherit an abandoned owner's receipt"
+        );
+        super::super::close(&session);
+    }
+
+    #[test]
+    fn evicting_an_owner_removes_its_abandoned_changed_paths() {
+        let evicted_session = format!("changed-path-evicted-{}", uuid::Uuid::now_v7());
+        super::super::set_session_cap(1);
+        super::super::open_or_create(Some(evicted_session.clone()));
+        record_session_changed_path(&evicted_session, "src/evicted.rs");
+
+        super::super::open_or_create(Some(format!(
+            "changed-path-replacement-{}",
+            uuid::Uuid::now_v7()
+        )));
+
+        assert!(
+            session_changed_paths(&evicted_session).is_empty(),
+            "LRU eviction must discard paths owned by the evicted session"
+        );
+        super::super::reset_session_store();
+        super::super::set_session_cap(super::super::DEFAULT_SESSION_CAP);
     }
 }
