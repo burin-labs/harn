@@ -1295,8 +1295,8 @@ jobs:
               package_args=(-p harn-vm -p harn-cli)
             else
               read -r -a package_args <<< "$args"
-              # The smoke test below executes target/debug/harn.exe. Keep that
-              # binary warm even for PRs that only touch a leaf crate.
+              # The smoke test below executes the Cargo target's harn.exe.
+              # Keep that binary warm even for PRs that only touch a leaf crate.
               if [[ " ${package_args[*]} " != *" -p harn-cli "* ]]; then
                 package_args+=(-p harn-cli)
               fi
@@ -1313,14 +1313,15 @@ jobs:
             cargo test "${package_args[@]}" --no-run
             cargo test -p harn-lexer -p harn-parser -p harn-stdlib -p harn-vm -p harn-hostlib -p harn-terminal -p harn-fmt -p harn-lint -p harn-modules
           fi
-          if [[ ! -f target/debug/harn.exe ]]; then
+          target_dir="${CARGO_TARGET_DIR:-target}"
+          if [[ ! -f "$target_dir/debug/harn.exe" ]]; then
             cargo build -p harn-cli --bin harn
           fi
       - name: Smoke test harn run
         shell: bash
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          ./target/debug/harn.exe run smoke.harn
+          "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn
 
   # Deterministic, always-on Windows *compile* gate. Unlike the path-gated
   # `windows` job above (which skips on routine PRs + the whole merge queue and

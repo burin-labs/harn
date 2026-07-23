@@ -101,4 +101,4 @@ jobs:
         shell: bash
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          ./target/debug/harn.exe run smoke.harn
+          "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn
