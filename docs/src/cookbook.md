@@ -204,25 +204,25 @@ pipeline default(task) {
 
 ## Precise edits with AST tools
 
-Agent-authored source mutations are easiest to keep correct when they speak
-the language of the tree, not the language of the diff. `std/edit` ships
-five primitives covering the common reaches. Pick by the **shape** of the
-change first; let the language-support table tie-break:
+`std/edit` ships structural and hash-guarded text primitives for
+agent-authored source mutations. Pick the simplest mechanism that safely
+fits the **shape and reach** of the change:
 
-| Shape | Reach for | Falls back to |
-|---|---|---|
-| Replace an existing node (function body, call expression, declaration) | [`edit_apply_node`](#how-to-rewrite-a-function-body-via-a-tree-sitter-query) | `edit_safe_text_patch` when the language has no grammar |
-| Add a sibling or child next to a node (new test, new import, new arm) | [`edit_insert_at_anchor`](#how-to-add-a-new-test-to-a-rust-mod) | `edit_safe_text_patch` |
-| Rename an identifier across the workspace | [`edit_rename_symbol`](#how-to-rename-a-symbol-across-the-workspace) | `edit_safe_text_patch` only when the language is out-of-batch |
-| Preview a multi-step plan before committing | [`edit_dry_run`](#how-to-preview-a-multi-step-edit-plan-and-approve) | (composes with all of the above) |
-| Anything else, or text-shaped change with collision risk | [`edit_safe_text_patch`](#how-to-apply-a-multi-hunk-text-patch-atomically) | — (this *is* the fallback) |
+| Shape | Good fit |
+|---|---|
+| Replace an existing node when a stable query is available | [`edit_apply_node`](#how-to-rewrite-a-function-body-via-a-tree-sitter-query) |
+| Add a sibling or child relative to a structural anchor | [`edit_insert_at_anchor`](#how-to-add-a-new-test-to-a-rust-mod) |
+| Rename an identifier and update semantic neighbors across the workspace | [`edit_rename_symbol`](#how-to-rename-a-symbol-across-the-workspace) |
+| Preview a risky or multi-step plan before committing | [`edit_dry_run`](#how-to-preview-a-multi-step-edit-plan-and-approve) |
+| Apply an exact localized text change with collision protection | [`edit_safe_text_patch`](#how-to-apply-a-multi-hunk-text-patch-atomically) |
 
-The decision is the same one a human editor makes: structural changes
-through the AST, textual changes through the patch. A `system_reminder`
-that lifts this table into the agent's next-turn prompt — see
-[How to nudge an agent toward AST tools](#how-to-nudge-an-agent-toward-ast-tools)
-— is the smallest change that durably shifts a coding agent away from
-freeform text patches.
+Grammar support is a capability, not an obligation. A small exact replacement
+does not become safer merely because the agent can write a Tree-Sitter query;
+structural tools earn their overhead when their addressing, validation, or
+semantic reach prevents a real failure mode. A `system_reminder` that lifts
+this guidance into the agent's next-turn prompt — see
+[How to guide an agent's edit choice](#how-to-guide-an-agents-edit-choice)
+— can help specialized coding agents make that tradeoff consistently.
 
 ### How to rewrite a function body via a tree-sitter query
 
@@ -536,7 +536,7 @@ For the full result shape (`touched_files[*].edits[*]` with byte and
 [Rename a symbol across the workspace](./cookbooks/rename-symbol.md)
 cookbook.
 
-### When AST tools won't work
+### When to use text patches
 
 The AST primitives all require a tree-sitter grammar for the file's
 language. They return `result == "unsupported_language"` instead of
@@ -549,6 +549,8 @@ Reach for `edit_safe_text_patch` (or the lower-level
 
 - the file's language is not in the supported batch (printable list
   lives next to each primitive in [`std/edit`](./stdlib/edit.md));
+- the change is an exact, localized replacement and a structural query would
+  add ceremony without improving correctness;
 - the change is purely textual — `LICENSE` headers, `CHANGELOG.md`
   entries, embedded SQL inside a string literal — and writing a
   tree-sitter query would mean writing one that matches a comment or
@@ -559,7 +561,7 @@ Reach for `edit_safe_text_patch` (or the lower-level
   you need a deterministic `stale_base` outcome rather than a tree
   re-parse failure.
 
-`edit_safe_text_patch` is the safe-by-default text fallback: it
+`edit_safe_text_patch` is the safe text mechanism: it
 hash-checks the pre-image against `expected_hash`, composes all hunks
 against the same staged-fs overlay, and either commits the post-image
 atomically or returns a single rejection result that the caller can
@@ -581,18 +583,16 @@ pipeline default(task) {
 }
 ```
 
-The progression — try the AST primitive first, drop to
-`edit_safe_text_patch` on `unsupported_language`, give up and ask the
-operator only when the patch also rejects — keeps the agent on the
-narrowest tool that can finish the job.
+Choose from the intended reach of the change, not from grammar availability
+alone. If a structural operation is the right fit but returns
+`unsupported_language`, retry with `edit_safe_text_patch`; if an exact patch
+already expresses the whole change safely, use it directly.
 
-### How to nudge an agent toward AST tools
+### How to guide an agent's edit choice
 
-The point of these primitives is only realised when the agent *reaches*
-for them. The smallest change that durably moves a coding agent away
-from freeform text patches is one `system_reminder` lifted into the
-prompt for every coding-agent loop. Reminders are typed, ephemeral
-transcript injections with TTL and dedupe — see
+Specialized coding agents can benefit from a short reminder to consider
+structural reach without turning it into a blanket requirement. Reminders are
+typed, ephemeral transcript injections with TTL and dedupe — see
 [System reminders](./system-reminders.md) for the lifecycle — so the
 snippet survives the next turn but does not bloat the durable transcript.
 
@@ -600,13 +600,13 @@ The canonical body and producer wiring:
 
 ```harn,ignore
 const edit_strategy_reminder = """
-Prefer the AST-precise primitives in std/edit when modifying source:
-- edit_apply_node for replacing a node (function body, call, decl).
-- edit_insert_at_anchor for adding a sibling/child (test, import, arm).
-- edit_rename_symbol for cross-file identifier renames.
-- edit_dry_run to preview a multi-op plan before committing.
-Fall back to edit_safe_text_patch only when the language has no
-tree-sitter grammar or the change is purely textual.
+Choose the simplest safe edit mechanism for each change.
+- Use edit_apply_node or edit_insert_at_anchor when structural addressing
+  and parse validation materially reduce risk.
+- Use edit_rename_symbol when semantic neighbors must change together.
+- Use edit_safe_text_patch for exact localized text changes, whether or not
+  the language has a Tree-Sitter grammar.
+- Use edit_dry_run to preview risky or multi-operation plans.
 """
 
 const injected = transcript.inject_reminder(transcript(), {

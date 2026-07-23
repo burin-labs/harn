@@ -1,26 +1,23 @@
-# Burin compass: steer toward AST edits
+# Burin compass: choose safer edit tools
 
-Harn ships a moat-quality set of **AST-precise edit primitives** — see
+Harn ships a set of **AST-precise edit primitives** — see
 the [structured refactorings cookbook](./structured-refactorings.md).
-They only pay off, though, if the agent loop *reaches for them first*.
-Left to its own devices a model takes the path of least resistance — a
-freeform `str_replace` / line patch — which is exactly the brittle,
-string-collision failure mode the structural tools exist to eliminate.
+They pay off when structural addressing, parse validation, or semantic-neighbor
+updates prevent a real failure mode. For an exact localized change, a
+hash-guarded text patch can be simpler and equally safe.
 
-The **burin compass** inverts that default. It is a built-in
+The **burin compass** helps specialized coding agents make that choice. It is
+a built-in
 [system-reminder](../system-reminders.md) provider, `compass_ast_edits`,
 that injects a standing reminder at session start (and on resume):
 
-> When editing source files, prefer the AST-precise edit tools over
-> freeform text edits: `edit_apply_node` / `edit_insert_at_anchor` for
-> node-level changes, `edit_rename_symbol` for safe cross-file renames,
-> and the structured refactors (`edit_extract_function`,
-> `edit_change_signature`, `edit_inline`, `edit_move_decl`, …) for
-> compound changes. Preview any plan with `edit_dry_run` before
-> committing. Reach for `edit_safe_text_patch` only when the language has
-> no grammar support.
+> Choose the simplest safe edit mechanism for each change. Use the
+> AST-precise tools when structural addressing or semantic reach materially
+> reduces risk; use `edit_safe_text_patch` for exact localized changes even
+> when grammar support is available. Preview risky or multi-operation plans
+> with `edit_dry_run`.
 
-The compass ships **opt-in**. Unlike the other canonical providers —
+Both the reminder and routing layer ship **opt-in**. Unlike the other canonical providers —
 which are conditional and stay silent until they have something to say
 (project facts, a workspace anchor, token pressure) — a steer toward code
 edits is only wanted in code-editing sessions, not in every sub-agent or
@@ -55,7 +52,7 @@ touches a call it cannot reason about.
 
 It runs in one of two modes:
 
-- **`suggest`** (the default) — advisory. The router injects a
+- **`suggest`** (the default after enabling Compass) — advisory. The router injects a
   one-turn system reminder naming the structural primitive the edit maps
   to (`edit_apply_node` for a node, `edit_rename_symbol` for a rename, or
   the hash-guarded `edit_safe_text_patch`), then dispatches the original
@@ -90,16 +87,15 @@ old or new file contents.
 
 These surface in eval dashboards as the agent-loop edit-reliability signal.
 
-## Why a reminder by default, not a hard rewrite
+## Why a reminder, not a hard rewrite
 
 In `suggest` mode the compass *steers* rather than *rewrites*. A reminder
-keeps the model in control: it can still choose a freeform patch when a
-file has no tree-sitter grammar (the structural tools degrade to
-`Unsupported` there anyway), and it never silently changes the bytes a
-tool call would produce. That makes the behaviour predictable and
-auditable — the reminder is visible in the transcript like any other
-system reminder. `rewrite` mode is opt-in for exactly this reason: it only
-ever substitutes a provably-equivalent call.
+keeps the model in control: it can choose an exact text patch when that is
+the simplest safe fit, and the router never silently changes the bytes a tool
+call would produce. That makes the behaviour predictable and auditable — the
+reminder is visible in the transcript like any other system reminder.
+`rewrite` mode is opt-in for exactly this reason: it only ever substitutes a
+provably-equivalent call.
 
 ## Turning it on
 
@@ -112,20 +108,20 @@ apply:
   what activates the steer.
 - **Inspect it** alongside the other canonical providers —
   `compass_ast_edits` appears in the provider metadata listing with the
-  summary "Steer the agent toward AST edit primitives over freeform text
-  edits."
+  purpose of helping coding agents choose the safest edit primitive for each
+  change.
 
 ## Configuring the router (escape hatches)
 
-The router is on by default in `suggest` mode for every agent loop. It is
-controlled by the `compass` option passed alongside the agent-loop tools
-and is fully gated:
+The router is off by default. Enable and configure it with the `compass`
+option passed alongside the agent-loop tools:
 
-- `compass: false` — turn the router off entirely. Freeform edits dispatch
-  with no observation, no reminder, no counter.
+- omitted, `compass: false`, or `compass: null` — off. Edit calls dispatch
+  with no observation, reminder, or counter.
+- `compass: true` — enable advisory `suggest` mode.
 - `compass: {enabled: false}` or `compass: {mode: "off"}` — equivalent
   off switch in dict form.
-- `compass: {mode: "suggest"}` — the default; advisory reminders only.
+- `compass: {mode: "suggest"}` — advisory reminders only.
 - `compass: {mode: "rewrite"}` — silent substitution of
   provably-equivalent calls, with a fall-back-to-suggest safety net.
 - `compass: {prefer: ["edit_apply_node", ...]}` — a persona's ordering
@@ -135,10 +131,10 @@ and is fully gated:
   `edit_apply_node` in its suggestion. When no `compass.prefer` override is
   set the router reads `edit_strategy.prefer` directly.
 
-The escape hatch the *model* always has: ignore the suggestion. A
+The model can always ignore an advisory suggestion. A
 `suggest` reminder never blocks or alters the call, and even a `rewrite`
 only ever swaps in a behaviourally identical patch — so a deliberate
-freeform edit on an unsupported file, or a one-off raw write, is always
+localized text edit, unsupported file, or one-off raw write is always
 available.
 
 ## Composes with

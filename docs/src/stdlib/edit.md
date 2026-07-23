@@ -4,30 +4,29 @@
 source files. Three flavors live side by side:
 
 - `edit_apply_node` — AST-precise replace via a Tree-Sitter query.
-  The default reach when agents need to rewrite a function body,
-  swap a call expression, or update a typed declaration.
+  A good fit when a stable structural query makes rewriting a function
+  body, call expression, or typed declaration safer.
 - `edit_insert_at_anchor` — AST-precise insert before/after/inside an
-  anchor node. The default reach for adding a new function, import,
-  test case, or match arm.
+  anchor node. A good fit for adding a new function, import, test case,
+  or match arm relative to a structural neighbor.
 - `edit_rename_symbol` — safe cross-file rename driven by the typed
-  symbol graph (#2434). The default reach when one identifier needs
-  to flip across the workspace without colliding on partial-name
-  matches.
+  symbol graph (#2434). A good fit when one identifier must change
+  across the workspace without colliding on partial-name matches.
 - `edit_fast_apply` / `fast_apply` — merge-model-assisted full-file
   application for broad edit intent. It reads the current file,
   asks the configured `merge` model role for complete updated bytes,
   validates and previews the result, then commits through
   `edit_safe_text_patch`.
 - `edit_apply_old_new_patch` — collision-aware old/new text patch
-  with exact / line / structural matching modes. The default reach
-  when the language has no tree-sitter grammar or when the model
-  reasoned in terms of literal lines.
+  with exact / line / structural matching modes. A good fit for exact
+  localized changes, whether or not the language has a Tree-Sitter
+  grammar, and when the model reasoned in terms of literal lines.
 - `edit_dry_run` — render a multi-op plan to a per-file unified diff
-  without touching disk. The default reach when an agent wants to
-  "measure twice, cut once" before committing a multi-step edit.
+  without touching disk. A good fit when an agent wants to "measure
+  twice, cut once" before committing a risky or multi-step edit.
 - `edit_capabilities` — report which AST-precise primitives are
-  available per language. The default reach when the loop needs to
-  decide between an AST edit and a text fallback before acting (see
+  available per language. Use it when structural grammar support
+  affects the loop's chosen edit mechanism (see
   [Language coverage](#language-coverage--capability-matrix)).
 - Validators and helpers — `edit_changed_regions`,
   `edit_validate_changed_regions`, `edit_check_lazy_truncation`,
@@ -930,9 +929,10 @@ fall back to a text-level edit (std/edit `edit_safe_text_patch`)
 ```
 
 The agent loop branches on `result` rather than maintaining its own
-language list: reach for an AST primitive first, and on
-`unsupported_language` fall back to `edit_safe_text_patch` /
-`edit_apply_old_new_patch`.
+language list. When a structural operation is the best fit, it can handle
+`unsupported_language` by retrying with `edit_safe_text_patch` or
+`edit_apply_old_new_patch`. Exact localized changes may use those text tools
+directly; grammar availability does not make an AST query mandatory.
 
 ### Adding a new language (onboarding contract)
 

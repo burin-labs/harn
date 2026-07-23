@@ -4,7 +4,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * The burin compass (`compass_ast_edits`) is a canonical reminder
  * provider that ships opt-in: it stays silent unless a session enables it
  * via `reminders: {providers: ["compass_ast_edits"]}`, at which point it
- * injects its AST-edit steer at session start.
+ * injects balanced edit-mechanism guidance at session start.
  */
 pipeline main() {
   with_llm_script(
