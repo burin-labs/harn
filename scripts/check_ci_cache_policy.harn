@@ -72,6 +72,17 @@ const CACHE_BUDGET_JOB = "cache_budget"
 
 const CACHE_BUDGET_SCRIPT = "./scripts/report_ci_cache_budget.sh"
 
+const CACHE_PRUNE_SCRIPT =
+  "./scripts/prune_ci_cache_generations.sh --family-prefix \"$HARN_CACHE_FAMILY_PREFIX\""
+
+const CACHE_PRUNE_INPUT = "prune-superseded-release-generations"
+
+const RELEASE_CACHE_WORKFLOW = "build-release-binaries.yml"
+
+const RELEASE_CACHE_JOB = "build"
+
+const RELEASE_CACHE_SHARED_KEY = "release-$" + "{{ matrix.target }}"
+
 const CLI_COLD_START_WORKFLOW = "cli-cold-start-budget.yml"
 
 const CLI_COLD_START_JOB = "cold-start-budget"
@@ -264,6 +275,47 @@ fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
   if !(step?.["continue-on-error"] ?? false) {
     errors = errors + ["${ACTION_PATH} must keep cache-service failures non-fatal"]
   }
+  const prune_input = action?.inputs?.[CACHE_PRUNE_INPUT]
+  if trim(to_string(prune_input?.default ?? "")) != "false" {
+    errors = errors + ["${ACTION_PATH} release-generation pruning must default off"]
+  }
+  const pruners = steps.filter({ candidate -> trim(candidate?.run ?? "") == CACHE_PRUNE_SCRIPT })
+    .to_list()
+  if len(pruners) != 1 {
+    errors = errors
+      + ["${ACTION_PATH} must contain one fail-closed release-generation pruning step"]
+  } else {
+    const prune_if = trim(pruners[0]?.if ?? "")
+    if !contains(prune_if, "inputs.${CACHE_PRUNE_INPUT} == 'true'")
+      || !contains(
+      prune_if,
+      "inputs.save == 'true'",
+    )
+      || !contains(prune_if, "github.ref == 'refs/heads/main'") {
+      errors = errors
+        + [
+        "${ACTION_PATH} release-generation pruning must require explicit main-branch save authorization",
+      ]
+    }
+    if pruners[0]?.["continue-on-error"] ?? false {
+      errors = errors
+        + [
+        "${ACTION_PATH} release-generation pruning must fail before the cache writer runs",
+      ]
+    }
+    const expected_prefix = "v0-rust-$" + "{{ inputs.shared-key }}-"
+    const expected_token = "$" + "{{ github.token }}"
+    if trim(pruners[0]?.env?.HARN_CACHE_FAMILY_PREFIX ?? "") != expected_prefix
+      || trim(
+      pruners[0]?.env?.GH_TOKEN ?? "",
+    )
+      != expected_token {
+      errors = errors
+        + [
+        "${ACTION_PATH} release-generation pruning must target the active shared key with the workflow token",
+      ]
+    }
+  }
   return errors
 }
 
@@ -362,6 +414,35 @@ fn cache_budget_reporter_errors(workflows: dict) -> list<string> {
     errors = errors
       + [
       "${CACHE_BUDGET_WORKFLOW}:${CACHE_BUDGET_JOB} must prune superseded release caches",
+    ]
+  }
+  return errors
+}
+
+fn release_cache_retention_errors(workflows: dict) -> list<string> {
+  const job = workflows[RELEASE_CACHE_WORKFLOW]?.jobs?.[RELEASE_CACHE_JOB]
+  if job == nil {
+    return ["${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must define the release cache writer"]
+  }
+  let errors: list<string> = []
+  if trim(job?.permissions?.actions ?? "") != "write" {
+    errors = errors
+      + ["${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must grant actions: write"]
+  }
+  const writers = (job?.steps ?? []).filter(
+    { step ->
+      return step_uses(step) == "./.github/actions/rust-cache"
+        && trim(step?.with?.["shared-key"] ?? "")
+        == RELEASE_CACHE_SHARED_KEY
+    },
+  )
+    .to_list()
+  if len(writers) != 1
+    || lowercase(trim(to_string(writers[0]?.with?.[CACHE_PRUNE_INPUT] ?? "")))
+    != "true" {
+    errors = errors
+      + [
+      "${RELEASE_CACHE_WORKFLOW}:${RELEASE_CACHE_JOB} must prune superseded release generations before saving",
     ]
   }
   return errors
@@ -827,6 +908,7 @@ pub fn ci_cache_policy_errors(
   let errors = cache_action_errors(policy, action)
     + node_cache_action_errors(node_action)
     + cache_budget_reporter_errors(workflows)
+    + release_cache_retention_errors(workflows)
     + cli_cold_start_budget_errors(workflows)
   let observed_writers: list<string> = []
   for workflow in workflows.keys().sorted() {
@@ -850,6 +932,26 @@ pub fn ci_cache_policy_errors(
           if !writer_allowed(policy, workflow, job, shared_key) {
             errors = errors + ["${writer} is not an authorized persistent cache writer"]
           }
+        }
+        const pruning_requested = lowercase(
+          trim(to_string(step?.with?.[CACHE_PRUNE_INPUT] ?? "false")),
+        )
+          == "true"
+        if pruning_requested
+          && !(workflow == RELEASE_CACHE_WORKFLOW
+          && job == RELEASE_CACHE_JOB
+          && trim(step?.with?.["shared-key"] ?? "")
+          == RELEASE_CACHE_SHARED_KEY
+          && writer_allowed(
+          policy,
+          workflow,
+          job,
+          trim(step?.with?.["shared-key"] ?? ""),
+        )) {
+          errors = errors
+            + [
+            "${workflow}:${job} enables release-generation pruning outside its configured writer",
+          ]
         }
       }
     }

@@ -13,7 +13,11 @@ fn policy() -> CiCachePolicy {
     storage_limit_bytes: 10737418240,
     remote_sccache: false,
     writers: [
-      {workflow: "build-release-binaries.yml", job: "build", shared_key: "release-target"},
+      {
+        workflow: "build-release-binaries.yml",
+        job: "build",
+        shared_key: "release-" + gha_expression("matrix.target"),
+      },
       {workflow: "windows-nightly.yml", job: "nextest", shared_key: "workspace-windows"},
     ],
   }
@@ -41,8 +45,19 @@ fn node_action() {
 
 fn action() {
   return {
+    inputs: {"prune-superseded-release-generations": {default: "false"}},
     runs: {
       steps: [
+        {
+          run:
+            "./scripts/prune_ci_cache_generations.sh --family-prefix \"$HARN_CACHE_FAMILY_PREFIX\"",
+          if:
+            "inputs.prune-superseded-release-generations == 'true' && inputs.save == 'true' && github.ref == 'refs/heads/main'",
+          env: {
+            GH_TOKEN: gha_expression("github.token"),
+            HARN_CACHE_FAMILY_PREFIX: "v0-rust-" + gha_expression("inputs.shared-key") + "-",
+          },
+        },
         {
           uses: "actions/cache/restore@exact-pin",
           if: "inputs.broad-restore-prefix != ''",
@@ -72,11 +87,13 @@ fn workflows() {
     "build-release-binaries.yml": {
       jobs: {
         build: {
+          permissions: {actions: "write", contents: "write"},
           steps: [
             {
               uses: "./.github/actions/rust-cache",
               with: {
-                "shared-key": "release-target",
+                "shared-key": "release-" + gha_expression("matrix.target"),
+                "prune-superseded-release-generations": true,
                 save: gha_expression("needs.setup.outputs.build_mode == 'warm'"),
               },
             },
@@ -162,7 +179,14 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
         test: {
           steps: [
             {uses: "Swatinem/rust-cache@floating"},
-            {uses: "./.github/actions/rust-cache", with: {"shared-key": "rogue", save: true}},
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {
+                "shared-key": "rogue",
+                "prune-superseded-release-generations": true,
+                save: true,
+              },
+            },
             {uses: "actions/setup-node@floating", with: {cache: "npm"}},
             {uses: "actions/cache/save@floating"},
             {uses: "docker/build-push-action@floating", with: {"cache-to": "type=gha"}},
@@ -177,6 +201,9 @@ pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(
   )
   assert(errors.contains("ci.yml:test bypasses ./.github/actions/rust-cache"))
   assert(errors.contains("ci.yml:test:rogue is not an authorized persistent cache writer"))
+  assert(
+    errors.contains("ci.yml:test enables release-generation pruning outside its configured writer"),
+  )
   assert(
     errors.contains("ci.yml:test bypasses ./.github/actions/node-cache with setup-node caching"),
   )
@@ -226,10 +253,11 @@ pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(task
       ...valid_action.runs,
       steps: [
         valid_action.runs.steps[0],
+        valid_action.runs.steps[1],
         {
-          ...valid_action.runs.steps[1],
+          ...valid_action.runs.steps[2],
           with: {
-            ...valid_action.runs.steps[1]?.with ?? {},
+            ...valid_action.runs.steps[2]?.with ?? {},
             "shared-key": gha_expression("inputs.shared-key"),
             key: gha_expression("inputs.source-key"),
           },
@@ -295,6 +323,36 @@ pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {
   const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
   assert(
     errors.contains("build-release-binaries.yml:cache_budget must fail when cache telemetry fails"),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_unbounded_release_writer(task) {
+  const bounded = workflows()["build-release-binaries.yml"].jobs.build
+  const release_cache = bounded.steps[0]
+  const invalid = {
+    ...workflows(),
+    "build-release-binaries.yml": {
+      jobs: {
+        build: {
+          ...bounded,
+          permissions: {actions: "read", contents: "write"},
+          steps: [
+            {
+              ...release_cache,
+              with: {...release_cache.with, "prune-superseded-release-generations": false},
+            },
+          ],
+        },
+        cache_budget: workflows()["build-release-binaries.yml"].jobs.cache_budget,
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+  assert(errors.contains("build-release-binaries.yml:build must grant actions: write"))
+  assert(
+    errors.contains(
+      "build-release-binaries.yml:build must prune superseded release generations before saving",
+    ),
   )
 }
 

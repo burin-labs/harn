@@ -21,6 +21,10 @@ inputs:
     description: Optional same-version cache key prefix to restore before the precise Swatinem key.
     required: false
     default: ""
+  prune-superseded-release-generations:
+    description: Retain one prior generation for this release target before an authorized save.
+    required: false
+    default: "false"
   save:
     description: Request a persistent save; non-main refs remain restore-only.
     required: false
@@ -34,6 +38,14 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Prune superseded release cache generations
+      if: inputs.prune-superseded-release-generations == 'true' && inputs.save == 'true' && github.ref == 'refs/heads/main'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ inputs.shared-key }}-
+      run: ./scripts/prune_ci_cache_generations.sh --family-prefix "$HARN_CACHE_FAMILY_PREFIX"
+
     - name: Restore broad Rust cache fallback
       if: inputs.broad-restore-prefix != ''
       uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
