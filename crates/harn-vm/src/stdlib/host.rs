@@ -12,7 +12,11 @@ use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 mod operation_registry;
+mod process_dispatch;
 pub(crate) mod turn_cache;
+
+use process_dispatch::dispatch_process_exec_with_policy;
+pub(crate) use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
 
 /// Audited wrapper for `chrono::Utc::now().to_rfc3339()`. Routes through
 /// the testbench leak audit so a paused-clock session can surface every
@@ -969,62 +973,6 @@ async fn dispatch_builtin_host_operation(
             format!("host_call: unsupported operation {capability}.{operation}"),
         )))),
     }
-}
-
-pub(crate) async fn dispatch_process_exec(
-    params: &crate::value::DictMap,
-    caller: serde_json::Value,
-) -> Result<VmValue, VmError> {
-    dispatch_process_exec_with_policy(None, params, caller).await
-}
-
-async fn dispatch_process_exec_with_policy(
-    ctx: Option<&AsyncBuiltinCtx>,
-    params: &crate::value::DictMap,
-    caller: serde_json::Value,
-) -> Result<VmValue, VmError> {
-    let (params, command_policy_context, command_policy_decisions) =
-        match crate::orchestration::run_command_policy_preflight_with_ctx(ctx, params, caller)
-            .await?
-        {
-            crate::orchestration::CommandPolicyPreflight::Proceed {
-                params,
-                context,
-                decisions,
-            } => (params, context, decisions),
-            crate::orchestration::CommandPolicyPreflight::Blocked {
-                status,
-                message,
-                context,
-                decisions,
-            } => {
-                return Ok(crate::orchestration::blocked_command_response(
-                    params, status, &message, context, decisions,
-                ));
-            }
-        };
-
-    let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone());
-    if let Some(bridge) = bridge {
-        if let Some(value) = bridge.dispatch("process", "exec", &params)? {
-            return crate::orchestration::run_command_policy_postflight_with_ctx(
-                ctx,
-                &params,
-                value,
-                command_policy_context,
-                command_policy_decisions,
-            )
-            .await;
-        }
-    }
-
-    dispatch_process_exec_after_policy(
-        ctx,
-        &params,
-        command_policy_context,
-        command_policy_decisions,
-    )
-    .await
 }
 
 /// Apply the command-policy preflight (deny-patterns, approval gating,

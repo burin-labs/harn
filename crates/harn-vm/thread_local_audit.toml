@@ -378,6 +378,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/orchestration/policy/operator_grant.rs"
+statics = ["OPERATOR_APPROVAL_GRANT_STACK"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/orchestration/settlement_agent.rs"
 statics = ["SETTLEMENT_AGENT_ACTIVE"]
 category = "logical_task"

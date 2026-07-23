@@ -35,6 +35,21 @@ use reporting::{
 };
 
 pub(crate) async fn run_command(args: TestArgs) {
+    let operator_approval_grant =
+        harn_vm::orchestration::OperatorApprovalGrant::from_cli_operations(
+            args.approve_risky.clone(),
+        )
+        .unwrap_or_else(|error| command_error(&error));
+    if operator_approval_grant.is_some()
+        && (args.determinism
+            || args.evals
+            || matches!(
+                args.target.as_deref(),
+                Some("agents-conformance" | "conformance" | "protocols")
+            ))
+    {
+        command_error("--approve-risky is supported only for user-test execution");
+    }
     if args.watch && (args.junit.is_some() || args.json_out.is_some()) {
         command_error(
             "`harn test --watch` cannot combine with --junit or --json-out; the watch loop never terminates so the report would never be written",
@@ -85,7 +100,7 @@ pub(crate) async fn run_command(args: TestArgs) {
     } else if args.determinism {
         run_determinism_command(args, shard_requested).await;
     } else {
-        run_standard_command(args).await;
+        run_standard_command(args, operator_approval_grant).await;
     }
 }
 
@@ -189,7 +204,10 @@ async fn run_determinism_command(args: TestArgs, shard_requested: bool) {
     }
 }
 
-async fn run_standard_command(args: TestArgs) {
+async fn run_standard_command(
+    args: TestArgs,
+    operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
+) {
     let cli_skill_dirs: Vec<PathBuf> = args.skill_dir.iter().map(PathBuf::from).collect();
     if args.record {
         harn_vm::llm::set_replay_mode(harn_vm::llm::LlmReplayMode::Record, ".harn-fixtures");
@@ -218,18 +236,23 @@ async fn run_standard_command(args: TestArgs) {
         } else if args.selection.is_some() {
             command_error("only `harn test conformance` accepts a second positional target");
         } else {
-            run_user_test_target(t, &args, &cli_skill_dirs).await;
+            run_user_test_target(t, &args, &cli_skill_dirs, operator_approval_grant).await;
         }
     } else {
         let test_dir = default_test_dir_or_exit();
         if args.selection.is_some() {
             command_error("only `harn test conformance` accepts a second positional target");
         }
-        run_user_test_target(&test_dir, &args, &cli_skill_dirs).await;
+        run_user_test_target(&test_dir, &args, &cli_skill_dirs, operator_approval_grant).await;
     }
 }
 
-async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[PathBuf]) {
+async fn run_user_test_target(
+    path: &str,
+    args: &TestArgs,
+    cli_skill_dirs: &[PathBuf],
+    operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
+) {
     let run_args = UserTestRunArgs {
         filter: args.filter.as_deref(),
         timeout_ms: args.timeout,
@@ -243,6 +266,7 @@ async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[Pat
         timing: args.timing,
         diagnose: args.diagnose,
         cli_skill_dirs,
+        operator_approval_grant,
     };
     if args.watch {
         watch::run(path, run_args).await;
@@ -317,7 +341,7 @@ impl UserTestReportConfig<'_> {
 /// Per-invocation knobs for `harn test <dir>` and `harn test --watch`.
 /// Bundled so call sites share one parameter shape and the runner
 /// signatures stay readable as new flags accrete.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct UserTestRunArgs<'a> {
     pub filter: Option<&'a str>,
     pub timeout_ms: u64,
@@ -331,6 +355,7 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub timing: bool,
     pub diagnose: bool,
     pub cli_skill_dirs: &'a [PathBuf],
+    pub operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
 }
 
 fn normalize_expected_output(text: &str) -> String {
@@ -480,7 +505,13 @@ async fn run_user_tests_once_with_session(
         progress: Some(user_test_progress(args.verbose)),
         diagnose: args.diagnose,
     };
-    let summary = test_runner::run_tests_with_session(path, &options, session).await;
+    let summary = test_runner::run_tests_with_session_and_operator_grant(
+        path,
+        &options,
+        session,
+        args.operator_approval_grant.as_ref(),
+    )
+    .await;
     print_test_results(
         &summary,
         UserTestOutputOptions {

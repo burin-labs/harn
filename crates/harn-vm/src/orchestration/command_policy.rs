@@ -79,6 +79,19 @@ pub enum CommandPolicyPreflight {
     },
 }
 
+/// How a command reached the process-policy boundary.
+///
+/// The reviewed structured-git path is deliberately separate from ordinary
+/// `process.exec`: its arguments were constructed by `stdlib.git`, its lease
+/// was checked against the remote, and its risky operation was approved before
+/// this final process dispatch. It may bypass only the generic text classifier's
+/// force-push catastrophe; every configured policy rule still applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommandDispatchOrigin {
+    ArbitraryProcess,
+    ReviewedGitPushWithLease,
+}
+
 struct HookDepthGuard;
 
 impl Drop for HookDepthGuard {
@@ -264,6 +277,21 @@ pub async fn run_command_policy_preflight_with_ctx(
     params: &crate::value::DictMap,
     caller: JsonValue,
 ) -> Result<CommandPolicyPreflight, VmError> {
+    run_command_policy_preflight_with_origin(
+        ctx,
+        params,
+        caller,
+        CommandDispatchOrigin::ArbitraryProcess,
+    )
+    .await
+}
+
+pub(crate) async fn run_command_policy_preflight_with_origin(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    params: &crate::value::DictMap,
+    caller: JsonValue,
+    origin: CommandDispatchOrigin,
+) -> Result<CommandPolicyPreflight, VmError> {
     let Some(policy) = current_command_policy() else {
         // No `command_policy` is on the stack. The catastrophic floor still
         // applies as a universal backstop — a bare `host_process_exec` must not
@@ -278,7 +306,8 @@ pub async fn run_command_policy_preflight_with_ctx(
         // closed here too.
         let default_policy = CommandPolicy::default();
         let context = command_context_json(params, &default_policy, caller);
-        let scan = command_risk_scan_json(&context, None);
+        let mut scan = command_risk_scan_json(&context, None);
+        exempt_reviewed_git_push_lease_from_catastrophic_floor(&mut scan, origin);
         let is_catastrophic = scan
             .get("catastrophic_reason")
             .and_then(|value| value.as_str())
@@ -323,7 +352,8 @@ pub async fn run_command_policy_preflight_with_ctx(
     let mut context = command_context_json(&current_params, &policy, caller);
     let mut decisions = Vec::new();
     let mut rewritten_by_hook = false;
-    let scan = command_risk_scan_json(&context, Some(&policy));
+    let mut scan = command_risk_scan_json(&context, Some(&policy));
+    exempt_reviewed_git_push_lease_from_catastrophic_floor(&mut scan, origin);
     if let Some(labels) = scan.get("risk_labels").and_then(|value| value.as_array()) {
         let labels = labels
             .iter()
@@ -538,7 +568,12 @@ pub async fn run_command_policy_preflight_with_ctx(
     }
 
     if rewritten_by_hook {
-        let scan = command_risk_scan_json(&context, Some(&policy));
+        let mut scan = command_risk_scan_json(&context, Some(&policy));
+        // The host validates a reviewed structured-git argv again after this
+        // preflight returns. Preserve the narrow exemption only until that
+        // second validation; a hook cannot turn a lease push into arbitrary
+        // process execution.
+        exempt_reviewed_git_push_lease_from_catastrophic_floor(&mut scan, origin);
         // Re-apply the never-approvable floor to the rewritten command: a
         // pre-hook rewrite must not be able to smuggle a catastrophic command
         // past the floor.
@@ -624,6 +659,39 @@ pub async fn run_command_policy_preflight_with_ctx(
         context,
         decisions,
     })
+}
+
+/// The universal classifier intentionally treats every textual force push as
+/// catastrophic. A structured `git.push` with an exact lease is not an
+/// arbitrary textual command: the builtin validated the operation before this
+/// dispatch and its caller must still satisfy all configured policy rules.
+///
+/// Remove only the classifier's synthetic `catastrophic` fact. Keep
+/// `git_force_push` so a caller's explicit `deny_labels` or approval policy can
+/// still reject or gate the operation. After policy hooks run, the host
+/// revalidates the exact argv before dispatch.
+fn exempt_reviewed_git_push_lease_from_catastrophic_floor(
+    scan: &mut JsonValue,
+    origin: CommandDispatchOrigin,
+) {
+    if origin != CommandDispatchOrigin::ReviewedGitPushWithLease {
+        return;
+    }
+    let has_git_force_push = risk_labels_from_scan(scan)
+        .iter()
+        .any(|label| label == "git_force_push");
+    if !has_git_force_push {
+        return;
+    }
+    if let Some(object) = scan.as_object_mut() {
+        object.remove("catastrophic_reason");
+        if let Some(labels) = object
+            .get_mut("risk_labels")
+            .and_then(JsonValue::as_array_mut)
+        {
+            labels.retain(|label| label.as_str() != Some("catastrophic"));
+        }
+    }
 }
 
 pub async fn run_command_policy_postflight(

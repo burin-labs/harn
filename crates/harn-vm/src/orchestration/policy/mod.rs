@@ -3,6 +3,7 @@
 mod approval_rules;
 mod effects;
 mod nested_budget;
+mod operator_grant;
 mod types;
 
 use crate::value::VmDictExt;
@@ -31,6 +32,13 @@ pub use nested_budget::{
     annotate_nested_execution_options, enter_nested_execution_policy, NestedExecutionGuard,
     NestedExecutionKind, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,
 };
+pub(crate) use operator_grant::{
+    clear_operator_approval_grants, swap_operator_approval_grant_stack,
+};
+pub use operator_grant::{
+    current_operator_approval_grant, install_operator_approval_grant, OperatorApprovalGrant,
+    OperatorApprovalGrantGuard,
+};
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
     ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy, JoinPolicy,
@@ -58,6 +66,7 @@ pub fn pop_execution_policy() {
 pub fn clear_execution_policy_stacks() {
     EXECUTION_POLICY_STACK.with(|stack| stack.borrow_mut().clear());
     EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow_mut().clear());
+    clear_operator_approval_grants();
     TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| *depth.borrow_mut() = 0);
 }
 

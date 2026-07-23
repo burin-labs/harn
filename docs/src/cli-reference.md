@@ -18,6 +18,7 @@ harn run --profile --profile-json profile.json <file.harn>
 harn run -e 'log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
+harn run --approve-risky git.push release.harn
 harn run --no-sandbox <file.harn>
 harn run --write-root /path/to/output main.harn
 harn run --read-only-root /path/to/other-repo main.harn
@@ -41,6 +42,7 @@ harn run --resume .harn/workers/worker_...json
 | `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
+| `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-network` | Permit spawned commands to open network sockets while retaining the worktree filesystem/process sandbox |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
@@ -62,6 +64,10 @@ harn run --resume .harn/workers/worker_...json
 | `--rusage-fd <fd>` | Write `--emit-rusage-json` output to an already-open Unix file descriptor |
 | `--allow-unsigned` | When running a `.harnpack`, accept bundles that carry no Ed25519 signature (local-dev override) |
 | `--dry-run-verify` | When running a `.harnpack`, verify the signature and replay into the cache without executing the entrypoint |
+
+`--approve-risky` is explicit operator authority, not pipeline configuration. It
+records a receipt on the protected operation and never relaxes the generic
+`process.exec` safety floor or configured command-policy rules.
 
 ### `--json` event stream
 
@@ -407,6 +413,7 @@ harn test tests/ --record              # record LLM fixtures
 harn test tests/ --replay              # replay LLM fixtures
 harn test tests/ --coverage            # print per-file line coverage
 harn test tests/ --coverage-out lcov.info  # also write an LCOV tracefile
+harn test --approve-risky git.push tests/release_branch_push.harn
 harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 ```
 
@@ -429,6 +436,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
 | `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly. A failing user test's captured output is included as `<system-out>` |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000). For user suites, setup is measured separately and does not consume the pipeline-execution budget; other targets bound their test case or subprocess |
+| `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for user-test execution; repeatable (for example `git.push`) |
 | `--max-test-ms <ms>` | Fail a passing test whose total setup + execution wall time exceeds the budget |
 | `--max-execute-ms <ms>` | Fail a passing test whose measured execution phase exceeds the performance budget |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
