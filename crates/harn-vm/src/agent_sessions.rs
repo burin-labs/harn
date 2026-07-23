@@ -381,12 +381,17 @@ pub fn set_transcript_budget_policy(
     })
 }
 
-/// Clear the session store. Wired into `reset_llm_state` for test isolation.
+/// Clear the calling thread's session store and its process-global sidecars.
 pub fn reset_session_store() {
-    SESSIONS.with(|s| s.borrow_mut().clear());
-    CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
+    let mut owned_session_ids: HashSet<String> =
+        SESSIONS.with(|s| s.borrow_mut().drain().map(|(id, _)| id).collect());
+    CURRENT_SESSION_STACK.with(|stack| {
+        owned_session_ids.extend(stack.borrow_mut().drain(..));
+    });
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
-    clear_all_session_changed_paths();
+    for session_id in owned_session_ids {
+        clear_session_changed_paths(&session_id);
+    }
     reset_default_transcript_budget_policy();
 }
 
@@ -761,6 +766,7 @@ pub fn open_or_create_with_actor_chain(
         .clone()
         .or_else(|| parent_session.as_deref().and_then(actor_chain));
     let mut was_new = false;
+    let mut evicted = None;
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         if let Some(state) = map.get_mut(&resolved) {
@@ -779,13 +785,20 @@ pub fn open_or_create_with_actor_chain(
                 .map(|(id, _)| id.clone())
             {
                 map.remove(&victim);
+                evicted = Some(victim);
             }
         }
         let mut state = SessionState::new(resolved.clone());
         state.actor_chain = inherited_actor_chain.clone();
         map.insert(resolved.clone(), state);
     });
+    if let Some(evicted) = evicted {
+        clear_session_changed_paths(&evicted);
+    }
     if was_new {
+        // A prior owner may have been abandoned before its receipt drained.
+        // Opening a fresh session with the same id starts a fresh receipt.
+        clear_session_changed_paths(&resolved);
         if let Some(parent) = parent_session.as_deref() {
             crate::agent_events::mirror_session_sinks(parent, &resolved);
         }
@@ -897,9 +910,10 @@ pub fn register_event_log_sink(session_id: &str) {
 }
 
 pub fn close(id: &str) {
-    SESSIONS.with(|s| {
-        s.borrow_mut().remove(id);
-    });
+    let removed = SESSIONS.with(|s| s.borrow_mut().remove(id).is_some());
+    if removed {
+        clear_session_changed_paths(id);
+    }
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
     // happens to reuse the same id.

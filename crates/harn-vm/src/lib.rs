@@ -746,11 +746,13 @@ mod reset_leak_tests {
     /// reusing the id would report writes it never made.
     #[test]
     fn reset_drains_session_changed_paths() {
-        agent_sessions::record_session_changed_path("sess-leak", "/tmp/written-by-a-dead-run.txt");
-        assert!(!agent_sessions::session_changed_paths("sess-leak").is_empty());
+        let session = "sess-leak";
+        agent_sessions::open_or_create(Some(session.to_string()));
+        agent_sessions::record_session_changed_path(session, "/tmp/written-by-a-dead-run.txt");
+        assert!(!agent_sessions::session_changed_paths(session).is_empty());
         reset_thread_local_state();
         assert!(
-            agent_sessions::session_changed_paths("sess-leak").is_empty(),
+            agent_sessions::session_changed_paths(session).is_empty(),
             "a receipt must not inherit an abandoned session's writes"
         );
     }
