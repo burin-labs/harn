@@ -30,7 +30,7 @@ fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
   // walk_dir returns a flat list of {path, is_dir, is_file, depth}. We
   // only emit `.harn` files. Walk order is stable per the builtin
   // contract; we sort + dedupe afterwards to match the Rust impl which
-  // calls `files.sort(); files.dedup();`.
+  // calls `files.sorted(); files.dedup();`.
   //
   // The Rust collect_harn_files() (crates/harn-cli/src/commands/mod.rs)
   // also drops files with a sibling `<name>.conformance-skip` marker;
@@ -50,15 +50,15 @@ fn __collect_harn_files(harness: Harness, root: string) -> list<string> {
     if harness.fs.exists(skip_marker) {
       continue
     }
-    files = files.push(path)
+    files = files.appending(path)
   }
-  const sorted = files.sort()
+  const sorted = files.sorted()
   // dedupe stable-sorted list: keep entry when it differs from previous.
   let out = []
   let prev = ""
   for path in sorted {
     if path != prev || len(out) == 0 {
-      out = out.push(path)
+      out = out.appending(path)
     }
     prev = path
   }
@@ -113,8 +113,8 @@ fn __spawn_precompile(
   // shape is preserved when this port becomes the default.
   let args = ["precompile", "--quiet", source_path]
   if per_file_out != "" {
-    args = args.push("--out")
-    args = args.push(per_file_out)
+    args = args.appending("--out")
+    args = args.appending(per_file_out)
   }
   const env = {HARN_PRECOMPILE_INNER: "1"}
   return harness.process.spawn_captured({cmd: bin, args: args, env: env})

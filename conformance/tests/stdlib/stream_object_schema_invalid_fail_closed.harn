@@ -8,7 +8,7 @@ pipeline default() {
   }
   let emitted = []
   for obj in stream_object(["{\"name\":\"Ada\",\"age\":\"not-an-int\"}"], schema) {
-    emitted = emitted.push(obj)
+    emitted = emitted.appending(obj)
   }
   __io_println(len(emitted))
 }

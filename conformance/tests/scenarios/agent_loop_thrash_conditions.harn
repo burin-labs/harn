@@ -169,7 +169,7 @@ pipeline default() {
     } else {
       "B"
     }
-    pingpong_steps = pingpong_steps.push(
+    pingpong_steps = pingpong_steps.appending(
       {calls: call(name, {}), prev: ok_dispatch(name, "obs-" + to_string(i))},
     )
   }

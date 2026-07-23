@@ -12,41 +12,41 @@ struct Basket {
  * so a same-named call must not be flagged.
  */
 impl Basket {
-  fn push(self, item: int) -> Basket {
-    return Basket {items: self.items.push(item)}
+  fn appending(self, item: int) -> Basket {
+    return Basket {items: self.items.appending(item)}
   }
 }
 
 pipeline test(task) {
   // Assigning the result back is the correct spelling, and is never flagged.
   let built = []
-  built = built.push(1)
-  assert_eq(built.count, 1, "assigned-back push is allowed")
+  built = built.appending(1)
+  assert_eq(built.count, 1, "assigned-back appending is allowed")
   // An explicit discard documents that only the effect/error is wanted.
-  const _ = [1, 2].sort()
+  const _ = [1, 2].sorted()
   // A closure argument can carry effects, so the call is not provably inert.
   const seen = [1, 2]
   seen.map({ x -> x * 2 })
   // A user `impl` method of the same name is not the built-in.
   const basket = Basket {items: []}
-  basket.push(1)
+  basket.appending(1)
   // Tail of a value-producing block: the value IS the block's result.
-  const from_closure = { -> [3, 1, 2].sort() }
+  const from_closure = { -> [3, 1, 2].sorted() }
   assert_eq(from_closure()[0], 1, "closure tail is a value, not a discard")
   const from_match = match 1 {
-    1 -> { [3, 1, 2].sort() }
+    1 -> { [3, 1, 2].sorted() }
     _ -> { [] }
   }
   assert_eq(from_match[0], 1, "match arm tail is a value, not a discard")
   const truthy = [1].count == 1
   const from_if = if truthy {
-    [3, 1, 2].sort()
+    [3, 1, 2].sorted()
   } else {
     []
   }
   assert_eq(from_if[0], 1, "if branch tail is a value, not a discard")
   const from_try = try {
-    [3, 1, 2].sort()
+    [3, 1, 2].sorted()
   } catch (e) {
     []
   }

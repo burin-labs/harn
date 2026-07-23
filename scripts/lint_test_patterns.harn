@@ -709,7 +709,7 @@ fn report_pattern(
 /** Load `{rel, text}` records for each repo-relative path, sorted. */
 fn load_files(rels: list<string>) -> list {
   let out: list = []
-  for rel in rels.sort() {
+  for rel in rels.sorted() {
     out = out + [{rel: rel, text: harness.fs.read_text(rel)}]
   }
   return out

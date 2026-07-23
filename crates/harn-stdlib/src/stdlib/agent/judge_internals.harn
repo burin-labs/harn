@@ -273,7 +273,7 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
       all_ok = false
       const finding = to_string(verdict?.findings ?? "")
       if finding != "" {
-        findings = findings.push(finding)
+        findings = findings.appending(finding)
       }
     }
   }

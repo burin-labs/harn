@@ -60,7 +60,7 @@ fn __edit_lifecycle_rejection(kind, verdict) {
 fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
   const reason = rejection?.reason ?? (kind + " rejected the edit")
   const code = rejection?.code ?? (kind + "_rejected")
-  return (fields ?? {}).merge(
+  return (fields ?? {}).merging(
     {
       result: "rejected",
       errors: [
@@ -79,7 +79,7 @@ fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
 
 fn __edit_lifecycle_pre_apply(options, action) {
   const hooks = __edit_lifecycle_hooks(options)
-  const request = (options ?? {}).merge({action: action})
+  const request = (options ?? {}).merging({action: action})
   if !__edit_hook_callable(hooks.pre_apply) {
     return {ok: true, request: request}
   }
@@ -167,9 +167,9 @@ fn __edit_lifecycle_snapshot(path, options) {
   const snapshot_id = "post-apply-" + uuid_v7()
   let request: dict = {session_id: session_id, scope_id: snapshot_id, paths: [path]}
   if options?.snapshot_root != nil {
-    request = request.merge({root: options.snapshot_root})
+    request = request.merging({root: options.snapshot_root})
   } else if options?.root != nil {
-    request = request.merge({root: options.root})
+    request = request.merging({root: options.root})
   }
   const captured = try {
     hostlib_fs_snapshot(request)
@@ -314,7 +314,7 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
       caller: ctx.options?.provenance,
     },
   }
-  return base.merge(extra)
+  return base.merging(extra)
 }
 
 /**
@@ -432,7 +432,7 @@ pub fn edit_safe_text_patch(params) {
   let idx = 0
   while idx < len(hunks) {
     const hunk = hunks[idx]
-    const hunk_opts = match_options.merge(hunk?.options ?? {})
+    const hunk_opts = match_options.merging(hunk?.options ?? {})
     const outcome = edit_apply_old_new_patch(working, hunk?.old_text, hunk?.new_text, hunk_opts)
     hunk_results = hunk_results + [outcome]
     if !outcome.ok {
@@ -517,7 +517,7 @@ pub fn edit_safe_text_patch(params) {
   if commit_result == "stale_base" {
     __edit_lifecycle_drop_snapshot(rollback_snapshot)
     return __edit_safe_patch_result(
-      ctx.merge({current_hash: committed_hash}),
+      ctx.merging({current_hash: committed_hash}),
       {
         result: "stale_base",
         after_sha256: committed_after,
@@ -553,7 +553,7 @@ pub fn edit_safe_text_patch(params) {
       committed_after
     }
     return __edit_safe_patch_result(
-      ctx.merge({current_hash: rollback_hash}),
+      ctx.merging({current_hash: rollback_hash}),
       __edit_lifecycle_reject_fields(
         "post_apply",
         post.rejection,
@@ -569,7 +569,7 @@ pub fn edit_safe_text_patch(params) {
   }
   __edit_lifecycle_drop_snapshot(rollback_snapshot)
   return __edit_safe_patch_result(
-    ctx.merge({current_hash: committed_hash}),
+    ctx.merging({current_hash: committed_hash}),
     {
       result: commit_result,
       after_sha256: committed_after,

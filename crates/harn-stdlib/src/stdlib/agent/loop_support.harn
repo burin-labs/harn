@@ -297,7 +297,7 @@ pub fn __agent_loop_build_turn_prompt(session, opts, iteration) {
       const fragments = agent_build_turn_system_fragments(session, effective, iteration)
       let parts = []
       for fragment in fragments {
-        parts = parts.push(fragment.body)
+        parts = parts.appending(fragment.body)
       }
       return {
         fragments: fragments,

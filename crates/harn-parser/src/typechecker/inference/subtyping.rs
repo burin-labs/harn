@@ -722,7 +722,7 @@ impl TypeChecker {
             // back as `int` through the original `list<int>` — requires *shared*
             // mutable aliasing, which Harn does not have: values have copy
             // semantics, so binding or passing a list hands over an independent
-            // copy (`let b = a; b[0] = x` leaves `a` untouched) and `push` is a
+            // copy (`let b = a; b[0] = x` leaves `a` untouched) and `appending` is a
             // functional operation that yields a new list. With no aliasing a
             // widening read is always sound, so `list` widens exactly like the
             // read-only `iter`/`generator`/`stream` sequences below.

@@ -3577,20 +3577,19 @@ A `list` / `dict` / `set` / `string` method was called as a statement and its
 result thrown away, so the call has no effect at all.
 
 Every method on Harn's built-in collections is **pure**. They are persistent,
-copy-on-write values: `push` clones the receiver, appends, and returns a *new*
-list. It never modifies the receiver.
+copy-on-write values: `appending` clones the receiver, adds an item, and
+returns a *new* list. It never modifies the receiver.
 
 ```harn
 const l = []
-l.push(1)      // error[HARN-LNT-066]: no effect — `l` is still []
-l.push(2)      // error[HARN-LNT-066]
+l.appending(1)      // error[HARN-LNT-066]: no effect — `l` is still []
+l.appending(2)      // error[HARN-LNT-066]
 // l == []
 ```
 
-This reads as a mutation to anyone arriving from Python, JavaScript, or Ruby,
-where `push`/`append` modify the list in place. In Harn it is dead code, and
-without this diagnostic it is invisible: the program typechecks cleanly, runs
-without error, and quietly builds an empty list.
+The method name reads as a value-producing operation, but its result still has
+to be consumed. Without this diagnostic, discarding it would typecheck, run
+without error, and quietly build an empty list.
 
 #### How to fix
 
@@ -3600,8 +3599,8 @@ this binding's value never changes):
 
 ```harn
 let l = []
-l = l.push(1)
-l = l.push(2)
+l = l.appending(1)
+l = l.appending(2)
 // l == [1, 2]
 ```
 
@@ -3610,7 +3609,7 @@ When building a collection in a loop, the same shape applies:
 ```harn
 let out = []
 for item in items {
-  out = out.push(transform(item))
+  out = out.appending(transform(item))
 }
 ```
 

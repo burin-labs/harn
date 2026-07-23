@@ -264,7 +264,7 @@ pub fn __intra_turn_push_resource_key(keys, value) {
   if contains(keys, key) {
     return keys
   }
-  return keys.push(key)
+  return keys.appending(key)
 }
 
 pub fn __intra_turn_push_resource_value(keys, value) {
@@ -338,7 +338,7 @@ pub fn __intra_turn_arg_value(args, aliases, name) {
     return args[raw_name]
   }
   if type_of(aliases) == "dict" {
-    for alias in aliases.keys().sort() {
+    for alias in aliases.keys().sorted() {
       if to_string(aliases[alias]) == raw_name && args[alias] != nil {
         return args[alias]
       }
@@ -386,7 +386,7 @@ pub fn __intra_turn_dependency_target_ranges(resource_keys, args, annotations) {
       continue
     }
     for key in resource_keys {
-      ranges = ranges.push({resource_key: key, start: range.start, end: range.end})
+      ranges = ranges.appending({resource_key: key, start: range.start, end: range.end})
     }
   }
   return ranges
@@ -402,7 +402,7 @@ pub fn __intra_turn_dependency_key_components(args, annotations) {
       if type_of(value) == "string" && trim(value) == "" {
         continue
       }
-      components = components.push({name: name, value: value})
+      components = components.appending({name: name, value: value})
     }
   }
   return components
@@ -416,7 +416,7 @@ pub fn __intra_turn_dependency_target_keys(resource_keys, args, annotations) {
   const digest = substring(sha256(json_stringify(components)), 0, 24)
   let keys = []
   for key in resource_keys {
-    keys = keys.push(key + "#target:" + digest)
+    keys = keys.appending(key + "#target:" + digest)
   }
   return keys
 }
@@ -759,13 +759,13 @@ pub fn __audit_flushes_from_result(result) {
   let flushes = []
   const single = result?._audit_flush
   if __callable(single) {
-    flushes = flushes.push(single)
+    flushes = flushes.appending(single)
   }
   const many = result?._audit_flushes
   if type_of(many) == "list" {
     for flush in many {
       if __callable(flush) {
-        flushes = flushes.push(flush)
+        flushes = flushes.appending(flush)
       }
     }
   }
@@ -776,7 +776,7 @@ pub fn __collect_audit_flushes(dispatch) {
   let flushes = []
   for result in __dispatch_results_list(dispatch) {
     for flush in __audit_flushes_from_result(result) {
-      flushes = flushes.push(flush)
+      flushes = flushes.appending(flush)
     }
   }
   return flushes
@@ -799,7 +799,7 @@ pub fn __strip_internal_dispatch(dispatch) {
   if type_of(dispatch) == "list" {
     let clean_results = []
     for result in dispatch {
-      clean_results = clean_results.push(__strip_internal_tool_result(result))
+      clean_results = clean_results.appending(__strip_internal_tool_result(result))
     }
     return clean_results
   }
@@ -815,7 +815,7 @@ pub fn __strip_internal_dispatch(dispatch) {
   if type_of(dispatch?.results) == "list" {
     let clean_results = []
     for result in dispatch.results {
-      clean_results = clean_results.push(__strip_internal_tool_result(result))
+      clean_results = clean_results.appending(__strip_internal_tool_result(result))
     }
     clean_dispatch = clean_dispatch + {results: clean_results}
   }
@@ -830,7 +830,7 @@ pub fn __spawn_audit_flushes(tasks, flushes) {
         flush()
       }
     }
-    out = out.push(task)
+    out = out.appending(task)
   }
   return out
 }
@@ -952,7 +952,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
           skipped_suffix_count,
         )
         __emit_synthetic_tool_lifecycle_finish(call, blocked, tools, options)
-        results = results.push(blocked)
+        results = results.appending(blocked)
         continue
       }
       if fanout_cap > 0 && capped_call_signature != nil
@@ -962,13 +962,13 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         if !collapsed_emitted {
           const collapsed = __intra_turn_collapsed_result(call, capped_sample)
           __emit_synthetic_tool_lifecycle_finish(call, collapsed, tools, options)
-          results = results.push(collapsed)
+          results = results.appending(collapsed)
           collapsed_emitted = true
         }
         continue
       }
       const result = __invoke_tool_with_index(call, index, tools, options)
-      results = results.push(result)
+      results = results.appending(result)
       // Poison this resource for later same-resource siblings only when the
       // execution boundary cannot prove the failure was a no-op. A structured
       // `mutation_status: "not_applied"` leaves the view byte-identical, so an
@@ -978,7 +978,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         && __intra_turn_failure_poisons_resource(
         result,
       ) {
-        failed_resource_guards = failed_resource_guards.push(
+        failed_resource_guards = failed_resource_guards.appending(
           __intra_turn_failed_guard_record(call, index, resource_guard, result),
         )
       }
@@ -1013,7 +1013,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   }
   let indexed = []
   for (index, call) in iter(tool_calls).enumerate() {
-    indexed = indexed.push({index: index, call: call})
+    indexed = indexed.appending({index: index, call: call})
   }
   const settled = parallel settle indexed with { max_concurrent: cap } { entry ->
     __invoke_tool_with_index(entry.call, entry.index, tools, options)
@@ -1021,7 +1021,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   let results = []
   for r in settled.results {
     if is_ok(r) {
-      results = results.push(unwrap(r))
+      results = results.appending(unwrap(r))
     } else {
       // `__invoke_tool` traps its own middleware exceptions, so a thrown
       // value here is a VM-level bug (e.g. parallel-task plumbing). Surface a
@@ -1031,7 +1031,7 @@ pub fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       if __agent_error_must_propagate(err) {
         throw err
       }
-      results = results.push(
+      results = results.appending(
         {
           ok: false,
           status: "error",

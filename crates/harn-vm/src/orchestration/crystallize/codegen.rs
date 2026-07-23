@@ -52,7 +52,7 @@ pub fn generate_harn_code(candidate: &WorkflowCandidate) -> String {
     .unwrap();
     writeln!(out, " */").unwrap();
     writeln!(out, "pipeline {}({}) {{", candidate.name, params).unwrap();
-    writeln!(out, "  const review_warnings = []").unwrap();
+    writeln!(out, "  let review_warnings = []").unwrap();
     for step in &candidate.steps {
         writeln!(out, "  // Step {}: {} {}", step.index, step.kind, step.name).unwrap();
         for side_effect in &step.side_effects {
@@ -84,7 +84,7 @@ pub fn generate_harn_code(candidate: &WorkflowCandidate) -> String {
             .unwrap();
             writeln!(
                 out,
-                "  review_warnings.push(\"fuzzy step: {}\")",
+                "  review_warnings = review_warnings.appending(\"fuzzy step: {}\")",
                 escape_harn_string(&step.name)
             )
             .unwrap();

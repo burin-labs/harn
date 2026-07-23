@@ -8,7 +8,7 @@ fn __load_cell_summaries(harness: Harness, results_dir: string) {
     const summary_path = path_join(path, "summary.json")
     if harness.fs.exists(summary_path) {
       const parsed = json_parse(harness.fs.read_text(summary_path))
-      summaries = summaries.push({label: entry, summary: parsed})
+      summaries = summaries.appending({label: entry, summary: parsed})
     }
   }
   return summaries
@@ -64,21 +64,21 @@ fn __group_by_cell(summaries) {
   for entry in summaries {
     const cell = __cell_from_label(entry.label)
     const bucket = groups[cell] ?? []
-    groups = groups + {[cell]: bucket.push(entry)}
+    groups = groups + {[cell]: bucket.appending(entry)}
   }
   return groups
 }
 
 fn __format_md(groups, results_dir: string) {
   let lines = []
-  lines = lines.push("# Step-Judge Experiment Report")
-  lines = lines.push("")
-  lines = lines.push("Source: `" + results_dir + "`")
-  lines = lines.push("")
-  lines = lines.push("## Cells")
-  lines = lines.push("")
-  lines = lines.push("| Cell | Runs | Pass | Pass% | Cost USD | Input tok | Output tok |")
-  lines = lines.push("|---|---:|---:|---:|---:|---:|---:|")
+  lines = lines.appending("# Step-Judge Experiment Report")
+  lines = lines.appending("")
+  lines = lines.appending("Source: `" + results_dir + "`")
+  lines = lines.appending("")
+  lines = lines.appending("## Cells")
+  lines = lines.appending("")
+  lines = lines.appending("| Cell | Runs | Pass | Pass% | Cost USD | Input tok | Output tok |")
+  lines = lines.appending("|---|---:|---:|---:|---:|---:|---:|")
   const cell_order = ["baseline-cheap", "symmetric-cheap", "asymmetric", "symmetric-strong"]
   let baseline_pass_rate = nil
   for cell in cell_order {
@@ -87,7 +87,7 @@ fn __format_md(groups, results_dir: string) {
       if cell == "baseline-cheap" {
         baseline_pass_rate = stats.pass_rate_pct
       }
-      lines = lines.push(
+      lines = lines.appending(
         "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
           + to_string(
           stats.pass_rate_pct,
@@ -102,36 +102,36 @@ fn __format_md(groups, results_dir: string) {
       )
     }
   }
-  lines = lines.push("")
+  lines = lines.appending("")
   if baseline_pass_rate != nil {
-    lines = lines.push("## Lift vs baseline-cheap")
-    lines = lines.push("")
-    lines = lines.push("| Cell | Lift (pp) |")
-    lines = lines.push("|---|---:|")
+    lines = lines.appending("## Lift vs baseline-cheap")
+    lines = lines.appending("")
+    lines = lines.appending("| Cell | Lift (pp) |")
+    lines = lines.appending("|---|---:|")
     for cell in cell_order {
       if cell != "baseline-cheap" && groups?.[cell] != nil {
         const stats = __cell_stats(groups[cell])
         const lift = stats.pass_rate_pct - baseline_pass_rate
-        lines = lines.push("| " + cell + " | " + to_string(lift) + " |")
+        lines = lines.appending("| " + cell + " | " + to_string(lift) + " |")
       }
     }
-    lines = lines.push("")
+    lines = lines.appending("")
   }
   // Probes (any cell not in the main 4).
   let probe_cells = []
   for cell in groups.keys() {
     if !contains(cell_order, cell) {
-      probe_cells = probe_cells.push(cell)
+      probe_cells = probe_cells.appending(cell)
     }
   }
   if len(probe_cells) > 0 {
-    lines = lines.push("## Probes")
-    lines = lines.push("")
-    lines = lines.push("| Probe | Runs | Pass | Pass% | Cost USD |")
-    lines = lines.push("|---|---:|---:|---:|---:|")
+    lines = lines.appending("## Probes")
+    lines = lines.appending("")
+    lines = lines.appending("| Probe | Runs | Pass | Pass% | Cost USD |")
+    lines = lines.appending("|---|---:|---:|---:|---:|")
     for cell in probe_cells {
       const stats = __cell_stats(groups[cell])
-      lines = lines.push(
+      lines = lines.appending(
         "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
           + to_string(
           stats.pass_rate_pct,
@@ -141,16 +141,16 @@ fn __format_md(groups, results_dir: string) {
           + " |",
       )
     }
-    lines = lines.push("")
+    lines = lines.appending("")
   }
-  lines = lines.push("## Go / no-go")
-  lines = lines.push("")
-  lines = lines.push("Compare lift to the criteria in `experiments/step-judge/README.md`:")
-  lines = lines.push("")
-  lines = lines.push("- asymmetric lift ≥ 15pp at ≤3× baseline cost → GO (recommended opt-in)")
-  lines = lines.push("- symmetric-cheap lift ≥ 10pp at ≤2× baseline cost → GO (both presets)")
-  lines = lines.push("- 5pp ≤ lift < threshold → SHIP AS OPT-IN with mixed-evidence note")
-  lines = lines.push(
+  lines = lines.appending("## Go / no-go")
+  lines = lines.appending("")
+  lines = lines.appending("Compare lift to the criteria in `experiments/step-judge/README.md`:")
+  lines = lines.appending("")
+  lines = lines.appending("- asymmetric lift ≥ 15pp at ≤3× baseline cost → GO (recommended opt-in)")
+  lines = lines.appending("- symmetric-cheap lift ≥ 10pp at ≤2× baseline cost → GO (both presets)")
+  lines = lines.appending("- 5pp ≤ lift < threshold → SHIP AS OPT-IN with mixed-evidence note")
+  lines = lines.appending(
     "- lift < 5pp or degraded → NO-GO; ship primitive @experimental, file follow-up",
   )
   return join(lines, "\n") + "\n"

@@ -17,7 +17,7 @@ pipeline test(task) {
         let _resp = llm_call("task " + to_string(i), nil, {provider: "mock", model: "mock"})
         return i
       }
-      const sorted = results.sort()
+      const sorted = results.sorted()
       __io_println(len(results) == 100)
       __io_println(sorted[0] == 0)
       __io_println(sorted[99] == 99)

@@ -39,7 +39,7 @@ fn __stream_drop_keys(d, keys) {
   let out = __stream_dict(d)
   for key in keys {
     if __stream_has_key(out, key) {
-      out = out.remove(key)
+      out = out.removing(key)
     }
   }
   return out

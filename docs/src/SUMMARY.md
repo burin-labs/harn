@@ -334,6 +334,7 @@
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Migrating to 0.10](./migrations/v0.10.md)
+- [Pure collection method names](./migrations/pure-collection-methods.md)
 - [Prompt templates: v2](./migrations/template-engine-v2.md)
 - [Package-root prompt assets](./migrations/package-root-prompt-assets.md)
 - [Schema-as-type](./migrations/schema-as-type.md)

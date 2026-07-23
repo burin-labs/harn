@@ -240,7 +240,7 @@ pub fn budget_summary(opts) {
   const ctx = if type_of(catalog) == "dict" && catalog?.context_window != nil {
     to_int(catalog.context_window)
   } else {
-    assumptions = assumptions.push("context_window unknown - using 8192 fallback")
+    assumptions = assumptions.appending("context_window unknown - using 8192 fallback")
     8192
   }
   const headroom = opts?.headroom ?? 0.1

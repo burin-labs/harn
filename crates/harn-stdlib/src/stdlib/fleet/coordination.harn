@@ -723,7 +723,7 @@ pub fn fleet_project(messages, options = nil) {
   }
   let projected_by_id = {}
   let work_groups = {}
-  for claim_id in claims.keys().sort() {
+  for claim_id in claims.keys().sorted() {
     const claim = claims[claim_id] ?? {}
     const heartbeat = heartbeats[claim.actor_id]
     const state = __fleet_claim_state(claim, acks[claim_id], dones[claim_id], heartbeat, now_ms)
@@ -748,7 +748,7 @@ pub fn fleet_project(messages, options = nil) {
   }
   let conflicts = []
   let conflicted_ids = {}
-  for work_key in work_groups.keys().sort() {
+  for work_key in work_groups.keys().sorted() {
     const ids = work_groups[work_key] ?? []
     if len(ids) > 1 {
       conflicts = conflicts + [{work_key: work_key, claim_ids: ids}]
@@ -758,7 +758,7 @@ pub fn fleet_project(messages, options = nil) {
     }
   }
   let projected_claims = []
-  for claim_id in projected_by_id.keys().sort() {
+  for claim_id in projected_by_id.keys().sorted() {
     let projected = projected_by_id[claim_id] ?? {}
     if conflicted_ids[claim_id] ?? false {
       projected = projected + {state: "conflicted"}
@@ -766,7 +766,7 @@ pub fn fleet_project(messages, options = nil) {
     projected_claims = projected_claims + [projected]
   }
   let projected_actors = []
-  for actor_id in actors.keys().sort() {
+  for actor_id in actors.keys().sorted() {
     let actor_claim_ids = []
     for claim in projected_claims {
       if claim.actor_id == actor_id && contains(["active", "proposed", "conflicted"], claim.state) {
@@ -800,7 +800,7 @@ pub fn fleet_project(messages, options = nil) {
     }
   }
   let latest_checkins = []
-  for actor_id in checkins.keys().sort() {
+  for actor_id in checkins.keys().sorted() {
     const checkin = checkins[actor_id] ?? {}
     latest_checkins = latest_checkins
       + [

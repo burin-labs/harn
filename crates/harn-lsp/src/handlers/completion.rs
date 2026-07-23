@@ -596,7 +596,7 @@ mod tests {
             "items: {items:?}"
         );
         assert!(
-            !items.iter().any(|(label, _)| label == "merge"),
+            !items.iter().any(|(label, _)| label == "merging"),
             "items: {items:?}"
         );
     }

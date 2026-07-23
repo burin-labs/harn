@@ -150,7 +150,7 @@ fn __web_fragment_kind(html, old_text) {
 }
 
 fn __web_annotate_regions(regions, kind) {
-  return (regions ?? []).map({ region -> region.merge({kind: kind}) })
+  return (regions ?? []).map({ region -> region.merging({kind: kind}) })
 }
 
 /**
@@ -453,7 +453,9 @@ pub fn web_artifact_apply_patch(html, old_text, new_text, options = nil) {
     }
   }
   const validation = web_artifact_validate(patch.patched, opts?.validation ?? opts)
-  const expected = patch.expected_region.merge({kind: __web_fragment_kind(source, old_text ?? "")})
+  const expected = patch.expected_region.merging(
+    {kind: __web_fragment_kind(source, old_text ?? "")},
+  )
   const region_report = edit_validate_changed_regions(
     source,
     patch.patched,

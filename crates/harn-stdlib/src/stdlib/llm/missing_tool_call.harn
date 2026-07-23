@@ -94,8 +94,8 @@ fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
     if name == "" || contains(names, name) {
       continue
     }
-    names = names.push(name)
-    out = out.push(
+    names = names.appending(name)
+    out = out.appending(
       {
         name: name,
         description: __missing_tool_call_string(entry?.description ?? entry?.function?.description),
@@ -105,8 +105,8 @@ fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
   for name in payload?.tool_names ?? [] {
     const text = __missing_tool_call_string(name)
     if text != "" && !contains(names, text) {
-      names = names.push(text)
-      out = out.push({name: text, description: ""})
+      names = names.appending(text)
+      out = out.appending({name: text, description: ""})
     }
   }
   return out
@@ -117,7 +117,7 @@ fn __missing_tool_call_tool_names(candidate_tools: list<MissingToolCallTool>) ->
   for entry in candidate_tools {
     const name = __missing_tool_call_string(entry.name)
     if name != "" && !contains(names, name) {
-      names = names.push(name)
+      names = names.appending(name)
     }
   }
   return names

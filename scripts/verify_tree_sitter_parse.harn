@@ -187,7 +187,7 @@ pub fn positive_harn_files(root: string) -> list<string> {
       paths = paths + [path_normalize(candidate)]
     }
   }
-  return paths.sort()
+  return paths.sorted()
 }
 
 fn emit_parse_failure(strict: bool, result) -> int {

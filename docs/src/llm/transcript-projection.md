@@ -144,9 +144,9 @@ const view = transcript_project(transcript, {
     let dropped = []
     for (idx, msg) in iter(messages).enumerate() {
       if msg.role == "tool" && msg.content.starts_with("Traceback") {
-        dropped = dropped.push(idx)
+        dropped = dropped.appending(idx)
       } else {
-        kept = kept.push(msg)
+        kept = kept.appending(msg)
       }
     }
     return {messages: kept, reason: "traceback_squashed"}

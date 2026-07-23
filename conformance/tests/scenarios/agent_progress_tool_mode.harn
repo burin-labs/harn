@@ -4,7 +4,7 @@ import { llm_text, with_llm_script } from "std/testing"
 fn tool_names(tools) {
   let names = []
   for entry in tools ?? [] {
-    names = names.push(to_string(entry?.name ?? entry?.function?.name ?? ""))
+    names = names.appending(to_string(entry?.name ?? entry?.function?.name ?? ""))
   }
   return names
 }

@@ -947,7 +947,7 @@ fn __semantic_nearest(index, query_vector) -> dict {
 
 fn __semantic_index_store(cache_opts, index, query_vector, response, query_text, opts) {
   const entry = {embedding: query_vector, response: response, prompt: query_text}
-  let appended = index.push(entry)
+  let appended = index.appending(entry)
   const max_entries = to_int(opts?.max_entries ?? __SEMANTIC_CACHE_DEFAULT_MAX_ENTRIES)
   if max_entries > 0 && len(appended) > max_entries {
     appended = appended.slice(len(appended) - max_entries, len(appended))
@@ -1103,9 +1103,9 @@ fn __result_schema_issue_text(candidate, schema) -> string {
     const path = to_string(issue?.path ?? "")
     const message = to_string(issue?.message ?? issue ?? "")
     if path == "" {
-      lines = lines.push("- " + message)
+      lines = lines.appending("- " + message)
     } else {
-      lines = lines.push("- " + path + ": " + message)
+      lines = lines.appending("- " + path + ": " + message)
     }
   }
   if len(lines) == 0 {
@@ -1275,7 +1275,7 @@ fn __repair_default_nudge(error_dict) {
   if type_of(error_dict) == "dict" {
     const detail = to_string(error_dict?.message ?? error_dict?.error ?? "")
     if detail != "" {
-      lines = lines.push("Validator said: " + detail)
+      lines = lines.appending("Validator said: " + detail)
     }
   }
   return join(lines, "\n")

@@ -86,7 +86,7 @@ pub fn env_list(name: string, separator = nil) -> list<string> {
   for item in split(value, sep) {
     const trimmed = trim(item)
     if trimmed != "" {
-      out = out.push(trimmed)
+      out = out.appending(trimmed)
     }
   }
   return out

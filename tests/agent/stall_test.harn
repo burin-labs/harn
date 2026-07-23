@@ -1096,7 +1096,7 @@ fn _parity_drive(cfg) {
       step[1],
     )
     s = o.state
-    out = out.push(
+    out = out.appending(
       {
         pattern: o.warning?.pattern,
         hard_stop: o.hard_stop,

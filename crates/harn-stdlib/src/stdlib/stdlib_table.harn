@@ -55,7 +55,7 @@ fn __table_columns(rows, opts) {
   if type_of(options?.columns) == "list" && len(options.columns) > 0 {
     let idx = 0
     for raw in options.columns {
-      cols = cols.push(__table_column_from(raw, idx, headers))
+      cols = cols.appending(__table_column_from(raw, idx, headers))
       idx += 1
     }
     return cols
@@ -63,22 +63,22 @@ fn __table_columns(rows, opts) {
   if len(headers) > 0 {
     let hidx = 0
     for header in headers {
-      cols = cols.push({key: to_string(hidx), header: header, align: "left", index: hidx})
+      cols = cols.appending({key: to_string(hidx), header: header, align: "left", index: hidx})
       hidx += 1
     }
     return cols
   }
   const first = rows?.[0]
   if type_of(first) == "dict" {
-    for key in keys(first).sort() {
-      cols = cols.push({key: key, header: key, align: "left", index: len(cols)})
+    for key in keys(first).sorted() {
+      cols = cols.appending({key: key, header: key, align: "left", index: len(cols)})
     }
     return cols
   }
   if type_of(first) == "list" {
     let i = 0
     while i < len(first) {
-      cols = cols.push({key: to_string(i), header: to_string(i), align: "left", index: i})
+      cols = cols.appending({key: to_string(i), header: to_string(i), align: "left", index: i})
       i += 1
     }
   }
@@ -105,9 +105,9 @@ fn __table_matrix(rows, cols, opts) {
     let rendered = []
     for col in cols {
       const max_width = col?.max_width ?? default_max
-      rendered = rendered.push(__table_cell(__table_value(row, col), max_width))
+      rendered = rendered.appending(__table_cell(__table_value(row, col), max_width))
     }
-    matrix = matrix.push(rendered)
+    matrix = matrix.appending(rendered)
   }
   return matrix
 }
@@ -118,7 +118,7 @@ fn __table_widths(cols, matrix) {
   while i < len(cols) {
     const fixed = cols[i]?.width
     if fixed != nil && fixed > 0 {
-      widths = widths.push(fixed)
+      widths = widths.appending(fixed)
       i += 1
       continue
     }
@@ -126,7 +126,7 @@ fn __table_widths(cols, matrix) {
     for row in matrix {
       width = max(width, ansi_visible_len(row[i] ?? ""))
     }
-    widths = widths.push(width)
+    widths = widths.appending(width)
     i += 1
   }
   return widths
@@ -153,7 +153,7 @@ fn __table_render_row(cells, cols, widths) -> string {
   let out = []
   let i = 0
   while i < len(cols) {
-    out = out.push(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left"))
+    out = out.appending(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left"))
     i += 1
   }
   return join(out, " | ")
@@ -162,7 +162,7 @@ fn __table_render_row(cells, cols, widths) -> string {
 fn __table_plain_separator(widths) -> string {
   let parts = []
   for width in widths {
-    parts = parts.push("-".repeat(max(width, 3)))
+    parts = parts.appending("-".repeat(max(width, 3)))
   }
   return join(parts, "-+-")
 }
@@ -175,7 +175,7 @@ fn __table_markdown_row(cells, cols, widths) -> string {
   let out = []
   let i = 0
   while i < len(cols) {
-    out = out.push(
+    out = out.appending(
       __table_markdown_escape(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left")),
     )
     i += 1
@@ -196,7 +196,7 @@ fn __table_markdown_separator(cols, widths) -> string {
     } else {
       marks
     }
-    out = out.push(cell)
+    out = out.appending(cell)
     i += 1
   }
   return "| " + join(out, " | ") + " |"
@@ -206,11 +206,11 @@ fn __table_render_plain(cols, matrix, widths, show_header) -> string {
   let lines = []
   if show_header {
     const header_cells = cols.map({ col -> col?.header ?? col?.key ?? "" })
-    lines = lines.push(__table_render_row(header_cells, cols, widths))
-    lines = lines.push(__table_plain_separator(widths))
+    lines = lines.appending(__table_render_row(header_cells, cols, widths))
+    lines = lines.appending(__table_plain_separator(widths))
   }
   for row in matrix {
-    lines = lines.push(__table_render_row(row, cols, widths))
+    lines = lines.appending(__table_render_row(row, cols, widths))
   }
   return join(lines, "\n")
 }
@@ -222,10 +222,10 @@ fn __table_render_markdown(cols, matrix, widths, show_header) -> string {
   } else {
     cols.map({ _col -> "" })
   }
-  lines = lines.push(__table_markdown_row(header_cells, cols, widths))
-  lines = lines.push(__table_markdown_separator(cols, widths))
+  lines = lines.appending(__table_markdown_row(header_cells, cols, widths))
+  lines = lines.appending(__table_markdown_separator(cols, widths))
   for row in matrix {
-    lines = lines.push(__table_markdown_row(row, cols, widths))
+    lines = lines.appending(__table_markdown_row(row, cols, widths))
   }
   return join(lines, "\n")
 }
@@ -274,8 +274,8 @@ pub fn render_markdown_table(rows: list, options: TableOptions = {}) -> string {
  */
 pub fn render_kv_table(data: dict, options: TableOptions = {}) -> string {
   let rows = []
-  for key in keys(data ?? {}).sort() {
-    rows = rows.push({key: key, value: data[key]})
+  for key in keys(data ?? {}).sorted() {
+    rows = rows.appending({key: key, value: data[key]})
   }
   const base = options ?? {}
   const opts = base

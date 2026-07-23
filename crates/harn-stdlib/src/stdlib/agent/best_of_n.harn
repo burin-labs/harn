@@ -99,7 +99,7 @@ pub fn best_of_n_candidates(opts) {
     }
     if is_ok(gr) {
       const cand = unwrap(gr)
-      candidates = candidates.push(cand)
+      candidates = candidates.appending(cand)
       if on_candidate != nil {
         const _ = try {
           on_candidate({index: idx, candidate: cand})

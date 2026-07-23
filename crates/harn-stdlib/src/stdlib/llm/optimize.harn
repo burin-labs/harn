@@ -52,17 +52,17 @@ fn __render_prompt(base_prompt, instruction, demos) {
   const instruction_text = trim(instruction ?? "")
   const base_text = trim(base_prompt)
   if instruction_text != "" {
-    parts = parts.push(instruction_text)
+    parts = parts.appending(instruction_text)
   }
   if base_text != "" && base_text != instruction_text {
-    parts = parts.push(base_text)
+    parts = parts.appending(base_text)
   }
   if len(demos) > 0 {
     let rendered = []
     for demo in demos {
-      rendered = rendered.push(__demo_text(demo))
+      rendered = rendered.appending(__demo_text(demo))
     }
-    parts = parts.push("Examples:\n" + join(rendered, "\n\n"))
+    parts = parts.appending("Examples:\n" + join(rendered, "\n\n"))
   }
   return join(parts, "\n\n")
 }
@@ -74,7 +74,7 @@ fn __candidate_space(config) {
   let idx = 0
   for instruction in instructions {
     for demos in demo_sets {
-      candidates = candidates.push(
+      candidates = candidates.appending(
         {
           index: idx,
           instruction: instruction,
@@ -213,13 +213,13 @@ fn __insert_ranked(ranked, entry) {
   let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
-      out = out.push(entry)
+      out = out.appending(entry)
       inserted = true
     }
-    out = out.push(existing)
+    out = out.appending(existing)
   }
   if !inserted {
-    out = out.push(entry)
+    out = out.appending(entry)
   }
   return out
 }
@@ -288,9 +288,9 @@ pub fn optimize_prompt(config) {
       acquisition: picked.acquisition,
       case_scores: judged.scores[0].case_scores,
     }
-    observations = observations.push(observation)
-    observed_indexes = observed_indexes.push(picked.candidate.index)
-    trace = trace.push(observation)
+    observations = observations.appending(observation)
+    observed_indexes = observed_indexes.appending(picked.candidate.index)
+    trace = trace.appending(observation)
     if best == nil || score > best.score {
       best = observation
       best_score = score

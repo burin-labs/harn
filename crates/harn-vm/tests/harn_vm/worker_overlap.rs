@@ -155,7 +155,7 @@ fn base_opts() {{
 pipeline main(task) {{
   let handles = []
   for i in 0 to {WORKER_COUNT} exclusive {{
-    handles = handles.push(sub_agent_run("bg worker " + to_string(i), base_opts() + {{background: true}}))
+    handles = handles.appending(sub_agent_run("bg worker " + to_string(i), base_opts() + {{background: true}}))
   }}
   const results = wait_agent(handles)
 

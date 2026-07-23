@@ -55,7 +55,7 @@ fn lane_test_tools() {
 fn tool_names(tools) {
   let names = []
   for entry in tools ?? [] {
-    names = names.push(entry?.name ?? entry?.function?.name ?? "")
+    names = names.appending(entry?.name ?? entry?.function?.name ?? "")
   }
   return names
 }

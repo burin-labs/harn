@@ -11,7 +11,7 @@ fn __feedback_contents(captured, kind: string) -> list<string> {
   let contents: list<string> = []
   for event in captured.events {
     if event.type == "feedback_injected" && event.kind == kind {
-      contents = contents.push(to_string(event.content ?? ""))
+      contents = contents.appending(to_string(event.content ?? ""))
     }
   }
   return contents

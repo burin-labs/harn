@@ -33,7 +33,7 @@ pipeline default(args) {
   }
   const measured = samples[warmup:iterations]
   const measured_count = iterations - warmup
-  const sorted = measured.sort_by({ ms -> ms })
+  const sorted = measured.sorted_by({ ms -> ms })
   const p50_index = measured_count / 2
   const p99_index = measured_count - 1
   const p50 = sorted[p50_index]

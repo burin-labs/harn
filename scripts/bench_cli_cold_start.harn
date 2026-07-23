@@ -206,7 +206,7 @@ fn reset_cache_dir(cache_dir: string) -> nil {
 }
 
 fn median(values: list<float>) -> float {
-  const sorted = values.sort()
+  const sorted = values.sorted()
   return sorted[sorted.count / 2] ?? 0.0
 }
 
@@ -459,7 +459,7 @@ pub fn select_commands(filter_raw: string) {
       missing = missing + [name]
     }
   }
-  return {ok: missing.count == 0, commands: selected, missing: missing.sort()}
+  return {ok: missing.count == 0, commands: selected, missing: missing.sorted()}
 }
 
 pub fn merge_baseline(

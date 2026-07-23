@@ -224,7 +224,7 @@ pub fn __verification_parse_cargo_metadata(adapter_id: string, data, changed_pat
 pub fn __verification_project_targets(project) -> list<string> {
   const raw = project?.targets ?? project?.tasks ?? []
   if type_of(raw) == "dict" {
-    return raw.keys().sort()
+    return raw.keys().sorted()
   }
   let names: list<string> = []
   for item in raw {
@@ -233,14 +233,14 @@ pub fn __verification_project_targets(project) -> list<string> {
       names = names + [name]
     }
   }
-  return names.sort()
+  return names.sorted()
 }
 
 pub fn __verification_project_rows(data) {
   const raw = data?.projects ?? data?.workspaces ?? data
   let rows = []
   if type_of(raw) == "dict" {
-    for name in raw.keys().sort() {
+    for name in raw.keys().sorted() {
       rows = rows + [(raw[name] ?? {}) + {name: name}]
     }
     return rows

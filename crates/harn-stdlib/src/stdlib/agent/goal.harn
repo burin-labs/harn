@@ -52,7 +52,7 @@ fn __string_list(value) {
   }
   let out = []
   for item in value {
-    out = out.push(to_string(item))
+    out = out.appending(to_string(item))
   }
   return out
 }
@@ -81,7 +81,7 @@ fn __normalize_criteria(value) {
         + "` has a `check` that must be a callable or nil; got "
         + type_of(entry.check)
     }
-    out = out.push(
+    out = out.appending(
       {check: entry?.check, description: description, id: entry?.id ?? ("sc_" + to_string(index))},
     )
     index = index + 1
@@ -122,19 +122,19 @@ pub fn goal(spec) {
 fn __render_goal_text(g) {
   let lines = ["## Goal", "Objective: " + g.objective]
   if len(g.success_criteria) > 0 {
-    lines = lines.push("Success criteria:")
+    lines = lines.appending("Success criteria:")
     for crit in g.success_criteria {
-      lines = lines.push("- " + crit.description)
+      lines = lines.appending("- " + crit.description)
     }
   }
   if len(g.constraints) > 0 {
-    lines = lines.push("Constraints:")
+    lines = lines.appending("Constraints:")
     for c in g.constraints {
-      lines = lines.push("- " + c)
+      lines = lines.appending("- " + c)
     }
   }
   if len(g.budget.keys()) > 0 {
-    lines = lines.push("Budget: " + json_stringify(g.budget))
+    lines = lines.appending("Budget: " + json_stringify(g.budget))
   }
   return join(lines, "\n")
 }
@@ -229,9 +229,9 @@ pub fn goal_check(g, facts = nil) {
   for crit in g.success_criteria {
     if __goal_callable(crit?.check) {
       if crit.check(bindings) {
-        met = met.push(crit.id)
+        met = met.appending(crit.id)
       } else {
-        unmet = unmet.push(crit.id)
+        unmet = unmet.appending(crit.id)
       }
     }
   }
@@ -289,12 +289,12 @@ fn __goal_unmet_feedback(g, unmet_ids) {
   let any = false
   for crit in g.success_criteria {
     if contains(unmet_ids, crit.id) {
-      lines = lines.push("- " + crit.description)
+      lines = lines.appending("- " + crit.description)
       any = true
     }
   }
   if !any {
-    lines = lines.push("- " + g.objective)
+    lines = lines.appending("- " + g.objective)
   }
   return join(lines, "\n")
 }

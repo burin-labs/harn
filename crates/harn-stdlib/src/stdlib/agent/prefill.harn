@@ -32,9 +32,9 @@ pub fn agent_take_one_shot_prefill(options = nil) -> AgentOneShotPrefill {
   if value != nil && type_of(value) != "string" {
     throw "agent_loop: prefill must be a string or nil; got " + type_of(value)
   }
-  let cleaned = base.remove("prefill")
+  let cleaned = base.removing("prefill")
   if type_of(base?.llm_options) == "dict" {
-    cleaned = cleaned + {llm_options: nested.remove("prefill")}
+    cleaned = cleaned + {llm_options: nested.removing("prefill")}
   }
   return {options: cleaned, prefill: value ?? ""}
 }

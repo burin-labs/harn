@@ -162,9 +162,9 @@ fn __cl_replace_row(ledger, handle_id, new_row) {
   let out = []
   for row in ledger {
     if row?.handle_id == handle_id {
-      out = out.push(new_row)
+      out = out.appending(new_row)
     } else {
-      out = out.push(row)
+      out = out.appending(row)
     }
   }
   return out
@@ -215,7 +215,7 @@ pub fn command_ledger_ingest(ledger, dispatch_results, now_ms, cw) -> list {
   let out = ledger
   for result in dispatch_results ?? [] {
     if __cl_is_running_handle(result) && __cl_row_index(out, to_string(result.handle_id)) < 0 {
-      out = out.push(__cl_new_row(result, now_ms, cw))
+      out = out.appending(__cl_new_row(result, now_ms, cw))
     }
   }
   return out
@@ -225,7 +225,7 @@ fn __cl_awaited_running(ledger) {
   let out = []
   for row in ledger {
     if row?.lease == "awaited" && row?.status == "running" {
-      out = out.push(row)
+      out = out.appending(row)
     }
   }
   return out
@@ -267,7 +267,7 @@ pub fn command_ledger_retire(ledger, handle_id) -> list {
   let out = []
   for row in ledger {
     if row?.handle_id != handle_id {
-      out = out.push(row)
+      out = out.appending(row)
     }
   }
   return out
@@ -433,18 +433,18 @@ pub fn command_ledger_decide(ledger, now_ms, cw) -> dict {
     if row?.lease == "awaited" && (row.status == "running" || row?.status == nil) {
       if __cl_row_fires(row, now_ms, cw) {
         fire = true
-        out = out.push(row)
+        out = out.appending(row)
       } else if now_ms >= row.next_decision_at_ms {
-        out = out.push(__cl_advance_schedule_row(row, now_ms, cw))
+        out = out.appending(__cl_advance_schedule_row(row, now_ms, cw))
       } else {
-        out = out.push(row)
+        out = out.appending(row)
       }
     } else if row.status != "running" && row?.lease == "awaited" {
       // A terminal row always fires (completion payload).
       fire = true
-      out = out.push(row)
+      out = out.appending(row)
     } else {
-      out = out.push(row)
+      out = out.appending(row)
     }
   }
   return {ledger: out, fire: fire}
@@ -534,7 +534,7 @@ pub fn command_ledger_build_digest(ledger, now_ms, cw) -> string {
   let next_update = nil
   for row in ledger {
     if row?.lease == "awaited" {
-      commands = commands.push(__cl_command_entry(row))
+      commands = commands.appending(__cl_command_entry(row))
       if row.status == "running" {
         const until = max(0, row.next_decision_at_ms - now_ms)
         if next_update == nil || until < next_update {
@@ -566,13 +566,13 @@ pub fn command_ledger_after_digest(ledger, now_ms, cw) -> list {
   let out = []
   for row in ledger {
     if row?.lease != "awaited" {
-      out = out.push(row)
+      out = out.appending(row)
     } else if row.status == "running" {
       const next_interval = min(
         row.decision_interval_ms * cw.decision_multiplier,
         cw.decision_cap_ms,
       )
-      out = out.push(
+      out = out.appending(
         row
           + {
           last_digest_offset: row.output_offset,
@@ -605,7 +605,7 @@ fn __cl_ceiling_breaches(ledger, now_ms, cw) {
   for row in ledger {
     if row?.lease == "awaited" && row.status == "running" {
       if now_ms - row.started_at_ms >= cw.max_awaited_wall_ms {
-        out = out.push(row)
+        out = out.appending(row)
       }
     }
   }
@@ -652,7 +652,7 @@ pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
           action: "release_to_service",
           elapsed_ms: now_ms - row.started_at_ms,
         }
-        receipts = receipts.push(receipt)
+        receipts = receipts.appending(receipt)
         agent_emit_event(session_id, "typed_checkpoint", receipt)
       } else {
         let _ = __cl_kill_handle(row.handle_id)
@@ -665,7 +665,7 @@ pub fn command_ledger_apply_ceiling(ledger, now_ms, cw, session_id) -> dict {
           action: "kill",
           elapsed_ms: now_ms - row.started_at_ms,
         }
-        receipts = receipts.push(receipt)
+        receipts = receipts.appending(receipt)
         agent_emit_event(session_id, "typed_checkpoint", receipt)
       }
     } else {
@@ -728,7 +728,7 @@ pub fn command_ledger_hold(session_id, ledger, cw, hold_state) -> dict {
     const ceiling = command_ledger_apply_ceiling(live, now, cw, session_id)
     live = ceiling.ledger
     for receipt in ceiling.receipts {
-      receipts = receipts.push(receipt)
+      receipts = receipts.appending(receipt)
     }
     if ceiling.escalated {
       const digest = command_ledger_build_digest(live, now, cw)

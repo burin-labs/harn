@@ -692,7 +692,7 @@ fn __nl_mcts(text, opts) -> dict {
       }
     }
   }
-  const sorted = ranked.sort_by({ cand -> -cand.score })
+  const sorted = ranked.sorted_by({ cand -> -cand.score })
   const unique = __nl_dedupe_candidates(sorted)
   const trimmed = if len(unique) > 10 {
     unique[:10]

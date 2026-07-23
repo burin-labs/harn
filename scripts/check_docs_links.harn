@@ -426,7 +426,7 @@ pipeline main(task) {
   for g in globbed {
     sources = sources + [rel_path(g)]
   }
-  sources = sources.sort()
+  sources = sources.sorted()
   let checked = 0
   let failures: list = []
   for source in sources {

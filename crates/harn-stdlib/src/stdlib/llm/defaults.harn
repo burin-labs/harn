@@ -385,7 +385,7 @@ pub fn pack_for(opts) {
   const scale = opts?.reasoning_scale ?? "medium"
   let scale_patch = __reasoning_scale_patch(lineage, scale)
   if caller_pinned_reasoning {
-    scale_patch = scale_patch.remove("thinking").remove("effort")
+    scale_patch = scale_patch.removing("thinking").removing("effort")
   }
   result = result + scale_patch
   // 3. Policy lowering. Direct `thinking` or `effort` always wins and bypasses

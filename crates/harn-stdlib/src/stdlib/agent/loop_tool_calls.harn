@@ -583,7 +583,7 @@ pub fn __agent_loop_record_await_tool_results(session, await_call, tool_calls, r
   let siblings = []
   for call in tool_calls ?? [] {
     if to_string(call?.id ?? call?.tool_call_id ?? "") != await_id {
-      siblings = siblings.push(call)
+      siblings = siblings.appending(call)
     }
   }
   agent_session_record_undispatched_tool_results(

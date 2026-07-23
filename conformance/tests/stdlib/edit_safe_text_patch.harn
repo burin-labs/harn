@@ -158,7 +158,7 @@ pipeline default() {
       path: rewrite_path,
       hunks: [{old_text: "alpha", new_text: "ignored"}],
       pre_apply: fn(req) { return {
-        rewrite: req.merge({hunks: [{old_text: "alpha", new_text: "rewritten"}]}),
+        rewrite: req.merging({hunks: [{old_text: "alpha", new_text: "rewritten"}]}),
       } },
     },
   )

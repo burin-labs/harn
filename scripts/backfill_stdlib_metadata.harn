@@ -465,7 +465,7 @@ pipeline main(task) {
   let already_complete = 0
   /* rglob("*.harn") sorted: glob returns abs workspace paths; sort for
      determinism. */
-  const files = harness.fs.glob("${stdlib}/**/*.harn").sort()
+  const files = harness.fs.glob("${stdlib}/**/*.harn").sorted()
   for path in files {
     const text = harness.fs.read_text(path)
     const result = process_file(text, path)

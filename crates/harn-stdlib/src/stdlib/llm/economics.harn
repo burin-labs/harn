@@ -236,9 +236,9 @@ pub fn estimate_session_cost(usage) {
   }
   let rows = []
   for k in aggregated.keys() {
-    rows = rows.push(aggregated[k])
+    rows = rows.appending(aggregated[k])
   }
-  const per_model = rows.sort_by({ row -> -row.cost_usd })
+  const per_model = rows.sorted_by({ row -> -row.cost_usd })
   return {
     total_cost_usd: total,
     known_cost_usd: known_total,

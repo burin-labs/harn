@@ -176,5 +176,5 @@ fn sorted_json_files(root: string) -> list<string> {
   for path in harness.fs.glob("${root}/**/*.json") {
     paths = paths + [path]
   }
-  return paths.sort()
+  return paths.sorted()
 }

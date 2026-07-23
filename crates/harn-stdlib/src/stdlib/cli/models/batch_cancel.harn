@@ -415,14 +415,14 @@ pub fn __run_cancel(harness: Harness) -> int {
   let errors = loaded.errors
   const warnings = []
   if out_path == "" {
-    errors = errors.push("--out is required")
+    errors = errors.appending("--out is required")
   }
   const source_receipt = loaded.artifact
   let jobs = []
   if len(errors) == 0 {
     for raw_job in safe_list(source_receipt["jobs"]) {
       const canceled = __cancel_one_job(harness, safe_dict(raw_job), dry_run)
-      jobs = jobs.push(__with_batch_lifecycle(safe_dict(canceled["job"]), "cancel", dry_run))
+      jobs = jobs.appending(__with_batch_lifecycle(safe_dict(canceled["job"]), "cancel", dry_run))
       errors = errors + safe_list(canceled["errors"])
     }
   }

@@ -202,9 +202,9 @@ pub fn agent_collapse_duplicate_read_calls(calls, registry, options = nil) -> li
     if read_only && signature != nil && contains(seen, signature) {
       continue
     }
-    kept = kept.push(call)
+    kept = kept.appending(call)
     if read_only && signature != nil {
-      seen = seen.push(signature)
+      seen = seen.appending(signature)
     }
   }
   return kept

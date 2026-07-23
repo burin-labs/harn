@@ -84,7 +84,7 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(task) {
       const report = check_harn_syntax_sensitive_scans(root)
       assert_eq(report.violation_count, 2)
       assert_eq(
-        report.findings.map({ row -> row.path }).to_list().sort(),
+        report.findings.map({ row -> row.path }).to_list().sorted(),
         ["docs/bad.md", "scripts/bad.harn"],
       )
     },
@@ -107,7 +107,7 @@ pipeline test_git_fast_path_includes_untracked_source(task) {
       write_text(root, "untracked.md", "var " + "reg = tool_registry()\n")
       const report = check_harn_syntax_sensitive_scans(root)
       assert_eq(
-        report.findings.map({ row -> row.path }).to_list().sort(),
+        report.findings.map({ row -> row.path }).to_list().sorted(),
         ["tracked.harn", "untracked.md"],
       )
       assert_eq(report.violation_count, 2)

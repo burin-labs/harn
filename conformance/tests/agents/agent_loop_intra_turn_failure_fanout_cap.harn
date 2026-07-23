@@ -58,7 +58,7 @@ fn identical_edit_batch(n) {
   let calls = []
   let i = 0
   while i < n {
-    calls = calls.push({id: "e" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
+    calls = calls.appending({id: "e" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
     i = i + 1
   }
   return calls
@@ -68,12 +68,12 @@ fn two_group_edit_batch(n) {
   let calls = []
   let i = 0
   while i < n {
-    calls = calls.push({id: "a" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
+    calls = calls.appending({id: "a" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
     i = i + 1
   }
   i = 0
   while i < n {
-    calls = calls.push({id: "b" + to_string(i), name: "edit", arguments: {path: "b.swift"}})
+    calls = calls.appending({id: "b" + to_string(i), name: "edit", arguments: {path: "b.swift"}})
     i = i + 1
   }
   return calls
@@ -83,7 +83,7 @@ fn distinct_look_batch(n) {
   let calls = []
   let i = 0
   while i < n {
-    calls = calls.push(
+    calls = calls.appending(
       {id: "l" + to_string(i), name: "look", arguments: {path: "f" + to_string(i) + ".swift"}},
     )
     i = i + 1

@@ -86,7 +86,7 @@ pipeline main(task) {
     files = files + [rel_path(g)]
   }
   let failures = 0
-  for file in files.sort() {
+  for file in files.sorted() {
     const text = harness.fs.read_text(file)
     if is_generated(text) {
       continue

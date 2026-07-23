@@ -132,7 +132,7 @@ pub fn __tool_names_by_status(dispatch, want_ok) {
   for result in results {
     const name = __tool_result_name(result)
     if name != "" && __tool_result_ok(result) == want_ok {
-      names = names.push(name)
+      names = names.appending(name)
     }
   }
   return names

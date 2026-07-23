@@ -546,7 +546,7 @@ impl TypeChecker {
                     self.check_node_with_expected(value, expected_value_type.as_ref(), scope);
                 // A field/subscript write through an immutable binding is
                 // rejected at runtime: collections are values, so `o.a = 1` is
-                // sugar for `o = <a new dict>`. (Not deep immutability: `push`
+                // sugar for `o = <a new dict>`. (Not deep immutability: `appending`
                 // returns a new value, so it stays legal on a `const`.) Flag it
                 // here so `harn check` agrees with the runtime; see LNT-066.
                 if !matches!(&target.node, Node::Identifier(_)) {

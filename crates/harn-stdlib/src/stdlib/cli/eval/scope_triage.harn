@@ -77,7 +77,7 @@ fn __load_cases(harness: Harness, path: string, max_cases) {
     let limited = []
     let i = 0
     while i < max_cases {
-      limited = limited.push(cases[i])
+      limited = limited.appending(cases[i])
       i = i + 1
     }
     cases = limited
@@ -336,7 +336,7 @@ fn __summarize(dataset_path, output_dir, live, model, threshold, cases, reports)
 fn __jsonl(reports) {
   let lines = []
   for report in reports {
-    lines = lines.push(json_stringify(report))
+    lines = lines.appending(json_stringify(report))
   }
   return join(lines, "\n") + "\n"
 }
@@ -415,7 +415,7 @@ fn main(harness: Harness) -> int {
   }
   let reports = []
   for case in cases {
-    reports = reports.push(__run_case(case, classifier))
+    reports = reports.appending(__run_case(case, classifier))
   }
   const report = __summarize(dataset_path, resolved_output, live, model, threshold, cases, reports)
   __mkdirp(harness, resolved_output)

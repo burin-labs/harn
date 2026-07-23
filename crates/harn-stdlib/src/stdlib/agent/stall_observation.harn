@@ -682,7 +682,7 @@ pub fn __agent_stall_emit_diagnostic_trip(
     warning = warning + {remediation_delivered: true}
   }
   const emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
-  const next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
+  const next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
 
@@ -732,7 +732,7 @@ pub fn __agent_stall_observe_no_progress(
     config.no_progress_messages,
   )
   const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
-  next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
+  next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
 
@@ -1067,7 +1067,7 @@ pub fn __agent_stall_observe_core(
         emitted_warning = warning
       }
       feedback_deferred = feedback_deferred || (emitted.feedback_deferred ?? false)
-      next_state = next_state + {warnings: next_state.warnings.push(warning)}
+      next_state = next_state + {warnings: next_state.warnings.appending(warning)}
     } else {
       next_state = __agent_stall_register_recovery(next_state)
     }

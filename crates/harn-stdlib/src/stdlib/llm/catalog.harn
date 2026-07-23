@@ -364,7 +364,7 @@ fn __filter_models(opts) {
     out = out + [model + {_score: __score_model(model)}]
   }
   // Sort descending by score: sort_by gives ascending, so negate the key.
-  return out.sort_by({ m -> -m._score })
+  return out.sorted_by({ m -> -m._score })
 }
 
 /**
@@ -600,7 +600,7 @@ fn __catalog_query_strengths(query, value) {
   if existing.contains(value) {
     return query
   }
-  return query + {strengths: existing.push(value)}
+  return query + {strengths: existing.appending(value)}
 }
 
 fn __catalog_query_where_values(raw) {
@@ -618,7 +618,7 @@ fn __catalog_query_where_values(raw) {
     if type_of(value) != "string" {
       throw "model_catalog_query: where values must be strings"
     }
-    values = values.push(value)
+    values = values.appending(value)
   }
   return values
 }
@@ -672,7 +672,7 @@ fn __catalog_query_columns(raw) {
       throw "model_catalog_query: unknown column '" + column + "'"
     }
     if !columns.contains(column) {
-      columns = columns.push(column)
+      columns = columns.appending(column)
     }
   }
   if len(columns) == 0 {
@@ -841,7 +841,7 @@ pub fn catalog_with_installed_ollama_models(
     if provider == "ollama" {
       known_ollama = known_ollama + {[id]: true}
     }
-    rows = rows.push(
+    rows = rows.appending(
       raw + {installed: provider == "ollama" && (installed[id] ?? false), cataloged: true},
     )
   }
@@ -849,7 +849,7 @@ pub fn catalog_with_installed_ollama_models(
     if type_of(raw_id) != "string" || trim(raw_id) == "" || (known_ollama[raw_id] ?? false) {
       continue
     }
-    rows = rows.push(
+    rows = rows.appending(
       {
         id: raw_id,
         provider: "ollama",
@@ -880,10 +880,10 @@ pub fn model_catalog_query(catalog: list, query: ModelCatalogQuery = {}) -> dict
   let models = []
   for row in catalog {
     if type_of(row) == "dict" && __catalog_row_matches(row, normalized) {
-      models = models.push(row)
+      models = models.appending(row)
     }
   }
-  const sorted = models.sort_by({ row -> __catalog_sort_key(row, normalized.sort ?? "provider") })
+  const sorted = models.sorted_by({ row -> __catalog_sort_key(row, normalized.sort ?? "provider") })
   return {schemaVersion: MODEL_CATALOG_QUERY_SCHEMA_VERSION, query: normalized, models: sorted}
 }
 
@@ -927,7 +927,7 @@ fn __catalog_column_specs(columns) {
     } else {
       column
     }
-    specs = specs.push({key: column, header: header, align: "left"})
+    specs = specs.appending({key: column, header: header, align: "left"})
   }
   return specs
 }
@@ -951,7 +951,7 @@ pub fn render_model_catalog_table(models: list, query: ModelCatalogQuery = {}) -
     for column in columns {
       row = row + {[column]: __catalog_column_value(model, column)}
     }
-    rows = rows.push(row)
+    rows = rows.appending(row)
   }
   return render_table(rows, {columns: __catalog_column_specs(columns), empty: "(no models match)"})
 }

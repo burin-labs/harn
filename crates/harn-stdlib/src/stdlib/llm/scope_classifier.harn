@@ -62,7 +62,9 @@ fn __scope_classifier_recent_context(messages, limit) {
   let i = start
   while i < total {
     const msg = messages[i]
-    out = out.push({role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""})
+    out = out.appending(
+      {role: to_string(msg?.role ?? ""), content: msg?.content ?? msg?.text ?? ""},
+    )
     i = i + 1
   }
   return out

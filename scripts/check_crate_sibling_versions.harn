@@ -160,7 +160,7 @@ fn checked_manifest_paths() -> list<string> {
       paths = paths + [path]
     }
   }
-  return paths.sort()
+  return paths.sorted()
 }
 
 fn unpublished_workspace_package_names(paths: list<string>) -> list<string> {
@@ -171,7 +171,7 @@ fn unpublished_workspace_package_names(paths: list<string>) -> list<string> {
       names = names + [manifest_package_name_from_text(text)]
     }
   }
-  return names.sort()
+  return names.sorted()
 }
 
 pipeline main(task) {

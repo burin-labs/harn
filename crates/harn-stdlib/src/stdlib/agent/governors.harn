@@ -771,7 +771,7 @@ pub fn compose_post_turn(callbacks: list) {
         break
       }
       if to_string(norm?.message ?? "") != "" {
-        messages = messages.push(norm.message)
+        messages = messages.appending(norm.message)
       }
     }
     if result != nil {
@@ -802,10 +802,10 @@ pub fn with_governance(opts: dict, config: dict) -> dict {
   let callbacks = []
   const existing = opts?.post_turn_callback
   if existing != nil {
-    callbacks = callbacks.push(existing)
+    callbacks = callbacks.appending(existing)
   }
   if config?.governor != nil {
-    callbacks = callbacks.push(governor_post_turn(config.governor))
+    callbacks = callbacks.appending(governor_post_turn(config.governor))
   }
   let result = opts
   const detectors = config?.detectors
@@ -818,7 +818,7 @@ pub fn with_governance(opts: dict, config: dict) -> dict {
     result = result + {stall_diagnostics: existing_stall + detector_spec_to_stall(detectors)}
     const overlay = unified_detectors_post_turn(detectors)
     if overlay != nil {
-      callbacks = callbacks.push(overlay)
+      callbacks = callbacks.appending(overlay)
     }
   }
   if len(callbacks) > 0 {
@@ -874,7 +874,7 @@ pub fn governors_selftest() -> dict {
   let missing = []
   for key in required {
     if !contains(keys(live_payload), key) {
-      missing = missing.push(key)
+      missing = missing.appending(key)
     }
   }
   if len(missing) > 0 {
@@ -890,7 +890,7 @@ pub fn governors_selftest() -> dict {
   const decision = governor_decision(policy, obs)
   return {
     decision: decision,
-    observed_keys: keys(live_payload).sort(),
+    observed_keys: keys(live_payload).sorted(),
     ok: decision.action == "abort" && obs.consumed == 5.0,
     required_keys: required,
   }

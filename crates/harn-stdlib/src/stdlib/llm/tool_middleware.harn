@@ -88,7 +88,7 @@ fn __tool_mw_string_list(value) -> list {
   let out = []
   for item in __tool_mw_list(value) {
     if item != nil {
-      out = out.push(to_string(item))
+      out = out.appending(to_string(item))
     }
   }
   return out
@@ -127,7 +127,7 @@ fn __tool_mw_drop_keys(value, keys) {
   if type_of(value) == "list" {
     let out = []
     for item in value {
-      out = out.push(__tool_mw_drop_keys(item, keys))
+      out = out.appending(__tool_mw_drop_keys(item, keys))
     }
     return out
   }
@@ -136,10 +136,10 @@ fn __tool_mw_drop_keys(value, keys) {
 
 fn __tool_mw_canonical_json(value) -> string {
   if type_of(value) == "dict" {
-    const keys = value.keys().sort()
+    const keys = value.keys().sorted()
     let parts = []
     for key in keys {
-      parts = parts.push(
+      parts = parts.appending(
         json_stringify(to_string(key)) + ":" + __tool_mw_canonical_json(value[key]),
       )
     }
@@ -148,7 +148,7 @@ fn __tool_mw_canonical_json(value) -> string {
   if type_of(value) == "list" {
     let parts = []
     for item in value {
-      parts = parts.push(__tool_mw_canonical_json(item))
+      parts = parts.appending(__tool_mw_canonical_json(item))
     }
     return "[" + join(parts, ",") + "]"
   }
@@ -276,7 +276,7 @@ pub fn tools_use_middleware(registry, transform) {
   let rewritten = []
   for entry in entries {
     if type_of(entry) != "dict" {
-      rewritten = rewritten.push(entry)
+      rewritten = rewritten.appending(entry)
       continue
     }
     const mapped = try {
@@ -292,7 +292,7 @@ pub fn tools_use_middleware(registry, transform) {
     if type_of(value) != "dict" {
       throw "tools_use_middleware: transform returned " + type_of(value) + "; expected dict or nil"
     }
-    rewritten = rewritten.push(value)
+    rewritten = rewritten.appending(value)
   }
   return registry + {tools: rewritten}
 }
@@ -337,7 +337,7 @@ pub fn tool_inject_param(entry, name, schema_fragment, opts = nil) {
     const new_props = props + {[name]: fragment}
     const req_list = __tool_mw_list(params?.required)
     const new_req = if required && !contains(req_list, name) {
-      req_list.push(name)
+      req_list.appending(name)
     } else {
       req_list
     }

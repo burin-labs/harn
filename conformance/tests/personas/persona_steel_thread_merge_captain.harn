@@ -26,7 +26,7 @@ fn pr_variants() {
   let prs = []
   let n = 1
   while n <= 50 {
-    prs = prs.push(
+    prs = prs.appending(
       {
         number: n,
         draft: n % 5 == 0,
@@ -52,9 +52,9 @@ fn merge_captain(ctx) {
     const decision = classify_pr(pr)
     if decision.action == "admin_merge" {
       const receipt = admin_merge(pr)
-      merged = merged.push(receipt.result.number)
+      merged = merged.appending(receipt.result.number)
     } else if decision.action == "handoff" {
-      handoffs = handoffs.push(semantic_conflict_ticket(pr))
+      handoffs = handoffs.appending(semantic_conflict_ticket(pr))
     }
   }
   const run = finalize_merge_sweep(handoffs)

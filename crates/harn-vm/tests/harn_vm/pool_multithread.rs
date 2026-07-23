@@ -34,7 +34,7 @@ pipeline main(task) {
   let handles = []
   for i in 0 to 8 exclusive {
     const seed = i
-    handles = handles.push(pool.submit({ -> seed + 10 }))
+    handles = handles.appending(pool.submit({ -> seed + 10 }))
   }
   const results = pool_wait(handles)
   let completed = 0

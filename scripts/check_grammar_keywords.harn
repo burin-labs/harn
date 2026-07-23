@@ -88,7 +88,7 @@ pipeline main(task) {
     __io_eprintln(
       "error: the spec grammar uses keyword literal(s) that are neither reserved keywords nor known contextual keywords:",
     )
-    __io_eprintln("  - ${drift.sort().join(", ")}")
+    __io_eprintln("  - ${drift.sorted().join(", ")}")
     __io_eprintln(
       "hint: a keyword may have been renamed/removed in crates/harn-lexer/src/token.rs without updating the spec grammar.",
     )

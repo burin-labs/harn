@@ -11,6 +11,6 @@ pipeline default() {
   const msg = "world" |> replace("hello _", "_", _)
   __io_println(msg)
   // Placeholder with method call
-  const nums = [3, 1, 2] |> _.sort()
+  const nums = [3, 1, 2] |> _.sorted()
   __io_println(nums)
 }

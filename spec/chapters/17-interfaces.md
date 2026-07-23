@@ -141,7 +141,7 @@ only in covariant positions.
 | Shape `{ field: T, ... }` | covariant per field (width subtyping) |
 
 `list` and `dict` are invariant because index assignment can *write* through
-them, which makes them read-write positions. Methods such as `push` are not a
+them, which makes them read-write positions. Methods such as `appending` are not a
 reason: they return a new collection and never modify the receiver, so they are
 covariant reads. See [Binding mutability](04-scope-rules.md#binding-mutability).
 

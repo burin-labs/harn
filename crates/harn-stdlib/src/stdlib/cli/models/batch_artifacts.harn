@@ -122,14 +122,14 @@ pub fn __batch_request_rows_read(harness: Harness, requests_path: string) -> Bat
     const parsed = try {
       json_parse(trimmed)
     } catch (failure) {
-      errors = errors.push("line " + to_string(line_no) + ": invalid JSON: " + failure.message)
+      errors = errors.appending("line " + to_string(line_no) + ": invalid JSON: " + failure.message)
       continue
     }
     if type_of(parsed) != "dict" {
-      errors = errors.push("line " + to_string(line_no) + ": expected a JSON object")
+      errors = errors.appending("line " + to_string(line_no) + ": expected a JSON object")
       continue
     }
-    rows = rows.push({line_no: line_no, row: parsed})
+    rows = rows.appending({line_no: line_no, row: parsed})
   }
   return {rows: rows, source_sha256: sha256(source), errors: errors}
 }
@@ -170,10 +170,10 @@ pub fn __batch_artifact_read(
   const artifact = safe_dict(parsed)
   const artifact_kind = safe_string(artifact["kind"], "")
   if !contract.accepted_kinds.contains(artifact_kind) {
-    errors = errors.push(contract.unsupported_prefix + artifact_kind)
+    errors = errors.appending(contract.unsupported_prefix + artifact_kind)
   }
   if len(safe_list(artifact[contract.collection_field])) == 0 {
-    errors = errors.push(contract.empty_error)
+    errors = errors.appending(contract.empty_error)
   }
   return {artifact: artifact, source_sha256: sha256(source), errors: errors}
 }

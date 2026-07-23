@@ -106,7 +106,7 @@ pub fn extract_paths(text) {
         return true
       },
     )
-    .sort()
+    .sorted()
 }
 
 // Parse fenced code blocks from LLM response text.

@@ -19,7 +19,7 @@ fn __tone_voice(tone) {
 fn __bulleted(items) {
   let lines = []
   for item in items {
-    lines = lines.push("- " + to_string(item))
+    lines = lines.appending("- " + to_string(item))
   }
   return join(lines, "\n")
 }
@@ -29,7 +29,7 @@ fn __examples_block(examples) {
   for ex in examples {
     const input = to_string(ex?.input ?? "")
     const output = to_string(ex?.output ?? "")
-    blocks = blocks.push("Input:\n" + input + "\n\nOutput:\n" + output)
+    blocks = blocks.appending("Input:\n" + input + "\n\nOutput:\n" + output)
   }
   return join(blocks, "\n\n---\n\n")
 }
@@ -39,7 +39,7 @@ fn __output_contract_block(contract) {
     return ""
   }
   let lines = []
-  const keys = contract.keys().sort()
+  const keys = contract.keys().sorted()
   for key in keys {
     const value = contract[key]
     const rendered = if type_of(value) == "dict" || type_of(value) == "list" {
@@ -47,7 +47,7 @@ fn __output_contract_block(contract) {
     } else {
       to_string(value)
     }
-    lines = lines.push("- " + to_string(key) + ": " + rendered)
+    lines = lines.appending("- " + to_string(key) + ": " + rendered)
   }
   return join(lines, "\n")
 }
@@ -128,7 +128,7 @@ pub fn with_system_fragments(options, parts) -> dict {
   }
   let normalized = []
   for part in __prompt_part_list(opts?.system) + __prompt_part_list(parts) {
-    normalized = normalized.push(__normalize_system_prompt_part(part))
+    normalized = normalized.appending(__normalize_system_prompt_part(part))
   }
   return opts + {system: normalized}
 }
@@ -156,16 +156,16 @@ pub fn system_prelude(opts) {
   const examples = opts?.examples ?? []
   let sections = [to_string(persona), __tone_voice(tone)]
   if type_of(tools) == "list" && len(tools) > 0 {
-    sections = sections.push("Tools available:\n" + __bulleted(tools))
+    sections = sections.appending("Tools available:\n" + __bulleted(tools))
   }
   if type_of(constraints) == "list" && len(constraints) > 0 {
-    sections = sections.push("Constraints:\n" + __bulleted(constraints))
+    sections = sections.appending("Constraints:\n" + __bulleted(constraints))
   }
   if type_of(output_contract) == "dict" && len(output_contract.keys()) > 0 {
-    sections = sections.push("Output:\n" + __output_contract_block(output_contract))
+    sections = sections.appending("Output:\n" + __output_contract_block(output_contract))
   }
   if type_of(examples) == "list" && len(examples) > 0 {
-    sections = sections.push("Examples:\n\n" + __examples_block(examples))
+    sections = sections.appending("Examples:\n\n" + __examples_block(examples))
   }
   return join(sections, "\n\n")
 }
@@ -229,7 +229,7 @@ fn __schema_property_lines(properties) {
     return []
   }
   let lines = []
-  const keys = properties.keys().sort()
+  const keys = properties.keys().sorted()
   for key in keys {
     const prop = properties[key]
     const kind = if type_of(prop) == "dict" {
@@ -242,7 +242,7 @@ fn __schema_property_lines(properties) {
     } else {
       ""
     }
-    lines = lines.push("- " + to_string(key) + " (" + kind + ")" + desc)
+    lines = lines.appending("- " + to_string(key) + " (" + kind + ")" + desc)
   }
   return lines
 }
@@ -269,7 +269,7 @@ pub fn structured_output_preface(schema, opts) {
     return render_prompt(to_string(template), bindings)
   }
   const required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
-    schema.required.sort()
+    schema.required.sorted()
   } else {
     []
   }
@@ -289,11 +289,11 @@ pub fn structured_output_preface(schema, opts) {
     required_line,
   ]
   if len(prop_lines) > 0 {
-    sections = sections.push("Properties:\n" + join(prop_lines, "\n"))
+    sections = sections.appending("Properties:\n" + join(prop_lines, "\n"))
   }
   const hint = options?.hint
   if hint != nil && to_string(hint) != "" {
-    sections = sections.push("Hint: " + to_string(hint))
+    sections = sections.appending("Hint: " + to_string(hint))
   }
   return join(sections, "\n\n")
 }

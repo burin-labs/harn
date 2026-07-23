@@ -77,12 +77,12 @@ fn test_format_pipe_placeholder_patterns() {
     let source = r#"pipeline default(task) {
   let words = "hello world" |> split(_, " ")
   let result = [3, 1, 2]
-    |> _.sort()
+    |> _.sorted()
     |> len(_)
 }"#;
     let result = format_source(source).unwrap();
     assert!(result.contains(r#""hello world" |> split(_, " ")"#));
-    assert!(result.contains("let result = [3, 1, 2]\n    |> _.sort()\n    |> len(_)"));
+    assert!(result.contains("let result = [3, 1, 2]\n    |> _.sorted()\n    |> len(_)"));
     assert_roundtrip(source);
 }
 

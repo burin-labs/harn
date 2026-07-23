@@ -30,7 +30,7 @@ pipeline test_one_to_four_targets_matches_explicit_patch(task) {
     let files = []
     let i = 0
     while i < targets {
-      files = files.push("src/module_" + to_string(i) + ".rs")
+      files = files.appending("src/module_" + to_string(i) + ".rs")
       i = i + 1
     }
     const described = "Fix the bug in " + join(files, " and ")
@@ -134,7 +134,7 @@ pipeline test_explicit_patch_lane_narrows_tools_and_policy(task) {
   assert_eq(result._lane_verdict.lane, "explicit_patch")
   let kept = []
   for entry in result.tools.tools {
-    kept = kept.push(entry.name)
+    kept = kept.appending(entry.name)
   }
   assert(contains(kept, "look"), "explicit_patch keeps look")
   assert(contains(kept, "edit"), "explicit_patch keeps edit")
@@ -158,7 +158,7 @@ pipeline test_hard_keep_survives_narrowing(task) {
   )
   let kept = []
   for entry in result.tools.tools {
-    kept = kept.push(entry.name)
+    kept = kept.appending(entry.name)
   }
   assert(contains(kept, "ask_user"), "hard_keep survives the explicit_patch lane")
 }
@@ -186,7 +186,7 @@ pipeline test_tool_kinds_resolve_against_registry_annotations(task) {
   )
   let kept = []
   for entry in result.tools.tools {
-    kept = kept.push(entry.name)
+    kept = kept.appending(entry.name)
   }
   assert_eq(kept, ["look"])
 }
@@ -238,7 +238,7 @@ pipeline test_stage_gate_parity_lane_policy_unchanged(task) {
   assert_eq(narrowed._lane_verdict.lane, "explicit_patch")
   let kept = []
   for entry in narrowed.tools.tools {
-    kept = kept.push(entry.name)
+    kept = kept.appending(entry.name)
   }
   assert(contains(kept, "edit"), "explicit_patch still keeps edit")
   assert(!contains(kept, "git"), "explicit_patch still hides git")

@@ -40,7 +40,7 @@ pipeline default(task) {
   log("First > 100: ${[10, 20, 60, 30].find({ x -> x > 100 })}")
   const config = {debug: true, verbose: false, level: 3}
   const overrides = {verbose: true, timeout: 30}
-  const merged = config.merge(overrides)
+  const merged = config.merging(overrides)
   log("Merged keys: ${merged.keys()}")
   log("Verbose: ${merged.verbose}")
   const nested = [[1, 2], [3], [4, 5, 6]]

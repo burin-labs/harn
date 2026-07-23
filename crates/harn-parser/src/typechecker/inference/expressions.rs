@@ -1047,15 +1047,15 @@ impl TypeChecker {
                     | "pad_right" | "repeat" | "join" => {
                         Some(result(TypeExpr::Named("string".into())))
                     }
-                    // `reverse` works on both strings and lists, returning the
+                    // `reversed` works on both strings and lists, returning the
                     // receiver's own type. Reversing a list yields a list with the
                     // same element type; reversing a string yields a string. A
                     // gradual/unknown receiver (`any`/`_`, or an unannotated value
                     // whose type we couldn't pin down) could be either at runtime,
                     // so it stays gradual rather than being forced to `string` —
                     // forcing `string` mis-typed list reversals through untyped
-                    // bindings (e.g. `list + value.reverse()`).
-                    "reverse" => {
+                    // bindings (e.g. `list + value.reversed()`).
+                    "reversed" => {
                         let is_list = list_elem.is_some()
                             || matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "list");
                         let is_string =
@@ -1093,7 +1093,7 @@ impl TypeChecker {
                         }
                     }
                     // List methods. `map`/`flat_map` produce the closure's return
-                    // type per element (flat_map flattens one level); `sort` keeps
+                    // type per element (flat_map flattens one level); `sorted` keeps
                     // the element type.
                     "map" => {
                         let param = list_elem.unwrap_or_else(Self::wildcard_type);
@@ -1113,7 +1113,7 @@ impl TypeChecker {
                             None => Some(result(TypeExpr::Named("list".into()))),
                         }
                     }
-                    "sort" => match &list_elem {
+                    "sorted" => match &list_elem {
                         Some(e) => Some(result(list_of(e.clone()))),
                         None => Some(result(TypeExpr::Named("list".into()))),
                     },
@@ -1137,8 +1137,8 @@ impl TypeChecker {
                         (Some(k), Some(v)) => Some(result(list_of(pair_of(k.clone(), v.clone())))),
                         _ => Some(result(TypeExpr::Named("list".into()))),
                     },
-                    "merge" | "map_values" | "rekey" | "map_keys" => {
-                        // Rekey/map_keys transform keys; resulting dict still keys-by-string.
+                    "merging" | "map_values" | "rekeyed" | "map_keys" => {
+                        // rekeyed/map_keys transform keys; resulting dict still keys-by-string.
                         // Preserve the value-type parameter when known so downstream code can
                         // still rely on dict<string, V> typing after a key-rename.
                         if let Some(v) = &dict_val {

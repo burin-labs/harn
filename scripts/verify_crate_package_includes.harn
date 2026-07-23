@@ -64,7 +64,7 @@ fn within_root(path: string, root: string) -> bool {
 pub fn packaged_include_errors(root: string, crate: string) -> list<string> {
   const package_root = path_normalize(root)
   let errors: list<string> = []
-  for source in harness.fs.glob("**/*.rs", package_root).sort() {
+  for source in harness.fs.glob("**/*.rs", package_root).sorted() {
     const text = harness.fs.read_text(source)
     const source_rel = rel_path(source, package_root)
     for include_path in rust_include_paths(text) {

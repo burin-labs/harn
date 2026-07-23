@@ -249,7 +249,7 @@ fn __agent_record_budget_decision(
   reason: string,
   status: string,
 ) -> list<AgentLoopBudgetDecision> {
-  return decisions.push(
+  return decisions.appending(
     {
       iteration: iteration,
       action: action,

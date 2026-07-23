@@ -265,7 +265,7 @@ pub enum VmValue {
     Dict(Shared<DictMap>),
     Closure(Shared<VmClosure>),
     /// Reference to a registered builtin function, used when a builtin name is
-    /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
+    /// referenced as a value (e.g. `snake_dict.rekeyed(snake_to_camel)`). The
     /// contained string is the builtin's registered name.
     BuiltinRef(HarnStr),
     /// Compact builtin reference for callback positions. The boxed

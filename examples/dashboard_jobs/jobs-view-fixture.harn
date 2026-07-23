@@ -11,9 +11,11 @@ pipeline default() {
   const local = fixture(harness, "local_job_stream")
   let events = []
   for item in local.events {
-    events = events.push(dashboard_job_event(item.kind, item))
+    events = events.appending(dashboard_job_event(item.kind, item))
   }
-  events = events.push(dashboard_job_event("run.started", fixture(harness, "cloud_managed_run")))
+  events = events.appending(
+    dashboard_job_event("run.started", fixture(harness, "cloud_managed_run")),
+  )
   const view = dashboard_jobs_view(events, {title: "Jobs", generated_at: "fixture"})
   for job in view.jobs {
     __io_println(job.job_id + " " + job.status)

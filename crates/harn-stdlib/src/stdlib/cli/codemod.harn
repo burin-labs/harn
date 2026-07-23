@@ -45,7 +45,7 @@ fn run_codemod(plan: list, apply: bool, allow_unsafe: bool) -> dict {
         if f.applied {
           applied = applied + 1
         }
-        file_results = file_results.push(f)
+        file_results = file_results.appending(f)
       }
     }
   }
@@ -64,7 +64,7 @@ fn run_builtin_recipe(name: string, files: list, apply: bool) -> dict {
         if f.applied {
           applied = applied + 1
         }
-        file_results = file_results.push(f)
+        file_results = file_results.appending(f)
       }
     }
     return {files: file_results, changed: changed, applied: applied}

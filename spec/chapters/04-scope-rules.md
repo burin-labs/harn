@@ -57,20 +57,20 @@ value, changing part of it changes the binding's whole value:
   all of them require `let`. Through a `const` binding each is rejected
   identically, with `HARN-OWN-001`. Read `d["k"] = 1` as sugar for
   `d = <a new dict differing at k>` and the requirement is self-evident.
-- **Methods** such as `push`, `sort`, and `add` return a *new* value and leave
+- **Methods** such as `appending`, `sorted`, and `adding` return a *new* value and leave
   the receiver's value untouched, so they change nothing and are permitted on
   a `const` binding. They are ordinary expressions, not assignments.
 
 ```harn
 const base = [1]
-const appended = base.push(2)   // fine: base is untouched, base == [1]
+const appended = base.appending(2)   // fine: base is untouched, base == [1]
 
 let built = []
-built = built.push(1)           // this is how a collection is built up
+built = built.appending(1)           // this is how a collection is built up
 ```
 
 Because the methods are pure, discarding a result silently does nothing;
-`HARN-LNT-066` rejects that as an error. A bare `l.push(1)` leaves `l`
+`HARN-LNT-066` rejects that as an error. A bare `l.appending(1)` leaves `l`
 unchanged and is always a bug.
 
 #### Why this is Swift's rule, not TypeScript's
@@ -115,4 +115,3 @@ New child scopes are created for:
 Control flow *headers* (`if` conditions, `match` scrutinees) evaluate in the current
 scope, but each branch or arm body is its own child scope: bindings declared inside
 shadow outer names and do not leak past the body.
-

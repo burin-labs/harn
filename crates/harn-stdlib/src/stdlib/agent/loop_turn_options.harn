@@ -125,7 +125,7 @@ pub fn __merge_tool_names(existing, additions) {
   const values = additions ?? []
   for name in values {
     if name != "" && !contains(merged, name) {
-      merged = merged.push(name)
+      merged = merged.appending(name)
     }
   }
   return merged
@@ -394,7 +394,7 @@ pub fn __agent_loop_emit_budget_exhausted(session_id, exhaustion) {
 }
 
 pub fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
-  return decisions.push(
+  return decisions.appending(
     {
       iteration: iteration,
       action: "stop",
@@ -506,7 +506,7 @@ pub fn __agent_loop_apply_stall_judge_veto(
 }
 
 pub fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_limit, new_limit) {
-  return decisions.push(
+  return decisions.appending(
     {
       iteration: iteration,
       action: "extend",

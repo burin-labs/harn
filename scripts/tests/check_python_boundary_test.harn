@@ -76,7 +76,7 @@ pipeline test_temp_tree_reports_only_unclassified_python(task) {
       const report = check_python_boundary(root)
       assert_eq(report.violation_count, 4)
       assert_eq(
-        report.violations.map({ row -> row.path }).to_list().sort(),
+        report.violations.map({ row -> row.path }).to_list().sorted(),
         [
           "conformance/helpers/http_proxy_server.py",
           "conformance/helpers/new_mock_server.py",

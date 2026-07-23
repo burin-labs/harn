@@ -100,7 +100,7 @@ fn _require_points(points) -> int {
 fn _copy_list(items) -> list {
   let out = []
   for item in items {
-    out = out.push(item)
+    out = out.appending(item)
   }
   return out
 }
@@ -137,14 +137,14 @@ fn _insert_ranked(ranked, entry, descending = false) -> list {
         entry.score < existing.score
       }
       if better {
-        out = out.push(entry)
+        out = out.appending(entry)
         inserted = true
       }
     }
-    out = out.push(existing)
+    out = out.appending(existing)
   }
   if !inserted {
-    out = out.push(entry)
+    out = out.appending(entry)
   }
   return out
 }
@@ -165,7 +165,7 @@ fn _zero_vector(size) -> list {
   let out = []
   let idx = 0
   while idx < size {
-    out = out.push(0.0)
+    out = out.appending(0.0)
     idx = idx + 1
   }
   return out
@@ -205,7 +205,7 @@ fn _init_kmeans_centroids(points, k) -> list {
   let centroids = [_copy_list(points[0])]
   while len(centroids) < k {
     const next_index = _farthest_point(points, centroids)
-    centroids = centroids.push(_copy_list(points[next_index]))
+    centroids = centroids.appending(_copy_list(points[next_index]))
   }
   return centroids
 }
@@ -215,8 +215,8 @@ fn _assign_points(points, centroids) -> {assignments: list, errors: list} {
   let errors = []
   for point in points {
     const nearest = _nearest_centroid(point, centroids)
-    assignments = assignments.push(nearest.index)
-    errors = errors.push(nearest.distance)
+    assignments = assignments.appending(nearest.index)
+    errors = errors.appending(nearest.distance)
   }
   return {assignments: assignments, errors: errors}
 }
@@ -240,8 +240,8 @@ fn _recompute_centroids(points, assignments, k, dims, errors) -> {centroids: lis
   let counts = []
   let idx = 0
   while idx < k {
-    sums = sums.push(_zero_vector(dims))
-    counts = counts.push(0)
+    sums = sums.appending(_zero_vector(dims))
+    counts = counts.appending(0)
     idx = idx + 1
   }
   idx = 0
@@ -262,15 +262,15 @@ fn _recompute_centroids(points, assignments, k, dims, errors) -> {centroids: lis
   while idx < k {
     if counts[idx] == 0 {
       const reseed = _largest_error_point(errors)
-      centroids = centroids.push(_copy_list(points[reseed]))
+      centroids = centroids.appending(_copy_list(points[reseed]))
     } else {
       let centroid = []
       let dim = 0
       while dim < dims {
-        centroid = centroid.push(sums[idx][dim] / counts[idx])
+        centroid = centroid.appending(sums[idx][dim] / counts[idx])
         dim = dim + 1
       }
-      centroids = centroids.push(centroid)
+      centroids = centroids.appending(centroid)
     }
     idx = idx + 1
   }
@@ -385,7 +385,7 @@ pub fn mean(items) {
  * @errors: []
  */
 pub fn median(items) {
-  const sorted = _require_non_empty_numeric_list(items).sort()
+  const sorted = _require_non_empty_numeric_list(items).sorted()
   const n = len(sorted)
   const mid = floor(n / 2)
   if n % 2 == 1 {
@@ -402,7 +402,7 @@ pub fn median(items) {
  * @errors: []
  */
 pub fn percentile(items, p) {
-  const sorted = _require_non_empty_numeric_list(items).sort()
+  const sorted = _require_non_empty_numeric_list(items).sorted()
   _require_number(p, "percentile")
   require p >= 0 && p <= 100, "percentile must be between 0 and 100"
   if len(sorted) == 1 {
@@ -852,7 +852,7 @@ pub fn moving_avg(items, window) -> list {
   let out = []
   let idx = 0
   while idx + size <= len(xs) {
-    out = out.push(mean(xs.slice(idx, idx + size)))
+    out = out.appending(mean(xs.slice(idx, idx + size)))
     idx = idx + 1
   }
   return out
@@ -873,7 +873,7 @@ pub fn ema(items, alpha) -> list {
   let idx = 1
   while idx < len(xs) {
     prev = a * xs[idx] + (1 - a) * prev
-    out = out.push(prev)
+    out = out.appending(prev)
     idx = idx + 1
   }
   return out
@@ -925,7 +925,7 @@ pub fn kmeans(points, k, options = nil) -> KMeansResult {
     let final_counts = []
     let idx = 0
     while idx < k {
-      final_counts = final_counts.push(0)
+      final_counts = final_counts.appending(0)
       idx = idx + 1
     }
     for cluster in assignments {

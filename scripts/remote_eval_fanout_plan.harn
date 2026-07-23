@@ -105,7 +105,7 @@ fn split_csv(value: string) -> list<string> {
 fn catalog_eval_names(catalog) -> list<string> {
   const evals = catalog?.evals ?? {}
   let out: list<string> = []
-  for name in evals.keys().sort() {
+  for name in evals.keys().sorted() {
     out = out + [to_string(name)]
   }
   return out
@@ -357,9 +357,9 @@ pub fn remote_eval_fanout_rejoin_receipt(plan, receipts) {
     }
     seen = seen + {[shard_id]: true}
     if __receipt_ingest_ok(receipt) {
-      accepted = accepted.push(receipt)
+      accepted = accepted.appending(receipt)
     } else {
-      failed = failed.push(
+      failed = failed.appending(
         {shard_id: shard_id, status: __receipt_status(receipt), receipt: receipt},
       )
     }
@@ -368,7 +368,7 @@ pub fn remote_eval_fanout_rejoin_receipt(plan, receipts) {
   for shard in plan?.shards ?? [] {
     const id = to_string(shard.id)
     if seen[id] == nil {
-      missing = missing.push(id)
+      missing = missing.appending(id)
     }
   }
   const ingest_ready = len(missing) == 0

@@ -111,7 +111,7 @@ fn __lane_validate_rows(rows) {
     if contains(names, name) {
       throw "lane_policy: duplicate lane row name \"" + name + "\""
     }
-    names = names.push(name)
+    names = names.appending(name)
     if row?.default ?? false {
       seen_default = true
     }
@@ -141,7 +141,7 @@ pub fn agent_lane_explicit_target_paths(task) {
   let out = []
   for token in found {
     if !contains(out, token) {
-      out = out.push(token)
+      out = out.appending(token)
     }
   }
   return out
@@ -265,7 +265,7 @@ fn __lane_entry_kind(entry, policy) {
 fn __lane_push_unique(names, value) {
   const n = to_string(value)
   if n != "" && !contains(names, n) {
-    return names.push(n)
+    return names.appending(n)
   }
   return names
 }
@@ -445,7 +445,7 @@ fn __stage_gate_token_list(values) {
   for value in values ?? [] {
     const rendered = to_string(value ?? "").trim()
     if rendered != "" && !contains(out, rendered) {
-      out = out.push(rendered)
+      out = out.appending(rendered)
     }
   }
   return out
@@ -750,10 +750,10 @@ fn __stage_gate_render_allowed(gate) {
   const tools = __stage_gate_token_list(gate?.allowed_tools ?? [])
   let parts = []
   if len(kinds) > 0 {
-    parts = parts.push("kinds=" + join(kinds, ","))
+    parts = parts.appending("kinds=" + join(kinds, ","))
   }
   if len(tools) > 0 {
-    parts = parts.push("tools=" + join(tools, ","))
+    parts = parts.appending("tools=" + join(tools, ","))
   }
   if len(parts) == 0 {
     return "none"

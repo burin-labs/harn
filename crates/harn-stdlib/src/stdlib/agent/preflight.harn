@@ -102,7 +102,7 @@ pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
     // encoder handles escaping, so the `body` flag is a no-op here.
     let pairs = []
     for a in args ?? [] {
-      pairs = pairs.push([to_string(a?.key), a?.value])
+      pairs = pairs.appending([to_string(a?.key), a?.value])
     }
     const call_obj = {name: to_string(name), args: dict_from_pairs(pairs)}
     return p.call_open + json_stringify(call_obj) + p.call_close
@@ -449,7 +449,7 @@ fn __agent_push_system_fragment(fragments, id, body) {
   if trimmed == "" {
     return fragments
   }
-  return fragments.push({id: "primary:" + id, source: "primary", body: trimmed})
+  return fragments.appending({id: "primary:" + id, source: "primary", body: trimmed})
 }
 
 /**
@@ -495,7 +495,7 @@ fn __agent_context_profile_fragments(opts) {
     if body == "" {
       continue
     }
-    fragments = fragments.push(
+    fragments = fragments.appending(
       {
         id: fragment?.id ?? "profile",
         source: fragment?.source ?? "profile",
@@ -608,7 +608,7 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
   }
   const scratchpad_fragment = agent_scratchpad_recitation_fragment(session, opts)
   if scratchpad_fragment != nil {
-    fragments = fragments.push(scratchpad_fragment)
+    fragments = fragments.appending(scratchpad_fragment)
   }
   return fragments
 }
@@ -623,7 +623,7 @@ pub fn agent_build_turn_system_fragments(session, opts, iteration) {
 pub fn agent_build_turn_system(session, opts, iteration) {
   let parts = []
   for fragment in agent_build_turn_system_fragments(session, opts, iteration) {
-    parts = parts.push(fragment.body)
+    parts = parts.appending(fragment.body)
   }
   return join(parts, "\n\n")
 }
@@ -733,7 +733,7 @@ fn __agent_collapse_repeated_runtime_feedback(messages: list) -> list {
   for message in messages {
     const feedback = __agent_runtime_feedback(message)
     if feedback == nil {
-      out = out.push(message)
+      out = out.appending(message)
       continue
     }
     const left = (to_int(remaining[feedback.signature] ?? 1) ?? 1) - 1
@@ -743,13 +743,13 @@ fn __agent_collapse_repeated_runtime_feedback(messages: list) -> list {
     }
     const repeat_count = to_int(counts[feedback.signature] ?? 1) ?? 1
     if repeat_count == 1 {
-      out = out.push(message)
+      out = out.appending(message)
       continue
     }
     const summary = "[Equivalent runtime feedback repeated "
       + to_string(repeat_count)
       + " times; earlier copies collapsed.]"
-    out = out.push(
+    out = out.appending(
       message
         + {
         content: "<runtime_feedback kind=\""
@@ -784,7 +784,7 @@ pub fn agent_build_turn_messages(session, opts, iteration) {
   let out = []
   let index = 0
   for message in collapsed_messages {
-    out = out.push(
+    out = out.appending(
       __agent_decorate_turn_message(message, opts, session, iteration, index, timestamp),
     )
     index = index + 1

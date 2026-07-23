@@ -203,7 +203,7 @@ pipeline main(task) {
   for g in harness.fs.glob(DOCS_GLOB) {
     md_files = md_files + [rel_path(g)]
   }
-  md_files = md_files.sort()
+  md_files = md_files.sorted()
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the snippet scratch directory lives there (removed afterward) rather
    * than under the system temp dir the bash version used. */

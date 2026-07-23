@@ -31,16 +31,15 @@ pub(super) enum BlockKind {
 /// collide with an effectful host or connector method of the same name
 /// (`get`, `add`, `remove`, `merge`, `count`, `find`, …).
 ///
-/// `push` and `pop` lead the list deliberately. They read as mutators to
-/// anyone arriving from Python/JS/Ruby, which is exactly why silently
-/// discarding their result is the trap this rule exists to catch.
-///
 /// Keep sorted.
 const PURE_COLLECTION_METHODS: &[&str] = &[
+    "adding",
+    "appending",
     "char_at",
     "chars",
     "chunk",
     "compact",
+    "dropping_last",
     "each_cons",
     "each_slice",
     "enumerate",
@@ -50,19 +49,19 @@ const PURE_COLLECTION_METHODS: &[&str] = &[
     "lowercase",
     "map_keys",
     "map_values",
+    "merging",
     "pad_left",
     "pad_right",
     "partition",
-    "pop",
-    "push",
-    "rekey",
+    "rekeyed",
+    "removing",
     "repeat",
-    "reverse",
+    "reversed",
     "skip",
     "slice",
     "sliding_window",
-    "sort",
-    "sort_by",
+    "sorted",
+    "sorted_by",
     "split",
     "substring",
     "tally",
@@ -106,9 +105,9 @@ impl Linter<'_> {
     }
 
     /// Flag a pure collection/string method call whose result is discarded
-    /// (`l.push(1)` as a statement).
+    /// (`l.appending(1)` as a statement).
     ///
-    /// `push` clones the receiver, appends, and returns a *new* list rather
+    /// `appending` clones the receiver, appends, and returns a *new* list rather
     /// than mutating `l`, so dropping the return value drops the entire point
     /// of the call and leaves `l` unchanged — a silent no-op that otherwise
     /// typechecks clean. This is an error rather than a warning because there
@@ -249,49 +248,48 @@ mod tests {
     }
 
     #[test]
-    fn flags_discarded_push_in_statement_position() {
-        // The exact shape this rule exists for: reads as a mutation, is a no-op.
+    fn flags_discarded_appending_in_statement_position() {
         assert_eq!(
-            flagged("fn main(h: Harness) {\n  const l = []\n  l.push(1)\n  log(l)\n}"),
-            vec!["push"]
+            flagged("fn main(h: Harness) {\n  const l = []\n  l.appending(1)\n  log(l)\n}"),
+            vec!["appending"]
         );
     }
 
     #[test]
-    fn flags_discarded_push_as_the_tail_of_a_fn_body() {
+    fn flags_discarded_appending_as_the_tail_of_a_fn_body() {
         // Harn has no implicit block return, so a `fn` tail is discarded too.
         assert_eq!(
-            flagged("fn build(l: list<int>) {\n  l.push(1)\n}"),
-            vec!["push"]
+            flagged("fn build(l: list<int>) {\n  l.appending(1)\n}"),
+            vec!["appending"]
         );
     }
 
     #[test]
-    fn flags_discarded_push_in_a_loop_body() {
+    fn flags_discarded_appending_in_a_loop_body() {
         // The classic builder bug: the tail of a `for` body is not a value.
         assert_eq!(
             flagged(
-                "fn main(h: Harness) {\n  let out = []\n  for i in [1] {\n    out.push(i)\n  }\n}"
+                "fn main(h: Harness) {\n  let out = []\n  for i in [1] {\n    out.appending(i)\n  }\n}"
             ),
-            vec!["push"]
+            vec!["appending"]
         );
     }
 
     #[test]
     fn allows_the_result_being_assigned_back() {
-        assert!(flagged("fn main(h: Harness) {\n  let l = []\n  l = l.push(1)\n}").is_empty());
+        assert!(flagged("fn main(h: Harness) {\n  let l = []\n  l = l.appending(1)\n}").is_empty());
     }
 
     #[test]
     fn allows_an_explicit_discard() {
-        assert!(flagged("fn main(h: Harness) {\n  const _ = [1].sort()\n}").is_empty());
+        assert!(flagged("fn main(h: Harness) {\n  const _ = [1].sorted()\n}").is_empty());
     }
 
     #[test]
     fn allows_a_call_taking_a_closure() {
         // The closure may carry effects, so the statement is not provably inert.
         assert!(flagged(
-            "fn main(h: Harness) {\n  const l = [1]\n  l.sort_by({ a, b -> a - b })\n  log(l)\n}"
+            "fn main(h: Harness) {\n  const l = [1]\n  l.sorted_by({ a, b -> a - b })\n  log(l)\n}"
         )
         .is_empty());
     }
@@ -300,7 +298,7 @@ mod tests {
     fn allows_a_same_named_user_impl_method() {
         // A user method may exist for its effects, unlike the built-ins.
         assert!(flagged(
-            "struct Basket { items: list<int> }\nimpl Basket {\n  fn push(self, i: int) -> Basket { return self }\n}\nfn main(h: Harness) {\n  const b = Basket { items: [] }\n  b.push(1)\n}"
+            "struct Basket { items: list<int> }\nimpl Basket {\n  fn appending(self, i: int) -> Basket { return self }\n}\nfn main(h: Harness) {\n  const b = Basket { items: [] }\n  b.appending(1)\n}"
         )
         .is_empty());
     }
@@ -316,10 +314,10 @@ mod tests {
         // Closure body, `match` arm, `if` branch, `try`, and `block { … }` all
         // yield their tail, so the tail is a result rather than a discard.
         for source in [
-            "fn main(h: Harness) {\n  const f = { -> [1].sort() }\n  log(f())\n}",
-            "fn main(h: Harness) {\n  const m = match 1 {\n    1 -> { [1].sort() }\n    _ -> { [] }\n  }\n  log(m)\n}",
-            "fn main(h: Harness) {\n  const i = if true { [1].sort() } else { [] }\n  log(i)\n}",
-            "fn main(h: Harness) {\n  const t = try { [1].sort() } catch (e) { [] }\n  log(t)\n}",
+            "fn main(h: Harness) {\n  const f = { -> [1].sorted() }\n  log(f())\n}",
+            "fn main(h: Harness) {\n  const m = match 1 {\n    1 -> { [1].sorted() }\n    _ -> { [] }\n  }\n  log(m)\n}",
+            "fn main(h: Harness) {\n  const i = if true { [1].sorted() } else { [] }\n  log(i)\n}",
+            "fn main(h: Harness) {\n  const t = try { [1].sorted() } catch (e) { [] }\n  log(t)\n}",
         ] {
             assert!(
                 flagged(source).is_empty(),
@@ -333,8 +331,8 @@ mod tests {
         // Only the *tail* of a value block is a result; earlier statements in
         // it are discarded like any other.
         assert_eq!(
-            flagged("fn main(h: Harness) {\n  const f = { -> \n    [1].sort()\n    42\n  }\n  log(f())\n}"),
-            vec!["sort"]
+            flagged("fn main(h: Harness) {\n  const f = { -> \n    [1].sorted()\n    42\n  }\n  log(f())\n}"),
+            vec!["sorted"]
         );
     }
 

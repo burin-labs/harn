@@ -111,7 +111,7 @@ fn __fact_string_list(value) -> list<string> {
   for entry in raw {
     const text = __fact_text(entry)
     if text != "" && !contains(out, text) {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
   return out
@@ -122,7 +122,7 @@ fn __fact_push_tag(tags, tag) -> list<string> {
   if text == "" || contains(tags, text) {
     return tags
   }
-  return tags.push(text)
+  return tags.appending(text)
 }
 
 fn __fact_evidence_entry(entry) -> FactEvidence {
@@ -147,7 +147,7 @@ fn __fact_evidence(value) -> list<FactEvidence> {
   }
   let out = []
   for entry in value {
-    out = out.push(__fact_evidence_entry(entry))
+    out = out.appending(__fact_evidence_entry(entry))
   }
   return out
 }
@@ -426,7 +426,7 @@ pub fn recall_facts(query, kind = nil, min_confidence = nil, scope = nil) -> lis
     if hit.confidence < min {
       continue
     }
-    out = out.push(hit)
+    out = out.appending(hit)
     if len(out) >= limit {
       break
     }

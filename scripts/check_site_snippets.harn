@@ -77,7 +77,7 @@ pipeline main(task) {
   for g in harness.fs.glob(SITE_SNIPPET_GLOB) {
     site_snippets = site_snippets + [rel_path(g)]
   }
-  site_snippets = site_snippets.sort()
+  site_snippets = site_snippets.sorted()
   let checked = 0
   let failures = 0
   for snippet in site_snippets + GALLERY_SCENARIOS {

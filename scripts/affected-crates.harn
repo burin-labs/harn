@@ -13,7 +13,7 @@ pub fn unique_sorted(items: list) -> list {
       out = out + [item]
     }
   }
-  return out.sort()
+  return out.sorted()
 }
 
 pub fn global_path_prefixes_from_text(text: string) -> list<string> {
@@ -100,9 +100,9 @@ pub fn workspace_from_metadata(meta: dict) -> dict {
         direct = direct + [dep_name]
       }
     }
-    deps = deps + {[name]: direct.sort()}
+    deps = deps + {[name]: direct.sorted()}
   }
-  return {crate_dirs: crate_dirs, deps: deps, all_crates: workspace_names.sort()}
+  return {crate_dirs: crate_dirs, deps: deps, all_crates: workspace_names.sorted()}
 }
 
 fn load_workspace() -> dict {
@@ -157,7 +157,7 @@ pub fn reverse_dep_closure(seeds: list<string>, deps: dict) -> list<string> {
       }
     }
   }
-  return closure.sort()
+  return closure.sorted()
 }
 
 pub fn selected_packages(
@@ -200,14 +200,14 @@ pub fn selected_packages(
     mode: "partial",
     selected: reverse_dep_closure(directly_changed, workspace.deps ?? {}),
     global_hits: [],
-    directly_changed: directly_changed.sort(),
+    directly_changed: directly_changed.sorted(),
     unowned: unique_sorted(unowned),
   }
 }
 
 pub fn emit_selection(selected: list<string>, all_crates: list<string>, output: string) -> string {
-  const sorted = selected.sort()
-  const full = sorted == all_crates.sort()
+  const sorted = selected.sorted()
+  const full = sorted == all_crates.sorted()
   if output == "packages" {
     return sorted.join("\n")
   }
@@ -232,7 +232,7 @@ pub fn emit_selection(selected: list<string>, all_crates: list<string>, output: 
 }
 
 fn preview(items: list, limit: int) -> string {
-  const sorted = items.sort()
+  const sorted = items.sorted()
   const shown = if sorted.count > limit {
     sorted[0:limit]
   } else {
@@ -313,7 +313,7 @@ fn main(harness: Harness) {
         + if pruned.count == 0 {
         "(none)"
       } else {
-        pruned.sort().join(", ")
+        pruned.sorted().join(", ")
       },
     )
     if (selection.unowned ?? []).count > 0 {

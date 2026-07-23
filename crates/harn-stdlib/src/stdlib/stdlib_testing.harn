@@ -327,7 +327,7 @@ fn __testing_argv_remaining<T>(
   while index < len(entries) {
     const entry = entries[index]
     if entry != nil {
-      out = out.push(entry.argv)
+      out = out.appending(entry.argv)
     }
     index = index + 1
   }
@@ -350,7 +350,7 @@ pub fn scripted_argv<T>(entries: list<ScriptedArgvStep<T>>) -> ScriptedArgv<T> {
   let calls = []
   return {
     run: fn(argv) {
-      calls = calls.push(argv)
+      calls = calls.appending(argv)
       if cursor >= len(entries) {
         throw "scripted_argv: unexpected command after script was consumed: " + to_string(argv)
       }
@@ -400,7 +400,7 @@ fn __testing_step_events_for(kind) {
   let out = []
   for event in __testing_step_events {
     if event.event == kind {
-      out = out.push(event)
+      out = out.appending(event)
     }
   }
   return out
@@ -608,7 +608,7 @@ pub fn step_assertions_begin(persona_pattern = "*") {
     persona_pattern,
     "PreStep",
     { ctx ->
-      __testing_step_events = __testing_step_events.push(__testing_step_event_record(ctx))
+      __testing_step_events = __testing_step_events.appending(__testing_step_event_record(ctx))
       return nil
     },
   )
@@ -616,7 +616,7 @@ pub fn step_assertions_begin(persona_pattern = "*") {
     persona_pattern,
     "PostStep",
     { ctx ->
-      __testing_step_events = __testing_step_events.push(__testing_step_event_record(ctx))
+      __testing_step_events = __testing_step_events.appending(__testing_step_event_record(ctx))
       return nil
     },
   )
@@ -643,7 +643,7 @@ pub fn step_assertions_end() {
 pub fn assert_steps_ran(expected_names, message = nil) {
   let actual = []
   for event in __testing_step_events_for("PreStep") {
-    actual = actual.push(event.step_name)
+    actual = actual.appending(event.step_name)
   }
   for name in expected_names {
     require contains(actual, name),
@@ -851,7 +851,7 @@ pub fn llm_tool_calls(calls) -> dict {
   let index = 0
   for call in calls ?? [] {
     const resolved_id = call?.id ?? (to_string(call?.name) + "_" + to_string(index))
-    out = out.push({id: resolved_id, name: call?.name, arguments: call?.args ?? {}})
+    out = out.appending({id: resolved_id, name: call?.name, arguments: call?.args ?? {}})
     index = index + 1
   }
   return {tool_calls: out}

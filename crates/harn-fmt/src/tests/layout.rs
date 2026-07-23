@@ -110,16 +110,16 @@ fn collect_harn_files(
 /// inline and written across several lines must format identically.
 #[test]
 fn source_newlines_do_not_split_a_short_method_call() {
-    let inline = formatted(r#"fn t(v: any) { v.push(Violation {key: "a", blocking: true}) }"#);
+    let inline = formatted(r#"fn t(v: any) { v.appending(Violation {key: "a", blocking: true}) }"#);
     let exploded = formatted(
-        "fn t(v: any) {\n  v.push(Violation {\n    key: \"a\",\n    blocking: true,\n  })\n}\n",
+        "fn t(v: any) {\n  v.appending(Violation {\n    key: \"a\",\n    blocking: true,\n  })\n}\n",
     );
     assert_eq!(
         inline, exploded,
         "layout must depend on the formatted width, not on how the author broke lines"
     );
     assert!(
-        inline.contains(r#"v.push(Violation {key: "a", blocking: true})"#),
+        inline.contains(r#"v.appending(Violation {key: "a", blocking: true})"#),
         "a short call must stay on one line, not split its receiver from its method:\n{inline}"
     );
 }
@@ -178,7 +178,7 @@ fn wrapped_chain_indents_args_inside_the_method_that_owns_them() {
 /// receiver as though it started at column zero.
 #[test]
 fn nested_unwrapped_chain_counts_indent_at_width_twenty() {
-    let source = "fn t() {\n  if true {\n    values.add(a, b, c)\n  }\n}\n";
+    let source = "fn t() {\n  if true {\n    values.adding(a, b, c)\n  }\n}\n";
     let out = format_source_opts(
         source,
         &FmtOptions {
@@ -190,7 +190,7 @@ fn nested_unwrapped_chain_counts_indent_at_width_twenty() {
 
     assert_eq!(
         out,
-        "fn t() {\n  if true {\n    values.add(\n      a,\n      b,\n      c,\n    )\n  }\n}\n"
+        "fn t() {\n  if true {\n    values.adding(\n      a,\n      b,\n      c,\n    )\n  }\n}\n"
     );
 }
 
@@ -270,14 +270,14 @@ fn require_messages_wrap_after_the_condition() {
 
 /// #4878 repro 1, verbatim.
 #[test]
-fn issue_4878_push_with_struct_literal_argument() {
+fn issue_4878_appending_with_struct_literal_argument() {
     let out = formatted(
         "pub struct Violation {\n  key: string\n  blocking: bool\n}\n\n\
          fn build() -> list<Violation> {\n  const violations: list<Violation> = []\n  \
-         violations.push(Violation {\n    key: \"a\",\n    blocking: true,\n  })\n  \
+         violations.appending(Violation {\n    key: \"a\",\n    blocking: true,\n  })\n  \
          return violations\n}\n",
     );
-    // The defect rendered the receiver alone on its own line, with `.push(`
+    // The defect rendered the receiver alone on its own line, with `.appending(`
     // orphaned beneath it. Assert on the line, not on a substring that
     // `return violations` also satisfies.
     assert!(
@@ -285,8 +285,9 @@ fn issue_4878_push_with_struct_literal_argument() {
         "receiver must not be split onto its own line for a call that fits:\n{out}"
     );
     assert!(
-        !out.lines().any(|l| l.trim_start().starts_with(".push(")),
-        "`.push(` must stay attached to its receiver for a call that fits:\n{out}"
+        !out.lines()
+            .any(|l| l.trim_start().starts_with(".appending(")),
+        "`.appending(` must stay attached to its receiver for a call that fits:\n{out}"
     );
 }
 
@@ -302,7 +303,7 @@ fn issue_4878_signature_is_not_joined_past_the_width() {
 #[test]
 fn wrapped_layout_is_idempotent() {
     let source = "fn t(v: any, a: string, b: string, c: string, d: string) {\n  \
-         v.chained(a).push(Violation {key: a, message: b + c + d + a + b + c + d + a + b, blocking: true})\n}\n";
+         v.chained(a).appending(Violation {key: a, message: b + c + d + a + b + c + d + a + b, blocking: true})\n}\n";
     let once = formatted(source);
     let twice = formatted(&once);
     assert_eq!(

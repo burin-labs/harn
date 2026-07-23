@@ -8,9 +8,9 @@ pipeline default(task) {
   __io_println(a.contains(9))
   __io_println(a.empty())
   // add / remove (return new sets)
-  const c = a.add(5)
+  const c = a.adding(5)
   __io_println(c.count())
-  const d = a.remove(1)
+  const d = a.removing(1)
   __io_println(d.count())
   // Set operations
   __io_println(a.union(b).count())

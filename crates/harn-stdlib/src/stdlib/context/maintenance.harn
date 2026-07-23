@@ -79,10 +79,10 @@ fn __cm_string_list(value, field) {
   for item in __cm_list(value, field) {
     const text = __cm_text(item)
     if text != "" && !out.contains(text) {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
-  return out.sort()
+  return out.sorted()
 }
 
 fn __cm_paths(input) {
@@ -240,7 +240,7 @@ pub fn context_maintenance_queue_receipt(
   return context_maintenance_receipt(
     job_id,
     status,
-    opts.merge(
+    opts.merging(
       {
         lifecycle_event: opts?.lifecycle_event ?? __cm_event_name(source_event),
         affected_paths: opts?.affected_paths ?? __cm_paths(source_event),
@@ -261,11 +261,11 @@ pub fn context_maintenance_transition(
   status: ContextMaintenanceJobStatus,
   input = nil,
 ) -> ContextMaintenanceJobReceipt {
-  const opts = (receipt ?? {}).merge(input ?? {})
+  const opts = (receipt ?? {}).merging(input ?? {})
   return context_maintenance_receipt(
     opts.job_id,
     status,
-    opts.merge(
+    opts.merging(
       {
         dedupe_key: receipt.dedupe_key,
         run_id: receipt.run_id,

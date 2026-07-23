@@ -59,7 +59,7 @@ fn __collect_samples(prompt, system, base_opts, sampler_opts, n, run_parallel) {
   let indices = []
   let i = 0
   while i < n {
-    indices = indices.push(i)
+    indices = indices.appending(i)
     i = i + 1
   }
   if run_parallel {
@@ -69,7 +69,7 @@ fn __collect_samples(prompt, system, base_opts, sampler_opts, n, run_parallel) {
   }
   let out = []
   for idx in indices {
-    out = out.push(__sample_one(prompt, system, call_opts, idx))
+    out = out.appending(__sample_one(prompt, system, call_opts, idx))
   }
   return out
 }
@@ -85,9 +85,9 @@ fn __reward_filter(samples, reward) {
         reward(s.text)
       }
       if !is_err(r) {
-        scored = scored.push(s + {reward: to_float(unwrap(r))})
+        scored = scored.appending(s + {reward: to_float(unwrap(r))})
       } else {
-        scored = scored.push(s + {reward: 0.0})
+        scored = scored.appending(s + {reward: 0.0})
       }
     }
   }
@@ -101,7 +101,7 @@ fn __structured_judge(samples, opts) {
   while i < total {
     const s = samples[i]
     if s?.ok ?? false {
-      labelled = labelled.push("[" + to_string(i) + "] " + to_string(s.text))
+      labelled = labelled.appending("[" + to_string(i) + "] " + to_string(s.text))
     }
     i = i + 1
   }
@@ -326,11 +326,11 @@ fn __tally_samples(samples, extract, normalize, vote_mode, confidence_fn) {
   for s in samples {
     const ans = __extract_answer(s, extract, normalize)
     if ans == nil {
-      extracted = extracted.push(nil)
+      extracted = extracted.appending(nil)
     } else {
       const key = __answer_key(ans)
       if counts[key] == nil {
-        keys_in_order = keys_in_order.push(key)
+        keys_in_order = keys_in_order.appending(key)
         counts = counts + {[key]: 0}
         first_seen = first_seen + {[key]: idx}
         weights = weights + {[key]: 0.0}
@@ -340,7 +340,7 @@ fn __tally_samples(samples, extract, normalize, vote_mode, confidence_fn) {
       if w != 0.0 {
         weights = weights + {[key]: weights[key] + w}
       }
-      extracted = extracted.push(ans)
+      extracted = extracted.appending(ans)
     }
     idx = idx + 1
   }
@@ -403,7 +403,7 @@ fn __build_distribution(keys_in_order, counts) {
   for k in keys_in_order {
     const c = counts[k]
     total = total + c
-    distribution = distribution.push({answer: k, count: c})
+    distribution = distribution.appending({answer: k, count: c})
   }
   return {distribution: distribution, total: total}
 }
@@ -467,7 +467,7 @@ pub fn self_consistency(prompt, system, opts = nil) {
   const dist = __build_distribution(tally.keys_in_order, tally.counts)
   let counts_only = []
   for d in dist.distribution {
-    counts_only = counts_only.push(d.count)
+    counts_only = counts_only.appending(d.count)
   }
   const session_id = to_string(cfg?._session_id ?? "")
   if winner.tie && session_id != "" {
@@ -524,7 +524,7 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
   let indexed = []
   let i = 0
   for item in items {
-    indexed = indexed.push({index: i, item: item})
+    indexed = indexed.appending({index: i, item: item})
     i = i + 1
   }
   const raw = parallel each indexed with {
@@ -570,7 +570,7 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
   // Sort by index to preserve input order. parallel each currently returns
   // results in input-list order, but we sort defensively in case that ever
   // changes.
-  const sorted = raw.sort_by({ entry -> entry.index })
+  const sorted = raw.sorted_by({ entry -> entry.index })
   let out = []
   for r in sorted {
     const failed = !(r?.ok ?? false)
@@ -578,7 +578,7 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
       throw r?.error ?? "parallel_judge: judge_fn errored"
     }
     if !(failed && on_error == "skip") {
-      out = out.push(r)
+      out = out.appending(r)
     }
   }
   return out
@@ -675,7 +675,7 @@ fn __debater_names(debaters) {
   let names = []
   let index = 0
   while index < len(debaters) {
-    names = names.push(__debater_name(debaters[index], index))
+    names = names.appending(__debater_name(debaters[index], index))
     index += 1
   }
   return names
@@ -746,13 +746,13 @@ fn __debate_llm_options(opts, debater) {
 fn __debate_system(opts, debater) {
   let parts = []
   if type_of(opts?.system) == "string" && trim(opts.system) != "" {
-    parts = parts.push(trim(opts.system))
+    parts = parts.appending(trim(opts.system))
   }
   if type_of(debater) == "dict" && type_of(debater?.system) == "string"
     && trim(debater.system) != "" {
-    parts = parts.push(trim(debater.system))
+    parts = parts.appending(trim(debater.system))
   }
-  parts = parts.push(
+  parts = parts.appending(
     "You are participating in a multi-agent debate. Answer from your assigned perspective, revise when prior rounds change your view, and keep the response concise.",
   )
   return join(parts, "\n\n")
@@ -761,9 +761,9 @@ fn __debate_system(opts, debater) {
 fn __debate_history(rounds) {
   let lines = []
   for round in rounds {
-    lines = lines.push("Round " + to_string(round.round) + ":")
+    lines = lines.appending("Round " + to_string(round.round) + ":")
     for response in round.responses {
-      lines = lines.push(response.debater + ": " + response.text)
+      lines = lines.appending(response.debater + ": " + response.text)
     }
   }
   return join(lines, "\n")
@@ -777,13 +777,13 @@ fn __debate_call_prompt(opts, debater, debater_name, round_number, previous_roun
   ]
   const instruction = __debater_instruction(debater)
   if instruction != "" {
-    parts = parts.push("Perspective:\n" + instruction)
+    parts = parts.appending("Perspective:\n" + instruction)
   }
   const history = __debate_history(previous_rounds)
   if history != "" {
-    parts = parts.push("Previous rounds:\n" + history)
+    parts = parts.appending("Previous rounds:\n" + history)
   }
-  parts = parts.push("Return only this debater's next response.")
+  parts = parts.appending("Return only this debater's next response.")
   return join(parts, "\n\n")
 }
 
@@ -822,7 +822,7 @@ fn __debate_run_round(opts, round_number, previous_rounds) {
       __debate_system(opts, debater),
       __debate_llm_options(opts, debater),
     )
-    responses = responses.push(__debate_response(name, result))
+    responses = responses.appending(__debate_response(name, result))
     index += 1
   }
   return responses
@@ -909,7 +909,7 @@ fn __round_stability(previous_round, current_round, threshold) {
     const current = current_round.responses[index]
     const previous = previous_round.responses[index]
     const drift = __text_drift(previous?.text ?? "", current?.text ?? "")
-    drifts = drifts.push({debater: current.debater, drift: drift})
+    drifts = drifts.appending({debater: current.debater, drift: drift})
     max_drift = max(max_drift, drift)
     index += 1
   }
@@ -958,7 +958,7 @@ pub fn debate(opts) -> DebateResult {
     let round = {round: round_number, responses: responses}
     if len(rounds) > 0 {
       const round_stability = __round_stability(rounds[-1], round, config.stability_threshold)
-      stability = stability.push(round_stability)
+      stability = stability.appending(round_stability)
       round = round
         + {
         max_round_drift: round_stability.max_round_drift,
@@ -973,7 +973,7 @@ pub fn debate(opts) -> DebateResult {
         }
       }
     }
-    rounds = rounds.push(round)
+    rounds = rounds.appending(round)
     if config.adaptive_stop && consecutive_stable >= config.stability_patience {
       short_circuit_event_id = __emit_stability_short_circuit(config, stability[-1])
       break
@@ -1084,7 +1084,7 @@ fn __tot_update_best(best, node) {
 }
 
 fn __tot_top(nodes, limit) {
-  return nodes.sort_by({ node -> 0 - node.score }).take(limit)
+  return nodes.sorted_by({ node -> 0 - node.score }).take(limit)
 }
 
 fn __tot_children(parent, expand, evaluate, is_terminal, k, next_id) {
@@ -1103,12 +1103,12 @@ fn __tot_children(parent, expand, evaluate, is_terminal, k, next_id) {
       next_id + idx,
       parent.id,
       state,
-      parent.path.push(state),
+      parent.path.appending(state),
       parent.depth + 1,
       __tot_score(evaluate, state),
       __tot_terminal(is_terminal, state),
     )
-    children = children.push(node)
+    children = children.appending(node)
     idx = idx + 1
   }
   return children
@@ -1164,7 +1164,7 @@ fn __tot_search_frontier(
       frontier[0]
     }
     frontier = if search == "dfs" {
-      frontier.pop()
+      frontier.dropping_last()
     } else {
       frontier.slice(1)
     }
@@ -1174,16 +1174,16 @@ fn __tot_search_frontier(
       const children = __tot_children(current, expand, evaluate, is_terminal, k, next_id)
       next_id = next_id + len(children)
       for child in children {
-        nodes = nodes.push(child)
+        nodes = nodes.appending(child)
         best = __tot_update_best(best, child)
       }
       if search == "bfs" {
         for child in children {
-          frontier = frontier.push(child)
+          frontier = frontier.appending(child)
         }
       }
       if search == "dfs" {
-        frontier = frontier + children.reverse()
+        frontier = frontier + children.reversed()
       }
     }
   }
@@ -1207,8 +1207,8 @@ fn __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, be
           const children = __tot_children(current, expand, evaluate, is_terminal, k, next_id)
           next_id = next_id + len(children)
           for child in children {
-            nodes = nodes.push(child)
-            candidates = candidates.push(child)
+            nodes = nodes.appending(child)
+            candidates = candidates.appending(child)
             best = __tot_update_best(best, child)
           }
         }

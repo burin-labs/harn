@@ -61,7 +61,7 @@ fn __string_values(value) {
   for item in value {
     const text = trim(to_string(item))
     if text != "" && !contains(out, text) {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
   return out
@@ -125,7 +125,7 @@ fn __bullet_list(prefix, items) {
   }
   let lines = []
   for item in items {
-    lines = lines.push("  - " + to_string(item))
+    lines = lines.appending("  - " + to_string(item))
   }
   return prefix + "\n" + join(lines, "\n")
 }
@@ -151,20 +151,20 @@ fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
     "- Preserve every \"MUST\" / \"MUST NOT\" verbatim.",
   ]
   if keep_block != "" {
-    lines = lines.push(keep_block)
+    lines = lines.appending(keep_block)
   }
   if strip_block != "" {
-    lines = lines.push(strip_block)
+    lines = lines.appending(strip_block)
   }
-  lines = lines.push(
+  lines = lines.appending(
     "- Output ONLY the rewritten prompt, then a single line beginning with"
       + " \"DIFF: \" summarizing what changed in <=120 chars.",
   )
-  lines = lines.push("")
-  lines = lines.push("Original prompt:")
-  lines = lines.push("\"\"\"")
-  lines = lines.push(to_string(user_prompt))
-  lines = lines.push("\"\"\"")
+  lines = lines.appending("")
+  lines = lines.appending("Original prompt:")
+  lines = lines.appending("\"\"\"")
+  lines = lines.appending(to_string(user_prompt))
+  lines = lines.appending("\"\"\"")
   return join(lines, "\n")
 }
 
@@ -183,7 +183,7 @@ fn __split_refined_and_diff(text) {
   let tail_pieces = []
   let i = 1
   while i < len(parts) {
-    tail_pieces = tail_pieces.push(parts[i])
+    tail_pieces = tail_pieces.appending(parts[i])
     i = i + 1
   }
   const diff_part = trim(join(tail_pieces, marker))

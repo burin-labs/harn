@@ -35,7 +35,7 @@ pub fn verification_snapshot_staleness(bound_snapshot, current_hashes) -> dict {
   const current = __verification_snapshot_map(current_hashes)
   const current_available = type_of(current) == "dict"
   let stale_files: list<string> = []
-  for path in keys(bound).sort() {
+  for path in keys(bound).sorted() {
     if !current_available || current[path] != bound[path] {
       stale_files = stale_files + [path]
     }
@@ -732,25 +732,25 @@ pub fn __verification_delta_signature(value, cfg: dict) -> string {
     if cfg?.include_path == true {
       const location = __verification_delta_location(value)
       if location != "" {
-        parts = parts.push(location)
+        parts = parts.appending(location)
       }
     }
     if cfg?.include_severity == true {
       const severity = trim(to_string(value?.severity ?? value?.level ?? ""))
       if severity != "" {
-        parts = parts.push(severity)
+        parts = parts.appending(severity)
       }
     }
     if cfg?.include_code != false {
       const code = trim(to_string(value?.code ?? value?.rule ?? value?.kind ?? ""))
       if code != "" {
-        parts = parts.push(code)
+        parts = parts.appending(code)
       }
     }
   }
   const text = __verification_delta_raw_text(value)
   if text != "" {
-    parts = parts.push(text)
+    parts = parts.appending(text)
   }
   return __verification_delta_normalize_text(join(parts, " "), cfg)
 }
@@ -777,13 +777,13 @@ pub fn __verification_delta_info(value, cfg: dict) -> dict {
   for entry in entries {
     const signature = __verification_delta_signature(entry, cfg)
     if signature != "" && !__verification_delta_ignored(signature, cfg) {
-      normalized = normalized.push(signature)
+      normalized = normalized.appending(signature)
     }
   }
   let signatures: list<string> = []
   for signature in normalized {
     if !signatures.contains(signature) {
-      signatures = signatures.push(signature)
+      signatures = signatures.appending(signature)
     }
   }
   const direct_count = __verification_delta_direct_count(value)
@@ -798,7 +798,7 @@ pub fn __verification_delta_info(value, cfg: dict) -> dict {
     feedsGates: __verification_delta_feeds_gates(value),
     feeds_gates: __verification_delta_feeds_gates(value),
     has_collection: has_collection,
-    signatures: signatures.sort(),
+    signatures: signatures.sorted(),
   }
 }
 
@@ -806,10 +806,10 @@ pub fn __verification_delta_set_minus(left: list<string>, right: list<string>) -
   let out: list<string> = []
   for item in left {
     if !right.contains(item) && !out.contains(item) {
-      out = out.push(item)
+      out = out.appending(item)
     }
   }
-  return out.sort()
+  return out.sorted()
 }
 
 pub fn __verification_delta_set_intersection(
@@ -819,10 +819,10 @@ pub fn __verification_delta_set_intersection(
   let out: list<string> = []
   for item in left {
     if right.contains(item) && !out.contains(item) {
-      out = out.push(item)
+      out = out.appending(item)
     }
   }
-  return out.sort()
+  return out.sorted()
 }
 
 pub fn __verification_delta_gate_signatures(info: dict) -> list<string> {

@@ -142,7 +142,7 @@ pub fn group_job_samples(samples: list<CiJobSample>) -> list<CiJobGroup> {
   for entry in durations_by_name {
     groups = groups + [{name: entry.key, stats: duration_stats(entry.value)}]
   }
-  return groups.sort_by({ group -> 0 - group.stats.p90_ms })
+  return groups.sorted_by({ group -> 0 - group.stats.p90_ms })
 }
 
 pub fn build_report(

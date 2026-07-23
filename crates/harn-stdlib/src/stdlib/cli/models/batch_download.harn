@@ -251,7 +251,7 @@ fn __download_fireworks_results(
   let artifacts = []
   let errors = []
   const signed_urls = safe_dict(body["filenameToSignedUrls"])
-  for filename in signed_urls.keys().sort() {
+  for filename in signed_urls.keys().sorted() {
     const signed_url = safe_string(signed_urls[filename], "")
     if signed_url == "" {
       continue
@@ -272,11 +272,11 @@ fn __download_fireworks_results(
     errors = errors + safe_list(downloaded["errors"])
     const artifact = downloaded["artifact"]
     if artifact != nil {
-      artifacts = artifacts.push(artifact)
+      artifacts = artifacts.appending(artifact)
     }
   }
   if len(artifacts) == 0 && len(errors) == 0 {
-    errors = errors.push("fireworks batch download endpoint returned no signed result files")
+    errors = errors.appending("fireworks batch download endpoint returned no signed result files")
   }
   return {ok: len(errors) == 0, artifacts: artifacts, errors: errors, response: body}
 }
@@ -455,7 +455,7 @@ fn __download_xai_results(
           errors: ["xai batch result download exceeded --max-bytes for batch " + batch_id],
         }
       }
-      lines = lines.push(line)
+      lines = lines.appending(line)
     }
     token = safe_string(body["pagination_token"], "")
     if token == "" {
@@ -526,7 +526,7 @@ fn __append_download_result(state: dict, result: dict) -> dict {
   let errors = safe_list(state["errors"]) + safe_list(result["errors"])
   const artifact = result["artifact"]
   if artifact != nil {
-    artifacts = artifacts.push(artifact)
+    artifacts = artifacts.appending(artifact)
   }
   return {artifacts: artifacts, errors: errors}
 }
@@ -745,7 +745,7 @@ pub fn __run_download(harness: Harness) -> int {
   let errors = loaded.errors
   const warnings = []
   if out_dir == "" {
-    errors = errors.push("--out-dir is required")
+    errors = errors.appending("--out-dir is required")
   }
   const status_receipt = loaded.artifact
   let jobs = []
@@ -758,7 +758,9 @@ pub fn __run_download(harness: Harness) -> int {
         dry_run,
         max_bytes,
       )
-      jobs = jobs.push(__with_batch_lifecycle(safe_dict(downloaded["job"]), "download", dry_run))
+      jobs = jobs.appending(
+        __with_batch_lifecycle(safe_dict(downloaded["job"]), "download", dry_run),
+      )
       errors = errors + safe_list(downloaded["errors"])
     }
   }

@@ -163,7 +163,7 @@ pub fn asset_record(triple: string, download_base: string, sha256: string, size:
  * `sorted(missing)`.
  */
 pub fn missing_message(missing: list<string>) -> string {
-  const sorted = missing.sort()
+  const sorted = missing.sorted()
   return "release-assets manifest is missing required archives: " + sorted.join(", ")
 }
 

@@ -31,7 +31,7 @@
  */
 pub fn ast_search(params) -> dict {
   const payload = hostlib_ast_search(params ?? {}) ?? {}
-  return payload.merge(
+  return payload.merging(
     {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/ast", helper: "ast_search"}},
   )
 }

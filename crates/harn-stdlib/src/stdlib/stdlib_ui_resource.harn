@@ -192,7 +192,7 @@ fn __ui_str_list(values) {
   for value in values ?? [] {
     const text = __ui_text(value)
     if text != "" && !out.contains(text) {
-      out = out.push(text)
+      out = out.appending(text)
     }
   }
   return out
@@ -248,7 +248,7 @@ pub fn ui_resource_csp_header(csp: UiResourceCsp) -> string {
   ]
   for entry in entries {
     if len(entry.values) > 0 {
-      directives = directives.push(entry.name + " " + join(entry.values, " "))
+      directives = directives.appending(entry.name + " " + join(entry.values, " "))
     }
   }
   return join(directives, "; ")
@@ -290,7 +290,7 @@ pub fn ui_resource(
   // MCP Apps resources communicate with the host through postMessage by
   // contract, so we default to allowing the artifact-web host-bridge surface.
   // Callers can pin a tighter policy via `options.validation`.
-  const validation_options = {allow_host_bridge: true}.merge(options?.validation ?? {})
+  const validation_options = {allow_host_bridge: true}.merging(options?.validation ?? {})
   const validation = web_artifact_validate(source, validation_options)
   const encoding = options?.contents_encoding ?? "utf8"
   const contents = if encoding == "base64" {
@@ -524,14 +524,14 @@ pub fn ui_select_for_host(
   const resource = result.ui_resource
   const resource_ok = resource != nil && resource.validation.ok
   if supports_apps && resource_ok {
-    return result.merge({selected: "ui_resource"})
+    return result.merging({selected: "ui_resource"})
   }
   const selected = if result.structured_fallback != nil {
     "structured_fallback"
   } else {
     "text_fallback"
   }
-  return result.merge({ui_resource: nil, selected: selected})
+  return result.merging({ui_resource: nil, selected: selected})
 }
 
 /**

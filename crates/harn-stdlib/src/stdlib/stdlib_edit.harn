@@ -157,7 +157,7 @@ fn __refactor_result(operation, language, fields) {
       language: language,
     },
   }
-  return base.merge(fields ?? {})
+  return base.merging(fields ?? {})
 }
 
 fn __refactor_unsupported(operation, language, reason) {
@@ -219,7 +219,7 @@ fn __refactor_exec_op(op, session_id, before_map) {
     }
   }
   if kind == "node_apply" {
-    const res = edit_apply_node((op?.params ?? {}).merge({session_id: session_id}))
+    const res = edit_apply_node((op?.params ?? {}).merging({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -231,7 +231,7 @@ fn __refactor_exec_op(op, session_id, before_map) {
     }
   }
   if kind == "node_insert" {
-    const res = edit_insert_at_anchor((op?.params ?? {}).merge({session_id: session_id}))
+    const res = edit_insert_at_anchor((op?.params ?? {}).merging({session_id: session_id}))
     return {
       ok: res.result == "applied",
       result: res.result,
@@ -291,7 +291,7 @@ fn __refactor_run(operation, language, ops, params, warnings) {
   let before_map = {}
   for path in touched {
     const r = hostlib_fs_read_text({path: path, session_id: session_id})
-    before_map = before_map.merge({[path]: r?.content ?? ""})
+    before_map = before_map.merging({[path]: r?.content ?? ""})
   }
   let conflicts = []
   let ok_all = true
