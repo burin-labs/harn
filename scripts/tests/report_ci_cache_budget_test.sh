@@ -17,13 +17,23 @@ if [[ "$args" == *'/actions/cache/usage'* ]]; then
     exit 1
   fi
   printf '{"full_name":"burin-labs/harn","active_caches_size_in_bytes":%s,"active_caches_count":2}\n' "${MOCK_USAGE_BYTES:-3000}"
+elif [[ "$args" == *'/actions/caches?ref=refs/heads/main&per_page=100'* ]]; then
+  if [[ "${MOCK_API_ERROR:-}" == "retention" ]]; then
+    echo "mock retention API authorization failure" >&2
+    exit 1
+  fi
+  if [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
+    printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-11111111-aaaaaaaa","size_in_bytes":2000,"created_at":"2026-01-01T00:00:00Z"},{"id":3,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-22222222-bbbbbbbb","size_in_bytes":2100,"created_at":"2026-01-02T00:00:00Z"}]}]\n'
+  else
+    printf '%s\n' '[{"actions_caches":[{"id":10,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"},{"id":20,"ref":"refs/heads/main","key":"v0-rust-release-aarch64-apple-darwin-Darwin-arm64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"},{"id":30,"ref":"refs/heads/main","key":"v0-rust-workspace-behavior-Linux-x64-11111111-aaaaaaaa","created_at":"2026-01-01T00:00:00Z"}]},{"actions_caches":[{"id":11,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-22222222-bbbbbbbb","created_at":"2026-01-02T00:00:00Z"},{"id":12,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-33333333-cccccccc","created_at":"2026-01-02T00:00:00Z"},{"id":21,"ref":"refs/heads/main","key":"v0-rust-release-aarch64-apple-darwin-Darwin-arm64-22222222-bbbbbbbb","created_at":"2026-01-02T00:00:00Z"},{"id":13,"ref":"refs/pull/9/merge","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-44444444-dddddddd","created_at":"2026-01-03T00:00:00Z"},{"id":14,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-manual-backup","created_at":"2026-01-04T00:00:00Z"}]}]'
+  fi
 elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
   if [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
     printf '[{"total_count":3,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-oldhash-oldlock","size_in_bytes":2000,"created_at":"2026-01-01T00:00:00Z"},{"id":3,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-newhash-newlock","size_in_bytes":2100,"created_at":"2026-01-02T00:00:00Z"},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000,"created_at":"2026-01-01T00:00:00Z"}]}]\n'
   else
     printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-linux","size_in_bytes":%s},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000}]}]\n' "${MOCK_LISTED_RELEASE_BYTES:-2000}"
   fi
-elif [[ "$args" == "cache delete 1 --repo burin-labs/harn" ]]; then
+elif [[ "$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
   exit 0
 else
   echo "unexpected gh arguments: $args" >&2
@@ -49,6 +59,38 @@ api repos/burin-labs/harn/actions/cache/usage
 api --paginate repos/burin-labs/harn/actions/caches?per_page=100 --slurp
 EXPECTED
 diff -u "$tmp/expected-gh.log" "$tmp/gh.log"
+
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/family-prune-gh.log" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --family-prefix v0-rust-release-x86_64-unknown-linux-gnu-
+cat >"$tmp/expected-family-prune-gh.log" <<'EXPECTED'
+api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page=100 --slurp
+cache delete 11 --repo burin-labs/harn
+cache delete 10 --repo burin-labs/harn
+EXPECTED
+diff -u "$tmp/expected-family-prune-gh.log" "$tmp/family-prune-gh.log"
+
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/all-prune-gh.log" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --all-release-families
+cat >"$tmp/expected-all-prune-gh.log" <<'EXPECTED'
+api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page=100 --slurp
+cache delete 20 --repo burin-labs/harn
+cache delete 11 --repo burin-labs/harn
+cache delete 10 --repo burin-labs/harn
+EXPECTED
+diff -u "$tmp/expected-all-prune-gh.log" "$tmp/all-prune-gh.log"
+
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/prune-error-gh.log" MOCK_API_ERROR=retention \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --family-prefix v0-rust-release-x86_64-unknown-linux-gnu- \
+  >"$tmp/prune-error.json" 2>"$tmp/prune-error.err"; then
+  echo "expected retention API authorization failure to fail" >&2
+  exit 1
+fi
+grep -q 'mock retention API authorization failure' "$tmp/prune-error.err"
 
 PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/lagging-gh.log" MOCK_USAGE_BYTES=10737418241 \
   GITHUB_REPOSITORY=burin-labs/harn \

@@ -11,30 +11,8 @@ list_cache_pages() {
   gh api --paginate "repos/$repository/actions/caches?per_page=100" --slurp
 }
 
-# Release warm runs intentionally rotate exact keys when the toolchain or
-# workspace fingerprint changes, but only the newest cache in each target
-# family can win the broad restore prefix. Delete superseded generations
-# before enforcing the repository budget instead of waiting for GitHub's
-# seven-day eviction while every main warm saves another multi-GB generation.
 if [[ "${HARN_PRUNE_SUPERSEDED_RELEASE_CACHES:-0}" == "1" ]]; then
-  prune_pages="$(list_cache_pages)"
-  while IFS= read -r cache_id; do
-    [[ -n "$cache_id" ]] || continue
-    gh cache delete "$cache_id" --repo "$repository"
-  done < <(
-    jq -r '
-      [.[].actions_caches[]
-        | select(.key | startswith("v0-rust-release-"))
-        | . + {family: (.key | sub("-[^-]+-[^-]+$"; ""))}
-      ]
-      | group_by(.family)
-      | .[]
-      | sort_by(.created_at, .id)
-      | reverse
-      | .[1:][]
-      | .id
-    ' <<<"$prune_pages"
-  )
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --all-release-families
 fi
 
 usage_json="$(gh api "repos/$repository/actions/cache/usage")"

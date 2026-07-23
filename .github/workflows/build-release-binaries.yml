@@ -627,6 +627,7 @@ jobs:
     # contents: write so each leg can upload its own archive to the release
     # as soon as it finishes (incremental per-arch publish).
     permissions:
+      actions: write
       contents: write
     # Runner labels are resolved from release-runner-policy.json in setup.
     # Warm, primary, recovery, and explicit benchmark capacity are separate
@@ -706,6 +707,7 @@ jobs:
           broad-restore-prefix: ${{ matrix.rust_cache_broad_restore_prefix }}
           cache-on-failure: true
           cache-bin: false
+          prune-superseded-release-generations: true
           save: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main') }}
 
       - name: Summarize cache mode
