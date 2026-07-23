@@ -29,7 +29,7 @@ import { BumpAdapter } from "std/bump/runtime"
 import { command_run } from "std/command"
 import { merge } from "std/json"
 import { poll_until } from "std/poll"
-import { is_v_semver } from "std/semver"
+import { is_v_semver, strip_v } from "std/semver"
 
 /** Everything the live adapter needs to reach git, GitHub, and validation. */
 pub type LiveBumpConfig = {
@@ -290,7 +290,10 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
     },
     base_sha: fn() { return trim(__git(["git", "rev-parse", "HEAD"]).stdout ?? "") },
     apply_version: fn(target) {
-      __shell("printf '%s\\n' '${target}' > ${cfg.version_file}")
+      // Release tags carry the conventional `v`; .harn-version stores the
+      // bare semver accepted by both old and new Harn installers.
+      const version = strip_v(target)
+      __shell("printf '%s\\n' '${version}' > ${cfg.version_file}")
       const refresh = __shell(cfg.refresh_command)
       const changed = !(__git(["git", "diff", "--quiet"]).success ?? false)
       const names = trim(__git(["git", "diff", "--name-only"]).stdout ?? "")
