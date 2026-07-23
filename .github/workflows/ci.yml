@@ -141,6 +141,8 @@ jobs:
             setup_action:
               - '.github/actions/setup-harn/**'
               - '.github/workflows/ci.yml'
+              - 'scripts/bootstrap_harn.mjs'
+              - 'scripts/tests/bootstrap_harn.test.mjs'
             package_audit:
               - '.github/workflows/ci.yml'
               - 'Cargo.lock'
@@ -1641,7 +1643,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Run deterministic setup-action tests
         if: runner.os == 'Linux'
-        run: node --test .github/actions/setup-harn/setup-harn.test.mjs
+        run: node --test scripts/tests/bootstrap_harn.test.mjs
       - name: Install a published Harn release
         id: harn
         uses: ./.github/actions/setup-harn
@@ -1655,11 +1657,13 @@ jobs:
           HARN_PATH: ${{ steps.harn.outputs.path }}
           HARN_VERSION: ${{ steps.harn.outputs.version }}
           HARN_CHECKSUM: ${{ steps.harn.outputs.checksum }}
+          HARN_RECEIPT: ${{ steps.harn.outputs.receipt }}
         run: |
           set -euo pipefail
           test "$HARN_VERSION" = "0.10.28"
           [[ "$HARN_CHECKSUM" =~ ^[0-9a-f]{64}$ ]]
           test -x "$HARN_PATH" || [[ "$RUNNER_OS" = "Windows" && -f "$HARN_PATH" ]]
+          node -e 'const r = JSON.parse(process.env.HARN_RECEIPT); if (r.schema_version !== "harn-bootstrap-v1" || r.binary_path !== process.env.HARN_PATH) process.exit(1)'
           harn --version
 
   # The Slow E2E suite lives in its own workflow (`.github/workflows/e2e.yml`),

@@ -54,12 +54,19 @@ Pin the action to the full commit for the Harn release you use. The action reads
 `.harn-version` by default, maps the hosted runner to an official Linux, macOS,
 or Windows asset, verifies that archive against the release's `SHA256SUMS`, and
 then adds the binary to `PATH`. A cached archive is reused only after it matches
-the currently published checksum. The action outputs `version`, `path`,
-`checksum`, `source-url`, and `cache-hit` for audit receipts or job summaries.
+the currently published checksum. The action outputs `version`, `target`,
+`path`, `checksum`, `source-url`, `cache-hit`, and the stable
+`harn-bootstrap-v1` `receipt` JSON for audit records or job summaries.
 
 This bootstrap is intentionally host-native: Harn cannot execute until the
 verified Harn binary exists. Package behavior, tests, and orchestration should
 remain Harn code after this one installation boundary.
+
+For local development and non-GitHub CI, use the same dependency-free
+bootstrap implementation directly. See
+[Bootstrap an exact Harn release](./dev/bootstrap-harn.md) for immutable
+version pins, explicit cache/install directories, offline operation, proxy
+configuration, and source-build fallback policy.
 
 ## Create a tool package
 
