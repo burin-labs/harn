@@ -27,6 +27,7 @@ pub type ProviderToolProbeRuntimeReceipt = {
   status: ProviderToolProbeRuntimeStatus,
   exit_code: int,
   version: string,
+  source_revision: string?,
   reason: string,
 }
 

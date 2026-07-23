@@ -1185,13 +1185,13 @@ fn run_dap_adapter() {
         .expect("harn-dap adapter thread panicked");
 }
 
-/// Run `harn version`. Build-time constants travel to the embedded
-/// `.harn` script via scoped env vars rather than a new builtin.
 async fn run_version(args: cli::VersionArgs) -> i32 {
     let _name = env_guard::ScopedEnvVar::set("HARN_BUILD_NAME", env!("CARGO_PKG_NAME"));
     let _version = env_guard::ScopedEnvVar::set("HARN_BUILD_VERSION", env!("CARGO_PKG_VERSION"));
     let _description =
         env_guard::ScopedEnvVar::set("HARN_BUILD_DESCRIPTION", env!("CARGO_PKG_DESCRIPTION"));
+    let _revision =
+        env_guard::ScopedEnvVar::set("HARN_BUILD_REVISION", env!("HARN_BUILD_REVISION"));
     let argv = if args.json {
         vec!["--json".to_string()]
     } else {

@@ -22,6 +22,8 @@ env:
   # fingerprints/build-script OUT_DIR artifacts are not safe to share across
   # those checkouts.
   CARGO_INCREMENTAL: "0"
+  # Bind every CI-built binary to the immutable commit under test.
+  HARN_BUILD_REVISION: ${{ github.sha }}
   # Promote build warnings to errors so platform-specific warnings can't
   # silently accumulate (Windows-only deprecations, dead_code for cfg-gated
   # paths, etc). Clippy already runs with `-D warnings` via `make lint`;

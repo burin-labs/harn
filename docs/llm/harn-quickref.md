@@ -26,7 +26,7 @@ logs and progress always go to stderr.
   `harn --json-schemas` (filter with `--command <name>`).
 - Per-command shape reference: `docs/src/cli-json-contract.md`.
 - Common pairs an agent will use:
-  - `harn version --json` — build metadata (`name`, `version`, `description`).
+  - `harn version --json` — build metadata (`name`, `version`, `description`, optional build-attested `source_revision`).
   - `harn upgrade --check --json` — resolve target release without downloading.
   - `harn lint --json <path>` — structured lint diagnostics + summary; pair with
     `harn lint --fix <path>` (no `--json`) to apply the recommended edits.

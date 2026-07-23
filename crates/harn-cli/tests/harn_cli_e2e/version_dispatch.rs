@@ -6,6 +6,10 @@
 
 use std::process::Command;
 
+#[path = "../../build_support/build_revision.rs"]
+#[allow(dead_code)]
+mod build_revision;
+
 #[test]
 fn version_dispatch_renders_banner_with_version() {
     let outcome = run_version_subprocess(false, &[]);
@@ -33,8 +37,44 @@ fn version_json_dispatch_renders_canonical_envelope() {
     assert_eq!(harn_value["schemaVersion"], 1);
     assert_eq!(harn_value["ok"], true);
     assert!(harn_value["data"]["version"].is_string());
-    assert!(harn_value["data"]["commit"].is_null() || harn_value["data"]["commit"].is_string());
-    assert!(harn_value["data"]["built_at"].is_null() || harn_value["data"]["built_at"].is_string());
+    assert_source_revision(&harn_value);
+}
+
+#[test]
+fn version_json_ignores_runtime_revision_environment() {
+    let harn = run_version_subprocess(
+        true,
+        &[(
+            "HARN_BUILD_REVISION",
+            "ffffffffffffffffffffffffffffffffffffffff",
+        )],
+    );
+    assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
+    let value: serde_json::Value = serde_json::from_str(&harn.stdout).expect("version JSON");
+    assert_source_revision(&value);
+}
+
+#[test]
+fn build_revision_normalization_covers_populated_and_unavailable_inputs() {
+    const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
+    assert_eq!(
+        build_revision::normalize(Some(REVISION)),
+        Ok(Some(REVISION))
+    );
+    assert_eq!(build_revision::normalize(None), Ok(None));
+    assert_eq!(build_revision::normalize(Some("  ")), Ok(None));
+    assert!(build_revision::normalize(Some("short")).is_err());
+    assert!(build_revision::normalize(Some("0123456789ABCDEF0123456789ABCDEF01234567")).is_err());
+}
+
+fn assert_source_revision(value: &serde_json::Value) {
+    let actual = &value["data"]["source_revision"];
+    let expected = env!("HARN_BUILD_REVISION");
+    if expected.is_empty() {
+        assert!(actual.is_null(), "source_revision={actual}");
+    } else {
+        assert_eq!(actual.as_str(), Some(expected));
+    }
 }
 
 struct SubprocessOutcome {

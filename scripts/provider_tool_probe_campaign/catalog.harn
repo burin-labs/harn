@@ -121,6 +121,7 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       status: "unavailable",
       exit_code: exit_code,
       version: "",
+      source_revision: nil,
       reason: if stderr != "" {
         stderr
       } else {
@@ -140,18 +141,26 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
       status: "invalid",
       exit_code: exit_code,
       version: "",
+      source_revision: nil,
       reason: "target Harn runtime produced invalid version JSON",
     }
   }
   const name = trim(to_string(parsed?.data?.name ?? ""))
   const version = trim(to_string(parsed?.data?.version ?? ""))
-  if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == "" {
+  const raw_revision = parsed?.data?.source_revision
+  const revision_valid = raw_revision == nil
+    || (type_of(raw_revision) == "string"
+    && trim(raw_revision)
+    != "")
+  if parsed?.schemaVersion != 1 || parsed?.ok != true || name != "harn-cli" || version == ""
+    || !revision_valid {
     return {
       schema_version: RUNTIME_RECEIPT_SCHEMA,
       command: command,
       status: "invalid",
       exit_code: exit_code,
       version: "",
+      source_revision: nil,
       reason: "target Harn runtime version JSON did not match the harn-cli contract",
     }
   }
@@ -161,8 +170,31 @@ pub fn provider_tool_probe_campaign_runtime_receipt(
     status: "verified",
     exit_code: exit_code,
     version: version,
+    source_revision: if raw_revision == nil {
+      nil
+    } else {
+      trim(raw_revision)
+    },
     reason: "target Harn runtime identified",
   }
+}
+
+pub fn provider_tool_probe_campaign_runtime_revision_requirement_error(
+  runtime: ProviderToolProbeRuntimeReceipt,
+  expected_revision: string,
+) -> string? {
+  const expected = trim(expected_revision)
+  if expected == "" {
+    return nil
+  }
+  const actual = trim(runtime.source_revision ?? "")
+  if actual == "" {
+    return "target Harn runtime did not report a source revision; expected " + expected
+  }
+  if actual != expected {
+    return "target Harn runtime source revision mismatch: expected " + expected + ", got " + actual
+  }
+  return nil
 }
 
 pub fn provider_tool_probe_campaign_runtime_allows_live(

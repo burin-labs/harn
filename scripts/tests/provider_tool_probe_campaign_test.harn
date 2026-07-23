@@ -8,6 +8,7 @@ fn verified_runtime() -> ProviderToolProbeRuntimeReceipt {
     status: "verified",
     exit_code: 0,
     version: "0.10.24",
+    source_revision: "0123456789abcdef0123456789abcdef01234567",
     reason: "target Harn runtime identified",
   }
 }
@@ -128,7 +129,15 @@ pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(t
     {
       exit_code: 0,
       stdout: json_stringify(
-        {schemaVersion: 1, ok: true, data: {name: "harn-cli", version: "0.10.24"}},
+        {
+          schemaVersion: 1,
+          ok: true,
+          data: {
+            name: "harn-cli",
+            version: "0.10.24",
+            source_revision: "0123456789abcdef0123456789abcdef01234567",
+          },
+        },
       ),
       stderr: "",
     },
@@ -141,10 +150,25 @@ pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(t
       status: "verified",
       exit_code: 0,
       version: "0.10.24",
+      source_revision: "0123456789abcdef0123456789abcdef01234567",
       reason: "target Harn runtime identified",
     },
   )
   assert_eq(provider_tool_probe_campaign_runtime_allows_live(receipt), true)
+  assert_eq(
+    provider_tool_probe_campaign_runtime_revision_requirement_error(
+      receipt,
+      "0123456789abcdef0123456789abcdef01234567",
+    ),
+    nil,
+  )
+  assert_eq(
+    provider_tool_probe_campaign_runtime_revision_requirement_error(
+      receipt,
+      "ffffffffffffffffffffffffffffffffffffffff",
+    ),
+    "target Harn runtime source revision mismatch: expected ffffffffffffffffffffffffffffffffffffffff, got 0123456789abcdef0123456789abcdef01234567",
+  )
 }
 
 @test
@@ -161,10 +185,18 @@ pipeline test_provider_tool_probe_campaign_normalizes_unavailable_runtime_receip
       status: "unavailable",
       exit_code: 127,
       version: "",
+      source_revision: nil,
       reason: "command not found",
     },
   )
   assert_eq(provider_tool_probe_campaign_runtime_allows_live(receipt), false)
+  assert_eq(
+    provider_tool_probe_campaign_runtime_revision_requirement_error(
+      receipt,
+      "0123456789abcdef0123456789abcdef01234567",
+    ),
+    "target Harn runtime did not report a source revision; expected 0123456789abcdef0123456789abcdef01234567",
+  )
 }
 
 @test
@@ -181,6 +213,7 @@ pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(t
       status: "invalid",
       exit_code: 0,
       version: "",
+      source_revision: nil,
       reason: "target Harn runtime produced invalid version JSON",
     },
   )
@@ -196,6 +229,7 @@ pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(t
       status: "invalid",
       exit_code: 0,
       version: "",
+      source_revision: nil,
       reason: "target Harn runtime version JSON did not match the harn-cli contract",
     },
   )
@@ -841,6 +875,8 @@ pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
         "2",
         "--max-probes",
         "10",
+        "--require-runtime-revision",
+        "0123456789abcdef0123456789abcdef01234567",
         "--providers-config",
         "/workspace/providers.toml",
       ],
@@ -851,6 +887,7 @@ pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(task) {
   assert_eq(parsed.shard_count, 4)
   assert_eq(parsed.shard_index, 2)
   assert_eq(parsed.max_probes, 10)
+  assert_eq(parsed.require_runtime_revision, "0123456789abcdef0123456789abcdef01234567")
   assert_eq(parsed.providers_config, "/workspace/providers.toml")
 }
 

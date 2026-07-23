@@ -380,6 +380,7 @@ test-pr-gate-scripts:
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/release_smoke_workflow_test.sh
+	./scripts/tests/build_revision_workflow_test.sh
 	./scripts/tests/check_release_smoke_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
 	./scripts/tests/bench_vm_startup_test.sh
