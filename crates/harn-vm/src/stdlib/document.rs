@@ -16,8 +16,11 @@ use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
 const BUILTIN_RENDERER_ID: &str = "builtin_text_pdf";
+const BUILTIN_EXTRACTOR_ID: &str = "builtin_pdf_text";
 const BUILTIN_RENDER_PDF: &str = "document_render_pdf";
 const BUILTIN_EXTRACT_TEXT: &str = "document_extract_text";
+const MAX_PDF_INPUT_BYTES: usize = 32 * 1024 * 1024;
+const MAX_PDF_DECOMPRESSED_BYTES: usize = 32 * 1024 * 1024;
 const DEFAULT_TITLE: &str = "Harn Document";
 const DEFAULT_PAGE_WIDTH_PT: usize = 612;
 const DEFAULT_PAGE_HEIGHT_PT: usize = 792;
@@ -27,6 +30,7 @@ const DEFAULT_LINE_HEIGHT_PT: usize = 14;
 const SOURCE_FORMAT_TEXT: &str = "text";
 const SOURCE_FORMAT_HTML: &str = "html";
 const SOURCE_FORMAT_MARKDOWN: &str = "markdown";
+const SOURCE_FORMAT_PDF: &str = "pdf";
 const PDF_OUTPUT_FORMAT: &str = "pdf";
 const RENDERER_KIND_BUILTIN: &str = "builtin";
 const RENDERER_FIDELITY_TEXT_LAYOUT: &str = "text_layout";
@@ -44,13 +48,13 @@ const OPTION_PROVIDER_OPTIONS: &str = "provider_options";
 const OPTION_RENDERER_OPTIONS: &str = "renderer_options";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SourceFormat {
+enum TextSourceFormat {
     Text,
     Html,
     Markdown,
 }
 
-impl SourceFormat {
+impl TextSourceFormat {
     fn parse(builtin: &str, value: Option<&str>, source: &str) -> Result<Self, VmError> {
         match value.unwrap_or_else(|| infer_source_format(source)) {
             SOURCE_FORMAT_TEXT | "txt" | "plain" | "text/plain" => Ok(Self::Text),
@@ -65,7 +69,7 @@ impl SourceFormat {
 
 #[derive(Clone, Debug)]
 struct PdfRenderOptions {
-    source_format: SourceFormat,
+    source_format: TextSourceFormat,
     title: String,
     page_width_pt: usize,
     page_height_pt: usize,
@@ -89,7 +93,7 @@ impl PdfRenderOptions {
                 "{BUILTIN_RENDER_PDF}: unsupported {OPTION_RENDERER} {renderer:?}; available renderer is {BUILTIN_RENDERER_ID:?}"
             )));
         }
-        let source_format = SourceFormat::parse(
+        let source_format = TextSourceFormat::parse(
             BUILTIN_RENDER_PDF,
             parser.optional_string(OPTION_SOURCE_FORMAT)?.as_deref(),
             source,
@@ -133,8 +137,8 @@ impl PdfRenderOptions {
 
     fn default_for(source: &str, title: Option<String>) -> Self {
         Self {
-            source_format: SourceFormat::parse(BUILTIN_RENDER_PDF, None, source)
-                .unwrap_or(SourceFormat::Text),
+            source_format: TextSourceFormat::parse(BUILTIN_RENDER_PDF, None, source)
+                .unwrap_or(TextSourceFormat::Text),
             title: title.unwrap_or_else(|| DEFAULT_TITLE.to_string()),
             page_width_pt: DEFAULT_PAGE_WIDTH_PT,
             page_height_pt: DEFAULT_PAGE_HEIGHT_PT,
@@ -200,32 +204,47 @@ fn document_render_pdf_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 #[harn_builtin(
     sig = "document_extract_text(source: string | bytes | nil, options?: dict) -> string",
     category = "document",
-    doc = "Extract normalized text from text, HTML, or Markdown input."
+    doc = "Extract normalized text from text, HTML, Markdown, or PDF byte input."
 )]
 fn document_extract_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let source = document_source_arg(args.first());
     let options = optional_dict_arg(args, 1, BUILTIN_EXTRACT_TEXT, "options", ErrorKind::Runtime)?;
-    let format = if let Some(dict) = options {
+    let requested_format = if let Some(dict) = options {
         let mut parser = OptionsParser::new(BUILTIN_EXTRACT_TEXT, dict, ErrorKind::Runtime);
-        let format = SourceFormat::parse(
-            BUILTIN_EXTRACT_TEXT,
-            parser.optional_string(OPTION_SOURCE_FORMAT)?.as_deref(),
-            &source,
-        )?;
+        let format = parser.optional_string(OPTION_SOURCE_FORMAT)?;
         parser.finish_strict(&[])?;
         format
     } else {
-        SourceFormat::parse(BUILTIN_EXTRACT_TEXT, None, &source)?
+        None
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        extract_text_for_format(&source, format),
-    )))
+    if matches!(
+        requested_format.as_deref(),
+        Some(SOURCE_FORMAT_PDF | "application/pdf")
+    ) {
+        let text = extract_pdf_text(pdf_source_bytes(args.first())?)?;
+        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
+    }
+    let source = document_source_arg(args.first());
+    let format = TextSourceFormat::parse(
+        BUILTIN_EXTRACT_TEXT,
+        requested_format.as_deref(),
+        &source,
+    )
+    .map_err(|_| {
+        let format = requested_format
+            .as_deref()
+            .unwrap_or_else(|| infer_source_format(&source));
+        VmError::Runtime(format!(
+            "{BUILTIN_EXTRACT_TEXT}: unsupported {OPTION_SOURCE_FORMAT} {format:?}; expected {SOURCE_FORMAT_TEXT}, {SOURCE_FORMAT_HTML}, {SOURCE_FORMAT_MARKDOWN}, or {SOURCE_FORMAT_PDF}"
+        ))
+    })?;
+    let text = extract_text_for_format(&source, format);
+    Ok(VmValue::String(arcstr::ArcStr::from(text)))
 }
 
 #[harn_builtin(
     sig = "document_pdf_capabilities(options?: dict) -> dict",
     category = "document",
-    doc = "Describe the built-in PDF rendering capability available in this Harn runtime."
+    doc = "Describe the built-in PDF rendering and text extraction capabilities available in this Harn runtime."
 )]
 fn document_pdf_capabilities_impl(
     _args: &[VmValue],
@@ -254,11 +273,38 @@ fn document_pdf_capabilities_impl(
         VmValue::List(Arc::new(Vec::new())),
     );
 
+    let mut extractor = crate::value::DictMap::new();
+    extractor.put_str("id", BUILTIN_EXTRACTOR_ID);
+    extractor.put_str("kind", RENDERER_KIND_BUILTIN);
+    extractor.put_str("input_type", "bytes");
+    extractor.insert(
+        crate::value::intern_key("source_formats"),
+        VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+            SOURCE_FORMAT_PDF,
+        ))])),
+    );
+    extractor.put_bool("ocr", false);
+    extractor.put_int("max_input_bytes", MAX_PDF_INPUT_BYTES as i64);
+    extractor.put_int(
+        "max_decompressed_bytes_per_stream",
+        MAX_PDF_DECOMPRESSED_BYTES as i64,
+    );
+    extractor.put_int("max_page_content_bytes", MAX_PDF_DECOMPRESSED_BYTES as i64);
+    extractor.insert(
+        crate::value::intern_key("external_dependencies"),
+        VmValue::List(Arc::new(Vec::new())),
+    );
+
     let mut out = crate::value::DictMap::new();
     out.put_str("default_renderer", BUILTIN_RENDERER_ID);
+    out.put_str("default_extractor", BUILTIN_EXTRACTOR_ID);
     out.insert(
         crate::value::intern_key("renderers"),
         VmValue::List(Arc::new(vec![VmValue::dict(renderer)])),
+    );
+    out.insert(
+        crate::value::intern_key("extractors"),
+        VmValue::List(Arc::new(vec![VmValue::dict(extractor)])),
     );
     Ok(VmValue::dict(out))
 }
@@ -270,6 +316,92 @@ fn document_source_arg(value: Option<&VmValue>) -> String {
         Some(VmValue::Nil) | None => String::new(),
         Some(other) => other.display(),
     }
+}
+
+fn pdf_source_bytes(value: Option<&VmValue>) -> Result<&[u8], VmError> {
+    match value {
+        Some(VmValue::Bytes(bytes)) => Ok(bytes.as_slice()),
+        _ => Err(pdf_extract_error(
+            "invalid_input",
+            "PDF extraction requires bytes input",
+            false,
+        )),
+    }
+}
+
+fn pdf_extract_error(kind: &str, message: &str, ocr_candidate: bool) -> VmError {
+    let mut fields = crate::value::DictMap::new();
+    fields.put_str("error", "document_extract_error");
+    fields.put_str("kind", kind);
+    fields.put_str("source_format", SOURCE_FORMAT_PDF);
+    fields.put_str("extractor", BUILTIN_EXTRACTOR_ID);
+    fields.put_str("message", message);
+    if ocr_candidate {
+        fields.put_bool("ocr_candidate", true);
+    }
+    VmError::Thrown(VmValue::dict(fields))
+}
+
+fn pdf_lopdf_error(error: lopdf::Error) -> VmError {
+    use lopdf::{DecompressError, Error};
+
+    match error {
+        Error::Decryption(_) | Error::InvalidPassword | Error::UnsupportedSecurityHandler(_) => {
+            pdf_extract_error(
+                "encrypted",
+                "PDF is encrypted; decrypt it before extraction",
+                false,
+            )
+        }
+        Error::Decompress(DecompressError::MemoryLimitExceeded { .. }) => pdf_extract_error(
+            "resource_limit",
+            "PDF exceeds the built-in extraction resource limit",
+            false,
+        ),
+        Error::Unimplemented(_) => pdf_extract_error(
+            "unsupported",
+            "PDF uses a feature unsupported by the built-in extractor",
+            false,
+        ),
+        _ => pdf_extract_error(
+            "malformed",
+            "PDF bytes could not be parsed or decoded",
+            false,
+        ),
+    }
+}
+
+fn extract_pdf_text(source: &[u8]) -> Result<String, VmError> {
+    if source.len() > MAX_PDF_INPUT_BYTES {
+        return Err(pdf_extract_error(
+            "resource_limit",
+            "PDF exceeds the built-in extraction input limit",
+            false,
+        ));
+    }
+    let options = lopdf::LoadOptions::with_max_decompressed_size(MAX_PDF_DECOMPRESSED_BYTES);
+    let document =
+        lopdf::Document::load_mem_with_options(source, options).map_err(pdf_lopdf_error)?;
+    if document.is_encrypted() || document.was_encrypted() {
+        return Err(pdf_extract_error(
+            "encrypted",
+            "PDF is encrypted; decrypt it before extraction",
+            false,
+        ));
+    }
+    let pages = document.get_pages().keys().copied().collect::<Vec<_>>();
+    let text = document
+        .extract_text_with_limit(&pages, MAX_PDF_DECOMPRESSED_BYTES)
+        .map_err(pdf_lopdf_error)?;
+    let normalized = normalize_text(&text).trim().to_string();
+    if normalized.is_empty() {
+        return Err(pdf_extract_error(
+            "no_extractable_text",
+            "PDF contains no extractable text; use an explicit OCR fallback for image-only documents",
+            true,
+        ));
+    }
+    Ok(normalized)
 }
 
 fn infer_source_format(source: &str) -> &'static str {
@@ -286,11 +418,11 @@ fn infer_source_format(source: &str) -> &'static str {
     }
 }
 
-fn extract_text_for_format(source: &str, format: SourceFormat) -> String {
+fn extract_text_for_format(source: &str, format: TextSourceFormat) -> String {
     match format {
-        SourceFormat::Text => normalize_text(source),
-        SourceFormat::Html => extract_html_text(source),
-        SourceFormat::Markdown => strip_markdown(source),
+        TextSourceFormat::Text => normalize_text(source),
+        TextSourceFormat::Html => extract_html_text(source),
+        TextSourceFormat::Markdown => strip_markdown(source),
     }
 }
 
@@ -553,6 +685,81 @@ mod tests {
         VmValue::String(arcstr::ArcStr::from(value))
     }
 
+    fn b(value: Vec<u8>) -> VmValue {
+        VmValue::Bytes(Arc::new(value))
+    }
+
+    fn pdf_extract_options() -> VmValue {
+        let mut options = crate::value::DictMap::new();
+        options.put_str(OPTION_SOURCE_FORMAT, SOURCE_FORMAT_PDF);
+        VmValue::dict(options)
+    }
+
+    fn pdf_failure(source: VmValue) -> VmValue {
+        match document_extract_text_impl(&[source, pdf_extract_options()], &mut String::new()) {
+            Err(VmError::Thrown(value)) => value,
+            other => panic!("expected structured extraction failure, got {other:?}"),
+        }
+    }
+
+    fn failure_field<'a>(failure: &'a VmValue, key: &str) -> &'a VmValue {
+        let VmValue::Dict(fields) = failure else {
+            panic!("expected failure dict");
+        };
+        fields.get(key).unwrap_or_else(|| panic!("missing {key}"))
+    }
+
+    fn string_value(value: &VmValue) -> &str {
+        let VmValue::String(value) = value else {
+            panic!("expected string");
+        };
+        value.as_str()
+    }
+
+    fn bool_value(value: &VmValue) -> bool {
+        let VmValue::Bool(value) = value else {
+            panic!("expected bool");
+        };
+        *value
+    }
+
+    fn int_value(value: &VmValue) -> i64 {
+        let VmValue::Int(value) = value else {
+            panic!("expected int");
+        };
+        *value
+    }
+
+    fn rendered_pdf(body: &str) -> Vec<u8> {
+        render_text_pdf(
+            body,
+            &PdfRenderOptions::default_for(body, Some(String::new())),
+        )
+    }
+
+    fn encrypted_pdf() -> Vec<u8> {
+        let mut document = lopdf::Document::load_mem(&rendered_pdf("classified")).unwrap();
+        document.trailer.set(
+            "ID",
+            lopdf::Object::Array(vec![
+                lopdf::Object::String(vec![1_u8; 16], lopdf::StringFormat::Literal),
+                lopdf::Object::String(vec![2_u8; 16], lopdf::StringFormat::Literal),
+            ]),
+        );
+        let state = lopdf::EncryptionState::try_from(lopdf::EncryptionVersion::V2 {
+            document: &document,
+            owner_password: "owner",
+            user_password: "user",
+            key_length: 128,
+            permissions: lopdf::Permissions::all(),
+        })
+        .unwrap();
+        document.encrypt(&state).unwrap();
+        let mut output = Vec::new();
+        document.save_to(&mut output).unwrap();
+        output
+    }
+
     #[test]
     fn render_pdf_returns_valid_pdf_envelope() {
         let value = document_render_pdf_impl(&[s("hello receipt")], &mut String::new()).unwrap();
@@ -570,7 +777,7 @@ mod tests {
     fn html_extraction_uses_visible_text() {
         let got = extract_text_for_format(
             "<html><body><h1>Receipt</h1><p>Amount $5.00</p></body></html>",
-            SourceFormat::Html,
+            TextSourceFormat::Html,
         );
         assert_eq!(got, "Receipt Amount $5.00");
     }
@@ -579,9 +786,102 @@ mod tests {
     fn markdown_extraction_strips_common_markup() {
         let got = extract_text_for_format(
             "# Title\n- **Amount** [link](https://x.test)",
-            SourceFormat::Markdown,
+            TextSourceFormat::Markdown,
         );
         assert_eq!(got, "Title\nAmount link");
+    }
+
+    #[test]
+    fn pdf_extraction_reads_portable_renderer_output() {
+        let value = document_extract_text_impl(
+            &[b(rendered_pdf("Portable receipt")), pdf_extract_options()],
+            &mut String::new(),
+        )
+        .unwrap();
+        assert_eq!(string_value(&value), "Portable receipt");
+    }
+
+    #[test]
+    fn pdf_extraction_requires_bytes() {
+        let failure = pdf_failure(s("%PDF-1.4"));
+        assert_eq!(
+            string_value(failure_field(&failure, "kind")),
+            "invalid_input"
+        );
+        assert_eq!(
+            string_value(failure_field(&failure, "message")),
+            "PDF extraction requires bytes input",
+        );
+    }
+
+    #[test]
+    fn pdf_extraction_reports_malformed_bytes_deterministically() {
+        let failure = pdf_failure(b(b"%PDF-1.4\nnot a document".to_vec()));
+        assert_eq!(
+            string_value(failure_field(&failure, "error")),
+            "document_extract_error",
+        );
+        assert_eq!(string_value(failure_field(&failure, "kind")), "malformed");
+        assert_eq!(
+            string_value(failure_field(&failure, "source_format")),
+            SOURCE_FORMAT_PDF,
+        );
+        assert_eq!(
+            string_value(failure_field(&failure, "extractor")),
+            BUILTIN_EXTRACTOR_ID,
+        );
+    }
+
+    #[test]
+    fn pdf_extraction_rejects_input_above_the_reported_limit() {
+        let failure = pdf_failure(b(vec![0; MAX_PDF_INPUT_BYTES + 1]));
+        assert_eq!(
+            string_value(failure_field(&failure, "kind")),
+            "resource_limit"
+        );
+    }
+
+    #[test]
+    fn pdf_extraction_reports_encrypted_input_deterministically() {
+        let failure = pdf_failure(b(encrypted_pdf()));
+        assert_eq!(string_value(failure_field(&failure, "kind")), "encrypted");
+        assert_eq!(
+            string_value(failure_field(&failure, "message")),
+            "PDF is encrypted; decrypt it before extraction",
+        );
+    }
+
+    #[test]
+    fn pdf_extraction_marks_image_only_or_blank_input_for_ocr() {
+        let failure = pdf_failure(b(rendered_pdf("")));
+        assert_eq!(
+            string_value(failure_field(&failure, "kind")),
+            "no_extractable_text",
+        );
+        assert!(bool_value(failure_field(&failure, "ocr_candidate")));
+    }
+
+    #[test]
+    fn pdf_capabilities_report_builtin_extractor_limits() {
+        let value = document_pdf_capabilities_impl(&[], &mut String::new()).unwrap();
+        let VmValue::Dict(capabilities) = value else {
+            panic!("expected capabilities dict");
+        };
+        assert_eq!(
+            string_value(capabilities.get("default_extractor").unwrap()),
+            BUILTIN_EXTRACTOR_ID,
+        );
+        let Some(VmValue::List(extractors)) = capabilities.get("extractors") else {
+            panic!("expected extractors list");
+        };
+        let VmValue::Dict(extractor) = &extractors[0] else {
+            panic!("expected extractor descriptor");
+        };
+        assert!(!bool_value(extractor.get("ocr").unwrap()));
+        assert_eq!(
+            int_value(extractor.get("max_input_bytes").unwrap()),
+            MAX_PDF_INPUT_BYTES as i64,
+        );
     }
 
     #[test]

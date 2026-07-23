@@ -4,6 +4,9 @@ pipeline test(task) {
   let capabilities = pdf_capabilities()
   __io_println(capabilities.default_renderer)
   __io_println(len(capabilities.renderers))
+  __io_println(capabilities.default_extractor)
+  __io_println(len(capabilities.extractors))
+  __io_println(capabilities.extractors[0].ocr)
   __io_println(
     extract_text(
       "<html><body><h1>Receipt</h1><p>Amount $5.00</p></body></html>",
@@ -18,6 +21,17 @@ pipeline test(task) {
   __io_println(starts_with(pdf_text, "%PDF-1.4"))
   __io_println(contains(pdf_text, "xref\n"))
   __io_println(contains(pdf_text, "trailer\n"))
+  __io_println(contains(extract_text(rendered, {source_format: "pdf"}), "Amount $5.00"))
+  const malformed = try {
+    extract_text(bytes_from_string("%PDF-1.4\nnot a document"), {source_format: "pdf"})
+  }
+  __io_println(unwrap_err(malformed).kind)
+  const blank = try {
+    extract_text(pdf_bytes("", {title: ""}), {source_format: "pdf"})
+  }
+  const blank_failure = unwrap_err(blank)
+  __io_println(blank_failure.kind)
+  __io_println(blank_failure.ocr_candidate)
   let path = path_join(harness.fs.temp_dir(), "harn-document-" + uuid() + ".pdf")
   defer {
     harness.fs.delete(path)
