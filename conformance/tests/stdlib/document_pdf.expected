@@ -1,8 +1,15 @@
 builtin_text_pdf
 1
+builtin_pdf_text
+1
+false
 Receipt Amount $5.00
 true
 true
+true
+true
+malformed
+no_extractable_text
 true
 application/pdf
 true

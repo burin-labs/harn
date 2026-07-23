@@ -1,11 +1,13 @@
 /** std/document — portable document conversion helpers. */
-type DocumentSourceFormat = "text" | "html" | "markdown"
+type DocumentRenderSourceFormat = "text" | "html" | "markdown"
+
+type DocumentExtractSourceFormat = DocumentRenderSourceFormat | "pdf"
 
 type PdfRenderer = "auto" | "builtin_text_pdf"
 
 type PdfRenderOptions = {
   renderer?: PdfRenderer,
-  source_format?: DocumentSourceFormat,
+  source_format?: DocumentRenderSourceFormat,
   title?: string,
   page_width_pt?: int,
   page_height_pt?: int,
@@ -18,12 +20,12 @@ type PdfRenderOptions = {
   renderer_options?: dict,
 }
 
-type TextExtractOptions = {source_format?: DocumentSourceFormat}
+type TextExtractOptions = {source_format?: DocumentExtractSourceFormat}
 
 type PdfWriteResult = {path: string, bytes: int, media_type: string, renderer: string}
 
 /**
- * Return the document/PDF renderers available in this runtime.
+ * Return the document/PDF renderers and extractors available in this runtime.
  *
  * @effects: []
  * @errors: []
@@ -33,7 +35,11 @@ pub fn pdf_capabilities() -> dict {
 }
 
 /**
- * Extract normalized text from text, HTML, or Markdown input.
+ * Extract normalized text from text, HTML, Markdown, or PDF input.
+ *
+ * PDF extraction requires bytes and uses the portable built-in text extractor.
+ * Encrypted, malformed, and image-only PDFs throw a structured
+ * `document_extract_error`; OCR is intentionally an explicit caller fallback.
  *
  * @effects: []
  * @errors: [document_extract_text]

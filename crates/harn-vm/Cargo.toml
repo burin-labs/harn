@@ -49,6 +49,7 @@ harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.34
 harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.34" }
 harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.34" }
 linkme = "0.3"
+lopdf = { version = "0.44", default-features = false, features = ["wasm_js"] }
 parking_lot = "0.12"
 pin-project-lite = "0.2"
 harn-clock = { path = "../harn-clock", version = "=0.10.34" }

@@ -2959,8 +2959,15 @@ Import with `import { pdf_bytes, write_pdf, extract_text, pdf_capabilities } fro
 - `write_pdf(path, source, options?)` writes those bytes through
   `harness.fs.write_bytes`, so normal sandbox `workspace_roots` apply.
 - `extract_text(source, {source_format?})` normalizes text-like document input.
-- `pdf_capabilities()` reports available renderers and source formats. The
-  built-in renderer is portable and text-layout oriented, not browser-grade CSS.
+  With `source_format: "pdf"`, it accepts PDF bytes and extracts embedded text
+  with the portable `builtin_pdf_text` extractor. Malformed, encrypted, and
+  image-only PDFs throw a structured `document_extract_error`; image-only
+  failures set `ocr_candidate: true` so callers can choose an explicit OCR
+  fallback.
+- `pdf_capabilities()` reports available renderers and extractors, including
+  supported formats, resource limits, external dependencies, and whether OCR
+  is available. The built-in renderer is portable and text-layout oriented,
+  not browser-grade CSS.
 
 ### Diff helpers
 
