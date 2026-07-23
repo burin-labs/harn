@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Emit the live server's statistics before stopping it. The upstream action's
-# post step runs after Harn stops the server and therefore sees reset counters.
+# Emit the live server's statistics before stopping a job-owned daemon. A
+# host-owned shared daemon must outlive every individual runner job.
 set -euo pipefail
 
 sccache_bin="${SCCACHE_PATH:-sccache}"
@@ -26,4 +26,6 @@ if [[ "${compile_requests:-0}" -ge 100 && "${cache_hits:-0}" -eq 0 ]]; then
   echo "::warning title=sccache is cold::${compile_requests} compile requests produced zero cache hits."
 fi
 
-"$sccache_bin" --stop-server >/dev/null 2>&1 || true
+if [[ "${HARN_SHARED_SCCACHE:-}" != "on" ]]; then
+  "$sccache_bin" --stop-server >/dev/null 2>&1 || true
+fi
