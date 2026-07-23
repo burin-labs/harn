@@ -133,12 +133,19 @@ impl LlmResult {
     /// zero. VM-return and provider-observability projections use this contract
     /// so their usage costs cannot disagree.
     pub(crate) fn priced_cost_usd(&self) -> Option<f64> {
-        crate::llm::cost::pricing_aware_call_cost(
+        let detail = crate::llm::cost::pricing_detail_for_tier(
             &self.provider,
             &self.model,
+            self.served_fast,
+            self.input_tokens,
+        )?;
+        Some(crate::llm::cost::project_call_cost(
+            &detail,
             self.input_tokens,
             self.output_tokens,
-        )
+            self.cache_read_tokens,
+            self.cache_write_tokens,
+        ))
     }
 
     /// True when the completion carries nothing the agent loop can act on: no
@@ -894,7 +901,10 @@ mod cache_supported_serde_tests {
         priced.model = "claude-sonnet-4-20250514".to_string();
         priced.input_tokens = 1_000;
         priced.output_tokens = 1_000;
-        let expected_cost = priced.priced_cost_usd().expect("catalog-priced result");
+        let uncached_cost = priced.priced_cost_usd().expect("catalog-priced result");
+        priced.cache_read_tokens = 800;
+        let expected_cost = priced.priced_cost_usd().expect("cache-priced result");
+        assert!(expected_cost < uncached_cost);
         let priced_value = vm_build_llm_result(&priced, None, None, None);
         let priced_dict = priced_value.as_dict().expect("result dict");
         let Some(VmValue::Dict(priced_usage)) = priced_dict.get("usage") else {

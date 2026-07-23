@@ -1,0 +1,45 @@
+import { assert_approx, assert_eq, with_llm_script } from "std/testing"
+
+pipeline test_structured_retry_cache_cost() {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["decision"],
+    properties: {decision: {type: "string", enum: ["merge", "wait"]}},
+  }
+  with_llm_script(
+    [
+      {
+        text: "{\"decision\":42}",
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        input_tokens: 1000,
+        output_tokens: 100,
+        cache_read_tokens: 800,
+      },
+      {
+        text: "{\"decision\":\"merge\"}",
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        input_tokens: 1200,
+        output_tokens: 200,
+        cache_read_tokens: 1000,
+      },
+    ],
+    { ->
+      const before = llm_session_cost().total_cost
+      const result = llm_call_structured_result(
+        "Choose an action.",
+        schema,
+        {provider: "mock", schema_retries: 1, repair: {enabled: false}},
+      )
+      const charged = llm_session_cost().total_cost - before
+      assert_eq(result.ok, true)
+      assert_eq(result.attempts, 2)
+      assert_eq(result.usage.cache_read_tokens, 1000)
+      assert_approx(result.usage.cost_usd, 0.0039)
+      assert_approx(charged, 0.00624)
+      __io_println("ok")
+    },
+  )
+}

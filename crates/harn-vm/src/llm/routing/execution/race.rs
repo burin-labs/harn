@@ -30,7 +30,7 @@ pub(super) async fn run_race(
         match res {
             Ok(v) => {
                 record.status = AttemptStatus::Succeeded;
-                record.cost_usd = Some(project_link_cost_usd(v));
+                record.cost_usd = project_link_cost_usd(v);
                 record.input_tokens = Some(v.input_tokens);
                 record.output_tokens = Some(v.output_tokens);
             }

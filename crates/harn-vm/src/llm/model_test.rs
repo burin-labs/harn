@@ -91,12 +91,7 @@ pub async fn run_model_smoke_test(
         first_token_ms,
         input_tokens: result.input_tokens,
         output_tokens: result.output_tokens,
-        estimated_cost_usd: super::calculate_cost_for_provider(
-            &result.provider,
-            &result.model,
-            result.input_tokens,
-            result.output_tokens,
-        ),
+        estimated_cost_usd: result.priced_cost_usd().unwrap_or(0.0),
     })
 }
 

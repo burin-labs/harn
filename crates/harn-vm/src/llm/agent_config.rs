@@ -89,12 +89,7 @@ pub(crate) fn agent_loop_result_from_llm(
             "blocks": result.blocks.clone(),
             "provider_response_id": result.telemetry.request_id.clone(),
             "thinking_summary": result.thinking_summary,
-            "cost_usd": crate::llm::cost::calculate_cost_for_provider(
-                &result.provider,
-                &result.model,
-                result.input_tokens,
-                result.output_tokens,
-            ),
+            "cost_usd": result.priced_cost_usd(),
             "route_policy": opts.route_policy.as_label(),
             "routing_decision": opts.routing_decision.as_ref(),
             "structural_experiment": opts.applied_structural_experiment.as_ref(),

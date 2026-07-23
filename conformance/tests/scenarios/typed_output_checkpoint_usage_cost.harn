@@ -51,7 +51,8 @@ pipeline test_typed_output_checkpoint_usage_cost() {
       assert_eq(success.ok, true)
       assert_eq(success.usage.input_tokens, 1000)
       assert_eq(success.usage.output_tokens, 1000)
-      assert_approx(success.usage.cost_usd, 0.018)
+      assert_eq(success.usage.cache_write_tokens, 1000)
+      assert_approx(success.usage.cost_usd, 0.01875)
       assert_eq(captured.events[0].checkpoint.usage, success.usage)
       const schema_failure = typed_output_checkpoint(
         "usage.schema_failure",
@@ -63,7 +64,8 @@ pipeline test_typed_output_checkpoint_usage_cost() {
       assert_eq(schema_failure.error_category, "schema_validation")
       assert_eq(schema_failure.usage.input_tokens, 2000)
       assert_eq(schema_failure.usage.output_tokens, 500)
-      assert_approx(schema_failure.usage.cost_usd, 0.0135)
+      assert_eq(schema_failure.usage.cache_read_tokens, 2000)
+      assert_approx(schema_failure.usage.cost_usd, 0.0081)
       const validator_failure = typed_output_checkpoint(
         "usage.validator_failure",
         "Choose an action.",
@@ -75,7 +77,8 @@ pipeline test_typed_output_checkpoint_usage_cost() {
       assert_eq(validator_failure.error_category, "validator_failure")
       assert_eq(validator_failure.usage.input_tokens, 500)
       assert_eq(validator_failure.usage.output_tokens, 2000)
-      assert_approx(validator_failure.usage.cost_usd, 0.0315)
+      assert_eq(validator_failure.usage.cache_read_tokens, 500)
+      assert_approx(validator_failure.usage.cost_usd, 0.03015)
       __io_println("ok")
     },
   )

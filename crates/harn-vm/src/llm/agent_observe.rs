@@ -922,12 +922,7 @@ pub(crate) async fn observed_llm_call(
                             &result.provider,
                             &result.model,
                             status,
-                            super::cost::calculate_cost_for_provider(
-                                &result.provider,
-                                &result.model,
-                                result.input_tokens,
-                                result.output_tokens,
-                            ),
+                            result.priced_cost_usd().unwrap_or(0.0),
                         );
                     }
                     return Err(error);
@@ -997,12 +992,7 @@ pub(crate) async fn observed_llm_call(
                         &result.provider,
                         &result.model,
                         "succeeded",
-                        super::cost::calculate_cost_for_provider(
-                            &result.provider,
-                            &result.model,
-                            result.input_tokens,
-                            result.output_tokens,
-                        ),
+                        result.priced_cost_usd().unwrap_or(0.0),
                     );
                     if result.cache_read_tokens > 0 {
                         metrics.record_llm_cache_hit(&result.provider);
