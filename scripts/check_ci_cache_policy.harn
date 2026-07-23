@@ -42,6 +42,8 @@ const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 
 const PERSISTENT_SCCACHE_SIZE = "40G"
 
+const PERSISTENT_SCCACHE_PORT = "4227"
+
 // Hang backstop for the archived-behavior consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test
 // command, no compiler caches, no compile fan-out), so the timeout only has to
@@ -539,6 +541,12 @@ fn persistent_sccache_job_errors(
   if trim(job?.env?.SCCACHE_CACHE_SIZE ?? "") != PERSISTENT_SCCACHE_SIZE {
     errors = errors
       + ["ci.yml:${job_name} must cap persistent sccache at ${PERSISTENT_SCCACHE_SIZE}"]
+  }
+  if trim(job?.env?.SCCACHE_SERVER_PORT ?? "") != PERSISTENT_SCCACHE_PORT {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must use host-owned sccache port ${PERSISTENT_SCCACHE_PORT}",
+    ]
   }
   if trim(job?.env?.SCCACHE_BASEDIRS ?? "") != "" {
     errors = errors

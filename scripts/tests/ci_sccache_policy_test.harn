@@ -30,7 +30,7 @@ fn sccache_action() {
 fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback_if: string) {
   return {
     "runs-on": runner,
-    env: {SCCACHE_CACHE_SIZE: "40G"},
+    env: {SCCACHE_CACHE_SIZE: "40G", SCCACHE_SERVER_PORT: "4227"},
     steps: [
       {
         uses: "./.github/actions/sccache",
@@ -316,6 +316,7 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
     ),
   )
   assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 40G"))
+  assert(errors.contains("ci.yml:package-audit must use host-owned sccache port 4227"))
   assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
 }
 
