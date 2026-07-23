@@ -30,7 +30,7 @@ fn sccache_action() {
 fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback_if: string) {
   return {
     "runs-on": runner,
-    env: {SCCACHE_BASEDIRS: gha_expression("github.workspace"), SCCACHE_CACHE_SIZE: "15G"},
+    env: {SCCACHE_CACHE_SIZE: "40G", SCCACHE_SERVER_PORT: "4227"},
     steps: [
       {
         uses: "./.github/actions/sccache",
@@ -315,7 +315,8 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
       "ci.yml:package-audit must retain rust-cache only on the GitHub-hosted fallback",
     ),
   )
-  assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 15G"))
+  assert(errors.contains("ci.yml:package-audit must cap persistent sccache at 40G"))
+  assert(errors.contains("ci.yml:package-audit must use host-owned sccache port 4227"))
   assert(errors.contains("ci.yml:surprise uses persistent sccache without a lane policy"))
 }
 
@@ -329,6 +330,7 @@ pipeline test_rejects_selfhosted_cache_backend_leaks(task) {
       ...valid.jobs,
       "package-audit": {
         ...package_job,
+        env: {...package_job.env, SCCACHE_BASEDIRS: gha_expression("github.workspace")},
         steps: package_job.steps.map(
           { step ->
             if step?.uses != "./.github/actions/sccache" {
@@ -342,6 +344,11 @@ pipeline test_rejects_selfhosted_cache_backend_leaks(task) {
     },
   }
   const errors = ci_sccache_policy_errors(sccache_action(), invalid)
+  assert(
+    errors.contains(
+      "ci.yml:package-audit must leave SCCACHE_BASEDIRS to the host-wide sccache daemon",
+    ),
+  )
   assert(errors.contains("ci.yml:package-audit must disable sticky storage on self-hosted runners"))
   assert(errors.contains("ci.yml:package-audit must disable GHA sccache on self-hosted runners"))
 }

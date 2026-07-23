@@ -40,7 +40,9 @@ const SELFHOSTED_DISABLE_VAR = "HARN_CI_DISABLE_SELFHOSTED_LINUX"
 
 const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 
-const PERSISTENT_SCCACHE_SIZE = "15G"
+const PERSISTENT_SCCACHE_SIZE = "40G"
+
+const PERSISTENT_SCCACHE_PORT = "4227"
 
 // Hang backstop for the archived-behavior consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test
@@ -540,8 +542,17 @@ fn persistent_sccache_job_errors(
     errors = errors
       + ["ci.yml:${job_name} must cap persistent sccache at ${PERSISTENT_SCCACHE_SIZE}"]
   }
-  if !contains(trim(job?.env?.SCCACHE_BASEDIRS ?? ""), "github.workspace") {
-    errors = errors + ["ci.yml:${job_name} must normalize sccache paths to github.workspace"]
+  if trim(job?.env?.SCCACHE_SERVER_PORT ?? "") != PERSISTENT_SCCACHE_PORT {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must use host-owned sccache port ${PERSISTENT_SCCACHE_PORT}",
+    ]
+  }
+  if trim(job?.env?.SCCACHE_BASEDIRS ?? "") != "" {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must leave SCCACHE_BASEDIRS to the host-wide sccache daemon",
+    ]
   }
   const caches = matching_steps(job, SCCACHE_ACTION)
   if len(caches) != 1 {
