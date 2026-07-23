@@ -293,24 +293,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn emits_monotonic_seq_across_events() {
-        let _guard = crate::tests::common::run_event_sink_lock::lock_run_event_sink();
+    #[tokio::test]
+    async fn emits_monotonic_seq_across_events() {
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         let emitter = NdjsonEmitter::new(Box::new(BufWriter(buf.clone())), false);
         let sink = emitter.sink();
-        let prior = harn_vm::run_events::install_sink(sink);
-        harn_vm::run_events::emit(RunEvent::Stdout {
-            payload: "hello\n".into(),
-        });
-        harn_vm::run_events::emit(RunEvent::Stderr {
-            payload: "warn\n".into(),
-        });
-        harn_vm::run_events::clear_sink();
+        harn_vm::run_events::scope(sink, async {
+            harn_vm::run_events::emit(RunEvent::Stdout {
+                payload: "hello\n".into(),
+            });
+            harn_vm::run_events::emit(RunEvent::Stderr {
+                payload: "warn\n".into(),
+            });
+        })
+        .await;
         emitter.emit_result(serde_json::Value::Null, 0);
-        if let Some(prior) = prior {
-            harn_vm::run_events::install_sink(prior);
-        }
 
         let raw = String::from_utf8(buf.lock().unwrap().clone()).expect("utf8");
         let lines: Vec<&str> = raw.lines().filter(|line| !line.is_empty()).collect();
@@ -333,26 +330,23 @@ mod tests {
         assert_eq!(types, vec!["stdout", "stderr", "result"]);
     }
 
-    #[test]
-    fn quiet_drops_stdout_and_stderr_without_gaps() {
-        let _guard = crate::tests::common::run_event_sink_lock::lock_run_event_sink();
+    #[tokio::test]
+    async fn quiet_drops_stdout_and_stderr_without_gaps() {
         let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
         let emitter = NdjsonEmitter::new(Box::new(BufWriter(buf.clone())), true);
         let sink = emitter.sink();
-        let prior = harn_vm::run_events::install_sink(sink);
-        harn_vm::run_events::emit(RunEvent::Stdout {
-            payload: "ignored\n".into(),
-        });
-        harn_vm::run_events::emit(RunEvent::Hook {
-            name: "PreRun".into(),
-            phase: "allow".into(),
-            payload: serde_json::Value::Null,
-        });
-        harn_vm::run_events::clear_sink();
+        harn_vm::run_events::scope(sink, async {
+            harn_vm::run_events::emit(RunEvent::Stdout {
+                payload: "ignored\n".into(),
+            });
+            harn_vm::run_events::emit(RunEvent::Hook {
+                name: "PreRun".into(),
+                phase: "allow".into(),
+                payload: serde_json::Value::Null,
+            });
+        })
+        .await;
         emitter.emit_result(serde_json::Value::Null, 0);
-        if let Some(prior) = prior {
-            harn_vm::run_events::install_sink(prior);
-        }
 
         let raw = String::from_utf8(buf.lock().unwrap().clone()).expect("utf8");
         let lines: Vec<&str> = raw.lines().filter(|line| !line.is_empty()).collect();
@@ -372,13 +366,8 @@ mod tests {
         );
     }
 
-    // The sink is process-global, so this test must retain its synchronous
-    // serialization guard for the whole async run. Keep it on one thread and
-    // document the intentionally scoped exception instead of dropping the
-    // guard and permitting a concurrent test to corrupt the event stream.
     #[tokio::test(flavor = "current_thread")]
     async fn explicit_exit_emits_stdio_and_one_result_event() {
-        let _guard = crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
         harn_vm::reset_thread_local_state();
         let temp = tempfile::TempDir::new().expect("temp dir");
         let script = temp.path().join("main.harn");
@@ -441,5 +430,115 @@ fn main(harness: Harness) {
             .iter()
             .all(|event| event["data"]["event_type"] != "error"));
         harn_vm::reset_thread_local_state();
+    }
+
+    struct BarrierWriter {
+        bytes: Arc<Mutex<Vec<u8>>>,
+        first_event_barrier: Arc<std::sync::Barrier>,
+        reached_barrier: bool,
+    }
+
+    impl Write for BarrierWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.bytes.lock().unwrap().extend_from_slice(buf);
+            if !self.reached_barrier && buf.contains(&b'\n') {
+                self.reached_barrier = true;
+                self.first_event_barrier.wait();
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn concurrent_json_runs_receive_only_their_own_ordered_events() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let alpha_path = temp.path().join("alpha.harn");
+        let beta_path = temp.path().join("beta.harn");
+        std::fs::write(
+            &alpha_path,
+            r#"
+fn main(harness: Harness) {
+  harness.stdio.println("alpha-out")
+  harness.stdio.eprintln("alpha-err")
+}
+"#,
+        )
+        .expect("write alpha script");
+        std::fs::write(
+            &beta_path,
+            r#"
+fn main(harness: Harness) {
+  harness.stdio.println("beta-out")
+  harness.stdio.eprintln("beta-err")
+}
+"#,
+        )
+        .expect("write beta script");
+
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let alpha_bytes = Arc::new(Mutex::new(Vec::new()));
+        let beta_bytes = Arc::new(Mutex::new(Vec::new()));
+
+        let spawn_run = |path: std::path::PathBuf, bytes: Arc<Mutex<Vec<u8>>>| {
+            let first_event_barrier = barrier.clone();
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime")
+                    .block_on(super::super::execute_run_json(
+                        &path.to_string_lossy(),
+                        false,
+                        std::collections::HashSet::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        super::super::CliLlmMockMode::Off,
+                        None,
+                        super::super::RunProfileOptions::default(),
+                        Box::new(BarrierWriter {
+                            bytes,
+                            first_event_barrier,
+                            reached_barrier: false,
+                        }),
+                        super::super::RunJsonOptions::default(),
+                    ))
+            })
+        };
+
+        let alpha = spawn_run(alpha_path, alpha_bytes.clone());
+        let beta = spawn_run(beta_path, beta_bytes.clone());
+        assert_eq!(alpha.join().expect("alpha thread").exit_code, 0);
+        assert_eq!(beta.join().expect("beta thread").exit_code, 0);
+
+        let parse = |bytes: &Arc<Mutex<Vec<u8>>>| {
+            String::from_utf8(bytes.lock().unwrap().clone())
+                .expect("utf8")
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("valid event"))
+                .collect::<Vec<_>>()
+        };
+        let alpha_events = parse(&alpha_bytes);
+        let beta_events = parse(&beta_bytes);
+
+        let assert_stream = |events: &[serde_json::Value], stdout: &str, stderr: &str| {
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|event| event["data"]["seq"].as_u64().expect("seq"))
+                    .collect::<Vec<_>>(),
+                [1, 2, 3]
+            );
+            assert_eq!(events[0]["data"]["event_type"], "stdout");
+            assert_eq!(events[0]["data"]["payload"], stdout);
+            assert_eq!(events[1]["data"]["event_type"], "stderr");
+            assert_eq!(events[1]["data"]["payload"], stderr);
+            assert_eq!(events[2]["data"]["event_type"], "result");
+        };
+        assert_stream(&alpha_events, "alpha-out\n", "alpha-err\n");
+        assert_stream(&beta_events, "beta-out\n", "beta-err\n");
     }
 }

@@ -1,4 +1,4 @@
-//! Run-event sink: an in-process bus the CLI installs to capture every
+//! Run-event sink: an execution-scoped bus the CLI attaches to capture every
 //! observable side effect of a `harn run` invocation as a single
 //! ordered stream.
 //!
@@ -13,7 +13,9 @@
 //! persistent topics so a single subscriber can see the whole run
 //! without joining across topics.
 
-use std::sync::{Arc, OnceLock, RwLock};
+use std::cell::RefCell;
+use std::future::Future;
+use std::sync::Arc;
 
 use serde::Serialize;
 
@@ -88,47 +90,42 @@ pub trait RunEventSink: Send + Sync {
     fn emit(&self, event: RunEvent);
 }
 
-fn active_slot() -> &'static RwLock<Option<Arc<dyn RunEventSink>>> {
-    static SLOT: OnceLock<RwLock<Option<Arc<dyn RunEventSink>>>> = OnceLock::new();
-    SLOT.get_or_init(|| RwLock::new(None))
+thread_local! {
+    /// The sink for the execution currently being polled on this thread.
+    ///
+    /// `AmbientExecutionScope` swaps this slot at every task poll, so the
+    /// thread-local is execution-owned even when unrelated futures interleave
+    /// on one runtime thread.
+    static RUN_EVENT_SINK_CONTEXT: RefCell<Option<Arc<dyn RunEventSink>>> =
+        RefCell::new(None);
 }
 
-/// Install `sink` as the process-wide run-event sink. Returns the
-/// previous sink (if any) so callers can chain. Installs are
-/// exclusive — there is one active sink at a time — to keep ordering
-/// trivially serial.
-pub fn install_sink(sink: Arc<dyn RunEventSink>) -> Option<Arc<dyn RunEventSink>> {
-    let mut guard = active_slot()
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.replace(sink)
+pub(crate) fn swap_run_event_sink(
+    sink: Option<Arc<dyn RunEventSink>>,
+) -> Option<Arc<dyn RunEventSink>> {
+    RUN_EVENT_SINK_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), sink))
 }
 
-/// Remove the active sink. No-op when none is installed.
-pub fn clear_sink() {
-    let mut guard = active_slot()
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *guard = None;
+/// Run `inner` with `sink` attached to its ambient execution scope.
+///
+/// The scope is installed only while `inner` is being polled. Inline and
+/// spawned VM work that captures the ambient execution inherits the sink;
+/// unrelated or sibling executions do not.
+pub fn scope<F: Future>(sink: Arc<dyn RunEventSink>, inner: F) -> impl Future<Output = F::Output> {
+    crate::orchestration::scope_run_event_sink(sink, inner)
 }
 
-/// Whether a sink is currently installed. Useful as a fast-path gate
+/// Whether the current execution has a sink. Useful as a fast-path gate
 /// for callers that would otherwise build a payload speculatively.
 pub fn sink_active() -> bool {
-    active_slot()
-        .read()
-        .map(|guard| guard.is_some())
-        .unwrap_or(false)
+    RUN_EVENT_SINK_CONTEXT.with(|slot| slot.borrow().is_some())
 }
 
-/// Emit `event` to the active sink. No-op when no sink is installed,
+/// Emit `event` to the current execution's sink. No-op when no sink is active,
 /// so it is safe to call from every hook point unconditionally.
 pub fn emit(event: RunEvent) {
-    let guard = match active_slot().read() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if let Some(sink) = guard.as_ref() {
+    let sink = RUN_EVENT_SINK_CONTEXT.with(|slot| slot.borrow().clone());
+    if let Some(sink) = sink {
         sink.emit(redact_run_event(event));
     }
 }
@@ -161,10 +158,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// The sink slot is process-global; tests that install/clear must
-    /// run serially even when nextest fans them out across threads.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
     struct CapturingSink {
         events: Mutex<Vec<RunEvent>>,
     }
@@ -175,32 +168,69 @@ mod tests {
         }
     }
 
-    #[test]
-    fn install_emit_clear_round_trip() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let sink = Arc::new(CapturingSink {
+    #[tokio::test]
+    async fn nested_scopes_restore_the_outer_sink() {
+        let outer = Arc::new(CapturingSink {
             events: Mutex::new(Vec::new()),
         });
-        let prior = install_sink(sink.clone());
-        assert!(sink_active());
-        emit(RunEvent::Stdout {
-            payload: "hi\n".into(),
+        let inner = Arc::new(CapturingSink {
+            events: Mutex::new(Vec::new()),
         });
-        clear_sink();
+
+        scope(outer.clone(), async {
+            emit(RunEvent::Stdout {
+                payload: "outer-before\n".into(),
+            });
+            crate::orchestration::scope_inline_subtask(async {
+                emit(RunEvent::Stdout {
+                    payload: "outer-inline\n".into(),
+                });
+            })
+            .await;
+            let inherited = crate::orchestration::AmbientExecutionScope::capture_inherited();
+            crate::orchestration::scope_ambient(inherited, async {
+                emit(RunEvent::Stdout {
+                    payload: "outer-worker\n".into(),
+                });
+            })
+            .await;
+            scope(inner.clone(), async {
+                emit(RunEvent::Stdout {
+                    payload: "inner\n".into(),
+                });
+            })
+            .await;
+            emit(RunEvent::Stdout {
+                payload: "outer-after\n".into(),
+            });
+        })
+        .await;
+
         assert!(!sink_active());
         emit(RunEvent::Stdout {
-            payload: "after-clear".into(),
+            payload: "unscoped\n".into(),
         });
 
-        let captured = sink.events.lock().unwrap();
-        assert_eq!(captured.len(), 1, "events after clear must be dropped");
-        match &captured[0] {
-            RunEvent::Stdout { payload } => assert_eq!(payload, "hi\n"),
-            other => panic!("unexpected event {other:?}"),
-        }
-
-        if let Some(prior) = prior {
-            install_sink(prior);
-        }
+        let payloads = |sink: &CapturingSink| {
+            sink.events
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|event| match event {
+                    RunEvent::Stdout { payload } => payload.clone(),
+                    other => panic!("unexpected event {other:?}"),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            payloads(&outer),
+            [
+                "outer-before\n",
+                "outer-inline\n",
+                "outer-worker\n",
+                "outer-after\n"
+            ]
+        );
+        assert_eq!(payloads(&inner), ["inner\n"]);
     }
 }

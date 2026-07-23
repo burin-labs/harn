@@ -497,7 +497,7 @@ struct ExecuteRunInputs<'a> {
     profile: RunProfileOptions,
     sandbox: RunSandboxOptions,
     interrupt_tokens: Option<RunInterruptTokens>,
-    json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
+    json: Option<JsonRunSession>,
     aux: RunAuxOptions,
     timing: Option<&'a mut RunTiming>,
     harnpack: HarnpackRunOptions,
@@ -577,8 +577,9 @@ pub(crate) async fn run_file_with_skill_dirs(
         .map(|timeout| start_run_deadline_watchdog(timeout, interrupt_tokens.clone()));
 
     let _stdout_passthrough = StdoutPassthroughGuard::enable();
-    let json_with_stdout =
-        json.map(|opts| (opts, Box::new(io::stdout()) as Box<dyn io::Write + Send>));
+    let json_session = json.map(|options| {
+        JsonRunSession::new(options, Box::new(io::stdout()) as Box<dyn io::Write + Send>)
+    });
     let outcome = execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -590,7 +591,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         profile,
         sandbox,
         interrupt_tokens: Some(interrupt_tokens.clone()),
-        json: json_with_stdout,
+        json: json_session,
         aux,
         timing: None,
         harnpack,
@@ -922,7 +923,7 @@ pub async fn execute_run_json(
         profile,
         sandbox: RunSandboxOptions::default(),
         interrupt_tokens: None,
-        json: Some((options, out)),
+        json: Some(JsonRunSession::new(options, out)),
         aux: RunAuxOptions::default(),
         timing: None,
         harnpack: HarnpackRunOptions::default(),
@@ -982,6 +983,19 @@ fn entry_source_dir(path: &str) -> std::path::PathBuf {
 // the intentional reborrow pattern here.
 #[allow(clippy::needless_option_as_deref)]
 async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
+    let mut inputs = inputs;
+    let json_session = inputs.json.take();
+    let Some(json_session) = json_session else {
+        return execute_run_inner_scoped(inputs, None).await;
+    };
+    let sink = json_session.sink();
+    harn_vm::run_events::scope(sink, execute_run_inner_scoped(inputs, Some(json_session))).await
+}
+
+async fn execute_run_inner_scoped(
+    inputs: ExecuteRunInputs<'_>,
+    json_session: Option<JsonRunSession>,
+) -> RunOutcome {
     let ExecuteRunInputs {
         path,
         trace,
@@ -993,7 +1007,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         profile,
         sandbox,
         interrupt_tokens,
-        json,
+        json: _,
         aux,
         timing,
         harnpack,
@@ -1011,13 +1025,6 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         None
     };
     let mut timing = timing.or(owned_timing.as_mut());
-
-    // `--json` installs an in-process sink that diverts every
-    // observable VM event (stdout, stderr, transcript, tool, hook,
-    // persona) into a single NDJSON stream on `out`. The sink stays
-    // active until we drop the guard below — fatal errors emit a
-    // terminal `error` event on the same stream before bailing.
-    let json_session = json.map(|(options, out)| JsonRunSession::install(options, out));
 
     let mut stderr = String::new();
     let mut stdout = String::new();
@@ -1777,13 +1784,9 @@ fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
     }
 }
 
-/// State for a single `harn run --json` invocation. Installs the
-/// run-event sink in [`Self::install`] and removes it in [`Drop`], so
-/// every exit path through `execute_run_inner` cleans up correctly
-/// even if a panic unwinds out of the VM. Save-and-restore of any
-/// previously installed sink keeps the helper safe to nest (rare, but
-/// in-process embeddings can call into `harn run` from a host that
-/// already had a sink wired).
+/// State for a single `harn run --json` invocation. `execute_run_inner`
+/// attaches its sink to the run's ambient execution scope, including setup and
+/// terminal handling, so every observable event stays in this stream.
 ///
 /// `finalize_result` / `finalize_error` emit the terminal event and
 /// build a [`RunOutcome`] whose stdout/stderr captured-buffer fields
@@ -1792,17 +1795,17 @@ fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
 /// binary entry can `process::exit(...)`.
 struct JsonRunSession {
     emitter: self::json_events::NdjsonEmitter,
-    prior_sink: Option<Arc<dyn harn_vm::run_events::RunEventSink>>,
 }
 
 impl JsonRunSession {
-    fn install(options: RunJsonOptions, out: Box<dyn io::Write + Send>) -> Self {
-        let emitter = NdjsonEmitter::new(out, options.quiet);
-        let prior_sink = harn_vm::run_events::install_sink(emitter.sink());
+    fn new(options: RunJsonOptions, out: Box<dyn io::Write + Send>) -> Self {
         Self {
-            emitter,
-            prior_sink,
+            emitter: NdjsonEmitter::new(out, options.quiet),
         }
+    }
+
+    fn sink(&self) -> Arc<dyn harn_vm::run_events::RunEventSink> {
+        self.emitter.sink()
     }
 
     fn finalize_result(self, value: serde_json::Value, exit_code: i32) -> RunOutcome {
@@ -1825,17 +1828,6 @@ impl JsonRunSession {
             stdout: String::new(),
             stderr: String::new(),
             exit_code,
-        }
-    }
-}
-
-impl Drop for JsonRunSession {
-    fn drop(&mut self) {
-        match self.prior_sink.take() {
-            Some(prior) => {
-                harn_vm::run_events::install_sink(prior);
-            }
-            None => harn_vm::run_events::clear_sink(),
         }
     }
 }
