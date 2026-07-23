@@ -1,8 +1,8 @@
 //! Compass tool-rewrite router (B.9, #2612).
 //!
 //! The compass *steer* (#2521, the `compass_ast_edits` reminder provider)
-//! tells the agent at session start to prefer the AST-precise edit
-//! primitives. This module is the *active routing layer*: a per-tool-call
+//! helps the agent choose when AST-precise edits materially improve safety.
+//! This module is the *active routing layer*: a per-tool-call
 //! hook that observes a freeform / whole-file edit call before it is
 //! dispatched and, conservatively, either
 //!
@@ -21,14 +21,14 @@
 //! returns [`CompassDecision::Passthrough`] and the dispatcher behaves
 //! exactly as before.
 //!
-//! ## Default + disable
+//! ## Enable + configure
 //!
-//! On by default in `suggest` mode. A session/persona controls it through
-//! the `compass` option:
+//! Off by default. A session/persona enables it through the `compass` option:
 //!
-//! - `compass: false` (or `compass: {enabled: false}`) — fully off.
+//! - omitted, `compass: false`, or `compass: null` — fully off.
+//! - `compass: true` — advisory `suggest` mode.
 //! - `compass: {mode: "off"}` — registered but inert (same as disabled).
-//! - `compass: {mode: "suggest"}` — default; advisory only.
+//! - `compass: {mode: "suggest"}` — advisory only.
 //! - `compass: {mode: "rewrite"}` — silently substitute provably-equivalent
 //!   structural calls; suggest (and fall back) otherwise.
 //! - `compass: {prefer: ["edit_rename_symbol", ...]}` — per-persona
@@ -102,9 +102,8 @@ pub(crate) struct CompassConfig {
 
 impl CompassConfig {
     /// Read the `compass` option out of the agent-loop options dict
-    /// (already JSON-shaped). Defaults to on/`suggest` so the compass is
-    /// the agent-loop default per #2521; the caller short-circuits when
-    /// [`CompassMode::Off`].
+    /// (already JSON-shaped). Defaults to off; the caller short-circuits
+    /// when [`CompassMode::Off`].
     pub(crate) fn from_options(options: &JsonValue) -> Self {
         let persona = options
             .get("persona")
@@ -115,8 +114,8 @@ impl CompassConfig {
             .to_string();
         let compass = options.get("compass");
         let mode = match compass {
-            // Absent → default on (suggest).
-            None | Some(JsonValue::Null) => CompassMode::Suggest,
+            // Absent/null → opt-in feature remains off.
+            None | Some(JsonValue::Null) => CompassMode::Off,
             // `compass: false` fully disables; `compass: true` is on.
             Some(JsonValue::Bool(false)) => CompassMode::Off,
             Some(JsonValue::Bool(true)) => CompassMode::Suggest,
@@ -134,9 +133,9 @@ impl CompassConfig {
                         .unwrap_or(CompassMode::Suggest)
                 }
             }
-            // Unknown shape → keep the safe default rather than erroring
+            // Unknown shape → fail quiet rather than steering unexpectedly
             // inside the dispatch hot path.
-            Some(_) => CompassMode::Suggest,
+            Some(_) => CompassMode::Off,
         };
         let prefer = compass
             .and_then(|value| value.get("prefer"))
@@ -860,10 +859,30 @@ mod tests {
     }
 
     #[test]
-    fn config_defaults_to_suggest_when_compass_absent() {
+    fn config_defaults_to_off_when_compass_absent() {
         let config = CompassConfig::from_options(&json!({}));
-        assert_eq!(config.mode, CompassMode::Suggest);
+        assert_eq!(config.mode, CompassMode::Off);
         assert_eq!(config.persona, "default");
+        assert_eq!(
+            CompassConfig::from_options(&json!({"compass": null})).mode,
+            CompassMode::Off
+        );
+        assert_eq!(
+            CompassConfig::from_options(&json!({"compass": "unexpected"})).mode,
+            CompassMode::Off
+        );
+    }
+
+    #[test]
+    fn config_enables_suggest_on_true_or_explicit_object() {
+        assert_eq!(
+            CompassConfig::from_options(&json!({"compass": true})).mode,
+            CompassMode::Suggest
+        );
+        assert_eq!(
+            CompassConfig::from_options(&json!({"compass": {}})).mode,
+            CompassMode::Suggest
+        );
     }
 
     #[test]

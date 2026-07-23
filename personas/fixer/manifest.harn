@@ -12,7 +12,7 @@ fn fixer_manifest() {
       "Materialize each suggested atom as a Fixer-signed atom.",
       "Use the original author's principal co-signature when the host can obtain it.",
       "Propose a follow-up slice containing the blocked slice atoms and remediation atoms.",
-      "Map every remediation atom to an std/edit AST primitive (apply_node, insert_at_anchor, rename_symbol); only drop to safe_text_patch when the language is unsupported or the change is text-shaped.",
+      "Choose the simplest safe std/edit primitive for each remediation atom: use structural tools when their addressing or semantic reach helps, and safe_text_patch for exact localized text changes.",
       "Record a receipt so the fix is auditable as its own shipping event.",
     ],
     required_capabilities: [
@@ -27,6 +27,7 @@ fn fixer_manifest() {
       preview: "edit_dry_run",
       fallback: "edit_safe_text_patch",
     },
+    compass: {mode: "suggest"},
   }
 }
 

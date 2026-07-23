@@ -196,13 +196,12 @@ prefer worktree-backed execution over ambient cwd state.
 
 ## Editing source
 
-Mutate source files through `std/edit` rather than freeform text patches:
-`edit_apply_node` to replace a node, `edit_insert_at_anchor` to add a
-sibling/child, `edit_rename_symbol` for cross-file renames, `edit_dry_run`
-to preview a multi-op plan, and `edit_safe_text_patch` only when the
-language has no tree-sitter grammar or the change is purely textual. The
-decision tree (and a `system_reminder` snippet that nudges agent loops the
-same way) lives in
+Use the simplest editing mechanism that safely fits the change. Prefer
+`std/edit` when structural addressing, cross-file rename semantics, or a
+staged multi-operation preview materially reduces risk. Ordinary repository
+maintenance may use normal patch tools; do not build a temporary Harn driver
+solely to edit a file. The available structural and hash-guarded primitives
+are documented in
 [Precise edits with AST tools](docs/src/cookbook.md#precise-edits-with-ast-tools).
 
 ## Changelog fragments

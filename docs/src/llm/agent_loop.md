@@ -1040,14 +1040,17 @@ judge.
 
 ## Editing source from inside an agent loop
 
-Agent loops that mutate code should reach for the AST-precise primitives in
-[`std/edit`](../stdlib/edit.md) before freeform text patches. The cookbook
+Agent loops that mutate code should choose the simplest safe mechanism for
+each change. The AST-precise primitives in [`std/edit`](../stdlib/edit.md)
+are useful when structural addressing or semantic-neighbor updates materially
+reduce risk; hash-guarded text patches remain appropriate for exact localized
+changes even when a grammar is available. The cookbook
 chapter [Precise edits with AST tools](../cookbook.md#precise-edits-with-ast-tools)
-walks through the decision tree (replace → `edit_apply_node`, add →
+walks through the choices (replace → `edit_apply_node`, add →
 `edit_insert_at_anchor`, rename → `edit_rename_symbol`, preview →
-`edit_dry_run`, text fallback → `edit_safe_text_patch`) and ships a
+`edit_dry_run`, exact text → `edit_safe_text_patch`) and ships a
 `system_reminder` snippet you can lift into `agent_loop`'s session-start
-hook so the model carries the same decision tree into every coding turn.
+hook so the model carries the same guidance into every coding turn.
 
 ## Daemon stdlib wrappers
 

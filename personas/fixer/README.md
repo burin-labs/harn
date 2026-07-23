@@ -11,16 +11,14 @@ follow-up slice construction.
 
 ## Edit strategy
 
-Fixer's mutation half routes through the AST-precise primitives in
+Fixer's mutation half chooses the narrowest safe primitive in
 [`std/edit`](../../docs/src/stdlib/edit.md): `edit_apply_node` for node
 replacement, `edit_insert_at_anchor` for sibling/child inserts,
 `edit_rename_symbol` for cross-file identifier renames, `edit_dry_run` to
-preview a multi-op plan, and `edit_safe_text_patch` as the text fallback
-when the language has no tree-sitter grammar or the change is purely
-textual. `lib/remediation_plan.harn` maps each incoming remediation atom
-to the narrowest primitive that fits its shape; the decision tree and
-the agent-loop `system_reminder` snippet that propagates the same
-preference live in
+preview a multi-op plan, and `edit_safe_text_patch` for exact localized text
+changes. `lib/remediation_plan.harn` maps each incoming remediation atom to
+the primitive that fits its shape; the editing guidance and agent-loop
+`system_reminder` snippet live in
 [Precise edits with AST tools](../../docs/src/cookbook.md#precise-edits-with-ast-tools).
 
 Validate locally:

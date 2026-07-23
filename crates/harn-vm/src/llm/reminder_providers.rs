@@ -1310,20 +1310,16 @@ pub async fn evaluate_and_inject(
     Ok(iteration_state.into_json())
 }
 
-/// Compass (B.9, #2521): steer the agent loop toward the
-/// AST-precise edit primitives over freeform text edits.
+/// Compass (B.9, #2521): help a coding agent choose an edit mechanism.
 ///
 /// The `edit_*` stdlib surface (`edit_apply_node`, `edit_rename_symbol`,
-/// the structured refactors, `edit_dry_run`) is the moat tool for the
-/// "measure twice, cut once" burin metaphor — but it only pays off when
-/// agents reach for it first. Left to defaults, the path of least
-/// resistance is a freeform `str_replace`/text patch, the brittle
-/// string-collision failure mode the AST tools exist to kill. This
-/// provider injects a standing reminder at session start (and on resume)
-/// that inverts the default: structural is the expected tool, freeform is
-/// the conscious fallback. When enabled it always fires (the steer is
-/// relevant to any code-editing session) and preserves across compaction
-/// so the guidance persists through a long session.
+/// the structured refactors, `edit_dry_run`) pays off when structural
+/// addressing, parse validation, or semantic-neighbor updates prevent a
+/// concrete failure mode. Hash-guarded text patches remain a first-class
+/// choice for exact localized changes. This provider injects that balanced
+/// guidance at session start (and on resume). When enabled it always fires
+/// and preserves across compaction so the guidance persists through a long
+/// session.
 ///
 /// It is registered in `canonical_providers` but ships **opt-in**: it is
 /// deliberately absent from the default-enabled set
@@ -1331,18 +1327,15 @@ pub async fn evaluate_and_inject(
 /// `reminders: {providers: ["compass_ast_edits"]}`. The other canonical
 /// providers are conditional (they stay silent without relevant data); an
 /// unconditional default-on steer would instead fire on every agent loop,
-/// including sub-agent and one-shot loops that never edit code. Flipping
-/// it on by default, alongside the tool-rewrite router, is tracked as
-/// follow-up #2612.
+/// including sub-agent and one-shot loops that never edit code.
 struct CompassAstEditsProvider;
 
-const COMPASS_AST_EDITS_BODY: &str = "When editing source files, prefer the AST-precise edit \
-tools over freeform text edits: `edit_apply_node` / `edit_insert_at_anchor` for node-level \
-changes, `edit_rename_symbol` for safe cross-file renames, and the structured refactors \
-(`edit_extract_function`, `edit_change_signature`, `edit_inline`, `edit_move_decl`, …) for \
-compound changes. Preview any plan with `edit_dry_run` before committing. Reach for \
-`edit_safe_text_patch` only when the language has no grammar support — the structural tools \
-update semantic neighbours (callers, imports) that a string replace would silently miss.";
+const COMPASS_AST_EDITS_BODY: &str = "Choose the simplest safe edit mechanism for each change. \
+Use `edit_apply_node` or `edit_insert_at_anchor` when structural addressing and parse \
+validation materially reduce risk, and `edit_rename_symbol` or a structured refactor when \
+semantic neighbours must change together. Use `edit_safe_text_patch` for exact localized \
+text changes, whether or not the language has grammar support. Preview risky or \
+multi-operation plans with `edit_dry_run`.";
 
 impl ReminderProvider for CompassAstEditsProvider {
     fn id(&self) -> &'static str {
@@ -1934,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    fn compass_steers_to_ast_edits_and_survives_compaction() {
+    fn compass_guides_edit_choice_and_survives_compaction() {
         let spec = CompassAstEditsProvider
             .evaluate(&ctx(HookEvent::SessionStart, json!({}), JsonValue::Null))
             .expect("compass fires on session start");
@@ -1943,8 +1936,10 @@ mod tests {
         // the other canonical providers, e.g. the workspace anchor test).
         assert_eq!(spec.dedupe_key.as_deref(), Some(COMPASS_AST_EDITS_ID));
         assert_eq!(spec.tags, vec![COMPASS_AST_EDITS_ID.to_string()]);
+        assert!(spec.body.contains("simplest safe edit mechanism"));
         assert!(spec.body.contains("edit_apply_node"));
         assert!(spec.body.contains("edit_rename_symbol"));
+        assert!(spec.body.contains("edit_safe_text_patch"));
         assert!(spec.body.contains("edit_dry_run"));
         // The steer must outlive a context compaction, otherwise a long
         // session silently reverts to freeform edits after the first squash.
