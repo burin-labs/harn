@@ -30,7 +30,7 @@ fn sccache_action() {
 fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback_if: string) {
   return {
     "runs-on": runner,
-    env: {SCCACHE_BASEDIRS: gha_expression("github.workspace"), SCCACHE_CACHE_SIZE: "40G"},
+    env: {SCCACHE_CACHE_SIZE: "40G"},
     steps: [
       {
         uses: "./.github/actions/sccache",
@@ -329,6 +329,7 @@ pipeline test_rejects_selfhosted_cache_backend_leaks(task) {
       ...valid.jobs,
       "package-audit": {
         ...package_job,
+        env: {...package_job.env, SCCACHE_BASEDIRS: gha_expression("github.workspace")},
         steps: package_job.steps.map(
           { step ->
             if step?.uses != "./.github/actions/sccache" {
@@ -342,6 +343,11 @@ pipeline test_rejects_selfhosted_cache_backend_leaks(task) {
     },
   }
   const errors = ci_sccache_policy_errors(sccache_action(), invalid)
+  assert(
+    errors.contains(
+      "ci.yml:package-audit must leave SCCACHE_BASEDIRS to the host-wide sccache daemon",
+    ),
+  )
   assert(errors.contains("ci.yml:package-audit must disable sticky storage on self-hosted runners"))
   assert(errors.contains("ci.yml:package-audit must disable GHA sccache on self-hosted runners"))
 }

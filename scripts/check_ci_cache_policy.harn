@@ -540,8 +540,11 @@ fn persistent_sccache_job_errors(
     errors = errors
       + ["ci.yml:${job_name} must cap persistent sccache at ${PERSISTENT_SCCACHE_SIZE}"]
   }
-  if !contains(trim(job?.env?.SCCACHE_BASEDIRS ?? ""), "github.workspace") {
-    errors = errors + ["ci.yml:${job_name} must normalize sccache paths to github.workspace"]
+  if trim(job?.env?.SCCACHE_BASEDIRS ?? "") != "" {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must leave SCCACHE_BASEDIRS to the host-wide sccache daemon",
+    ]
   }
   const caches = matching_steps(job, SCCACHE_ACTION)
   if len(caches) != 1 {
