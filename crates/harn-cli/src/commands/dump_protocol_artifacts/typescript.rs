@@ -292,6 +292,31 @@ export interface ACPContentBlock {
   _meta?: ACPExtensionMeta<ACPObject>
 }
 
+export interface ACPToolCallDiff {
+  type: "diff"
+  path: string
+  oldText?: string | null
+  newText: string
+  _meta?: ACPExtensionMeta<ACPObject>
+}
+
+export interface ACPToolCallContentBlock {
+  type: "content"
+  content: ACPContentBlock
+  _meta?: ACPExtensionMeta<ACPObject>
+}
+
+export interface ACPToolCallTerminal {
+  type: "terminal"
+  terminalId: string
+  _meta?: ACPExtensionMeta<ACPObject>
+}
+
+export type ACPToolCallContent =
+  | ACPToolCallDiff
+  | ACPToolCallContentBlock
+  | ACPToolCallTerminal
+
 export type ACPToolExecutor =
   | "harn_builtin"
   | "host_bridge"
@@ -340,7 +365,7 @@ export interface ACPToolCall {
   title: string
   kind?: ACPToolKind
   status?: ACPToolCallStatus
-  content?: ACPContentBlock[]
+  content?: ACPToolCallContent[]
   locations?: ACPValue[]
   rawInput?: ACPValue
   rawOutput?: ACPValue
@@ -353,7 +378,7 @@ export interface ACPToolCallUpdate {
   title?: string | null
   kind?: ACPToolKind
   status?: ACPToolCallStatus | null
-  content?: ACPContentBlock[]
+  content?: ACPToolCallContent[]
   locations?: ACPValue[]
   rawInput?: ACPValue
   rawOutput?: ACPValue
@@ -423,7 +448,8 @@ export interface ACPPermissionToolCall {
   sessionUpdate?: "tool_call_update"
   toolCallId: string
   title?: string
-  kind?: string
+  kind?: ACPToolKind
+  content?: ACPToolCallContent[]
   rawInput?: ACPValue
   _meta?: ACPExtensionMeta<ACPObject>
 }

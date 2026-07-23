@@ -129,6 +129,7 @@ public enum HarnProtocolConstants {
         "rawInputPartial",
     ]
     public static let contentExtensionFields: [String] = [
+        "permission_preview",
         "visible_delta",
         "visible_text",
     ]

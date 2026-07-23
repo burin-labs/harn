@@ -39,8 +39,12 @@ pub(super) async fn request_side_effect_permission(
     tool_args: &serde_json::Value,
     violation: SideEffectCeilingViolation,
     reason: String,
-    tool_descriptor: Option<serde_json::Value>,
+    tool_context: (
+        Option<serde_json::Value>,
+        Option<crate::tool_annotations::ToolAnnotations>,
+    ),
 ) -> SideEffectPermissionOutcome {
+    let (tool_descriptor, tool_annotations) = tool_context;
     let approval_id = if tool_call_id.is_empty() {
         format!("tool_call_{}", uuid::Uuid::now_v7())
     } else {
@@ -71,6 +75,7 @@ pub(super) async fn request_side_effect_permission(
         }),
         requested_capabilities: vec![format!("tool.{tool_name}")],
         tool_descriptor,
+        tool_annotations,
     };
     match request_host_permission(bridge, request).await {
         HostPermissionOutcome::Allowed { .. } => {

@@ -205,7 +205,7 @@ async fn side_effect_ceiling_rejection_stays_terminal() {
         &serde_json::json!({"path": "proof.txt"}),
         side_effect_violation(),
         "side effect blocked".to_string(),
-        None,
+        (None, None),
     )
     .await;
 
@@ -241,7 +241,7 @@ async fn side_effect_ceiling_transport_failure_stays_terminal() {
         &serde_json::json!({"path": "proof.txt"}),
         side_effect_violation(),
         "side effect blocked".to_string(),
-        None,
+        (None, None),
     )
     .await;
 

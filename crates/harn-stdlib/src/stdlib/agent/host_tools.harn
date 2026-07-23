@@ -106,6 +106,14 @@ fn __agent_host_annotations(options, key, defaults) {
   return defaults + shared + local
 }
 
+fn __agent_host_file_annotations(options, key, kind) {
+  return __agent_host_annotations(
+    options,
+    key,
+    {kind: kind, side_effect_level: "workspace_write", arg_schema: {path_params: ["path"]}},
+  )
+}
+
 fn __agent_host_config(options, key, config) {
   const opts = __agent_host_options(options)
   let out = config
@@ -1371,11 +1379,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}, content: {type: "string"}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(
-            opts,
-            key,
-            {kind: "edit", side_effect_level: "workspace_write"},
-          ),
+          annotations: __agent_host_file_annotations(opts, key, "edit"),
           handler: { args ->
             __agent_host_render(
               hostlib_tools_write_file(
@@ -1410,11 +1414,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
             replace_all: {type: "boolean", required: false},
           },
           returns: {type: "object"},
-          annotations: __agent_host_annotations(
-            opts,
-            key,
-            {kind: "edit", side_effect_level: "workspace_write"},
-          ),
+          annotations: __agent_host_file_annotations(opts, key, "edit"),
           handler: { args ->
             __agent_host_render(__agent_host_edit_file_apply(args, opts), opts, key)
           },
@@ -1438,11 +1438,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(
-            opts,
-            key,
-            {kind: "edit", side_effect_level: "workspace_write"},
-          ),
+          annotations: __agent_host_file_annotations(opts, key, "edit"),
           handler: { args ->
             const path = __agent_host_resolve_path(args.path, opts)
             harness.fs.mkdir(path, true)
@@ -1468,11 +1464,7 @@ pub fn agent_edit_tools(registry = nil, options = nil) {
         {
           parameters: {path: {type: "string"}, recursive: {type: "boolean", required: false}},
           returns: {type: "object"},
-          annotations: __agent_host_annotations(
-            opts,
-            key,
-            {kind: "delete", side_effect_level: "workspace_write"},
-          ),
+          annotations: __agent_host_file_annotations(opts, key, "delete"),
           handler: { args ->
             __agent_host_render(
               hostlib_tools_delete_file(

@@ -576,11 +576,13 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "generic_throw",
 ];
 
+pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = "permission_preview";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = "visible_delta";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_TEXT: &str = "visible_text";
 
-/// `_meta.harn` content-block extension keys (`visible_text` / `visible_delta`) Harn attaches to streamed content.
+/// `_meta.harn` extension keys Harn attaches to ACP content.
 pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &[
+    "permission_preview",
     "visible_delta",
     "visible_text",
 ];

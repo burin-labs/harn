@@ -15,6 +15,7 @@ mod denial_results;
 mod dispatch_policy;
 mod host_permission;
 mod side_effect_ceiling;
+mod tool_catalog;
 use denial_results::agent_primitive_denied_tool;
 use dispatch_policy::{enforce_dispatch_policies, tool_denial_from_policy};
 use host_permission::{
@@ -22,6 +23,10 @@ use host_permission::{
     HostPermissionOutcome, HostPermissionRequest,
 };
 use side_effect_ceiling::{request_side_effect_permission, SideEffectPermissionOutcome};
+use tool_catalog::{
+    annotations_for as tool_annotations_for, descriptor_for as tool_descriptor_for,
+    permission_context_for,
+};
 
 #[derive(Clone)]
 struct CapturingAgentEventSink {
@@ -868,54 +873,6 @@ async fn host_agent_dispatch_tool_batch_impl(
     Ok(VmValue::List(std::sync::Arc::new(results)))
 }
 
-/// Resolve a tool's model-visible descriptor (description + inputSchema) from
-/// the dispatch catalog, plus the rug-pull `schemaChanged` flag, so the host
-/// can render the full tool text at approval time. `None` when the catalog has
-/// no usable entry.
-fn tool_descriptor_for(tools_val: Option<&VmValue>, tool_name: &str) -> Option<serde_json::Value> {
-    let dict = tools_val?.as_dict()?;
-    let tools_list = match dict.get("tools") {
-        Some(VmValue::List(list)) => list,
-        _ => return None,
-    };
-    for tool in tools_list.iter() {
-        let entry = match tool {
-            VmValue::Dict(entry) => entry,
-            _ => continue,
-        };
-        if entry.get("name").map(|v| v.display()).as_deref() != Some(tool_name) {
-            continue;
-        }
-        let mut out = serde_json::Map::new();
-        if let Some(value) = entry.get("description") {
-            out.insert(
-                "description".to_string(),
-                crate::mcp::vm_value_to_serde(value),
-            );
-        }
-        if let Some(value) = entry.get("inputSchema") {
-            out.insert(
-                "inputSchema".to_string(),
-                crate::mcp::vm_value_to_serde(value),
-            );
-        }
-        if let Some(value) = entry.get("_mcp_server") {
-            out.insert(
-                "mcpServer".to_string(),
-                crate::mcp::vm_value_to_serde(value),
-            );
-        }
-        if matches!(entry.get("_schema_changed"), Some(VmValue::Bool(true))) {
-            out.insert("schemaChanged".to_string(), serde_json::Value::Bool(true));
-        }
-        if out.is_empty() {
-            return None;
-        }
-        return Some(serde_json::Value::Object(out));
-    }
-    None
-}
-
 /// A fired trifecta gate: the human-facing `reason` plus whether an in-context
 /// injection verdict drove it (so the decision can carry a `prompt_injection`
 /// risk label in addition to `lethal_trifecta`).
@@ -1180,7 +1137,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 &tool_args,
                 violation,
                 policy_denial.reason.clone(),
-                tool_descriptor_for(tools, &tool_name),
+                permission_context_for(tools, &tool_name),
             )
             .await
             {
@@ -1485,6 +1442,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 request_context: serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 requested_capabilities: vec![format!("tool.{tool_name}")],
                 tool_descriptor: tool_descriptor_for(tools, &tool_name),
+                tool_annotations: tool_annotations_for(tools, &tool_name),
             };
             match request_host_permission(bridge.as_ref(), request).await {
                 HostPermissionOutcome::Allowed { response } => {
@@ -2265,10 +2223,7 @@ async fn host_agent_reminder_providers_fire_impl(
 
 #[cfg(test)]
 mod security_gate_tests {
-    use super::{tool_descriptor_for, trifecta_gate_reason, upgrade_to_trifecta_ask};
-    use crate::value::VmValue;
-
-    use std::sync::Arc;
+    use super::{trifecta_gate_reason, upgrade_to_trifecta_ask};
 
     fn allow_decision() -> crate::orchestration::PolicyEvaluation {
         crate::orchestration::PolicyEvaluation {
@@ -2538,40 +2493,6 @@ mod security_gate_tests {
         )
         .expect("forged-directive taint + fetch tool must gate");
         assert!(outcome.reason.contains("forged_directive"));
-    }
-
-    fn vm_str(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
-    }
-
-    #[test]
-    fn tool_descriptor_extracts_description_and_schema_changed() {
-        let mut tool = crate::value::DictMap::new();
-        tool.insert(crate::value::intern_key("name"), vm_str("linear__create"));
-        tool.insert(
-            crate::value::intern_key("description"),
-            vm_str("Create an issue"),
-        );
-        tool.insert(crate::value::intern_key("_mcp_server"), vm_str("linear"));
-        tool.insert(
-            crate::value::intern_key("_schema_changed"),
-            VmValue::Bool(true),
-        );
-        let catalog = {
-            let mut dict = crate::value::DictMap::new();
-            dict.insert(
-                crate::value::intern_key("tools"),
-                VmValue::List(Arc::new(vec![VmValue::dict(tool)])),
-            );
-            VmValue::dict(dict)
-        };
-
-        let descriptor = tool_descriptor_for(Some(&catalog), "linear__create").expect("descriptor");
-        assert_eq!(descriptor["description"], "Create an issue");
-        assert_eq!(descriptor["mcpServer"], "linear");
-        assert_eq!(descriptor["schemaChanged"], true);
-
-        assert!(tool_descriptor_for(Some(&catalog), "unknown_tool").is_none());
     }
 }
 

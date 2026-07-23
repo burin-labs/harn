@@ -143,8 +143,7 @@ pub(super) fn generate_rust_for_version(artifact_version: &str) -> String {
     out.push_str(&rust_const_group(
         "HARN_CONTENT_EXTENSION_FIELD",
         "HARN_CONTENT_EXTENSION_FIELDS",
-        "`_meta.harn` content-block extension keys (`visible_text` / \
-         `visible_delta`) Harn attaches to streamed content.",
+        "`_meta.harn` extension keys Harn attaches to ACP content.",
         HARN_CONTENT_EXTENSION_FIELDS,
     ));
     out.push_str(&rust_const_group(

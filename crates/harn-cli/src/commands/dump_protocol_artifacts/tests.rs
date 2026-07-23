@@ -142,6 +142,8 @@ fn generated_types_include_harn_wire_vocabularies() {
     assert!(ts.contains("export interface ToolCallReceipt"));
     assert!(ts.contains("HARN_TOOL_CALL_RECEIPT_STATUSES"));
     assert!(ts.contains("export interface HarnACPPromptErrorData"));
+    assert!(ts.contains("export interface ACPToolCallDiff"));
+    assert!(ts.contains("content?: ACPToolCallContent[]"));
     assert!(swift.contains("public struct HarnACPPromptErrorData"));
     for value in agent_terminal_class_values() {
         assert!(ts.contains(&value), "TypeScript artifact missing {value}");
@@ -217,7 +219,10 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     // Session-update discriminators (base + Harn extensions).
     assert!(rust.contains("pub const ACP_SESSION_UPDATES: &[&str] = &["));
     assert!(rust.contains("pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &["));
-    // `_meta.harn.visible_text` / `visible_delta` content extension keys.
+    // `_meta.harn` content extension keys.
+    assert!(rust.contains(
+        "pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = \"permission_preview\""
+    ));
     assert!(rust
         .contains("pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_TEXT: &str = \"visible_text\""));
     assert!(rust.contains(
