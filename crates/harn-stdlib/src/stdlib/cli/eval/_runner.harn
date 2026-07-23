@@ -11,7 +11,7 @@
  * (`context.harn`, `tool_calls.harn`, `model_selector.harn`) duplicate
  * the helpers they need. This module is the canonical source — sibling
  * scripts must keep the inlined copies byte-identical, and the tests in
- * `crates/harn-cli/tests/eval_cluster_dispatch.rs` enforce the rendered
+ * `crates/harn-cli/tests/harn_cli_e2e/eval_cluster_dispatch.rs` enforce the rendered
  * output contracts.
  *
  * Once #2300 / G7 (AOT bytecode embedding) ships the cross-script

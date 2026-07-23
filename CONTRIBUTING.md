@@ -269,7 +269,7 @@ Wire the scenario into the CLI by:
    [`crates/harn-cli/src/commands/demo.rs`](crates/harn-cli/src/commands/demo.rs)
    with `include_str!` references to both files.
 2. Adding a `#[test]` in
-   [`crates/harn-cli/tests/demo_cli.rs`](crates/harn-cli/tests/demo_cli.rs)
+   [`crates/harn-cli/tests/harn_cli_fast/demo_cli.rs`](crates/harn-cli/tests/harn_cli_fast/demo_cli.rs)
    that runs the scenario end-to-end and asserts on the receipt
    envelope and any per-task markers.
 

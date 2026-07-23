@@ -116,7 +116,15 @@ pub fn filter_for_path(
     if package == nil {
       return nil
     }
-    if harness.fs.exists(path_join(root, crate_dir, "tests", dir + ".rs")) {
+    // `tests/<dir>.rs` is the companion-module pattern (a top-level test file
+    // with a sibling directory of submodules); `tests/<dir>/main.rs` is the
+    // consolidated pattern (many former test binaries merged into one whose
+    // root is `main.rs`, e.g. `harn_cli_fast`/`harn_cli_e2e`/`harn_vm`). Either
+    // way the nextest binary name is `<dir>`.
+    if harness.fs.exists(path_join(root, crate_dir, "tests", dir + ".rs"))
+      || harness.fs.exists(
+      path_join(root, crate_dir, "tests", dir, "main.rs"),
+    ) {
       return "binary(" + dir + ")"
     }
     return "package(" + package + ")"

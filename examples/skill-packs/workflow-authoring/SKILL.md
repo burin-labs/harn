@@ -191,7 +191,7 @@ runs the validate → preview → run pipeline, and prints a JSON report with
 `{validation_passed, preview_passed, run_passed, structural_assertions, ...}`.
 
 `cases/*.golden_bundle` is the canonical expected bundle. The Rust regression
-gate (`crates/harn-cli/tests/workflow_authoring_eval.rs`) loads every case +
+gate (`crates/harn-cli/tests/harn_cli_e2e/workflow_authoring_eval.rs`) loads every case +
 recipe, asserts the goldens validate / preview / run, and asserts the
 structural assertions hold. Add a case → CI catches drift.
 

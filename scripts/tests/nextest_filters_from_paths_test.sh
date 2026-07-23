@@ -26,9 +26,9 @@ exit 42
 SH
 chmod +x "$fake_bin/python3"
 
-expected="binary(orchestrator_http) or package(harn-cli) or package(harn-vm)"
+expected="binary(harn_cli_fast) or package(harn-cli) or package(harn-vm)"
 actual=$(PATH="$fake_bin:$PATH" "$filter_script" \
-  "crates/harn-cli/tests/orchestrator_http/admin.rs" \
+  "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/admin.rs" \
   "crates/harn-cli/tests/test_util/process.rs" \
   "crates/harn-vm/src/flow/slice.rs")
 if [[ "$actual" != "$expected" ]]; then

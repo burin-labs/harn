@@ -15,7 +15,7 @@
 # etc. directly in the test binary) stay in the PR suite — they're seconds-fast
 # and would otherwise leak runtime regressions to nightly. Add a new file here
 # when it lands rather than letting it default into the e2e tier.
-default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and (binary(burin_mini_playground) or binary(bytecode_cache) or binary(check_cli) or binary(crystallize_cli) or binary(demo_cli) or binary(eval_prompt_cli) or binary(flow_ship_cli) or binary(harnpack_run) or binary(llm_mock_cli) or binary(orchestrator_http) or binary(pack_cli) or binary(persona_cli) or binary(profile) or binary(test_bench_cli) or binary(trigger_replay_cli)))"
+default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast))"
 # Any test that runs longer than 15s is considered "slow"; if it exceeds
 # the 60s hard cap three times it is terminated so the suite keeps moving.
 slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
@@ -35,7 +35,7 @@ fail-fast = false
 # CI profile is stricter: one warning at 30s, hard kill at 120s.
 # Inherits the same default-filter as the default profile (fast suite only).
 [profile.ci]
-default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and (binary(burin_mini_playground) or binary(bytecode_cache) or binary(check_cli) or binary(crystallize_cli) or binary(demo_cli) or binary(eval_prompt_cli) or binary(flow_ship_cli) or binary(harnpack_run) or binary(llm_mock_cli) or binary(orchestrator_http) or binary(pack_cli) or binary(persona_cli) or binary(profile) or binary(test_bench_cli) or binary(trigger_replay_cli)))"
+default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast))"
 slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
 leak-timeout = { period = "5s", result = "fail" }
 fail-fast = false
