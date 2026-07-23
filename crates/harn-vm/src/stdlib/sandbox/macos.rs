@@ -12,14 +12,15 @@
 //! mapping table.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 
 use super::{
     policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
-    process_sandbox_roots, unavailable, PrepareOutcome, SandboxBackend,
+    process_sandbox_roots, process_spawn_error, spawn_error, unavailable, PrepareOutcome,
+    ProcessCommandConfig, SandboxBackend,
 };
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
@@ -56,6 +57,38 @@ impl SandboxBackend for Backend {
     ) -> Result<PrepareOutcome, VmError> {
         wrap_with_sandbox_exec(program, args, policy, profile)
     }
+
+    fn run_to_output(
+        program: &str,
+        args: &[String],
+        config: &ProcessCommandConfig,
+        policy: &CapabilityPolicy,
+        profile: SandboxProfile,
+    ) -> Result<Output, VmError> {
+        let mut command = super::build_std_command::<Self>(program, args, policy, profile)?;
+        super::apply_process_config(&mut command, config);
+        let output = crate::op_interrupt::capture_output_interruptible(&mut command)
+            .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
+        match sandbox_exec_spawn_error(&output) {
+            Some(error) => Err(error),
+            None => Ok(output),
+        }
+    }
+}
+
+fn sandbox_exec_spawn_error(output: &Output) -> Option<VmError> {
+    const EX_OSERR: i32 = 71;
+    const PREFIX: &str = "sandbox-exec: execvp() of '";
+    const SUFFIX: &str = "' failed: No such file or directory\n";
+
+    let stderr = std::str::from_utf8(&output.stderr).ok()?;
+    if output.status.code() == Some(EX_OSERR)
+        && stderr.starts_with(PREFIX)
+        && stderr.ends_with(SUFFIX)
+    {
+        return Some(spawn_error(std::io::Error::from_raw_os_error(libc::ENOENT)));
+    }
+    None
 }
 
 fn wrap_with_sandbox_exec(
@@ -374,6 +407,54 @@ fn standard_device_profile_rules() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_exec_missing_program_matches_direct_spawn_error() {
+        if !Path::new(SANDBOX_EXEC_PATH).exists() {
+            return;
+        }
+        let cwd = std::env::current_dir().expect("current dir");
+        let mut policy = macos_policy_with_workspace_ops(&[]);
+        policy.workspace_roots = vec![cwd.display().to_string()];
+        let config = ProcessCommandConfig {
+            cwd: Some(cwd),
+            ..Default::default()
+        };
+        let missing = "definitely-not-a-real-binary-harn-4885";
+        let direct = Command::new(missing)
+            .output()
+            .map_err(spawn_error)
+            .expect_err("direct missing program");
+        let sandboxed =
+            Backend::run_to_output(missing, &[], &config, &policy, SandboxProfile::Worktree)
+                .expect_err("sandboxed missing program");
+
+        assert_eq!(sandboxed.to_string(), direct.to_string());
+    }
+
+    #[test]
+    fn sandbox_exec_keeps_genuine_nonzero_exit_as_output() {
+        if !Path::new(SANDBOX_EXEC_PATH).exists() {
+            return;
+        }
+        let cwd = std::env::current_dir().expect("current dir");
+        let mut policy = macos_policy_with_workspace_ops(&[]);
+        policy.workspace_roots = vec![cwd.display().to_string()];
+        let config = ProcessCommandConfig {
+            cwd: Some(cwd),
+            ..Default::default()
+        };
+        let output = Backend::run_to_output(
+            "/bin/sh",
+            &strings(["-c", "exit 71"]),
+            &config,
+            &policy,
+            SandboxProfile::Worktree,
+        )
+        .expect("sandboxed nonzero exit");
+
+        assert_eq!(output.status.code(), Some(71));
+    }
 
     #[test]
     fn sandbox_profile_allows_go_build_and_module_caches_read_write() {
