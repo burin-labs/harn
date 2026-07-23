@@ -485,13 +485,7 @@ pub fn request_permission(tool_name, request_args) { return true }
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_executes_host_backed_script() {
-        // execute_playground runs a pipeline through the process-global
-        // run_events sink, so it needs run_event_sink_lock as well as env_lock.
-        // Acquire env before sink (the order documented at both lock modules)
-        // so dual-lock tests cannot deadlock.
         let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
-        let _sink_guard =
-            crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -553,13 +547,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_reports_missing_capability_with_caller_context() {
-        // execute_playground runs a pipeline through the process-global
-        // run_events sink, so it needs run_event_sink_lock as well as env_lock.
-        // Acquire env before sink (the order documented at both lock modules)
-        // so dual-lock tests cannot deadlock.
         let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
-        let _sink_guard =
-            crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -596,13 +584,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_replays_cli_llm_mock_fixtures() {
-        // execute_playground runs a pipeline through the process-global
-        // run_events sink, so it needs run_event_sink_lock as well as env_lock.
-        // Acquire env before sink (the order documented at both lock modules)
-        // so dual-lock tests cannot deadlock.
         let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
-        let _sink_guard =
-            crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -650,13 +632,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_replays_cli_llm_mock_error_envelopes() {
-        // execute_playground runs a pipeline through the process-global
-        // run_events sink, so it needs run_event_sink_lock as well as env_lock.
-        // Acquire env before sink (the order documented at both lock modules)
-        // so dual-lock tests cannot deadlock.
         let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
-        let _sink_guard =
-            crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");

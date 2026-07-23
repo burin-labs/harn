@@ -276,8 +276,6 @@ fn run_sandbox_attestation_reports_effective_policy() {
 
 #[tokio::test]
 async fn execute_run_exit_flushes_stdio_and_bypasses_catch() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let script = temp.path().join("main.harn");
@@ -318,8 +316,6 @@ fn main(harness: Harness) -> int {
 
 #[tokio::test]
 async fn execute_run_allows_read_from_explicit_read_only_root_but_denies_write() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -410,8 +406,6 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_allows_write_to_explicit_write_root() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -537,8 +531,6 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
 #[cfg(all(feature = "hostlib", unix))]
 #[tokio::test]
 async fn execute_run_allows_command_run_read_from_read_only_root() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -593,8 +585,6 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_default_sandbox_reports_worktree_profile() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let script = temp.path().join("main.harn");
@@ -627,8 +617,6 @@ pipeline main() {
 
 #[tokio::test]
 async fn execute_run_default_sandbox_blocks_outside_workspace_read() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -674,8 +662,6 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_no_sandbox_allows_outside_workspace_read() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -719,8 +705,6 @@ pipeline main() {{
 
 #[tokio::test]
 async fn execute_run_builtin_policy_defers_unrelated_manifest_handler_initialization() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     let script = write_manifest_trigger_project(
@@ -751,8 +735,6 @@ fn main(harness: Harness) {
 
 #[tokio::test]
 async fn execute_run_without_builtin_policy_eagerly_validates_manifest_handlers() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     let script = write_manifest_trigger_project(
@@ -789,8 +771,6 @@ pipeline main() {
 
 #[tokio::test]
 async fn execute_run_denies_network_by_default() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let script = temp.path().join("main.harn");
@@ -828,8 +808,6 @@ pipeline main() {
 #[cfg(feature = "hostlib")]
 #[tokio::test]
 async fn execute_run_installs_hostlib_gate() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     let temp = tempfile::NamedTempFile::new().expect("temp file");
     std::fs::write(
         temp.path(),
@@ -861,8 +839,6 @@ pipeline main() {
 #[cfg(all(feature = "hostlib", unix))]
 #[tokio::test]
 async fn execute_run_can_read_hostlib_command_artifacts() {
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     let temp = tempfile::NamedTempFile::new().expect("temp file");
     std::fs::write(
         temp.path(),
@@ -927,8 +903,6 @@ length: 20,
 #[tokio::test]
 async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency() {
     let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
-    let _run_event_sink =
-        crate::tests::common::run_event_sink_lock::lock_run_event_sink_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path();

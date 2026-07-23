@@ -95,7 +95,9 @@ pub(crate) use policy::swap_execution_policy_stack;
 pub use policy::*;
 
 mod ambient_scope;
-pub(crate) use ambient_scope::{scope_ambient, scope_inline_subtask, AmbientExecutionScope};
+pub(crate) use ambient_scope::{
+    scope_ambient, scope_inline_subtask, scope_run_event_sink, AmbientExecutionScope,
+};
 pub use ambient_scope::{
     scope_llm_runtime_overrides, scope_llm_runtime_overrides_with_provider_endpoints,
 };

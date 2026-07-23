@@ -57,6 +57,7 @@ use crate::llm_config::{
     swap_runtime_provider_endpoint_overrides, swap_user_overrides as swap_provider_overrides,
     ProvidersConfig, RuntimeProviderEndpointOverrides,
 };
+use crate::run_events::{swap_run_event_sink, RunEventSink};
 use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextOverlay};
 use crate::stdlib::process::{
     swap_session_profile, swap_source_dir, swap_thread_execution_context,
@@ -118,6 +119,10 @@ pub(crate) struct AmbientExecutionScope {
     /// (and later issue) under the run's owner. Without this, a verdict issued
     /// from inside `parallel` would fail closed (the owner would read empty).
     execution_scope: Vec<std::sync::Arc<str>>,
+    /// Ordered observable events for this execution tree. JSON runs install a
+    /// sink once; inline and spawned work inherit it without exposing sibling
+    /// executions to the stream.
+    run_event_sink: Option<std::sync::Arc<dyn RunEventSink>>,
     trusted_depth: usize,
     command_hook_depth: usize,
     /// Deterministic pre-approval tool-deny closures. Inherited by a spawned
@@ -209,6 +214,7 @@ impl AmbientExecutionScope {
             execution_scope: clone_via_swap(
                 crate::observability::execution_scope::swap_execution_scope_stack,
             ),
+            run_event_sink: clone_via_swap(swap_run_event_sink),
             ..Self::default()
         }
     }
@@ -264,6 +270,7 @@ impl AmbientExecutionScope {
             execution_scope: clone_via_swap(
                 crate::observability::execution_scope::swap_execution_scope_stack,
             ),
+            run_event_sink: clone_via_swap(swap_run_event_sink),
             trusted_depth: clone_via_swap(swap_trusted_bridge_depth),
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
             precheck: clone_via_swap(swap_tool_precheck_stack),
@@ -271,44 +278,64 @@ impl AmbientExecutionScope {
         }
     }
 
-    /// Install this scope into the ambient thread-locals, returning whatever was
-    /// installed before so the caller can restore it. O(1) per stack.
-    fn swap_in(self) -> Self {
-        Self {
-            execution: swap_execution_policy_stack(self.execution),
-            approval: swap_approval_policy_stack(self.approval),
-            operator_approval_grants: swap_operator_approval_grant_stack(
-                self.operator_approval_grants,
-            ),
-            command: swap_command_policy_stack(self.command),
-            permissions: swap_dynamic_permission_stack(self.permissions),
-            runtime_context: swap_runtime_context_overlay_stack(self.runtime_context),
-            autonomy: swap_autonomy_policy_stack(self.autonomy),
-            llm_render: swap_llm_render_stack(self.llm_render),
-            llm_transcript: swap_llm_transcript_ambient(self.llm_transcript),
-            llm_mock: swap_llm_mock_context(self.llm_mock),
-            connector_ctx: swap_active_harn_connector_ctx(self.connector_ctx),
-            egress_policy: swap_policy_context(self.egress_policy),
-            session_stack: swap_current_session_stack(self.session_stack),
-            execution_context: swap_thread_execution_context(self.execution_context),
-            source_dir: swap_source_dir(self.source_dir),
-            mutation_session: swap_mutation_session(self.mutation_session),
-            session_profile: swap_session_profile(self.session_profile),
-            host_bridge: swap_current_host_bridge(self.host_bridge),
-            provider_overrides: swap_provider_overrides(self.provider_overrides),
-            runtime_provider_endpoint_overrides: swap_runtime_provider_endpoint_overrides(
-                self.runtime_provider_endpoint_overrides,
-            ),
-            capability_overrides: swap_capability_overrides(self.capability_overrides),
-            execution_scope: crate::observability::execution_scope::swap_execution_scope_stack(
-                self.execution_scope,
-            ),
-            trusted_depth: swap_trusted_bridge_depth(self.trusted_depth),
-            command_hook_depth: swap_command_policy_hook_depth(self.command_hook_depth),
-            precheck: swap_tool_precheck_stack(self.precheck),
-            precheck_depth: swap_tool_precheck_depth(self.precheck_depth),
+    /// Swap this scope with the ambient thread-locals one field at a time.
+    /// Avoiding a whole-`Self` temporary keeps the poll stack bounded as new
+    /// ambient capabilities are added.
+    fn swap_in_place(&mut self) {
+        fn swap_slot<T: Default>(slot: &mut T, swap: impl FnOnce(T) -> T) {
+            *slot = swap(std::mem::take(slot));
         }
+
+        swap_slot(&mut self.execution, swap_execution_policy_stack);
+        swap_slot(&mut self.approval, swap_approval_policy_stack);
+        swap_slot(
+            &mut self.operator_approval_grants,
+            swap_operator_approval_grant_stack,
+        );
+        swap_slot(&mut self.command, swap_command_policy_stack);
+        swap_slot(&mut self.permissions, swap_dynamic_permission_stack);
+        swap_slot(
+            &mut self.runtime_context,
+            swap_runtime_context_overlay_stack,
+        );
+        swap_slot(&mut self.autonomy, swap_autonomy_policy_stack);
+        swap_slot(&mut self.llm_render, swap_llm_render_stack);
+        swap_slot(&mut self.llm_transcript, swap_llm_transcript_ambient);
+        swap_slot(&mut self.llm_mock, swap_llm_mock_context);
+        swap_slot(&mut self.connector_ctx, swap_active_harn_connector_ctx);
+        swap_slot(&mut self.egress_policy, swap_policy_context);
+        swap_slot(&mut self.session_stack, swap_current_session_stack);
+        swap_slot(&mut self.execution_context, swap_thread_execution_context);
+        swap_slot(&mut self.source_dir, swap_source_dir);
+        swap_slot(&mut self.mutation_session, swap_mutation_session);
+        swap_slot(&mut self.session_profile, swap_session_profile);
+        swap_slot(&mut self.host_bridge, swap_current_host_bridge);
+        swap_slot(&mut self.provider_overrides, swap_provider_overrides);
+        swap_slot(
+            &mut self.runtime_provider_endpoint_overrides,
+            swap_runtime_provider_endpoint_overrides,
+        );
+        swap_slot(&mut self.capability_overrides, swap_capability_overrides);
+        swap_slot(
+            &mut self.execution_scope,
+            crate::observability::execution_scope::swap_execution_scope_stack,
+        );
+        swap_slot(&mut self.run_event_sink, swap_run_event_sink);
+        swap_slot(&mut self.trusted_depth, swap_trusted_bridge_depth);
+        swap_slot(&mut self.command_hook_depth, swap_command_policy_hook_depth);
+        swap_slot(&mut self.precheck, swap_tool_precheck_stack);
+        swap_slot(&mut self.precheck_depth, swap_tool_precheck_depth);
     }
+}
+
+/// Run `inner` with an execution-owned run-event sink.
+pub(crate) fn scope_run_event_sink<F: Future>(
+    sink: std::sync::Arc<dyn RunEventSink>,
+    inner: F,
+) -> Scoped<F> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope.run_event_sink = Some(sink);
+    scope_ambient(scope, inner)
 }
 
 /// Run `inner` with the exact provider and capability overlays supplied by an
@@ -434,6 +461,9 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     // a fan-out worker runs the same program run and its run_test must record /
     // issue under that run's owner. See observability/execution_scope.rs.
     ("ACTIVE_EXECUTION_SCOPE_STACK", AmbientScoping::Captured),
+    // Ordered run events follow the same execution tree without leaking into a
+    // concurrently-polled sibling run.
+    ("RUN_EVENT_SINK_CONTEXT", AmbientScoping::Captured),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet
     // read across a fan-out child's awaits. Wire each into the scope the day it
     // becomes cross-task-read (mirrors AUDITED_LATENT_CAPABILITIES). ---
@@ -549,7 +579,11 @@ pin_project! {
     pub(crate) struct Scoped<F> {
         #[pin]
         inner: F,
-        scope: Option<AmbientExecutionScope>,
+        // Keep the large, extensible ambient snapshot out of the future's
+        // inline state. Deep VM futures already run close to nextest's thread
+        // stack limit; adding one captured capability must not enlarge every
+        // scoped future frame.
+        scope: Box<AmbientExecutionScope>,
     }
 }
 
@@ -559,7 +593,7 @@ pin_project! {
 pub(crate) fn scope_ambient<F: Future>(scope: AmbientExecutionScope, inner: F) -> Scoped<F> {
     Scoped {
         inner,
-        scope: Some(scope),
+        scope: Box::new(scope),
     }
 }
 
@@ -571,15 +605,12 @@ pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
 /// Restores the outer scope (and saves the task's own scope back) on drop, so
 /// the thread-locals are left correct even if the inner poll panics.
 struct RestoreGuard<'a> {
-    outer: Option<AmbientExecutionScope>,
-    slot: &'a mut Option<AmbientExecutionScope>,
+    scope: &'a mut AmbientExecutionScope,
 }
 
 impl Drop for RestoreGuard<'_> {
     fn drop(&mut self) {
-        if let Some(outer) = self.outer.take() {
-            *self.slot = Some(outer.swap_in());
-        }
+        self.scope.swap_in_place();
     }
 }
 
@@ -589,12 +620,8 @@ impl<F: Future> Future for Scoped<F> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
         let this = self.project();
         // Install this task's scope, capturing whatever the polling thread had.
-        let task_scope = this.scope.take().unwrap_or_default();
-        let outer = task_scope.swap_in();
-        let _restore = RestoreGuard {
-            outer: Some(outer),
-            slot: this.scope,
-        };
+        this.scope.swap_in_place();
+        let _restore = RestoreGuard { scope: this.scope };
         this.inner.poll(cx)
     }
 }
@@ -1324,6 +1351,7 @@ mod tests {
             "LLM_MOCK_CONTEXT",
             "EGRESS_POLICY_CONTEXT",
             "ACTIVE_EXECUTION_SCOPE_STACK",
+            "RUN_EVENT_SINK_CONTEXT",
             "TRANSCRIPT_DIR_STACK",
         ]
         .into_iter()
