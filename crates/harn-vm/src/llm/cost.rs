@@ -102,7 +102,7 @@ pub fn peek_total_tokens() -> u64 {
 /// Unlike [`install_llm_cost_budget`] this returns no guard and does not reset
 /// the running total: it mutates the same `LLM_BUDGET` thread-local a dispatch
 /// already consults at preflight ([`check_llm_preflight_budget`]) and after
-/// each call ([`accumulate_cost_for_provider`]). A supervisor on the dispatch
+/// each call ([`record_llm_usage`]). A supervisor on the dispatch
 /// thread can therefore tighten or loosen the ceiling mid-run and have the next
 /// LLM call observe it — the basis for ACP `session/set_budget` re-arm
 /// (burin-labs/burin-code#1561). Callers that want fresh per-scope accounting
@@ -832,20 +832,12 @@ pub(crate) fn cache_savings_usd_for_provider(
     cache_read_savings + cache_write_savings
 }
 
-pub(crate) fn accumulate_cost_for_provider(
-    provider: &str,
+fn accumulate_llm_usage(
     model: &str,
     input_tokens: i64,
     output_tokens: i64,
-    served_fast: bool,
+    cost: f64,
 ) -> Result<(), VmError> {
-    let cost = pricing_detail_for_tier(provider, model, served_fast, input_tokens)
-        .map(|detail| {
-            (input_tokens as f64 * detail.input_per_1k
-                + output_tokens as f64 * detail.output_per_1k)
-                / 1000.0
-        })
-        .unwrap_or(0.0);
     // Always attribute usage to the active `@step` (if any), even when
     // the per-call cost is zero — token-only step budgets need the
     // count regardless of pricing.
@@ -889,14 +881,13 @@ pub(crate) fn accumulate_cost_for_provider(
     })
 }
 
-pub(crate) fn record_llm_usage_for_provider(
-    provider: &str,
-    model: &str,
-    input_tokens: i64,
-    output_tokens: i64,
-    served_fast: bool,
-) -> Result<(), VmError> {
-    accumulate_cost_for_provider(provider, model, input_tokens, output_tokens, served_fast)
+pub(crate) fn record_llm_usage(result: &crate::llm::api::LlmResult) -> Result<(), VmError> {
+    accumulate_llm_usage(
+        &result.model,
+        result.input_tokens,
+        result.output_tokens,
+        result.priced_cost_usd().unwrap_or(0.0),
+    )
 }
 
 pub(crate) fn register_cost_builtins(vm: &mut Vm) {
@@ -1781,13 +1772,11 @@ mod tests {
         let _budget = install_llm_token_budget(10);
 
         // First call within budget — admits.
-        let first =
-            accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 5, 0, false);
+        let first = accumulate_llm_usage("claude-sonnet-4-20250514", 5, 0, 0.0);
         assert!(first.is_ok());
 
         // Second call pushes over — raises BudgetExceeded.
-        let second =
-            accumulate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 8, 0, false);
+        let second = accumulate_llm_usage("claude-sonnet-4-20250514", 8, 0, 0.0);
         match second {
             Err(VmError::CategorizedError { category, message }) => {
                 assert_eq!(category, ErrorCategory::BudgetExceeded);

@@ -172,13 +172,7 @@ pub(crate) async fn vm_call_llm_full_single_route(
     while delta_rx.try_recv().is_ok() {
         first_token.observe_delta();
     }
-    super::cost::record_llm_usage_for_provider(
-        &result.provider,
-        &result.model,
-        result.input_tokens,
-        result.output_tokens,
-        result.served_fast,
-    )?;
+    super::cost::record_llm_usage(&result)?;
     Ok(result)
 }
 
@@ -199,13 +193,7 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route(
 ) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
     let result = vm_call_llm_full_inner(opts, Some(delta_tx)).await?;
-    super::cost::record_llm_usage_for_provider(
-        &result.provider,
-        &result.model,
-        result.input_tokens,
-        result.output_tokens,
-        result.served_fast,
-    )?;
+    super::cost::record_llm_usage(&result)?;
     Ok(result)
 }
 
@@ -262,13 +250,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route(
         ))))
     })?
     .map_err(OffthreadLlmError::into_vm_error)?;
-    super::cost::record_llm_usage_for_provider(
-        &result.provider,
-        &result.model,
-        result.input_tokens,
-        result.output_tokens,
-        result.served_fast,
-    )?;
+    super::cost::record_llm_usage(&result)?;
     Ok(result)
 }
 

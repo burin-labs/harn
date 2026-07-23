@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
 use crate::llm::api::LlmCallOptions;
-use crate::llm::cost::{calculate_cost_for_provider, peek_total_cost};
+use crate::llm::cost::peek_total_cost;
 use crate::llm::routing_verifier::{build_refine_nudge, run_verifier, Verifier, VerifierSignal};
 
 use super::{
@@ -331,13 +331,8 @@ fn check_link_budget(
     }
 }
 
-fn project_link_cost_usd(result: &crate::llm::api::LlmResult) -> f64 {
-    calculate_cost_for_provider(
-        &result.provider,
-        &result.model,
-        result.input_tokens,
-        result.output_tokens,
-    )
+fn project_link_cost_usd(result: &crate::llm::api::LlmResult) -> Option<f64> {
+    result.priced_cost_usd()
 }
 
 pub(super) fn duration_ms(elapsed: Duration) -> u64 {
@@ -791,7 +786,7 @@ pub(crate) async fn execute_with_routing(
                     .find(|rec| matches!(rec.status, AttemptStatus::Failed) && rec.error.is_none())
                 {
                     record.status = AttemptStatus::Succeeded;
-                    record.cost_usd = Some(project_link_cost_usd(&value));
+                    record.cost_usd = project_link_cost_usd(&value);
                     record.input_tokens = Some(value.input_tokens);
                     record.output_tokens = Some(value.output_tokens);
                 }

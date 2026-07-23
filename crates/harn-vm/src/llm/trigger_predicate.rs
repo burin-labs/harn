@@ -6,7 +6,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::api::{LlmRequestPayload, LlmResult};
-use super::cost::calculate_cost_for_provider;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct TriggerPredicateBudget {
@@ -196,12 +195,7 @@ pub(crate) fn note_result(request: &LlmRequestPayload, result: &LlmResult) {
             .saturating_add(result.output_tokens)
             .max(0) as u64;
         state.total_tokens = state.total_tokens.saturating_add(call_tokens);
-        state.total_cost_usd += calculate_cost_for_provider(
-            &result.provider,
-            &result.model,
-            result.input_tokens,
-            result.output_tokens,
-        );
+        state.total_cost_usd += result.priced_cost_usd().unwrap_or(0.0);
         if state
             .budget
             .tokens_max

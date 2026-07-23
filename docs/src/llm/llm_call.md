@@ -137,7 +137,7 @@ is duplicated at the envelope's top level.
 |---|---|---|
 | `input_tokens` | int | Input/prompt token count |
 | `output_tokens` | int | Output/completion token count |
-| `cost_usd` | float \| nil | Catalog-priced response cost; `nil` (not `0`) when pricing is unknown |
+| `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache |
 | `cache_write_tokens` | int | Prompt tokens written into provider-side cache |
 | `cache_hit_ratio` | float \| nil | Fraction of prompt tokens served from cache; `nil` when the provider reports no cache accounting |
@@ -530,7 +530,7 @@ Envelope fields:
 | `attempts` | int | Number of model calls made. `1` = no retries; `2+` = schema retries kicked in. `0` only when arg parsing failed before any call. |
 | `repaired` | bool | `true` when the repair pass produced valid JSON. |
 | `extracted_json` | bool | `true` when JSON had to be lifted from prose / markdown fences. |
-| `usage` | dict | Final-attempt token, priced-cost, and prompt-cache accounting. Unknown `cost_usd` stays `nil`. |
+| `usage` | dict | Final-attempt token, cache-adjusted priced-cost, and prompt-cache accounting. Each structured retry is charged as its own provider call; this envelope is not an aggregate. Unknown `cost_usd` stays `nil`. |
 | `model` | string | Model that produced the final attempt. |
 | `provider` | string | Provider that produced the final attempt. |
 
