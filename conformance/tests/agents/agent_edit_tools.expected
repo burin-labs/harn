@@ -31,6 +31,10 @@ edit
 workspace_write
 delete
 workspace_write
+path
+path
+path
+path
 true
 false
 false

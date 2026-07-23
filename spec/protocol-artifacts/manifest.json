@@ -71,6 +71,7 @@
       "audio"
     ],
     "contentExtensionFields": [
+      "permission_preview",
       "visible_delta",
       "visible_text"
     ],

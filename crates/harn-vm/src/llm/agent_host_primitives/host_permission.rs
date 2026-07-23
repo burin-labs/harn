@@ -18,6 +18,7 @@ pub(super) struct HostPermissionRequest {
     pub request_context: serde_json::Value,
     pub requested_capabilities: Vec<String>,
     pub tool_descriptor: Option<serde_json::Value>,
+    pub tool_annotations: Option<crate::tool_annotations::ToolAnnotations>,
 }
 
 pub(super) enum HostPermissionOutcome {
@@ -77,17 +78,27 @@ pub(super) async fn request_host_permission(
     let Some(bridge) = bridge else {
         return HostPermissionOutcome::Unavailable;
     };
+    let evidence_refs = crate::llm::permission_preview::capture(
+        request.tool_annotations.as_ref(),
+        &request.tool_name,
+        &request.tool_args,
+    );
     let approval_request = crate::stdlib::hitl::approval_request_for_host_permission(
         request.tool_call_id.clone(),
         request.tool_name.clone(),
         request.tool_args.clone(),
         request.session_id.clone(),
-        Vec::new(),
+        evidence_refs,
         request.request_context,
         request.requested_capabilities,
     );
     let approval_request_json =
         serde_json::to_value(&approval_request).unwrap_or(serde_json::Value::Null);
+    let tool_kind = request
+        .tool_annotations
+        .as_ref()
+        .map(|annotations| annotations.kind)
+        .unwrap_or_default();
     match bridge
         .call(
             crate::llm::acp_permission::METHOD_REQUEST_PERMISSION,
@@ -99,6 +110,7 @@ pub(super) async fn request_host_permission(
                 approval_request_json,
                 &request.policy_decision,
                 request.tool_descriptor,
+                tool_kind,
             ),
         )
         .await
@@ -134,6 +146,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
+    use std::sync::Mutex as StdMutex;
     use tokio::sync::Mutex as TokioMutex;
 
     fn request() -> HostPermissionRequest {
@@ -146,7 +159,89 @@ mod tests {
             request_context: serde_json::Value::Null,
             requested_capabilities: Vec::new(),
             tool_descriptor: None,
+            tool_annotations: None,
         }
+    }
+
+    fn responding_bridge(requests: Arc<StdMutex<Vec<serde_json::Value>>>) -> Arc<HostBridge> {
+        let pending: Arc<
+            TokioMutex<HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>>,
+        > = Arc::new(TokioMutex::new(HashMap::new()));
+        let response_pending = pending.clone();
+        let writer = Arc::new(move |line: &str| {
+            let request: serde_json::Value = serde_json::from_str(line)
+                .map_err(|error| format!("invalid bridge request: {error}"))?;
+            requests
+                .lock()
+                .map_err(|_| "captured request mutex poisoned".to_string())?
+                .push(request.clone());
+            let id = request["id"]
+                .as_u64()
+                .ok_or_else(|| "bridge request missing numeric id".to_string())?;
+            let sender = response_pending
+                .try_lock()
+                .map_err(|_| "bridge pending map unexpectedly locked".to_string())?
+                .remove(&id)
+                .ok_or_else(|| "bridge request was not pending".to_string())?;
+            sender
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": crate::llm::acp_permission::allow_response(),
+                }))
+                .map_err(|_| "bridge caller dropped before response".to_string())
+        });
+        Arc::new(HostBridge::from_parts_with_writer(
+            pending,
+            Arc::new(AtomicBool::new(false)),
+            writer,
+            1,
+        ))
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn edit_request_captures_preimage_before_sending_canonical_diff() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        std::fs::write(directory.path().join("src.rs"), "old\n").expect("fixture");
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(directory.path().to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+        ));
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let bridge = responding_bridge(captured.clone());
+        let mut request = request();
+        request.tool_name = "edit".to_string();
+        request.tool_args = serde_json::json!({
+            "action": "exact_patch",
+            "path": "src.rs",
+            "old_string": "old",
+            "new_string": "new"
+        });
+        request.tool_annotations = Some(crate::tool_annotations::ToolAnnotations {
+            kind: crate::tool_annotations::ToolKind::Edit,
+            arg_schema: crate::tool_annotations::ToolArgSchema {
+                path_params: vec!["path".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let outcome = request_host_permission(Some(&bridge), request).await;
+        crate::stdlib::process::set_thread_execution_context(None);
+
+        assert!(matches!(outcome, HostPermissionOutcome::Allowed { .. }));
+        let requests = captured.lock().expect("captured requests");
+        let diff = &requests[0]["params"]["toolCall"]["content"][0];
+        assert_eq!(diff["type"], "diff");
+        assert_eq!(diff["oldText"], "old\n");
+        assert_eq!(diff["newText"], "new\n");
+        assert_eq!(
+            requests[0]["params"]["toolCall"]["_meta"]["harn"]["approvalRequest"]["evidence_refs"]
+                [0]["source"],
+            "pre_approval"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

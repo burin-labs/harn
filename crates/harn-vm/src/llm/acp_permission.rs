@@ -74,6 +74,7 @@ pub(crate) fn request_params(
     approval_request: JsonValue,
     policy_decision: &JsonValue,
     tool_descriptor: Option<JsonValue>,
+    tool_kind: crate::tool_annotations::ToolKind,
 ) -> JsonValue {
     let mut params = serde_json::Map::new();
     if let Some(session_id) = session_id {
@@ -91,19 +92,55 @@ pub(crate) fn request_params(
     if let (Some(descriptor), Some(obj)) = (tool_descriptor, harn_meta.as_object_mut()) {
         obj.insert("toolDescriptor".to_string(), descriptor);
     }
-    params.insert(
-        "toolCall".to_string(),
-        json!({
-            "sessionUpdate": "tool_call_update",
-            "toolCallId": tool_call_id,
-            "title": tool_name,
-            "kind": "other",
-            "rawInput": raw_input,
-            "_meta": { "harn": harn_meta }
-        }),
-    );
+    let content = permission_content(&approval_request);
+    let mut tool_call = json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": tool_call_id,
+        "title": tool_name,
+        "kind": tool_kind,
+        "rawInput": raw_input,
+        "_meta": { "harn": harn_meta }
+    });
+    if !content.is_empty() {
+        tool_call
+            .as_object_mut()
+            .expect("tool call object")
+            .insert("content".to_string(), JsonValue::Array(content));
+    }
+    params.insert("toolCall".to_string(), tool_call);
     params.insert("options".to_string(), canonical_options());
     JsonValue::Object(params)
+}
+
+fn permission_content(approval_request: &JsonValue) -> Vec<JsonValue> {
+    approval_request
+        .get("evidence_refs")
+        .and_then(JsonValue::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|evidence| evidence.get("kind").and_then(JsonValue::as_str) == Some("file_mutation_diff"))
+        .filter_map(|evidence| {
+            let path = evidence.get("path")?.as_str()?;
+            let new_text = evidence.get("newText")?.as_str()?;
+            let old_text = evidence.get("oldText").cloned().unwrap_or(JsonValue::Null);
+            let preview_meta = json!({
+                "source": evidence.get("source").cloned().unwrap_or_else(|| json!("pre_approval")),
+                "preimageSha256": evidence.get("preimageSha256").cloned().unwrap_or(JsonValue::Null),
+                "byteCount": evidence.get("byteCount").cloned().unwrap_or(JsonValue::Null),
+            });
+            Some(json!({
+                "type": "diff",
+                "path": path,
+                "oldText": old_text,
+                "newText": new_text,
+                "_meta": {
+                    "harn": {
+                        "permission_preview": preview_meta
+                    }
+                }
+            }))
+        })
+        .collect()
 }
 
 /// The agent's interpretation of a canonical permission response.
@@ -162,6 +199,7 @@ pub(crate) fn parse_response(response: &JsonValue) -> WireOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tool_annotations::ToolKind;
 
     #[test]
     fn request_params_carry_canonical_options_and_tool_call() {
@@ -173,11 +211,13 @@ mod tests {
             json!({"id": "tool-1", "action": "edit"}),
             &json!({"decision": "ask"}),
             None,
+            ToolKind::Other,
         );
         assert_eq!(params["sessionId"], "session-1");
         assert_eq!(params["toolCall"]["sessionUpdate"], "tool_call_update");
         assert_eq!(params["toolCall"]["toolCallId"], "tool-1");
         assert_eq!(params["toolCall"]["title"], "edit");
+        assert_eq!(params["toolCall"]["kind"], "other");
         assert_eq!(params["toolCall"]["rawInput"]["path"], "src/lib.rs");
         assert_eq!(params["toolCall"]["_meta"]["harn"]["toolName"], "edit");
         assert_eq!(
@@ -190,6 +230,58 @@ mod tests {
         assert_eq!(options[0]["kind"], "allow_once");
         assert_eq!(options[1]["optionId"], OPTION_REJECT);
         assert_eq!(options[1]["kind"], "reject_once");
+    }
+
+    #[test]
+    fn request_params_project_file_evidence_into_canonical_diff_content() {
+        let params = request_params(
+            Some("session-1"),
+            "tool-1",
+            "edit",
+            &json!({"path": "src/lib.rs"}),
+            json!({
+                "id": "tool-1",
+                "action": "edit",
+                "evidence_refs": [{
+                    "kind": "file_mutation_diff",
+                    "path": "/workspace/src/lib.rs",
+                    "oldText": "old\n",
+                    "newText": "new\n",
+                    "preimageSha256": "abc123",
+                    "byteCount": 4,
+                    "source": "pre_approval"
+                }]
+            }),
+            &json!({"decision": "ask"}),
+            None,
+            ToolKind::Edit,
+        );
+
+        let diff = &params["toolCall"]["content"][0];
+        assert_eq!(diff["type"], "diff");
+        assert_eq!(diff["path"], "/workspace/src/lib.rs");
+        assert_eq!(diff["oldText"], "old\n");
+        assert_eq!(diff["newText"], "new\n");
+        assert_eq!(
+            diff["_meta"]["harn"]["permission_preview"]["preimageSha256"],
+            "abc123"
+        );
+    }
+
+    #[test]
+    fn request_params_use_the_declared_acp_tool_kind() {
+        let params = request_params(
+            Some("session-1"),
+            "tool-1",
+            "edit",
+            &json!({"path": "src/lib.rs"}),
+            json!({"id": "tool-1", "evidence_refs": []}),
+            &json!({"decision": "ask"}),
+            None,
+            ToolKind::Edit,
+        );
+
+        assert_eq!(params["toolCall"]["kind"], "edit");
     }
 
     #[test]

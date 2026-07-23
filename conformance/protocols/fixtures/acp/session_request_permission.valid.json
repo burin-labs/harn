@@ -14,7 +14,24 @@
           "sessionUpdate": "tool_call_update",
           "toolCallId": "tool-1",
           "title": "edit",
-          "kind": "other"
+          "kind": "edit",
+          "content": [
+            {
+              "type": "diff",
+              "path": "/workspace/src/lib.rs",
+              "oldText": "old\n",
+              "newText": "new\n",
+              "_meta": {
+                "harn": {
+                  "permission_preview": {
+                    "source": "pre_approval",
+                    "preimageSha256": "abc123",
+                    "byteCount": 4
+                  }
+                }
+              }
+            }
+          ]
         },
         "options": [
           {

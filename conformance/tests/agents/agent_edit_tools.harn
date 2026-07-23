@@ -127,6 +127,10 @@ pipeline main() {
   __io_println(tool_find(tools, "write_file").annotations.side_effect_level)
   __io_println(tool_find(tools, "delete_path").annotations.kind)
   __io_println(tool_find(tools, "edit_file").annotations.side_effect_level)
+  __io_println(tool_find(tools, "write_file").annotations.arg_schema.path_params[0])
+  __io_println(tool_find(tools, "edit_file").annotations.arg_schema.path_params[0])
+  __io_println(tool_find(tools, "create_directory").annotations.arg_schema.path_params[0])
+  __io_println(tool_find(tools, "delete_path").annotations.arg_schema.path_params[0])
   // --- read-only stance hides every edit tool, keeps read tools ---
   const surface = agent_edit_tools(agent_read_tools(nil, {root: root}), {root: root})
   with_llm_script(

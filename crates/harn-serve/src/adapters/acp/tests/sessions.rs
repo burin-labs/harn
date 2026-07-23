@@ -1643,21 +1643,14 @@ async fn acp_bridge_routes_session_request_permission_response() {
         assistant_state: Mutex::new(VisibleTextState::default()),
     });
 
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../conformance/protocols/fixtures/acp/session_request_permission.valid.json"
+    )))
+    .expect("permission fixture");
     let call = bridge.call_client(
         "session/request_permission",
-        serde_json::json!({
-            "sessionId": "session-1",
-            "toolCall": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-1",
-                "title": "edit",
-                "kind": "other"
-            },
-            "options": [
-                {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-                {"optionId": "reject", "name": "Reject", "kind": "reject_once"}
-            ]
-        }),
+        fixture["documents"][0]["params"].clone(),
     );
     tokio::pin!(call);
 

@@ -90,6 +90,7 @@ async fn request_permission(
                 approval_request_json,
                 &policy_decision.clone().unwrap_or(JsonValue::Null),
                 None,
+                crate::tool_annotations::ToolKind::Other,
             ),
         )
         .await?;

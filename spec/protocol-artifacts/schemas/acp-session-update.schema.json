@@ -75,7 +75,50 @@
         "toolCallId": { "type": "string", "minLength": 1 },
         "title": { "type": "string" },
         "kind": { "type": "string" },
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PermissionToolCallContent" }
+        },
         "rawInput": {},
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionToolCallContent": {
+      "oneOf": [
+        { "$ref": "#/$defs/PermissionToolCallDiff" },
+        { "$ref": "#/$defs/PermissionToolCallContentBlock" },
+        { "$ref": "#/$defs/PermissionToolCallTerminal" }
+      ]
+    },
+    "PermissionToolCallDiff": {
+      "type": "object",
+      "required": ["type", "path", "newText"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "diff" },
+        "path": { "type": "string", "minLength": 1 },
+        "oldText": { "type": ["string", "null"] },
+        "newText": { "type": "string" },
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionToolCallContentBlock": {
+      "type": "object",
+      "required": ["type", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "content" },
+        "content": { "$ref": "#/$defs/ContentBlock" },
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionToolCallTerminal": {
+      "type": "object",
+      "required": ["type", "terminalId"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "terminal" },
+        "terminalId": { "type": "string", "minLength": 1 },
         "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
       }
     },

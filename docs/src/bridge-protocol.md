@@ -156,8 +156,8 @@ max-byte fields, and rollups by logical reminder tag, source, and rendered role,
 so operators can audit per-turn reminder pressure without scanning every
 individual `transcript.reminder.fired` event.
 
-Content extensions (`visible_text` and `visible_delta` on the
-`agent_message_chunk` content block, advertised via
+Content extensions (`visible_text`, `visible_delta`, and
+`permission_preview`, advertised via
 `agentCapabilities._meta.harn.contentExtensionFields`) follow the same
 convention but ride under `content._meta.harn` because they extend the
 canonical ACP content block, not the session-update envelope. Example:
@@ -295,98 +295,126 @@ Request payload (harn-issued):
 ```json
 {
   "sessionId": "session_123",
-  "approvalRequest": {
-    "id": "tool-call_123",
-    "action": "edit_file",
-    "args": {"path": "src/main.rs"},
-    "principal": "worker_3",
-    "requested_at": "2026-04-30T12:00:00Z",
-    "approvers_required": 1,
-    "evidence_refs": [
+  "toolCall": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "tool-call_123",
+    "title": "edit_file",
+    "kind": "edit",
+    "rawInput": {
+      "path": "src/main.rs",
+      "old_string": "let port = 3000;",
+      "new_string": "let port = 8080;"
+    },
+    "content": [
       {
-        "kind": "workspace_path",
-        "ref": "src/main.rs",
-        "metadata": {"workspace_path": "src/main.rs"}
+        "type": "diff",
+        "path": "/workspace/src/main.rs",
+        "oldText": "fn main() {\n    let port = 3000;\n}\n",
+        "newText": "fn main() {\n    let port = 8080;\n}\n",
+        "_meta": {
+          "harn": {
+            "permission_preview": {
+              "source": "pre_approval",
+              "preimageSha256": "3a7bd3e2360a...",
+              "byteCount": 35
+            }
+          }
+        }
       }
     ],
-    "undo_metadata": {
-      "session_id": "session_123",
-      "run_id": "run_123",
-      "worker_id": null,
-      "mutation_scope": "apply_workspace",
-      "policy_decision": {
-        "type": "harn.permission_policy_decision.v1",
-        "action": "ask",
-        "reason": "workspace edit",
-        "matched_rule": {"source": "rules", "action": "ask", "id": "edit-src", "index": 0},
-        "risk_labels": ["approval_required", "path_rule"]
+    "_meta": {
+      "harn": {
+        "toolName": "edit_file",
+        "approvalRequest": {
+          "id": "tool-call_123",
+          "action": "edit_file",
+          "args": {
+            "path": "src/main.rs",
+            "old_string": "let port = 3000;",
+            "new_string": "let port = 8080;"
+          },
+          "principal": "session_123",
+          "requested_at": "2026-04-30T12:00:00Z",
+          "approvers_required": 1,
+          "evidence_refs": [
+            {
+              "kind": "file_mutation_diff",
+              "path": "/workspace/src/main.rs",
+              "oldText": "fn main() {\n    let port = 3000;\n}\n",
+              "newText": "fn main() {\n    let port = 8080;\n}\n",
+              "preimageSha256": "3a7bd3e2360a...",
+              "byteCount": 35,
+              "source": "pre_approval"
+            }
+          ],
+          "undo_metadata": {
+            "policy_decision": {
+              "type": "harn.permission_policy_decision.v1",
+              "action": "ask",
+              "reason": "workspace edit"
+            }
+          },
+          "capabilities_requested": ["tool.edit_file"]
+        },
+        "policyDecision": {
+          "type": "harn.permission_policy_decision.v1",
+          "action": "ask",
+          "reason": "workspace edit",
+          "matched_rule": {
+            "source": "rules",
+            "action": "ask",
+            "id": "edit-src",
+            "index": 0
+          },
+          "risk_labels": ["approval_required", "path_rule"],
+          "context": {
+            "tool_name": "edit_file",
+            "tool_kind": "edit",
+            "side_effect": "workspace_write",
+            "paths": [{"workspace_path": "src/main.rs"}]
+          }
+        }
       }
-    },
-    "capabilities_requested": ["workspace.write_text"]
-  },
-  "policyDecision": {
-    "type": "harn.permission_policy_decision.v1",
-    "action": "ask",
-    "reason": "workspace edit",
-    "matched_rule": {"source": "rules", "action": "ask", "id": "edit-src", "index": 0},
-    "risk_labels": ["approval_required", "path_rule"],
-    "context": {
-      "tool_name": "edit_file",
-      "tool_kind": "edit",
-      "side_effect": "workspace_write",
-      "paths": [{"workspace_path": "src/main.rs"}]
     }
   },
-  "toolCall": {
-    "toolCallId": "call_123",
-    "toolName": "edit_file",
-    "rawInput": {"path": "src/main.rs"}
-  },
-  "mutation": {
-    "session_id": "session_123",
-    "run_id": "run_123",
-    "worker_id": null,
-    "mutation_scope": "apply_workspace",
-    "approval_policy": {"require_approval": ["edit*"]}
-  },
-  "declaredPaths": ["src/main.rs"]
+  "options": [
+    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+    {"optionId": "reject", "name": "Reject", "kind": "reject_once"}
+  ]
 }
 ```
 
-`approvalRequest` is the canonical Harn `ApprovalRequest` payload. Hosts should
-render approval UI from that object and use `policyDecision` as the policy
-rationale: it includes the matched rule, risk labels, normalized context, and
-the action (`ask` for host approval requests). The same receipt is copied into
+The request uses ACP's canonical `toolCall.content` diff shape. Harn reads each
+declared file path immediately before requesting approval and emits full
+`oldText` and `newText` when the mutation can be reconstructed exactly. The
+pre-image is bounded to 1 MiB per file and 16 files per request. For an
+unsupported edit shape, path outside the execution root, symlink, unreadable
+file, non-UTF-8 file, or oversized file, Harn omits the canonical diff instead
+of fabricating one and records explicit `file_preimage` evidence (including an
+unavailability reason when applicable) in
+`toolCall._meta.harn.approvalRequest.evidence_refs`.
+
+`approvalRequest` is the canonical Harn `ApprovalRequest` payload and
+`policyDecision` is the policy rationale. Both live under
+`toolCall._meta.harn`; the standard ACP fields remain at their canonical
+locations. The same policy receipt is copied into
 `approvalRequest.undo_metadata.policy_decision` and into
 `PermissionGrant`/`PermissionDeny` transcript-event metadata so approvals are
-auditable and replayable even when the host only persists the canonical request.
-Treat the surrounding `toolCall`, `mutation`, and `declaredPaths` fields as
-compatibility/context fields. The same shape is used in stdlib HITL notifications at
-`harn.hitl.requested.params.payload.approval_request`, so IDE hosts,
-cloud approval inboxes, and CLI-style hosts can share one renderer.
-
-Field meanings:
-
-- `id`: stable approval request id. For tool permission prompts this is the
-  emitted tool-call id; for stdlib HITL it is the HITL request id.
-- `action`: human-readable action name, usually the tool or stdlib action.
-- `args`: structured action arguments safe for host rendering.
-- `principal`: agent, worker, session, or other actor requesting approval.
-- `requested_at`: RFC3339 UTC timestamp.
-- `deadline`: optional RFC3339 UTC deadline. Omitted when there is no deadline.
-- `approvers_required`: number of approving reviewers required to proceed.
-- `evidence_refs`: host-renderable evidence handles, such as declared workspace
-  paths or run artifacts.
-- `undo_metadata`: mutation/audit metadata a host can use to group undo/redo.
-- `capabilities_requested`: canonical capability operation names requested by
-  the action.
+auditable and replayable.
 
 Response payload (host-issued):
 
-- `{ "outcome": { "outcome": "selected" } }` (ACP canonical): granted
-- `{ "granted": true }` (legacy shim): granted with original args
-- `{ "granted": true, "args": {...} }`: granted with rewritten args
-- `{ "granted": false, "reason": "..." }`: denied
+```json
+{
+  "outcome": {
+    "outcome": "selected",
+    "optionId": "allow"
+  }
+}
+```
+
+Selecting `reject` denies the call. A cancelled chooser returns
+`{"outcome":{"outcome":"cancelled"}}`; both cases fail closed.
 
 ## Worker lifecycle notifications
 

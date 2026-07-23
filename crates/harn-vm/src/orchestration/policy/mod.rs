@@ -329,10 +329,22 @@ pub fn current_tool_declared_path_entries(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> Vec<WorkspacePathInfo> {
-    let Some(map) = args.as_object() else {
+    let Some(annotations) = current_tool_annotations(tool_name) else {
         return Vec::new();
     };
-    let Some(annotations) = current_tool_annotations(tool_name) else {
+    tool_declared_path_entries(&annotations, args)
+}
+
+/// Rich workspace-path descriptors declared by explicit tool annotations.
+///
+/// Permission requests can receive annotations directly from the dispatch
+/// catalog even when no ambient execution policy is installed. Keeping the
+/// path projection here gives both sources identical normalization semantics.
+pub fn tool_declared_path_entries(
+    annotations: &crate::tool_annotations::ToolAnnotations,
+    args: &serde_json::Value,
+) -> Vec<WorkspacePathInfo> {
+    let Some(map) = args.as_object() else {
         return Vec::new();
     };
     let workspace_root = crate::stdlib::process::execution_root_path();

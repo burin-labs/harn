@@ -103,7 +103,8 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "rawInputPartial",
 ];
 
-pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["visible_delta", "visible_text"];
+pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] =
+    &["permission_preview", "visible_delta", "visible_text"];
 pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
     serde_json::json!({
         "harn": {
