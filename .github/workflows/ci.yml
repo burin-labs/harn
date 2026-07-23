@@ -347,7 +347,7 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_BASEDIRS: ${{ github.workspace }}
-      SCCACHE_CACHE_SIZE: 15G
+      SCCACHE_CACHE_SIZE: 40G
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/rust-toolchain
@@ -429,7 +429,7 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_BASEDIRS: ${{ github.workspace }}
-      SCCACHE_CACHE_SIZE: 15G
+      SCCACHE_CACHE_SIZE: 40G
       # Link the Linux Rust lanes with mold. Warm lanes become link-bound once
       # the persistent local cache has hits, so mold lowers the remaining
       # wall-clock floor. GOTCHA: a job-level RUSTFLAGS env var
@@ -742,7 +742,7 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_BASEDIRS: ${{ github.workspace }}
-      SCCACHE_CACHE_SIZE: 15G
+      SCCACHE_CACHE_SIZE: 40G
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

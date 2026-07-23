@@ -40,7 +40,7 @@ const SELFHOSTED_DISABLE_VAR = "HARN_CI_DISABLE_SELFHOSTED_LINUX"
 
 const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 
-const PERSISTENT_SCCACHE_SIZE = "15G"
+const PERSISTENT_SCCACHE_SIZE = "40G"
 
 // Hang backstop for the archived-behavior consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test
