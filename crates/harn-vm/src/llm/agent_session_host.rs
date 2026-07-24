@@ -821,14 +821,25 @@ async fn host_agent_session_finalize(
         session.max_iterations,
         session.last_llm_stop_reason.as_deref(),
     );
-    // Surface the canonical reason to the host bridge so an outer ACP
-    // adapter can populate `session/prompt`'s `stopReason`. The bridge
-    // is opt-in: pipelines that don't run under ACP simply leave the
-    // slot unset.
-    if let Some(bridge) = super::agent_runtime::current_host_bridge() {
-        bridge.set_prompt_stop_reason(acp_stop_reason);
-    }
     let terminal_class = agent_terminal_class(&final_status, &stop_reason, terminal_error.as_ref());
+    // Classify once at the owning loop boundary. The bridge carries this exact
+    // value to ACP; hosts never reconstruct terminal truth from `stopReason`.
+    let terminal_outcome = crate::agent_events::AgentTerminalOutcome::new(
+        crate::agent_events::classify_agent_terminal_with_class(
+            &canonical_status,
+            &stop_reason,
+            terminal_error.is_some(),
+            terminal_class,
+        ),
+        if stop_reason.is_empty() {
+            canonical_status.clone()
+        } else {
+            stop_reason.clone()
+        },
+    );
+    if let Some(bridge) = super::agent_runtime::current_host_bridge() {
+        bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
+    }
     if let Some(error) = terminal_error.as_ref() {
         let transcript_event = super::helpers::transcript_event(
             "agent_loop_terminal_error",
@@ -865,24 +876,6 @@ async fn host_agent_session_finalize(
         .and_then(last_assistant_text)
         .unwrap_or_default();
 
-    // Classify the terminal condition once, into a typed outcome the host reads
-    // instead of substring-matching the raw status (harn#4568). Additive: the
-    // raw `final_status` / `stop_reason` / `terminal_class` fields are unchanged.
-    // The lossless `reason` carries the raw stop reason (or the canonical status
-    // when the loop sealed no stop reason).
-    let terminal_outcome = crate::agent_events::AgentTerminalOutcome::new(
-        crate::agent_events::classify_agent_terminal_with_class(
-            &canonical_status,
-            &stop_reason,
-            terminal_error.is_some(),
-            terminal_class,
-        ),
-        if stop_reason.is_empty() {
-            canonical_status.clone()
-        } else {
-            stop_reason.clone()
-        },
-    );
     emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
     let trace_summary = super::trace::agent_trace_summary();
     let result = serde_json::json!({

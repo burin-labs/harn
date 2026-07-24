@@ -418,21 +418,18 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                 initialize["result"]["agentCapabilities"]["promptCapabilities"]["embeddedContext"]
                     .is_boolean()
             );
+            let harn_capabilities = &initialize["result"]["agentCapabilities"]["_meta"]["harn"];
+            assert_eq!(harn_capabilities["schemaCompatibility"], ACP_SCHEMA_COMPATIBILITY);
             assert_eq!(
-                initialize["result"]["agentCapabilities"]["_meta"]["harn"]["schemaCompatibility"],
-                ACP_SCHEMA_COMPATIBILITY
-            );
-            assert_eq!(
-                initialize["result"]["agentCapabilities"]["_meta"]["harn"]["extensionContract"],
+                harn_capabilities["extensionContract"],
                 "https://harnlang.com/spec/harn-extensions/v1"
             );
             assert_eq!(
-                initialize["result"]["agentCapabilities"]["_meta"]["harn"]
-                    ["sessionUpdateExtensions"],
+                harn_capabilities["sessionUpdateExtensions"],
                 serde_json::json!(HARN_SESSION_UPDATE_EXTENSIONS)
             );
-            let agent_event_method = &initialize["result"]["agentCapabilities"]["_meta"]["harn"]
-                ["extensionMethods"][HARN_AGENT_EVENT_METHOD];
+            let agent_event_method =
+                &harn_capabilities["extensionMethods"][HARN_AGENT_EVENT_METHOD];
             assert!(
                 agent_event_method.is_object(),
                 "agent capabilities must advertise the {HARN_AGENT_EVENT_METHOD} \
@@ -444,9 +441,12 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                 "advertised kinds must match the canonical HARN_AGENT_EVENT_KINDS list"
             );
             assert_eq!(
-                initialize["result"]["agentCapabilities"]["_meta"]["harn"]
-                    ["toolLifecycleExtensionFields"],
+                harn_capabilities["toolLifecycleExtensionFields"],
                 serde_json::json!(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS)
+            );
+            assert_eq!(
+                harn_capabilities["promptResultExtensionFields"],
+                serde_json::json!(HARN_PROMPT_RESULT_EXTENSION_FIELDS)
             );
 
             request_tx

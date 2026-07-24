@@ -3,8 +3,9 @@ use std::process::{Command, Stdio};
 
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -152,6 +153,11 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
         HARN_AGENT_EVENT_KINDS,
     ));
     out.push_str(&go_typed_array(
+        "HarnPromptResultExtensionField",
+        "HarnPromptResultExtensionFields",
+        HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    ));
+    out.push_str(&go_typed_array(
         "ACPContentBlockType",
         "ACPContentBlockTypes",
         ACP_CONTENT_BLOCK_TYPES,
@@ -190,6 +196,16 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
         "AgentTerminalClass",
         "AgentTerminalClasses",
         &agent_terminal_class_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
+        "AgentTerminalKind",
+        "AgentTerminalKinds",
+        &agent_terminal_kind_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
+        "AgentTerminalOwner",
+        "AgentTerminalOwners",
+        &agent_terminal_owner_values(),
     ));
     out.push_str(&go_typed_array(
         "ToolCallReceiptStatus",
@@ -340,6 +356,29 @@ type HarnACPPromptErrorData struct {
 	RetryAfterMs *int64 `json:"retryAfterMs,omitempty"`
 	Provider *string `json:"provider,omitempty"`
 	Model *string `json:"model,omitempty"`
+}
+
+// HarnAgentTerminalOutcome is the producer-owned reason an agent loop ended.
+type HarnAgentTerminalOutcome struct {
+	Kind AgentTerminalKind `json:"kind"`
+	Reason string `json:"reason"`
+	Owner AgentTerminalOwner `json:"owner"`
+}
+
+// HarnACPPromptResultHarnMetadata contains Harn prompt-result extensions.
+type HarnACPPromptResultHarnMetadata struct {
+	Terminal *HarnAgentTerminalOutcome `json:"terminal,omitempty"`
+}
+
+// HarnACPPromptResultMetadata is the standard ACP extension envelope.
+type HarnACPPromptResultMetadata struct {
+	Harn HarnACPPromptResultHarnMetadata `json:"harn"`
+}
+
+// HarnACPPromptResult preserves terminal truth alongside canonical stopReason.
+type HarnACPPromptResult struct {
+	StopReason string `json:"stopReason"`
+	Meta *HarnACPPromptResultMetadata `json:"_meta,omitempty"`
 }
 
 // ACPResponse is a JSON-RPC response envelope.

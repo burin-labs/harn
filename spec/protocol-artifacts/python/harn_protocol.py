@@ -48,6 +48,7 @@ __all__ = [
     "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
     "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
     "HARN_CONTENT_EXTENSION_FIELDS",
+    "HARN_PROMPT_RESULT_EXTENSION_FIELDS",
     "A2A_METHODS",
     "A2A_TASK_STATES",
     "A2A_TASK_EVENT_TYPES",
@@ -65,6 +66,8 @@ __all__ = [
     "ACPAgentNotification",
     "ACPSessionUpdate",
     "AgentTerminalClass",
+    "AgentTerminalKind",
+    "AgentTerminalOwner",
     "ACPPromptErrorSchema",
     "ACPToolKind",
     "ACPToolCallStatus",
@@ -80,6 +83,10 @@ __all__ = [
     "MCPLoggingLevel",
     "ACPError",
     "HarnACPPromptErrorData",
+    "HarnAgentTerminalOutcome",
+    "HarnACPPromptResultHarnMetadata",
+    "HarnACPPromptResultMetadata",
+    "HarnACPPromptResult",
     "ACPRequest",
     "ACPResponse",
     "ACPNotification",
@@ -360,6 +367,9 @@ HARN_CONTENT_EXTENSION_FIELDS: tuple = (
     "visible_delta",
     "visible_text",
 )
+HARN_PROMPT_RESULT_EXTENSION_FIELDS: tuple = (
+    "terminal",
+)
 A2A_METHODS: tuple = (
     "message/send",
     "message/stream",
@@ -535,6 +545,28 @@ class AgentTerminalClass(str, Enum):
     HOST_BRIDGE_UNIMPLEMENTED = "host_bridge_unimplemented"
     AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
     GENERIC_THROW = "generic_throw"
+
+
+class AgentTerminalKind(str, Enum):
+    NATURAL = "natural"
+    USER_CANCELLED = "user_cancelled"
+    POLICY_BUDGET = "policy_budget"
+    POLICY_NO_PROGRESS = "policy_no_progress"
+    POLICY_GUARDRAIL = "policy_guardrail"
+    POLICY_STOP = "policy_stop"
+    PROVIDER_ERROR = "provider_error"
+    RUNTIME_ERROR = "runtime_error"
+    SUSPENDED = "suspended"
+    UNKNOWN = "unknown"
+
+
+class AgentTerminalOwner(str, Enum):
+    AGENT = "agent"
+    USER = "user"
+    POLICY = "policy"
+    PROVIDER = "provider"
+    HARNESS = "harness"
+    UNKNOWN = "unknown"
 
 
 class ACPPromptErrorSchema(str, Enum):
@@ -717,6 +749,29 @@ class HarnACPPromptErrorData(_HarnDataclass):
     retryAfterMs: Optional[int] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+
+
+@dataclass
+class HarnAgentTerminalOutcome(_HarnDataclass):
+    kind: AgentTerminalKind
+    reason: str
+    owner: AgentTerminalOwner
+
+
+@dataclass
+class HarnACPPromptResultHarnMetadata(_HarnDataclass):
+    terminal: Optional[HarnAgentTerminalOutcome] = None
+
+
+@dataclass
+class HarnACPPromptResultMetadata(_HarnDataclass):
+    harn: HarnACPPromptResultHarnMetadata
+
+
+@dataclass
+class HarnACPPromptResult(_HarnDataclass):
+    stopReason: str
+    _meta: Optional[HarnACPPromptResultMetadata] = None
 
 
 @dataclass

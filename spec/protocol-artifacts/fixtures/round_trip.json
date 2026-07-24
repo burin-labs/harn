@@ -73,7 +73,16 @@
       "id": 17,
       "jsonrpc": "2.0",
       "result": {
-        "ok": true
+        "_meta": {
+          "harn": {
+            "terminal": {
+              "kind": "policy_budget",
+              "owner": "policy",
+              "reason": "max_iterations"
+            }
+          }
+        },
+        "stopReason": "max_turn_requests"
       }
     },
     "sessionUpdateNotification": {

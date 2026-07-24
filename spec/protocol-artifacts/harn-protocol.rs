@@ -576,6 +576,55 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "generic_throw",
 ];
 
+pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
+pub const AGENT_TERMINAL_KIND_USER_CANCELLED: &str = "user_cancelled";
+pub const AGENT_TERMINAL_KIND_POLICY_BUDGET: &str = "policy_budget";
+pub const AGENT_TERMINAL_KIND_POLICY_NO_PROGRESS: &str = "policy_no_progress";
+pub const AGENT_TERMINAL_KIND_POLICY_GUARDRAIL: &str = "policy_guardrail";
+pub const AGENT_TERMINAL_KIND_POLICY_STOP: &str = "policy_stop";
+pub const AGENT_TERMINAL_KIND_PROVIDER_ERROR: &str = "provider_error";
+pub const AGENT_TERMINAL_KIND_RUNTIME_ERROR: &str = "runtime_error";
+pub const AGENT_TERMINAL_KIND_SUSPENDED: &str = "suspended";
+pub const AGENT_TERMINAL_KIND_UNKNOWN: &str = "unknown";
+
+/// Producer-owned agent terminal outcome kinds.
+pub const AGENT_TERMINAL_KINDS: &[&str] = &[
+    "natural",
+    "user_cancelled",
+    "policy_budget",
+    "policy_no_progress",
+    "policy_guardrail",
+    "policy_stop",
+    "provider_error",
+    "runtime_error",
+    "suspended",
+    "unknown",
+];
+
+pub const AGENT_TERMINAL_OWNER_AGENT: &str = "agent";
+pub const AGENT_TERMINAL_OWNER_USER: &str = "user";
+pub const AGENT_TERMINAL_OWNER_POLICY: &str = "policy";
+pub const AGENT_TERMINAL_OWNER_PROVIDER: &str = "provider";
+pub const AGENT_TERMINAL_OWNER_HARNESS: &str = "harness";
+pub const AGENT_TERMINAL_OWNER_UNKNOWN: &str = "unknown";
+
+/// Owners attributed by producer-owned agent terminal outcomes.
+pub const AGENT_TERMINAL_OWNERS: &[&str] = &[
+    "agent",
+    "user",
+    "policy",
+    "provider",
+    "harness",
+    "unknown",
+];
+
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_TERMINAL: &str = "terminal";
+
+/// `_meta.harn` extension keys on successful ACP prompt results.
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &[
+    "terminal",
+];
+
 pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = "permission_preview";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = "visible_delta";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_TEXT: &str = "visible_text";

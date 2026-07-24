@@ -1,7 +1,8 @@
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -143,6 +144,10 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
         "HARN_CONTENT_EXTENSION_FIELDS",
         HARN_CONTENT_EXTENSION_FIELDS,
     ));
+    out.push_str(&py_const_tuple(
+        "HARN_PROMPT_RESULT_EXTENSION_FIELDS",
+        HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    ));
     out.push_str(&py_const_tuple("A2A_METHODS", A2A_METHODS));
     out.push_str(&py_const_tuple("A2A_TASK_STATES", A2A_TASK_STATES));
     out.push_str(&py_const_tuple(
@@ -181,6 +186,14 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str(&py_str_enum_owned(
         "AgentTerminalClass",
         &agent_terminal_class_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
+        "AgentTerminalKind",
+        &agent_terminal_kind_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
+        "AgentTerminalOwner",
+        &agent_terminal_owner_values(),
     ));
     out.push_str(&py_str_enum_owned(
         "ACPPromptErrorSchema",
@@ -288,6 +301,29 @@ class HarnACPPromptErrorData(_HarnDataclass):
     retryAfterMs: Optional[int] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+
+
+@dataclass
+class HarnAgentTerminalOutcome(_HarnDataclass):
+    kind: AgentTerminalKind
+    reason: str
+    owner: AgentTerminalOwner
+
+
+@dataclass
+class HarnACPPromptResultHarnMetadata(_HarnDataclass):
+    terminal: Optional[HarnAgentTerminalOutcome] = None
+
+
+@dataclass
+class HarnACPPromptResultMetadata(_HarnDataclass):
+    harn: HarnACPPromptResultHarnMetadata
+
+
+@dataclass
+class HarnACPPromptResult(_HarnDataclass):
+    stopReason: str
+    _meta: Optional[HarnACPPromptResultMetadata] = None
 
 
 @dataclass
@@ -635,6 +671,7 @@ pub(super) fn python_public_names() -> Vec<String> {
         "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
         "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
         "HARN_CONTENT_EXTENSION_FIELDS",
+        "HARN_PROMPT_RESULT_EXTENSION_FIELDS",
         "A2A_METHODS",
         "A2A_TASK_STATES",
         "A2A_TASK_EVENT_TYPES",
@@ -652,6 +689,8 @@ pub(super) fn python_public_names() -> Vec<String> {
         "ACPAgentNotification",
         "ACPSessionUpdate",
         "AgentTerminalClass",
+        "AgentTerminalKind",
+        "AgentTerminalOwner",
         "ACPPromptErrorSchema",
         "ACPToolKind",
         "ACPToolCallStatus",
@@ -667,6 +706,10 @@ pub(super) fn python_public_names() -> Vec<String> {
         "MCPLoggingLevel",
         "ACPError",
         "HarnACPPromptErrorData",
+        "HarnAgentTerminalOutcome",
+        "HarnACPPromptResultHarnMetadata",
+        "HarnACPPromptResultMetadata",
+        "HarnACPPromptResult",
         "ACPRequest",
         "ACPResponse",
         "ACPNotification",

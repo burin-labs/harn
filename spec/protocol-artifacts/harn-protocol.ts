@@ -147,6 +147,35 @@ export const AGENT_TERMINAL_CLASSES = [
 ] as const
 export type AgentTerminalClass = (typeof AGENT_TERMINAL_CLASSES)[number]
 
+export const AGENT_TERMINAL_KINDS = [
+  "natural",
+  "user_cancelled",
+  "policy_budget",
+  "policy_no_progress",
+  "policy_guardrail",
+  "policy_stop",
+  "provider_error",
+  "runtime_error",
+  "suspended",
+  "unknown",
+] as const
+export type AgentTerminalKind = (typeof AGENT_TERMINAL_KINDS)[number]
+
+export const AGENT_TERMINAL_OWNERS = [
+  "agent",
+  "user",
+  "policy",
+  "provider",
+  "harness",
+  "unknown",
+] as const
+export type AgentTerminalOwner = (typeof AGENT_TERMINAL_OWNERS)[number]
+
+export const HARN_PROMPT_RESULT_EXTENSION_FIELDS = [
+  "terminal",
+] as const
+export type HarnPromptResultExtensionField = (typeof HARN_PROMPT_RESULT_EXTENSION_FIELDS)[number]
+
 export const HARN_AGENT_EVENT_KINDS = [
   "budget_circuit_breaker",
   "budget_exhausted",
@@ -437,6 +466,21 @@ export interface HarnACPPromptErrorData {
   model?: string
 }
 
+export interface HarnAgentTerminalOutcome {
+  kind: AgentTerminalKind
+  reason: string
+  owner: AgentTerminalOwner
+}
+
+export interface HarnACPPromptResult {
+  stopReason: string
+  _meta?: {
+    harn: {
+      terminal?: HarnAgentTerminalOutcome
+    }
+  }
+}
+
 export interface ACPNotification {
   jsonrpc: "2.0"
   method: string
@@ -681,6 +725,7 @@ export interface ACPAgentCapabilities {
     sessionUpdateExtensions?: HarnACPSessionUpdateExtension[]
     toolLifecycleExtensionFields?: string[]
     contentExtensionFields?: string[]
+    promptResultExtensionFields?: HarnPromptResultExtensionField[]
     extensionMethods?: Record<string, ACPObject>
     hostCapabilityOperations?: Record<string, string[]>
     extensionContract?: string

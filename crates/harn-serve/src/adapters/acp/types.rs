@@ -494,6 +494,8 @@ impl AcpSessionPromptParams {
 pub struct AcpSessionPromptResult {
     #[serde(rename = "stopReason")]
     pub stop_reason: String,
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<AcpMeta>,
 }
 
 /// ACP content blocks accepted by Harn prompt and injection requests.
@@ -683,6 +685,18 @@ impl AcpMeta {
         Self {
             harn: AcpHarnMeta {
                 actor: Some(actor),
+                terminal: None,
+                extra: BTreeMap::new(),
+            },
+            extra: BTreeMap::new(),
+        }
+    }
+
+    pub fn terminal(terminal: harn_vm::agent_events::AgentTerminalOutcome) -> Self {
+        Self {
+            harn: AcpHarnMeta {
+                actor: None,
+                terminal: Some(terminal),
                 extra: BTreeMap::new(),
             },
             extra: BTreeMap::new(),
@@ -695,6 +709,8 @@ impl AcpMeta {
 pub struct AcpHarnMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<harn_vm::agent_events::AgentTerminalOutcome>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -848,6 +864,68 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn session_prompt_result_round_trips_typed_terminal_truth() {
+        let result = AcpSessionPromptResult {
+            stop_reason: "max_turn_requests".to_string(),
+            meta: Some(AcpMeta::terminal(
+                harn_vm::agent_events::AgentTerminalOutcome::new(
+                    harn_vm::agent_events::AgentTerminalKind::PolicyBudget,
+                    "max_iterations",
+                ),
+            )),
+        };
+
+        let wire = serde_json::to_value(&result).expect("serialize prompt result");
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "stopReason": "max_turn_requests",
+                "_meta": {
+                    "harn": {
+                        "terminal": {
+                            "kind": "policy_budget",
+                            "reason": "max_iterations",
+                            "owner": "policy",
+                        },
+                    },
+                },
+            })
+        );
+        let restored: AcpSessionPromptResult =
+            serde_json::from_value(wire).expect("deserialize prompt result");
+        assert_eq!(restored, result);
+    }
+
+    #[test]
+    fn session_prompt_result_preserves_unknown_exception_and_legacy_shape() {
+        let unknown: AcpSessionPromptResult = serde_json::from_value(serde_json::json!({
+            "stopReason": "end_turn",
+            "_meta": {
+                "harn": {
+                    "terminal": {
+                        "kind": "unknown",
+                        "reason": "exception",
+                        "owner": "unknown",
+                    },
+                },
+            },
+        }))
+        .expect("deserialize unknown terminal");
+        assert_eq!(
+            unknown.meta.expect("terminal metadata").harn.terminal,
+            Some(harn_vm::agent_events::AgentTerminalOutcome::new(
+                harn_vm::agent_events::AgentTerminalKind::Unknown,
+                "exception",
+            ))
+        );
+
+        let legacy: AcpSessionPromptResult =
+            serde_json::from_value(serde_json::json!({"stopReason": "end_turn"}))
+                .expect("deserialize legacy prompt result");
+        assert!(legacy.meta.is_none());
     }
 
     #[test]

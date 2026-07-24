@@ -204,6 +204,14 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"typed_checkpoint",
 }
 
+// HarnPromptResultExtensionField is the typed alias for the HarnPromptResultExtensionFields wire vocabulary.
+type HarnPromptResultExtensionField = string
+
+// HarnPromptResultExtensionFields enumerates every wire value Harn currently emits for HarnPromptResultExtensionField.
+var HarnPromptResultExtensionFields = []HarnPromptResultExtensionField{
+	"terminal",
+}
+
 // ACPContentBlockType is the typed alias for the ACPContentBlockTypes wire vocabulary.
 type ACPContentBlockType = string
 
@@ -316,6 +324,36 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"host_bridge_unimplemented",
 	"agent_loop_protocol_failure",
 	"generic_throw",
+}
+
+// AgentTerminalKind is the typed alias for the AgentTerminalKinds wire vocabulary.
+type AgentTerminalKind = string
+
+// AgentTerminalKinds enumerates every wire value Harn currently emits for AgentTerminalKind.
+var AgentTerminalKinds = []AgentTerminalKind{
+	"natural",
+	"user_cancelled",
+	"policy_budget",
+	"policy_no_progress",
+	"policy_guardrail",
+	"policy_stop",
+	"provider_error",
+	"runtime_error",
+	"suspended",
+	"unknown",
+}
+
+// AgentTerminalOwner is the typed alias for the AgentTerminalOwners wire vocabulary.
+type AgentTerminalOwner = string
+
+// AgentTerminalOwners enumerates every wire value Harn currently emits for AgentTerminalOwner.
+var AgentTerminalOwners = []AgentTerminalOwner{
+	"agent",
+	"user",
+	"policy",
+	"provider",
+	"harness",
+	"unknown",
 }
 
 // ToolCallReceiptStatus is the typed alias for the ToolCallReceiptStatuses wire vocabulary.
@@ -580,6 +618,29 @@ type HarnACPPromptErrorData struct {
 	RetryAfterMs  *int64             `json:"retryAfterMs,omitempty"`
 	Provider      *string            `json:"provider,omitempty"`
 	Model         *string            `json:"model,omitempty"`
+}
+
+// HarnAgentTerminalOutcome is the producer-owned reason an agent loop ended.
+type HarnAgentTerminalOutcome struct {
+	Kind   AgentTerminalKind  `json:"kind"`
+	Reason string             `json:"reason"`
+	Owner  AgentTerminalOwner `json:"owner"`
+}
+
+// HarnACPPromptResultHarnMetadata contains Harn prompt-result extensions.
+type HarnACPPromptResultHarnMetadata struct {
+	Terminal *HarnAgentTerminalOutcome `json:"terminal,omitempty"`
+}
+
+// HarnACPPromptResultMetadata is the standard ACP extension envelope.
+type HarnACPPromptResultMetadata struct {
+	Harn HarnACPPromptResultHarnMetadata `json:"harn"`
+}
+
+// HarnACPPromptResult preserves terminal truth alongside canonical stopReason.
+type HarnACPPromptResult struct {
+	StopReason string                       `json:"stopReason"`
+	Meta       *HarnACPPromptResultMetadata `json:"_meta,omitempty"`
 }
 
 // ACPResponse is a JSON-RPC response envelope.

@@ -1,7 +1,8 @@
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -114,6 +115,10 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
         HARN_CONTENT_EXTENSION_FIELDS,
     ));
     out.push_str(&swift_string_array(
+        "promptResultExtensionFields",
+        HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    ));
+    out.push_str(&swift_string_array(
         "toolCallReceiptStatuses",
         TOOL_CALL_RECEIPT_STATUSES,
     ));
@@ -167,6 +172,14 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
         &agent_terminal_class_values(),
     ));
     out.push_str(&swift_enum(
+        "HarnAgentTerminalKind",
+        &agent_terminal_kind_values(),
+    ));
+    out.push_str(&swift_enum(
+        "HarnAgentTerminalOwner",
+        &agent_terminal_owner_values(),
+    ));
+    out.push_str(&swift_enum(
         "HarnACPPromptErrorSchema",
         &[ACP_PROMPT_ERROR_DATA_SCHEMA.to_string()],
     ));
@@ -182,6 +195,25 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
     public var retryAfterMs: Int?
     public var provider: String?
     public var model: String?
+}
+
+public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
+    public var kind: HarnAgentTerminalKind
+    public var reason: String
+    public var owner: HarnAgentTerminalOwner
+}
+
+public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {
+    public var terminal: HarnAgentTerminalOutcome?
+}
+
+public struct HarnACPPromptResultMetadata: Codable, Sendable, Equatable {
+    public var harn: HarnACPPromptResultHarnMetadata
+}
+
+public struct HarnACPPromptResult: Codable, Sendable, Equatable {
+    public var stopReason: String
+    public var _meta: HarnACPPromptResultMetadata?
 }
 
 ",
