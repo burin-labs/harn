@@ -6,6 +6,11 @@ if [[ $# -eq 0 ]]; then
   exit 2
 fi
 
+# Harn compilation and VM setup can exceed Rust's 2 MiB spawned-thread
+# default. The production CLI deliberately uses 16 MiB; make every CI test
+# lane mirror that contract while preserving an explicit caller override.
+export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+
 report_resources() {
   local label="$1"
 

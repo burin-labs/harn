@@ -289,6 +289,12 @@ do
   fi
 done
 
+if ! grep -Fq 'RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"' "$make_targets"; then
+  echo "Makefile Rust test targets did not set the production CLI stack default" >&2
+  cat "$make_targets" >&2
+  exit 1
+fi
+
 fake_harn="$tmp_root/fake harn"
 touch "$fake_harn"
 chmod +x "$fake_harn"

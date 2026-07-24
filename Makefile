@@ -8,7 +8,7 @@ HARN_CARGO_CMD = ./scripts/cargo_with_worktree_build_dir.sh
 # still seed these variables explicitly after process startup. Harn script
 # tests use harn_test_env.sh so they also get a fresh durable session store.
 HARN_EGRESS_TEST_ENV = env -u HARN_EGRESS_ALLOW -u HARN_EGRESS_DENY -u HARN_EGRESS_DEFAULT -u HARN_EGRESS_BLOCK_PRIVATE -u HARN_EGRESS_ALLOW_LOOPBACK
-HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1
+HARN_RUST_TEST_ENV = $(HARN_EGRESS_TEST_ENV) HARN_LLM_CALLS_DISABLED=1 RUST_MIN_STACK="$${RUST_MIN_STACK:-16777216}"
 HARN_SCRIPT_TEST_ENV = bash ./scripts/harn_test_env.sh
 HARN_BIN_CMD = ./scripts/harn_bin.sh
 HARN_BIN_PRINT_CMD = $(if $(strip $(HARN_BIN)),env HARN_BIN="$(HARN_BIN)" $(HARN_BIN_CMD) --print,$(HARN_BIN_CMD) --print)

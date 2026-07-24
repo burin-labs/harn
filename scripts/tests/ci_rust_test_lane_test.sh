@@ -25,6 +25,12 @@ grep -q 'Exit status: 0' "$summary"
 grep -q '::group::Rust test resources before' "$log"
 grep -q 'rust_test_execution_seconds=' "$log"
 
+# Test workers mirror the production CLI stack by default, but callers can
+# deliberately exercise another stack size.
+"$script" bash -c 'test "$RUST_MIN_STACK" = 16777216' >/dev/null 2>&1
+RUST_MIN_STACK=4194304 "$script" \
+  bash -c 'test "$RUST_MIN_STACK" = 4194304' >/dev/null 2>&1
+
 custom_summary="$tmpdir/custom-summary.md"
 custom_log="$tmpdir/custom-output.log"
 GITHUB_STEP_SUMMARY="$custom_summary" "$script" true >"$custom_log" 2>&1

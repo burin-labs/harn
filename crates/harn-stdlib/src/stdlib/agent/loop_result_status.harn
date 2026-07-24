@@ -14,15 +14,6 @@ pub fn __dispatch_results_list(dispatch) {
   return dispatch?.results ?? []
 }
 
-pub const __PRODUCT_ERROR_WRITE_TOOL_NAMES = ["edit", "scaffold", "run_codemod", "write"]
-
-pub fn __tool_result_write_product_tool(result) -> bool {
-  const name = lowercase(
-    trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")),
-  )
-  return contains(__PRODUCT_ERROR_WRITE_TOOL_NAMES, name)
-}
-
 fn __error_category_is_dispatch_rejection(category) -> bool {
   return category == "schema_validation" || category == "permission_denied"
 }
@@ -54,50 +45,15 @@ pub fn __tool_result_dispatch_rejection(result) -> bool {
   return false
 }
 
-pub fn __tool_result_write_product_error_text(text: string) -> bool {
-  const lower = lowercase(trim(text))
-  if lower == "" {
-    return false
-  }
-  if lower.starts_with("## diagnostics (") {
-    return !lower.starts_with("## diagnostics (0 errors")
-  }
-  if lower.starts_with("[result of ") && lower.contains("\n## diagnostics (") {
-    return !lower.contains("\n## diagnostics (0 errors")
-  }
-  return lower.starts_with("no ")
-    || lower.starts_with("file already exists")
-    || lower.starts_with("missing required parameter")
-    || lower.contains("[edit rejected]")
-}
-
 pub fn __tool_result_product_error(result) -> bool {
   if type_of(result) != "dict" {
     return false
   }
-  // Producer-stamped field wins when present (PR-3/4 path).
-  if result?.product_error != nil {
-    return result.product_error ? true : false
+  const outcome = agent_tool_result_outcome(result)
+  if outcome.product_error != nil {
+    return outcome.product_error ? true : false
   }
-  if __tool_result_dispatch_rejection(result) {
-    return true
-  }
-  const write_tool = __tool_result_write_product_tool(result)
-  for key in ["error", "observation", "rendered_result", "result", "output"] {
-    if result[key] != nil {
-      let text = trim(to_string(result[key]))
-      if starts_with(text, "Error:") {
-        return true
-      }
-      if starts_with(text, "[result of ") && contains(text, "\nError:") {
-        return true
-      }
-      if write_tool && __tool_result_write_product_error_text(text) {
-        return true
-      }
-    }
-  }
-  return false
+  return __tool_result_dispatch_rejection(result)
 }
 
 pub fn __tool_result_ok(result) -> bool {

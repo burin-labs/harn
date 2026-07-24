@@ -548,36 +548,12 @@ fn materialized_persona_name(package_root: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::future::Future;
     use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
 
     use harn_modules::package_snapshot::PackageSnapshot;
 
     use super::*;
-
-    /// Persona apply materializes through compile + doctor paths that drive the
-    /// Harn VM. That work needs more than libtest's default 2 MiB worker stack
-    /// and can otherwise SIGABRT the whole `harn-cli` test binary (#5250).
-    fn block_on_cli_stack_async<Fut>(build: impl FnOnce() -> Fut + Send + 'static) -> Fut::Output
-    where
-        Fut: Future + 'static,
-        Fut::Output: Send + 'static,
-    {
-        thread::Builder::new()
-            .name("persona-apply-test".into())
-            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
-            .spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("persona-apply test runtime")
-                    .block_on(build())
-            })
-            .expect("failed to spawn persona-apply test thread")
-            .join()
-            .expect("persona-apply test thread panicked")
-    }
 
     fn apply_fixture(root: &Path) -> (PathBuf, PersonaMaterializeArgs) {
         fs::create_dir_all(root).unwrap();
@@ -608,7 +584,7 @@ mod tests {
 
     #[test]
     fn reviewed_receipt_applies_idempotently_and_projects_its_trigger() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, args) = apply_fixture(temp.path());
 
@@ -663,7 +639,7 @@ mod tests {
 
     #[test]
     fn concurrent_identical_apply_waits_for_failed_transaction_then_succeeds() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, first_args) = apply_fixture(temp.path());
             let second_args = PersonaMaterializeArgs {
@@ -732,7 +708,7 @@ mod tests {
 
     #[test]
     fn apply_requires_an_explicit_project_manifest() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (_, args) = apply_fixture(temp.path());
 
@@ -748,7 +724,7 @@ mod tests {
 
     #[test]
     fn apply_rejects_relative_output_root_traversal_before_materialization() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, mut args) = apply_fixture(temp.path());
             args.output_root = PathBuf::from("../outside");
@@ -766,7 +742,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn apply_rejects_relative_output_root_symlink_escape() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             use std::os::unix::fs::symlink;
 
             let temp = tempfile::tempdir().unwrap();
@@ -787,7 +763,7 @@ mod tests {
 
     #[test]
     fn activation_failure_rolls_back_the_local_package_install() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, args) = apply_fixture(temp.path());
             let ledger = temp.path().join(".harn/personas/activations.json");
@@ -822,7 +798,7 @@ mod tests {
 
     #[test]
     fn verification_failure_restores_the_exact_prior_activation() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, args) = apply_fixture(temp.path());
             let first = apply_reviewed_persona(Some(&manifest), &args).await;
@@ -861,7 +837,7 @@ mod tests {
 
     #[test]
     fn activation_rollback_refuses_to_clobber_a_newer_record() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, args) = apply_fixture(temp.path());
             let applied = apply_reviewed_persona(Some(&manifest), &args).await;
@@ -900,7 +876,7 @@ mod tests {
 
     #[test]
     fn activation_mutation_returns_the_atomic_replaced_record() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, args) = apply_fixture(temp.path());
             let applied = apply_reviewed_persona(Some(&manifest), &args).await;
@@ -953,7 +929,7 @@ mod tests {
 
     #[test]
     fn trigger_verification_requires_guarded_complete_package_projection() {
-        block_on_cli_stack_async(|| async {
+        crate::tests::common::async_runtime::block_on_cli_stack(|| async {
             let temp = tempfile::tempdir().unwrap();
             let (manifest, args) = apply_fixture(temp.path());
             let applied = apply_reviewed_persona(Some(&manifest), &args).await;

@@ -154,6 +154,13 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = "package(harn-cli) and kind(lib)"
 leak-timeout = { period = "10s", result = "pass" }
 
+# Under full workspace fan-out, this in-memory verdict test has intermittently
+# outlived nextest's captured-output grace period despite owning no subprocess
+# or background worker. Keep leak detection strict for the rest of hostlib.
+[[profile.default.overrides]]
+filter = "package(harn-hostlib) and test(verdict::tests::no_active_scope_is_rejected)"
+leak-timeout = { period = "10s", result = "pass" }
+
 [[profile.default.overrides]]
 filter = "package(harn-cli) and kind(test)"
 test-group = "harn-subprocess"
@@ -178,6 +185,10 @@ test-group = "harn-nested-cargo"
 
 [[profile.ci.overrides]]
 filter = "package(harn-cli) and kind(lib)"
+leak-timeout = { period = "10s", result = "pass" }
+
+[[profile.ci.overrides]]
+filter = "package(harn-hostlib) and test(verdict::tests::no_active_scope_is_rejected)"
 leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.ci.overrides]]
@@ -227,6 +238,10 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
 [[profile.flake-detection.overrides]]
 filter = "package(harn-cli) and kind(lib)"
+leak-timeout = { period = "10s", result = "pass" }
+
+[[profile.flake-detection.overrides]]
+filter = "package(harn-hostlib) and test(verdict::tests::no_active_scope_is_rejected)"
 leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.flake-detection.overrides]]

@@ -469,7 +469,11 @@ fn run_scripted(calls, opts = {}) {
               } else {
                 "unknown"
               }
-              return result + {mutation_status: mutation_status}
+              const product_error = (args?.fail_noop ?? false)
+                || (args?.fail_applied ?? false)
+                || (args?.fail_return ?? false)
+                || (args?.diagnostics ?? false)
+              return result + {mutation_status: mutation_status, product_error: product_error}
             },
           }
             + opts,

@@ -25,8 +25,11 @@ harn_internal_executable_path_command() {
 harn_debug_binary_path() {
   local target_dir="${CARGO_TARGET_DIR:-}"
   if [[ -z "$target_dir" ]]; then
-    echo "error: CARGO_TARGET_DIR is required to locate a no-build worktree harn binary" >&2
-    return 1
+    # Cargo metadata resolves layered target-dir configuration without
+    # compiling anything. This keeps --no-build source checks usable in a
+    # freshly entered worktree where setup wrote .cargo/config.toml but the
+    # parent shell did not export CARGO_TARGET_DIR.
+    target_dir="$(harn_cargo_metadata_target_dir)" || return $?
   fi
   printf '%s/debug/harn%s\n' "$target_dir" "$(harn_debug_bin_suffix)"
 }
