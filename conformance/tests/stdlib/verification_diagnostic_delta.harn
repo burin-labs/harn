@@ -19,6 +19,17 @@ pipeline test(task) {
   assert_eq(same.status, "unchanged")
   assert_eq(same.progress_credit, false)
   assert_eq(same.same_signature_set, true)
+  const different_path = verification_diagnostic_delta(
+    prior_shifted,
+    {
+      diagnostics: [
+        {path: "src/b.tx", line: 99, column: 7, code: "E1", message: "error E1: missing Foo"},
+      ],
+    },
+    {row: {diagnosticDelta: {include_path: true}}},
+  )
+  assert_eq(different_path.status, "advanced")
+  assert_eq(different_path.progress_credit, true)
   const location_sensitive = verification_diagnostic_delta(
     prior_shifted,
     current_shifted,

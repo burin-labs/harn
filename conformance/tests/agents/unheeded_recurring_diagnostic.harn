@@ -1,0 +1,152 @@
+import {
+  DiagnosticCategories,
+  RecurringDiagnosticState,
+  agent_unheeded_recurring_diagnostic,
+} from "std/agent/stall"
+
+const CATEGORIES: DiagnosticCategories = {
+  codes: {"missing-symbol": "resolution"},
+  patterns: [
+    {pattern: "expected (type expression|';')", category: "syntax"},
+    {pattern: "type mismatch", category: "type"},
+  ],
+}
+
+fn observe(previous: RecurringDiagnosticState?, diagnostics: list, attempt: int) {
+  return agent_unheeded_recurring_diagnostic(
+    previous,
+    {diagnostics: diagnostics, diagnostic_count: len(diagnostics)},
+    attempt,
+    CATEGORIES,
+  )
+}
+
+pipeline test(task) {
+  const syntax_first = observe(
+    nil,
+    [
+      {
+        path: "src/schema.zig",
+        line: 117,
+        column: 9,
+        severity: "error",
+        message: "expected ';' after statement",
+      },
+    ],
+    4,
+  )
+  assert_eq(syntax_first.signal, nil)
+  const syntax_first_state = syntax_first.state
+  guard syntax_first_state != nil else {
+    throw "first syntax observation must retain state"
+  }
+  assert_eq(syntax_first_state.streak, 1)
+  const syntax_second = observe(
+    syntax_first_state,
+    [
+      {
+        path: "src/schema.zig",
+        line: 126,
+        column: 9,
+        severity: "error",
+        message: "expected ';' after statement",
+      },
+    ],
+    5,
+  )
+  const syntax_signal = syntax_second.signal
+  guard syntax_signal != nil else {
+    throw "second unchanged syntax observation must fire"
+  }
+  assert_eq(syntax_signal.category, "syntax")
+  assert_eq(syntax_signal.streak, 2)
+  assert_eq(syntax_signal.first_attempt, 4)
+  assert_eq(syntax_signal.last_attempt, 5)
+  assert_eq(syntax_signal.location, "src/schema.zig")
+  assert_eq(syntax_signal.message, "expected ';' after statement")
+  assert_eq(syntax_signal.signature, "src/schema.zig expected ';' after statement")
+  const resolution_first = observe(
+    nil,
+    [{path: "src/main.rs", line: 8, code: "missing-symbol", message: "cannot find symbol Widget"}],
+    1,
+  )
+  const resolution_first_state = resolution_first.state
+  guard resolution_first_state != nil else {
+    throw "first resolution observation must retain state"
+  }
+  const resolution_second = observe(
+    resolution_first_state,
+    [{path: "src/main.rs", line: 9, code: "missing-symbol", message: "cannot find symbol Widget"}],
+    2,
+  )
+  const resolution_signal = resolution_second.signal
+  guard resolution_signal != nil else {
+    throw "second unchanged resolution observation must fire"
+  }
+  assert_eq(resolution_signal.category, "resolution")
+  const unknown_first = observe(
+    nil,
+    [{path: "src/main.rs", line: 1, message: "compiler said nope"}],
+    1,
+  )
+  const unknown_first_state = unknown_first.state
+  guard unknown_first_state != nil else {
+    throw "first unknown observation must retain state"
+  }
+  const unknown_second = observe(
+    unknown_first_state,
+    [{path: "src/main.rs", line: 2, message: "compiler said nope"}],
+    2,
+  )
+  const unknown_signal = unknown_second.signal
+  guard unknown_signal != nil else {
+    throw "second unchanged unknown observation must fire"
+  }
+  assert_eq(unknown_signal.category, "unknown")
+  const falling_first = observe(
+    nil,
+    [
+      {path: "src/main.rs", line: 1, message: "same error"},
+      {path: "src/main.rs", line: 2, message: "same error"},
+    ],
+    1,
+  )
+  const falling_first_state = falling_first.state
+  guard falling_first_state != nil else {
+    throw "first multi-diagnostic observation must retain state"
+  }
+  const falling_second = observe(
+    falling_first_state,
+    [{path: "src/main.rs", line: 3, message: "same error"}],
+    2,
+  )
+  assert_eq(falling_second.signal, nil)
+  const falling_second_state = falling_second.state
+  guard falling_second_state != nil else {
+    throw "falling diagnostic set must retain new state"
+  }
+  assert_eq(falling_second_state.streak, 1)
+  const changing_second = observe(
+    syntax_first_state,
+    [{path: "src/schema.zig", line: 126, message: "expected type expression"}],
+    5,
+  )
+  assert_eq(changing_second.signal, nil)
+  const changing_second_state = changing_second.state
+  guard changing_second_state != nil else {
+    throw "changed diagnostic must retain new state"
+  }
+  assert_eq(changing_second_state.streak, 1)
+  const advisory = agent_unheeded_recurring_diagnostic(
+    syntax_first_state,
+    {
+      diagnostics: [{path: "src/schema.zig", line: 126, message: "expected ';' after statement"}],
+      feedsGates: false,
+    },
+    5,
+    CATEGORIES,
+  )
+  assert_eq(advisory.state, nil)
+  assert_eq(advisory.signal, nil)
+  __io_println("unheeded recurring diagnostic ok")
+}
