@@ -234,6 +234,30 @@ async fn collect_sse_body_after_progress(
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
+fn serve_mcp_stdio_rejects_stdout_observability_without_writing_stdout() {
+    let output = harn_e2e_command()
+        .args(["serve", "mcp", "--obs", "stdout", "missing.harn"])
+        .output()
+        .expect("run harn serve mcp");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        output.stdout.is_empty(),
+        "stdout is reserved for MCP protocol frames: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "`harn serve mcp --transport stdio` cannot use `--obs stdout`: stdout is reserved for \
+             JSON-RPC protocol frames; use `--obs stderr`, `--obs otel`, or `--obs off`"
+        ),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
 fn serve_mcp_stdio_lists_calls_and_cancels_exported_functions() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);

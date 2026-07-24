@@ -2850,6 +2850,11 @@ derived from Harn type annotations. With `--transport http`, the server also
 supports Streamable HTTP on `--path` plus the legacy SSE compatibility
 endpoints `--sse-path` and `--messages-path`.
 
+ACP and MCP stdio transports reserve stdout for JSON-RPC frames, so they reject
+`--obs stdout`. Use `--obs stderr`, `--obs otel`, or `--obs off` instead.
+Stdout observability remains available with MCP HTTP and ACP WebSocket, where
+stdout is not the protocol transport.
+
 For scripts that author the MCP surface through the registration
 builtins (`mcp_tools(registry)`, `mcp_resource(...)`, `mcp_prompt(...)`)
 instead of `pub fn` exports, `harn serve mcp` auto-detects that mode,
