@@ -7,7 +7,10 @@ use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
 pub(super) mod approval_denials;
 pub(super) mod denials;
+mod handler_result;
 pub(super) mod hash;
+
+use handler_result::agent_tool_handler_result_text;
 
 pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> serde_json::Value {
     denials::denied_tool_result(tool_name, reason)
@@ -287,7 +290,9 @@ fn extract_missing_params(reason: &str) -> Option<String> {
 }
 
 pub(super) fn render_tool_result(value: &serde_json::Value) -> String {
-    if let Some(text) = value.as_str() {
+    if let Some(text) = agent_tool_handler_result_text(value) {
+        text.to_string()
+    } else if let Some(text) = value.as_str() {
         text.to_string()
     } else if value.is_null() {
         "(no output)".to_string()
@@ -339,18 +344,13 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
 /// Coerce a Harn tool handler's return value into the tool-result payload.
 ///
 /// Handler returns are normally rendered to their display string, because tool
-/// results are text the model reads. But a return that carries a screenshot
-/// (the computer tool's `{ok, text, screenshot: {base64, scale_factor, ...}}`)
-/// MUST keep its structure: display-stringifying it buries the base64 in an
-/// unrecoverable Harn-display string, so the tool-result recorder can never lift
-/// the screenshot into an image content block and the model never sees the
-/// screen (it just gets ~800 KB of base64 as text). When the return carries a
-/// screenshot we keep it as structured JSON — the recorder extracts the image
-/// and the base64 is elided from the rendered TEXT separately. Every other
-/// return is byte-identical to the previous `String(display())` behavior.
+/// results are text the model reads. Preserve structure only for the explicit
+/// `harn.agent_tool_handler_result.v1` envelope and screenshot-bearing computer
+/// results. Every other return keeps its historical `String(display())`
+/// behavior.
 pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
     let json = crate::llm::vm_value_to_json(val);
-    if json_carries_screenshot(&json) {
+    if agent_tool_handler_result_text(&json).is_some() || json_carries_screenshot(&json) {
         json
     } else {
         serde_json::Value::String(val.display())

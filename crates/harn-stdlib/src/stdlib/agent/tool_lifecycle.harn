@@ -14,6 +14,27 @@ pub type AgentToolLifecycleErrorCategory = "schema_validation" \
 
 pub type AgentToolMutationStatus = "applied" | "not_applied" | "unknown"
 
+/**
+ * Explicit handler return for tools that need machine-readable facts beside the
+ * model-visible text. The dispatcher preserves `data` on `result` and renders
+ * only `text`; ordinary dict returns keep their historical display rendering.
+ */
+pub type AgentToolHandlerResult<T> = {
+  schema: "harn.agent_tool_handler_result.v1",
+  text: string,
+  data: T,
+}
+
+/**
+ * Pair model-visible tool feedback with typed producer facts.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_handler_result<T>(text: string, data: T) -> AgentToolHandlerResult<T> {
+  return {schema: "harn.agent_tool_handler_result.v1", text: text, data: data}
+}
+
 const TOOL_LIFECYCLE_ERROR_CATEGORIES = [
   "schema_validation",
   "tool_error",
