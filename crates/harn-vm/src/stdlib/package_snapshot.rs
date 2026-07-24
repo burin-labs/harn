@@ -128,6 +128,13 @@ mod tests {
         GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
     };
     use std::fs::{self, File};
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+
+    const HELPER_MODE_ENV: &str = "HARN_PACKAGE_SNAPSHOT_LEASE_HELPER_MODE";
+    const HELPER_ROOT_ENV: &str = "HARN_PACKAGE_SNAPSHOT_LEASE_HELPER_ROOT";
+    const HELPER_TEST: &str =
+        "stdlib::package_snapshot::tests::package_snapshot_lease_lifecycle_helper";
 
     fn publish_fixture(root: &std::path::Path) -> PathBuf {
         const GENERATION: &str = "reset_lease_generation";
@@ -160,57 +167,139 @@ mod tests {
         )
     }
 
+    fn spawn_helper(
+        root: &std::path::Path,
+        mode: &str,
+    ) -> (Child, ChildStdin, BufReader<ChildStdout>) {
+        // On macOS, flock leases survive fork until the child execs and applies
+        // CLOEXEC. A concurrent Command::spawn elsewhere in the suite can
+        // therefore inherit a lease owned by this test process just before the
+        // VM drops it. Keep ownership in a helper process so unrelated suite
+        // children cannot inherit the descriptor; pipe checkpoints keep the
+        // helper alive while the parent verifies each lifecycle boundary.
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(HELPER_TEST)
+            .arg("--nocapture")
+            .env(HELPER_MODE_ENV, mode)
+            .env(HELPER_ROOT_ENV, root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        (child, stdin, stdout)
+    }
+
+    fn wait_for_helper(stdout: &mut impl BufRead, expected: &str) {
+        let mut line = String::new();
+        loop {
+            let read = stdout.read_line(&mut line).unwrap();
+            assert_ne!(
+                read, 0,
+                "package snapshot lease helper exited before {expected:?}"
+            );
+            if line.trim() == expected {
+                return;
+            }
+            line.clear();
+        }
+    }
+
+    fn continue_helper(stdin: &mut impl Write) {
+        stdin.write_all(b"continue\n").unwrap();
+        stdin.flush().unwrap();
+    }
+
+    fn helper_checkpoint(marker: &str) {
+        println!("{marker}");
+        std::io::stdout().flush().unwrap();
+
+        let mut command = String::new();
+        std::io::stdin().read_line(&mut command).unwrap();
+        assert_eq!(command.trim(), "continue");
+    }
+
     #[tokio::test(flavor = "current_thread")]
-    async fn another_execution_reset_cannot_release_live_snapshot_lease() {
-        let temp = tempfile::tempdir().unwrap();
-        let lease_path = publish_fixture(temp.path());
-        let chunk = crate::compile_source(&open_source(temp.path())).unwrap();
+    async fn package_snapshot_lease_lifecycle_helper() {
+        let Ok(mode) = std::env::var(HELPER_MODE_ENV) else {
+            return;
+        };
+        let root = PathBuf::from(std::env::var_os(HELPER_ROOT_ENV).unwrap());
         let mut owner = Vm::new();
         crate::register_vm_stdlib(&mut owner);
-        let receipt = owner.execute(&chunk).await.unwrap();
-        let VmValue::Dict(_) = receipt else {
-            panic!("package snapshot open must return a receipt");
-        };
 
+        match mode.as_str() {
+            "drop" => {
+                let chunk = crate::compile_source(&open_source(&root)).unwrap();
+                let receipt = owner.execute(&chunk).await.unwrap();
+                assert!(matches!(receipt, VmValue::Dict(_)));
+                helper_checkpoint("snapshot-open");
+
+                std::thread::spawn(crate::reset_thread_local_state)
+                    .join()
+                    .unwrap();
+                helper_checkpoint("unrelated-reset");
+
+                drop(owner);
+                helper_checkpoint("owner-dropped");
+            }
+            "close" => {
+                let root = serde_json::to_string(&root.to_string_lossy()).unwrap();
+                let chunk = crate::compile_source(&format!(
+                    "fn main(harness: Harness) {{\n  const snapshot = package_snapshot_open({root})\n  return package_snapshot_close(snapshot.handle)\n}}\nmain(harness)"
+                ))
+                .unwrap();
+                assert!(matches!(
+                    owner.execute(&chunk).await.unwrap(),
+                    VmValue::Bool(true)
+                ));
+                helper_checkpoint("snapshot-closed");
+            }
+            other => panic!("unknown package snapshot lease helper mode {other:?}"),
+        }
+    }
+
+    #[test]
+    fn another_execution_reset_cannot_release_live_snapshot_lease() {
+        let temp = tempfile::tempdir().unwrap();
+        let lease_path = publish_fixture(temp.path());
+        let (mut helper, mut helper_stdin, mut helper_stdout) = spawn_helper(temp.path(), "drop");
         let lease = File::open(&lease_path).unwrap();
+        wait_for_helper(&mut helper_stdout, "snapshot-open");
         assert!(
             lease.try_lock().is_err(),
             "the open snapshot must hold its generation lease"
         );
 
-        std::thread::spawn(crate::reset_thread_local_state)
-            .join()
-            .unwrap();
+        continue_helper(&mut helper_stdin);
+        wait_for_helper(&mut helper_stdout, "unrelated-reset");
         assert!(
             lease.try_lock().is_err(),
             "another execution reset must not release the owner's live lease"
         );
 
-        drop(owner);
+        continue_helper(&mut helper_stdin);
+        wait_for_helper(&mut helper_stdout, "owner-dropped");
         lease
             .try_lock()
             .expect("dropping the owning execution must release its abandoned reader lease");
+        continue_helper(&mut helper_stdin);
+        assert!(helper.wait().unwrap().success());
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn explicit_close_releases_owning_execution_lease() {
+    #[test]
+    fn explicit_close_releases_owning_execution_lease() {
         let temp = tempfile::tempdir().unwrap();
         let lease_path = publish_fixture(temp.path());
-        let root = serde_json::to_string(&temp.path().to_string_lossy()).unwrap();
-        let chunk = crate::compile_source(&format!(
-            "fn main(harness: Harness) {{\n  const snapshot = package_snapshot_open({root})\n  return package_snapshot_close(snapshot.handle)\n}}\nmain(harness)"
-        ))
-        .unwrap();
-        let mut owner = Vm::new();
-        crate::register_vm_stdlib(&mut owner);
-
-        assert!(matches!(
-            owner.execute(&chunk).await.unwrap(),
-            VmValue::Bool(true)
-        ));
+        let (mut helper, mut helper_stdin, mut helper_stdout) = spawn_helper(temp.path(), "close");
+        wait_for_helper(&mut helper_stdout, "snapshot-closed");
         let lease = File::open(lease_path).unwrap();
         lease
             .try_lock()
             .expect("explicit close must release the owning execution's reader lease");
+        continue_helper(&mut helper_stdin);
+        assert!(helper.wait().unwrap().success());
     }
 }
