@@ -1092,9 +1092,18 @@ pub(crate) fn session_closed_env(
     let Some(profile) = current_session_profile() else {
         return Ok(None);
     };
+    let workspace_defaults: BTreeMap<String, String> =
+        crate::process_sandbox::active_workspace_process_env()
+            .into_iter()
+            .collect();
     let resolved = crate::security::resolve_env(
         &profile,
-        &|name| std::env::var(name).ok(),
+        &|name| {
+            workspace_defaults
+                .get(name)
+                .cloned()
+                .or_else(|| std::env::var(name).ok())
+        },
         &resolve_grant_secret,
     )
     .map_err(|error| {
@@ -1103,6 +1112,9 @@ pub(crate) fn session_closed_env(
         ))))
     })?;
     let mut env: BTreeMap<String, String> = resolved;
+    for (key, value) in workspace_defaults {
+        env.entry(key).or_insert(value);
+    }
     env.extend(overlay);
     Ok(Some(env.into_iter().collect()))
 }

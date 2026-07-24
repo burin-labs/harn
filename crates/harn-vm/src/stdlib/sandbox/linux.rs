@@ -16,10 +16,11 @@ use super::{
     policy_allows_capability, policy_allows_network, policy_allows_workspace_write,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
-    process_sandbox_policy_write_roots, process_sandbox_readonly_roots, process_sandbox_roots,
-    sandbox_rejection, warn_once, PrepareOutcome, SandboxBackend, SandboxFallback,
+    process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
+    process_sandbox_roots, sandbox_rejection, warn_once, PrepareOutcome, SandboxBackend,
+    SandboxFallback,
 };
-use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
 use crate::value::VmError;
 
 pub(super) struct Backend;
@@ -184,6 +185,9 @@ fn landlock_profile(
     for root in process_sandbox_developer_toolchain_read_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), true)?;
     }
+    for root in developer_toolchain_system_read_roots(policy) {
+        push_rule(&mut profile, root, read_only_access(), true)?;
+    }
     let workspace_access = workspace_access(policy);
     for root in process_sandbox_roots(policy) {
         push_rule(&mut profile, root, workspace_access, false)?;
@@ -231,6 +235,18 @@ fn system_read_roots() -> Vec<PathBuf> {
     .into_iter()
     .map(PathBuf::from)
     .collect()
+}
+
+fn developer_toolchain_system_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if process_sandbox_presets(policy).contains(&ProcessSandboxPreset::DeveloperToolchains) {
+        // Linux vendor toolchains commonly live below /opt. In particular,
+        // hosted runners may expose /usr/bin/go as a symlink into /opt; Landlock
+        // evaluates the resolved target and therefore needs this read/execute
+        // root even though PATH reports a system-runtime path.
+        vec![PathBuf::from("/opt")]
+    } else {
+        Vec::new()
+    }
 }
 
 fn standard_device_rules() -> Vec<(PathBuf, u64)> {
@@ -1100,6 +1116,30 @@ mod tests {
             0,
             "developer-toolchain Landlock rules use read-only access bits"
         );
+    }
+
+    #[test]
+    fn developer_toolchains_admit_linux_vendor_installations() {
+        let enabled = CapabilityPolicy {
+            process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![ProcessSandboxPreset::DeveloperToolchains]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            developer_toolchain_system_read_roots(&enabled),
+            vec![PathBuf::from("/opt")]
+        );
+
+        let disabled = CapabilityPolicy {
+            process_sandbox: crate::orchestration::ProcessSandboxPolicy {
+                presets: Some(Vec::new()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(developer_toolchain_system_read_roots(&disabled).is_empty());
     }
 
     #[test]

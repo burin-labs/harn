@@ -216,8 +216,8 @@ fn default_run_workspace_root_prefers_manifest_root_then_cwd() {
 #[test]
 fn default_run_policy_only_raises_the_requested_side_effect_ceiling() {
     let workspace = Path::new("/tmp/workspace");
-    let default = default_run_capability_policy(workspace, &[], &[], false);
-    let network = default_run_capability_policy(workspace, &[], &[], true);
+    let default = default_run_capability_policy(workspace, &[], &[], &[], &[], false);
+    let network = default_run_capability_policy(workspace, &[], &[], &[], &[], true);
 
     assert_eq!(default.side_effect_level.as_deref(), Some("process_exec"));
     assert_eq!(network.side_effect_level.as_deref(), Some("network"));
@@ -481,7 +481,14 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
     harn_vm::reset_thread_local_state();
     let workspace = Path::new("/tmp/workspace");
     let grant = PathBuf::from("/tmp/out/coordination");
-    let policy = default_run_capability_policy(workspace, std::slice::from_ref(&grant), &[], false);
+    let policy = default_run_capability_policy(
+        workspace,
+        std::slice::from_ref(&grant),
+        &[],
+        &[],
+        &[],
+        false,
+    );
 
     assert_eq!(policy.side_effect_level.as_deref(), Some("process_exec"));
     assert_eq!(
@@ -530,7 +537,7 @@ fn write_grant_keeps_process_and_egress_defaults_armed() {
 
 #[cfg(all(feature = "hostlib", unix))]
 #[tokio::test]
-async fn execute_run_allows_command_run_read_from_read_only_root() {
+async fn execute_run_allows_command_run_read_from_process_only_root() {
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path().join("project");
@@ -573,13 +580,20 @@ pipeline main() {{
         CliLlmMockMode::Off,
         None,
         RunProfileOptions::default(),
-        RunSandboxOptions::default().with_read_only_roots(vec![read_only_root.clone()]),
+        RunSandboxOptions::default().with_process_read_roots(vec![read_only_root.clone()]),
         HarnpackRunOptions::default(),
     )
     .await;
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "payload");
+    assert!(
+        outcome
+            .stderr
+            .contains("sandbox active; extra subprocess read root:"),
+        "process-only grant should be disclosed: {}",
+        outcome.stderr
+    );
     harn_vm::reset_thread_local_state();
 }
 

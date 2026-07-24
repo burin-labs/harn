@@ -71,6 +71,22 @@ pub(crate) struct RunArgs {
         conflicts_with = "no_sandbox"
     )]
     pub write_root: Vec<PathBuf>,
+    /// Extra subprocess-only read roots. Repeatable; Harn filesystem builtins
+    /// do not gain access to these paths.
+    #[arg(
+        long = "sandbox-read-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub sandbox_read_root: Vec<PathBuf>,
+    /// Extra subprocess-only write roots. Repeatable; Harn filesystem builtins
+    /// do not gain access to these paths.
+    #[arg(
+        long = "sandbox-write-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub sandbox_write_root: Vec<PathBuf>,
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,

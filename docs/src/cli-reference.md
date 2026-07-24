@@ -22,6 +22,8 @@ harn run --approve-risky git.push release.harn
 harn run --no-sandbox <file.harn>
 harn run --write-root /path/to/output main.harn
 harn run --read-only-root /path/to/other-repo main.harn
+harn run --sandbox-write-root /path/to/tool-cache main.harn
+harn run --sandbox-read-root /path/to/sdk main.harn
 harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
 harn run --attest <file.harn>
@@ -47,6 +49,8 @@ harn run --resume .harn/workers/worker_...json
 | `--allow-process-network` | Permit spawned commands to open network sockets while retaining the worktree filesystem/process sandbox |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
+| `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |
+| `--sandbox-read-root <path>` | Let spawned subprocesses read an extra root without granting Harn filesystem builtins access |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |

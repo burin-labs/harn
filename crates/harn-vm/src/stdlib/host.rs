@@ -1292,15 +1292,10 @@ pub(crate) fn build_sandboxed_command(
             cmd.env_remove(key);
         }
     }
-    // Point the child's temp dir at a sandbox-writable, workspace-local
-    // location so compiler linkers (rustc/cc/ld, Go, Swift, …) and other
-    // toolchains that honor TMPDIR/TMP/TEMP don't false-fail trying to write
-    // intermediates to the unwritable system /tmp. A key the caller set (via
-    // `env`) or explicitly stripped (via `env_remove`) is left as the caller
-    // intended; only keys the caller did not touch receive the overlay. No-op
-    // when the active profile is unrestricted or no writable workspace root is
-    // available.
-    for (key, value) in crate::process_sandbox::active_workspace_tmpdir_env() {
+    // Give the child workspace-local temp, home, and toolchain-cache paths. A
+    // key the caller set (via `env`) or explicitly stripped (via `env_remove`)
+    // is left as intended; only untouched keys receive the overlay.
+    for (key, value) in crate::process_sandbox::active_workspace_process_env() {
         if caller_env_keys.contains(&key) {
             continue;
         }
