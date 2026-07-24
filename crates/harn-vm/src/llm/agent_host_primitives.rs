@@ -15,6 +15,7 @@ mod denial_results;
 mod dispatch_policy;
 mod host_permission;
 mod side_effect_ceiling;
+mod structured_tool_result;
 mod tool_catalog;
 use denial_results::agent_primitive_denied_tool;
 use dispatch_policy::{enforce_dispatch_policies, tool_denial_from_policy};
@@ -536,68 +537,6 @@ fn agent_primitive_undispatched_tool(
         obj.insert("skip_reason".to_string(), serde_json::json!(reason));
     }
     result
-}
-
-fn structured_tool_mutation_status(result: &serde_json::Value) -> &'static str {
-    let status = result
-        .get("mutation_status")
-        .and_then(serde_json::Value::as_str);
-    match status {
-        Some("applied") => crate::agent_events::ToolMutationStatus::Applied.as_str(),
-        Some("not_applied") => crate::agent_events::ToolMutationStatus::NotApplied.as_str(),
-        _ => crate::agent_events::ToolMutationStatus::Unknown.as_str(),
-    }
-}
-
-fn structured_tool_changed_paths(result: &serde_json::Value) -> Option<Vec<&str>> {
-    let paths = result
-        .get("changed_paths")
-        .and_then(serde_json::Value::as_array)?
-        .iter()
-        .filter_map(serde_json::Value::as_str)
-        .filter(|path| !path.trim().is_empty())
-        .collect();
-    Some(paths)
-}
-
-#[cfg(test)]
-mod structured_tool_mutation_tests {
-    use super::{structured_tool_changed_paths, structured_tool_mutation_status};
-
-    #[test]
-    fn lifts_only_declared_mutation_outcomes() {
-        assert_eq!(
-            structured_tool_mutation_status(&serde_json::json!({"mutation_status": "applied"})),
-            "applied"
-        );
-        assert_eq!(
-            structured_tool_mutation_status(&serde_json::json!({"mutation_status": "not_applied"})),
-            "not_applied"
-        );
-        for result in [
-            serde_json::json!({}),
-            serde_json::json!({"mutation_status": "maybe"}),
-            serde_json::json!({"mutation_status": 1}),
-            serde_json::json!({"mutationStatus": "applied"}),
-        ] {
-            assert_eq!(structured_tool_mutation_status(&result), "unknown");
-        }
-    }
-
-    #[test]
-    fn lifts_only_nonempty_string_paths() {
-        let result = serde_json::json!({
-            "changed_paths": ["src/lib.rs", "", 7, "tests/lib.rs"]
-        });
-        assert_eq!(
-            structured_tool_changed_paths(&result),
-            Some(vec!["src/lib.rs", "tests/lib.rs"])
-        );
-        assert!(structured_tool_changed_paths(&serde_json::json!({
-            "changed_paths": "src/lib.rs"
-        }))
-        .is_none());
-    }
 }
 
 /// Synthesize placeholder tool_results for calls that were persisted as an
@@ -1779,8 +1718,8 @@ pub(super) async fn host_agent_dispatch_tool_call(
 
     match outcome.result {
         Ok(raw_result) => {
-            let mutation_status = structured_tool_mutation_status(&raw_result);
-            let changed_paths = structured_tool_changed_paths(&raw_result);
+            let mutation_status = structured_tool_result::mutation_status(&raw_result);
+            let changed_paths = structured_tool_result::changed_paths(&raw_result);
             // Render from a base64-elided copy so a screenshot (or any image)
             // result does not swamp the transcript text — the full image payload
             // still travels to the model as an image content block via the

@@ -12,7 +12,12 @@ pipeline main() {
       handler: { _ ->
         return agent_tool_handler_result(
           "Edited src/main.harn\n\nDiagnostics wording may change.",
-          {edit_status: "applied_still_failing", diagnostics_error_count: 2},
+          {
+            edit_status: "applied_still_failing",
+            diagnostics_error_count: 2,
+            mutation_status: "applied",
+            changed_paths: ["src/main.harn"],
+          },
         )
       },
     },
@@ -25,4 +30,6 @@ pipeline main() {
   __io_println(dispatched.result.data.edit_status)
   __io_println(dispatched.result.data.diagnostics_error_count)
   __io_println(!dispatched.observation.contains("diagnostics_error_count"))
+  __io_println(dispatched.mutation_status)
+  __io_println(dispatched.changed_paths[0])
 }
