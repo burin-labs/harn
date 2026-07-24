@@ -1523,26 +1523,48 @@ emits JSON with native/text/disabled fallback classification.
 harn provider tool-probe ollama --model devstral-small-2
 harn provider tool-probe llamacpp --model local-qwen3.6 --mode non-streaming
 harn provider tool-probe dashscope --model qwen3.6-35b-a3b --mode non-streaming --repeat 5
+harn provider tool-probe openai --model gpt-5.4-mini --tool-format json
 ```
 
 Use `--response-fixture` to classify a saved provider response without making a
 network request. Use `--repeat` for live reliability checks; repeated summaries
 only pass when every attempted probe for that mode succeeds. `harn local switch`
-can consume the JSON with `--probe-result`.
+can consume the JSON with `--probe-result`. `--tool-format native|json|text`
+forces the live emission contract and exact parser; it does not enable the
+permissive `adaptive` parser.
+
+## harn provider tool-calibrate
+
+Run the fixed live micro-case battery across a route × format matrix and write a
+versioned tool-format fitness snapshot. Records are keyed by provider, model,
+format, and case and include pass rate, classification histogram, latency, and
+token totals. Route recommendations select the highest pass rate, then lower
+latency and token use.
+
+```bash
+harn provider tool-calibrate \
+  --route openai:gpt-5.4-mini \
+  --route ollama:qwen3:8b \
+  --repeat 5 \
+  --output .harn/tool-format-fitness.json
+```
+
+Set `HARN_TOOL_FORMAT_FITNESS_PATH` before starting Harn to use a reviewed
+snapshot. Harn reads it once per process, so changing the file during an eval
+cannot change that eval's tool format. Explicit alias pins still win; without a
+measured recommendation Harn falls back to the capability catalog and then the
+global default. Snapshot recommendations can only select `native`, `json`, or
+`text`, never `adaptive`.
 
 ## harn provider tool-scorecard
 
 Aggregate one or more `harn provider tool-probe --json` reports into a stable
 route scorecard. Fixture input is offline-only: the command reads saved probe
-reports and does not call providers. The JSON report uses `schema_version: 2`
+reports and does not call providers. The JSON report uses `schema_version: 8`
 and includes route-level `catalog_claim`, `catalog_mismatches`, and
-`suggested_catalog_updates` fields so catalog drift can be reviewed from
-evidence instead of incident notes. Suggested updates are advisory and are only
-emitted for positive observed tool-call evidence, such as a route that reliably
-produces native or text-channel tool calls. Because scorecard aggregation only
-observes the text channel, not the exact text grammar, text-channel preferred
-format suggestions use Harn's fenced-JSON `json` default unless the catalog
-already pins a compatible `text` or `json` format.
+`suggested_catalog_updates` fields plus a `fitness` store with exact
+provider/model/format/case observations. Suggested catalog updates remain
+advisory and are only emitted for positive observed tool-call evidence.
 
 ```bash
 harn provider tool-scorecard --tool-probe-report ./probe.json

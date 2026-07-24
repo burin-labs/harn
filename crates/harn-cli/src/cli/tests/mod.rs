@@ -6,7 +6,8 @@ pub(crate) use std::path::PathBuf;
 pub(crate) use std::time::Duration as StdDuration;
 
 pub(crate) use super::provider::{
-    ProviderDispatchAuditVariantArg, ProviderToolProbeCaseArg, ProviderToolProbeModeArg,
+    ProviderDispatchAuditVariantArg, ProviderToolProbeCaseArg, ProviderToolProbeFormatArg,
+    ProviderToolProbeModeArg,
 };
 pub(crate) use super::{
     CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
@@ -28,6 +29,7 @@ mod parse_models;
 mod parse_orchestration;
 mod parse_packaging;
 mod parse_provider_dispatch_audit;
+mod parse_provider_tool_calibrate;
 mod parse_provider_tool_probe_audit;
 mod parse_providers;
 mod parse_serve;

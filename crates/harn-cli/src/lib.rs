@@ -672,6 +672,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             }
             ProviderCommand::Probe(probe) => commands::provider::run_provider_probe(probe).await,
             ProviderCommand::ToolProbe(args) => commands::provider::run_tool_probe(args).await,
+            ProviderCommand::ToolCalibrate(args) => commands::run_tool_calibrate(args).await,
             ProviderCommand::ToolProbeAudit(args) => commands::providers::run_audit(args),
             ProviderCommand::ToolScorecard(tool_scorecard) => {
                 commands::provider::run_provider_tool_scorecard(tool_scorecard).await;

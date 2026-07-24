@@ -602,7 +602,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       runner: "provider_tool_probe",
       probe_case: "single_tool_call",
       modes: ["non-streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
     {
@@ -613,7 +613,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       runner: "provider_tool_probe",
       probe_case: "single_tool_call",
       modes: ["streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
     {
@@ -624,7 +624,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       runner: "provider_tool_probe",
       probe_case: "parallel_tool_calls",
       modes: ["non-streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
     {
@@ -635,7 +635,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       runner: "provider_tool_probe",
       probe_case: "tool_result_followup",
       modes: ["non-streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
     {
@@ -676,7 +676,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       runner: "provider_tool_probe",
       probe_case: "large_string_argument",
       modes: ["non-streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
     {
@@ -686,7 +686,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
         "Harmony-looking control tokens inside user/tool payload content remain payload bytes, not framing.",
       runner: "planned_agent_loop",
       modes: ["non-streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
     {
@@ -696,7 +696,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
         "Forced tool_choice either reaches the provider correctly or is rejected before dispatch.",
       runner: "planned_agent_loop",
       modes: ["non-streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
     {
@@ -706,7 +706,7 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
         "Empty-argument tool calls are preserved as empty dicts, not treated as dropped or truncated args.",
       runner: "planned_agent_loop",
       modes: ["non-streaming"],
-      tool_formats: ["native", "json", "text/tagged"],
+      tool_formats: ["native", "json", "text"],
       cheap: true,
     },
   ]

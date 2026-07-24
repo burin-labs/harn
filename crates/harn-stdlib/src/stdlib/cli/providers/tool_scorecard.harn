@@ -130,6 +130,7 @@ fn __join_dict_field(values: list, key: string, fallback: string) -> string {
 
 fn __render_human(report: dict) -> string {
   const summary = __safe_dict(report["summary"])
+  const fitness = __safe_dict(report["fitness"])
   let out = "provider tool-call scorecard: routes="
     + to_string(__safe_int(report["route_count"], 0))
     + " pass="
@@ -144,6 +145,8 @@ fn __render_human(report: dict) -> string {
     + to_string(__safe_int(summary["needs_review"], 0))
     + " quarantined="
     + to_string(__safe_int(summary["quarantined"], 0))
+    + " format_recommendations="
+    + to_string(len(__safe_list(fitness["recommendations"])))
     + "\n"
   const best = __safe_dict(summary["best_route"])
   const best_provider = __safe_string(best["provider"], "")

@@ -29,7 +29,7 @@ pub fn __probe_status_for_format(report: dict, mode: string, format: string) -> 
   if format == "native" {
     return __safe_status(tool_calling?.native)
   }
-  if format == "json" && mode == "non-streaming" {
+  if format == "json" || format == "text" {
     return __safe_status(tool_calling?.text)
   }
   return "unknown"
@@ -46,11 +46,7 @@ pub fn __probe_cell(
 ) -> ProviderToolProbeCell {
   const status_value = __probe_status_for_format(report, mode, format)
   const status = __status_from_probe(status_value)
-  const reason = if format == "text/tagged" {
-    "legacy tagged text runner is declared but not yet separated from the current JSON text-channel probe"
-  } else if format == "json" && mode == "streaming" {
-    "provider tool-probe does not currently produce a streaming JSON text-channel verdict"
-  } else if status == "pass" {
+  const reason = if status == "pass" {
     "provider tool-probe reported pass at the Harn parse/dispatch boundary"
   } else if status == "fail" {
     report?.tool_calling?.failure_reason ?? "provider tool-probe reported fail"
@@ -62,11 +58,7 @@ pub fn __probe_cell(
     behavior,
     mode,
     format,
-    if format == "text/tagged" || (format == "json" && mode == "streaming") {
-      "planned"
-    } else {
-      status
-    },
+    status,
     reason,
     {
       tool_calling: report?.tool_calling ?? {},
@@ -187,35 +179,37 @@ pub fn __run_tool_probe(
   if len(missing) > 0 {
     return __skipped_cells_for_missing_env(route, behavior, mode, missing)
   }
-  const command = __tool_probe_command(
-    harn_bin,
-    route,
-    mode,
-    to_string(behavior.probe_case ?? "single_tool_call"),
-    repeat,
-    timeout_secs,
-  )
-  const artifact_path = provider_tool_probe_campaign_artifact_path(
-    route,
-    behavior,
-    mode,
-    output_dir,
-  )
-  const child = harness.process.spawn_captured(
-    {cmd: harn_bin, args: command[1:len(command)], env: env},
-  )
-  const stdout = child.stdout ?? ""
-  if trim(stdout) != "" {
-    harness.fs.write_text(artifact_path, stdout)
-  }
-  const parsed = try {
-    json_parse(stdout)
-  } catch (_) {
-    nil
-  }
-  if parsed == nil {
-    let cells: list<ProviderToolProbeCell> = []
-    for format in behavior.tool_formats {
+  let cells: list<ProviderToolProbeCell> = []
+  for format in behavior.tool_formats {
+    const command = __tool_probe_command(
+      harn_bin,
+      route,
+      mode,
+      to_string(behavior.probe_case ?? "single_tool_call"),
+      format,
+      repeat,
+      timeout_secs,
+    )
+    const artifact_path = provider_tool_probe_campaign_artifact_path(
+      route,
+      behavior,
+      mode,
+      format,
+      output_dir,
+    )
+    const child = harness.process.spawn_captured(
+      {cmd: harn_bin, args: command[1:len(command)], env: env},
+    )
+    const stdout = child.stdout ?? ""
+    if trim(stdout) != "" {
+      harness.fs.write_text(artifact_path, stdout)
+    }
+    const parsed = try {
+      json_parse(stdout)
+    } catch (_) {
+      nil
+    }
+    if parsed == nil {
       cells = cells
         + [
         __base_cell(
@@ -233,11 +227,8 @@ pub fn __run_tool_probe(
         )
           + {command: command},
       ]
+      continue
     }
-    return cells
-  }
-  let cells: list<ProviderToolProbeCell> = []
-  for format in behavior.tool_formats {
     cells = cells + [__probe_cell(route, behavior, mode, format, parsed, artifact_path, command)]
   }
   return cells
@@ -247,12 +238,15 @@ pub fn provider_tool_probe_campaign_artifact_path(
   route: ProviderToolProbeRoute,
   behavior: ProviderToolProbeBehavior,
   mode: string,
+  format: string,
   output_dir: string,
 ) -> string {
   const probe_case = __slug(to_string(behavior.probe_case ?? "single_tool_call"))
   return path_join(
     output_dir,
     "tool-probe-" + route.id + "-" + __slug(behavior.id) + "-" + probe_case + "-" + __slug(mode)
+      + "-"
+      + __slug(format)
       + ".json",
   )
 }

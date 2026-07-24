@@ -217,20 +217,27 @@ async fn aggregate_tool_conformance_report(
         }
         let raw = std::fs::read_to_string(path)
             .map_err(|error| format!("error: failed to read {}: {error}", path.display()))?;
-        Ok(
-            harn_vm::llm::tool_conformance::classify_tool_conformance_fixture_for_case(
+        let mode = args.mode.tool_probe_modes()[0];
+        Ok(if let Some(format) = args.tool_format {
+            harn_vm::llm::tool_conformance::classify_tool_conformance_fixture_for_case_and_format(
                 args.provider.clone(),
                 args.model.clone(),
-                args.mode
-                    .tool_probe_modes()
-                    .into_iter()
-                    .next()
-                    .unwrap_or(harn_vm::llm::tool_conformance::ToolProbeMode::NonStreaming),
+                mode,
+                format.tool_probe_format(),
                 args.probe_case.tool_probe_case(),
                 args.marker.clone(),
                 &raw,
-            ),
-        )
+            )
+        } else {
+            harn_vm::llm::tool_conformance::classify_tool_conformance_fixture_for_case(
+                args.provider.clone(),
+                args.model.clone(),
+                mode,
+                args.probe_case.tool_probe_case(),
+                args.marker.clone(),
+                &raw,
+            )
+        })
     } else {
         Ok(harn_vm::llm::tool_conformance::run_tool_conformance_probe(
             args.tool_conformance_probe_options(),

@@ -1,7 +1,76 @@
 use super::*;
 use crate::llm::tool_conformance::{
-    ToolCallingConformanceSummary, ToolProbeMode, ToolProbeStatus, ToolProbeUsage,
+    ToolCallingConformanceSummary, ToolProbeFormat, ToolProbeMode, ToolProbeStatus, ToolProbeUsage,
 };
+
+#[test]
+fn fitness_store_records_each_tuple_and_recommends_by_pass_then_latency() {
+    let mut native = report(
+        "acme",
+        "model",
+        vec![
+            case(ToolProbeClassification::StructuredNativeToolCall, true),
+            case(ToolProbeClassification::EmptySilent, false),
+        ],
+    );
+    native.tool_format = ToolProbeFormat::Native;
+
+    let mut json = report(
+        "acme",
+        "model",
+        vec![
+            case(ToolProbeClassification::ParseableHarnTextToolCall, true),
+            case(ToolProbeClassification::ParseableHarnTextToolCall, true),
+        ],
+    );
+    json.tool_format = ToolProbeFormat::Json;
+    for observed in &mut json.cases {
+        observed.elapsed_ms = Some(30);
+    }
+
+    let mut text = report(
+        "acme",
+        "model",
+        vec![
+            case(ToolProbeClassification::ParseableHarnTextToolCall, true),
+            case(ToolProbeClassification::ParseableHarnTextToolCall, true),
+        ],
+    );
+    text.tool_format = ToolProbeFormat::Text;
+    for observed in &mut text.cases {
+        observed.elapsed_ms = Some(10);
+    }
+
+    let store = fitness_store_from_tool_reports(&[native, json, text]);
+
+    assert_eq!(store.schema_version, TOOL_FORMAT_FITNESS_SCHEMA_VERSION);
+    assert_eq!(store.records.len(), 3);
+    let native_record = store
+        .records
+        .iter()
+        .find(|record| record.tool_format == "native")
+        .expect("native record");
+    assert_eq!(native_record.probe_case, "single_tool_call");
+    assert_eq!(native_record.attempts, 2);
+    assert_eq!(native_record.successes, 1);
+    assert_eq!(
+        native_record.classification_histogram.get("empty_silent"),
+        Some(&1)
+    );
+    assert_eq!(store.recommendations[0].tool_format, "text");
+    assert_eq!(
+        recommended_tool_format_from_store(&store, "acme", "model").as_deref(),
+        Some("text")
+    );
+
+    let mut permissive = store;
+    permissive.recommendations[0].tool_format = "adaptive".to_string();
+    assert_eq!(
+        recommended_tool_format_from_store(&permissive, "acme", "model"),
+        None,
+        "fitness snapshots must never select the permissive parser as an emission format"
+    );
+}
 
 #[test]
 fn scorecard_ranks_successful_native_route_first() {
@@ -720,6 +789,7 @@ fn report_with_probe_case(
         schema_version: 1,
         provider: provider.to_string(),
         model: model.to_string(),
+        tool_format: crate::llm::tool_conformance::ToolProbeFormat::Native,
         base_url: None,
         probe_case,
         tool_name: "echo_marker".to_string(),

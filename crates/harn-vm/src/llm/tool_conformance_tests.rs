@@ -100,6 +100,83 @@ fn request_report_materializes_large_string_case_without_provider_call() {
 }
 
 #[test]
+fn request_report_for_json_format_uses_prompt_contract_without_native_tools() {
+    let report = tool_conformance_request_report_for_format(
+        "openai",
+        "gpt-5.4-mini",
+        None,
+        vec![ToolProbeMode::NonStreaming],
+        ToolProbeFormat::Json,
+        ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
+        "case-seed",
+    )
+    .expect("JSON request report");
+
+    assert_eq!(report.tool_format, ToolProbeFormat::Json);
+    let request = &report.requests[0];
+    assert_eq!(
+        request.validation.status,
+        ToolConformanceRequestValidationStatus::Pass,
+        "{:?}",
+        request.validation.issues
+    );
+    assert!(request.request_body.get("tools").is_none());
+    assert!(request.request_body.get("tool_choice").is_none());
+    let body = request.request_body.to_string();
+    assert!(body.contains(TOOL_PROBE_TOOL_NAME));
+    assert!(body.contains("```tool"));
+}
+
+#[test]
+fn requested_text_formats_are_classified_exactly_not_adaptively() {
+    let fenced = r#"{"choices":[{"message":{"content":"```tool\n{\"name\":\"echo_marker\",\"args\":{\"value\":\"case\"}}\n```"}}]}"#;
+    let tagged = r#"{"choices":[{"message":{"content":"<tool_call>\necho_marker({ value: \"case\" })\n</tool_call>"}}]}"#;
+
+    let json_pass = classify_tool_conformance_fixture_for_case_and_format(
+        "openai",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeFormat::Json,
+        ToolProbeCase::SingleToolCall,
+        "case",
+        fenced,
+    );
+    let text_mismatch = classify_tool_conformance_fixture_for_case_and_format(
+        "openai",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeFormat::Text,
+        ToolProbeCase::SingleToolCall,
+        "case",
+        fenced,
+    );
+    let text_pass = classify_tool_conformance_fixture_for_case_and_format(
+        "openai",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeFormat::Text,
+        ToolProbeCase::SingleToolCall,
+        "case",
+        tagged,
+    );
+    let json_mismatch = classify_tool_conformance_fixture_for_case_and_format(
+        "openai",
+        "model",
+        ToolProbeMode::NonStreaming,
+        ToolProbeFormat::Json,
+        ToolProbeCase::SingleToolCall,
+        "case",
+        tagged,
+    );
+
+    assert!(json_pass.cases[0].ok, "{:?}", json_pass.cases[0]);
+    assert!(!text_mismatch.cases[0].ok, "{:?}", text_mismatch.cases[0]);
+    assert!(text_pass.cases[0].ok, "{:?}", text_pass.cases[0]);
+    assert!(!json_mismatch.cases[0].ok, "{:?}", json_mismatch.cases[0]);
+}
+
+#[test]
 fn request_catalog_audit_validates_every_catalog_route_in_process() {
     let report = tool_conformance_request_catalog_audit(
         ToolProbeCase::catalog_request_audit_cases(),
@@ -1160,6 +1237,10 @@ fn aggregates_openai_streaming_tool_call_deltas() {
     let case = classify_tool_probe_response(
         ToolProbeMode::Streaming,
         &response,
+        ToolProbeFormatPolicy {
+            format: ToolProbeFormat::Native,
+            strict: true,
+        },
         ToolProbeCase::SingleToolCall,
         DEFAULT_TOOL_PROBE_MARKER,
         None,
@@ -1192,6 +1273,10 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
     let case = classify_tool_probe_response(
         ToolProbeMode::Streaming,
         &response,
+        ToolProbeFormatPolicy {
+            format: ToolProbeFormat::Native,
+            strict: true,
+        },
         ToolProbeCase::SingleToolCall,
         DEFAULT_TOOL_PROBE_MARKER,
         None,
