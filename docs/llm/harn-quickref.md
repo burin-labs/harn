@@ -2954,6 +2954,9 @@ plain terminal.
 - Direct runs can keep sandboxing on while writing outside the project with
   `harn run --write-root <path> script.harn`; the path is added to
   `workspace_roots`. Use `--read-only-root <path>` for additive read scope.
+- Use `--sandbox-write-root <path>` or `--sandbox-read-root <path>` when only
+  spawned subprocesses need the extra path; Harn filesystem builtins stay
+  scoped to the workspace roots.
 
 ### Document helpers
 

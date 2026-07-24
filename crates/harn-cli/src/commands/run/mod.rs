@@ -26,7 +26,7 @@ pub mod json_events;
 mod lifecycle;
 mod llm_mock;
 mod manifest_runtime;
-mod sandbox;
+pub(crate) mod sandbox;
 
 use self::eval_source::create_eval_temp_file;
 pub(crate) use self::eval_source::prepare_eval_temp_file;

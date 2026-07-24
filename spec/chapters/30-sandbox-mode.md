@@ -50,6 +50,25 @@ writable mount. Use this for external output folders such as iCloud Drive
 exports without falling back to `--no-sandbox`. `--write-root` cannot be
 combined with `--no-sandbox`.
 
+### --sandbox-read-root / --sandbox-write-root
+
+```bash
+harn run --sandbox-read-root /path/to/sdk \
+  --sandbox-write-root /path/to/cache main.harn
+```
+
+Permit a spawned subprocess to read or write an additional root without
+granting Harn filesystem builtins access to that root. These repeatable flags
+populate `process_sandbox.read_roots` and `process_sandbox.write_roots`
+respectively while leaving the rest of the default sandbox active. Neither
+flag can be combined with `--no-sandbox`.
+
+Restricted worktree profiles also create a self-ignored
+`.harn-toolchain-cache/` directory under the first writable workspace root.
+The spawned-process environment points mutable home, compiler-cache,
+package-manager-cache, and Python user-site state into this directory unless
+the caller explicitly supplies the corresponding environment variable.
+
 ### --deny
 
 ```bash

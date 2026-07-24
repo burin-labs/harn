@@ -98,11 +98,15 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     // Node / npm / pnpm: module path + cache/home roots.
     "NODE_PATH",
     "NPM_CONFIG_CACHE",
+    "NPM_CONFIG_STORE_DIR",
     "NVM_DIR",
     "PNPM_HOME",
+    "YARN_CACHE_FOLDER",
     // Python / uv / pyenv: path, install roots, active venv.
+    "PIP_CACHE_DIR",
     "PYENV_ROOT",
     "PYTHONPATH",
+    "PYTHONUSERBASE",
     "UV_CACHE_DIR",
     "VIRTUAL_ENV",
     // Go: workspace, install root, build/module caches.
@@ -133,11 +137,15 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
     // Node / npm / pnpm
     "NODE_PATH",
     "NPM_CONFIG_CACHE",
+    "NPM_CONFIG_STORE_DIR",
     "NVM_DIR",
     "PNPM_HOME",
+    "YARN_CACHE_FOLDER",
     // Python / uv / pyenv
+    "PIP_CACHE_DIR",
     "PYENV_ROOT",
     "PYTHONPATH",
+    "PYTHONUSERBASE",
     "UV_CACHE_DIR",
     "VIRTUAL_ENV",
     // Go
@@ -158,13 +166,17 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
 /// jail is a provable environment/config gap, not the workload's code defect.
 pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
     "CARGO_HOME",
+    "CARGO_TARGET_DIR",
     "GOCACHE",
     "GOMODCACHE",
     "GOPATH",
     "NPM_CONFIG_CACHE",
+    "NPM_CONFIG_STORE_DIR",
+    "PIP_CACHE_DIR",
     "PNPM_HOME",
     "RUSTUP_HOME",
     "UV_CACHE_DIR",
+    "YARN_CACHE_FOLDER",
 ];
 
 /// The complete set of environment variable names admitted into a

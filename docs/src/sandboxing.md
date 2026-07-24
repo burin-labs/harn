@@ -27,6 +27,11 @@ with `--no-sandbox`. A grant-scoped run discloses exactly the delta on
 one stderr line (for example `sandbox active; extra write root: /path`)
 and skips the blanket `--no-sandbox` warning.
 
+When only a spawned compiler or package manager needs the path, use
+`--sandbox-write-root <path>` or `--sandbox-read-root <path>` instead.
+These flags populate `process_sandbox.write_roots` and `.read_roots`;
+Harn filesystem builtins do not gain access to the path.
+
 The process-network opt-in is deliberately broader than Harn's egress
 allowlist. `HARN_EGRESS_ALLOW` and `egress_policy(...)` constrain HTTP,
 provider, connector, and other network calls owned by the Harn runtime.
@@ -94,9 +99,9 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
 
 - `system_runtime`: host runtime directories needed to launch common binaries.
 - `developer_toolchains`: standard compiler/toolchain locations such as Xcode,
-  Command Line Tools, Homebrew, plus common home-dir toolchain managers and
-  runtimes such as `~/.local/share/uv`, `~/.rustup`, `~/.cargo`, `~/.pyenv`,
-  `~/.nvm`, `~/.volta`, and `~/go`.
+  Command Line Tools, Homebrew, Linux vendor installs under `/opt`, plus common
+  home-dir toolchain managers and runtimes such as `~/.local/share/uv`,
+  `~/.rustup`, `~/.cargo`, `~/.pyenv`, `~/.nvm`, `~/.volta`, and `~/go`.
 - `package_manager_config`: read-only per-user npm, pip, cargo, git, and CA
   config/cache roots under `$HOME`, such as `.npmrc`, `.gitconfig`, `.netrc`,
   `.config`, `.cache`, and cargo config/registry paths.
@@ -113,9 +118,14 @@ policy from adding host filesystem reach.
 ### Running real toolchains in the sandbox
 
 The local process sandbox is meant to run normal developer tools, including
-toolchains that depend on enterprise package-manager state. It constrains what
-the child process can open; it does not rewrite npm, pip, cargo, git, proxy, or
-CA configuration.
+toolchains that need mutable build and package-manager state. Restricted
+worktree profiles create `.harn-toolchain-cache/` under the writable workspace
+and point `HOME`, XDG/cache variables, Go caches, pip/uv caches, npm/Yarn/pnpm
+caches, and Python's user base into it. Explicit per-command environment values
+win. The directory self-ignores its contents and can be deleted safely.
+`CARGO_HOME`, `RUSTUP_HOME`, and existing package-manager config files keep
+pointing at their narrowly scoped toolchain/config preset roots so installed
+toolchains and private-registry configuration remain usable.
 
 With the default `developer_toolchains` and `package_manager_config` presets,
 the Unix desktop backends grant child processes read-only access to common
@@ -139,8 +149,8 @@ grant those preset roots, and `process_sandbox.read_roots` / `.write_roots`
 remain the preferred way to add the specific SDK, cache, or config directory a
 subprocess needs.
 
-Child processes spawned without env overrides inherit the parent environment.
-That includes corporate proxy and CA variables such as `HTTP_PROXY`,
+Other admitted child variables still come from the parent environment. That
+includes corporate proxy and CA variables such as `HTTP_PROXY`,
 `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`,
 `SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
 `GIT_SSL_CAINFO`, and `CARGO_HTTP_CAINFO`. The sandbox does not special-case
@@ -173,6 +183,18 @@ the registry config and cache before the run, point the inherited package
 manager/proxy/CA variables at readable files, and keep network side effects
 disabled; if a tool must reach a corporate proxy, the active policy still needs
 to allow network side effects.
+
+Direct CLI runs expose the same process-only policy without requiring a
+manifest edit:
+
+```bash
+harn run \
+  --sandbox-read-root /opt/acme/sdk \
+  --sandbox-write-root /opt/acme/cache \
+  main.harn
+```
+
+Both flags are repeatable and incompatible with `--no-sandbox`.
 
 ### Writable vs. read-only roots
 

@@ -61,6 +61,20 @@ pub(crate) struct TimeRunArgs {
         conflicts_with = "no_sandbox"
     )]
     pub read_only_root: Vec<PathBuf>,
+    /// Extra subprocess-only read roots.
+    #[arg(
+        long = "sandbox-read-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub sandbox_read_root: Vec<PathBuf>,
+    /// Extra subprocess-only write roots.
+    #[arg(
+        long = "sandbox-write-root",
+        value_name = "PATH",
+        conflicts_with = "no_sandbox"
+    )]
+    pub sandbox_write_root: Vec<PathBuf>,
     /// Positional arguments passed to the pipeline as the global `argv`
     /// list. Place them after a `--` separator: `harn time run script.harn -- a b c`.
     #[arg(last = true)]

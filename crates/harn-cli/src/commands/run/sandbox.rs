@@ -15,6 +15,10 @@ pub struct RunSandboxOptions {
     /// Extra read-only filesystem roots. `path` resolving under one of
     /// these entries is scoped for reads, but writes still fail.
     pub read_only_roots: Vec<PathBuf>,
+    /// Extra roots readable only by spawned subprocesses.
+    pub process_read_roots: Vec<PathBuf>,
+    /// Extra roots writable only by spawned subprocesses.
+    pub process_write_roots: Vec<PathBuf>,
     /// Raise the direct-run side-effect ceiling to permit network-capable
     /// subprocesses without disabling filesystem or process confinement.
     pub allow_process_network: bool,
@@ -27,6 +31,8 @@ impl Default for RunSandboxOptions {
             workspace_root: None,
             write_roots: Vec::new(),
             read_only_roots: Vec::new(),
+            process_read_roots: Vec::new(),
+            process_write_roots: Vec::new(),
             allow_process_network: false,
         }
     }
@@ -52,6 +58,8 @@ impl RunSandboxOptions {
             workspace_root: None,
             write_roots: Vec::new(),
             read_only_roots: Vec::new(),
+            process_read_roots: Vec::new(),
+            process_write_roots: Vec::new(),
             allow_process_network: false,
         }
     }
@@ -79,6 +87,35 @@ impl RunSandboxOptions {
         self.read_only_roots = read_only_roots.into_iter().collect();
         self
     }
+
+    /// Add subprocess-only read roots to the default sandbox policy.
+    pub fn with_process_read_roots<I>(mut self, roots: I) -> Self
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
+        self.process_read_roots = roots.into_iter().collect();
+        self
+    }
+
+    /// Add subprocess-only write roots to the default sandbox policy.
+    pub fn with_process_write_roots<I>(mut self, roots: I) -> Self
+    where
+        I: IntoIterator<Item = PathBuf>,
+    {
+        self.process_write_roots = roots.into_iter().collect();
+        self
+    }
+}
+
+pub(crate) fn run_sandbox_options_from_args(args: &crate::cli::RunArgs) -> RunSandboxOptions {
+    if args.no_sandbox {
+        return RunSandboxOptions::disabled();
+    }
+    RunSandboxOptions::sandboxed(args.allow_process_network)
+        .with_write_roots(args.write_root.iter().cloned())
+        .with_read_only_roots(args.read_only_root.iter().cloned())
+        .with_process_read_roots(args.sandbox_read_root.iter().cloned())
+        .with_process_write_roots(args.sandbox_write_root.iter().cloned())
 }
 
 struct ExecutionPolicyGuard;
@@ -122,6 +159,8 @@ pub(super) fn install_run_sandbox_scope(
             workspace_root,
             &options.write_roots,
             &options.read_only_roots,
+            &options.process_read_roots,
+            &options.process_write_roots,
             options.allow_process_network,
         ));
         Some(ExecutionPolicyGuard)
@@ -171,6 +210,20 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
             "extra read-only root{}: {}",
             plural_suffix(options.read_only_roots.len()),
             display_grant_roots(&options.read_only_roots),
+        ));
+    }
+    if !options.process_write_roots.is_empty() {
+        deltas.push(format!(
+            "extra subprocess write root{}: {}",
+            plural_suffix(options.process_write_roots.len()),
+            display_grant_roots(&options.process_write_roots),
+        ));
+    }
+    if !options.process_read_roots.is_empty() {
+        deltas.push(format!(
+            "extra subprocess read root{}: {}",
+            plural_suffix(options.process_read_roots.len()),
+            display_grant_roots(&options.process_read_roots),
         ));
     }
     if options.allow_process_network {
@@ -231,6 +284,8 @@ pub(super) fn default_run_capability_policy(
     workspace_root: &Path,
     write_roots: &[PathBuf],
     read_only_roots: &[PathBuf],
+    process_read_roots: &[PathBuf],
+    process_write_roots: &[PathBuf],
     allow_process_network: bool,
 ) -> harn_vm::orchestration::CapabilityPolicy {
     let mut workspace_roots = Vec::with_capacity(1 + write_roots.len());
@@ -253,6 +308,19 @@ pub(super) fn default_run_capability_policy(
             .map(|path| normalize_run_workspace_root(path.as_path()))
             .map(|path| path.display().to_string())
             .collect(),
+        process_sandbox: harn_vm::orchestration::ProcessSandboxPolicy {
+            presets: None,
+            read_roots: process_read_roots
+                .iter()
+                .map(|path| normalize_run_workspace_root(path.as_path()))
+                .map(|path| path.display().to_string())
+                .collect(),
+            write_roots: process_write_roots
+                .iter()
+                .map(|path| normalize_run_workspace_root(path.as_path()))
+                .map(|path| path.display().to_string())
+                .collect(),
+        },
         side_effect_level: Some(
             if allow_process_network {
                 harn_vm::tool_annotations::SideEffectLevel::Network
@@ -320,6 +388,14 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         .iter()
         .map(|path| rendered_jail_root(path).display().to_string())
         .collect::<Vec<_>>();
+    let process_read_roots = active_policy
+        .as_ref()
+        .map(|policy| render_policy_roots(&policy.process_sandbox.read_roots))
+        .unwrap_or_default();
+    let process_write_roots = active_policy
+        .as_ref()
+        .map(|policy| render_policy_roots(&policy.process_sandbox.write_roots))
+        .unwrap_or_default();
 
     serde_json::json!({
         "run_default_enabled": sandbox.enabled,
@@ -327,6 +403,8 @@ pub(super) fn run_sandbox_attestation(sandbox: &RunSandboxOptions) -> serde_json
         "workspace_roots": workspace_roots,
         "write_roots": write_roots,
         "read_only_roots": read_only_roots,
+        "process_read_roots": process_read_roots,
+        "process_write_roots": process_write_roots,
         "profile": profile,
         "process_network_requested": sandbox.allow_process_network,
         "process_network_enabled": process_network_enabled,
@@ -407,6 +485,42 @@ mod tests {
             sandbox_grant_disclosure(&options).as_deref(),
             Some("sandbox active; subprocess network allowed\n"),
         );
+    }
+
+    #[test]
+    fn subprocess_roots_stay_process_only_and_are_disclosed() {
+        let workspace = tempfile::tempdir().unwrap();
+        let process_read = workspace.path().join("sdk");
+        let process_write = workspace.path().join("cache");
+        let options = RunSandboxOptions::default()
+            .with_process_read_roots(vec![process_read.clone()])
+            .with_process_write_roots(vec![process_write.clone()]);
+        let policy = default_run_capability_policy(
+            workspace.path(),
+            &[],
+            &[],
+            &options.process_read_roots,
+            &options.process_write_roots,
+            false,
+        );
+
+        assert_eq!(
+            policy.process_sandbox.read_roots,
+            vec![process_read.display().to_string()]
+        );
+        assert_eq!(
+            policy.process_sandbox.write_roots,
+            vec![process_write.display().to_string()]
+        );
+        assert_eq!(
+            policy.workspace_roots,
+            vec![workspace.path().display().to_string()]
+        );
+        assert!(policy.read_only_roots.is_empty());
+
+        let disclosure = sandbox_grant_disclosure(&options).unwrap();
+        assert!(disclosure.contains("extra subprocess write root"));
+        assert!(disclosure.contains("extra subprocess read root"));
     }
 
     #[test]

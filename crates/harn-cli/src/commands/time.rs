@@ -149,6 +149,8 @@ pub(crate) async fn run(args: TimeRunArgs) {
             .with_process_network(args.allow_process_network)
             .with_write_roots(args.write_root.iter().cloned())
             .with_read_only_roots(args.read_only_root.iter().cloned())
+            .with_process_read_roots(args.sandbox_read_root.iter().cloned())
+            .with_process_write_roots(args.sandbox_write_root.iter().cloned())
     };
 
     // In `--json` mode stdout is owned by the envelope, so we keep

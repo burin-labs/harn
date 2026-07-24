@@ -65,6 +65,9 @@ mod policy;
 mod replace;
 #[cfg(target_os = "windows")]
 mod windows;
+mod workspace_env;
+#[cfg(all(test, unix))]
+mod workspace_env_integration;
 
 pub(crate) use handler_env::effective_fallback;
 #[cfg(test)]
@@ -75,6 +78,12 @@ pub(crate) use replace::{
     atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
     read_for_replace_scoped_at_open,
 };
+pub use workspace_env::active_workspace_process_env;
+pub(crate) use workspace_env::{
+    inject_workspace_process_env, workspace_local_tmpdir, WORKSPACE_TMPDIR_NAME,
+};
+#[cfg(test)]
+pub(crate) use workspace_env::{inject_workspace_tmpdir, TMPDIR_ENV_KEYS};
 
 const HANDLER_SANDBOX_ENV: &str = "HARN_HANDLER_SANDBOX";
 #[cfg(any(unix, windows))]
@@ -1420,7 +1429,7 @@ fn sandboxed_process_config(
         resolved.cwd = Some(default_process_cwd_for_policy(policy)?);
     }
     neutralize_rustc_wrapper(&mut resolved.env);
-    inject_workspace_tmpdir(&mut resolved.env, policy);
+    inject_workspace_process_env(&mut resolved.env, policy);
     Ok(resolved)
 }
 
@@ -1445,112 +1454,6 @@ fn neutralize_rustc_wrapper(env: &mut Vec<(String, String)>) {
             env.push((key.to_string(), String::new()));
         }
     }
-}
-
-/// Workspace-relative directory name for the sandbox-writable temp dir that
-/// [`workspace_local_tmpdir`] points `TMPDIR`/`TMP`/`TEMP` at. Lives inside a
-/// writable workspace root (which both OS backends already grant) so any
-/// toolchain that honors `TMPDIR` writes its intermediates somewhere the
-/// sandbox permits, instead of the unwritable system `/tmp`.
-pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
-
-/// The environment keys a workspace-local temp dir is exported under. `TMPDIR`
-/// is the POSIX/Rust/clang/gcc/Go/Swift convention; `TMP`/`TEMP` cover tools
-/// (and Windows toolchains) that read those instead.
-pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
-
-/// Resolve the sandbox-writable, workspace-local temp directory for `policy`,
-/// creating it lazily.
-///
-/// Compiler linkers (`rustc`/`cc`/`ld`, Go, Swift, …) and countless other
-/// toolchains write intermediate object/temp files to `$TMPDIR`, defaulting to
-/// the system `/tmp` when it is unset. Under a restricted profile `/tmp` is
-/// outside the writable workspace roots, so those writes are denied and a build
-/// that would otherwise succeed FALSE-FAILS for an infrastructure reason. By
-/// pointing the child's temp dir at a directory *inside* the first writable
-/// workspace root — which the OS sandbox already grants write access to — the
-/// build's temp writes land somewhere permitted without widening the sandbox.
-///
-/// Returns `None` when the policy declares no writable workspace root (there is
-/// nowhere sandbox-writable to anchor the temp dir) or when the directory could
-/// not be created (the caller then leaves the child's inherited temp dir
-/// untouched rather than failing the spawn).
-pub(crate) fn workspace_local_tmpdir(policy: &CapabilityPolicy) -> Option<PathBuf> {
-    let root = normalized_workspace_roots(policy).into_iter().next()?;
-    let tmpdir = root.join(WORKSPACE_TMPDIR_NAME);
-    if let Err(error) = std::fs::create_dir_all(&tmpdir) {
-        warn_once(
-            "handler_sandbox_workspace_tmpdir",
-            &format!(
-                "could not create workspace-local temp dir '{}': {error}; \
-                 leaving the child's inherited temp dir in place",
-                tmpdir.display()
-            ),
-        );
-        return None;
-    }
-    // Keep the temp dir's churn out of every git-based diff/status (so it never
-    // leaks into an agent's view, a PR, or eval grading) by self-ignoring its
-    // own contents. A `.gitignore` of `*` inside the dir excludes everything,
-    // including itself, regardless of whether the workspace tracks it. Written
-    // best-effort and only when absent so we don't thrash an existing file.
-    let ignore = tmpdir.join(".gitignore");
-    if !ignore.exists() {
-        let _ = std::fs::write(
-            &ignore,
-            "# Created by the Harn sandbox; safe to delete.\n*\n",
-        );
-    }
-    Some(tmpdir)
-}
-
-/// Overlay `TMPDIR`/`TMP`/`TEMP` onto a child's env so a sandboxed toolchain
-/// writes its intermediates to a workspace-local, sandbox-writable directory
-/// instead of the unwritable system `/tmp` (see [`workspace_local_tmpdir`]).
-///
-/// A key the caller set explicitly in `env` is left untouched — an intentional
-/// per-call `TMPDIR` is honored. The inherited-from-parent value is *not*
-/// preserved: that is exactly the non-writable `/tmp` (or empty) we must
-/// override. No-op under an unrestricted/absent policy or when no writable
-/// workspace root is available.
-pub(crate) fn inject_workspace_tmpdir(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
-        return;
-    }
-    let Some(tmpdir) = workspace_local_tmpdir(policy) else {
-        return;
-    };
-    let tmpdir = tmpdir.display().to_string();
-    for key in TMPDIR_ENV_KEYS {
-        if env.iter().any(|(existing, _)| existing == key) {
-            // The caller pinned this key explicitly; respect it.
-            continue;
-        }
-        env.push((key.to_string(), tmpdir.clone()));
-    }
-}
-
-/// The `TMPDIR`/`TMP`/`TEMP` overrides for the *currently active* execution
-/// policy, as `(key, value)` pairs, or an empty vec when no restricted policy
-/// is active or no writable workspace root exists.
-///
-/// This reads the active execution policy directly (gating only on a restricted
-/// `sandbox_profile`), deliberately *not* through [`active_sandbox_policy`]:
-/// the workspace-local temp dir is a benefit of the child env, independent of
-/// whether OS confinement is enforced, so it must still engage under
-/// `HARN_HANDLER_SANDBOX=warn`/`off` (which only weaken *enforcement*, not the
-/// profile). [`inject_workspace_tmpdir`] still no-ops under `Unrestricted`.
-///
-/// This is the entry point the `host_call("process", …)` exec/spawn builder and
-/// the `harn-hostlib` real spawner use to overlay the keys onto a
-/// `Command`/`tokio::process::Command`, skipping any the caller already pinned.
-pub fn active_workspace_tmpdir_env() -> Vec<(String, String)> {
-    let Some(policy) = crate::orchestration::current_execution_policy() else {
-        return Vec::new();
-    };
-    let mut env = Vec::new();
-    inject_workspace_tmpdir(&mut env, &policy);
-    env
 }
 
 /// Environment overlay that pins a child tool's *message* output to a
@@ -1805,8 +1708,9 @@ fn sandbox_denial_error(summary: String, detail: &str, policy: &CapabilityPolicy
             message: format!(
                 "{summary}; the {var} toolchain cache resolves to '{}', which is outside the \
                  sandbox profile — a host environment/config gap, not the agent's code defect. \
-                 Grant it with process_sandbox.write_roots, relocate the cache into the \
-                 workspace, or extend the DeveloperToolchains preset",
+                 For `harn run`, pass --sandbox-write-root '{}'; embedders can add it to \
+                 process_sandbox.write_roots or extend the DeveloperToolchains preset",
+                path.display(),
                 path.display()
             ),
             category: ErrorCategory::Environment,
@@ -1818,8 +1722,9 @@ fn sandbox_denial_error(summary: String, detail: &str, policy: &CapabilityPolicy
             message: format!(
                 "{summary}; the sandbox denied writing '{}', a well-known developer-toolchain \
                  cache outside the active profile — a host environment/config gap, not the \
-                 agent's code defect. Enable the DeveloperToolchains preset, grant it with \
-                 process_sandbox.write_roots, or relocate the cache into the workspace",
+                 agent's code defect. For `harn run`, pass --sandbox-write-root '{}'; embedders \
+                 can enable the DeveloperToolchains preset or add process_sandbox.write_roots",
+                path.display(),
                 path.display()
             ),
             category: ErrorCategory::Environment,
@@ -1831,8 +1736,8 @@ fn sandbox_denial_error(summary: String, detail: &str, policy: &CapabilityPolicy
 fn sandbox_process_violation_message(summary: String) -> String {
     format!(
         "{summary}; if the command depends on a developer toolchain or cache outside the \
-         workspace, add that root to process_sandbox.read_roots / process_sandbox.write_roots \
-         (or, for a well-known toolchain cache, extend the DeveloperToolchains preset)"
+         workspace, pass --sandbox-read-root / --sandbox-write-root to `harn run`, or add the \
+         root to process_sandbox.read_roots / process_sandbox.write_roots in an embedder policy"
     )
 }
 
