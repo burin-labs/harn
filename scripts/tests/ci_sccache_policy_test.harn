@@ -34,8 +34,7 @@ fn persistent_job(runner: string, cache_key: string, sticky_if: string, fallback
     steps: [
       {
         uses: "./.github/actions/sccache",
-        if:
-          "runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+        if: "env.HARN_RUNNER_TIER != 'github-hosted'",
         with: {"cache-key": cache_key, sticky: gha_expression(sticky_if)},
       },
       {uses: "./.github/actions/rust-cache", if: fallback_if},
@@ -48,7 +47,7 @@ fn workflow() {
   const disable = "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'"
   const selfhosted =
     "vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true' && needs.runner-availability.outputs.linux == 'true'"
-  const hosted_fallback = disable + " && runner.environment != 'self-hosted'"
+  const hosted_fallback = "env.HARN_RUNNER_TIER == 'github-hosted'"
   const rust = persistent_job(
     gha_expression(
       "vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true' && (matrix.selfhosted == 'stable'"
@@ -61,7 +60,7 @@ fn workflow() {
         + " && 'ubuntu-latest' || matrix.runner)",
     ),
     gha_expression("matrix.cache_key"),
-    "runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+    "env.HARN_RUNNER_TIER == 'blacksmith'",
     hosted_fallback,
   )
   const rust_with_flags = {
@@ -98,7 +97,7 @@ fn workflow() {
             + " && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404')",
         ),
         "package-audit",
-        "runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'",
+        "env.HARN_RUNNER_TIER == 'blacksmith'",
         hosted_fallback,
       ),
       "rust-builds": {
@@ -129,7 +128,7 @@ fn workflow() {
             if: "matrix.kind == 'behavior'",
             env: {
               CARGO_BUILD_JOBS: gha_expression(
-                "runner.environment == 'self-hosted' && '12' || '4'",
+                "env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4'",
               ),
               HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: gha_expression(
                 "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0'",
@@ -359,7 +358,9 @@ pipeline test_rejects_remote_cache_backend_and_hosted_sccache(task) {
       "ci.yml:package-audit must leave SCCACHE_BASEDIRS to the host-wide sccache daemon",
     ),
   )
-  assert(errors.contains("ci.yml:package-audit must disable sticky storage on self-hosted runners"))
+  assert(
+    errors.contains("ci.yml:package-audit must mount sticky storage only on the Blacksmith rung"),
+  )
   assert(errors.contains("ci.yml:package-audit must skip sccache on the GitHub-hosted fallback"))
   assert(errors.contains("ci.yml:package-audit must not enable per-object GHA sccache"))
   assert(
