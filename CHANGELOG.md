@@ -9,6 +9,30 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.38
+
+### Added
+
+- **Typed recurring-diagnostic stall signal in `std/agent` (#4588).**
+  Hosts can now fold authoritative verification attempts into a
+  location-invariant `UnheededRecurringDiagnostic`, with category derived from
+  data-only language-catalog code and pattern mappings and active diagnostic
+  progress excluded from recurrence.
+
+### Changed
+
+- **Playground actions now share one normalized field decoder (#4686).**
+  JSON and YAML action parsing keep the existing tagged schema while avoiding
+  a large derived deserializer state machine for every input format and caller.
+
+### Fixed
+
+- Restore execution-owned ambient VM state, step/persona context, tracing spans,
+  and pipeline callbacks when an embedding host cancels a timed execution.
+- Require exact-source successful Windows and macOS hosted workflow evidence
+  before release preparation, with typed Actions proof validation and a
+  certified-source receipt bound to the synthetic release commit's parent.
+
 ## v0.10.37
 
 ### Fixed
