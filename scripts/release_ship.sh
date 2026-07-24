@@ -895,6 +895,14 @@ if [[ -n "$AUDIT_RECEIPT" && "$MODE" != "prepare-here" ]]; then
   echo "error: --audit-receipt is only valid with harness-driven --prepare" >&2
   exit 1
 fi
+if [[ "$MODE" == "prepare-here" && -z "$AUDIT_RECEIPT" ]]; then
+  echo "error: harness-driven --prepare requires an exact-source hosted audit receipt" >&2
+  exit 1
+fi
+if [[ -n "$AUDIT_RECEIPT" && ! -f "$AUDIT_RECEIPT" ]]; then
+  echo "error: audit receipt does not exist: $AUDIT_RECEIPT" >&2
+  exit 1
+fi
 
 # Mode-specific guards. Each mode runs against a different baseline:
 #   prepare-here: feature branch with dirty tree (release content authored)

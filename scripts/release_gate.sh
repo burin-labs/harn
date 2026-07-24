@@ -411,13 +411,13 @@ cleanup_preserved_audit_tmp() {
 resolve_audit_plan() {
   local receipt_path="$1"
   local plan_path="$2"
-  local head_sha
-  head_sha="$(git rev-parse HEAD)"
+  local certified_source_sha="$3"
   local args=(
     run scripts/release_audit_contract.harn --
     --contract scripts/release_audit_contract.json
     --check-ci .github/workflows/ci.yml
-    --head-sha "$head_sha"
+    --head-sha "$certified_source_sha"
+    --shell-plan
   )
   if [[ -n "$receipt_path" ]]; then
     args+=(--receipt "$receipt_path")
@@ -429,56 +429,47 @@ resolve_audit_plan() {
   fi
   harn_cmd "${args[@]}" > "$plan_path"
 
-  local meta
-  meta="$(python3 - "$plan_path" <<'PY'
-import json
-import re
-import sys
-
-plan = json.load(open(sys.argv[1], encoding="utf-8"))
-required = {
-    "ok", "receipt_reused", "reason", "proof_kind", "head_sha",
-    "lane_names", "lane_runners", "lanes", "errors",
-}
-if set(plan) != required or plan["ok"] is not True:
-    raise SystemExit("invalid release audit plan envelope")
-if not isinstance(plan["receipt_reused"], bool) or not isinstance(plan["reason"], str):
-    raise SystemExit("invalid release audit plan metadata")
-names = plan["lane_names"]
-runners = plan["lane_runners"]
-if not isinstance(names, list) or not isinstance(runners, list) or len(names) != len(runners) or not names:
-    raise SystemExit("invalid release audit plan lanes")
-name_re = re.compile(r"^[a-z0-9-]+$")
-runner_re = re.compile(r"^[a-z0-9_]+$")
-if any(not isinstance(v, str) or not name_re.fullmatch(v) for v in names):
-    raise SystemExit("invalid release audit lane name")
-if any(not isinstance(v, str) or not runner_re.fullmatch(v) for v in runners):
-    raise SystemExit("invalid release audit lane runner")
-if len(set(names)) != len(names) or len(set(runners)) != len(runners):
-    raise SystemExit("duplicate release audit lane identity")
-print(("true" if plan["receipt_reused"] else "false") + "\t" + plan["reason"])
-PY
-)"
-  IFS=$'\t' read -r AUDIT_RECEIPT_REUSED AUDIT_PLAN_REASON <<< "$meta"
   SELECTED_AUDIT_STEPS=()
   SELECTED_AUDIT_RUNNERS=()
-  local name runner
-  while IFS=$'\t' read -r name runner; do
-    if ! declare -F "$runner" >/dev/null; then
-      echo "error: missing audit lane runner for $name: $runner" >&2
-      return 1
-    fi
-    SELECTED_AUDIT_STEPS+=("$name")
-    SELECTED_AUDIT_RUNNERS+=("$runner")
-  done < <(python3 - "$plan_path" <<'PY'
-import json
-import sys
-
-plan = json.load(open(sys.argv[1], encoding="utf-8"))
-for name, runner in zip(plan["lane_names"], plan["lane_runners"]):
-    print(f"{name}\t{runner}")
-PY
-)
+  local kind first second
+  local meta_seen=0
+  while IFS=$'\t' read -r kind first second; do
+    case "$kind" in
+      meta)
+        if [[ "$meta_seen" -ne 0 || ! "$first" =~ ^(true|false)$ || ! "$second" =~ ^[a-z0-9_]+$ ]]; then
+          echo "error: invalid release audit plan metadata" >&2
+          return 1
+        fi
+        AUDIT_RECEIPT_REUSED="$first"
+        AUDIT_PLAN_REASON="$second"
+        meta_seen=1
+        ;;
+      lane)
+        if [[ ! "$first" =~ ^[a-z0-9-]+$ || ! "$second" =~ ^[a-z0-9_]+$ ]]; then
+          echo "error: invalid release audit lane metadata" >&2
+          return 1
+        fi
+        if ! declare -F "$second" >/dev/null; then
+          echo "error: missing audit lane runner for $first: $second" >&2
+          return 1
+        fi
+        SELECTED_AUDIT_STEPS+=("$first")
+        SELECTED_AUDIT_RUNNERS+=("$second")
+        ;;
+      *)
+        echo "error: invalid release audit plan row" >&2
+        return 1
+        ;;
+    esac
+  done < "$plan_path"
+  if [[ "$meta_seen" -ne 1 || "${#SELECTED_AUDIT_STEPS[@]}" -eq 0 ]]; then
+    echo "error: incomplete release audit plan" >&2
+    return 1
+  fi
+  if [[ -n "$receipt_path" && "$AUDIT_RECEIPT_REUSED" != "true" ]]; then
+    echo "error: hosted audit receipt rejected: $AUDIT_PLAN_REASON" >&2
+    return 1
+  fi
 }
 
 cmd_audit() {
@@ -508,7 +499,9 @@ cmd_audit() {
 
   local plan_path
   plan_path="$(mktemp)"
-  if ! resolve_audit_plan "$receipt_path" "$plan_path"; then
+  local certified_source_sha
+  certified_source_sha="$(git rev-parse HEAD)"
+  if ! resolve_audit_plan "$receipt_path" "$plan_path" "$certified_source_sha"; then
     rm -f "$plan_path"
     exit 1
   fi

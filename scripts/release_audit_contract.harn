@@ -10,6 +10,9 @@ import {
   schema_string,
   schema_validator,
 } from "std/schema"
+import {
+  github_actions_exact_proof,
+} from "../crates/harn-stdlib/src/stdlib/stdlib_connectors_github"
 
 pub type ReleaseAuditLane = {name: string, runner: string, proof: "merge_group" | "residual"}
 
@@ -34,6 +37,17 @@ pub type ReleaseAuditContract = {
   schema_version: "harn.release_audit_contract.v1",
   lanes: list<ReleaseAuditLane>,
   merge_group_jobs: list<ReleaseAuditCiJob>,
+}
+
+pub type ReleasePlatformProof = {
+  platform: "windows" | "macos",
+  workflow_path: string,
+  required_job: string,
+  run: dict,
+  jobs: dict,
+  started_at_ms: int,
+  completed_at_ms: int,
+  duration_ms: int,
 }
 
 pub type ReleaseAuditPlan = {
@@ -98,21 +112,6 @@ fn contract_schema() {
   )
 }
 
-fn receipt_job_schema() {
-  return schema_closed_object(
-    {
-      id: schema_int() + {minimum: 1},
-      name: schema_string() + {min_len: 1},
-      url: schema_string()
-        + {
-        pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+/job/[0-9]+$",
-      },
-      status: schema_literal("completed"),
-      conclusion: schema_literal("success"),
-    },
-  )
-}
-
 fn warm_schema() {
   return schema_closed_object(
     {
@@ -124,34 +123,95 @@ fn warm_schema() {
   )
 }
 
-fn merge_group_receipt_schema() {
+fn platform_proof_schema() {
   return schema_closed_object(
     {
-      schema_version: schema_literal("harn.release_audit_receipt.v1"),
-      proof_kind: schema_literal("merge_group"),
-      head_sha: sha_schema(),
+      platform: schema_enum(["windows", "macos"]),
+      workflow_path: schema_string() + {pattern: "^[.]github/workflows/[a-z0-9-]+[.]yml$"},
+      required_job: schema_string() + {min_len: 1},
       run: schema_closed_object(
         {
+          repo: schema_string() + {pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
           id: schema_int() + {minimum: 1},
-          url: schema_string()
-            + {
-            pattern: "^https://github[.]com/burin-labs/harn/actions/runs/[0-9]+$",
-          },
-          event: schema_literal("merge_group"),
-          workflow: schema_literal("CI"),
-          head_sha: sha_schema(),
+          workflow_path: schema_string() + {min_len: 1},
+          run_attempt: schema_int() + {minimum: 1},
+          event: schema_literal("workflow_dispatch"),
           status: schema_literal("completed"),
           conclusion: schema_literal("success"),
+          head_sha: sha_schema(),
+          url: schema_string() + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+$"},
         },
       ),
-      jobs: schema_list(receipt_job_schema()),
+      jobs: schema_closed_object(
+        {
+          repo: schema_string() + {pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          run_id: schema_int() + {minimum: 1},
+          total_count: schema_int() + {minimum: 1},
+          jobs: schema_list(
+            schema_closed_object(
+              {
+                id: schema_int() + {minimum: 1},
+                run_id: schema_int() + {minimum: 1},
+                name: schema_string() + {min_len: 1},
+                status: schema_literal("completed"),
+                conclusion: schema_literal("success"),
+                url: schema_string()
+                  + {
+                  pattern: "^https://github[.]com/.+/actions/runs/[0-9]+/job/[0-9]+$",
+                },
+              },
+            ),
+          ),
+          page: schema_literal(1),
+          per_page: schema_int() + {minimum: 1},
+        },
+      ),
+      started_at_ms: schema_int() + {minimum: 0},
+      completed_at_ms: schema_int() + {minimum: 0},
+      duration_ms: schema_int() + {minimum: 0},
+    },
+  )
+}
+
+fn hosted_platform_receipt_schema() {
+  return schema_closed_object(
+    {
+      schema_version: schema_literal("harn.release_audit_receipt.v2"),
+      proof_kind: schema_literal("hosted_platform"),
+      source: schema_closed_object(
+        {
+          repo: schema_string() + {pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          branch: schema_string() + {min_len: 1},
+          sha: sha_schema(),
+          remote_sha_after: sha_schema(),
+        },
+      ),
+      platforms: schema_list(platform_proof_schema()),
+      local_source: schema_closed_object(
+        {
+          head_sha: sha_schema(),
+          status: schema_literal("success"),
+          lane_names: schema_list(schema_string() + {pattern: "^[a-z0-9-]+$"}),
+          started_at_ms: schema_int() + {minimum: 0},
+          completed_at_ms: schema_int() + {minimum: 0},
+          duration_ms: schema_int() + {minimum: 0},
+        },
+      ),
+      join: schema_closed_object(
+        {
+          started_at_ms: schema_int() + {minimum: 0},
+          completed_at_ms: schema_int() + {minimum: 0},
+          duration_ms: schema_int() + {minimum: 0},
+          critical_path: schema_enum(["windows", "macos", "local_source"]),
+        },
+      ),
       warm: warm_schema(),
     },
   )
 }
 
 fn receipt_schema() {
-  return merge_group_receipt_schema()
+  return hosted_platform_receipt_schema()
 }
 
 fn unique_strings(values: list<string>) -> bool {
@@ -324,38 +384,82 @@ pub fn release_audit_receipt_plan(
   }
   const receipt = report.value
   const expected = lowercase(trim(expected_head_sha))
-  if receipt.head_sha != expected || receipt.warm.head_sha != expected {
+  if receipt.source.sha != expected || receipt.source.remote_sha_after != expected
+    || receipt
+    .local_source.head_sha
+    != expected
+    || receipt.warm.head_sha != expected {
     return release_audit_full_plan(contract, "head_sha_mismatch", expected)
   }
   if receipt.warm.binary_sha256 != lowercase(trim(observed_warm_binary_sha256)) {
     return release_audit_full_plan(contract, "warm_binary_sha256_mismatch", expected)
   }
-  const expected_run_url = "https://github.com/burin-labs/harn/actions/runs/${receipt.run.id}"
-  if receipt.run.url != expected_run_url {
-    return release_audit_full_plan(contract, "run_url_identity_mismatch", expected)
+  const required_source_lanes = contract.lanes.filter({ lane -> lane.proof == "merge_group" }).map(
+    { lane -> lane.name },
+  )
+    .to_list()
+  if !exact_rows(receipt.local_source.lane_names, required_source_lanes).ok {
+    return release_audit_full_plan(contract, "local_source_lanes_mismatch", expected)
   }
-  if receipt.run.head_sha != expected {
-    return release_audit_full_plan(contract, "run_head_sha_mismatch", expected)
+  const platforms = receipt.platforms.map({ proof -> proof.platform }).to_list()
+  if !exact_rows(platforms, ["windows", "macos"]).ok {
+    return release_audit_full_plan(contract, "platform_proofs_mismatch", expected)
   }
-  const observed_jobs = receipt.jobs.map({ job -> job.name }).to_list()
-  const observed_job_ids = receipt.jobs.map({ job -> "${job.id}" }).to_list()
-  if !unique_strings(observed_job_ids) {
-    return release_audit_full_plan(contract, "duplicate_merge_group_job_id", expected)
+  const expected_workflows = {
+    windows: ".github/workflows/windows-nightly.yml",
+    macos: ".github/workflows/macos-nightly.yml",
   }
-  for job in receipt.jobs {
-    if job.url != expected_run_url + "/job/${job.id}" {
-      return release_audit_full_plan(contract, "job_url_identity_mismatch", expected)
+  const expected_jobs = {
+    windows: "Workspace nextest (windows-latest)",
+    macos: "Workspace nextest (macos-latest)",
+  }
+  let slowest = ""
+  let longest = -1
+  for platform in receipt.platforms {
+    if platform.workflow_path != expected_workflows[platform.platform]
+      || platform.required_job
+      != expected_jobs[platform
+      .platform] {
+      return release_audit_full_plan(contract, "platform_identity_mismatch", expected)
+    }
+    if platform.completed_at_ms - platform.started_at_ms != platform.duration_ms {
+      return release_audit_full_plan(contract, "platform_timing_mismatch", expected)
+    }
+    const proof = github_actions_exact_proof(
+      {
+        repo: receipt.source.repo,
+        workflow_path: platform.workflow_path,
+        event: "workflow_dispatch",
+        head_sha: expected,
+        required_job: platform.required_job,
+        run_id: platform.run.id,
+      },
+      [platform.run],
+      platform.jobs,
+    )
+    if !proof.ok {
+      return release_audit_full_plan(contract, "platform_proof_" + proof.reason, expected)
+    }
+    if platform.duration_ms > longest {
+      longest = platform.duration_ms
+      slowest = platform.platform
     }
   }
-  const required_jobs = contract.merge_group_jobs.map({ job -> job.name }).to_list()
-  const rows = exact_rows(observed_jobs, required_jobs)
-  if !rows.ok {
-    return release_audit_full_plan(
-      contract,
-      "merge_group_jobs_mismatch",
-      expected,
-      ["missing=" + join(rows.missing, ","), "unknown=" + join(rows.unknown, ",")],
-    )
+  if receipt.local_source.completed_at_ms - receipt.local_source.started_at_ms
+    != receipt.local_source
+    .duration_ms {
+    return release_audit_full_plan(contract, "local_source_timing_mismatch", expected)
+  }
+  if receipt.local_source.duration_ms > longest {
+    longest = receipt.local_source.duration_ms
+    slowest = "local_source"
+  }
+  if receipt.join.completed_at_ms - receipt.join.started_at_ms != receipt.join.duration_ms
+    || receipt
+    .join.critical_path
+    != slowest
+    || receipt.join.duration_ms < longest {
+    return release_audit_full_plan(contract, "join_timing_mismatch", expected)
   }
   const lanes = residual_lanes(contract)
   return audit_plan(lanes, true, "receipt_accepted", receipt.proof_kind, expected)
@@ -453,9 +557,30 @@ fn arg_spec() {
         {kind: "flag", name: "head_sha", long: "--head-sha", default: ""},
         {kind: "flag", name: "warm_binary_sha256", long: "--warm-binary-sha256", default: ""},
         {kind: "flag", name: "check_ci", long: "--check-ci", default: ""},
+        {kind: "switch", name: "shell_plan", long: "--shell-plan", default: false},
       ],
     },
   )
+}
+
+fn print_plan(harness: Harness, plan: ReleaseAuditPlan, shell_plan: bool) {
+  if !shell_plan {
+    harness.stdio.println(json_stringify(plan))
+    return nil
+  }
+  harness.stdio.println(
+    "meta\t" + if plan.receipt_reused {
+      "true"
+    } else {
+      "false"
+    }
+      + "\t"
+      + plan.reason,
+  )
+  for lane in plan.lanes {
+    harness.stdio.println("lane\t" + lane.name + "\t" + lane.runner)
+  }
+  return nil
 }
 
 fn main(harness: Harness) {
@@ -499,6 +624,7 @@ fn main(harness: Harness) {
   const receipt_path = trim(parsed?.receipt ?? "")
   const expected_sha = trim(parsed?.head_sha ?? "")
   const warm_binary_sha256 = trim(parsed?.warm_binary_sha256 ?? "")
+  const shell_plan = parsed?.shell_plan ?? false
   if receipt_path == "" && expected_sha == "" {
     if ci_path != "" {
       harness.stdio.println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
@@ -508,9 +634,7 @@ fn main(harness: Harness) {
     exit(2)
   }
   if receipt_path == "" {
-    harness.stdio.println(
-      json_stringify(release_audit_full_plan(contract, "no_receipt", expected_sha)),
-    )
+    print_plan(harness, release_audit_full_plan(contract, "no_receipt", expected_sha), shell_plan)
     return nil
   }
   const loaded = read_json_result(receipt_path)
@@ -519,6 +643,6 @@ fn main(harness: Harness) {
   } else {
     release_audit_full_plan(contract, "receipt_unreadable", expected_sha)
   }
-  harness.stdio.println(json_stringify(plan))
+  print_plan(harness, plan, shell_plan)
   return nil
 }

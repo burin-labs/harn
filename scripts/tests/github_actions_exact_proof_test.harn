@@ -1,0 +1,150 @@
+import {
+  github_actions_exact_proof,
+} from "../../crates/harn-stdlib/src/stdlib/stdlib_connectors_github"
+
+const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+const OTHER_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+const REPO = "burin-labs/harn"
+
+const RUN_ID = 123
+
+const JOB_ID = 456
+
+fn run(overrides = {}) {
+  return {
+    repo: REPO,
+    id: RUN_ID,
+    workflow_id: 17,
+    workflow_path: ".github/workflows/windows-nightly.yml",
+    run_number: 42,
+    run_attempt: 1,
+    name: "Windows nightly",
+    event: "workflow_dispatch",
+    status: "completed",
+    conclusion: "success",
+    head_sha: SHA,
+    head_branch: "main",
+    url: "https://github.com/burin-labs/harn/actions/runs/123",
+    api_url: "https://api.github.com/repos/burin-labs/harn/actions/runs/123",
+    created_at: "2026-07-24T00:00:00Z",
+    started_at: "2026-07-24T00:00:01Z",
+    updated_at: "2026-07-24T00:10:00Z",
+  }
+    + overrides
+}
+
+fn job(overrides = {}) {
+  return {
+    id: JOB_ID,
+    run_id: RUN_ID,
+    name: "Full Windows workspace",
+    status: "completed",
+    conclusion: "success",
+    url: "https://github.com/burin-labs/harn/actions/runs/123/job/456",
+    api_url: "https://api.github.com/repos/burin-labs/harn/actions/jobs/456",
+    started_at: "2026-07-24T00:00:01Z",
+    completed_at: "2026-07-24T00:10:00Z",
+    runner_name: "GitHub Actions 1",
+    runner_group_name: "GitHub Actions",
+    labels: ["windows-latest"],
+    steps: [],
+  }
+    + overrides
+}
+
+fn jobs(rows = [job()], total_count = 1) {
+  return {repo: REPO, run_id: RUN_ID, total_count: total_count, jobs: rows, page: 1, per_page: 100}
+}
+
+fn request(overrides = {}) {
+  return {
+    repo: REPO,
+    workflow_path: ".github/workflows/windows-nightly.yml",
+    event: "workflow_dispatch",
+    head_sha: SHA,
+    required_job: "Full Windows workspace",
+    run_id: RUN_ID,
+  }
+    + overrides
+}
+
+pipeline test_exact_actions_proof_fixtures(task) {
+  const accepted = github_actions_exact_proof(request(), [run()], jobs())
+  assert_eq(accepted.ok, true)
+  assert_eq(accepted.reason, "proof_accepted")
+  assert_eq(accepted.proof?.run_id, RUN_ID)
+  assert_eq(accepted.proof?.job_id, JOB_ID)
+  assert_eq(
+    github_actions_exact_proof(request({head_sha: OTHER_SHA}), [run()], jobs()).reason,
+    "run_identity_mismatch",
+  )
+  assert_eq(
+    github_actions_exact_proof(
+      request({workflow_path: ".github/workflows/macos-nightly.yml"}),
+      [run()],
+      jobs(),
+    ).reason,
+    "run_identity_mismatch",
+  )
+  assert_eq(
+    github_actions_exact_proof(request({run_id: nil}), [run(), run({id: 124})], jobs()).reason,
+    "duplicate_exact_run",
+  )
+  assert_eq(
+    github_actions_exact_proof(request(), [run({conclusion: "failure"})], jobs()).reason,
+    "run_not_successful",
+  )
+  assert_eq(
+    github_actions_exact_proof(
+      request(),
+      [run({status: "completed", conclusion: "cancelled"})],
+      jobs(),
+    ).reason,
+    "run_not_successful",
+  )
+  assert_eq(
+    github_actions_exact_proof(request(), [run({status: "in_progress", conclusion: nil})], jobs())
+      .reason,
+    "run_not_completed",
+  )
+  assert_eq(
+    github_actions_exact_proof(request(), [{...run(), url: nil}], jobs()).reason,
+    "malformed_run",
+  )
+  assert_eq(
+    github_actions_exact_proof(request(), [run()], jobs([job(), job({id: 457})], 2)).reason,
+    "duplicate_job_name",
+  )
+  assert_eq(
+    github_actions_exact_proof(request(), [run()], jobs([job(), job({name: "Other"})], 2)).reason,
+    "duplicate_job_id",
+  )
+  assert_eq(
+    github_actions_exact_proof(request(), [run()], jobs([job()], 2)).reason,
+    "incomplete_jobs",
+  )
+  assert_eq(
+    github_actions_exact_proof(
+      request(),
+      [run()],
+      jobs([job({status: "in_progress", conclusion: nil})]),
+    ).reason,
+    "job_not_completed",
+  )
+  assert_eq(
+    github_actions_exact_proof(
+      request(),
+      [run()],
+      jobs([job({status: "completed", conclusion: "failure"})]),
+    ).reason,
+    "job_not_successful",
+  )
+  // A branch move is observed as a different run SHA and invalidates the
+  // frozen-source request instead of silently accepting the newer run.
+  assert_eq(
+    github_actions_exact_proof(request(), [run({head_sha: OTHER_SHA})], jobs()).reason,
+    "run_identity_mismatch",
+  )
+}

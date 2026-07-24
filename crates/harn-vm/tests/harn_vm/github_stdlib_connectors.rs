@@ -22,9 +22,29 @@ impl ConnectorClient for RecordingClient {
             .expect("recording client calls lock")
             .push((method.to_string(), args));
         Ok(match method {
-            "github.actions.workflow_dispatch" => json!({"workflow_run_id": 123}),
-            "github.actions.runs" => json!({"workflow_runs": [{"id": 123}]}),
+            "github.actions.workflow_dispatch" => json!({
+                "repo": "octo-org/octo-repo", "accepted": true, "run_id": 123,
+                "workflow_id": "release.yml", "workflow_path": ".github/workflows/release.yml",
+                "run_attempt": 1, "ref": "main", "head_sha": "abc", "head_branch": "main",
+                "event": "workflow_dispatch", "status": "queued", "conclusion": null,
+                "url": "https://github.com/octo-org/octo-repo/actions/runs/123",
+                "api_url": "https://api.github.com/repos/octo-org/octo-repo/actions/runs/123"
+            }),
+            "github.actions.runs" => {
+                json!({"repo": "octo-org/octo-repo", "total_count": 1, "runs": [{
+                "id": 123, "status": "completed"
+            }], "page": 1, "per_page": 30})
+            }
             "github.actions.run" => json!({"id": 123, "status": "completed"}),
+            "github.actions.run_jobs" => {
+                json!({"repo": "octo-org/octo-repo", "run_id": 123, "total_count": 1, "jobs": [{
+                "id": 456, "name": "Full workspace"
+            }], "page": 1, "per_page": 100})
+            }
+            "github.actions.run_cancel" => json!({
+                "repo": "octo-org/octo-repo", "run_id": 123, "accepted": true,
+                "state": "cancel_requested"
+            }),
             "repos.get_text" => json!({"text": "v0.8.4\n"}),
             "github.release.latest" => json!({
                 "ok": true,
@@ -87,14 +107,18 @@ import {
   release_assets,
   workflow_dispatch,
   workflow_run,
+  workflow_run_cancel,
+  workflow_run_jobs,
   workflow_runs,
 } from "std/connectors/github"
 
 pipeline main(task) {
   const dispatch = workflow_dispatch("git@github.com:octo-org/octo-repo.git", "release.yml", "main", {version: "v0.8.4"})
-  assert_eq(dispatch.workflow_run_id, 123, "dispatch result")
-  assert_eq(workflow_runs("octo-org/octo-repo", {event: "workflow_dispatch"}).workflow_runs[0].id, 123, "runs result")
+  assert_eq(dispatch.run_id, 123, "dispatch result")
+  assert_eq(workflow_runs("octo-org/octo-repo", {event: "workflow_dispatch"}).runs[0].id, 123, "runs result")
   assert_eq(workflow_run("octo-org/octo-repo", 123).status, "completed", "run result")
+  assert_eq(workflow_run_jobs("octo-org/octo-repo", 123).jobs[0].id, 456, "jobs result")
+  assert_eq(workflow_run_cancel("octo-org/octo-repo", 123).accepted, true, "cancel result")
   assert_eq(trim(read_file_at_ref("https://github.com/octo-org/octo-repo.git", ".harn-version", "main").text), "v0.8.4", "file text")
   assert_eq(latest_release("octo-org/octo-repo").tag_name, "v0.8.4", "release tag")
   assert_eq(release_assets("octo-org/octo-repo", 501).asset_names[0], "harn-x86_64-unknown-linux-gnu.tar.gz", "asset names")
@@ -124,6 +148,8 @@ pipeline main(task) {
             "github.actions.workflow_dispatch",
             "github.actions.runs",
             "github.actions.run",
+            "github.actions.run_jobs",
+            "github.actions.run_cancel",
             "repos.get_text",
             "github.release.latest",
             "github.release.assets",
@@ -134,7 +160,7 @@ pipeline main(task) {
     );
     assert_eq!(calls[0].1["repo"], "octo-org/octo-repo");
     assert_eq!(calls[0].1["workflow_id"], "release.yml");
-    assert_eq!(calls[3].1["ref"], "main");
-    assert_eq!(calls[6].1["pull_number"], 7);
-    assert_eq!(calls[8].1["state"], "closed");
+    assert_eq!(calls[5].1["ref"], "main");
+    assert_eq!(calls[8].1["pull_number"], 7);
+    assert_eq!(calls[10].1["state"], "closed");
 }
