@@ -9,6 +9,45 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.36
+
+### Added
+
+- Added `harn provider tool-calibrate`, exact live `tool-probe --tool-format`
+  overrides, and pinned per-route format fitness snapshots used by default
+  tool-format selection.
+
+### Changed
+
+- Add versioned grammar-fitness receipts and typed parser health to AST
+  responses; structural writes now fail closed unless parser coverage is
+  verified.
+- Agent-loop tool results now use structured error and product-outcome fields
+  exclusively; rendered tool prose no longer determines whether a result failed.
+- Rust test lanes now mirror the production CLI's stack contract, preventing
+  stack-sensitive Harn compilation tests from aborting on smaller runners.
+- No-build developer checks now discover the configured per-worktree Cargo
+  target directory without compiling when the shell has not exported it.
+- Nextest now treats delayed hostlib captured-output teardown as diagnostic
+  after a bounded grace period, avoiding false failures under full fan-out.
+
+### Fixed
+
+- **ACP prompt results preserve agent terminal truth (#4834).** Successful
+  `session/prompt` responses now expose the producer-owned terminal outcome
+  under `_meta.harn.terminal`, so policy, budget, error, suspension, and unknown
+  stops cannot be mistaken for completion from ACP `end_turn` alone.
+- **Headless sandbox toolchain state is workspace-local and process roots are
+  reachable from the CLI (#4835).** Restricted runs now provide writable Go,
+  Python, npm, Yarn, pnpm, XDG, home, and temp state without granting broad
+  writes to the real user home, while `--sandbox-read-root` and
+  `--sandbox-write-root` expose the existing process-only policy as scoped
+  alternatives to `--no-sandbox`.
+- **Deterministic provider decode failures stop immediately (#4837).** HTTP
+  500 responses that report grammar or response-format decoding failures now
+  surface as terminal `invalid_response` errors instead of exhausting the
+  transient server-error retry budget.
+
 ## v0.10.35
 
 ### Breaking
