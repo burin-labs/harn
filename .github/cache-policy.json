@@ -17,6 +17,11 @@
       "shared_key": "workspace-windows"
     },
     {
+      "workflow": "macos-nightly.yml",
+      "job": "nextest",
+      "shared_key": "workspace-macos"
+    },
+    {
       "workflow": "ci.yml",
       "job": "package-audit",
       "shared_key": "package-audit"

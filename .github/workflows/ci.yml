@@ -356,16 +356,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache
+        # Hosted fallback uses the bounded coarse rust-cache below. The former
+        # per-object GHA backend used 5.35 GiB / 6,785 entries for a 31% warm
+        # hit rate, crowding the repository's shared 10 GiB cache pool.
+        if: runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
         with:
           cache-key: package-audit
           sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
-          # On the hosted path (Blacksmith off) sccache has no sticky disk, so
-          # back it with the free GitHub Actions cache. Independent kill switch
-          # HARN_CI_DISABLE_SCCACHE_GHA restores the backendless 0%-hit path
-          # without re-enabling Blacksmith.
-          # Never on self-hosted: the box's persistent local SCCACHE_DIR is
-          # the better backend there, and SCCACHE_GHA_ENABLED would clobber it.
-          gha-backend: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
       - uses: ./.github/actions/rust-cache
         if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'
         continue-on-error: true
@@ -520,14 +517,10 @@ jobs:
         with:
           components: ${{ matrix.rust_components }}
       - uses: ./.github/actions/sccache
+        if: runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
         with:
           cache-key: ${{ matrix.cache_key }}
           sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
-          # Hosted path: back sccache with the free GitHub Actions cache (see the
-          # package-audit lane). HARN_CI_DISABLE_SCCACHE_GHA is the kill switch.
-          # Never on self-hosted: the box's persistent local SCCACHE_DIR is
-          # the better backend there, and SCCACHE_GHA_ENABLED would clobber it.
-          gha-backend: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
       - uses: ./.github/actions/rust-cache
         if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'
         continue-on-error: true
@@ -762,10 +755,10 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache
+        if: runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
         with:
           cache-key: workspace-cli
           sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
-          gha-backend: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && vars.HARN_CI_DISABLE_SCCACHE_GHA != 'true' }}
       - name: Build portable Harn CLI
         env:
           CARGO_BUILD_JOBS: "4"
@@ -1494,13 +1487,15 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        continue-on-error: true
-      - uses: ./.github/actions/configure-cargo-sccache
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
+          # Restore the cache written by macos-nightly.yml. PR and merge-group
+          # refs stay restore-only under the repository cache policy. Bind the
+          # target artifacts to the full embedded-source revision, matching
+          # the Windows cache's stale-module safety contract.
           shared-key: workspace-macos
+          source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           cache-on-failure: true
           cache-bin: false
       - name: Clippy all targets (deny warnings)
@@ -1515,12 +1510,6 @@ jobs:
       - name: Typecheck generated Swift protocol bindings
         shell: bash
         run: xcrun swiftc -typecheck spec/protocol-artifacts/HarnProtocol.swift
-      # Gracefully stop the sccache daemon so the post-job orphan-cleanup phase
-      # has nothing to terminate (see the Stop-sccache note in rust-builds).
-      - name: Stop sccache server
-        if: always()
-        shell: bash
-        run: '"${SCCACHE_PATH:-sccache}" --stop-server || true'
 
   portal:
     name: Portal frontend
