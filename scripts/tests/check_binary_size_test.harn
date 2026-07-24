@@ -9,6 +9,7 @@ type ReleaseWorkflowStep = {name?: string, if?: string, uses?: string, run?: str
 type ReleaseWorkflow = {
   env: {BINARY_SIZE_BUDGET_MB: string},
   jobs: {
+    setup: {steps: list<ReleaseWorkflowStep>},
     prepare_cli_aot: {needs: string, if: string, steps: list<ReleaseWorkflowStep>},
     build: {needs: list<string>, steps: list<ReleaseWorkflowStep>},
     release: {needs: list<string>, if: string},
@@ -25,6 +26,7 @@ fn release_workflow() -> ReleaseWorkflow {
       jobs: schema_field(
         schema_object(
           {
+            setup: schema_field(schema_object({steps: schema_field(schema_list(step_schema))})),
             prepare_cli_aot: schema_field(
               schema_object(
                 {
@@ -160,7 +162,7 @@ pipeline test_workflow_budget_matches_helper_default(task) {
 @test
 pipeline test_workflow_preserves_bloat_after_failed_budget_gate(task) {
   const diagnostic_mode =
-    "matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || needs.setup.outputs.build_mode == 'benchmark')"
+    "matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))"
   const diagnostics = "always() && " + diagnostic_mode
   const steps = release_workflow().jobs.build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
@@ -175,6 +177,18 @@ pipeline test_workflow_preserves_bloat_after_failed_budget_gate(task) {
   assert_eq(
     release_workflow_step(steps, "Upload binary-size report").if,
     "always() && matrix.target == 'x86_64-unknown-linux-gnu'",
+  )
+}
+
+@test
+pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(task) {
+  const resolve = release_workflow_step(
+    release_workflow().jobs.setup.steps,
+    "Resolve release context",
+  )
+  assert(
+    resolve.run?.contains("benchmark_cargo_bloat requires benchmark_only=true")
+      ?? false,
   )
 }
 

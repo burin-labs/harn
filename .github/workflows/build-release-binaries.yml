@@ -86,6 +86,11 @@ on:
         required: false
         type: boolean
         default: false
+      benchmark_cargo_bloat:
+        description: 'Also run the expensive cargo-bloat diagnostics for a benchmark_only dispatch. The hard byte/ELF size gate always runs.'
+        required: false
+        type: boolean
+        default: false
       runner_profile:
         description: 'Runner override for recovery/benchmark: policy, standard, or fast. Primary releases and warm builds always use policy.'
         required: false
@@ -155,6 +160,7 @@ jobs:
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
+          INPUT_BENCHMARK_CARGO_BLOAT: ${{ inputs.benchmark_cargo_bloat && 'true' || 'false' }}
           INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'policy' }}
           FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
           EVENT_NAME: ${{ github.event_name }}
@@ -287,6 +293,10 @@ jobs:
           if (( REQUESTED_TARGET_COUNT > 0 )); then
             validate_requested_targets "$REQUESTED_TARGETS_JSON"
           fi
+          if [[ "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
+            echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
+            exit 1
+          fi
           if [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
@@ -304,7 +314,7 @@ jobs:
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE" "$INPUT_TARGETS")"
             SHOULD_BUILD_BINARIES=true
-            echo "::notice::Non-publishing benchmark from $REF using runner profile $RUNNER_PROFILE. No sign/notarize/package/upload/release/container/cache save."
+            echo "::notice::Non-publishing benchmark from $REF using runner profile $RUNNER_PROFILE. No sign/notarize/package/upload/release/container/cache save. cargo-bloat opt-in: $INPUT_BENCHMARK_CARGO_BLOAT."
           elif [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::warm_cache_only is only valid for workflow_dispatch"
@@ -736,7 +746,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install cargo-bloat
-        if: matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || needs.setup.outputs.build_mode == 'benchmark')
+        # Warm runs own the recurring diagnostic. Release-admission
+        # benchmarks keep their hard byte/ELF gate but only pay cargo-bloat's
+        # tens-of-minutes relink/analysis tail when explicitly requested.
+        if: matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: cargo-bloat
@@ -1090,7 +1103,7 @@ jobs:
           fi
 
       - name: Generate cargo-bloat report
-        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || needs.setup.outputs.build_mode == 'benchmark')
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))
         shell: bash
         continue-on-error: true
         env:
