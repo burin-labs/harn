@@ -1,6 +1,27 @@
 use super::*;
 use futures::StreamExt;
 use harn_vm::event_log::{AnyEventLog, EventLog, Topic};
+use std::future::Future;
+
+fn block_on_cli_stack_async<Fut>(build: impl FnOnce() -> Fut + Send + 'static) -> Fut::Output
+where
+    Fut: Future + 'static,
+    Fut::Output: Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("orchestrator-harness-test".into())
+        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
+        .spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("orchestrator harness test runtime")
+                .block_on(build())
+        })
+        .expect("failed to spawn orchestrator harness test thread")
+        .join()
+        .expect("orchestrator harness test thread panicked")
+}
 
 fn write_test_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -261,67 +282,69 @@ pub pipeline run(event) {{
         .expect("harness shutdown");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn materialized_cron_persona_executes_its_generated_entry_workflow() {
-    let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
-    let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
-    let clock = harn_vm::clock::PausedClock::new(
-        time::OffsetDateTime::from_unix_timestamp(1_784_195_970).unwrap(),
-    );
-    let temp = tempfile::TempDir::new().unwrap();
-    let blueprint = temp.path().join("blueprint.json");
-    std::fs::write(
-        &blueprint,
-        serde_json::json!({
-            "schema_version": "1",
-            "name": "reply_digest",
-            "description": "Summarizes follow-up work.",
-            "goal": "Surface replies every hour.",
-            "template": "deterministic-sweeper",
-            "cron": {"cron": "0 * * * *", "timezone": "UTC"},
-        })
-        .to_string(),
-    )
-    .unwrap();
-    let package = crate::commands::persona_scaffold::materialize_persona_package(
-        &blueprint,
-        &temp.path().join("personas"),
-        false,
-    )
-    .await
-    .expect("materialize cron persona");
-
-    let config =
-        OrchestratorConfig::for_test(package.root.join("harn.toml"), temp.path().join("state"))
-            .with_clock(clock.clone());
-    let harness = OrchestratorHarness::start(config)
+#[test]
+fn materialized_cron_persona_executes_its_generated_entry_workflow() {
+    block_on_cli_stack_async(|| async {
+        let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+        let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+        let clock = harn_vm::clock::PausedClock::new(
+            time::OffsetDateTime::from_unix_timestamp(1_784_195_970).unwrap(),
+        );
+        let temp = tempfile::TempDir::new().unwrap();
+        let blueprint = temp.path().join("blueprint.json");
+        std::fs::write(
+            &blueprint,
+            serde_json::json!({
+                "schema_version": "1",
+                "name": "reply_digest",
+                "description": "Summarizes follow-up work.",
+                "goal": "Surface replies every hour.",
+                "template": "deterministic-sweeper",
+                "cron": {"cron": "0 * * * *", "timezone": "UTC"},
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let package = crate::commands::persona_scaffold::materialize_persona_package(
+            &blueprint,
+            &temp.path().join("personas"),
+            false,
+        )
         .await
-        .expect("harness start");
-    let event_log = harness.event_log();
-    let topic = Topic::new(harn_vm::personas::PERSONA_RUNTIME_TOPIC).unwrap();
-    clock.advance(std::time::Duration::from_secs(30));
-    wait_for_persona_completion(&event_log).await;
+        .expect("materialize cron persona");
 
-    let lifecycle = event_log
-        .read_range(&topic, None, usize::MAX)
-        .await
-        .expect("read materialized persona lifecycle");
-    let completed = lifecycle
-        .iter()
-        .find(|(_, event)| event.kind == "persona.run.completed")
-        .expect("materialized persona completed");
-    assert_eq!(
-        completed.1.payload["entry_workflow"].as_str(),
-        Some("src/reply_digest.harn#run")
-    );
-    assert!(!lifecycle
-        .iter()
-        .any(|(_, event)| event.kind == "persona.run.failed"));
+        let config =
+            OrchestratorConfig::for_test(package.root.join("harn.toml"), temp.path().join("state"))
+                .with_clock(clock.clone());
+        let harness = OrchestratorHarness::start(config)
+            .await
+            .expect("harness start");
+        let event_log = harness.event_log();
+        let topic = Topic::new(harn_vm::personas::PERSONA_RUNTIME_TOPIC).unwrap();
+        clock.advance(std::time::Duration::from_secs(30));
+        wait_for_persona_completion(&event_log).await;
 
-    harness
-        .shutdown(std::time::Duration::from_secs(5))
-        .await
-        .expect("harness shutdown");
+        let lifecycle = event_log
+            .read_range(&topic, None, usize::MAX)
+            .await
+            .expect("read materialized persona lifecycle");
+        let completed = lifecycle
+            .iter()
+            .find(|(_, event)| event.kind == "persona.run.completed")
+            .expect("materialized persona completed");
+        assert_eq!(
+            completed.1.payload["entry_workflow"].as_str(),
+            Some("src/reply_digest.harn#run")
+        );
+        assert!(!lifecycle
+            .iter()
+            .any(|(_, event)| event.kind == "persona.run.failed"));
+
+        harness
+            .shutdown(std::time::Duration::from_secs(5))
+            .await
+            .expect("harness shutdown");
+    });
 }
 
 #[tokio::test(flavor = "multi_thread")]
