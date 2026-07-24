@@ -641,9 +641,12 @@ open_bump_pr() {
     echo "error: expected version $next, got $actual_next"
     exit 1
   fi
+  make gen-grammar-fitness
 
   log_step "Commit version bump"
-  stage_version_bump_manifests spec/acp-registry/harn/agent.json
+  stage_version_bump_manifests \
+    spec/acp-registry/harn/agent.json \
+    crates/harn-hostlib/data/grammar-fitness/receipt.v1.json
   git commit -m "Bump version to $next"
 
   log_step "Push bump branch"
@@ -723,6 +726,7 @@ prepare_here() {
     echo "error: expected version $next, got $actual_next"
     exit 1
   fi
+  make gen-grammar-fitness
 
   run_common_gates
 
