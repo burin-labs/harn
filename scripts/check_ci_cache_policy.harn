@@ -26,6 +26,8 @@ const ACTION_PATH = ".github/actions/rust-cache/action.yml"
 
 const NODE_ACTION_PATH = ".github/actions/node-cache/action.yml"
 
+const SETUP_HARN_ACTION_PATH = ".github/actions/setup-harn/action.yml"
+
 const SCCACHE_ACTION_PATH = ".github/actions/sccache/action.yml"
 
 const SCCACHE_ACTION = "./.github/actions/sccache"
@@ -359,6 +361,56 @@ fn node_cache_action_errors(action) -> list<string> {
   if !(restores[0]?.["continue-on-error"] ?? false)
     || !(caches[0]?.["continue-on-error"] ?? false) {
     errors = errors + ["${NODE_ACTION_PATH} must keep cache-service failures non-fatal"]
+  }
+  return errors
+}
+
+/** Keep immutable setup archives reusable without copying them onto every ephemeral ref. */
+pub fn setup_harn_cache_action_errors(action) -> list<string> {
+  const steps = action?.runs?.steps ?? []
+  const restores = steps.filter(
+    { step -> step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX) },
+  )
+    .to_list()
+  const caches = steps.filter(
+    { step -> step_uses(step).starts_with(UPSTREAM_GENERIC_CACHE_PREFIX) },
+  )
+    .to_list()
+  if len(restores) != 1 || len(caches) != 1 {
+    return [
+      "${SETUP_HARN_ACTION_PATH} must contain one restore-only cache and one default-branch cache step",
+    ]
+  }
+  let errors: list<string> = []
+  const default_ref = "format('refs/heads/{0}', github.event.repository.default_branch)"
+  if !contains(trim(restores[0]?.if ?? ""), "github.ref != ${default_ref}") {
+    errors = errors
+      + [
+      "${SETUP_HARN_ACTION_PATH} must use restore-only caching away from the caller's default branch",
+    ]
+  }
+  if !contains(trim(caches[0]?.if ?? ""), "github.ref == ${default_ref}") {
+    errors = errors
+      + [
+      "${SETUP_HARN_ACTION_PATH} must save archives only on the caller's default branch",
+    ]
+  }
+  const restore_path = trim(restores[0]?.with?.path ?? "")
+  const cache_path = trim(caches[0]?.with?.path ?? "")
+  const restore_key = trim(restores[0]?.with?.key ?? "")
+  const cache_key = trim(caches[0]?.with?.key ?? "")
+  if restore_path == "" || restore_path != cache_path || restore_key == ""
+    || restore_key != cache_key
+    || !contains(restore_key, "setup-harn-v2-") {
+    errors = errors
+      + [
+      "${SETUP_HARN_ACTION_PATH} restore-only consumers and default-branch writer must share one versioned path and key",
+    ]
+  }
+  if !(restores[0]?.["continue-on-error"] ?? false)
+    || !(caches[0]?.["continue-on-error"] ?? false) {
+    errors = errors
+      + ["${SETUP_HARN_ACTION_PATH} must keep cache-service failures non-fatal"]
   }
   return errors
 }
@@ -1038,21 +1090,22 @@ fn main(harness: Harness) {
   }
   const action = read_yaml(ACTION_PATH, nil)
   const node_action = read_yaml(NODE_ACTION_PATH, nil)
+  const setup_harn_action = read_yaml(SETUP_HARN_ACTION_PATH, nil)
   const sccache_action = read_yaml(SCCACHE_ACTION_PATH, nil)
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(path, nil)
   }
   const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
-    + ci_sccache_policy_errors(
-    sccache_action,
-    workflows["ci.yml"],
+    + setup_harn_cache_action_errors(
+    setup_harn_action,
   )
-    + windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"])
-    + macos_shared_cache_errors(
+    + ci_sccache_policy_errors(sccache_action, workflows["ci.yml"])
+    + windows_shared_cache_errors(
     workflows["ci.yml"],
-    workflows["macos-nightly.yml"],
+    workflows["windows-nightly.yml"],
   )
+    + macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"])
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {
