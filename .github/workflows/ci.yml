@@ -352,6 +352,24 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_CACHE_SIZE: 40G
       SCCACHE_SERVER_PORT: "4227"
+      # Which rung of the ladder above this job actually landed on.
+      #
+      # `runner.environment` CANNOT answer that question on any lane that can
+      # reach Blacksmith. Blacksmith runners register as ordinary self-hosted
+      # runners, so `runner.environment` reports `self-hosted` on them exactly
+      # as it does on our own boxes: every `== 'self-hosted'` guard fires on
+      # the Blacksmith rung and every `!= 'self-hosted'` guard silently skips
+      # there. Observed on the burin-code Rust TUI lanes (burin-code#5423);
+      # latent here only because HARN_CI_DISABLE_BLACKSMITH_LINUX has been true
+      # since 2026-07-19, which pins the lower rung to `ubuntu-latest`.
+      #
+      # This mirrors the `runs-on` predicate above term for term. The two are a
+      # pair and must be edited together; scripts/check_runner_tier.py fails
+      # the build if they disagree or if `runner.environment` reappears here.
+      HARN_RUNNER_TIER: >-
+        ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+          && needs.runner-availability.outputs.linux == 'true') && 'self-hosted'
+          || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/rust-toolchain
@@ -359,12 +377,12 @@ jobs:
         # Hosted fallback uses the bounded coarse rust-cache below. The former
         # per-object GHA backend used 5.35 GiB / 6,785 entries for a 31% warm
         # hit rate, crowding the repository's shared 10 GiB cache pool.
-        if: runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
+        if: env.HARN_RUNNER_TIER != 'github-hosted'
         with:
           cache-key: package-audit
-          sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ env.HARN_RUNNER_TIER == 'blacksmith' }}
       - uses: ./.github/actions/rust-cache
-        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'
+        if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
           shared-key: package-audit
@@ -440,6 +458,16 @@ jobs:
       # link-arg appended. Linux-only: the windows/macos jobs never see this and
       # keep the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      # See the HARN_RUNNER_TIER comment on `package-audit`. This lane's ladder
+      # is matrix-driven, so the tier mirrors both self-hosted arms: the `lint`
+      # leg claims a `harn-ci-stable` worker and the `behavior` leg a
+      # `harn-ci-big` one, and either falling through lands on the same
+      # Blacksmith / hosted rung as `runs-on`.
+      HARN_RUNNER_TIER: >-
+        ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+          && (matrix.selfhosted == 'stable' && needs.runner-availability.outputs.linux == 'true'
+            || matrix.selfhosted == 'big' && needs.runner-availability.outputs.linux_big == 'true')) && 'self-hosted'
+          || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
     strategy:
       fail-fast: true
       matrix:
@@ -479,17 +507,18 @@ jobs:
           # entire point of routing this leg to the boxes. Hosted runners are
           # ephemeral so cleaning there is a no-op either way; the box's
           # cleanup cron sweeps targets older than 3 days.
-          clean: ${{ !(matrix.kind == 'behavior' && runner.environment == 'self-hosted') }}
+          clean: ${{ !(matrix.kind == 'behavior' && env.HARN_RUNNER_TIER == 'self-hosted') }}
       # Hosted-image SDK reclaim only: on a self-hosted box this would rm -rf
       # system paths and docker-prune live local images. Self-hosted disk
-      # hygiene is owned by the box's cleanup cron instead.
+      # hygiene is owned by the box's cleanup cron instead. Blacksmith VMs are
+      # ephemeral vendor capacity, not our boxes, so they take the reclaim.
       - uses: ./.github/actions/free-disk-space
-        if: runner.environment != 'self-hosted'
+        if: env.HARN_RUNNER_TIER != 'self-hosted'
       # Observability for the persistent-workspace path: how much disk the
       # worker has before the build starts. The cleanup cron owns reclamation;
       # this is the signal that tells us when it is falling behind.
       - name: Report self-hosted disk headroom
-        if: runner.environment == 'self-hosted'
+        if: env.HARN_RUNNER_TIER == 'self-hosted'
         run: |
           {
             echo "### Self-hosted disk headroom"
@@ -517,12 +546,12 @@ jobs:
         with:
           components: ${{ matrix.rust_components }}
       - uses: ./.github/actions/sccache
-        if: runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
+        if: env.HARN_RUNNER_TIER != 'github-hosted'
         with:
           cache-key: ${{ matrix.cache_key }}
-          sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ env.HARN_RUNNER_TIER == 'blacksmith' }}
       - uses: ./.github/actions/rust-cache
-        if: vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && runner.environment != 'self-hosted'
+        if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
           # Both legs restore the behavior cache and only the behavior leg
@@ -563,7 +592,10 @@ jobs:
           # 4 rustc jobs bound peak memory on the 8-vCPU hosted runners; the
           # big self-hosted workers have 24 cores and 61 GB, where 12 jobs is
           # still comfortably memory-safe and halves the cold-compile floor.
-          CARGO_BUILD_JOBS: ${{ runner.environment == 'self-hosted' && '12' || '4' }}
+          # This MUST key on the tier, not `runner.environment`: the Blacksmith
+          # rung here is also 8 vCPU, and `runner.environment` reports
+          # `self-hosted` there, which would hand it the 24-core setting.
+          CARGO_BUILD_JOBS: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4' }}
           HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0' }}
         run: >-
           ./scripts/ci/behavior_artifact.sh build
@@ -581,7 +613,7 @@ jobs:
         id: release-audit-rust-test
         if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
-          CARGO_BUILD_JOBS: ${{ runner.environment == 'self-hosted' && '12' || '4' }}
+          CARGO_BUILD_JOBS: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4' }}
           HARN_LLM_CALLS_DISABLED: "1"
         run: >-
           scripts/ci/run_rust_test_lane.sh
@@ -741,12 +773,17 @@ jobs:
       SCCACHE_CACHE_SIZE: 40G
       SCCACHE_SERVER_PORT: "4227"
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      # See the HARN_RUNNER_TIER comment on `package-audit`.
+      HARN_RUNNER_TIER: >-
+        ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+          && needs.runner-availability.outputs.linux == 'true') && 'self-hosted'
+          || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - uses: ./.github/actions/free-disk-space
-        if: runner.environment != 'self-hosted'
+        if: env.HARN_RUNNER_TIER != 'self-hosted'
       - name: Install mold linker
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
@@ -755,10 +792,10 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - uses: ./.github/actions/sccache
-        if: runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'
+        if: env.HARN_RUNNER_TIER != 'github-hosted'
         with:
           cache-key: workspace-cli
-          sticky: ${{ runner.environment != 'self-hosted' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' }}
+          sticky: ${{ env.HARN_RUNNER_TIER == 'blacksmith' }}
       - name: Build portable Harn CLI
         env:
           CARGO_BUILD_JOBS: "4"

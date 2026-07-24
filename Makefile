@@ -267,6 +267,10 @@ lint-actions:
 		echo "Pin org runner-availability workflow references to a full commit SHA." >&2; \
 		exit 1; \
 	fi
+	@# Prove each Blacksmith-capable job's declared HARN_RUNNER_TIER agrees with
+	@# its runs-on ladder. Unlike actionlint above this is NOT allowed to skip:
+	@# the failure it guards against is silent, so a silent gate is worthless.
+	@python3 scripts/check_runner_tier.py
 
 # Reject unreviewed conformance diagnostics while preserving the explicitly
 # triaged baseline. Paired .error/.lint fixtures own their diagnostics in the
