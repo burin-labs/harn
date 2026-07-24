@@ -122,6 +122,30 @@ fn deterministic_tools() {
 }
 ```
 
+### Structured producer facts
+
+Tool handlers normally return the text shown to the model. If middleware or
+another lifecycle consumer also needs machine-readable facts, return an
+explicit handler-result envelope:
+
+```harn
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+
+fn main() {
+  const handler = { _args ->
+    return agent_tool_handler_result(
+      "Edited src/main.harn",
+      {mutation_status: "applied", diagnostics_error_count: 0},
+    )
+  }
+}
+```
+
+The dispatcher keeps the complete envelope on `result`. It uses only `text`
+for `rendered_result` and the model-visible observation, so changing the prose
+does not change the structured facts. Unmarked dict returns retain their
+historical display-string behavior.
+
 Then hand the registry to `agent_loop(...)`:
 
 ```harn,ignore

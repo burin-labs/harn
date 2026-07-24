@@ -1,0 +1,28 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+
+pipeline main() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Return typed edit facts beside human feedback.",
+    {
+      parameters: {},
+      handler: { _ ->
+        return agent_tool_handler_result(
+          "Edited src/main.harn\n\nDiagnostics wording may change.",
+          {edit_status: "applied_still_failing", diagnostics_error_count: 2},
+        )
+      },
+    },
+  )
+  const dispatched = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  __io_println(
+    dispatched.rendered_result == "Edited src/main.harn\n\nDiagnostics wording may change.",
+  )
+  __io_println(dispatched.result.schema)
+  __io_println(dispatched.result.data.edit_status)
+  __io_println(dispatched.result.data.diagnostics_error_count)
+  __io_println(!dispatched.observation.contains("diagnostics_error_count"))
+}
