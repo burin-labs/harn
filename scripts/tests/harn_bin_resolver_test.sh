@@ -67,6 +67,9 @@ case "${FAKE_CARGO_MODE:-success}" in
 esac
 
 case "$*" in
+  "metadata --format-version=1 --no-deps")
+    printf '{"target_directory":"%s"}\n' "${FAKE_METADATA_TARGET_DIR:?}"
+    ;;
   "run --quiet --bin harn -- __internal-executable-path")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
@@ -121,6 +124,28 @@ if ! grep -Fxq "$expected_bin" "$tmp_root/no-build.out"; then
 fi
 if [[ -s "$record" ]]; then
   echo "harn_bin --no-build invoked cargo" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+: > "$record"
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_METADATA_TARGET_DIR="$target_dir" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --no-build --print > "$tmp_root/no-build-metadata.out"
+if ! grep -Fxq "$expected_bin" "$tmp_root/no-build-metadata.out"; then
+  echo "harn_bin --no-build did not discover Cargo's configured target directory" >&2
+  cat "$tmp_root/no-build-metadata.out" >&2
+  exit 1
+fi
+if ! grep -Fxq "args=metadata --format-version=1 --no-deps" "$record"; then
+  echo "harn_bin --no-build did not use buildless Cargo metadata discovery" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if grep -Fq "args=run " "$record"; then
+  echo "harn_bin --no-build attempted to build after metadata discovery" >&2
   cat "$record" >&2
   exit 1
 fi

@@ -51,7 +51,13 @@ pipeline test() {
   }
   assert_eq(__tool_result_dispatch_rejection(prose_only), false)
   // Producer-stamped product_error is trusted without consulting prose.
-  const stamped_fail = {ok: true, status: "ok", tool_name: "write", product_error: true}
+  const stamped_fail = {
+    ok: true,
+    status: "ok",
+    tool_name: "write",
+    product_error: true,
+    rendered_result: "Validation finished with two blocking findings.",
+  }
   assert_eq(__tool_result_product_error(stamped_fail), true)
   assert_eq(__tool_result_ok(stamped_fail), false)
   const stamped_clean = {
@@ -63,15 +69,15 @@ pipeline test() {
   }
   assert_eq(__tool_result_product_error(stamped_clean), false)
   assert_eq(__tool_result_ok(stamped_clean), true)
-  // Unstamped write-tool diagnostics prose remains a product-error fallback
-  // until PR-4 deletes it behind a guaranteed producer field.
+  // Identical transport-successful prose without the producer field is not
+  // reinterpreted as a semantic failure.
   const diagnostics = {
     ok: true,
     status: "ok",
     tool_name: "edit",
     rendered_result: "## Diagnostics (2 errors, via tsc)",
   }
-  assert_eq(__tool_result_product_error(diagnostics), true)
-  assert_eq(__tool_result_ok(diagnostics), false)
+  assert_eq(__tool_result_product_error(diagnostics), false)
+  assert_eq(__tool_result_ok(diagnostics), true)
   log("agent loop result status typed ok")
 }

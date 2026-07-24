@@ -1,27 +1,6 @@
 use super::*;
 use futures::StreamExt;
 use harn_vm::event_log::{AnyEventLog, EventLog, Topic};
-use std::future::Future;
-
-fn block_on_cli_stack_async<Fut>(build: impl FnOnce() -> Fut + Send + 'static) -> Fut::Output
-where
-    Fut: Future + 'static,
-    Fut::Output: Send + 'static,
-{
-    std::thread::Builder::new()
-        .name("orchestrator-harness-test".into())
-        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("orchestrator harness test runtime")
-                .block_on(build())
-        })
-        .expect("failed to spawn orchestrator harness test thread")
-        .join()
-        .expect("orchestrator harness test thread panicked")
-}
 
 fn write_test_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -284,7 +263,7 @@ pub pipeline run(event) {{
 
 #[test]
 fn materialized_cron_persona_executes_its_generated_entry_workflow() {
-    block_on_cli_stack_async(|| async {
+    crate::tests::common::async_runtime::block_on_cli_stack_multi_thread(|| async {
         let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
         let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
         let clock = harn_vm::clock::PausedClock::new(

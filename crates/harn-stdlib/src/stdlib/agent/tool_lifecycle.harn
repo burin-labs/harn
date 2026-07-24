@@ -145,8 +145,7 @@ pub type AgentEditOutcomeStatus = "none" \
  *   unstamped.
  * - `diagnostics_error_count`: producer-reported error count; `nil` when absent.
  * - `from_structured`: whether any structured field decided the verdict. When
- *   `false`, a result carries no structured signal at all and a consumer that
- *   still owns a legacy prose fallback must use it.
+ *   `false`, a result carries no structured signal at all.
  */
 pub type AgentToolResultOutcome = {
   kind: AgentToolResultOutcomeKind,
@@ -245,9 +244,7 @@ fn __agent_tool_result_kind(
  * transport status (`ok`/`success`/`status`), the typed error code/category,
  * and any producer-stamped `product_error` / `edit_status` / diagnostics
  * fields. It never inspects rendered or observation prose. This is the single
- * contract both the agent loop and host tool-result classifiers converge on;
- * consumers that still own a legacy prose fallback branch on
- * `from_structured == false` until every producer stamps the typed fields.
+ * contract both the agent loop and host tool-result classifiers converge on.
  *
  * @effects: []
  * @errors: []
@@ -286,11 +283,9 @@ pub fn agent_tool_result_outcome(result: any) -> AgentToolResultOutcome {
 /**
  * Structured is-ok verdict for scheduling and rejected-tool accounting. Returns
  * a concrete bool when the envelope carries a structured signal, or `nil` when
- * it carries none and the caller must consult its own legacy fallback. A
+ * it carries none. A
  * transport-successful write tool whose producer has not yet stamped
- * `product_error` reports `kind == "ok"` with `product_error == nil`; a consumer
- * that owns a prose fallback for that specific case should keep it until the
- * producer guarantees the field.
+ * `product_error` reports `kind == "ok"` with `product_error == nil`.
  *
  * @effects: []
  * @errors: []
