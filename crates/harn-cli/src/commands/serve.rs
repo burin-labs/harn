@@ -114,6 +114,21 @@ fn apply_obs_mode(mode: ServeObsMode) -> Result<(), String> {
         .map_err(|error| format!("--obs {backend}: {error}"))
 }
 
+fn validate_obs_transport(
+    mode: ServeObsMode,
+    stdout_is_protocol: bool,
+    surface: &str,
+) -> Result<(), String> {
+    if stdout_is_protocol && mode == ServeObsMode::Stdout {
+        return Err(format!(
+            "`harn serve {surface} --transport stdio` cannot use `--obs stdout`: stdout is \
+             reserved for JSON-RPC protocol frames; use `--obs stderr`, `--obs otel`, or \
+             `--obs off`"
+        ));
+    }
+    Ok(())
+}
+
 /// Refuse to start an unauthenticated HTTP serve adapter on a
 /// non-loopback bind. When the bind is loopback (`127.0.0.0/8`, `::1`)
 /// the call returns `Ok(())` after emitting a WARN log; when the bind
@@ -149,6 +164,7 @@ fn guard_serve_bind_auth(
 }
 
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
+    validate_obs_transport(args.obs, args.transport == AcpServeTransport::Stdio, "acp")?;
     apply_obs_mode(args.obs)?;
     let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
     let profile = harn_serve::AcpProfileConfig {
@@ -302,6 +318,7 @@ pub(crate) async fn run_worker_server(args: &WorkerServeArgs) -> Result<(), Stri
 }
 
 pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
+    validate_obs_transport(args.obs, args.transport == McpServeTransport::Stdio, "mcp")?;
     apply_obs_mode(args.obs)?;
     if args.transport == McpServeTransport::Stdio
         && (!args.api_key.is_empty() || args.hmac_secret.is_some())
@@ -1081,7 +1098,101 @@ fn build_auth_policy(api_keys: &[String], hmac_secret: Option<&String>) -> AuthP
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
+    use crate::cli::{Cli, Command};
+
     use super::*;
+
+    fn parse_serve_command(args: &[&str]) -> ServeCommand {
+        let cli = Cli::try_parse_from(args).expect("parse serve command");
+        let Some(Command::Serve(serve)) = cli.command else {
+            panic!("expected serve command");
+        };
+        serve.command
+    }
+
+    #[tokio::test]
+    async fn acp_stdio_rejects_stdout_observability_before_serving() {
+        let ServeCommand::Acp(args) =
+            parse_serve_command(&["harn", "serve", "acp", "--obs", "stdout"])
+        else {
+            panic!("expected serve acp");
+        };
+
+        let error = run_acp_server(&args)
+            .await
+            .expect_err("ACP stdio must reject stdout observability");
+        assert_eq!(
+            error,
+            "`harn serve acp --transport stdio` cannot use `--obs stdout`: stdout is reserved for \
+             JSON-RPC protocol frames; use `--obs stderr`, `--obs otel`, or `--obs off`"
+        );
+    }
+
+    #[tokio::test]
+    async fn mcp_stdio_rejects_stdout_observability_before_loading_script() {
+        let ServeCommand::Mcp(args) =
+            parse_serve_command(&["harn", "serve", "mcp", "--obs", "stdout", "missing.harn"])
+        else {
+            panic!("expected serve mcp");
+        };
+
+        let error = run_mcp_server(&args)
+            .await
+            .expect_err("MCP stdio must reject stdout observability");
+        assert_eq!(
+            error,
+            "`harn serve mcp --transport stdio` cannot use `--obs stdout`: stdout is reserved for \
+             JSON-RPC protocol frames; use `--obs stderr`, `--obs otel`, or `--obs off`"
+        );
+    }
+
+    #[test]
+    fn non_stdio_transports_allow_stdout_observability() {
+        let cases: &[&[&str]] = &[
+            &[
+                "harn",
+                "serve",
+                "acp",
+                "--transport",
+                "websocket",
+                "--obs",
+                "stdout",
+            ],
+            &[
+                "harn",
+                "serve",
+                "mcp",
+                "--transport",
+                "http",
+                "--obs",
+                "stdout",
+                "server.harn",
+            ],
+        ];
+        for args in cases {
+            match parse_serve_command(args) {
+                ServeCommand::Acp(args) => {
+                    validate_obs_transport(
+                        args.obs,
+                        args.transport == AcpServeTransport::Stdio,
+                        "acp",
+                    )
+                    .expect("ACP WebSocket does not reserve stdout");
+                }
+                ServeCommand::Mcp(args) => {
+                    validate_obs_transport(
+                        args.obs,
+                        args.transport == McpServeTransport::Stdio,
+                        "mcp",
+                    )
+                    .expect("MCP HTTP does not reserve stdout");
+                }
+                _ => panic!("expected ACP or MCP serve command"),
+            }
+        }
+    }
 
     fn test_script_mcp_state() -> ScriptMcpHttpState {
         let (tx, _rx) = tokio_mpsc::unbounded_channel();

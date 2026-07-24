@@ -105,6 +105,30 @@ fn latest_prompt_summary(notifications: &[JsonValue], session_id: &str) -> JsonV
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
+fn serve_acp_stdio_rejects_stdout_observability_without_writing_stdout() {
+    let output = harn_e2e_command()
+        .args(["serve", "acp", "--obs", "stdout"])
+        .output()
+        .expect("run harn serve acp");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        output.stdout.is_empty(),
+        "stdout is reserved for ACP protocol frames: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "`harn serve acp --transport stdio` cannot use `--obs stdout`: stdout is reserved for \
+             JSON-RPC protocol frames; use `--obs stderr`, `--obs otel`, or `--obs off`"
+        ),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
 fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     let _guard = lock_acp_cli_tests();
     let temp = TempDir::new().unwrap();
