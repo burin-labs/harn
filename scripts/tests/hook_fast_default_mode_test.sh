@@ -233,7 +233,8 @@ fi
   if ! UNEXPECTED_COMMAND_RECORD="$record" \
     MARKDOWN_COMMAND_RECORD="$markdown_record" \
     PATH="$prepush_fake_bin:$PATH" \
-    ./.githooks/pre-push origin git@example.com:burin-labs/harn.git > "$tmp_root/pre-push.out"; then
+    ./.githooks/pre-push origin git@example.com:burin-labs/harn.git \
+      </dev/null > "$tmp_root/pre-push.out"; then
     echo "pre-push no-local-build simulation failed" >&2
     cat "$tmp_root/pre-push.out" >&2 || true
     cat "$record" >&2 || true
