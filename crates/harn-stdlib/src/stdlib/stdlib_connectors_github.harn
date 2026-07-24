@@ -50,6 +50,155 @@ type GitHubWaitOptions = GitHubOptions
 
 type GitHubRepoRef = {owner: string, name: string, full_name: string}
 
+/** Authentication and retry controls for GitHub Actions transport. */
+pub type GitHubActionsTransportOptions = {
+  token?: string,
+  installation_token?: string,
+  api_base_url?: string,
+  app_id?: int | string,
+  installation_id?: int | string,
+  private_key_pem?: string,
+  private_key_secret?: string,
+  secrets?: dict,
+  retry?: dict,
+  retry_policy?: dict,
+  retry_on?: list<string>,
+  retry_unsafe?: bool,
+  idempotency_key?: string,
+  max_attempts?: int,
+  base_ms?: int,
+  backoff_ms?: int,
+  cap_ms?: int,
+  respect_retry_after?: bool,
+}
+
+/** Filters belong to the run query, not to transport configuration. */
+pub type GitHubWorkflowRunsQuery = {
+  workflow_id?: int | string,
+  event?: string,
+  status?: string,
+  branch?: string,
+  head_sha?: string,
+  per_page?: int,
+  page?: int,
+}
+
+/** Pagination controls for one exact workflow run's jobs. */
+pub type GitHubWorkflowJobsQuery = {filter?: string, per_page?: int, page?: int}
+
+pub type GitHubActionsRun = {
+  repo: string,
+  id: int,
+  workflow_id: int?,
+  workflow_path: string,
+  run_number: int?,
+  run_attempt: int?,
+  name: string,
+  event: string,
+  status: string,
+  conclusion: string?,
+  head_sha: string,
+  head_branch: string,
+  url: string,
+  api_url: string,
+  created_at: string?,
+  started_at: string?,
+  updated_at: string?,
+}
+
+pub type GitHubActionsJob = {
+  id: int,
+  run_id: int,
+  name: string,
+  status: string,
+  conclusion: string?,
+  url: string,
+  api_url: string,
+  started_at: string?,
+  completed_at: string?,
+  runner_name: string?,
+  runner_group_name: string?,
+  labels: list<string>,
+  steps: list<dict>,
+}
+
+pub type GitHubActionsJobsPage = {
+  repo: string,
+  run_id: int,
+  total_count: int,
+  jobs: list<GitHubActionsJob>,
+  page: int,
+  per_page: int,
+}
+
+pub type GitHubActionsRunsPage = {
+  repo: string,
+  total_count: int,
+  runs: list<GitHubActionsRun>,
+  page: int,
+  per_page: int,
+}
+
+pub type GitHubWorkflowDispatchReceipt = {
+  repo: string,
+  accepted: bool,
+  run_id: int,
+  workflow_id: string?,
+  workflow_path: string,
+  run_attempt: int?,
+  ref: string,
+  head_sha: string,
+  head_branch: string,
+  event: string,
+  status: string,
+  conclusion: string?,
+  url: string,
+  api_url: string,
+}
+
+pub type GitHubWorkflowCancelReceipt = {
+  repo: string,
+  run_id: int,
+  accepted: bool,
+  state: "cancel_requested",
+}
+
+type GitHubWorkflowDispatchResponse = GitHubWorkflowDispatchReceipt \
+  | Result<GitHubWorkflowDispatchReceipt, any>
+
+type GitHubActionsRunsResponse = GitHubActionsRunsPage | Result<GitHubActionsRunsPage, any>
+
+type GitHubActionsRunResponse = GitHubActionsRun | Result<GitHubActionsRun, any>
+
+type GitHubActionsJobsResponse = GitHubActionsJobsPage | Result<GitHubActionsJobsPage, any>
+
+type GitHubWorkflowCancelResponse = GitHubWorkflowCancelReceipt \
+  | Result<GitHubWorkflowCancelReceipt, any>
+
+pub type GitHubActionsExactProofRequest = {
+  repo: string,
+  workflow_path: string,
+  event: string,
+  head_sha: string,
+  required_job: string,
+  run_id?: int,
+}
+
+pub type GitHubActionsExactProof = {
+  repo: string,
+  workflow_path: string,
+  run_id: int,
+  run_attempt: int?,
+  run_url: string,
+  event: string,
+  head_sha: string,
+  job_id: int,
+  job_name: string,
+  job_url: string,
+}
+
+pub type GitHubActionsExactProofReport = {ok: bool, reason: string, proof: GitHubActionsExactProof?}
+
 type GitHubAutoMergeResult = {
   ok: bool,
   state: string,
@@ -467,8 +616,8 @@ pub fn workflow_dispatch(
   workflow_id: any,
   ref: string = "main",
   inputs: dict? = nil,
-  options: GitHubCallOptions = {},
-) {
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubWorkflowDispatchResponse {
   const r = __github_repo_or_throw(repo)
   return call(
     "github.actions.workflow_dispatch",
@@ -483,9 +632,13 @@ pub fn workflow_dispatch(
  * @effects: []
  * @errors: []
  */
-pub fn workflow_runs(repo: string | dict, options: GitHubCallOptions = {}) {
+pub fn workflow_runs(
+  repo: string | dict,
+  query: GitHubWorkflowRunsQuery = {},
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubActionsRunsResponse {
   const r = __github_repo_or_throw(repo)
-  return call("github.actions.runs", {repo: r.full_name}, options)
+  return call("github.actions.runs", merge(query, {repo: r.full_name}), options)
 }
 
 /**
@@ -494,9 +647,44 @@ pub fn workflow_runs(repo: string | dict, options: GitHubCallOptions = {}) {
  * @effects: []
  * @errors: []
  */
-pub fn workflow_run(repo: string | dict, run_id: int | string, options: GitHubCallOptions = {}) {
+pub fn workflow_run(
+  repo: string | dict,
+  run_id: int | string,
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubActionsRunResponse {
   const r = __github_repo_or_throw(repo)
   return call("github.actions.run", {repo: r.full_name, run_id: run_id}, options)
+}
+
+/**
+ * Fetch one page of jobs for one exact Actions workflow run.
+ *
+ * @effects: [net]
+ * @errors: [connector_error]
+ */
+pub fn workflow_run_jobs(
+  repo: string | dict,
+  run_id: int | string,
+  query: GitHubWorkflowJobsQuery = {},
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubActionsJobsResponse {
+  const r = __github_repo_or_throw(repo)
+  return call("github.actions.run_jobs", merge(query, {repo: r.full_name, run_id: run_id}), options)
+}
+
+/**
+ * Request cancellation of one exact Actions workflow run.
+ *
+ * @effects: [net]
+ * @errors: [connector_error]
+ */
+pub fn workflow_run_cancel(
+  repo: string | dict,
+  run_id: int | string,
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubWorkflowCancelResponse {
+  const r = __github_repo_or_throw(repo)
+  return call("github.actions.run_cancel", {repo: r.full_name, run_id: run_id}, options)
 }
 
 /**
@@ -511,8 +699,8 @@ pub fn actions_workflow_dispatch(
   workflow_id: any,
   ref: string = "main",
   inputs: dict? = nil,
-  options: GitHubCallOptions = {},
-) {
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubWorkflowDispatchResponse {
   return workflow_dispatch(owner + "/" + repo, workflow_id, ref, inputs, options)
 }
 
@@ -522,8 +710,13 @@ pub fn actions_workflow_dispatch(
  * @effects: []
  * @errors: []
  */
-pub fn actions_workflow_runs(owner: string, repo: string, options: GitHubCallOptions = {}) {
-  return workflow_runs(owner + "/" + repo, options)
+pub fn actions_workflow_runs(
+  owner: string,
+  repo: string,
+  query: GitHubWorkflowRunsQuery = {},
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubActionsRunsResponse {
+  return workflow_runs(owner + "/" + repo, query, options)
 }
 
 /**
@@ -536,9 +729,211 @@ pub fn actions_workflow_run(
   owner: string,
   repo: string,
   run_id: int | string,
-  options: GitHubCallOptions = {},
-) {
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubActionsRunResponse {
   return workflow_run(owner + "/" + repo, run_id, options)
+}
+
+/**
+ * Package-compatible owner/repo alias for workflow_run_jobs.
+ *
+ * @effects: [net]
+ * @errors: [connector_error]
+ */
+pub fn actions_workflow_run_jobs(
+  owner: string,
+  repo: string,
+  run_id: int | string,
+  query: GitHubWorkflowJobsQuery = {},
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubActionsJobsResponse {
+  return workflow_run_jobs(owner + "/" + repo, run_id, query, options)
+}
+
+/**
+ * Package-compatible owner/repo alias for workflow_run_cancel.
+ *
+ * @effects: [net]
+ * @errors: [connector_error]
+ */
+pub fn actions_workflow_run_cancel(
+  owner: string,
+  repo: string,
+  run_id: int | string,
+  options: GitHubActionsTransportOptions = {},
+) -> GitHubWorkflowCancelResponse {
+  return workflow_run_cancel(owner + "/" + repo, run_id, options)
+}
+
+fn __actions_proof_report(reason: string) -> GitHubActionsExactProofReport {
+  return {ok: false, reason: reason, proof: nil}
+}
+
+fn __actions_positive_id(value) -> bool {
+  return value != nil && to_int(value) > 0 && to_string(to_int(value)) == to_string(value)
+}
+
+fn __actions_unique_strings(values: list<string>) -> bool {
+  let seen: list<string> = []
+  for value in values {
+    if seen.contains(value) {
+      return false
+    }
+    seen = seen + [value]
+  }
+  return true
+}
+
+fn __actions_run_well_formed(run) -> bool {
+  return __actions_positive_id(run?.id)
+    && trim(to_string(run?.workflow_path ?? "")) != ""
+    && trim(to_string(run?.event ?? "")) != ""
+    && trim(to_string(run?.head_sha ?? "")) != ""
+    && trim(to_string(run?.status ?? "")) != ""
+    && trim(to_string(run?.url ?? "")) != ""
+}
+
+fn __actions_job_well_formed(job, run_id: int) -> bool {
+  return __actions_positive_id(job?.id)
+    && job?.run_id == run_id
+    && trim(to_string(job?.name ?? "")) != ""
+    && trim(to_string(job?.status ?? "")) != ""
+    && trim(to_string(job?.url ?? "")) != ""
+}
+
+fn __actions_exact_runs(request: GitHubActionsExactProofRequest, runs, expected_sha: string) {
+  return runs.filter(
+    { run ->
+      run.workflow_path == request.workflow_path && run.event == request.event
+        && lowercase(
+        run.head_sha,
+      )
+        == expected_sha
+        && (request.run_id == nil || run.id == request.run_id)
+    },
+  )
+    .to_list()
+}
+
+fn __actions_run_rejection(run, expected_url: string) -> string {
+  if run.url != expected_url {
+    return "run_url_identity_mismatch"
+  }
+  if run.status != "completed" {
+    return "run_not_completed"
+  }
+  if run.conclusion != "success" {
+    return "run_not_successful"
+  }
+  return ""
+}
+
+fn __actions_jobs_check(jobs_page, repo: string, run_id: int, required_name: string) {
+  if jobs_page == nil || jobs_page?.run_id != run_id || jobs_page?.repo != repo
+    || jobs_page
+    ?.total_count
+    == nil
+    || jobs_page?.jobs == nil
+    || type_of(jobs_page.jobs) != "list"
+    || jobs_page.total_count != len(jobs_page.jobs) {
+    return {reason: "incomplete_jobs", job: nil}
+  }
+  let job_ids: list<string> = []
+  let job_names: list<string> = []
+  for job in jobs_page.jobs {
+    if !__actions_job_well_formed(job, run_id) {
+      return {reason: "malformed_job", job: nil}
+    }
+    job_ids = job_ids + [to_string(job.id)]
+    job_names = job_names + [job.name]
+  }
+  if !__actions_unique_strings(job_ids) {
+    return {reason: "duplicate_job_id", job: nil}
+  }
+  if !__actions_unique_strings(job_names) {
+    return {reason: "duplicate_job_name", job: nil}
+  }
+  const required = jobs_page.jobs.filter({ job -> job.name == required_name }).to_list()
+  if len(required) != 1 {
+    return {reason: "required_job_identity_mismatch", job: nil}
+  }
+  return {reason: "", job: required[0]}
+}
+
+/**
+ * Validate a complete run/jobs response into one exact, terminal-success proof.
+ *
+ * This reducer performs no network calls, so fixture tests and release
+ * orchestration share the same fail-closed identity boundary.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn github_actions_exact_proof(
+  request: GitHubActionsExactProofRequest,
+  runs,
+  jobs_page,
+) -> GitHubActionsExactProofReport {
+  const expected_sha = lowercase(trim(request.head_sha))
+  if len(regex_captures("^[0-9a-f]{40}$", expected_sha)) == 0
+    || trim(request.repo) == ""
+    || trim(request.workflow_path) == ""
+    || trim(request.event) == ""
+    || trim(request.required_job) == "" {
+    return __actions_proof_report("invalid_request")
+  }
+  if runs == nil || type_of(runs) != "list" || len(runs) == 0 {
+    return __actions_proof_report("missing_run")
+  }
+  for run in runs {
+    if !__actions_run_well_formed(run) {
+      return __actions_proof_report("malformed_run")
+    }
+  }
+  const exact = __actions_exact_runs(request, runs, expected_sha)
+  if len(exact) == 0 {
+    return __actions_proof_report("run_identity_mismatch")
+  }
+  if len(exact) != 1 {
+    return __actions_proof_report("duplicate_exact_run")
+  }
+  const run = exact[0]
+  const expected_run_url = "https://github.com/" + request.repo + "/actions/runs/${run.id}"
+  const run_rejection = __actions_run_rejection(run, expected_run_url)
+  if run_rejection != "" {
+    return __actions_proof_report(run_rejection)
+  }
+  const jobs_checked = __actions_jobs_check(jobs_page, request.repo, run.id, request.required_job)
+  if jobs_checked.reason != "" {
+    return __actions_proof_report(jobs_checked.reason)
+  }
+  const job = jobs_checked.job
+  const expected_job_url = expected_run_url + "/job/${job.id}"
+  if job.url != expected_job_url {
+    return __actions_proof_report("job_url_identity_mismatch")
+  }
+  if job.status != "completed" {
+    return __actions_proof_report("job_not_completed")
+  }
+  if job.conclusion != "success" {
+    return __actions_proof_report("job_not_successful")
+  }
+  return {
+    ok: true,
+    reason: "proof_accepted",
+    proof: {
+      repo: request.repo,
+      workflow_path: request.workflow_path,
+      run_id: run.id,
+      run_attempt: run?.run_attempt,
+      run_url: run.url,
+      event: run.event,
+      head_sha: expected_sha,
+      job_id: job.id,
+      job_name: job.name,
+      job_url: job.url,
+    },
+  }
 }
 
 /**

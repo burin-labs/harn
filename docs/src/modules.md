@@ -1579,8 +1579,11 @@ names and normalized result envelopes.
 | `pr_edit(repo, pull_number, edits, options?)` | Update the closed PR edit field set through the typed connector method |
 | `release_view(repo, tag?, options?)` | Return a typed release envelope by exact tag, or the latest release |
 | `workflow_dispatch(repo, workflow_id, ref?, inputs?, options?)` | Dispatch a `workflow_dispatch` workflow without shelling out |
-| `workflow_runs(repo, options?)` | List repository or workflow-scoped Actions runs |
+| `workflow_runs(repo, query?, options?)` | List repository or workflow-scoped Actions runs with query filters separate from transport options |
 | `workflow_run(repo, run_id, options?)` | Fetch one Actions run |
+| `workflow_run_jobs(repo, run_id, query?, options?)` | Fetch one page of jobs for an exact Actions run |
+| `workflow_run_cancel(repo, run_id, options?)` | Request cancellation of an exact Actions run |
+| `github_actions_exact_proof(request, runs, jobs_page)` | Reduce complete run/job evidence into one fail-closed exact-SHA success proof |
 | `read_file_at_ref(repo, path, ref?, options?)` | Read decoded repository file text at a ref |
 | `latest_release(repo, options?)` | Return a stable latest-release envelope with `tag_name` and `asset_names` |
 | `release_assets(repo, release_id?, options?)` | Return a stable release-assets envelope |

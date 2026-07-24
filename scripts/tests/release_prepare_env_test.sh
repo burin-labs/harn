@@ -379,7 +379,9 @@ assert_ordered_ship_events() {
 }
 
 rm -rf "$target_dir"
-run_ship_prepare full
+receipt="$tmp_root/audit-receipt.json"
+printf '{}\n' > "$receipt"
+run_ship_prepare full --audit-receipt "$receipt"
 
 expected_harn="$target_dir/debug/harn"
 if ! grep -Fxq "prepare HARN_BIN=$expected_harn" "$record_ship"; then
@@ -404,17 +406,15 @@ if ! grep -Fq "$expected_record" "$record_make"; then
 fi
 
 assert_ordered_ship_events full \
-  "gate=audit --validate-only" \
+  "gate=audit --validate-only --receipt $receipt" \
   "make=sync-language-spec" \
   "make=gen-highlight" \
   "gate=prepare --bump patch --allow-dirty" \
   "make=gen-grammar-fitness" \
   "make=portal-check" \
-  "gate=audit"
+  "gate=audit --receipt $receipt"
 
 rm -rf "$target_dir"
-receipt="$tmp_root/audit-receipt.json"
-printf '{}\n' > "$receipt"
 run_ship_prepare residual --audit-receipt "$receipt"
 assert_ordered_ship_events residual \
   "gate=audit --validate-only --receipt $receipt" \
@@ -483,7 +483,7 @@ HARN_RELEASE_ROOT="$release_root" \
   INJECT_HIDDEN_INDEX_CHANGE=1 \
   PATH="$fake_bin:$PATH" \
     "$repo_root/scripts/release_ship.sh" \
-      --prepare --bump patch --skip-dry-run \
+      --prepare --bump patch --skip-dry-run --audit-receipt "$receipt" \
       > "$tmp_root/ship-rollback.txt" 2>&1
 rollback_rc=$?
 set -e

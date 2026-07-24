@@ -26,6 +26,28 @@ creation, tag push, crate publishing, and GitHub release creation.
 The tag is pushed before crate publishing so release-binary workflows and other
 downstream automation can start in parallel with crates.io publication.
 
+## Hosted platform certification
+
+Release preparation is fail-closed on the frozen remote source SHA. Before the
+version/changelog commit is created, the release harness dispatches
+`.github/workflows/windows-nightly.yml` and
+`.github/workflows/macos-nightly.yml` for the frozen source branch while the
+local source audit runs. GitHub must return an exact run ID for each dispatch.
+Both runs and their full-workspace jobs must complete successfully with the
+expected workflow path, event, SHA, URL, and unique job identity.
+
+The resulting `harn.release_audit_receipt.v2` records the certified source SHA,
+run/job URLs and IDs, per-lane timings, and critical path. The harness re-reads
+the remote branch after the join; movement invalidates the whole receipt. The
+release harness runs the residual checks affected by release metadata, creates
+the synthetic release commit, and then proves that commit has exactly the
+certified SHA as its sole parent.
+
+If a hosted run fails or is cancelled, fix the source or runner problem and
+restart the release from the still-unmodified source branch. If a valid exact
+run is already recorded, reuse its receipt; do not dispatch a blind duplicate.
+If the branch moved, discard both platform receipts and freeze the new SHA.
+
 ## Piecewise gates
 
 Use the lower-level gates when you need to audit or dry-run without opening a
