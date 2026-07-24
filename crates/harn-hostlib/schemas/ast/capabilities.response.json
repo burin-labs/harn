@@ -28,7 +28,22 @@
           "apply_node": { "type": "boolean" },
           "insert_at_anchor": { "type": "boolean" },
           "rename_symbol": { "type": "boolean" },
-          "symbols": { "type": "boolean" }
+          "symbols": { "type": "boolean" },
+          "health": {
+            "type": "object",
+            "description": "Versioned safe-edit ParserHealth artifact and corpus fitness.",
+            "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+            "properties": {
+              "schema_version": { "const": 1 },
+              "operation": { "enum": ["parse", "search", "safe_edit"] },
+              "grammar": { "type": "object" },
+              "corpus": { "type": "object" },
+              "source": { "type": "object" },
+              "support": { "enum": ["supported", "unsupported"] },
+              "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+            },
+            "additionalProperties": false
+          }
         },
         "required": [
           "language",
@@ -36,10 +51,26 @@
           "apply_node",
           "insert_at_anchor",
           "rename_symbol",
-          "symbols"
+          "symbols",
+          "health"
         ],
         "additionalProperties": false
       }
+    },
+    "health": {
+      "type": "object",
+      "description": "Explicit unavailable ParserHealth on an unsupported-language response.",
+      "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "operation": { "enum": ["parse", "search", "safe_edit"] },
+        "grammar": { "type": "object" },
+        "corpus": { "type": "object" },
+        "source": { "type": "object" },
+        "support": { "enum": ["supported", "unsupported"] },
+        "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["result", "fallback_suggestion"],

@@ -129,6 +129,26 @@ sources = ["crates/harn-lexer/src/token.rs"]
 ci = true
 make_all = true
 
+[[artifact]]
+id = "grammar-fitness"
+description = "Resolved Tree-sitter artifact provenance and versioned parse/search/safe-edit corpus fitness receipt consumed by ParserHealth."
+gen = "gen-grammar-fitness"
+check = "check-grammar-fitness"
+outputs = ["crates/harn-hostlib/data/grammar-fitness/receipt.v1.json"]
+sources = [
+  "Cargo.lock",
+  "crates/harn-hostlib/Cargo.toml",
+  "crates/harn-hostlib/data/grammar-fitness/corpus.schema.json",
+  "crates/harn-hostlib/data/grammar-fitness/corpus.v1.json",
+  "crates/harn-hostlib/data/grammar-fitness/fixtures/",
+  "crates/harn-hostlib/tests/fixtures/ast/",
+  "crates/harn-hostlib/tests/fixtures/parser_agreement/",
+  "scripts/sync_grammar_fitness_receipt.harn",
+  "tree-sitter-harn/src/",
+]
+ci = true
+make_all = true
+
 # ---------------------------------------------------------------------------
 # Mirrors whose drift guards are required in both `make all` and CI. Keep this
 # section wired through the workflow audit before adding new generated outputs.
@@ -392,6 +412,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-harn-syntax-sensitive-scans" = "source"
 "check-tree-sitter-keywords" = "source"
 "check-grammar-keywords" = "source"
+"check-grammar-fitness" = "excluded"
 "check-generated-registry" = "source"
 "check-release-audit-contract" = "source"
 "check-ci-cache-policy" = "source"

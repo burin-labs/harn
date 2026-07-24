@@ -26,6 +26,7 @@ use harn_vm::VmValue;
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_string, str_value};
 
+use super::health::{ParserHealth, ParserOperation};
 use super::language::{EditCapabilities, Language, TEXT_PATCH_FALLBACK};
 
 const BUILTIN: &str = "hostlib_ast_capabilities";
@@ -68,6 +69,10 @@ fn row(language: Language) -> VmValue {
         ("insert_at_anchor", VmValue::Bool(insert_at_anchor)),
         ("rename_symbol", VmValue::Bool(rename_symbol)),
         ("symbols", VmValue::Bool(symbols)),
+        (
+            "health",
+            ParserHealth::fitted(language, ParserOperation::SafeEdit).to_vm_value(),
+        ),
     ])
 }
 
@@ -79,6 +84,10 @@ fn unsupported_language_response(hint: &str) -> VmValue {
             str_value(format!("no tree-sitter grammar registered for `{hint}`")),
         ),
         ("fallback_suggestion", str_value(TEXT_PATCH_FALLBACK)),
+        (
+            "health",
+            ParserHealth::unavailable(None, ParserOperation::SafeEdit).to_vm_value(),
+        ),
     ])
 }
 

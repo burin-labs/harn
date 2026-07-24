@@ -32,6 +32,32 @@ source files. Three flavors live side by side:
   `edit_validate_changed_regions`, `edit_check_lazy_truncation`,
   `edit_explain_whitespace_difference`, `edit_strip_line_number_prefixes`.
 
+## Parser health and safe edits
+
+Every hostlib AST parse, search, capability, structural-diff, and mutation
+response carries a versioned `health` object. It identifies the exact resolved
+grammar artifact and ABI, the checked-in fitness-corpus digest and operation
+coverage, the current source observation, and one of four coverage states:
+
+- `verified`: the selected artifact passed the operation corpus and, when the
+  operation inspected source, its observation is authoritative.
+- `partial`: a read-only search produced useful structure from a tree that also
+  contains parser errors.
+- `inconclusive`: the parser saw errors and no configured independent checker
+  established whether the source or grammar caused them.
+- `unavailable`: no fitted parser result exists, including runtime or transport
+  failure.
+
+Structural writes require `verified`. They reject the other states with
+`parser_not_verified`; setting `validate: false` can only produce a dry-run
+preview and cannot bypass the write gate. Error span size is deliberately not
+used to guess whether valid source exposed a grammar limitation.
+
+Grammar dependency changes update
+`crates/harn-hostlib/data/grammar-fitness/receipt.v1.json` with
+`make gen-grammar-fitness`. `make check-grammar-fitness` compares the resolved
+artifact receipt and executes the versioned parse/search/safe-edit corpus.
+
 > **Feature gate.** Every helper that reads or writes a file on disk —
 > `edit_apply_node`, `edit_insert_at_anchor`, `edit_fast_apply`, and
 > `edit_safe_text_patch` —

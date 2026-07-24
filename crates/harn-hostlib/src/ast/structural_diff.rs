@@ -20,6 +20,7 @@ use crate::tools::args::{
     build_dict, dict_arg, optional_int, optional_string, require_string, str_value,
 };
 
+use super::health::{ParserHealth, ParserOperation};
 use super::language::Language;
 use super::parse::parse_source;
 use super::unified_diff::{render as render_unified_diff, ChangeKind};
@@ -643,7 +644,7 @@ fn structural_response(
         .iter()
         .map(|change| change_to_vm(change, before, after))
         .collect();
-    build_dict([
+    ParserHealth::observed(language, ParserOperation::Search, false).attach_to(build_dict([
         ("result", str_value("ok")),
         ("mode", str_value("structural")),
         ("changed", VmValue::Bool(!changes.is_empty())),
@@ -658,7 +659,7 @@ fn structural_response(
             summary_value(&counts, 0, 0, before.nodes.len(), after.nodes.len()),
         ),
         ("limits", limits_value(limits)),
-    ])
+    ]))
 }
 
 fn line_fallback(
@@ -679,7 +680,13 @@ fn line_fallback(
         ("lines_removed", VmValue::Int(diff.lines_removed as i64)),
     ]);
     let counts = ChangeCounts::default();
-    build_dict([
+    let health = match language {
+        Some(language) if reason == "parse_error" => {
+            ParserHealth::observed(language, ParserOperation::Search, true)
+        }
+        _ => ParserHealth::unavailable(language, ParserOperation::Search),
+    };
+    health.attach_to(build_dict([
         ("result", str_value("fallback")),
         ("mode", str_value("line")),
         ("changed", VmValue::Bool(before != after)),
@@ -697,7 +704,7 @@ fn line_fallback(
             summary_value(&counts, diff.lines_added, diff.lines_removed, 0, 0),
         ),
         ("limits", limits_value(limits)),
-    ])
+    ]))
 }
 
 fn fallback_display_path(path_a: &str, path_b: &str) -> String {

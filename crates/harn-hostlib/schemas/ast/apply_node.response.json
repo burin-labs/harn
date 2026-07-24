@@ -13,7 +13,8 @@
         "ambiguous",
         "invalid_query",
         "unsupported_language",
-        "syntax_error"
+        "syntax_error",
+        "parser_not_verified"
       ]
     },
     "applied": {
@@ -105,8 +106,23 @@
     "fallback_suggestion": {
       "type": "string",
       "description": "Text-edit degradation path; set when `result == \"unsupported_language\"`."
+    },
+    "health": {
+      "type": "object",
+      "description": "Versioned ParserHealth provenance and coverage contract. Non-dry-run writes require verified coverage.",
+      "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "operation": { "enum": ["parse", "search", "safe_edit"] },
+        "grammar": { "type": "object" },
+        "corpus": { "type": "object" },
+        "source": { "type": "object" },
+        "support": { "enum": ["supported", "unsupported"] },
+        "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+      },
+      "additionalProperties": false
     }
   },
-  "required": ["result", "applied"],
+  "required": ["result", "applied", "health"],
   "additionalProperties": false
 }

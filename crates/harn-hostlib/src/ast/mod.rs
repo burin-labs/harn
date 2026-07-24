@@ -41,6 +41,7 @@ mod dry_run;
 mod edit_common;
 mod function_body;
 mod fuzzy;
+mod health;
 mod imports;
 mod insert_at_anchor;
 mod language;
@@ -56,6 +57,7 @@ mod types;
 mod undefined_names;
 mod unified_diff;
 
+pub use health::{Coverage, ParserHealth, ParserOperation, SourceObservation};
 pub use language::{EditCapabilities, Language, TEXT_PATCH_FALLBACK};
 pub use types::{OutlineItem, ParseError, ParsedNode, Symbol, SymbolKind, UndefinedName};
 

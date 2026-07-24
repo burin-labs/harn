@@ -53,6 +53,7 @@ use super::edit_common::{
     resolve_target_capture, select_spans, sha256_hex, splice, write_source, SelectFailure,
     Selector, Span,
 };
+use super::health::{ParserHealth, ParserOperation};
 use super::language::{Language, TEXT_PATCH_FALLBACK};
 use super::parse::parse_bytes;
 
@@ -101,10 +102,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let language = match Language::detect(&path, language_hint.as_deref()) {
         Some(l) => l,
         None => {
-            return Ok(unsupported_language_response(
+            let health = ParserHealth::unavailable(None, ParserOperation::SafeEdit);
+            return Ok(health.attach_to(unsupported_language_response(
                 &path_str,
                 language_hint.as_deref(),
-            ))
+            )));
         }
     };
 
@@ -114,10 +116,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let ts_language = match language.ts_language() {
         Some(l) => l,
         None => {
-            return Ok(unsupported_language_response(
+            let health = ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit);
+            return Ok(health.attach_to(unsupported_language_response(
                 &path_str,
                 language_hint.as_deref(),
-            ))
+            )));
         }
     };
 
@@ -125,18 +128,22 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let query = match Query::new(&ts_language, &query_text) {
         Ok(q) => q,
-        Err(err) => return Ok(invalid_query_response(&query_text, &err)),
+        Err(err) => {
+            let health = ParserHealth::not_observed(language, ParserOperation::SafeEdit);
+            return Ok(health.attach_to(invalid_query_response(&query_text, &err)));
+        }
     };
 
     let target_index = match resolve_target_capture(&query, &target_capture) {
         Ok(idx) => idx,
         Err(detail) => {
-            return Ok(no_match_response(
+            let health = ParserHealth::not_observed(language, ParserOperation::SafeEdit);
+            return Ok(health.attach_to(no_match_response(
                 &path_str,
                 &query_text,
                 &target_capture,
                 &detail,
-            ))
+            )));
         }
     };
 
@@ -144,57 +151,81 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         builtin: BUILTIN,
         message: err.to_string(),
     })?;
+    let source_health = ParserHealth::observed(
+        language,
+        ParserOperation::SafeEdit,
+        tree.root_node().has_error(),
+    );
+    if !source_health.is_verified() {
+        return Ok(source_health.attach_to(non_verified_response(
+            &path_str,
+            "source structure is not verified; refusing structural mutation",
+        )));
+    }
 
     let spans = collect_target_spans(&query, &tree, &source, target_index);
     if spans.is_empty() {
-        return Ok(no_match_response(
+        return Ok(source_health.attach_to(no_match_response(
             &path_str,
             &query_text,
             &target_capture,
             "query produced zero captures",
-        ));
+        )));
     }
 
     let chosen = match select_spans(&spans, selector) {
         Ok(spans) => spans,
         Err(SelectFailure::Ambiguous) => {
-            return Ok(ambiguous_response(spans.len(), &spans));
+            return Ok(source_health.attach_to(ambiguous_response(spans.len(), &spans)));
         }
         Err(SelectFailure::NthOutOfRange { requested }) => {
-            return Ok(no_nth_response(
+            return Ok(source_health.attach_to(no_nth_response(
                 spans.len(),
                 requested,
                 &path_str,
                 &query_text,
-            ));
+            )));
         }
     };
 
     let patched = splice(&source, &chosen, &replacement);
 
+    let post_edit_error = first_syntax_error(&patched, language);
     if validate {
-        if let Some(detail) = first_syntax_error(&patched, language) {
-            return Ok(syntax_error_response(
+        if let Some(detail) = &post_edit_error {
+            let health = ParserHealth::observed(language, ParserOperation::SafeEdit, true);
+            return Ok(health.attach_to(syntax_error_response(
                 &path_str,
                 &lossy_str(&patched),
-                &detail,
+                detail,
                 &chosen,
-            ));
+            )));
         }
+    } else if !dry_run {
+        let health = ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit);
+        return Ok(health.attach_to(non_verified_response(
+            &path_str,
+            "`validate: false` is allowed only for dry-run previews",
+        )));
     }
 
     if !dry_run {
         write_source(BUILTIN, &path, &patched, session_id.as_deref())?;
     }
 
-    Ok(applied_response(
+    let health = ParserHealth::observed(
+        language,
+        ParserOperation::SafeEdit,
+        post_edit_error.is_some(),
+    );
+    Ok(health.attach_to(applied_response(
         &path_str,
         &source,
         &patched,
         &chosen,
         &replacement,
         dry_run,
-    ))
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +350,15 @@ fn syntax_error_response(path: &str, after: &str, detail: &str, chosen: &[Span])
         ("details", str_value(detail)),
         ("match_count", VmValue::Int(chosen.len() as i64)),
         ("preview", str_value(after)),
+    ])
+}
+
+fn non_verified_response(path: &str, details: &str) -> VmValue {
+    build_dict([
+        ("result", str_value("parser_not_verified")),
+        ("applied", VmValue::Bool(false)),
+        ("path", str_value(path)),
+        ("details", str_value(details)),
     ])
 }
 
@@ -496,6 +536,37 @@ mod tests {
         // Original file must remain untouched on rejection.
         let on_disk = std::fs::read_to_string(file.path()).expect("read");
         assert_eq!(on_disk, source);
+    }
+
+    #[test]
+    fn rejects_structural_write_when_source_health_is_not_verified() {
+        let source = "fn alpha( {\n";
+        let file = write_temp("rs", source);
+        let path = file.path().to_string_lossy().to_string();
+        let result = invoke(dict(&[
+            ("path", vm_string(&path)),
+            ("query", vm_string("(function_item) @target")),
+            ("replacement", vm_string("fn alpha() {}")),
+        ]));
+        assert_eq!(s(field(&result, "result")), "parser_not_verified");
+        let health = field(&result, "health");
+        assert_eq!(s(field(health, "coverage")), "inconclusive");
+        assert_eq!(std::fs::read_to_string(file.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn validate_false_cannot_bypass_a_real_write() {
+        let source = "fn alpha() { 1 }\n";
+        let file = write_temp("rs", source);
+        let path = file.path().to_string_lossy().to_string();
+        let result = invoke(dict(&[
+            ("path", vm_string(&path)),
+            ("query", vm_string("(function_item body: (block) @target)")),
+            ("replacement", vm_string("{ 2 }")),
+            ("validate", VmValue::Bool(false)),
+        ]));
+        assert_eq!(s(field(&result, "result")), "parser_not_verified");
+        assert_eq!(std::fs::read_to_string(file.path()).unwrap(), source);
     }
 
     #[test]

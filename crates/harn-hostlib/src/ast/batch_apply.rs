@@ -62,6 +62,7 @@ use super::edit_common::{
     resolve_target_capture, select_spans, sha256_hex, splice, write_source, SelectFailure,
     Selector,
 };
+use super::health::{ParserHealth, ParserOperation};
 use super::language::Language;
 use super::parse::parse_bytes;
 
@@ -207,10 +208,11 @@ struct FileOutcome {
     changed: bool,
     preview: Option<String>,
     details: Option<String>,
+    health: ParserHealth,
 }
 
 impl FileOutcome {
-    fn failure(result: &'static str, details: impl Into<String>) -> Self {
+    fn failure(result: &'static str, details: impl Into<String>, health: ParserHealth) -> Self {
         FileOutcome {
             result,
             match_count: 0,
@@ -219,6 +221,7 @@ impl FileOutcome {
             changed: false,
             preview: None,
             details: Some(details.into()),
+            health,
         }
     }
 
@@ -246,7 +249,7 @@ impl FileOutcome {
         if let Some(details) = self.details {
             entries.push(("details", str_value(details)));
         }
-        build_dict(entries)
+        self.health.attach_to(build_dict(entries))
     }
 }
 
@@ -266,6 +269,7 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
                     "could not infer a tree-sitter grammar for `{path_str}` (hint: {})",
                     cfg.language_hint.unwrap_or("none")
                 ),
+                ParserHealth::unavailable(None, ParserOperation::SafeEdit),
             ))
         }
     };
@@ -278,13 +282,20 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
                     "grammar for `{}` is not compiled into this build",
                     language.name()
                 ),
+                ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
             ))
         }
     };
 
     let source = match read_source(BUILTIN, &path, cfg.session_id, cfg.max_bytes) {
         Ok(source) => source,
-        Err(err) => return Ok(FileOutcome::failure("read_error", err.to_string())),
+        Err(err) => {
+            return Ok(FileOutcome::failure(
+                "read_error",
+                err.to_string(),
+                ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
+            ))
+        }
     };
 
     let query = match Query::new(&ts_language, cfg.query_text) {
@@ -293,23 +304,48 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
             return Ok(FileOutcome::failure(
                 "invalid_query",
                 format_query_error(&err),
+                ParserHealth::not_observed(language, ParserOperation::SafeEdit),
             ))
         }
     };
 
     let target_index = match resolve_target_capture(&query, cfg.target_capture) {
         Ok(idx) => idx,
-        Err(detail) => return Ok(FileOutcome::failure("no_match", detail)),
+        Err(detail) => {
+            return Ok(FileOutcome::failure(
+                "no_match",
+                detail,
+                ParserHealth::not_observed(language, ParserOperation::SafeEdit),
+            ))
+        }
     };
 
     let tree = match parse_bytes(&source, language) {
         Ok(tree) => tree,
-        Err(err) => return Ok(FileOutcome::failure("parse_error", err.to_string())),
+        Err(err) => {
+            return Ok(FileOutcome::failure(
+                "parse_error",
+                err.to_string(),
+                ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
+            ))
+        }
     };
+    let source_health = ParserHealth::observed(
+        language,
+        ParserOperation::SafeEdit,
+        tree.root_node().has_error(),
+    );
+    if !source_health.is_verified() {
+        return Ok(FileOutcome::failure(
+            "parser_not_verified",
+            "source structure is not verified; refusing structural mutation",
+            source_health,
+        ));
+    }
 
     let spans = collect_target_spans(&query, &tree, &source, target_index);
     if spans.is_empty() {
-        return Ok(unchanged(&source, "no_match", 0, None));
+        return Ok(unchanged(&source, "no_match", 0, None, source_health));
     }
 
     let chosen = match select_spans(&spans, cfg.selector) {
@@ -324,6 +360,7 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
                      use `\"first\" | \"all\" | \"nth\"` to disambiguate",
                     spans.len()
                 )),
+                source_health,
             ))
         }
         Err(SelectFailure::NthOutOfRange { requested }) => {
@@ -335,14 +372,16 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
                     "`select: \"nth\"` requested index {requested}, only {} match(es) found",
                     spans.len()
                 )),
+                source_health,
             ))
         }
     };
 
     let patched = splice(&source, &chosen, cfg.replacement);
 
+    let post_edit_error = first_syntax_error(&patched, language);
     if cfg.validate {
-        if let Some(detail) = first_syntax_error(&patched, language) {
+        if let Some(detail) = post_edit_error.as_ref() {
             return Ok(FileOutcome {
                 result: "syntax_error",
                 match_count: chosen.len(),
@@ -350,9 +389,16 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
                 after_sha: Some(sha256_hex(&patched)),
                 changed: false,
                 preview: Some(lossy_str(&patched)),
-                details: Some(detail),
+                details: Some(detail.clone()),
+                health: ParserHealth::observed(language, ParserOperation::SafeEdit, true),
             });
         }
+    } else if !cfg.dry_run {
+        return Ok(FileOutcome::failure(
+            "parser_not_verified",
+            "`validate: false` is allowed only for dry-run previews",
+            ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
+        ));
     }
 
     let changed = patched != source;
@@ -371,6 +417,11 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
         changed,
         preview: Some(lossy_str(&patched)),
         details: None,
+        health: ParserHealth::observed(
+            language,
+            ParserOperation::SafeEdit,
+            post_edit_error.is_some(),
+        ),
     })
 }
 
@@ -384,6 +435,7 @@ fn unchanged(
     result: &'static str,
     match_count: usize,
     details: Option<String>,
+    health: ParserHealth,
 ) -> FileOutcome {
     let sha = sha256_hex(source);
     FileOutcome {
@@ -394,6 +446,7 @@ fn unchanged(
         changed: false,
         preview: None,
         details,
+        health,
     }
 }
 
