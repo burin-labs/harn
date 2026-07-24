@@ -1150,7 +1150,10 @@ fn provider_tool_scorecard_json_reports_catalog_mismatches() {
 
     assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["schema_version"], 7);
+    assert_eq!(
+        harn_value["schema_version"],
+        harn_vm::llm::tool_scorecard::TOOL_SCORECARD_SCHEMA_VERSION
+    );
     let route = &harn_value["routes"][0];
     assert_eq!(route["provider"], provider);
     assert_eq!(route["model"], model);
@@ -1264,7 +1267,10 @@ fn provider_tool_scorecard_json_reports_unknown_catalog_route() {
 
     assert_eq!(harn.exit_code, 0, "stderr: {}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["schema_version"], 7);
+    assert_eq!(
+        harn_value["schema_version"],
+        harn_vm::llm::tool_scorecard::TOOL_SCORECARD_SCHEMA_VERSION
+    );
     let route = &harn_value["routes"][0];
     assert!(route["catalog_claim"].is_null());
     assert_eq!(
