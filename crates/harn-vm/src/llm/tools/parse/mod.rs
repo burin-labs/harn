@@ -268,6 +268,7 @@ fn strip_native_name_provider_suffixes(mut text: &str) -> &str {
 ///     expression removed, whitespace around the hole collapsed. This is
 ///     what should be shown as "the agent's answer" and replayed back into
 ///     conversation history — tool calls are structured data, not narration.
+#[derive(Clone)]
 pub(crate) struct TextToolParseResult {
     pub calls: Vec<serde_json::Value>,
     pub errors: Vec<String>,

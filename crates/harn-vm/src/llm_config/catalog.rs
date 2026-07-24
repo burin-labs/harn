@@ -938,10 +938,10 @@ pub fn is_known_tool_format(format: &str) -> bool {
 }
 
 /// Resolve the default tool format for a model+provider combination.
-/// Priority: alias `tool_format` (matched by model ID) > provider/model
-/// capability matrix > legacy provider feature > "json" (the global
-/// text-channel default; heredoc "text" is opt-in via a pin or explicit
-/// request).
+/// Priority: alias `tool_format` (matched by model ID) > pinned empirical
+/// fitness > provider/model capability matrix > legacy provider feature >
+/// "json" (the global text-channel default; heredoc "text" is opt-in via a
+/// pin or explicit request).
 pub fn default_tool_format(model: &str, provider: &str) -> String {
     let config = effective_config();
     default_tool_format_with_config(&config, model, provider)
@@ -952,6 +952,20 @@ pub(crate) fn default_tool_format_with_config(
     model: &str,
     provider: &str,
 ) -> String {
+    default_tool_format_with_config_and_fitness(
+        config,
+        model,
+        provider,
+        crate::llm::tool_scorecard::pinned_tool_format(provider, model),
+    )
+}
+
+pub(crate) fn default_tool_format_with_config_and_fitness(
+    config: &ProvidersConfig,
+    model: &str,
+    provider: &str,
+    measured_format: Option<String>,
+) -> String {
     // Aliases match by model ID + provider, or by alias name.
     for (name, alias) in &config.aliases {
         let matches = (alias.id == model && alias.provider == provider) || name == model;
@@ -960,6 +974,11 @@ pub(crate) fn default_tool_format_with_config(
                 return fmt.clone();
             }
         }
+    }
+    if let Some(format) =
+        measured_format.filter(|format| matches!(format.as_str(), "native" | "json" | "text"))
+    {
+        return format;
     }
     let capabilities = crate::llm::capabilities::lookup(provider, model);
     if let Some(format) = capabilities.preferred_tool_format.as_deref() {

@@ -261,6 +261,7 @@ local lifecycle gates and eval harnesses:
 ```bash
 harn provider tool-probe ollama --model devstral-small-2 --mode both --json
 harn provider tool-probe dashscope --model qwen3.6-35b-a3b --mode non-streaming --repeat 5 --json
+harn provider tool-probe ollama --model qwen3:8b --tool-format text --json
 harn local switch ollama-gemma4 --probe-result gemma4-tool-probe.json
 ```
 
@@ -271,6 +272,13 @@ arguments, empty response, HTTP error, or transport error. Its
 systems should record: `native`, `text`, or `disabled`. Use `--repeat` for
 provider reliability measurements; repeated summaries only pass when every
 attempt for that mode succeeds.
+
+For route selection rather than a one-off lifecycle receipt, run
+`harn provider tool-calibrate --route provider:model`. It measures the fixed
+case battery under native, fenced-JSON, and tagged-text emission and writes a
+versioned snapshot. Point `HARN_TOOL_FORMAT_FITNESS_PATH` at a reviewed snapshot
+before an eval starts; the runtime pins it on first use and never switches
+formats midway through the process.
 
 ### Enterprise providers
 

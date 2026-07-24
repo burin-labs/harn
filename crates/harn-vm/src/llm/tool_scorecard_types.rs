@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolScorecardReport {
@@ -8,6 +8,50 @@ pub struct ToolScorecardReport {
     pub route_count: usize,
     pub summary: ToolScorecardSummary,
     pub routes: Vec<ToolScorecardRoute>,
+    pub fitness: ToolFormatFitnessStore,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ToolFormatFitnessStore {
+    pub schema_version: u32,
+    pub records: Vec<ToolFormatFitnessRecord>,
+    pub recommendations: Vec<ToolFormatFitnessRecommendation>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ToolFormatFitnessRecord {
+    pub provider: String,
+    pub model: String,
+    pub tool_format: String,
+    pub probe_case: String,
+    pub attempts: usize,
+    pub successes: usize,
+    pub pass_rate: f64,
+    pub classification_histogram: BTreeMap<String, usize>,
+    pub observed_latency_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_p50_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_p95_ms: Option<u64>,
+    pub observed_usage_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ToolFormatFitnessRecommendation {
+    pub provider: String,
+    pub model: String,
+    pub tool_format: String,
+    pub attempts: usize,
+    pub successes: usize,
+    pub pass_rate: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_p50_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_tokens: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

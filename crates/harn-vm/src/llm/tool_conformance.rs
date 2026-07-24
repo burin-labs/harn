@@ -16,18 +16,22 @@ use crate::llm_config::{self, ProviderDef};
 mod helpers;
 #[path = "tool_conformance_request.rs"]
 mod request;
+#[path = "tool_conformance_request_contract.rs"]
+mod request_contract;
 #[path = "tool_conformance_types.rs"]
 mod types;
 use super::usage_normalization::extract_probe_usage;
 pub use super::usage_normalization::ToolProbeUsage;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
-use request::{probe_request_body, probe_request_body_with_warnings, validate_probe_request_body};
+#[cfg(test)]
+use request::validate_probe_request_body;
+use request::{probe_request_body_for_format, probe_request_body_with_warnings_for_format};
 pub use types::{
     ToolConformanceRequestAuditFailure, ToolConformanceRequestAuditNotApplicable,
     ToolConformanceRequestAuditReport, ToolConformanceRequestAuditRoute,
     ToolConformanceRequestAuditWarning, ToolConformanceRequestCase, ToolConformanceRequestReport,
     ToolConformanceRequestValidation, ToolConformanceRequestValidationStatus,
-    ToolConformanceRequestWarning,
+    ToolConformanceRequestWarning, ToolProbeFormat, ToolProbeMode, ToolProbeRequestProfile,
 };
 
 pub const TOOL_CONFORMANCE_SCHEMA_VERSION: u32 = 1;
@@ -41,6 +45,8 @@ pub struct ToolConformanceProbeOptions {
     pub provider: String,
     pub model: String,
     pub base_url: Option<String>,
+    pub tool_format: ToolProbeFormat,
+    pub strict_tool_format: bool,
     pub modes: Vec<ToolProbeMode>,
     pub probe_case: ToolProbeCase,
     pub marker: String,
@@ -54,6 +60,8 @@ impl ToolConformanceProbeOptions {
             provider: provider.into(),
             model: model.into(),
             base_url: None,
+            tool_format: ToolProbeFormat::Native,
+            strict_tool_format: false,
             modes: vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
             probe_case: ToolProbeCase::SingleToolCall,
             marker: DEFAULT_TOOL_PROBE_MARKER.to_string(),
@@ -63,23 +71,13 @@ impl ToolConformanceProbeOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolProbeMode {
-    NonStreaming,
-    Streaming,
+#[derive(Debug, Clone, Copy)]
+struct ToolProbeFormatPolicy {
+    format: ToolProbeFormat,
+    strict: bool,
 }
 
-impl ToolProbeMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::NonStreaming => "non_streaming",
-            Self::Streaming => "streaming",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolProbeCase {
     #[default]
@@ -91,27 +89,6 @@ pub enum ToolProbeCase {
     NoToolAnswerOrRefusal,
     UnavailableToolRepair,
     DoneSentinel,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolProbeRequestProfile {
-    #[default]
-    CatalogDefault,
-    ParameterEdges,
-}
-
-impl ToolProbeRequestProfile {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::CatalogDefault => "catalog_default",
-            Self::ParameterEdges => "parameter_edges",
-        }
-    }
-
-    pub fn catalog_request_audit_profiles() -> Vec<Self> {
-        vec![Self::CatalogDefault, Self::ParameterEdges]
-    }
 }
 
 impl ToolProbeCase {
@@ -240,6 +217,8 @@ pub struct ToolConformanceReport {
     pub schema_version: u32,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub tool_format: ToolProbeFormat,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     #[serde(default)]
@@ -353,6 +332,10 @@ pub async fn run_tool_conformance_probe(
                     &model_id,
                     base_url.as_deref(),
                     *mode,
+                    ToolProbeFormatPolicy {
+                        format: options.tool_format,
+                        strict: options.strict_tool_format,
+                    },
                     options.probe_case,
                     &expected_value,
                     options.timeout_secs,
@@ -365,6 +348,7 @@ pub async fn run_tool_conformance_probe(
         provider,
         model_id,
         base_url,
+        options.tool_format,
         options.probe_case,
         options.marker,
         expected_value,
@@ -401,6 +385,49 @@ pub fn classify_tool_conformance_fixture_for_case(
     marker: impl Into<String>,
     raw: &str,
 ) -> ToolConformanceReport {
+    classify_tool_conformance_fixture_with_policy(
+        provider,
+        model,
+        mode,
+        ToolProbeFormat::Native,
+        false,
+        probe_case,
+        marker,
+        raw,
+    )
+}
+
+pub fn classify_tool_conformance_fixture_for_case_and_format(
+    provider: impl Into<String>,
+    model: impl Into<String>,
+    mode: ToolProbeMode,
+    tool_format: ToolProbeFormat,
+    probe_case: ToolProbeCase,
+    marker: impl Into<String>,
+    raw: &str,
+) -> ToolConformanceReport {
+    classify_tool_conformance_fixture_with_policy(
+        provider,
+        model,
+        mode,
+        tool_format,
+        true,
+        probe_case,
+        marker,
+        raw,
+    )
+}
+
+fn classify_tool_conformance_fixture_with_policy(
+    provider: impl Into<String>,
+    model: impl Into<String>,
+    mode: ToolProbeMode,
+    tool_format: ToolProbeFormat,
+    strict_tool_format: bool,
+    probe_case: ToolProbeCase,
+    marker: impl Into<String>,
+    raw: &str,
+) -> ToolConformanceReport {
     let marker = marker.into();
     let expected_value = probe_case.expected_value(&marker);
     let provider = provider.into();
@@ -410,6 +437,10 @@ pub fn classify_tool_conformance_fixture_for_case(
     let case = classify_tool_probe_response(
         mode,
         &response,
+        ToolProbeFormatPolicy {
+            format: tool_format,
+            strict: strict_tool_format,
+        },
         probe_case,
         &expected_value,
         None,
@@ -420,6 +451,7 @@ pub fn classify_tool_conformance_fixture_for_case(
         provider,
         model,
         None,
+        tool_format,
         probe_case,
         marker,
         expected_value,
@@ -436,23 +468,47 @@ pub fn tool_conformance_request_report(
     request_profile: ToolProbeRequestProfile,
     marker: impl Into<String>,
 ) -> Result<ToolConformanceRequestReport, String> {
+    tool_conformance_request_report_for_format(
+        provider,
+        model,
+        base_url,
+        modes,
+        ToolProbeFormat::Native,
+        probe_case,
+        request_profile,
+        marker,
+    )
+}
+
+pub fn tool_conformance_request_report_for_format(
+    provider: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<String>,
+    modes: Vec<ToolProbeMode>,
+    tool_format: ToolProbeFormat,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    marker: impl Into<String>,
+) -> Result<ToolConformanceRequestReport, String> {
     let provider = provider.into();
     let model = model.into();
     let marker = marker.into();
     let expected_value = probe_case.expected_value(&marker);
     let mut requests = Vec::new();
     for mode in normalized_modes(&modes) {
-        let (request_body, warnings) = probe_request_body_with_warnings(
+        let (request_body, warnings) = probe_request_body_with_warnings_for_format(
             &provider,
             &model,
             mode,
+            tool_format,
             probe_case,
             request_profile,
             &expected_value,
         )?;
-        let mut validation = validate_probe_request_body(
+        let mut validation = request::validate_probe_request_body_for_format(
             &provider,
             &model,
+            tool_format,
             probe_case,
             request_profile,
             &request_body,
@@ -468,6 +524,7 @@ pub fn tool_conformance_request_report(
         schema_version: TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION,
         provider,
         model,
+        tool_format,
         base_url,
         probe_case,
         request_profile,
@@ -487,11 +544,34 @@ pub fn tool_conformance_request_report_json(
     request_profile: ToolProbeRequestProfile,
     marker: impl Into<String>,
 ) -> Result<String, String> {
-    let report = tool_conformance_request_report(
+    tool_conformance_request_report_json_for_format(
         provider,
         model,
         base_url,
         modes,
+        ToolProbeFormat::Native,
+        probe_case,
+        request_profile,
+        marker,
+    )
+}
+
+pub fn tool_conformance_request_report_json_for_format(
+    provider: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<String>,
+    modes: Vec<ToolProbeMode>,
+    tool_format: ToolProbeFormat,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    marker: impl Into<String>,
+) -> Result<String, String> {
+    let report = tool_conformance_request_report_for_format(
+        provider,
+        model,
+        base_url,
+        modes,
+        tool_format,
         probe_case,
         request_profile,
         marker,
@@ -715,6 +795,7 @@ fn report_from_cases(
     provider: String,
     model: String,
     base_url: Option<String>,
+    tool_format: ToolProbeFormat,
     probe_case: ToolProbeCase,
     marker: String,
     expected_value: String,
@@ -725,6 +806,7 @@ fn report_from_cases(
         schema_version: TOOL_CONFORMANCE_SCHEMA_VERSION,
         provider,
         model,
+        tool_format,
         base_url,
         probe_case,
         tool_name: TOOL_PROBE_TOOL_NAME.to_string(),
@@ -818,6 +900,7 @@ async fn execute_live_probe_case(
     model: &str,
     base_url: Option<&str>,
     mode: ToolProbeMode,
+    format_policy: ToolProbeFormatPolicy,
     probe_case: ToolProbeCase,
     marker: &str,
     timeout_secs: u64,
@@ -845,10 +928,11 @@ async fn execute_live_probe_case(
             );
         }
     };
-    let body = match probe_request_body(
+    let body = match probe_request_body_for_format(
         provider,
         model,
         mode,
+        format_policy.format,
         probe_case,
         ToolProbeRequestProfile::CatalogDefault,
         marker,
@@ -917,19 +1001,13 @@ async fn execute_live_probe_case(
     classify_tool_probe_response(
         mode,
         &response_value,
+        format_policy,
         probe_case,
         marker,
         Some(status.as_u16()),
         elapsed,
         usage,
     )
-}
-
-/// True when `calls` contains the probe's echo_marker call (the
-/// `TOOL_PROBE_TOOL_NAME` tool with `args.value == marker`). Shared by the
-/// tagged and fenced-JSON text-channel parse attempts.
-fn probe_marker_present(calls: &[Value], marker: &str) -> bool {
-    probe_values_present(calls, &[marker.to_string()])
 }
 
 fn probe_values_present(calls: &[Value], expected_values: &[String]) -> bool {
@@ -962,12 +1040,14 @@ fn expected_tool_values(probe_case: ToolProbeCase, expected_value: &str) -> Vec<
 fn classify_tool_probe_response(
     mode: ToolProbeMode,
     response: &Value,
+    format_policy: ToolProbeFormatPolicy,
     probe_case: ToolProbeCase,
     expected_value: &str,
     http_status: Option<u16>,
     elapsed_ms: Option<u64>,
     usage: Option<ToolProbeUsage>,
 ) -> ToolConformanceCase {
+    let tool_format = format_policy.format;
     let native = extract_native_tool_calls(response);
     let native_count = native.len();
     let mut malformed_native = false;
@@ -991,7 +1071,8 @@ fn classify_tool_probe_response(
         .all(|expected| native_probe_calls.contains(expected));
     let native_cardinality_matches =
         native_probe_calls.len() == expected_call_count && native_count == expected_call_count;
-    let native_pass = probe_case.requires_probe_tool()
+    let native_pass = tool_format == ToolProbeFormat::Native
+        && probe_case.requires_probe_tool()
         && native_values_match
         && native_cardinality_matches
         && !malformed_native;
@@ -1018,15 +1099,17 @@ fn classify_tool_probe_response(
     let content = extract_content(response);
     let tools = probe_tool_registry();
     let tagged = crate::llm::tools::parse_text_tool_calls_with_tools(&content, Some(&tools));
-    let parsed = if probe_marker_present(&tagged.calls, expected_value) {
-        tagged
+    let fenced = crate::llm::tools::parse_fenced_json_tool_calls(&content);
+    let requested = match tool_format {
+        ToolProbeFormat::Native | ToolProbeFormat::Text => &tagged,
+        ToolProbeFormat::Json => &fenced,
+    };
+    let parsed = if probe_values_present(&requested.calls, &expected_tool_values) {
+        requested
+    } else if probe_values_present(&tagged.calls, &expected_tool_values) {
+        &tagged
     } else {
-        let fenced = crate::llm::tools::parse_fenced_json_tool_calls(&content);
-        if probe_marker_present(&fenced.calls, expected_value) {
-            fenced
-        } else {
-            tagged
-        }
+        &fenced
     };
     let text_count = parsed.calls.len();
     if !probe_case.requires_probe_tool() {
@@ -1036,14 +1119,22 @@ fn classify_tool_probe_response(
             expected_value,
             &content,
             (native_count, text_count),
-            parsed,
+            parsed.clone(),
             (http_status, elapsed_ms),
             usage,
         );
     }
     let text_values_match = probe_values_present(&parsed.calls, &expected_tool_values);
     let text_cardinality_matches = parsed.calls.len() == expected_call_count;
-    let text_pass = text_values_match && text_cardinality_matches;
+    let requested_values_match = probe_values_present(&requested.calls, &expected_tool_values);
+    let requested_cardinality_matches = requested.calls.len() == expected_call_count;
+    let text_pass = if format_policy.strict {
+        tool_format != ToolProbeFormat::Native
+            && requested_values_match
+            && requested_cardinality_matches
+    } else {
+        text_values_match && text_cardinality_matches
+    };
     if text_pass {
         return ToolConformanceCase {
             mode,
@@ -1056,8 +1147,8 @@ fn classify_tool_probe_response(
             native_tool_call_count: native_count,
             text_tool_call_count: text_count,
             usage,
-            parser_errors: parsed.errors,
-            protocol_violations: parsed.violations,
+            parser_errors: parsed.errors.clone(),
+            protocol_violations: parsed.violations.clone(),
             content_sample: sample_content(&content),
         };
     }
@@ -1113,8 +1204,8 @@ fn classify_tool_probe_response(
         native_tool_call_count: native_count,
         text_tool_call_count: text_count,
         usage,
-        parser_errors: parsed.errors,
-        protocol_violations: parsed.violations,
+        parser_errors: parsed.errors.clone(),
+        protocol_violations: parsed.violations.clone(),
         content_sample: sample_content(&content),
     }
 }

@@ -1,9 +1,10 @@
 use serde_json::{json, Value};
 
+use super::request_contract::probe_tool_contract;
 use super::{
     probe_tool_registry, ToolConformanceRequestValidation, ToolConformanceRequestValidationStatus,
-    ToolConformanceRequestWarning, ToolProbeCase, ToolProbeMode, ToolProbeRequestProfile,
-    TOOL_PROBE_TOOL_NAME,
+    ToolConformanceRequestWarning, ToolProbeCase, ToolProbeFormat, ToolProbeMode,
+    ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
 };
 use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
 use crate::llm::capabilities::WireDialect;
@@ -13,6 +14,7 @@ const ANTHROPIC_THINKING_SIGNATURE: &str = "harn-scorecard-anthropic-thinking-si
 const ANTHROPIC_REDACTED_THINKING_DATA: &str = "harn-scorecard-redacted-thinking-payload";
 const GEMINI_THOUGHT_SIGNATURE: &str = "harn-scorecard-gemini-thinking-signature";
 
+#[cfg(test)]
 pub(super) fn probe_request_body(
     provider: &str,
     model: &str,
@@ -21,10 +23,39 @@ pub(super) fn probe_request_body(
     request_profile: ToolProbeRequestProfile,
     marker: &str,
 ) -> Result<Value, String> {
-    probe_request_body_with_warnings(provider, model, mode, probe_case, request_profile, marker)
-        .map(|(body, _warnings)| body)
+    probe_request_body_for_format(
+        provider,
+        model,
+        mode,
+        ToolProbeFormat::Native,
+        probe_case,
+        request_profile,
+        marker,
+    )
 }
 
+pub(super) fn probe_request_body_for_format(
+    provider: &str,
+    model: &str,
+    mode: ToolProbeMode,
+    tool_format: ToolProbeFormat,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    marker: &str,
+) -> Result<Value, String> {
+    probe_request_body_with_warnings_for_format(
+        provider,
+        model,
+        mode,
+        tool_format,
+        probe_case,
+        request_profile,
+        marker,
+    )
+    .map(|(body, _warnings)| body)
+}
+
+#[cfg(test)]
 pub(super) fn probe_request_body_with_warnings(
     provider: &str,
     model: &str,
@@ -33,13 +64,41 @@ pub(super) fn probe_request_body_with_warnings(
     request_profile: ToolProbeRequestProfile,
     marker: &str,
 ) -> Result<(Value, Vec<ToolConformanceRequestWarning>), String> {
-    let payload =
-        probe_request_payload(provider, model, mode, probe_case, request_profile, marker)?;
+    probe_request_body_with_warnings_for_format(
+        provider,
+        model,
+        mode,
+        ToolProbeFormat::Native,
+        probe_case,
+        request_profile,
+        marker,
+    )
+}
+
+pub(super) fn probe_request_body_with_warnings_for_format(
+    provider: &str,
+    model: &str,
+    mode: ToolProbeMode,
+    tool_format: ToolProbeFormat,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    marker: &str,
+) -> Result<(Value, Vec<ToolConformanceRequestWarning>), String> {
+    let payload = probe_request_payload_for_format(
+        provider,
+        model,
+        mode,
+        tool_format,
+        probe_case,
+        request_profile,
+        marker,
+    )?;
     let body = provider_compatible_probe_request_body(&payload);
     let warnings = request_body_warnings(&payload, &body);
     Ok((body, warnings))
 }
 
+#[cfg(test)]
 pub(super) fn probe_request_payload(
     provider: &str,
     model: &str,
@@ -48,20 +107,49 @@ pub(super) fn probe_request_payload(
     request_profile: ToolProbeRequestProfile,
     marker: &str,
 ) -> Result<LlmRequestPayload, String> {
+    probe_request_payload_for_format(
+        provider,
+        model,
+        mode,
+        ToolProbeFormat::Native,
+        probe_case,
+        request_profile,
+        marker,
+    )
+}
+
+pub(super) fn probe_request_payload_for_format(
+    provider: &str,
+    model: &str,
+    mode: ToolProbeMode,
+    tool_format: ToolProbeFormat,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    marker: &str,
+) -> Result<LlmRequestPayload, String> {
+    if tool_format != ToolProbeFormat::Native
+        && probe_case == ToolProbeCase::SignedThinkingToolResultFollowup
+    {
+        return Err(
+            "signed-thinking tool-result replay is only defined for native tool format".to_string(),
+        );
+    }
     let model_defaults = llm_config::model_params_for_route(provider, model);
     let default_float =
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(toml::Value::as_float) };
     let default_int =
         |key: &str| -> Option<i64> { model_defaults.get(key).and_then(toml::Value::as_integer) };
-    let native_tools = if probe_case.request_uses_probe_tool() {
-        Some(
-            crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
-                .expect("tool probe registry is static and should convert to native tools"),
-        )
-    } else {
-        None
-    };
-    let mut tool_choice = if probe_case.requires_probe_tool()
+    let native_tools =
+        if tool_format == ToolProbeFormat::Native && probe_case.request_uses_probe_tool() {
+            Some(
+                crate::llm::tools::vm_tools_to_native(&probe_tool_registry(), provider, model)
+                    .expect("tool probe registry is static and should convert to native tools"),
+            )
+        } else {
+            None
+        };
+    let mut tool_choice = if tool_format == ToolProbeFormat::Native
+        && probe_case.requires_probe_tool()
         && !crate::llm::provider::provider_uses_ollama_messages(provider, model)
     {
         if provider == "llamacpp" {
@@ -97,7 +185,7 @@ pub(super) fn probe_request_payload(
         api_key: String::new(),
         api_mode: LlmApiMode::ChatCompletions,
         messages: Vec::new(),
-        system: None,
+        system: probe_tool_contract(tool_format)?,
         max_tokens: default_int("max_tokens").unwrap_or(256),
         temperature: Some(default_float("temperature").unwrap_or(0.0)),
         top_p: default_float("top_p"),
@@ -138,7 +226,7 @@ pub(super) fn probe_request_payload(
         cli_llm_mock_scope: None,
         mock_scope: None,
     };
-    payload.messages = probe_messages(provider, probe_case, marker);
+    payload.messages = probe_messages(provider, tool_format, probe_case, marker);
     apply_request_profile(&mut payload, request_profile);
     Ok(payload)
 }
@@ -196,7 +284,12 @@ fn probe_prompt(probe_case: ToolProbeCase, marker: &str) -> String {
     }
 }
 
-fn probe_messages(provider: &str, probe_case: ToolProbeCase, marker: &str) -> Vec<Value> {
+fn probe_messages(
+    provider: &str,
+    tool_format: ToolProbeFormat,
+    probe_case: ToolProbeCase,
+    marker: &str,
+) -> Vec<Value> {
     if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
         return signed_thinking_probe_messages(provider, marker);
     }
@@ -205,6 +298,29 @@ fn probe_messages(provider: &str, probe_case: ToolProbeCase, marker: &str) -> Ve
     }
 
     let tool_call_id = "call_harn_tool_probe_1";
+    if tool_format != ToolProbeFormat::Native {
+        let call = match tool_format {
+            ToolProbeFormat::Json => format!(
+                "```tool\n{}\n```",
+                json!({"name": TOOL_PROBE_TOOL_NAME, "args": {"value": marker}})
+            ),
+            ToolProbeFormat::Text => format!(
+                "<tool_call>\n{TOOL_PROBE_TOOL_NAME}({{ value: {marker:?} }})\n</tool_call>"
+            ),
+            ToolProbeFormat::Native => unreachable!(),
+        };
+        return vec![
+            json!({"role": "user", "content": probe_prompt(probe_case, marker)}),
+            json!({"role": "assistant", "content": call}),
+            json!({
+                "role": "user",
+                "content": format!(
+                    "[result of {TOOL_PROBE_TOOL_NAME}]\n{}\n[end of {TOOL_PROBE_TOOL_NAME} result]\n",
+                    json!({"value": marker})
+                ),
+            }),
+        ];
+    }
     vec![
         json!({"role": "user", "content": probe_prompt(probe_case, marker)}),
         json!({
@@ -431,9 +547,28 @@ fn push_omitted_sampling_param(
     }
 }
 
+#[cfg(test)]
 pub(super) fn validate_probe_request_body(
     provider: &str,
     model: &str,
+    probe_case: ToolProbeCase,
+    request_profile: ToolProbeRequestProfile,
+    body: &Value,
+) -> ToolConformanceRequestValidation {
+    validate_probe_request_body_for_format(
+        provider,
+        model,
+        ToolProbeFormat::Native,
+        probe_case,
+        request_profile,
+        body,
+    )
+}
+
+pub(super) fn validate_probe_request_body_for_format(
+    provider: &str,
+    model: &str,
+    tool_format: ToolProbeFormat,
     probe_case: ToolProbeCase,
     request_profile: ToolProbeRequestProfile,
     body: &Value,
@@ -453,6 +588,20 @@ pub(super) fn validate_probe_request_body(
         };
     }
     let mut issues = Vec::new();
+    if tool_format != ToolProbeFormat::Native {
+        validate_text_channel_probe_request(body, &dialect, tool_format, &mut issues);
+        validate_generation_parameter_ranges(body, &dialect, &mut issues);
+        return ToolConformanceRequestValidation {
+            dialect,
+            status: if issues.is_empty() {
+                ToolConformanceRequestValidationStatus::Pass
+            } else {
+                ToolConformanceRequestValidationStatus::Fail
+            },
+            warnings: Vec::new(),
+            issues,
+        };
+    }
     match dialect.as_str() {
         "anthropic" => {
             validate_anthropic_probe_request(body, probe_case, request_profile, &mut issues);
@@ -477,6 +626,32 @@ pub(super) fn validate_probe_request_body(
         },
         warnings: Vec::new(),
         issues,
+    }
+}
+
+fn validate_text_channel_probe_request(
+    body: &Value,
+    dialect: &str,
+    tool_format: ToolProbeFormat,
+    issues: &mut Vec<String>,
+) {
+    match dialect {
+        "gemini" | "vertex" => require_array(body, "/contents", issues),
+        _ => require_array(body, "/messages", issues),
+    }
+    for pointer in ["/tools", "/tool_choice", "/toolConfig", "/tool_config"] {
+        reject_present(body, pointer, "text-channel tool probe", issues);
+    }
+    let body_text = body.to_string();
+    let format_marker = match tool_format {
+        ToolProbeFormat::Json => "```tool",
+        ToolProbeFormat::Text => "<tool_call>",
+        ToolProbeFormat::Native => unreachable!(),
+    };
+    if !body_text.contains(TOOL_PROBE_TOOL_NAME) || !body_text.contains(format_marker) {
+        issues.push(format!(
+            "text-channel request is missing the {tool_format:?} echo_marker contract"
+        ));
     }
 }
 

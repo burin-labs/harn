@@ -3,13 +3,71 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{ToolProbeCase, ToolProbeMode, ToolProbeRequestProfile};
+use super::ToolProbeCase;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProbeFormat {
+    #[default]
+    Native,
+    Json,
+    Text,
+}
+
+impl ToolProbeFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+            Self::Json => "json",
+            Self::Text => "text",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProbeMode {
+    NonStreaming,
+    Streaming,
+}
+
+impl ToolProbeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NonStreaming => "non_streaming",
+            Self::Streaming => "streaming",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProbeRequestProfile {
+    #[default]
+    CatalogDefault,
+    ParameterEdges,
+}
+
+impl ToolProbeRequestProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CatalogDefault => "catalog_default",
+            Self::ParameterEdges => "parameter_edges",
+        }
+    }
+
+    pub fn catalog_request_audit_profiles() -> Vec<Self> {
+        vec![Self::CatalogDefault, Self::ParameterEdges]
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolConformanceRequestReport {
     pub schema_version: u32,
     pub provider: String,
     pub model: String,
+    #[serde(default)]
+    pub tool_format: ToolProbeFormat,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     #[serde(default)]

@@ -18,8 +18,10 @@ use super::tool_conformance::{
 pub use super::tool_scorecard_types::*;
 
 mod catalog_drift;
+mod fitness;
+pub use fitness::*;
 
-pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 7;
+pub const TOOL_SCORECARD_SCHEMA_VERSION: u32 = 8;
 pub const TOOL_SCORECARD_PLAN_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Default)]
@@ -191,6 +193,7 @@ impl CaseStats {
 
 pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolScorecardReport {
     let catalog_claims = catalog_claims_by_route();
+    let fitness = fitness_store_from_tool_reports(&reports);
     let mut grouped: BTreeMap<(String, String), RouteAccumulator> = BTreeMap::new();
     for report in reports {
         let key = (report.provider.clone(), report.model.clone());
@@ -255,6 +258,7 @@ pub fn scorecard_from_tool_reports(reports: Vec<ToolConformanceReport>) -> ToolS
         route_count: routes.len(),
         summary,
         routes,
+        fitness,
     }
 }
 

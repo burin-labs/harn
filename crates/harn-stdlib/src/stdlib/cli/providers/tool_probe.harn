@@ -14,7 +14,7 @@
  *     `ToolConformanceReport` shape; see
  *     `crates/harn-vm/src/llm/tool_conformance.rs` for the canonical
  *     definition. Required keys:
- *       provider, model, cases[], tool_calling{native, text,
+ *       provider, model, tool_format, cases[], tool_calling{native, text,
  *       streaming_native, fallback_mode, failure_reason?}
  *   HARN_OUTPUT_JSON — "1" for the JSON envelope (default at the
  *     handler level), else the human conformance summary.
@@ -108,12 +108,15 @@ fn __any_case_ok(report: dict) -> bool {
 fn __render_human(report: dict) -> string {
   const provider = __safe_string(report["provider"], "")
   const model = __safe_string(report["model"], "")
+  const tool_format = __safe_string(report["tool_format"], "native")
   const tc = __safe_dict(report["tool_calling"])
   const fallback = __safe_string(tc["fallback_mode"], "")
   const native = __safe_string(tc["native"], "")
   const text = __safe_string(tc["text"], "")
   const streaming_native = __safe_string(tc["streaming_native"], "")
   let out = provider + " " + model
+    + " format="
+    + tool_format
     + " fallback="
     + fallback
     + " native="

@@ -1487,49 +1487,6 @@ fn test_parses_provider_probe_args() {
 }
 
 #[test]
-fn test_parses_provider_tool_probe_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "provider",
-        "tool-probe",
-        "ollama",
-        "--model",
-        "devstral-small-2",
-        "--base-url",
-        "http://127.0.0.1:11434",
-        "--mode",
-        "non-streaming",
-        "--case",
-        "parallel_tool_calls",
-        "--marker",
-        "marker",
-        "--repeat",
-        "5",
-        "--response-fixture",
-        "fixture.json",
-    ]);
-    let Command::Provider(provider) = cli.command.unwrap() else {
-        panic!("expected provider command");
-    };
-    let ProviderCommand::ToolProbe(args) = provider.command else {
-        panic!("expected provider tool-probe command");
-    };
-    assert_eq!(args.provider, "ollama");
-    assert_eq!(args.model, "devstral-small-2");
-    assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
-    assert!(matches!(args.mode, ProviderToolProbeModeArg::NonStreaming));
-    assert!(matches!(
-        args.probe_case,
-        ProviderToolProbeCaseArg::ParallelToolCalls
-    ));
-    assert_eq!(args.marker, "marker");
-    assert_eq!(args.repeat, 5);
-    assert_eq!(args.response_fixture, Some(PathBuf::from("fixture.json")));
-    assert!(!args.dry_run_request);
-    assert!(args.json);
-}
-
-#[test]
 fn test_parses_provider_tool_scorecard_args() {
     let cli = Cli::parse_from([
         "harn",

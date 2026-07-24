@@ -125,13 +125,11 @@ pub fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
     if cell.runner == "provider_tool_probe" {
       executable_cells = executable_cells + 1
       executable_cells_by_provider = __increment_key(executable_cells_by_provider, cell.provider)
-      if cell.tool_format == "native" {
-        executable_commands = executable_commands + 1
-        executable_commands_by_provider = __increment_key(
-          executable_commands_by_provider,
-          cell.provider,
-        )
-      }
+      executable_commands = executable_commands + 1
+      executable_commands_by_provider = __increment_key(
+        executable_commands_by_provider,
+        cell.provider,
+      )
     } else {
       missing_runner = missing_runner + 1
       missing_runner_by_behavior = __increment_key(missing_runner_by_behavior, cell.behavior)
@@ -150,7 +148,7 @@ pub fn __executable_gap(cells: list<ProviderToolProbeCell>) -> dict {
 pub fn __estimated_spend(live: bool, cells: list<ProviderToolProbeCell>, repeat: int) -> dict {
   let executable_probe_count = 0
   for cell in cells {
-    if cell.runner != "provider_tool_probe" || cell.tool_format != "native" {
+    if cell.runner != "provider_tool_probe" {
       continue
     }
     if !live && cell.status == "planned" {

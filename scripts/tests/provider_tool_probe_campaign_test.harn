@@ -512,6 +512,8 @@ pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_fo
       "non-streaming",
       "--case",
       "single_tool_call",
+      "--tool-format",
+      "native",
       "--repeat",
       "1",
       "--timeout-secs",
@@ -548,6 +550,8 @@ pipeline test_provider_tool_probe_campaign_planned_cells_include_custom_command_
       "streaming",
       "--case",
       "single_tool_call",
+      "--tool-format",
+      "native",
       "--repeat",
       "5",
       "--timeout-secs",
@@ -581,12 +585,12 @@ pipeline test_provider_tool_probe_campaign_report_summarizes_cells(task) {
   assert_eq(report.summary.planned, 3)
   assert_eq(report.summary.pass, 0)
   assert_eq(report.cell_count, 3)
-  assert_eq(report.spend.executable_probe_count, 1)
+  assert_eq(report.spend.executable_probe_count, 3)
   assert_eq(report.spend.actual_usd_known, true)
   assert_eq(report.spend.actual_usd, 0.0)
   assert_eq(report.runner_summary.provider_tool_probe.total, 3)
   assert_eq(report.executable_gap.executable_cells, 3)
-  assert_eq(report.executable_gap.executable_commands, 1)
+  assert_eq(report.executable_gap.executable_commands, 3)
   assert_eq(report.executable_gap.missing_runner, 0)
   assert_eq(report.auth_readiness.env_checked, false)
   assert_eq(report.auth_readiness.ready_routes, 1)
@@ -655,7 +659,7 @@ pipeline test_provider_tool_probe_campaign_max_probes_caps_executable_units(task
     plan.slice,
   )
   assert_eq(report.campaign_slice.max_probes, 2)
-  assert_eq(report.spend.executable_probe_count, 6)
+  assert_eq(report.spend.executable_probe_count, 18)
 }
 
 @test
@@ -732,7 +736,7 @@ pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(task) {
   )
   assert_eq(report.runner_summary.provider_tool_probe.total, 3)
   assert_eq(report.executable_gap.executable_cells, 3)
-  assert_eq(report.executable_gap.executable_commands, 1)
+  assert_eq(report.executable_gap.executable_commands, 3)
   assert_eq(report.executable_gap.missing_runner, 0)
   assert_eq(
     cells[0]?.command,
@@ -747,6 +751,8 @@ pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(task) {
       "non-streaming",
       "--case",
       "parallel_tool_calls",
+      "--tool-format",
+      "native",
       "--repeat",
       "1",
       "--timeout-secs",
@@ -840,6 +846,7 @@ pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavio
       route,
       behavior,
       "non-streaming",
+      "native",
       ".out",
     )
     assert_false(paths.contains(path), "artifact path must be unique: " + path)

@@ -25,6 +25,9 @@ pub(crate) enum ProviderCommand {
     Probe(ProviderProbeArgs),
     /// Run one-tool provider conformance and classify native/text fallback.
     ToolProbe(ProviderToolProbeArgs),
+    /// Measure tool-call format fitness across routes and fixed micro-cases.
+    #[command(name = "tool-calibrate")]
+    ToolCalibrate(ProviderToolCalibrateArgs),
     /// Render and validate every catalogued provider tool-probe request shape
     /// without calling providers.
     #[command(name = "tool-probe-audit")]
@@ -334,6 +337,10 @@ pub(crate) struct ProviderToolProbeArgs {
     /// Select the fixed micro-case to probe.
     #[arg(long = "case", value_enum, default_value_t = ProviderToolProbeCaseArg::SingleToolCall)]
     pub probe_case: ProviderToolProbeCaseArg,
+    /// Force the tool-call emission format instead of using provider-native
+    /// tool calling.
+    #[arg(long = "tool-format", value_enum)]
+    pub tool_format: Option<ProviderToolProbeFormatArg>,
     /// Select the provider request-profile to render for --dry-run-request.
     /// Non-default profiles are offline request-audit surfaces, not live
     /// conformance probes.
@@ -357,6 +364,44 @@ pub(crate) struct ProviderToolProbeArgs {
     pub timeout_secs: u64,
     /// Emit JSON. Defaults to true because evals and setup scripts consume
     /// the structured conformance report.
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = ArgAction::Set
+    )]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderToolCalibrateArgs {
+    /// Provider/model route to calibrate. Repeat to build a matrix. Format is
+    /// `provider:model`; the model part may contain additional `:`.
+    #[arg(long = "route", required = true)]
+    pub routes: Vec<String>,
+    /// Restrict calibration to one or more emission formats. Omit to measure
+    /// native, fenced JSON, and tagged text.
+    #[arg(long = "tool-format", value_enum)]
+    pub tool_formats: Vec<ProviderToolProbeFormatArg>,
+    /// Restrict calibration to one or more fixed micro-cases. Omit to run the
+    /// complete live-applicable battery.
+    #[arg(long = "case", value_enum)]
+    pub probe_cases: Vec<ProviderToolProbeCaseArg>,
+    /// Probe only one transport mode instead of both.
+    #[arg(long, value_enum, default_value_t = ProviderToolProbeModeArg::Both)]
+    pub mode: ProviderToolProbeModeArg,
+    /// Repeat every route/format/case/mode observation.
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u16).range(1..=100))]
+    pub repeat: u16,
+    /// Request timeout in seconds for each observation.
+    #[arg(long, default_value_t = 120)]
+    pub timeout_secs: u64,
+    /// Write the versioned fitness snapshot here. Runtime selection reads a
+    /// snapshot once per process via HARN_TOOL_FORMAT_FITNESS_PATH.
+    #[arg(long, default_value = ".harn/tool-format-fitness.json")]
+    pub output: PathBuf,
+    /// Also print the written fitness snapshot as JSON.
     #[arg(
         long,
         default_value_t = true,
@@ -440,6 +485,23 @@ pub(crate) enum ProviderToolProbeModeArg {
     Both,
     NonStreaming,
     Streaming,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum ProviderToolProbeFormatArg {
+    Native,
+    Json,
+    Text,
+}
+
+impl ProviderToolProbeFormatArg {
+    pub(crate) fn tool_probe_format(self) -> harn_vm::llm::tool_conformance::ToolProbeFormat {
+        match self {
+            Self::Native => harn_vm::llm::tool_conformance::ToolProbeFormat::Native,
+            Self::Json => harn_vm::llm::tool_conformance::ToolProbeFormat::Json,
+            Self::Text => harn_vm::llm::tool_conformance::ToolProbeFormat::Text,
+        }
+    }
 }
 
 impl ProviderToolProbeModeArg {
@@ -530,6 +592,14 @@ impl ProviderToolProbeCaseArg {
 }
 
 impl ProviderToolProbeArgs {
+    pub(crate) fn requested_tool_probe_format(
+        &self,
+    ) -> harn_vm::llm::tool_conformance::ToolProbeFormat {
+        self.tool_format
+            .unwrap_or(ProviderToolProbeFormatArg::Native)
+            .tool_probe_format()
+    }
+
     pub(crate) fn live_request_profile_error(&self) -> Option<&'static str> {
         if self.dry_run_request
             || self.request_profile == ProviderToolProbeRequestProfileArg::CatalogDefault
@@ -551,6 +621,8 @@ impl ProviderToolProbeArgs {
             self.model.clone(),
         );
         options.base_url = self.base_url.clone();
+        options.tool_format = self.requested_tool_probe_format();
+        options.strict_tool_format = self.tool_format.is_some();
         options.modes = self.mode.tool_probe_modes();
         options.probe_case = self.probe_case.tool_probe_case();
         options.marker = self.marker.clone();
