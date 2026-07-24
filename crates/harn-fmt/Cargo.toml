@@ -9,8 +9,8 @@ homepage.workspace = true
 description = "Code formatter for the Harn programming language"
 
 [dependencies]
-harn-lexer = { path = "../harn-lexer", version = "=0.10.36" }
-harn-parser = { path = "../harn-parser", version = "=0.10.36" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.37" }
+harn-parser = { path = "../harn-parser", version = "=0.10.37" }
 # Line-fitting decisions are measured in terminal columns, which is neither a
 # byte nor a `char` count once a literal holds CJK or emoji.
 unicode-width = "0.2"
