@@ -76,16 +76,11 @@ pipeline default(task) {
       && first_data.responses[0].outcome?.error
       != nil,
   )
-  // Poll the second drain until the expired claim is reclaimed. A bare
-  // `sleep(120ms)` was the original wait, but under heavy parallel
-  // cargo load the second subprocess can cold-start and call
-  // `claim_next` while the first drain's last 25ms heartbeat is still
-  // alive (TTL = 50ms, heartbeat = TTL/2), so the second drain saw
-  // zero ready jobs and the assertions tripped. Re-running `drain` is
-  // idempotent — a no-op drain returns `drained:0` without consuming
-  // state — so retrying until the reclaim lands is safe. Budget is
-  // generous enough to absorb GHA-runner stalls without making the
-  // happy path slower than the original wait.
+  // Poll a later drain until the deferred claim expires. The first drain must
+  // keep its failed claim alive until it exits; otherwise it can reclaim and
+  // dispatch its own deferred job when response persistence plus loop overhead
+  // exceeds the short TTL. A no-op later drain is safe to retry because it
+  // cannot consume a still-claimed job.
   let second = nil
   let second_data = nil
   const claim_reclaim_deadline = harness.clock.now_ms() + 5000

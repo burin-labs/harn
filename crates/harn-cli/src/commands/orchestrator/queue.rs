@@ -189,6 +189,7 @@ async fn run_drain(
     let mut drained = Vec::new();
     let mut acked = 0usize;
     let mut deferred = 0usize;
+    let mut deferred_heartbeats = Vec::new();
 
     loop {
         let Some(claimed) = queue
@@ -246,7 +247,6 @@ async fn run_drain(
             },
         };
 
-        stop_claim_heartbeat(heartbeat).await;
         queue
             .append_response(&args.queue, &response)
             .await
@@ -259,15 +259,25 @@ async fn run_drain(
                 )
             });
         if should_ack {
+            heartbeat.stop().await;
             queue
                 .ack_claim(&claimed.handle)
                 .await
                 .map_err(|error| format!("failed to ack worker claim: {error}"))?;
             acked += 1;
         } else {
+            // Keep deferred claims owned until this drain finishes. Otherwise a
+            // short TTL can expire between recording the response and the next
+            // claim attempt, letting this invocation dispatch its own failed
+            // job repeatedly instead of moving on to other ready work.
+            deferred_heartbeats.push(heartbeat);
             deferred += 1;
         }
         drained.push(response);
+    }
+
+    for heartbeat in deferred_heartbeats {
+        heartbeat.stop().await;
     }
 
     let state = queue
@@ -529,8 +539,8 @@ fn start_claim_heartbeat(
     queue: harn_vm::WorkerQueue,
     handle: harn_vm::WorkerQueueClaimHandle,
     ttl: StdDuration,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+) -> ClaimHeartbeat {
+    ClaimHeartbeat::new(tokio::spawn(async move {
         loop {
             tokio::time::sleep(heartbeat_interval(ttl)).await;
             let still_owned = queue.renew_claim(&handle, ttl).await.unwrap_or(false);
@@ -538,12 +548,34 @@ fn start_claim_heartbeat(
                 break;
             }
         }
-    })
+    }))
 }
 
-async fn stop_claim_heartbeat(handle: tokio::task::JoinHandle<()>) {
-    handle.abort();
-    let _ = handle.await;
+struct ClaimHeartbeat {
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl ClaimHeartbeat {
+    fn new(handle: tokio::task::JoinHandle<()>) -> Self {
+        Self {
+            handle: Some(handle),
+        }
+    }
+
+    async fn stop(mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+}
+
+impl Drop for ClaimHeartbeat {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
