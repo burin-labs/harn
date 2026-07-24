@@ -12,8 +12,8 @@ impl crate::vm::Vm {
         let result = match method {
             "count" => Ok(VmValue::Int(items.len() as i64)),
             "empty" => Ok(VmValue::Bool(items.is_empty())),
-            "map" | "filter" | "find" | "flat_map" | "sorted_by" | "partition" | "group_by"
-            | "take_while" | "drop_while" | "count_by" => {
+            "map" | "filter" | "find" | "flat_map" | "sorted_by" | "sort_by" | "partition"
+            | "group_by" | "take_while" | "drop_while" | "count_by" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
                 }
@@ -37,7 +37,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Bool(true))
             }
-            "sorted" => {
+            "sorted" | "sort" => {
                 if !args.is_empty() {
                     return Some(Err(VmError::TypeError(
                         "list.sorted takes no arguments; use list.sorted_by(fn) for key-based sorting"
@@ -48,7 +48,7 @@ impl crate::vm::Vm {
                 sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
                 Ok(VmValue::List(std::sync::Arc::new(sorted)))
             }
-            "reversed" => {
+            "reversed" | "reverse" => {
                 let mut rev: Vec<VmValue> = items.iter().cloned().collect();
                 rev.reverse();
                 Ok(VmValue::List(std::sync::Arc::new(rev)))
@@ -238,14 +238,14 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::List(std::sync::Arc::new(result)))
             }
-            "appending" => {
+            "appending" | "push" => {
                 let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
                 if let Some(item) = args.first() {
                     new_list.push(item.clone());
                 }
                 Ok(VmValue::List(std::sync::Arc::new(new_list)))
             }
-            "dropping_last" => {
+            "dropping_last" | "pop" => {
                 let mut new_list: Vec<VmValue> = items.iter().cloned().collect();
                 new_list.pop();
                 Ok(VmValue::List(std::sync::Arc::new(new_list)))
@@ -465,7 +465,7 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::List(std::sync::Arc::new(results)))
             }
-            "sorted_by" => {
+            "sorted_by" | "sort_by" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Nil);
                 };

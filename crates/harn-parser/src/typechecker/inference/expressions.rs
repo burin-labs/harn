@@ -1055,7 +1055,7 @@ impl TypeChecker {
                     // so it stays gradual rather than being forced to `string` —
                     // forcing `string` mis-typed list reversals through untyped
                     // bindings (e.g. `list + value.reversed()`).
-                    "reversed" => {
+                    "reversed" | "reverse" => {
                         let is_list = list_elem.is_some()
                             || matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "list");
                         let is_string =
@@ -1113,7 +1113,7 @@ impl TypeChecker {
                             None => Some(result(TypeExpr::Named("list".into()))),
                         }
                     }
-                    "sorted" => match &list_elem {
+                    "sorted" | "sort" => match &list_elem {
                         Some(e) => Some(result(list_of(e.clone()))),
                         None => Some(result(TypeExpr::Named("list".into()))),
                     },
@@ -1137,7 +1137,7 @@ impl TypeChecker {
                         (Some(k), Some(v)) => Some(result(list_of(pair_of(k.clone(), v.clone())))),
                         _ => Some(result(TypeExpr::Named("list".into()))),
                     },
-                    "merging" | "map_values" | "rekeyed" | "map_keys" => {
+                    "merging" | "merge" | "map_values" | "rekeyed" | "rekey" | "map_keys" => {
                         // rekeyed/map_keys transform keys; resulting dict still keys-by-string.
                         // Preserve the value-type parameter when known so downstream code can
                         // still rely on dict<string, V> typing after a key-rename.

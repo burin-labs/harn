@@ -719,7 +719,7 @@ fn unknown_method_on_list_is_rejected() {
 }
 
 #[test]
-fn removed_imperative_collection_names_are_rejected() {
+fn legacy_collection_names_remain_accepted_during_migration() {
     let diags = nam_005(
         r#"fn f() {
   const s: string = "hi"
@@ -736,19 +736,11 @@ fn removed_imperative_collection_names_are_rejected() {
   values.delete(1)
 }"#,
     );
-    assert_eq!(diags.len(), 9, "got: {diags:?}");
-    for old_name in [
-        "reverse", "push", "pop", "sort", "sort_by", "add", "remove", "delete",
-    ] {
-        assert!(
-            diags.iter().any(|message| message.contains(old_name)),
-            "missing diagnostic for `{old_name}`: {diags:?}"
-        );
-    }
+    assert!(diags.is_empty(), "got: {diags:?}");
     for old_name in ["merge", "remove", "rekey"] {
         assert!(
-            !crate::typechecker::method_registry::DICT_METHODS.contains(&old_name),
-            "dict registry still accepts removed method `{old_name}`"
+            crate::typechecker::method_registry::DICT_METHODS.contains(&old_name),
+            "dict registry must accept compatibility method `{old_name}`"
         );
     }
 }
