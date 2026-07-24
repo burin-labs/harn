@@ -900,6 +900,18 @@ fn categorized_server_error_is_retryable() {
 }
 
 #[test]
+fn deterministic_invalid_response_500_is_not_retryable() {
+    assert!(!is_retryable_llm_error(&thrown(
+        "llamacpp HTTP 500 Internal Server Error [invalid_response]: \
+         The model produced output that does not match the expected peg-native format"
+    )));
+    assert!(is_retryable_llm_error(&thrown(
+        "anthropic HTTP 500 Internal Server Error [http_error]: \
+         {\"type\":\"overloaded_error\",\"message\":\"Service unavailable\"}"
+    )));
+}
+
+#[test]
 fn categorized_transient_network_is_retryable() {
     assert!(is_retryable_llm_error(&categorized(
         "reset",
