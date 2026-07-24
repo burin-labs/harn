@@ -46,8 +46,24 @@ const PERSISTENT_SCCACHE_SIZE = "40G"
 
 const PERSISTENT_SCCACHE_PORT = "4227"
 
-const PERSISTENT_SCCACHE_IF =
-  "runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'"
+// Job-level env var naming the rung of the runner ladder a job landed on.
+// These lanes must NOT ask `runner.environment` instead: Blacksmith runners
+// register as ordinary self-hosted runners, so it reports `self-hosted` there
+// too and cannot tell vendor capacity from our own boxes. The tier is proved
+// to agree with each job's `runs-on` by scripts/check_runner_tier.py; this
+// file owns only what the cache steps do with it.
+const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
+
+// sccache is the compiler cache on both the self-hosted and Blacksmith rungs;
+// the GitHub-hosted fallback uses the bounded coarse rust-cache instead.
+const PERSISTENT_SCCACHE_IF = "env.${RUNNER_TIER_ENV} != 'github-hosted'"
+
+// Sticky disks are Blacksmith-only storage: our own boxes keep a warm local
+// path and hosted runners are ephemeral with no sticky device to mount.
+const STICKY_ONLY_ON_BLACKSMITH = "env.${RUNNER_TIER_ENV} == 'blacksmith'"
+
+// The coarse rust-cache is the GitHub-hosted fallback's only compiler cache.
+const RUST_CACHE_ONLY_HOSTED = "env.${RUNNER_TIER_ENV} == 'github-hosted'"
 
 // Hang backstop for the archived-behavior consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test
@@ -737,11 +753,9 @@ fn persistent_sccache_job_errors(
         + ["ci.yml:${job_name} must skip sccache on the GitHub-hosted fallback"]
     }
     const sticky = trim(caches[0]?.with?.sticky ?? "")
-    if !contains(sticky, BLACKSMITH_DISABLE_VAR) {
-      errors = errors + ["ci.yml:${job_name} sticky cache must follow ${BLACKSMITH_DISABLE_VAR}"]
-    }
-    if !contains(sticky, "runner.environment != 'self-hosted'") {
-      errors = errors + ["ci.yml:${job_name} must disable sticky storage on self-hosted runners"]
+    if !contains(sticky, STICKY_ONLY_ON_BLACKSMITH) {
+      errors = errors
+        + ["ci.yml:${job_name} must mount sticky storage only on the Blacksmith rung"]
     }
     if caches[0]?.with?.["gha-backend"] != nil {
       errors = errors + ["ci.yml:${job_name} must not enable per-object GHA sccache"]
@@ -935,21 +949,16 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     workflow,
     "package-audit",
     "blacksmith-4vcpu-ubuntu-2404",
-    "vars.${BLACKSMITH_DISABLE_VAR} == 'true' && runner.environment != 'self-hosted'",
+    RUST_CACHE_ONLY_HOSTED,
   )
-    + persistent_sccache_job_errors(
-    workflow,
-    "rust-builds",
-    "matrix.runner",
-    "vars.${BLACKSMITH_DISABLE_VAR} == 'true' && runner.environment != 'self-hosted'",
-  )
+    + persistent_sccache_job_errors(workflow, "rust-builds", "matrix.runner", RUST_CACHE_ONLY_HOSTED)
   const rust_job = workflow?.jobs?.["rust-builds"]
   const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
   if len(rust_sccache) == 1 {
     const sticky_condition = trim(rust_sccache[0]?.with?.sticky ?? "")
-    if !contains(sticky_condition, BLACKSMITH_DISABLE_VAR) {
+    if !contains(sticky_condition, STICKY_ONLY_ON_BLACKSMITH) {
       errors = errors
-        + ["ci.yml:rust-builds sticky storage must follow the Blacksmith kill switch"]
+        + ["ci.yml:rust-builds sticky storage must stay on the Blacksmith rung"]
     }
   }
   const matrix = rust_job?.strategy?.matrix?.include ?? []
@@ -977,7 +986,7 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   // Memory-bounded compile fan-out: 4 rustc jobs on the 8-vCPU hosted
   // runners, 12 on the big self-hosted workers (24 cores / 61 GB).
   const build_jobs_policy = "$"
-    + "{{ runner.environment == 'self-hosted' && '12' || '4' }}"
+    + "{{ env.${RUNNER_TIER_ENV} == 'self-hosted' && '12' || '4' }}"
   if trim(build_step?.if ?? "") != "matrix.kind == 'behavior'"
     || trim(
     build_step?.env?.CARGO_BUILD_JOBS ?? "",

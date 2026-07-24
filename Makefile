@@ -267,6 +267,11 @@ lint-actions:
 		echo "Pin org runner-availability workflow references to a full commit SHA." >&2; \
 		exit 1; \
 	fi
+	@# Keep each Blacksmith-capable job off `runner.environment` and its declared
+	@# HARN_RUNNER_TIER in step with its runs-on ladder. Unlike actionlint above
+	@# this is NOT allowed to skip: the failure it guards against is silent, so
+	@# a gate that can silently not-run would be worthless against it.
+	@$(HARN_CMD) run scripts/check_runner_tier.harn
 
 # Reject unreviewed conformance diagnostics while preserving the explicitly
 # triaged baseline. Paired .error/.lint fixtures own their diagnostics in the
