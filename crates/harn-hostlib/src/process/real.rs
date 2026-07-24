@@ -28,33 +28,96 @@ pub fn default_spawner() -> Arc<dyn ProcessSpawner> {
 
 impl ProcessSpawner for RealSpawner {
     fn spawn(&self, spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
+        #[cfg(unix)]
+        if spec.owner_death == super::OwnerDeathPolicy::KillContainment {
+            if spec.use_stdin {
+                return Err(ProcessError::InvalidArgv(
+                    "owner-death containment reserves stdin for the liveness pipe".to_string(),
+                ));
+            }
+            if !matches!(spec.output_capture, OutputCapture::Pipe) {
+                return Err(ProcessError::InvalidArgv(
+                    "owner-death containment requires piped output".to_string(),
+                ));
+            }
+            if !spec.configure_process_group {
+                return Err(ProcessError::InvalidArgv(
+                    "owner-death containment requires an independent process group".to_string(),
+                ));
+            }
+            let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
+            let mut command = super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
+            let mut child = command.spawn().map_err(map_spawn_error)?;
+            let liveness = child.stdin.take().ok_or_else(|| {
+                ProcessError::Spawn("guardian liveness pipe was not created".to_string())
+            })?;
+            let (stderr, guardian_pid, payload_pid) =
+                match super::owner_death::await_startup(&mut child) {
+                    Ok(startup) => startup,
+                    Err(error) => {
+                        let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(
+                            child.id(),
+                            9,
+                        );
+                        let _ = child.wait();
+                        return Err(error);
+                    }
+                };
+            return Ok(real_process(
+                child,
+                cleanup_token,
+                Some(liveness),
+                Some(stderr),
+                Some(guardian_pid),
+                Some(payload_pid),
+                None,
+            ));
+        }
+
         let (mut command, cleanup_token) = prepare_command(&spec, None)?;
+        #[cfg(target_os = "windows")]
+        let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment {
+            let job = super::windows::KillOnCloseJob::new().map_err(|error| {
+                ProcessError::Spawn(format!("create owner Job Object: {error}"))
+            })?;
+            super::windows::configure_suspended(&mut command);
+            Some(Arc::new(job))
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "windows"))]
+        let owner_job = None;
         let child = command.spawn().map_err(map_spawn_error)?;
 
-        let pid = child.id();
-        let pgid = child_process_group_id(pid);
-        let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
-            pid,
-            cleanup_token: cleanup_token.clone(),
-        });
+        #[cfg(target_os = "windows")]
+        if let Some(job) = &owner_job {
+            if let Err(error) = job
+                .assign_process(child.id())
+                .and_then(|()| super::windows::resume_process(child.id()))
+            {
+                let mut child = child;
+                let _ = job.terminate();
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ProcessError::Spawn(format!(
+                    "contain suspended worker in owner Job Object: {error}"
+                )));
+            }
+        }
 
-        Ok(Box::new(RealProcess {
-            pid,
-            pgid,
+        Ok(real_process(
+            child,
             cleanup_token,
-            killer,
-            child: Some(child),
-            stdin: None,
-            stdout: None,
-            stderr: None,
-            stdin_taken: false,
-            stdout_taken: false,
-            stderr_taken: false,
-        }))
+            None,
+            None,
+            None,
+            None,
+            owner_job,
+        ))
     }
 }
 
-fn prepare_command(
+pub(crate) fn prepare_command(
     spec: &SpawnSpec,
     cleanup_token: Option<String>,
 ) -> Result<(Command, String), ProcessError> {
@@ -262,15 +325,50 @@ struct RealProcess {
     stdin: Option<ChildStdin>,
     stdout: Option<ChildStdout>,
     stderr: Option<ChildStderr>,
+    owner_liveness: Option<ChildStdin>,
     stdin_taken: bool,
     stdout_taken: bool,
     stderr_taken: bool,
 }
 
+fn real_process(
+    child: Child,
+    cleanup_token: String,
+    owner_liveness: Option<ChildStdin>,
+    stderr: Option<ChildStderr>,
+    reported_pid: Option<u32>,
+    killer_pid: Option<u32>,
+    #[cfg(target_os = "windows")] owner_job: Option<Arc<super::windows::KillOnCloseJob>>,
+    #[cfg(not(target_os = "windows"))] _owner_job: Option<()>,
+) -> Box<dyn ProcessHandle> {
+    let pid = reported_pid.unwrap_or_else(|| child.id());
+    let pgid = child_process_group_id(pid);
+    let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
+        pid: killer_pid.unwrap_or(pid),
+        cleanup_token: cleanup_token.clone(),
+        #[cfg(target_os = "windows")]
+        owner_job,
+    });
+    Box::new(RealProcess {
+        pid,
+        pgid,
+        cleanup_token,
+        killer,
+        child: Some(child),
+        stdin: None,
+        stdout: None,
+        stderr,
+        owner_liveness,
+        stdin_taken: false,
+        stdout_taken: false,
+        stderr_taken: false,
+    })
+}
+
 impl RealProcess {
     fn ensure_pipes_taken(&mut self) {
         if let Some(child) = self.child.as_mut() {
-            if self.stdin.is_none() && !self.stdin_taken {
+            if self.owner_liveness.is_none() && self.stdin.is_none() && !self.stdin_taken {
                 self.stdin = child.stdin.take();
             }
             if self.stdout.is_none() && !self.stdout_taken {
@@ -326,6 +424,7 @@ impl ProcessHandle for RealProcess {
         interrupt: &dyn Fn() -> bool,
     ) -> io::Result<WaitOutcome> {
         let killer = Arc::clone(&self.killer);
+        let owner_death_contained = self.owner_liveness.is_some();
         let Some(child) = self.child.as_mut() else {
             return Err(io::Error::other("child already reaped"));
         };
@@ -335,6 +434,11 @@ impl ProcessHandle for RealProcess {
                 Some(status) => return Ok(WaitOutcome::Exited(decode_status(status))),
                 None => {
                     if interrupt() {
+                        if owner_death_contained {
+                            let report = killer.kill();
+                            let _ = child.wait();
+                            return Ok(WaitOutcome::Interrupted(report));
+                        }
                         // Scope cancellation / deadline expiry: graceful
                         // group termination (SIGTERM, grace, SIGKILL) shared
                         // with the VM-side `process.*` builtins.
@@ -353,7 +457,9 @@ impl ProcessHandle for RealProcess {
                         // subsequent `child.wait()` cannot block forever on a
                         // timed-out process.
                         let mut report = killer.kill();
-                        let _ = child.kill();
+                        if !owner_death_contained {
+                            let _ = child.kill();
+                        }
                         let _ = child.wait();
                         report.refresh_survivor_status();
                         return Ok(WaitOutcome::TimedOut(report));
@@ -381,6 +487,8 @@ impl ProcessHandle for RealProcess {
 struct RealKiller {
     pid: u32,
     cleanup_token: String,
+    #[cfg(target_os = "windows")]
+    owner_job: Option<Arc<super::windows::KillOnCloseJob>>,
 }
 
 impl ProcessKiller for RealKiller {
@@ -391,7 +499,11 @@ impl ProcessKiller for RealKiller {
             9,
         );
         #[cfg(target_os = "windows")]
-        terminate_process(self.pid);
+        if let Some(job) = &self.owner_job {
+            let _ = job.terminate();
+        } else {
+            terminate_process(self.pid);
+        }
         report
     }
 }
@@ -452,17 +564,9 @@ pub(crate) fn child_process_group_id(pid: u32) -> Option<u32> {
 
 pub(crate) fn configure_background_process_group(command: &mut std::process::Command) {
     #[cfg(unix)]
-    unsafe {
+    {
         use std::os::unix::process::CommandExt;
-        command.pre_exec(|| {
-            extern "C" {
-                fn setpgid(pid: i32, pgid: i32) -> i32;
-            }
-            if setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
+        command.process_group(0);
     }
     #[cfg(not(unix))]
     {

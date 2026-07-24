@@ -15,7 +15,9 @@
 
 #![cfg(unix)]
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
+use std::os::fd::{FromRawFd, RawFd};
+use std::os::unix::process::CommandExt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use harn_hostlib::tools::ToolsCapability;
@@ -43,6 +45,11 @@ fn registry() -> BuiltinRegistry {
 }
 
 fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
+    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
+        "--exact",
+        "process_tools_e2e::owner_death_guardian_fixture",
+        "--nocapture",
+    ]);
     harn_hostlib::tools::permissions::enable_for_test();
     let registry = registry();
     let entry = registry
@@ -120,6 +127,299 @@ fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
     }
 }
 
+const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
+const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
+
+#[test]
+fn owner_death_guardian_fixture() {
+    if !harn_hostlib::process::owner_death::guardian_requested() {
+        return;
+    }
+    harn_hostlib::process::owner_death::run_guardian_from_env().expect("run owner-death guardian");
+}
+
+#[test]
+fn owner_death_grandchild_fixture() {
+    if std::env::var_os(OWNER_DEATH_REPORT_FD_ENV).is_none() {
+        return;
+    }
+    loop {
+        unsafe {
+            libc::pause();
+        }
+    }
+}
+
+#[test]
+fn owner_death_payload_fixture() {
+    let Some(report_fd) = std::env::var(OWNER_DEATH_REPORT_FD_ENV)
+        .ok()
+        .and_then(|value| value.parse::<RawFd>().ok())
+    else {
+        return;
+    };
+    let grandchild = std::process::Command::new(
+        std::env::current_exe().expect("resolve process-tools test executable"),
+    )
+    .args([
+        "--exact",
+        "process_tools_e2e::owner_death_grandchild_fixture",
+        "--nocapture",
+    ])
+    .spawn()
+    .expect("spawn native grandchild fixture");
+    let report = format!(
+        "payload={} pgid={} grandchild={}\n",
+        std::process::id(),
+        unsafe { libc::getpgrp() },
+        grandchild.id()
+    );
+    let written = unsafe { libc::write(report_fd, report.as_ptr().cast(), report.len()) };
+    assert_eq!(written, report.len() as isize, "write payload handshake");
+    std::mem::forget(grandchild);
+    loop {
+        unsafe {
+            libc::pause();
+        }
+    }
+}
+
+#[test]
+fn owner_death_supervisor_fixture() {
+    if std::env::var_os(OWNER_DEATH_SUPERVISOR_ENV).is_none() {
+        return;
+    }
+    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
+        "--exact",
+        "process_tools_e2e::owner_death_guardian_fixture",
+        "--nocapture",
+    ]);
+    let info = harn_hostlib::tools::long_running::spawn_long_running(
+        "owner_death_supervisor_fixture",
+        std::env::current_exe()
+            .expect("resolve process-tools test executable")
+            .to_string_lossy()
+            .into_owned(),
+        vec![
+            "--exact".to_string(),
+            "process_tools_e2e::owner_death_payload_fixture".to_string(),
+            "--nocapture".to_string(),
+        ],
+        None,
+        std::collections::BTreeMap::new(),
+        format!("owner-death-supervisor-{}", std::process::id()),
+    )
+    .expect("spawn managed background payload");
+    println!(
+        "supervisor={} supervisor_pgid={} worker={} worker_pgid={}",
+        std::process::id(),
+        unsafe { libc::getpgrp() },
+        info.pid,
+        info.process_group_id.expect("worker process group")
+    );
+    std::io::stdout().flush().expect("flush supervisor report");
+    loop {
+        unsafe {
+            libc::pause();
+        }
+    }
+}
+
+struct ProcessGroupCleanup {
+    groups: Vec<i32>,
+}
+
+impl Drop for ProcessGroupCleanup {
+    fn drop(&mut self) {
+        for pgid in &self.groups {
+            if *pgid > 0 {
+                unsafe {
+                    libc::kill(-*pgid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
+    let mut report_pipe = [0_i32; 2];
+    assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
+    let read_fd = report_pipe[0];
+    let write_fd = report_pipe[1];
+    let read_flags = unsafe { libc::fcntl(read_fd, libc::F_GETFD) };
+    assert!(read_flags >= 0);
+    assert_eq!(
+        unsafe { libc::fcntl(read_fd, libc::F_SETFD, read_flags | libc::FD_CLOEXEC) },
+        0
+    );
+
+    let mut supervisor = std::process::Command::new(
+        std::env::current_exe().expect("resolve process-tools test executable"),
+    );
+    supervisor
+        .args([
+            "--exact",
+            "process_tools_e2e::owner_death_supervisor_fixture",
+            "--nocapture",
+        ])
+        .env(OWNER_DEATH_SUPERVISOR_ENV, "1")
+        .env(OWNER_DEATH_REPORT_FD_ENV, write_fd.to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .process_group(0);
+    let mut supervisor = supervisor.spawn().expect("spawn isolated supervisor");
+    unsafe {
+        libc::close(write_fd);
+    }
+    let mut cleanup = ProcessGroupCleanup {
+        groups: vec![supervisor.id() as i32],
+    };
+
+    let supervisor_stdout = supervisor.stdout.take().expect("supervisor stdout");
+    let mut supervisor_lines = std::io::BufReader::new(supervisor_stdout).lines();
+    let supervisor_report = supervisor_lines
+        .find_map(|line| {
+            let line = line.expect("read supervisor report");
+            line.starts_with("supervisor=").then_some(line)
+        })
+        .expect("supervisor report line");
+    let fields = parse_pid_fields(&supervisor_report);
+    let supervisor_pid = fields["supervisor"];
+    let supervisor_pgid = fields["supervisor_pgid"];
+    let worker_pid = fields["worker"];
+    let worker_pgid = fields["worker_pgid"];
+    assert_eq!(supervisor_pid, supervisor_pgid);
+    assert_eq!(worker_pid, worker_pgid);
+    assert_ne!(worker_pgid, supervisor_pgid);
+    cleanup.groups.push(worker_pgid);
+
+    let mut report_file = unsafe { std::fs::File::from_raw_fd(read_fd) };
+    let mut payload_report = String::new();
+    std::io::BufReader::new(&mut report_file)
+        .read_line(&mut payload_report)
+        .expect("read payload report");
+    let payload_fields = parse_pid_fields(&payload_report);
+    assert_eq!(payload_fields["pgid"], worker_pgid);
+    assert_ne!(payload_fields["payload"], payload_fields["grandchild"]);
+
+    assert_eq!(
+        unsafe { libc::kill(-supervisor_pgid, libc::SIGKILL) },
+        0,
+        "SIGKILL isolated supervisor group"
+    );
+    supervisor.wait().expect("reap supervisor");
+
+    let mut poll_fd = libc::pollfd {
+        fd: read_fd,
+        events: libc::POLLIN | libc::POLLHUP,
+        revents: 0,
+    };
+    assert_eq!(
+        unsafe { libc::poll(&raw mut poll_fd, 1, 10_000) },
+        1,
+        "worker descriptors did not close after owner death"
+    );
+    let mut eof = [0_u8; 1];
+    assert_eq!(
+        report_file.read(&mut eof).expect("read owner-death EOF"),
+        0,
+        "worker report descriptor remained open"
+    );
+    wait_for_native_exit(worker_pid);
+    if unsafe { libc::kill(-worker_pgid, 0) } != -1
+        || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    {
+        // Darwin can report the just-exited group as EAGAIN between NOTE_EXIT
+        // delivery and launchd reaping its orphaned leader. A second native
+        // process-exit barrier closes that kernel transition without sleeping
+        // or polling.
+        wait_for_native_exit(worker_pid);
+    }
+    assert_eq!(unsafe { libc::kill(-worker_pgid, 0) }, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    cleanup.groups.clear();
+}
+
+fn parse_pid_fields(line: &str) -> std::collections::BTreeMap<&str, i32> {
+    line.split_whitespace()
+        .filter_map(|field| field.split_once('='))
+        .map(|(key, value)| {
+            (
+                key,
+                value
+                    .parse::<i32>()
+                    .unwrap_or_else(|_| panic!("invalid pid field {key}={value}")),
+            )
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_native_exit(pid: i32) {
+    let pid_fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32 };
+    if pid_fd < 0 {
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+        return;
+    }
+    let mut poll_fd = libc::pollfd {
+        fd: pid_fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    assert_eq!(unsafe { libc::poll(&raw mut poll_fd, 1, 10_000) }, 1);
+    unsafe {
+        libc::close(pid_fd);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_native_exit(pid: i32) {
+    let queue = unsafe { libc::kqueue() };
+    assert!(queue >= 0, "create process kqueue");
+    let change = libc::kevent {
+        ident: pid as usize,
+        filter: libc::EVFILT_PROC,
+        flags: libc::EV_ADD | libc::EV_ONESHOT,
+        fflags: libc::NOTE_EXIT,
+        data: 0,
+        udata: std::ptr::null_mut(),
+    };
+    let timeout = libc::timespec {
+        tv_sec: 10,
+        tv_nsec: 0,
+    };
+    let mut event = change;
+    let result = unsafe {
+        libc::kevent(
+            queue,
+            &raw const change,
+            1,
+            &raw mut event,
+            1,
+            &raw const timeout,
+        )
+    };
+    unsafe {
+        libc::close(queue);
+    }
+    if result < 0 {
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    } else {
+        assert_eq!(result, 1, "worker did not exit before kernel deadline");
+    }
+}
+
 fn as_dict(value: &VmValue) -> harn_vm::value::DictMap {
     match value {
         VmValue::Dict(map) => (**map).clone(),
@@ -136,6 +436,24 @@ fn real_run_command_echoes_stdout_and_reports_exit_zero() {
     assert_eq!(require_str(&resp, "stdout").trim(), "hello");
     assert_eq!(require_str(&resp, "status"), "completed");
     assert!(!require_bool(&resp, "timed_out"));
+}
+
+#[test]
+fn real_background_spawn_failure_is_reported_before_returning_a_handle() {
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist_str(&["harn-owner-death-command-that-does-not-exist"]),
+    );
+    req.insert("background".into(), VmValue::Bool(true));
+    let error = call("hostlib_tools_run_command", req).expect_err("background spawn must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("harn-owner-death-command-that-does-not-exist")
+            || error.to_string().contains("No such file"),
+        "unexpected background spawn error: {error}"
+    );
 }
 
 #[test]

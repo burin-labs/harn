@@ -59,6 +59,17 @@ pub enum EnvMode {
     Patch,
 }
 
+/// What should happen to a spawned process tree if its supervising Harn
+/// process exits without running normal handle cleanup.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OwnerDeathPolicy {
+    /// Do not add an owner-lifetime guard.
+    #[default]
+    None,
+    /// Kill the independently contained worker tree when its owner dies.
+    KillContainment,
+}
+
 /// Explicit secret-bearing environment variable names that the agent's
 /// `run`/`command_run` tool must never leak into a child process (and thus
 /// into the model context, since the child's stdout is returned to the
@@ -154,6 +165,8 @@ pub struct SpawnSpec {
     /// Set the child's process group to its own pid (`setpgid(0, 0)`). Used
     /// for long-running handles so the kill-by-pgid path works.
     pub configure_process_group: bool,
+    /// Process-tree behavior when the supervising Harn process dies.
+    pub owner_death: OwnerDeathPolicy,
     /// How stdout/stderr should be attached for this child.
     pub output_capture: OutputCapture,
 }
