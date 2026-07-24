@@ -1,5 +1,5 @@
 import { defineMessages, useIntl } from "react-intl"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router"
 
 import { RunDetail } from "../components/RunDetail"
 import { useRunDetailData } from "../hooks/useRunDetailData"
