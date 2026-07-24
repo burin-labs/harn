@@ -6,6 +6,16 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 
 const MAX_PROVIDER_ERROR_BODY_CHARS: usize = 2048;
 
+/// HTTP 500 bodies that report a deterministic response-shape failure rather
+/// than transient provider unavailability. Each entry is a conjunction; the
+/// table stays provider-agnostic and can absorb new serving-stack phrasings.
+const INVALID_RESPONSE_FINGERPRINTS: &[&[&str]] = &[
+    &["does not match the expected", "format"],
+    &["peg-native"],
+    &["grammar", "parse"],
+    &["format", "decode"],
+];
+
 /// Coarse retry semantics for provider failures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LlmErrorKind {
@@ -41,6 +51,7 @@ pub(crate) enum LlmErrorReason {
     ContextOverflow,
     ContentPolicy,
     InvalidRequest,
+    InvalidResponse,
     ModelUnavailable,
     EmptyGeneration,
     Unknown,
@@ -57,6 +68,7 @@ impl LlmErrorReason {
             Self::ContextOverflow => "context_overflow",
             Self::ContentPolicy => "content_policy",
             Self::InvalidRequest => "invalid_request",
+            Self::InvalidResponse => "invalid_response",
             Self::ModelUnavailable => "model_unavailable",
             Self::EmptyGeneration => "empty_generation",
             Self::Unknown => "unknown",
@@ -345,6 +357,9 @@ fn classify_http_status_and_body(
     if is_model_unavailable(&body_lower) || matches!(status.as_u16(), 404 | 410) {
         return (LlmErrorKind::Terminal, LlmErrorReason::ModelUnavailable);
     }
+    if is_invalid_response(status, &body_lower) {
+        return (LlmErrorKind::Terminal, LlmErrorReason::InvalidResponse);
+    }
     if matches!(status.as_u16(), 500 | 502 | 503 | 529)
         || body_lower.contains("overloaded_error")
         || body_lower.contains("service unavailable")
@@ -394,6 +409,9 @@ fn classify_error_message_taxonomy(msg: &str) -> Option<(LlmErrorKind, LlmErrorR
     if is_model_unavailable(&lower) {
         return Some((LlmErrorKind::Terminal, LlmErrorReason::ModelUnavailable));
     }
+    if lower.contains("[invalid_response]") {
+        return Some((LlmErrorKind::Terminal, LlmErrorReason::InvalidResponse));
+    }
     if lower.contains("[rate_limited]")
         || lower.contains("too many requests")
         || lower.contains("insufficient_quota")
@@ -430,6 +448,13 @@ fn classify_error_message_taxonomy(msg: &str) -> Option<(LlmErrorKind, LlmErrorR
         return Some((LlmErrorKind::Terminal, LlmErrorReason::InvalidRequest));
     }
     None
+}
+
+fn is_invalid_response(status: reqwest::StatusCode, body_lower: &str) -> bool {
+    status.as_u16() == 500
+        && INVALID_RESPONSE_FINGERPRINTS
+            .iter()
+            .any(|fingerprint| fingerprint.iter().all(|marker| body_lower.contains(marker)))
 }
 
 /// Provider-agnostic detection of a "the assembled prompt is bigger than the
@@ -652,6 +677,76 @@ mod tests {
         .message;
         assert!(msg.contains("[http_error]"), "msg was: {msg}");
         assert!(msg.contains("upstream exploded"));
+    }
+
+    #[test]
+    fn classify_decode_format_500_as_terminal_invalid_response() {
+        let info = classify_provider_http_error(
+            "llamacpp",
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+            r#"{"error":{"code":500,"message":"The model produced output that does not match the expected peg-native format","type":"server_error"}}"#,
+        );
+
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::InvalidResponse);
+        assert!(
+            info.message.contains("[invalid_response]"),
+            "msg was: {}",
+            info.message
+        );
+
+        let round_trip = classify_llm_error(ErrorCategory::ServerError, &info.message);
+        assert_eq!(round_trip.kind, LlmErrorKind::Terminal);
+        assert_eq!(round_trip.reason, LlmErrorReason::InvalidResponse);
+    }
+
+    #[test]
+    fn classify_generic_decode_format_500_fingerprints_as_invalid_response() {
+        for body in [
+            "PEG-NATIVE decoder rejected the response",
+            "response grammar parse failed",
+            "response format decode failed",
+        ] {
+            let info = classify_provider_http_error(
+                "local",
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                None,
+                body,
+            );
+            assert_eq!(
+                info.kind,
+                LlmErrorKind::Terminal,
+                "expected terminal classification for {body}"
+            );
+            assert_eq!(
+                info.reason,
+                LlmErrorReason::InvalidResponse,
+                "expected invalid_response for {body}"
+            );
+        }
+
+        let non_500 = classify_provider_http_error(
+            "local",
+            reqwest::StatusCode::BAD_GATEWAY,
+            None,
+            "PEG-NATIVE decoder rejected the response",
+        );
+        assert_eq!(non_500.kind, LlmErrorKind::Transient);
+        assert_eq!(non_500.reason, LlmErrorReason::ServerError);
+    }
+
+    #[test]
+    fn classify_overloaded_500_as_transient_server_error() {
+        let info = classify_provider_http_error(
+            "anthropic",
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+            r#"{"error":{"type":"overloaded_error","message":"Service unavailable"}}"#,
+        );
+
+        assert_eq!(info.kind, LlmErrorKind::Transient);
+        assert_eq!(info.reason, LlmErrorReason::ServerError);
     }
 
     #[test]

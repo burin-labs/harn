@@ -3996,9 +3996,10 @@ LLM provider failures also include `error.kind` and `error.reason`.
 `kind` is `"transient"` or `"terminal"`. Transient reasons are
 `"rate_limit"`, `"server_error"`, `"network_error"`, and `"timeout"`;
 terminal reasons are `"auth_failure"`, `"context_overflow"`,
-`"content_policy"`, `"invalid_request"`, `"model_unavailable"`, and
-`"unknown"`. `llm_call` and `agent_loop` spend their retry budget only
-when `kind == "transient"`.
+`"content_policy"`, `"invalid_request"`, `"invalid_response"`,
+`"model_unavailable"`, and `"unknown"`. `invalid_response` identifies a
+deterministic provider decode or grammar-format failure. `llm_call` and
+`agent_loop` spend their retry budget only when `kind == "transient"`.
 
 Pair with `llm_mock({error: {category, message, retry_after_ms?}})` or
 the provider-envelope form
