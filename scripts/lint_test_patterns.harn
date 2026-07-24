@@ -1,10 +1,11 @@
-// Lint script that fails if wall-clock polling patterns appear in test files
-// outside an explicit per-pattern allowlist. Part of the deflake epic (#1057).
+// Lint script that fails if forbidden patterns appear in test files outside an
+// explicit per-pattern allowlist or count baseline.
 //
-// These patterns cause flaky tests because they race against scheduler
-// behavior and system load. The approved replacements use injected time
+// The wall-clock patterns cause flaky tests because they race against scheduler
+// behavior and system load. Their approved replacements use injected time
 // (tokio::time::pause/advance), event subscriptions, or deterministic
-// harnesses.
+// harnesses. Direct shell spawns also drop platform-independent coverage on
+// Windows, so new process probes use the Cargo-built cross-platform helper.
 //
 // Ported from scripts/lint_test_patterns.sh — same file selection, same
 // per-pattern allowlists, same `  <line>:<content>` + hint output, same
@@ -211,6 +212,14 @@ const DIRECT_HARN_BINARY_BASELINE = [
   {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_authoring_eval.rs", count: 1},
   {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_cli.rs", count: 1},
   {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_patch_cli.rs", count: 1},
+]
+
+// File-level ratchet for direct shell process spawns in Rust tests. These two
+// platform-specific tests predate the gate; delete each row when its shell
+// dependency is removed. New process probes should use harn-test-echo-env.
+const SHELL_SPAWN_LITERAL_BASELINE = [
+  {path: "crates/harn-hostlib/tests/harn_hostlib/process_artifact_retention.rs", count: 1},
+  {path: "crates/harn-vm/src/stdlib/sandbox/tests.rs", count: 1},
 ]
 
 // Runtime files allowed to read host time directly (#1439). Each entry is a
@@ -633,6 +642,24 @@ pub fn direct_harn_binary_baseline_duplicates() -> list<string> {
   return duplicate_baseline_paths(DIRECT_HARN_BINARY_BASELINE)
 }
 
+/** Direct Rust process spawns whose executable is sh, /bin/sh, or cmd. */
+pub fn shell_spawn_literal_pattern() -> string {
+  return "([A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_]*Command::new[ \\t\\r\\n]*\\([ \\t\\r\\n]*\"(sh|/bin/sh|cmd)\""
+}
+
+pub fn shell_spawn_literal_baseline(rel: string) -> int {
+  for item in SHELL_SPAWN_LITERAL_BASELINE {
+    if item.path == rel {
+      return item.count
+    }
+  }
+  return 0
+}
+
+pub fn shell_spawn_literal_baseline_duplicates() -> list<string> {
+  return duplicate_baseline_paths(SHELL_SPAWN_LITERAL_BASELINE)
+}
+
 pub fn spawn_orchestrator_pattern() -> string {
   return r"spawn_orchestrator\("
 }
@@ -743,7 +770,7 @@ pipeline main(task) {
   const harn_files = load_files(harn_rels)
   const runtime_files = load_files(runtime_rels)
   let violations = 0
-  __io_println("=== Checking test files for wall-clock patterns ===")
+  __io_println("=== Checking test files for forbidden patterns ===")
   __io_println("--- std::thread::sleep ---")
   violations = violations
     + report_pattern(
@@ -823,6 +850,34 @@ pipeline main(task) {
       )
       __io_println(
         "    hint: route real CLI subprocesses through crates/harn-cli/tests/test_util/process.rs",
+      )
+      violations = violations + 1
+    }
+  }
+  __io_println("--- direct shell process spawns (file-level ratchet) ---")
+  for path in shell_spawn_literal_baseline_duplicates() {
+    __io_println("  duplicate baseline path: " + path)
+    __io_println("    hint: keep exactly one canonical expected-count row per file")
+    violations = violations + 1
+  }
+  for f in test_files {
+    const hits = find_hits(f.text, shell_spawn_literal_pattern())
+    const actual = hits.count
+    const expected = shell_spawn_literal_baseline(f.rel)
+    if actual != expected {
+      __io_println(
+        "  " + f.rel + ": expected " + to_string(expected) + ", found " + to_string(actual),
+      )
+      if actual > expected {
+        for hit in hits {
+          __io_println("    ${hit.line_no}:${hit.text}")
+        }
+      }
+      __io_println(
+        "    hint: use the hermetic harn-test-echo-env helper instead of spawning sh, /bin/sh, or cmd",
+      )
+      __io_println(
+        "          or lower SHELL_SPAWN_LITERAL_BASELINE after removing a grandfathered spawn",
       )
       violations = violations + 1
     }
@@ -928,6 +983,6 @@ pipeline main(task) {
     __io_println("approved alternatives and how to opt out with reviewer justification.")
     return 1
   }
-  __io_println("OK: no wall-clock pattern violations found.")
+  __io_println("OK: no forbidden test pattern violations found.")
   return 0
 }
