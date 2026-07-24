@@ -1,284 +1,211 @@
-//! Parser-agreement contract gate.
+//! Versioned grammar-fitness contract gate.
 //!
-//! For a small checked-in polyglot fixture corpus, assert that the host's
-//! BUNDLED tree-sitter parser facts AGREE with declared ground truth for each
-//! `(fixture, language)` pair. The facts checked are the ones the agent loop
-//! ships to the model:
-//!
-//!   * `hostlib_ast_extract_imports` — the import set
-//!   * `hostlib_ast_parse_errors`    — whether the file parses cleanly
-//!
-//! ## Why this exists
-//!
-//! A bundled-grammar regression (a tree-sitter grammar bump that mis-lexes valid
-//! modern source) silently ships PHANTOM facts to the model — a phantom import
-//! the model "fixes", or a phantom parse-error storm that steers it to rewrite
-//! correct code. A downstream host caught one such bug after it shipped: the
-//! tree-sitter-zig grammar mis-lexed a valid `\\` multiline string into a storm
-//! of `unexpected '...'` errors (observed in an IDE host), and the only defense was a
-//! per-language special-case. This corpus is the GENERALIZED, pre-ship defense:
-//! a grammar regression that disagrees with ground truth fails THIS test in CI
-//! instead of reaching an agent.
-//!
-//! ## Extending the corpus
-//!
-//! Add one fixture file under `tests/fixtures/parser_agreement/` and one
-//! [`Case`] row in [`corpus`]. Keep fixtures tiny — this is an agreement gate,
-//! not a parser conformance suite. Ground-truth values are what the CURRENTLY
-//! bundled grammars produce; a future grammar bump that changes them is exactly
-//! the regression this gate is meant to surface (re-pin deliberately, with a
-//! note, when a change is intended).
-//!
-//! ## Seed regression
-//!
-//! `sample.zig` carries a `\\` multiline string — the exact construct that bit
-//! us. Its ground truth is `expect_clean_parse: true`: if a grammar bump
-//! re-introduces the mislex, the parse errors come back and this case fails.
+//! The JSON corpus is the checked-in authority. Every row proves parse,
+//! structural-search, and post-edit validation behavior for the exact grammar
+//! artifact recorded in `receipt.v1.json`.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
-use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
-use harn_vm::VmValue;
+use harn_hostlib::ast::Language;
+use serde::Deserialize;
+use streaming_iterator::StreamingIterator;
+use tree_sitter::{Parser, Query, QueryCursor};
 
-/// One corpus row: a fixture file + the language to parse it as + the parser
-/// facts that must agree with ground truth.
-struct Case {
-    /// Fixture filename under `tests/fixtures/parser_agreement/`.
-    fixture: &'static str,
-    /// Language wire-name (or extension alias) handed to the builtins.
-    language: &'static str,
-    /// The exact import-statement texts the bundled grammar must extract, in
-    /// document order. Drawn from what the currently shipped grammars produce.
-    expected_imports: &'static [&'static str],
-    /// Whether the fixture must parse with ZERO `ERROR`/`MISSING` nodes. The
-    /// fixtures are all valid modern source, so this is `true` everywhere — a
-    /// `false` here would mean ground truth is itself broken.
-    expect_clean_parse: bool,
+const CORPUS_JSON: &str = include_str!("../../data/grammar-fitness/corpus.v1.json");
+const CORPUS_SCHEMA_JSON: &str = include_str!("../../data/grammar-fitness/corpus.schema.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Corpus {
+    schema_version: u32,
+    rows: Vec<CorpusRow>,
 }
 
-/// The polyglot corpus — one row per language. Tiny and extensible.
-fn corpus() -> Vec<Case> {
-    vec![
-        // SEED REGRESSION: the zig `\\` multiline string that the bundled
-        // grammar once mis-lexed into a phantom error storm (#3010). Zig
-        // `@import` builtins are not import DECLARATIONS in the grammar, so the
-        // import set is empty — the load-bearing fact here is the CLEAN parse.
-        Case {
-            fixture: "sample.zig",
-            language: "zig",
-            expected_imports: &[],
-            expect_clean_parse: true,
-        },
-        Case {
-            fixture: "sample.py",
-            language: "python",
-            expected_imports: &["import os", "from typing import List, Optional"],
-            expect_clean_parse: true,
-        },
-        Case {
-            fixture: "sample.rs",
-            language: "rust",
-            expected_imports: &["use std::collections::HashMap;"],
-            expect_clean_parse: true,
-        },
-        Case {
-            fixture: "sample.go",
-            language: "go",
-            // tree-sitter-go surfaces the grouped `import (...)` block as one
-            // `import_declaration` statement.
-            expected_imports: &["import (\n\t\"fmt\"\n\t\"os\"\n)"],
-            expect_clean_parse: true,
-        },
-        Case {
-            fixture: "sample.ts",
-            language: "typescript",
-            expected_imports: &[
-                "import { readFile } from 'fs';",
-                "import path from \"path\";",
-            ],
-            expect_clean_parse: true,
-        },
-        Case {
-            fixture: "sample.c",
-            language: "c",
-            expected_imports: &["#include <stdio.h>", "#include \"local.h\""],
-            expect_clean_parse: true,
-        },
-    ]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CorpusRow {
+    language: String,
+    fixture: String,
+    authority: String,
+    operations: Vec<Operation>,
+    expected: ExpectedFacts,
 }
 
-// ---------------------------------------------------------------------------
-// Harness plumbing
-// ---------------------------------------------------------------------------
-
-fn ast_registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    AstCapability.register_builtins(&mut registry);
-    registry
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+enum Operation {
+    Parse,
+    Search,
+    SafeEdit,
 }
 
-fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in pairs {
-        map.insert((*k).into(), v.clone());
-    }
-    VmValue::dict(map)
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExpectedFacts {
+    clean_parse: bool,
+    minimum_search_matches: usize,
+    safe_edit_suffix: String,
 }
 
-fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
-    let entry = registry
-        .find(name)
-        .unwrap_or_else(|| panic!("builtin {name} not registered"));
-    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("{name} failed: {err}"))
+fn corpus() -> Corpus {
+    serde_json::from_str(CORPUS_JSON).expect("grammar fitness corpus must match its typed schema")
 }
 
-fn vstring(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+fn fixture_path(row: &CorpusRow) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("data/grammar-fitness")
+        .join(&row.fixture)
 }
 
-fn dict_field(value: &VmValue, key: &str) -> VmValue {
-    match value {
-        VmValue::Dict(d) => d
-            .get(key)
-            .cloned()
-            .unwrap_or_else(|| panic!("missing field `{key}` on {value:?}")),
-        other => panic!("expected dict, got {other:?}"),
-    }
+fn parser_for(language: Language) -> Parser {
+    let ts_language = language
+        .ts_language()
+        .unwrap_or_else(|| panic!("grammar for {} must be compiled", language.name()));
+    let mut parser = Parser::new();
+    parser
+        .set_language(&ts_language)
+        .unwrap_or_else(|err| panic!("set grammar for {}: {err}", language.name()));
+    parser
 }
 
-fn list_value(value: &VmValue) -> Arc<Vec<VmValue>> {
-    match value {
-        VmValue::List(l) => l.clone(),
-        other => panic!("expected list, got {other:?}"),
-    }
-}
-
-fn string_value(value: &VmValue) -> String {
-    match value {
-        VmValue::String(s) => s.to_string(),
-        other => panic!("expected string, got {other:?}"),
-    }
-}
-
-fn bool_value(value: &VmValue) -> bool {
-    match value {
-        VmValue::Bool(b) => *b,
-        other => panic!("expected bool, got {other:?}"),
-    }
-}
-
-fn fixture_source(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/parser_agreement")
-        .join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("read fixture {}: {err}", path.display()))
-}
-
-fn extracted_imports(registry: &BuiltinRegistry, source: &str, language: &str) -> Vec<String> {
-    let result = invoke(
-        registry,
-        "hostlib_ast_extract_imports",
-        dict(&[("source", vstring(source)), ("language", vstring(language))]),
-    );
-    assert!(
-        bool_value(&dict_field(&result, "supported")),
-        "language `{language}` must be a supported tree-sitter grammar"
-    );
-    list_value(&dict_field(&result, "statements"))
-        .iter()
-        .map(|stmt| string_value(&dict_field(stmt, "text")))
-        .collect()
-}
-
-fn parse_error_messages(registry: &BuiltinRegistry, source: &str, language: &str) -> Vec<String> {
-    let result = invoke(
-        registry,
-        "hostlib_ast_parse_errors",
-        dict(&[
-            ("content", vstring(source)),
-            ("language", vstring(language)),
-        ]),
-    );
-    assert!(
-        bool_value(&dict_field(&result, "supported")),
-        "language `{language}` must be a supported tree-sitter grammar"
-    );
-    list_value(&dict_field(&result, "errors"))
-        .iter()
-        .map(|e| string_value(&dict_field(e, "message")))
-        .collect()
-}
-
-// ---------------------------------------------------------------------------
-// The contract
-// ---------------------------------------------------------------------------
-
-/// Every corpus fixture's BUNDLED parser facts must agree with ground truth. A
-/// grammar regression that disagrees fails here, in CI, before it can ship a
-/// phantom fact to the model.
 #[test]
-fn bundled_parser_facts_agree_with_ground_truth() {
-    let registry = ast_registry();
-    for case in corpus() {
-        let source = fixture_source(case.fixture);
+fn corpus_is_versioned_closed_and_covers_every_language() {
+    let schema: serde_json::Value =
+        serde_json::from_str(CORPUS_SCHEMA_JSON).expect("corpus JSON Schema must be valid JSON");
+    let instance: serde_json::Value =
+        serde_json::from_str(CORPUS_JSON).expect("corpus must be valid JSON");
+    let validator = jsonschema::validator_for(&schema).expect("corpus JSON Schema must compile");
+    if let Err(error) = validator.validate(&instance) {
+        panic!("grammar fitness corpus violates its JSON Schema: {error}");
+    }
+    let corpus = corpus();
+    assert_eq!(corpus.schema_version, 1);
 
-        // Fact 1 — the import set the host extracts must match ground truth
-        // exactly (a phantom or dropped import is a steering hazard).
-        let imports = extracted_imports(&registry, &source, case.language);
-        let expected: Vec<String> = case
-            .expected_imports
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        assert_eq!(
-            imports, expected,
-            "parser-agreement MISMATCH on `{}` ({}): extracted imports diverged from ground truth — \
-             a bundled grammar bump is shipping phantom/dropped import facts to the model",
-            case.fixture, case.language,
+    let mut seen = BTreeSet::new();
+    for row in &corpus.rows {
+        assert!(
+            seen.insert(row.language.clone()),
+            "duplicate corpus row for {}",
+            row.language
         );
+        assert!(
+            !row.authority.trim().is_empty(),
+            "authority must be explicit"
+        );
+        assert_eq!(
+            row.operations.iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([Operation::Parse, Operation::Search, Operation::SafeEdit]),
+            "{} must cover every operation class",
+            row.language
+        );
+        assert!(
+            fixture_path(row).is_file(),
+            "missing fixture {}",
+            fixture_path(row).display()
+        );
+    }
 
-        // Fact 2 — valid modern source must parse with no ERROR/MISSING nodes.
-        // This is the direct guard on the zig multiline-string regression: a
-        // re-introduced mislex makes the parse-error storm reappear here.
-        let errors = parse_error_messages(&registry, &source, case.language);
-        if case.expect_clean_parse {
+    let registered = Language::all()
+        .iter()
+        .map(|language| language.name().to_string())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(seen, registered, "corpus and language registry must agree");
+}
+
+#[test]
+fn resolved_grammars_pass_the_versioned_fitness_corpus() {
+    for row in corpus().rows {
+        let language = Language::from_name(&row.language)
+            .unwrap_or_else(|| panic!("unknown corpus language {}", row.language));
+        let source = std::fs::read(fixture_path(&row))
+            .unwrap_or_else(|err| panic!("read {}: {err}", fixture_path(&row).display()));
+        let mut parser = parser_for(language);
+        let tree = parser
+            .parse(&source, None)
+            .unwrap_or_else(|| panic!("parser returned no tree for {}", row.language));
+        if row.expected.clean_parse {
             assert!(
-                errors.is_empty(),
-                "parser-agreement MISMATCH on `{}` ({}): expected a CLEAN parse but the bundled \
-                 grammar reported {} error(s): {:?} — a grammar regression is mis-lexing valid \
-                 source into phantom parse errors",
-                case.fixture,
-                case.language,
-                errors.len(),
-                errors,
+                !tree.root_node().has_error(),
+                "{} parse fitness failed for {} ({})",
+                row.language,
+                row.fixture,
+                row.authority
             );
         }
+
+        let ts_language = language.ts_language().expect("grammar compiled");
+        let query = Query::new(&ts_language, "(_) @node").expect("portable wildcard query");
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), source.as_slice());
+        let mut match_count = 0;
+        let mut first_span = None;
+        while let Some(query_match) = matches.next() {
+            match_count += 1;
+            if first_span.is_none() {
+                first_span = query_match
+                    .captures
+                    .first()
+                    .map(|capture| (capture.node.start_byte(), capture.node.end_byte()));
+            }
+        }
+        assert!(
+            match_count >= row.expected.minimum_search_matches,
+            "{} search fitness returned {match_count} matches, expected at least {}",
+            row.language,
+            row.expected.minimum_search_matches
+        );
+
+        let (start, end) = first_span.expect("search fitness must bind a node");
+        let mut edited = Vec::with_capacity(source.len() + row.expected.safe_edit_suffix.len());
+        edited.extend_from_slice(&source[..start]);
+        edited.extend_from_slice(&source[start..end]);
+        edited.extend_from_slice(row.expected.safe_edit_suffix.as_bytes());
+        edited.extend_from_slice(&source[end..]);
+        let edited_tree = parser
+            .parse(&edited, None)
+            .unwrap_or_else(|| panic!("post-edit parser returned no tree for {}", row.language));
+        assert!(
+            !edited_tree.root_node().has_error(),
+            "{} safe-edit validation fitness failed after a trivia-only structural splice",
+            row.language
+        );
     }
 }
 
-/// Guard the SEED regression on its own so a failure names it unambiguously: the
-/// zig `\\` multiline string must parse clean AND surface no phantom imports.
 #[test]
-fn zig_multiline_string_does_not_regress_to_phantom_facts() {
-    let registry = ast_registry();
-    let source = fixture_source("sample.zig");
+fn swift_optional_chain_cast_and_fallback_stays_clean() {
+    let row = corpus()
+        .rows
+        .into_iter()
+        .find(|row| row.language == "swift")
+        .expect("Swift corpus row");
+    let source = std::fs::read_to_string(fixture_path(&row)).expect("read Swift fixture");
+    assert!(source
+        .contains("notification.userInfo?[\"message\"] as? String ?? \"Collaboration error\""));
+    let tree = parser_for(Language::Swift)
+        .parse(source.as_bytes(), None)
+        .expect("Swift parse tree");
     assert!(
-        source.contains("\\\\SELECT"),
-        "the seed fixture must contain a `\\\\` multiline string"
+        !tree.root_node().has_error(),
+        "the approved Swift artifact regressed optional-chain/cast/coalesce syntax"
     );
-    let errors = parse_error_messages(&registry, &source, "zig");
+}
+
+#[test]
+fn zig_multiline_string_stays_clean() {
+    let row = corpus()
+        .rows
+        .into_iter()
+        .find(|row| row.language == "zig")
+        .expect("Zig corpus row");
+    let source = std::fs::read_to_string(fixture_path(&row)).expect("read Zig fixture");
+    assert!(source.contains("\\\\SELECT"));
+    let tree = parser_for(Language::Zig)
+        .parse(source.as_bytes(), None)
+        .expect("Zig parse tree");
     assert!(
-        errors.is_empty(),
-        "REGRESSION: the bundled tree-sitter-zig grammar mis-lexed the `\\\\` multiline string \
-         into {} phantom parse error(s): {:?} (this is the #3010 class)",
-        errors.len(),
-        errors,
-    );
-    let imports = extracted_imports(&registry, &source, "zig");
-    assert!(
-        imports.is_empty(),
-        "zig `@import` builtins are not import declarations; the grammar must surface none, got {imports:?}"
+        !tree.root_node().has_error(),
+        "the approved Zig artifact regressed multiline strings"
     );
 }

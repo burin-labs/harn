@@ -18,9 +18,12 @@ true
 applied
 fast_apply
 true
-syntax_error
+parser_not_verified
 false
 1
+true
+parser_unavailable
+unavailable
 true
 llm_invalid_output
 schema_validation

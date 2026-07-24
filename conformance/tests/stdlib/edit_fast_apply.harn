@@ -23,6 +23,7 @@ pipeline default() {
       llm_text("{\"content\":\"def answer():\\n    return 4\\n\"}"),
       llm_text("{\"content\":\"export function answer(): number {\\n  return 5;\\n}\\n\"}"),
       llm_text("{\"content\":\"fn broken( {\\n\"}"),
+      llm_text("{\"content\":\"updated but unsupported\\n\"}"),
       llm_text("{\"content\":123}"),
     ],
     { ->
@@ -89,6 +90,17 @@ pipeline default() {
       __io_println(rejected.ok)
       __io_println(rejected.telemetry.validation_rejected)
       __io_println(harness.fs.read_text(bad_path) == bad_before)
+      const unavailable_path = write_fixture(root, "notes.unknown", "original\n")
+      const unavailable = edit_fast_apply(
+        {
+          path: unavailable_path,
+          intent: "Update the note.",
+          llm_options: {provider: "mock", model: "mock"},
+        },
+      )
+      __io_println(unavailable.result)
+      __io_println(unavailable.validation.health.coverage)
+      __io_println(harness.fs.read_text(unavailable_path) == "original\n")
       const invalid_output = edit_fast_apply(
         {
           path: bad_path,

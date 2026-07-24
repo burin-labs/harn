@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "rows": [
+    {
+      "language": "harn",
+      "fixture": "../../tests/fixtures/ast/harn/source.harn",
+      "authority": "Harn language conformance",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "typescript",
+      "fixture": "../../tests/fixtures/ast/typescript/source.ts",
+      "authority": "TypeScript language syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "tsx",
+      "fixture": "../../tests/fixtures/ast/tsx/source.tsx",
+      "authority": "TypeScript JSX syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "javascript",
+      "fixture": "../../tests/fixtures/ast/javascript/source.js",
+      "authority": "ECMAScript syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "jsx",
+      "fixture": "../../tests/fixtures/ast/jsx/source.jsx",
+      "authority": "ECMAScript JSX syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "python",
+      "fixture": "../../tests/fixtures/ast/python/source.py",
+      "authority": "Python language syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "go",
+      "fixture": "../../tests/fixtures/ast/go/source.go",
+      "authority": "Go language specification",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "rust",
+      "fixture": "../../tests/fixtures/ast/rust/source.rs",
+      "authority": "Rust reference syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "java",
+      "fixture": "../../tests/fixtures/ast/java/source.java",
+      "authority": "Java language specification",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "c",
+      "fixture": "../../tests/fixtures/ast/c/source.c",
+      "authority": "ISO C syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "cpp",
+      "fixture": "../../tests/fixtures/ast/cpp/source.cpp",
+      "authority": "ISO C++ syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "csharp",
+      "fixture": "../../tests/fixtures/ast/csharp/source.cs",
+      "authority": "C# language specification",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "ruby",
+      "fixture": "../../tests/fixtures/ast/ruby/source.rb",
+      "authority": "Ruby syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "kotlin",
+      "fixture": "../../tests/fixtures/ast/kotlin/source.kt",
+      "authority": "Kotlin language specification",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "php",
+      "fixture": "../../tests/fixtures/ast/php/source.php",
+      "authority": "PHP language specification",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "scala",
+      "fixture": "../../tests/fixtures/ast/scala/source.scala",
+      "authority": "Scala language specification",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "bash",
+      "fixture": "../../tests/fixtures/ast/bash/source.sh",
+      "authority": "POSIX shell and Bash syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "swift",
+      "fixture": "fixtures/swift_optional_chain.swift",
+      "authority": "Swift compiler acceptance and alex-pinkus/tree-sitter-swift#597",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "zig",
+      "fixture": "../../tests/fixtures/parser_agreement/sample.zig",
+      "authority": "Zig compiler acceptance and harn#3010",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "elixir",
+      "fixture": "../../tests/fixtures/ast/elixir/source.ex",
+      "authority": "Elixir syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "lua",
+      "fixture": "../../tests/fixtures/ast/lua/source.lua",
+      "authority": "Lua reference syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "haskell",
+      "fixture": "../../tests/fixtures/ast/haskell/source.hs",
+      "authority": "Haskell language report syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "r",
+      "fixture": "../../tests/fixtures/ast/r/source.r",
+      "authority": "R language syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "json",
+      "fixture": "../../tests/fixtures/ast/json/source.json",
+      "authority": "RFC 8259",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "yaml",
+      "fixture": "../../tests/fixtures/ast/yaml/source.yaml",
+      "authority": "YAML 1.2 syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "toml",
+      "fixture": "../../tests/fixtures/ast/toml/source.toml",
+      "authority": "TOML 1.0 syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "css",
+      "fixture": "../../tests/fixtures/ast/css/source.css",
+      "authority": "CSS syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "html",
+      "fixture": "../../tests/fixtures/ast/html/source.html",
+      "authority": "WHATWG HTML syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "sql",
+      "fixture": "../../tests/fixtures/ast/sql/source.sql",
+      "authority": "SQL grammar fixture",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    },
+    {
+      "language": "markdown",
+      "fixture": "../../tests/fixtures/ast/markdown/source.md",
+      "authority": "CommonMark syntax",
+      "operations": ["parse", "search", "safe_edit"],
+      "expected": {"clean_parse": true, "minimum_search_matches": 1, "safe_edit_suffix": "\n"}
+    }
+  ]
+}

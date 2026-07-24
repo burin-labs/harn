@@ -14,6 +14,7 @@ use tree_sitter::Node;
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_int, optional_string, str_value};
 
+use super::health::{ParserHealth, ParserOperation};
 use super::language::Language;
 use super::parse::{parse_source, read_source};
 use super::types::ParseError;
@@ -53,6 +54,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let tree = match parse_source(&source, language) {
         Ok(tree) => tree,
         Err(_) => {
+            let health = ParserHealth::unavailable(Some(language), ParserOperation::Parse);
             return Ok(build_dict([
                 ("path", str_value(path_str.as_deref().unwrap_or(""))),
                 ("language", str_value(language.name())),
@@ -60,7 +62,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 ("had_errors", VmValue::Bool(false)),
                 ("errors", VmValue::List(Arc::new(Vec::new()))),
                 ("top_level_decl_count", VmValue::Int(0)),
-            ]))
+                ("health", health.to_vm_value()),
+            ]));
         }
     };
 
@@ -68,26 +71,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     collect_errors(tree.root_node(), source.as_bytes(), &mut errors);
     let top_level = count_top_level_declarations(tree.root_node(), language);
     let had_errors = tree.root_node().has_error() || !errors.is_empty();
-
-    // A grammar-limitation "cascade": tree-sitter could not parse a construct
-    // the language genuinely supports (e.g. tree-sitter-scala 0.26 on Scala 3
-    // indentation-based `match`/`case`), so it wraps essentially the whole file
-    // in one root-level ERROR node spanning from the first line to the last.
-    // That is NOT a localized, model-authored syntax mistake — the file is
-    // well-formed source the grammar just can't model. Edit-validation gates
-    // must not hard-reject a CORRECT create/replace on this signal, or they
-    // false-fail correct edits (evidence: eval-scala-feat t2 reported
-    // `syntax error: line 1: package rulekit...` on a valid Scala 3 file).
-    // We surface this so consumers can downgrade the rejection instead of
-    // blaming the model for the grammar's blind spot.
-    let total_lines = source_line_count(&source);
-    let cascade = errors
-        .iter()
-        .any(|e| error_spans_full_source(e, total_lines));
-    let errors_list: Vec<VmValue> = errors
-        .iter()
-        .map(|e| e.to_vm_value_with_span(error_spans_full_source(e, total_lines)))
-        .collect();
+    let health = ParserHealth::observed(language, ParserOperation::Parse, had_errors);
+    let errors_list: Vec<VmValue> = errors.iter().map(ParseError::to_vm_value).collect();
 
     Ok(build_dict([
         ("path", str_value(path_str.as_deref().unwrap_or(""))),
@@ -96,33 +81,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("had_errors", VmValue::Bool(had_errors)),
         ("errors", VmValue::List(Arc::new(errors_list))),
         ("top_level_decl_count", VmValue::Int(top_level as i64)),
-        ("cascade", VmValue::Bool(cascade)),
+        ("health", health.to_vm_value()),
     ]))
-}
-
-/// Count of source lines (number of `\n`-separated segments). Used to decide
-/// whether an ERROR node covers essentially the whole file.
-fn source_line_count(source: &str) -> u32 {
-    if source.is_empty() {
-        return 0;
-    }
-    (source.bytes().filter(|b| *b == b'\n').count() as u32) + 1
-}
-
-/// True when an ERROR node starts at the top of the file and spans nearly all
-/// of it — the fingerprint of a grammar-limitation cascade rather than a
-/// localized syntax mistake. Requires the node to begin on the first line and
-/// to cover at least 80% of the source lines (and at least a handful of lines,
-/// so a tiny file that is genuinely broken end-to-end is not excused).
-fn error_spans_full_source(error: &ParseError, total_lines: u32) -> bool {
-    if total_lines < 5 {
-        return false;
-    }
-    if error.start_row != 0 {
-        return false;
-    }
-    let covered = error.end_row.saturating_sub(error.start_row) + 1;
-    covered * 100 >= total_lines * 80
 }
 
 fn resolve_language(
@@ -438,34 +398,28 @@ mod tests {
         }
     }
 
-    fn bool_field(value: &VmValue, key: &str) -> bool {
-        match value {
-            VmValue::Dict(d) => match d.get(key) {
-                Some(VmValue::Bool(b)) => *b,
-                other => panic!("expected bool field {key}, got {other:?}"),
-            },
-            _ => panic!("expected dict"),
-        }
-    }
-
-    fn err_bool(err: &VmValue, key: &str) -> bool {
-        match err {
-            VmValue::Dict(d) => matches!(d.get(key), Some(VmValue::Bool(true))),
-            _ => false,
-        }
+    fn health_coverage(value: &VmValue) -> String {
+        let VmValue::Dict(response) = value else {
+            panic!("expected response dict")
+        };
+        let Some(VmValue::Dict(health)) = response.get("health") else {
+            panic!("missing health dict")
+        };
+        let Some(VmValue::String(coverage)) = health.get("coverage") else {
+            panic!("missing health.coverage")
+        };
+        coverage.to_string()
     }
 
     // The decoded body the model authored for eval-scala-feat t2 (`edit`
     // create, `tool_format: "native"` — serde already turned the JSON `\n`
     // escapes into real newlines). It is valid Scala 3, but tree-sitter-scala
     // 0.26 cannot parse the indentation-based `match`/`case` arms, so it wraps
-    // nearly the whole file in one root-spanning ERROR node and the gate
-    // false-rejected the correct create with `syntax error: line 1: package
-    // rulekit...`. The body must reach tree-sitter with REAL newlines (it does)
-    // and the result must carry the `cascade` / `spans_full_source` signal so
-    // the edit-validation gate can decline to hard-reject a grammar blind spot.
+    // nearly the whole file in one root-spanning ERROR node. Source shape is
+    // not an authority for deciding whether this is invalid source or a
+    // grammar limitation, so ParserHealth must report it as inconclusive.
     #[test]
-    fn scala3_indented_match_cascade_is_flagged_not_localized() {
+    fn scala3_indented_match_is_inconclusive_without_an_external_authority() {
         let body = include_str!("scala_repro_fixture.scala");
         // The authored body reaches us with real newlines, not literal `\n`
         // line breaks. (Literal backslash-n only survives inside Scala string /
@@ -480,46 +434,30 @@ mod tests {
             !errors.is_empty(),
             "tree-sitter-scala 0.26 should error here"
         );
-        // The cascade signal must be set, and the first (root-spanning) error
-        // must be marked so consumers can downgrade the rejection.
-        assert!(
-            bool_field(&result, "cascade"),
-            "a root-spanning grammar cascade must set cascade=true"
-        );
-        assert!(
-            errors.iter().any(|e| err_bool(e, "spans_full_source")),
-            "the file-spanning ERROR node must be marked spans_full_source"
-        );
+        assert_eq!(health_coverage(&result), "inconclusive");
     }
 
-    // A normal one-line, localized syntax error must NOT be classified as a
-    // cascade — only file-spanning grammar blind spots get the escape hatch.
+    // A localized syntax error receives the same evidence grade. ParserHealth
+    // does not guess the cause of parser errors from their span.
     #[test]
-    fn localized_python_error_is_not_a_cascade() {
+    fn localized_python_error_is_also_inconclusive() {
         let src = "def a():\n    return 1\n\n\ndef b(\n    return 2\n\n\ndef c():\n    return 3\n";
         let result = run_with(src, "python");
         let errors = list_field(&result, "errors");
         assert!(!errors.is_empty());
-        assert!(
-            !bool_field(&result, "cascade"),
-            "a localized error in an otherwise-parseable file is not a cascade"
-        );
-        assert!(
-            !errors.iter().any(|e| err_bool(e, "spans_full_source")),
-            "a localized error must not be marked spans_full_source"
-        );
+        assert_eq!(health_coverage(&result), "inconclusive");
     }
 
-    // Simple Scala 3 optional-braces (`object Foo:`) parses cleanly — proves the
-    // cascade is specifically the indented `match`/`case` blind spot, and that
-    // we are not blanket-excusing Scala.
+    // Simple Scala 3 optional-braces (`object Foo:`) parses cleanly, while the
+    // indented `match`/`case` fixture remains inconclusive. We do not
+    // blanket-excuse or blanket-reject Scala.
     #[test]
     fn simple_scala3_optional_braces_has_no_errors() {
         let src = "package rulekit\n\nobject Foo:\n  val x: Int = 1\n";
         let result = run_with(src, "scala");
         let errors = list_field(&result, "errors");
         assert!(errors.is_empty(), "expected clean parse, got {errors:?}");
-        assert!(!bool_field(&result, "cascade"));
+        assert_eq!(health_coverage(&result), "verified");
     }
 
     // The Kotlin file the model authored for eval-kotlin-workflow t1 (`edit`
@@ -538,7 +476,7 @@ mod tests {
         let result = run_with(body, "kotlin");
         let errors = list_field(&result, "errors");
         assert!(errors.is_empty(), "expected clean parse, got {errors:?}");
-        assert!(!bool_field(&result, "cascade"));
+        assert_eq!(health_coverage(&result), "verified");
     }
 
     // Swift optional-chained subscripts are ordinary production syntax. The
@@ -560,7 +498,7 @@ func message(from notification: Notification) -> String {
             errors.is_empty(),
             "valid Swift optional chaining must parse clean, got {errors:?}"
         );
-        assert!(!bool_field(&result, "cascade"));
+        assert_eq!(health_coverage(&result), "verified");
     }
 
     // Guard against over-unescaping: a JSON-arg body with `\\n` (an intended

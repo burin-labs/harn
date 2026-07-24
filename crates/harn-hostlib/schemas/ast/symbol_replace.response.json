@@ -12,7 +12,8 @@
         "not_found",
         "ambiguous",
         "unsupported_language",
-        "syntax_error_after_edit"
+        "syntax_error_after_edit",
+        "parser_not_verified"
       ]
     },
     "source": {
@@ -37,8 +38,23 @@
     "details": {
       "type": "string",
       "description": "First-line diagnostic from the post-edit re-parse. Set only when `result` is `syntax_error_after_edit`."
+    },
+    "health": {
+      "type": "object",
+      "description": "Versioned safe-edit ParserHealth provenance and coverage contract.",
+      "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "operation": { "enum": ["parse", "search", "safe_edit"] },
+        "grammar": { "type": "object" },
+        "corpus": { "type": "object" },
+        "source": { "type": "object" },
+        "support": { "enum": ["supported", "unsupported"] },
+        "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+      },
+      "additionalProperties": false
     }
   },
-  "required": ["result"],
+  "required": ["result", "health"],
   "additionalProperties": false
 }

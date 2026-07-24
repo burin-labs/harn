@@ -41,8 +41,23 @@
     "language": {
       "type": "string",
       "description": "Echo of the unrecognized `language` field. Set only when `result` is `unsupported_language`."
+    },
+    "health": {
+      "type": "object",
+      "description": "Versioned read-only ParserHealth provenance and coverage contract.",
+      "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "operation": { "enum": ["parse", "search", "safe_edit"] },
+        "grammar": { "type": "object" },
+        "corpus": { "type": "object" },
+        "source": { "type": "object" },
+        "support": { "enum": ["supported", "unsupported"] },
+        "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+      },
+      "additionalProperties": false
     }
   },
-  "required": ["result"],
+  "required": ["result", "health"],
   "additionalProperties": false
 }

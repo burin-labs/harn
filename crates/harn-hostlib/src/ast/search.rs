@@ -48,6 +48,7 @@ use crate::tools::args::{
 use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{format_query_error, lossy_str, node_text, read_source};
+use super::health::{ParserHealth, ParserOperation};
 use super::language::{Language, TEXT_PATCH_FALLBACK};
 use super::parse::parse_source;
 
@@ -132,6 +133,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         Ok(q) => q,
         Err(err) => {
             return Ok(invalid_query_response(
+                language,
                 &query_text,
                 format_query_error(&err),
                 &err,
@@ -139,7 +141,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
     if query.capture_names().is_empty() {
-        return Ok(no_capture_response(&query_text));
+        return Ok(no_capture_response(language, &query_text));
     }
 
     let tree = parse_source(&source, language).map_err(|err| HostlibError::Backend {
@@ -147,6 +149,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         message: err.to_string(),
     })?;
     let had_errors = tree.root_node().has_error();
+    let health = ParserHealth::observed(language, ParserOperation::Search, had_errors);
 
     let mut matches = collect_matches(&query, &tree, &source);
     // Document order keeps results stable regardless of the cursor's internal
@@ -159,7 +162,9 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         matches.truncate(max_matches as usize);
     }
 
-    Ok(ok_response(language, &matches, truncated, had_errors))
+    Ok(ok_response(
+        language, &matches, truncated, had_errors, &health,
+    ))
 }
 
 /// A captured span: byte offsets plus 0-based row/col, mirroring the
@@ -270,6 +275,7 @@ fn ok_response(
     matches: &[SearchMatch],
     truncated: bool,
     had_errors: bool,
+    health: &ParserHealth,
 ) -> VmValue {
     build_dict([
         ("result", str_value("ok")),
@@ -277,6 +283,7 @@ fn ok_response(
         ("match_count", VmValue::Int(matches.len() as i64)),
         ("truncated", VmValue::Bool(truncated)),
         ("had_errors", VmValue::Bool(had_errors)),
+        ("health", health.to_vm_value()),
         (
             "matches",
             VmValue::List(Arc::new(matches.iter().map(match_to_value).collect())),
@@ -320,6 +327,7 @@ fn span_to_value(span: &Span) -> VmValue {
 /// core fields so `.harn` consumers never branch on field presence.
 fn error_response(
     result: &str,
+    health: ParserHealth,
     extra: impl IntoIterator<Item = (&'static str, VmValue)>,
 ) -> VmValue {
     let mut entries: Vec<(&'static str, VmValue)> = vec![
@@ -328,15 +336,22 @@ fn error_response(
         ("match_count", VmValue::Int(0)),
         ("truncated", VmValue::Bool(false)),
         ("had_errors", VmValue::Bool(false)),
+        ("health", health.to_vm_value()),
         ("matches", VmValue::List(Arc::new(Vec::new()))),
     ];
     entries.extend(extra);
     build_dict(entries)
 }
 
-fn invalid_query_response(query: &str, details: String, err: &QueryError) -> VmValue {
+fn invalid_query_response(
+    language: Language,
+    query: &str,
+    details: String,
+    err: &QueryError,
+) -> VmValue {
     error_response(
         "invalid_query",
+        ParserHealth::not_observed(language, ParserOperation::Search),
         [
             ("query", str_value(query)),
             ("details", str_value(details)),
@@ -346,9 +361,10 @@ fn invalid_query_response(query: &str, details: String, err: &QueryError) -> VmV
     )
 }
 
-fn no_capture_response(query: &str) -> VmValue {
+fn no_capture_response(language: Language, query: &str) -> VmValue {
     error_response(
         "invalid_query",
+        ParserHealth::not_observed(language, ParserOperation::Search),
         [
             ("query", str_value(query)),
             (
@@ -367,6 +383,7 @@ fn unsupported_language_response(path: Option<&str>, hint: Option<&str>) -> VmVa
     let target = path.unwrap_or("<inline source>");
     error_response(
         "unsupported_language",
+        ParserHealth::unavailable(hint.and_then(Language::from_name), ParserOperation::Search),
         [
             (
                 "details",

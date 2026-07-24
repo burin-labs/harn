@@ -51,9 +51,24 @@
     "fallback_suggestion": {
       "type": "string",
       "description": "Text-level fallback to reach for on `unsupported_language`."
+    },
+    "health": {
+      "type": "object",
+      "description": "Versioned ParserHealth provenance and coverage contract.",
+      "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "operation": { "enum": ["parse", "search", "safe_edit"] },
+        "grammar": { "type": "object" },
+        "corpus": { "type": "object" },
+        "source": { "type": "object" },
+        "support": { "enum": ["supported", "unsupported"] },
+        "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+      },
+      "additionalProperties": false
     }
   },
-  "required": ["result", "language", "match_count", "truncated", "had_errors", "matches"],
+  "required": ["result", "language", "match_count", "truncated", "had_errors", "matches", "health"],
   "additionalProperties": false,
   "$defs": {
     "Span": {

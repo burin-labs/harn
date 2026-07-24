@@ -30,6 +30,7 @@ use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, require_string, str_value};
 
 use super::fuzzy;
+use super::health::{ParserHealth, ParserOperation};
 use super::language::Language;
 use super::parse::parse_source;
 use super::symbols::extract;
@@ -67,27 +68,30 @@ pub(super) fn run_extract(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let symbol_name = require_string(EXTRACT_BUILTIN, dict, "symbol_name")?;
 
     let Some(language) = Language::from_name(&language_name) else {
-        return Ok(unsupported_language_response(&language_name));
+        let health = ParserHealth::unavailable(None, ParserOperation::Search);
+        return Ok(health.attach_to(unsupported_language_response(&language_name)));
     };
+    let (tree, health) = source_health(&source, language, ParserOperation::Search)?;
 
     let lines = source.split('\n').collect::<Vec<&str>>();
-    let outcome = locate_symbol(EXTRACT_BUILTIN, &source, language, &symbol_name, &lines)?;
-    match outcome {
+    let outcome = locate_symbol(&tree, &source, language, &symbol_name, &lines);
+    let response = match outcome {
         LocateOutcome::Found(range) => {
             let text = slice_lines(&lines, range.start_line, range.end_line);
-            Ok(build_dict([
+            build_dict([
                 ("result", str_value("extracted")),
                 ("text", str_value(text)),
                 ("start_line", VmValue::Int(range.start_line as i64)),
                 ("end_line", VmValue::Int(range.end_line as i64)),
-            ]))
+            ])
         }
         LocateOutcome::NotFound {
             available,
             suggestions,
-        } => Ok(not_found_response(available, suggestions)),
-        LocateOutcome::Ambiguous { match_count } => Ok(ambiguous_response(match_count)),
-    }
+        } => not_found_response(available, suggestions),
+        LocateOutcome::Ambiguous { match_count } => ambiguous_response(match_count),
+    };
+    Ok(health.attach_to(response))
 }
 
 pub(super) fn run_delete(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -98,32 +102,48 @@ pub(super) fn run_delete(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let symbol_name = require_string(DELETE_BUILTIN, dict, "symbol_name")?;
 
     let Some(language) = Language::from_name(&language_name) else {
-        return Ok(unsupported_language_response(&language_name));
+        let health = ParserHealth::unavailable(None, ParserOperation::SafeEdit);
+        return Ok(health.attach_to(unsupported_language_response(&language_name)));
     };
+    let (tree, health) = source_health(&source, language, ParserOperation::SafeEdit)?;
+    if !health.is_verified() {
+        return Ok(health.attach_to(parser_not_verified_response()));
+    }
 
     let lines = source.split('\n').collect::<Vec<&str>>();
-    let outcome = locate_symbol(DELETE_BUILTIN, &source, language, &symbol_name, &lines)?;
+    let outcome = locate_symbol(&tree, &source, language, &symbol_name, &lines);
     match outcome {
         LocateOutcome::Found(range) => {
             let new_lines = remove_range(&lines, range.start_line, range.end_line);
             let collapsed = collapse_blank_lines(new_lines);
             let new_source = collapsed.join("\n");
             match validate_syntax(&new_source, language) {
-                Ok(()) => Ok(build_dict([
-                    ("result", str_value("removed")),
-                    ("source", str_value(&new_source)),
-                ])),
-                Err(details) => Ok(build_dict([
-                    ("result", str_value("syntax_error_after_edit")),
-                    ("details", str_value(&details)),
-                ])),
+                Ok(()) => Ok(
+                    ParserHealth::observed(language, ParserOperation::SafeEdit, false).attach_to(
+                        build_dict([
+                            ("result", str_value("removed")),
+                            ("source", str_value(&new_source)),
+                        ]),
+                    ),
+                ),
+                Err(details) => {
+                    Ok(
+                        ParserHealth::observed(language, ParserOperation::SafeEdit, true)
+                            .attach_to(build_dict([
+                                ("result", str_value("syntax_error_after_edit")),
+                                ("details", str_value(&details)),
+                            ])),
+                    )
+                }
             }
         }
         LocateOutcome::NotFound {
             available,
             suggestions,
-        } => Ok(not_found_response(available, suggestions)),
-        LocateOutcome::Ambiguous { match_count } => Ok(ambiguous_response(match_count)),
+        } => Ok(health.attach_to(not_found_response(available, suggestions))),
+        LocateOutcome::Ambiguous { match_count } => {
+            Ok(health.attach_to(ambiguous_response(match_count)))
+        }
     }
 }
 
@@ -136,33 +156,69 @@ pub(super) fn run_replace(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let new_text = require_string(REPLACE_BUILTIN, dict, "new_text")?;
 
     let Some(language) = Language::from_name(&language_name) else {
-        return Ok(unsupported_language_response(&language_name));
+        let health = ParserHealth::unavailable(None, ParserOperation::SafeEdit);
+        return Ok(health.attach_to(unsupported_language_response(&language_name)));
     };
+    let (tree, health) = source_health(&source, language, ParserOperation::SafeEdit)?;
+    if !health.is_verified() {
+        return Ok(health.attach_to(parser_not_verified_response()));
+    }
 
     let lines = source.split('\n').collect::<Vec<&str>>();
-    let outcome = locate_symbol(REPLACE_BUILTIN, &source, language, &symbol_name, &lines)?;
+    let outcome = locate_symbol(&tree, &source, language, &symbol_name, &lines);
     match outcome {
         LocateOutcome::Found(range) => {
             let new_lines = replace_range(&lines, range.start_line, range.end_line, &new_text);
             let collapsed = collapse_blank_lines(new_lines);
             let new_source = collapsed.join("\n");
             match validate_syntax(&new_source, language) {
-                Ok(()) => Ok(build_dict([
-                    ("result", str_value("replaced")),
-                    ("source", str_value(&new_source)),
-                ])),
-                Err(details) => Ok(build_dict([
-                    ("result", str_value("syntax_error_after_edit")),
-                    ("details", str_value(&details)),
-                ])),
+                Ok(()) => Ok(
+                    ParserHealth::observed(language, ParserOperation::SafeEdit, false).attach_to(
+                        build_dict([
+                            ("result", str_value("replaced")),
+                            ("source", str_value(&new_source)),
+                        ]),
+                    ),
+                ),
+                Err(details) => {
+                    Ok(
+                        ParserHealth::observed(language, ParserOperation::SafeEdit, true)
+                            .attach_to(build_dict([
+                                ("result", str_value("syntax_error_after_edit")),
+                                ("details", str_value(&details)),
+                            ])),
+                    )
+                }
             }
         }
         LocateOutcome::NotFound {
             available,
             suggestions,
-        } => Ok(not_found_response(available, suggestions)),
-        LocateOutcome::Ambiguous { match_count } => Ok(ambiguous_response(match_count)),
+        } => Ok(health.attach_to(not_found_response(available, suggestions))),
+        LocateOutcome::Ambiguous { match_count } => {
+            Ok(health.attach_to(ambiguous_response(match_count)))
+        }
     }
+}
+
+fn source_health(
+    source: &str,
+    language: Language,
+    operation: ParserOperation,
+) -> Result<(tree_sitter::Tree, ParserHealth), HostlibError> {
+    let tree = parse_source(source, language)?;
+    let health = ParserHealth::observed(language, operation, tree.root_node().has_error());
+    Ok((tree, health))
+}
+
+fn parser_not_verified_response() -> VmValue {
+    build_dict([
+        ("result", str_value("parser_not_verified")),
+        (
+            "details",
+            str_value("source structure is not verified; refusing structural mutation"),
+        ),
+    ])
 }
 
 /// Parse `source`, run the existing symbol extractor, then resolve
@@ -171,17 +227,13 @@ pub(super) fn run_replace(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 /// extended upward to capture decorators / doc comments / attributes
 /// that share the symbol's preamble.
 fn locate_symbol(
-    builtin: &'static str,
+    tree: &tree_sitter::Tree,
     source: &str,
     language: Language,
     symbol_name: &str,
     lines: &[&str],
-) -> Result<LocateOutcome, HostlibError> {
-    let tree = parse_source(source, language).map_err(|err| HostlibError::Backend {
-        builtin,
-        message: err.to_string(),
-    })?;
-    let symbols = extract(&tree, source, language);
+) -> LocateOutcome {
+    let symbols = extract(tree, source, language);
 
     let parts: Vec<&str> = symbol_name.splitn(2, '.').collect();
     let (qualifier, base_name) = if parts.len() == 2 {
@@ -202,17 +254,17 @@ fn locate_symbol(
         .collect();
 
     if matches.len() > 1 {
-        return Ok(LocateOutcome::Ambiguous {
+        return LocateOutcome::Ambiguous {
             match_count: matches.len(),
-        });
+        };
     }
     let Some(matched) = matches.first().copied() else {
         let available: Vec<String> = symbols.iter().map(|s| s.name.clone()).collect();
         let suggestions = fuzzy::best_matches(symbol_name, &available, 3);
-        return Ok(LocateOutcome::NotFound {
+        return LocateOutcome::NotFound {
             available,
             suggestions,
-        });
+        };
     };
 
     let decl_line_zero = matched.start_row as usize;
@@ -222,10 +274,10 @@ fn locate_symbol(
         .saturating_add(1)
         .min(lines.len());
 
-    Ok(LocateOutcome::Found(SymbolRange {
+    LocateOutcome::Found(SymbolRange {
         start_line,
         end_line,
-    }))
+    })
 }
 
 /// Walk upward from a declaration line and return the 0-based line index
@@ -291,11 +343,14 @@ fn validate_syntax(source: &str, language: Language) -> Result<(), String> {
         Err(_) => return Err("Failed to parse modified source".into()),
     };
     let root = tree.root_node();
+    if !root.has_error() {
+        return Ok(());
+    }
     let errors = collect_errors(root, source);
     if let Some(first) = errors.into_iter().next() {
         return Err(first);
     }
-    Ok(())
+    Err("post-edit source has parse errors".into())
 }
 
 fn collect_errors(root: tree_sitter::Node<'_>, source: &str) -> Vec<String> {

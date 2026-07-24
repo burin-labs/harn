@@ -1068,6 +1068,7 @@ jobs:
       - run: make check-receipt-structs
       - run: make check-docs-links
       - run: make check-tree-sitter-keywords
+      - run: make check-grammar-fitness
       - run: make check-generated-registry
       - run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/verify_release_metadata.harn'
       - name: Check no retroactive CHANGELOG edits

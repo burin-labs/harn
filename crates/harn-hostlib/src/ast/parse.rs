@@ -17,6 +17,7 @@ use crate::tools::args::{
     build_dict, dict_arg, optional_int, optional_string, require_string, str_value,
 };
 
+use super::health::{ParserHealth, ParserOperation};
 use super::language::Language;
 use super::types::ParsedNode;
 
@@ -52,6 +53,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let source = read_source(&path_str, max_bytes as usize)?;
     let tree = parse_source(&source, language)?;
     let (root_id, nodes) = flatten(&tree);
+    let had_errors = tree.root_node().has_error();
+    let health = ParserHealth::observed(language, ParserOperation::Parse, had_errors);
 
     let nodes_list: Vec<VmValue> = nodes.iter().map(ParsedNode::to_vm_value).collect();
 
@@ -60,7 +63,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("language", str_value(language.name())),
         ("root_id", VmValue::Int(root_id as i64)),
         ("nodes", VmValue::List(Arc::new(nodes_list))),
-        ("had_errors", VmValue::Bool(tree.root_node().has_error())),
+        ("had_errors", VmValue::Bool(had_errors)),
+        ("health", health.to_vm_value()),
     ]))
 }
 

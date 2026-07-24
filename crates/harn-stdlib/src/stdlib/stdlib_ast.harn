@@ -22,7 +22,9 @@
  * `m.captures.target.text`. The query failing to compile yields
  * `result == "invalid_query"`; an unknown grammar yields
  * `result == "unsupported_language"`. Search never throws on syntax errors —
- * it queries the partial tree and reports `had_errors`.
+ * it queries the partial tree and reports `had_errors`. Every response carries
+ * versioned `health`; partial results are useful for reads but are not verified
+ * evidence for structural writes.
  *
  * @effects: [host]
  * @errors: [backend]

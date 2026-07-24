@@ -74,12 +74,26 @@ fn __edit_fast_apply_validate(path, proposed, params) {
     hostlib_ast_parse_errors({path: path, content: proposed, language: opts?.language})
   }
   if is_err(raw) {
-    return {ok: true, skipped: true, reason: to_string(unwrap_err(raw)), errors: []}
+    return {
+      ok: false,
+      skipped: false,
+      result: "parser_unavailable",
+      reason: to_string(unwrap_err(raw)),
+      errors: [],
+      health: {coverage: "unavailable", source: {observation: "not_observed"}},
+    }
   }
   const parsed = unwrap(raw)
-  const supported = parsed?.supported ?? true
-  if !supported {
-    return {ok: true, skipped: true, reason: "unsupported_language", errors: []}
+  const coverage = parsed?.health?.coverage ?? "unavailable"
+  if coverage != "verified" {
+    return {
+      ok: false,
+      skipped: false,
+      result: "parser_not_verified",
+      reason: "parser coverage is " + coverage,
+      errors: parsed?.errors ?? [],
+      health: parsed?.health ?? {coverage: "unavailable"},
+    }
   }
   const had_errors = parsed?.had_errors ?? false
   return {
@@ -92,6 +106,7 @@ fn __edit_fast_apply_validate(path, proposed, params) {
     },
     errors: parsed?.errors ?? [],
     top_level_decl_count: parsed?.top_level_decl_count,
+    health: parsed?.health,
   }
 }
 
@@ -213,8 +228,8 @@ fn __edit_fast_apply_result(ctx, fields = nil) {
  * - `llm_options`: extra `llm_call` options. Explicit options win over role
  *   defaults.
  * - `dry_run`: return the preview diff without writing.
- * - `validate_syntax`: default true; rejects parse errors for supported
- *   Tree-Sitter languages and skips validation for unsupported paths.
+ * - `validate_syntax`: default true; requires verified ParserHealth coverage.
+ *   Parser/runtime unavailability fails closed instead of appearing clean.
  *
  * @effects: [host, fs, llm.call]
  * @errors: [backend]
@@ -322,7 +337,7 @@ pub fn edit_fast_apply(params) {
     return __edit_fast_apply_result(
       ctx,
       {
-        result: "syntax_error",
+        result: validation.result,
         validation: validation,
         validation_rejected: 1,
         errors: validation.errors,

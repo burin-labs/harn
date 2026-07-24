@@ -55,6 +55,7 @@ use super::edit_common::{
     first_syntax_error, format_query_error, lossy_str, read_source, resolve_target_capture,
     sha256_hex, write_source,
 };
+use super::health::{ParserHealth, ParserOperation};
 use super::language::{Language, TEXT_PATCH_FALLBACK};
 use super::parse::parse_bytes;
 
@@ -137,10 +138,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let language = match Language::detect(&path, language_hint.as_deref()) {
         Some(l) => l,
         None => {
-            return Ok(unsupported_language_response(
+            let health = ParserHealth::unavailable(None, ParserOperation::SafeEdit);
+            return Ok(health.attach_to(unsupported_language_response(
                 &path_str,
                 language_hint.as_deref(),
-            ));
+            )));
         }
     };
 
@@ -150,10 +152,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let ts_language = match language.ts_language() {
         Some(l) => l,
         None => {
-            return Ok(unsupported_language_response(
+            let health = ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit);
+            return Ok(health.attach_to(unsupported_language_response(
                 &path_str,
                 language_hint.as_deref(),
-            ));
+            )));
         }
     };
 
@@ -161,18 +164,22 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let query = match Query::new(&ts_language, &query_text) {
         Ok(q) => q,
-        Err(err) => return Ok(invalid_query_response(&query_text, &err)),
+        Err(err) => {
+            let health = ParserHealth::not_observed(language, ParserOperation::SafeEdit);
+            return Ok(health.attach_to(invalid_query_response(&query_text, &err)));
+        }
     };
 
     let target_index = match resolve_target_capture(&query, &target_capture) {
         Ok(idx) => idx,
         Err(detail) => {
-            return Ok(no_match_response(
+            let health = ParserHealth::not_observed(language, ParserOperation::SafeEdit);
+            return Ok(health.attach_to(no_match_response(
                 &path_str,
                 &query_text,
                 &target_capture,
                 &detail,
-            ));
+            )));
         }
     };
 
@@ -180,18 +187,29 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         builtin: BUILTIN,
         message: err.to_string(),
     })?;
+    let source_health = ParserHealth::observed(
+        language,
+        ParserOperation::SafeEdit,
+        tree.root_node().has_error(),
+    );
+    if !source_health.is_verified() {
+        return Ok(source_health.attach_to(non_verified_response(
+            &path_str,
+            "source structure is not verified; refusing structural mutation",
+        )));
+    }
 
     let anchors = collect_anchors(&query, &tree, &source, target_index);
     if anchors.is_empty() {
-        return Ok(no_match_response(
+        return Ok(source_health.attach_to(no_match_response(
             &path_str,
             &query_text,
             &target_capture,
             "query produced zero anchors",
-        ));
+        )));
     }
     if anchors.len() > 1 {
-        return Ok(ambiguous_response(&anchors));
+        return Ok(source_health.attach_to(ambiguous_response(&anchors)));
     }
 
     // Re-borrow the matched node so we can inspect its children — the
@@ -208,12 +226,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     ) {
         Ok(p) => p,
         Err(invalid) => {
-            return Ok(invalid_anchor_response(
+            return Ok(source_health.attach_to(invalid_anchor_response(
                 &path_str,
                 position,
                 &anchors[0],
                 &invalid,
-            ));
+            )));
         }
     };
 
@@ -225,21 +243,34 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let insertion_text = format!("{}{body}{}", plan.prefix, plan.suffix);
     let patched = splice_insert(&source, plan.insertion_byte, &insertion_text);
 
+    let post_edit_error = first_syntax_error(&patched, language);
     if validate {
-        if let Some(detail) = first_syntax_error(&patched, language) {
-            return Ok(syntax_error_response(
+        if let Some(detail) = &post_edit_error {
+            let health = ParserHealth::observed(language, ParserOperation::SafeEdit, true);
+            return Ok(health.attach_to(syntax_error_response(
                 &path_str,
                 &lossy_str(&patched),
-                &detail,
-            ));
+                detail,
+            )));
         }
+    } else if !dry_run {
+        let health = ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit);
+        return Ok(health.attach_to(non_verified_response(
+            &path_str,
+            "`validate: false` is allowed only for dry-run previews",
+        )));
     }
 
     if !dry_run {
         write_source(BUILTIN, &path, &patched, session_id.as_deref())?;
     }
 
-    Ok(applied_response(
+    let health = ParserHealth::observed(
+        language,
+        ParserOperation::SafeEdit,
+        post_edit_error.is_some(),
+    );
+    Ok(health.attach_to(applied_response(
         &path_str,
         &source,
         &patched,
@@ -249,7 +280,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         position,
         &plan.target_indent,
         dry_run,
-    ))
+    )))
 }
 
 #[derive(Debug, Clone)]
@@ -721,6 +752,15 @@ fn syntax_error_response(path: &str, after: &str, detail: &str) -> VmValue {
         ("path", str_value(path)),
         ("details", str_value(detail)),
         ("preview", str_value(after)),
+    ])
+}
+
+fn non_verified_response(path: &str, details: &str) -> VmValue {
+    build_dict([
+        ("result", str_value("parser_not_verified")),
+        ("applied", VmValue::Bool(false)),
+        ("path", str_value(path)),
+        ("details", str_value(details)),
     ])
 }
 

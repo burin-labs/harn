@@ -1,0 +1,490 @@
+{
+  "corpus": {
+    "digest": "sha256:f71ba4f4e1d87e4e9197613e5eab539a079afa245b5751c64843aff7e97846e1",
+    "schema_version": 1
+  },
+  "languages": [
+    {
+      "authority": "Harn language conformance",
+      "language": "harn",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:d1630285c9933dc91c191397145514a546900e02cd938a472bb641e293c3769e",
+        "checksum": null,
+        "name": "tree-sitter-harn",
+        "source": "workspace-path",
+        "version": "0.10.34"
+      }
+    },
+    {
+      "authority": "TypeScript language syntax",
+      "language": "typescript",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
+        "checksum": "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
+        "name": "tree-sitter-typescript",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.2"
+      }
+    },
+    {
+      "authority": "TypeScript JSX syntax",
+      "language": "tsx",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
+        "checksum": "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff",
+        "name": "tree-sitter-typescript",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.2"
+      }
+    },
+    {
+      "authority": "ECMAScript syntax",
+      "language": "javascript",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:68204f2abc0627a90bdf06e605f5c470aa26fdcb2081ea553a04bdad756693f5",
+        "checksum": "68204f2abc0627a90bdf06e605f5c470aa26fdcb2081ea553a04bdad756693f5",
+        "name": "tree-sitter-javascript",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.25.0"
+      }
+    },
+    {
+      "authority": "ECMAScript JSX syntax",
+      "language": "jsx",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:68204f2abc0627a90bdf06e605f5c470aa26fdcb2081ea553a04bdad756693f5",
+        "checksum": "68204f2abc0627a90bdf06e605f5c470aa26fdcb2081ea553a04bdad756693f5",
+        "name": "tree-sitter-javascript",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.25.0"
+      }
+    },
+    {
+      "authority": "Python language syntax",
+      "language": "python",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:6bf85fd39652e740bf60f46f4cda9492c3a9ad75880575bf14960f775cb74a1c",
+        "checksum": "6bf85fd39652e740bf60f46f4cda9492c3a9ad75880575bf14960f775cb74a1c",
+        "name": "tree-sitter-python",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.25.0"
+      }
+    },
+    {
+      "authority": "Go language specification",
+      "language": "go",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:c8560a4d2f835cc0d4d2c2e03cbd0dde2f6114b43bc491164238d333e28b16ea",
+        "checksum": "c8560a4d2f835cc0d4d2c2e03cbd0dde2f6114b43bc491164238d333e28b16ea",
+        "name": "tree-sitter-go",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.25.0"
+      }
+    },
+    {
+      "authority": "Rust reference syntax",
+      "language": "rust",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:439e577dbe07423ec2582ac62c7531120dbfccfa6e5f92406f93dd271a120e45",
+        "checksum": "439e577dbe07423ec2582ac62c7531120dbfccfa6e5f92406f93dd271a120e45",
+        "name": "tree-sitter-rust",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.24.2"
+      }
+    },
+    {
+      "authority": "Java language specification",
+      "language": "java",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:0aa6cbcdc8c679b214e616fd3300da67da0e492e066df01bcf5a5921a71e90d6",
+        "checksum": "0aa6cbcdc8c679b214e616fd3300da67da0e492e066df01bcf5a5921a71e90d6",
+        "name": "tree-sitter-java",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.5"
+      }
+    },
+    {
+      "authority": "ISO C syntax",
+      "language": "c",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:a9b2eb57a55fed6b00812912e730b7a275cf4fe98bfd6a5d76263d4438371728",
+        "checksum": "a9b2eb57a55fed6b00812912e730b7a275cf4fe98bfd6a5d76263d4438371728",
+        "name": "tree-sitter-c",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.24.2"
+      }
+    },
+    {
+      "authority": "ISO C++ syntax",
+      "language": "cpp",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:df2196ea9d47b4ab4a31b9297eaa5a5d19a0b121dceb9f118f6790ad0ab94743",
+        "checksum": "df2196ea9d47b4ab4a31b9297eaa5a5d19a0b121dceb9f118f6790ad0ab94743",
+        "name": "tree-sitter-cpp",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.4"
+      }
+    },
+    {
+      "authority": "C# language specification",
+      "language": "csharp",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:c1aac67f1ad71de1d6d39708d34811081c26dfa495658de6c14c34200849357c",
+        "checksum": "c1aac67f1ad71de1d6d39708d34811081c26dfa495658de6c14c34200849357c",
+        "name": "tree-sitter-c-sharp",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.5"
+      }
+    },
+    {
+      "authority": "Ruby syntax",
+      "language": "ruby",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:be0484ea4ef6bb9c575b4fdabde7e31340a8d2dbc7d52b321ac83da703249f95",
+        "checksum": "be0484ea4ef6bb9c575b4fdabde7e31340a8d2dbc7d52b321ac83da703249f95",
+        "name": "tree-sitter-ruby",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.1"
+      }
+    },
+    {
+      "authority": "Kotlin language specification",
+      "language": "kotlin",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:e800ebbda938acfbf224f4d2c34947a31994b1295ee6e819b65226c7b51b4450",
+        "checksum": "e800ebbda938acfbf224f4d2c34947a31994b1295ee6e819b65226c7b51b4450",
+        "name": "tree-sitter-kotlin-ng",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "1.1.0"
+      }
+    },
+    {
+      "authority": "PHP language specification",
+      "language": "php",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:0d8c17c3ab69052c5eeaa7ff5cd972dd1bc25d1b97ee779fec391ad3b5df5592",
+        "checksum": "0d8c17c3ab69052c5eeaa7ff5cd972dd1bc25d1b97ee779fec391ad3b5df5592",
+        "name": "tree-sitter-php",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.24.2"
+      }
+    },
+    {
+      "authority": "Scala language specification",
+      "language": "scala",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:de5a4a7ff23a55474ce6a741d52aaeca7a82fe9421bb982b86e98c6ac8629397",
+        "checksum": "de5a4a7ff23a55474ce6a741d52aaeca7a82fe9421bb982b86e98c6ac8629397",
+        "name": "tree-sitter-scala",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.26.0"
+      }
+    },
+    {
+      "authority": "POSIX shell and Bash syntax",
+      "language": "bash",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:9e5ec769279cc91b561d3df0d8a5deb26b0ad40d183127f409494d6d8fc53062",
+        "checksum": "9e5ec769279cc91b561d3df0d8a5deb26b0ad40d183127f409494d6d8fc53062",
+        "name": "tree-sitter-bash",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.25.1"
+      }
+    },
+    {
+      "authority": "Swift compiler acceptance and alex-pinkus/tree-sitter-swift#597",
+      "language": "swift",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:f3b98fb6bc8e6a6a10023f401aa6a1858115e849dfaf7de57dd8b8ea0f257bd9",
+        "checksum": "f3b98fb6bc8e6a6a10023f401aa6a1858115e849dfaf7de57dd8b8ea0f257bd9",
+        "name": "tree-sitter-swift",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.7.2"
+      }
+    },
+    {
+      "authority": "Zig compiler acceptance and harn#3010",
+      "language": "zig",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:ab11fc124851b0db4dd5e55983bbd9631192e93238389dcd44521715e5d53e28",
+        "checksum": "ab11fc124851b0db4dd5e55983bbd9631192e93238389dcd44521715e5d53e28",
+        "name": "tree-sitter-zig",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "1.1.2"
+      }
+    },
+    {
+      "authority": "Elixir syntax",
+      "language": "elixir",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:66dd064a762ed95bfc29857fa3cb7403bb1e5cb88112de0f6341b7e47284ba40",
+        "checksum": "66dd064a762ed95bfc29857fa3cb7403bb1e5cb88112de0f6341b7e47284ba40",
+        "name": "tree-sitter-elixir",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.3.5"
+      }
+    },
+    {
+      "authority": "Lua reference syntax",
+      "language": "lua",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:8daaf5f4235188a58603c39760d5fa5d4b920d36a299c934adddae757f32a10c",
+        "checksum": "8daaf5f4235188a58603c39760d5fa5d4b920d36a299c934adddae757f32a10c",
+        "name": "tree-sitter-lua",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.5.0"
+      }
+    },
+    {
+      "authority": "Haskell language report syntax",
+      "language": "haskell",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:977c51e504548cba13fc27cb5a2edab2124cf6716a1934915d07ab99523b05a4",
+        "checksum": "977c51e504548cba13fc27cb5a2edab2124cf6716a1934915d07ab99523b05a4",
+        "name": "tree-sitter-haskell",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.1"
+      }
+    },
+    {
+      "authority": "R language syntax",
+      "language": "r",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:ffc9954ec870dcad6cffdd302b405306c68cf031ed79a78cd9746f6740d9fe20",
+        "checksum": "ffc9954ec870dcad6cffdd302b405306c68cf031ed79a78cd9746f6740d9fe20",
+        "name": "tree-sitter-r",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "1.3.0"
+      }
+    },
+    {
+      "authority": "RFC 8259",
+      "language": "json",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:4d727acca406c0020cffc6cf35516764f36c8e3dc4408e5ebe2cb35a947ec471",
+        "checksum": "4d727acca406c0020cffc6cf35516764f36c8e3dc4408e5ebe2cb35a947ec471",
+        "name": "tree-sitter-json",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.24.8"
+      }
+    },
+    {
+      "authority": "YAML 1.2 syntax",
+      "language": "yaml",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:53c223db85f05e34794f065454843b0668ebc15d240ada63e2b5939f43ce7c97",
+        "checksum": "53c223db85f05e34794f065454843b0668ebc15d240ada63e2b5939f43ce7c97",
+        "name": "tree-sitter-yaml",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.7.2"
+      }
+    },
+    {
+      "authority": "TOML 1.0 syntax",
+      "language": "toml",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:e9adc2c898ae49730e857d75be403da3f92bb81d8e37a2f918a08dd10de5ebb1",
+        "checksum": "e9adc2c898ae49730e857d75be403da3f92bb81d8e37a2f918a08dd10de5ebb1",
+        "name": "tree-sitter-toml-ng",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.7.0"
+      }
+    },
+    {
+      "authority": "CSS syntax",
+      "language": "css",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:a5cbc5e18f29a2c6d6435891f42569525cf95435a3e01c2f1947abcde178686f",
+        "checksum": "a5cbc5e18f29a2c6d6435891f42569525cf95435a3e01c2f1947abcde178686f",
+        "name": "tree-sitter-css",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.25.0"
+      }
+    },
+    {
+      "authority": "WHATWG HTML syntax",
+      "language": "html",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:261b708e5d92061ede329babaaa427b819329a9d427a1d710abb0f67bbef63ee",
+        "checksum": "261b708e5d92061ede329babaaa427b819329a9d427a1d710abb0f67bbef63ee",
+        "name": "tree-sitter-html",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.23.2"
+      }
+    },
+    {
+      "authority": "SQL grammar fixture",
+      "language": "sql",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:9d198ad3c319c02e43c21efa1ec796b837afcb96ffaef1a40c1978fbdcec7d17",
+        "checksum": "9d198ad3c319c02e43c21efa1ec796b837afcb96ffaef1a40c1978fbdcec7d17",
+        "name": "tree-sitter-sequel",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.3.11"
+      }
+    },
+    {
+      "authority": "CommonMark syntax",
+      "language": "markdown",
+      "operations": [
+        "parse",
+        "search",
+        "safe_edit"
+      ],
+      "package": {
+        "artifact_digest": "sha256:2efd398be546456c814598ee56c0f51769a77241511b4a58077815d120afa882",
+        "checksum": "2efd398be546456c814598ee56c0f51769a77241511b4a58077815d120afa882",
+        "name": "tree-sitter-md",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "version": "0.5.3"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "tree_sitter_runtime": "0.26.11"
+}

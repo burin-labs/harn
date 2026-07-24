@@ -78,7 +78,8 @@
             "unsupported_language",
             "syntax_error",
             "read_error",
-            "parse_error"
+            "parse_error",
+            "parser_not_verified"
           ],
           "description": "Per-file outcome. `applied` even when `changed` is false (e.g. an idempotent re-run that matched but produced identical bytes)."
         },
@@ -105,9 +106,24 @@
         "details": {
           "type": "string",
           "description": "Human-readable explanation for a non-applied result."
+        },
+        "health": {
+          "type": "object",
+          "description": "Versioned ParserHealth provenance and coverage contract for this file.",
+          "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+          "properties": {
+            "schema_version": { "const": 1 },
+            "operation": { "enum": ["parse", "search", "safe_edit"] },
+            "grammar": { "type": "object" },
+            "corpus": { "type": "object" },
+            "source": { "type": "object" },
+            "support": { "enum": ["supported", "unsupported"] },
+            "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+          },
+          "additionalProperties": false
         }
       },
-      "required": ["path", "result", "match_count", "changed"],
+      "required": ["path", "result", "match_count", "changed", "health"],
       "additionalProperties": false
     }
   }

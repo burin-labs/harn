@@ -12,9 +12,24 @@
       "type": "array",
       "items": { "$ref": "#/$defs/Node" }
     },
-    "had_errors": { "type": "boolean" }
+    "had_errors": { "type": "boolean" },
+    "health": {
+      "type": "object",
+      "description": "Versioned ParserHealth provenance, corpus fitness, source observation, support, and coverage contract.",
+      "required": ["schema_version", "operation", "grammar", "corpus", "source", "support", "coverage"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "operation": { "enum": ["parse", "search", "safe_edit"] },
+        "grammar": { "type": "object" },
+        "corpus": { "type": "object" },
+        "source": { "type": "object" },
+        "support": { "enum": ["supported", "unsupported"] },
+        "coverage": { "enum": ["verified", "partial", "unavailable", "inconclusive"] }
+      },
+      "additionalProperties": false
+    }
   },
-  "required": ["path", "language", "root_id", "nodes", "had_errors"],
+  "required": ["path", "language", "root_id", "nodes", "had_errors", "health"],
   "additionalProperties": false,
   "$defs": {
     "Node": {
