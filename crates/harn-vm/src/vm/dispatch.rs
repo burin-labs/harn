@@ -339,7 +339,7 @@ impl Vm {
     ) -> Result<VmValue, VmError> {
         let saved_handlers = std::mem::take(&mut self.exception_handlers);
         let active_context = (!crate::step_runtime::is_tracked_function(&closure.func.name))
-            .then(crate::step_runtime::take_active_context);
+            .then(crate::step_runtime::suspend_active_context);
 
         let target_frame_depth = self.frames.len();
         let frame_result = self.push_closure_frame_args(closure, &args);
@@ -350,9 +350,7 @@ impl Vm {
         };
 
         self.exception_handlers = saved_handlers;
-        if let Some(ctx) = active_context {
-            crate::step_runtime::restore_active_context(ctx);
-        }
+        drop(active_context);
 
         result
     }

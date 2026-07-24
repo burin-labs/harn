@@ -150,7 +150,6 @@ impl Drop for ExecutionDeadlineGuard {
             .store(self.previous, Ordering::Release);
         if !self.completed {
             self.state.abandoned.store(true, Ordering::Release);
-            crate::orchestration::clear_pipeline_on_finish();
         }
     }
 }

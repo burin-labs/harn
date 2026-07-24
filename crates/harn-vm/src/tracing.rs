@@ -9,6 +9,9 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::value::VmValue;
@@ -539,6 +542,88 @@ impl SpanCollector {
 thread_local! {
     static COLLECTOR: RefCell<SpanCollector> = RefCell::new(SpanCollector::new());
     static TRACING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// Close only spans opened after this checkpoint if its owning future is
+/// cancelled. Existing caller spans remain active and completed history is
+/// retained.
+pub(crate) fn checkpoint() -> TracingCheckpoint {
+    let open_at_checkpoint =
+        COLLECTOR.with(|collector| collector.borrow().open.keys().copied().collect::<Vec<_>>());
+    TracingCheckpoint {
+        open_at_checkpoint: Some(open_at_checkpoint),
+    }
+}
+
+pub(crate) struct TracingCheckpoint {
+    open_at_checkpoint: Option<Vec<u64>>,
+}
+
+impl TracingCheckpoint {
+    pub(crate) fn complete(mut self) {
+        self.open_at_checkpoint = None;
+    }
+}
+
+impl Drop for TracingCheckpoint {
+    fn drop(&mut self) {
+        let Some(baseline) = self.open_at_checkpoint.take() else {
+            return;
+        };
+        COLLECTOR.with(|collector| {
+            let mut collector = collector.borrow_mut();
+            let mut abandoned = collector
+                .active_stack
+                .iter()
+                .rev()
+                .copied()
+                .filter(|span_id| !baseline.contains(span_id))
+                .collect::<Vec<_>>();
+            for span_id in collector.open.keys().rev().copied() {
+                if !baseline.contains(&span_id) && !abandoned.contains(&span_id) {
+                    abandoned.push(span_id);
+                }
+            }
+            for span_id in abandoned {
+                collector.set_metadata(span_id, "status", serde_json::json!("abandoned"));
+                collector.end(span_id);
+            }
+        });
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub(crate) struct Checkpointed<F> {
+        // Field order matters on cancellation: abandon open spans before
+        // dropping `inner`, whose ordinary RAII span guards would otherwise
+        // close them as if execution completed normally.
+        checkpoint: Option<TracingCheckpoint>,
+        #[pin]
+        inner: F,
+    }
+}
+
+pub(crate) fn checkpoint_future<F: Future>(inner: F) -> Checkpointed<F> {
+    Checkpointed {
+        checkpoint: Some(checkpoint()),
+        inner,
+    }
+}
+
+impl<F: Future> Future for Checkpointed<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let result = this.inner.poll(cx);
+        if result.is_ready() {
+            this.checkpoint
+                .take()
+                .expect("tracing checkpoint")
+                .complete();
+        }
+        result
+    }
 }
 
 /// Best-effort wall-clock millis since the UNIX epoch. Honors an active

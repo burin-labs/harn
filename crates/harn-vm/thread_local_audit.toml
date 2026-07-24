@@ -697,7 +697,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/step_runtime.rs"
-statics = ["STEP_REGISTRY", "PERSONA_REGISTRY", "STEP_REGISTRY_LEN", "PERSONA_REGISTRY_LEN", "PERSONA_STACK", "STEP_STACK", "COMPLETED_STEPS", "PERSONA_HOOKS"]
+statics = ["STEP_REGISTRY", "PERSONA_REGISTRY", "STEP_REGISTRY_LEN", "PERSONA_REGISTRY_LEN", "PERSONA_STACK", "STEP_STACK", "ACTIVE_CONTEXT_SUSPENSION_STACK", "COMPLETED_STEPS", "PERSONA_HOOKS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

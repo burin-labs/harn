@@ -309,11 +309,11 @@ impl super::super::Vm {
         payload: VmValue,
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + Send + 'a>> {
         Box::pin(async move {
-            let snapshot = crate::step_runtime::take_active_context();
+            let active_context = crate::step_runtime::suspend_active_context();
             let result = self
                 .call_closure_args(handler, CallArgs::One(&payload))
                 .await;
-            crate::step_runtime::restore_active_context(snapshot);
+            drop(active_context);
             result
         })
     }
