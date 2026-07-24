@@ -451,6 +451,51 @@ pub fn signal_pid_tree_group_and_token_with_report(
     }
 }
 
+/// Signal a process tree and cleanup-token cohort without signaling the
+/// `preserved_pgid`.
+///
+/// Owner-death guardians use this to kill every worker in their own group,
+/// reap adopted descendants, and only then terminate the now-empty group
+/// leader. Processes that escaped into another group still receive a group
+/// signal.
+#[cfg(unix)]
+pub fn signal_pid_tree_and_token_preserving_group_with_report(
+    pid: u32,
+    cleanup_token: Option<&str>,
+    preserved_pgid: u32,
+    signal: i32,
+) -> ProcessCleanupReport {
+    let preserved_pgid = preserved_pgid as i32;
+    let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
+    for child in descendant_processes(pid) {
+        signal_pid_preserving_group(child.pid, preserved_pgid, signal);
+        report.merge_child(child.with_signal(signal));
+    }
+    if let Some(cleanup_token) = cleanup_token.filter(|token| !token.is_empty()) {
+        for child in cleanup_token_processes(cleanup_token) {
+            if child.pid == pid {
+                continue;
+            }
+            signal_pid_preserving_group(child.pid, preserved_pgid, signal);
+            report.merge_child(child.with_signal(signal));
+        }
+    }
+    signal_pid_preserving_group(pid, preserved_pgid, signal);
+    report
+}
+
+#[cfg(unix)]
+fn signal_pid_preserving_group(pid: u32, preserved_pgid: i32, signal: i32) {
+    let pid = pid as i32;
+    let pgid = unsafe { libc::getpgid(pid) };
+    unsafe {
+        if pgid > 0 && pgid != preserved_pgid {
+            libc::kill(-pgid, signal);
+        }
+        libc::kill(pid, signal);
+    }
+}
+
 #[cfg(unix)]
 fn descendant_processes(root: u32) -> Vec<ProcessCleanupChild> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};

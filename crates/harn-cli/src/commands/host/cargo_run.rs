@@ -91,6 +91,7 @@ async fn run_cargo(store: &harn_hostlib::HostLeaseStore, args: HostLeaseRunCargo
         env_mode: harn_hostlib::process::EnvMode::InheritClean,
         use_stdin: true,
         configure_process_group: true,
+        owner_death: harn_hostlib::process::OwnerDeathPolicy::None,
         output_capture: harn_hostlib::process::OutputCapture::Inherit,
     }) {
         Ok(worker) => worker,
@@ -662,6 +663,7 @@ fn cargo_spawn_spec(
         env_mode: harn_hostlib::process::EnvMode::InheritClean,
         use_stdin: true,
         configure_process_group: false,
+        owner_death: harn_hostlib::process::OwnerDeathPolicy::None,
         output_capture: harn_hostlib::process::OutputCapture::Inherit,
     })
 }

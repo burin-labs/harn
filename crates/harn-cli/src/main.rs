@@ -23,6 +23,10 @@ use std::ffi::OsStr;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() {
+    #[cfg(feature = "hostlib")]
+    if harn_hostlib::process::owner_death::run_if_requested() {
+        unreachable!("owner-death guardian execution does not return");
+    }
     match invoked_as().as_deref() {
         Some("harn-lsp") => run_sidecar("harn-lsp", harn_lsp::run),
         Some("harn-dap") => run_sidecar("harn-dap", harn_dap::run),

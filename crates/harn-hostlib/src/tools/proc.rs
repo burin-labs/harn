@@ -161,6 +161,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         // interrupt path below (scope cancellation / deadline expiry) can
         // reap grandchildren with a single group signal.
         configure_process_group: true,
+        owner_death: process_handle::OwnerDeathPolicy::None,
         output_capture: file_capture
             .as_ref()
             .map(FileCapture::output_capture)

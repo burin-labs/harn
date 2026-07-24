@@ -47,7 +47,9 @@ use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::json::vm_dict_to_json;
-use crate::process::{self as process_handle, ProcessHandle, ProcessKiller, SpawnSpec};
+use crate::process::{
+    self as process_handle, OwnerDeathPolicy, ProcessHandle, ProcessKiller, SpawnSpec,
+};
 use crate::tools::args::to_agent_path;
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
@@ -408,6 +410,7 @@ pub(crate) fn spawn_long_running_with_options(
         env_mode: options.env_mode,
         use_stdin: false,
         configure_process_group: true,
+        owner_death: OwnerDeathPolicy::KillContainment,
         output_capture: process_handle::OutputCapture::Pipe,
     };
     let handle = process_handle::spawn_process(spec)
