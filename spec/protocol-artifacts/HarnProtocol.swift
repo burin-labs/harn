@@ -133,6 +133,9 @@ public enum HarnProtocolConstants {
         "visible_delta",
         "visible_text",
     ]
+    public static let promptResultExtensionFields: [String] = [
+        "terminal",
+    ]
     public static let toolCallReceiptStatuses: [String] = [
         "ok",
         "schema_violation",
@@ -453,6 +456,50 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnAgentTerminalKind: String, Codable, Sendable, CaseIterable {
+    case natural = "natural"
+    case userCancelled = "user_cancelled"
+    case policyBudget = "policy_budget"
+    case policyNoProgress = "policy_no_progress"
+    case policyGuardrail = "policy_guardrail"
+    case policyStop = "policy_stop"
+    case providerError = "provider_error"
+    case runtimeError = "runtime_error"
+    case suspended = "suspended"
+    case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "natural",
+        "user_cancelled",
+        "policy_budget",
+        "policy_no_progress",
+        "policy_guardrail",
+        "policy_stop",
+        "provider_error",
+        "runtime_error",
+        "suspended",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnAgentTerminalOwner: String, Codable, Sendable, CaseIterable {
+    case agent = "agent"
+    case user = "user"
+    case policy = "policy"
+    case provider = "provider"
+    case harness = "harness"
+    case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "agent",
+        "user",
+        "policy",
+        "provider",
+        "harness",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnACPPromptErrorSchema: String, Codable, Sendable, CaseIterable {
     case harnAcpPromptErrorV1 = "harn.acp.prompt_error.v1"
 
@@ -472,6 +519,25 @@ public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var retryAfterMs: Int?
     public var provider: String?
     public var model: String?
+}
+
+public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
+    public var kind: HarnAgentTerminalKind
+    public var reason: String
+    public var owner: HarnAgentTerminalOwner
+}
+
+public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {
+    public var terminal: HarnAgentTerminalOutcome?
+}
+
+public struct HarnACPPromptResultMetadata: Codable, Sendable, Equatable {
+    public var harn: HarnACPPromptResultHarnMetadata
+}
+
+public struct HarnACPPromptResult: Codable, Sendable, Equatable {
+    public var stopReason: String
+    public var _meta: HarnACPPromptResultMetadata?
 }
 
 public enum HarnToolCallReceiptStatus: String, Codable, Sendable, CaseIterable {

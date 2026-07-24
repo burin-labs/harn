@@ -98,12 +98,9 @@ pub struct HostBridge {
     skills_reload_requested: Arc<AtomicBool>,
     /// Whether the current daemon-mode agent loop is blocked in idle wait.
     daemon_idle: Arc<AtomicBool>,
-    /// Canonical ACP `stopReason` recorded by the most recent `agent_loop`
-    /// finalize during this prompt. Read once by the ACP adapter when the
-    /// pipeline returns and populated by `host_agent_session_finalize`.
-    /// Pipelines that don't run an agent loop leave this `None`, in which
-    /// case the adapter falls back to `end_turn`.
-    prompt_stop_reason: std::sync::Mutex<Option<String>>,
+    /// Canonical ACP stop reason and producer-owned terminal outcome recorded
+    /// by the most recent `agent_loop` finalize during this prompt.
+    prompt_outcome: std::sync::Mutex<Option<(String, crate::agent_events::AgentTerminalOutcome)>>,
     /// Per-call visible assistant text state for call_progress notifications.
     visible_call_states: std::sync::Mutex<HashMap<String, VisibleTextState>>,
     /// Whether an LLM call's deltas should be exposed to end users while streaming.
@@ -921,7 +918,7 @@ impl HostBridge {
             resume_requested,
             skills_reload_requested,
             daemon_idle,
-            prompt_stop_reason: std::sync::Mutex::new(None),
+            prompt_outcome: std::sync::Mutex::new(None),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
@@ -995,7 +992,7 @@ impl HostBridge {
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: Arc::new(AtomicBool::new(false)),
-            prompt_stop_reason: std::sync::Mutex::new(None),
+            prompt_outcome: std::sync::Mutex::new(None),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
@@ -1019,7 +1016,7 @@ impl HostBridge {
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: Arc::new(AtomicBool::new(false)),
-            prompt_stop_reason: std::sync::Mutex::new(None),
+            prompt_outcome: std::sync::Mutex::new(None),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: Some(InProcessHost {
@@ -1190,23 +1187,26 @@ impl HostBridge {
         self.daemon_idle.load(Ordering::SeqCst)
     }
 
-    /// Record the canonical ACP `stopReason` for the current prompt. The
-    /// last writer wins, which matches the semantic that an outer
-    /// `agent_loop` (the one whose result the user observes) always
+    /// Record the current prompt's canonical ACP stop reason and typed terminal
+    /// outcome atomically. The last writer wins because the outer `agent_loop`
     /// finalizes after any inner loops it spawned.
-    pub fn set_prompt_stop_reason(&self, reason: &str) {
+    pub fn set_prompt_outcome(
+        &self,
+        stop_reason: &str,
+        terminal: &crate::agent_events::AgentTerminalOutcome,
+    ) {
         *self
-            .prompt_stop_reason
+            .prompt_outcome
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(reason.to_string());
+            .unwrap_or_else(|e| e.into_inner()) = Some((stop_reason.to_string(), terminal.clone()));
     }
 
-    /// Consume any prompt stop reason recorded during this prompt. The
-    /// ACP adapter calls this once after the pipeline returns; pipelines
-    /// that didn't run an `agent_loop` see `None` and the adapter falls
-    /// back to `end_turn`.
-    pub fn take_prompt_stop_reason(&self) -> Option<String> {
-        self.prompt_stop_reason
+    /// Consume the prompt outcome after the pipeline returns. Pipelines that
+    /// did not run an `agent_loop` leave this absent.
+    pub fn take_prompt_outcome(
+        &self,
+    ) -> Option<(String, crate::agent_events::AgentTerminalOutcome)> {
+        self.prompt_outcome
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take()

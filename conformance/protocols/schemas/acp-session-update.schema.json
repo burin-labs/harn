@@ -192,7 +192,60 @@
       "properties": {
         "jsonrpc": { "const": "2.0" },
         "id": { "type": ["string", "integer"] },
-        "result": { "type": "object" }
+        "result": {
+          "type": "object",
+          "if": { "required": ["stopReason"] },
+          "then": { "$ref": "#/$defs/SessionPromptResult" }
+        }
+      }
+    },
+    "SessionPromptResult": {
+      "type": "object",
+      "required": ["stopReason"],
+      "additionalProperties": true,
+      "properties": {
+        "stopReason": { "type": "string", "minLength": 1 },
+        "_meta": { "$ref": "#/$defs/PromptResultExtensionMeta" }
+      }
+    },
+    "PromptResultExtensionMeta": {
+      "type": "object",
+      "required": ["harn"],
+      "additionalProperties": true,
+      "properties": {
+        "harn": { "$ref": "#/$defs/HarnPromptResultMeta" }
+      }
+    },
+    "HarnPromptResultMeta": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "terminal": { "$ref": "#/$defs/AgentTerminalOutcome" }
+      }
+    },
+    "AgentTerminalOutcome": {
+      "type": "object",
+      "required": ["kind", "reason", "owner"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "natural",
+            "user_cancelled",
+            "policy_budget",
+            "policy_no_progress",
+            "policy_guardrail",
+            "policy_stop",
+            "provider_error",
+            "runtime_error",
+            "suspended",
+            "unknown"
+          ]
+        },
+        "reason": { "type": "string" },
+        "owner": {
+          "enum": ["agent", "user", "policy", "provider", "harness", "unknown"]
+        }
       }
     },
     "JsonRpcErrorResponse": {

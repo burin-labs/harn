@@ -1,7 +1,8 @@
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 
 use super::constants::*;
@@ -139,6 +140,24 @@ pub(super) fn generate_rust_for_version(artifact_version: &str) -> String {
         "AGENT_TERMINAL_CLASSES",
         "Stable terminal classes carried by typed ACP prompt-error data.",
         &agent_terminal_class_values(),
+    ));
+    out.push_str(&rust_const_group_owned(
+        "AGENT_TERMINAL_KIND",
+        "AGENT_TERMINAL_KINDS",
+        "Producer-owned agent terminal outcome kinds.",
+        &agent_terminal_kind_values(),
+    ));
+    out.push_str(&rust_const_group_owned(
+        "AGENT_TERMINAL_OWNER",
+        "AGENT_TERMINAL_OWNERS",
+        "Owners attributed by producer-owned agent terminal outcomes.",
+        &agent_terminal_owner_values(),
+    ));
+    out.push_str(&rust_const_group(
+        "HARN_PROMPT_RESULT_EXTENSION_FIELD",
+        "HARN_PROMPT_RESULT_EXTENSION_FIELDS",
+        "`_meta.harn` extension keys on successful ACP prompt results.",
+        HARN_PROMPT_RESULT_EXTENSION_FIELDS,
     ));
     out.push_str(&rust_const_group(
         "HARN_CONTENT_EXTENSION_FIELD",

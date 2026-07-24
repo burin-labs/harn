@@ -811,6 +811,12 @@ Rust embedders get the same facade through `EmbeddedAgentClient`:
 and `run_view_from_path(...)` all use the ACP/server projection paths instead
 of private record parsing.
 
+`send_user_input(...)` decodes Harn's optional
+`result._meta.harn.terminal` extension into the typed prompt result. For
+agent-loop prompts, embedders should report completion only when
+`terminal.kind` is `natural`; `stopReason: end_turn` can also accompany policy
+or unknown stops.
+
 ### Session timeline extension
 
 `harn.session_timeline.query` projects existing Harn observability records into

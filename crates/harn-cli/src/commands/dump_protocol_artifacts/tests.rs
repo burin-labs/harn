@@ -6,7 +6,8 @@ use serde_json::json;
 
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_vm::llm::receipts::{
@@ -142,10 +143,18 @@ fn generated_types_include_harn_wire_vocabularies() {
     assert!(ts.contains("export interface ToolCallReceipt"));
     assert!(ts.contains("HARN_TOOL_CALL_RECEIPT_STATUSES"));
     assert!(ts.contains("export interface HarnACPPromptErrorData"));
+    assert!(ts.contains("export interface HarnACPPromptResult"));
+    assert!(ts.contains("export interface HarnAgentTerminalOutcome"));
     assert!(ts.contains("export interface ACPToolCallDiff"));
     assert!(ts.contains("content?: ACPToolCallContent[]"));
     assert!(swift.contains("public struct HarnACPPromptErrorData"));
+    assert!(swift.contains("public struct HarnACPPromptResult"));
+    assert!(swift.contains("public struct HarnAgentTerminalOutcome"));
     for value in agent_terminal_class_values() {
+        assert!(ts.contains(&value), "TypeScript artifact missing {value}");
+        assert!(swift.contains(&value), "Swift artifact missing {value}");
+    }
+    for value in agent_terminal_kind_values() {
         assert!(ts.contains(&value), "TypeScript artifact missing {value}");
         assert!(swift.contains(&value), "Swift artifact missing {value}");
     }
@@ -199,6 +208,8 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     assert!(rust.contains("pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str ="));
     assert!(rust.contains("pub const ACP_PROMPT_ERROR_DATA_SCHEMA: &str ="));
     assert!(rust.contains("pub const AGENT_TERMINAL_CLASSES: &[&str] = &["));
+    assert!(rust.contains("pub const AGENT_TERMINAL_KINDS: &[&str] = &["));
+    assert!(rust.contains("pub const AGENT_TERMINAL_OWNERS: &[&str] = &["));
     assert!(rust.contains(&format!(
         "pub const HARN_AGENT_EVENT_METHOD: &str = {};",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
@@ -229,6 +240,7 @@ fn generated_rust_includes_harn_wire_vocabularies() {
         "pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = \"visible_delta\""
     ));
     assert!(rust.contains("pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["));
+    assert!(rust.contains("pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["));
     // Dotted / slashed wire names must collapse to valid const identifiers.
     assert!(rust.contains(
         "pub const ACP_DISPATCHED_METHOD_HARN_HITL_RESPOND: &str = \"harn.hitl.respond\""
@@ -244,6 +256,7 @@ fn generated_rust_includes_harn_wire_vocabularies() {
         .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter())
         .chain(HARN_AGENT_EVENT_KINDS.iter())
         .chain(HARN_CONTENT_EXTENSION_FIELDS.iter())
+        .chain(HARN_PROMPT_RESULT_EXTENSION_FIELDS.iter())
         .chain(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS.iter())
     {
         assert!(rust.contains(value), "Rust artifact missing {value}");
@@ -396,7 +409,10 @@ fn generated_python_includes_harn_wire_vocabularies() {
     assert!(py.contains("class _HarnDataclass:"));
     assert!(py.contains("def is_request("));
     assert!(py.contains("class HarnACPPromptErrorData(_HarnDataclass):"));
+    assert!(py.contains("class HarnACPPromptResult(_HarnDataclass):"));
+    assert!(py.contains("class HarnAgentTerminalOutcome(_HarnDataclass):"));
     assert!(py.contains("class AgentTerminalClass(str, Enum):"));
+    assert!(py.contains("class AgentTerminalKind(str, Enum):"));
     for value in HARN_SESSION_UPDATE_EXTENSIONS
         .iter()
         .chain(HARN_AGENT_EVENT_KINDS.iter())
@@ -434,7 +450,10 @@ fn generated_go_includes_harn_wire_vocabularies() {
     assert!(go.contains("type ToolCallReceipt struct"));
     assert!(go.contains("var ToolCallReceiptStatuses = []ToolCallReceiptStatus"));
     assert!(go.contains("type HarnACPPromptErrorData struct"));
+    assert!(go.contains("type HarnACPPromptResult struct"));
+    assert!(go.contains("type HarnAgentTerminalOutcome struct"));
     assert!(go.contains("var AgentTerminalClasses = []AgentTerminalClass"));
+    assert!(go.contains("var AgentTerminalKinds = []AgentTerminalKind"));
     for value in HARN_SESSION_UPDATE_EXTENSIONS
         .iter()
         .chain(HARN_AGENT_EVENT_KINDS.iter())
@@ -466,6 +485,14 @@ fn acp_prompt_error_schema_matches_runtime_terminal_classes() {
     assert_eq!(
         schema["$defs"]["HarnPromptErrorData"]["properties"]["terminalClass"]["enum"],
         json!(agent_terminal_class_values())
+    );
+    assert_eq!(
+        schema["$defs"]["AgentTerminalOutcome"]["properties"]["kind"]["enum"],
+        json!(agent_terminal_kind_values())
+    );
+    assert_eq!(
+        schema["$defs"]["AgentTerminalOutcome"]["properties"]["owner"]["enum"],
+        json!(agent_terminal_owner_values())
     );
 }
 
@@ -563,6 +590,10 @@ fn round_trip_fixture_matches_python_and_go_field_set() {
         fixture["envelopes"]["errorResponse"]["error"]["data"]["schema"],
         json!(ACP_PROMPT_ERROR_DATA_SCHEMA)
     );
+    assert_eq!(
+        fixture["envelopes"]["response"]["result"]["_meta"]["harn"]["terminal"]["kind"],
+        "policy_budget"
+    );
     assert_eq!(fixture["toolCallReceipt"]["schema_version"], json!(1));
 }
 
@@ -590,6 +621,10 @@ fn manifest_advertises_python_and_go_bindings() {
     assert_eq!(
         manifest["acp"]["harnSessionTimelineMethods"],
         json!(HARN_SESSION_TIMELINE_METHODS)
+    );
+    assert_eq!(
+        manifest["acp"]["promptResultExtensionFields"],
+        json!(HARN_PROMPT_RESULT_EXTENSION_FIELDS)
     );
     assert!(
         manifest["acp"]["dispatchedMethods"]

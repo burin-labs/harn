@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use harn_serve::adapters::acp::{ACP_SESSION_UPDATE_VARIANTS, HARN_SESSION_UPDATE_EXTENSIONS};
 use harn_vm::agent_events::{
-    ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus, WorkerEvent,
+    AgentTerminalKind, ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus, WorkerEvent,
 };
 use harn_vm::llm::AgentTerminalClass;
 use harn_vm::tool_annotations::{SideEffectLevel, ToolKind};
@@ -47,6 +47,17 @@ pub(super) fn agent_terminal_class_values() -> Vec<String> {
         .iter()
         .map(|class| class.as_str().to_string())
         .collect()
+}
+
+pub(super) fn agent_terminal_kind_values() -> Vec<String> {
+    AgentTerminalKind::ALL
+        .iter()
+        .map(|kind| kind.as_str().to_string())
+        .collect()
+}
+
+pub(super) fn agent_terminal_owner_values() -> Vec<String> {
+    unique_ordered(AgentTerminalKind::ALL.iter().map(|kind| kind.owner()))
 }
 
 pub(super) fn worker_status_values() -> Vec<String> {

@@ -70,6 +70,12 @@ Unknown values should be ignored per ACP forward-compatibility rules.
 Hosts that render Harn extensions should key off the explicit extension
 list from `initialize` instead of a local allow-list.
 
+Agent-loop prompt results expose the same producer-owned terminal outcome used
+by Harn's runtime under `result._meta.harn.terminal`, advertised through
+`agentCapabilities._meta.harn.promptResultExtensionFields`. Hosts must treat
+only `terminal.kind: "natural"` as completion; canonical ACP `stopReason:
+"end_turn"` alone is not completion evidence.
+
 Harn keeps its tool-rendering extensions under `tool_call._meta.harn` and
 `tool_call_update._meta.harn`, following ACP's extension convention while
 leaving canonical ACP fields at their standard locations. These Harn

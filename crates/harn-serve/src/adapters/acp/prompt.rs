@@ -308,9 +308,11 @@ impl AcpServer {
                 if !output.is_empty() {
                     bridge.send_update(&output);
                 }
-                let stop_reason = host_bridge_for_response
-                    .take_prompt_stop_reason()
-                    .unwrap_or_else(|| "end_turn".to_string());
+                let (stop_reason, terminal) =
+                    host_bridge_for_response.take_prompt_outcome().map_or_else(
+                        || ("end_turn".to_string(), None),
+                        |(reason, terminal)| (reason, Some(terminal)),
+                    );
                 if stop_reason != "cancelled" {
                     #[cfg(feature = "hostlib")]
                     let fs_snapshot_ids = harn_hostlib::fs_snapshot::list_snapshots(&session_id)
@@ -335,7 +337,11 @@ impl AcpServer {
                 send_json_response(
                     &send_output,
                     &id_owned,
-                    serde_json::json!({"stopReason": stop_reason}),
+                    serde_json::to_value(AcpSessionPromptResult {
+                        stop_reason,
+                        meta: terminal.map(AcpMeta::terminal),
+                    })
+                    .expect("ACP prompt result serializes"),
                 );
             }
             Err(e) => {

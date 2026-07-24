@@ -1,7 +1,8 @@
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, ACP_SCHEMA_COMPATIBILITY, HARN_AGENT_EVENT_KINDS,
-    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
-    HARN_SESSION_UPDATE_EXTENSIONS, HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
+    HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::llm::receipts::{
@@ -117,6 +118,7 @@ pub(super) fn generate_manifest_for_version(
             "harnAgentEventKinds": HARN_AGENT_EVENT_KINDS,
             "toolLifecycleExtensionFields": HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
             "contentExtensionFields": HARN_CONTENT_EXTENSION_FIELDS,
+            "promptResultExtensionFields": HARN_PROMPT_RESULT_EXTENSION_FIELDS,
             "contentBlockTypes": ACP_CONTENT_BLOCK_TYPES,
             "toolKinds": tool_kind_values(),
             "toolCallStatuses": tool_call_status_values(),
@@ -328,7 +330,18 @@ pub(super) fn generate_round_trip_fixture_for_version(
     let response = json!({
         "jsonrpc": "2.0",
         "id": 17,
-        "result": {"ok": true},
+        "result": {
+            "stopReason": "max_turn_requests",
+            "_meta": {
+                "harn": {
+                    "terminal": {
+                        "kind": "policy_budget",
+                        "reason": "max_iterations",
+                        "owner": "policy",
+                    },
+                },
+            },
+        },
     });
     let error_response = json!({
         "jsonrpc": "2.0",

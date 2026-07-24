@@ -285,6 +285,9 @@
       "agent_loop_protocol_failure",
       "generic_throw"
     ],
+    "promptResultExtensionFields": [
+      "terminal"
+    ],
     "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v0.12.2",
     "sessionUpdateVariants": [
       "user_message",

@@ -105,6 +105,7 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
 
 pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] =
     &["permission_preview", "visible_delta", "visible_text"];
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal"];
 pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
     serde_json::json!({
         "harn": {
@@ -112,6 +113,7 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
             "sessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
             "toolLifecycleExtensionFields": HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
             "contentExtensionFields": HARN_CONTENT_EXTENSION_FIELDS,
+            "promptResultExtensionFields": HARN_PROMPT_RESULT_EXTENSION_FIELDS,
             // ACP `ExtNotification` methods this server emits beyond the
             // canonical `session/update` stream. Clients that recognize
             // the method consume the payload; clients that don't MUST

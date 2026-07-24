@@ -1,6 +1,7 @@
 use harn_serve::adapters::acp::{
     ACP_PROMPT_ERROR_DATA_SCHEMA, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
-    HARN_PROVIDER_CATALOG_METHOD, HARN_SESSION_UPDATE_EXTENSIONS,
+    HARN_PROMPT_RESULT_EXTENSION_FIELDS, HARN_PROVIDER_CATALOG_METHOD,
+    HARN_SESSION_UPDATE_EXTENSIONS,
 };
 use harn_serve::MCP_PROTOCOL_VERSION;
 use harn_vm::llm::receipts::{TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_STATUSES};
@@ -92,6 +93,21 @@ pub(super) fn generate_typescript_for_version(artifact_version: &str) -> String 
         "AGENT_TERMINAL_CLASSES",
         &agent_terminal_class_values(),
         "AgentTerminalClass",
+    ));
+    out.push_str(&ts_array_owned(
+        "AGENT_TERMINAL_KINDS",
+        &agent_terminal_kind_values(),
+        "AgentTerminalKind",
+    ));
+    out.push_str(&ts_array_owned(
+        "AGENT_TERMINAL_OWNERS",
+        &agent_terminal_owner_values(),
+        "AgentTerminalOwner",
+    ));
+    out.push_str(&ts_array(
+        "HARN_PROMPT_RESULT_EXTENSION_FIELDS",
+        HARN_PROMPT_RESULT_EXTENSION_FIELDS,
+        "HarnPromptResultExtensionField",
     ));
     out.push_str(&ts_array(
         "HARN_AGENT_EVENT_KINDS",
@@ -247,6 +263,21 @@ export interface HarnACPPromptErrorData {
   retryAfterMs?: number
   provider?: string
   model?: string
+}
+
+export interface HarnAgentTerminalOutcome {
+  kind: AgentTerminalKind
+  reason: string
+  owner: AgentTerminalOwner
+}
+
+export interface HarnACPPromptResult {
+  stopReason: string
+  _meta?: {
+    harn: {
+      terminal?: HarnAgentTerminalOutcome
+    }
+  }
 }
 
 export interface ACPNotification {
@@ -493,6 +524,7 @@ export interface ACPAgentCapabilities {
     sessionUpdateExtensions?: HarnACPSessionUpdateExtension[]
     toolLifecycleExtensionFields?: string[]
     contentExtensionFields?: string[]
+    promptResultExtensionFields?: HarnPromptResultExtensionField[]
     extensionMethods?: Record<string, ACPObject>
     hostCapabilityOperations?: Record<string, string[]>
     extensionContract?: string
