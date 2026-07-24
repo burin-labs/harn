@@ -606,163 +606,183 @@ mod tests {
         )
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn reviewed_receipt_applies_idempotently_and_projects_its_trigger() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, args) = apply_fixture(temp.path());
+    #[test]
+    fn reviewed_receipt_applies_idempotently_and_projects_its_trigger() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, args) = apply_fixture(temp.path());
 
-        let first = apply_reviewed_persona(Some(&manifest), &args).await;
-        assert!(first.ok, "{:#?}", first.error);
-        assert_eq!(first.stage, PersonaApplyStage::Complete);
-        let first_install = first.install.as_ref().unwrap();
-        assert_eq!(first_install.alias, "harn-accepted-prompt-watch-persona");
-        assert_eq!(first_install.path, "personas/accepted_prompt_watch");
-        assert!(first_install.manifest_changed);
-        assert!(first_install.generation_changed);
-        let first_activation = first.activation.as_ref().unwrap();
-        assert!(first_activation.changed);
-        let first_verification = first.verification.as_ref().unwrap();
-        assert_eq!(
-            first_verification.persona_id,
-            "harn-accepted-prompt-watch-persona/accepted_prompt_watch"
-        );
-        assert_eq!(
-            first_verification.trigger_ids,
-            vec!["harn-accepted-prompt-watch-persona/accepted_prompt_watch-cron"]
-        );
-        let manifest_after_first = fs::read(&manifest).unwrap();
+            let first = apply_reviewed_persona(Some(&manifest), &args).await;
+            assert!(first.ok, "{:#?}", first.error);
+            assert_eq!(first.stage, PersonaApplyStage::Complete);
+            let first_install = first.install.as_ref().unwrap();
+            assert_eq!(first_install.alias, "harn-accepted-prompt-watch-persona");
+            assert_eq!(first_install.path, "personas/accepted_prompt_watch");
+            assert!(first_install.manifest_changed);
+            assert!(first_install.generation_changed);
+            let first_activation = first.activation.as_ref().unwrap();
+            assert!(first_activation.changed);
+            let first_verification = first.verification.as_ref().unwrap();
+            assert_eq!(
+                first_verification.persona_id,
+                "harn-accepted-prompt-watch-persona/accepted_prompt_watch"
+            );
+            assert_eq!(
+                first_verification.trigger_ids,
+                vec!["harn-accepted-prompt-watch-persona/accepted_prompt_watch-cron"]
+            );
+            let manifest_after_first = fs::read(&manifest).unwrap();
 
-        let second = apply_reviewed_persona(Some(&manifest), &args).await;
-        assert!(second.ok, "{:#?}", second.error);
-        let second_install = second.install.as_ref().unwrap();
-        assert_eq!(second_install.alias, first_install.alias);
-        assert!(!second_install.manifest_changed);
-        assert!(!second_install.generation_changed);
-        assert_eq!(second_install.generation, first_install.generation);
-        assert!(!second.activation.as_ref().unwrap().changed);
-        assert_eq!(fs::read(&manifest).unwrap(), manifest_after_first);
+            let second = apply_reviewed_persona(Some(&manifest), &args).await;
+            assert!(second.ok, "{:#?}", second.error);
+            let second_install = second.install.as_ref().unwrap();
+            assert_eq!(second_install.alias, first_install.alias);
+            assert!(!second_install.manifest_changed);
+            assert!(!second_install.generation_changed);
+            assert_eq!(second_install.generation, first_install.generation);
+            assert!(!second.activation.as_ref().unwrap().changed);
+            assert_eq!(fs::read(&manifest).unwrap(), manifest_after_first);
 
-        let extensions = package::try_load_runtime_extensions(&manifest).unwrap();
-        let handler = format!("persona://{}", first_verification.persona_id);
-        let trigger = extensions
-            .triggers
-            .iter()
-            .find(|trigger| trigger.handler == handler)
-            .unwrap();
-        assert_eq!(
-            trigger.kind_specific.get("schedule"),
-            Some(&toml::Value::String("0 9 * * *".to_string()))
-        );
-        assert_eq!(
-            trigger.kind_specific.get("timezone"),
-            Some(&toml::Value::String("UTC".to_string()))
-        );
+            let extensions = package::try_load_runtime_extensions(&manifest).unwrap();
+            let handler = format!("persona://{}", first_verification.persona_id);
+            let trigger = extensions
+                .triggers
+                .iter()
+                .find(|trigger| trigger.handler == handler)
+                .unwrap();
+            assert_eq!(
+                trigger.kind_specific.get("schedule"),
+                Some(&toml::Value::String("0 9 * * *".to_string()))
+            );
+            assert_eq!(
+                trigger.kind_specific.get("timezone"),
+                Some(&toml::Value::String("UTC".to_string()))
+            );
+        });
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn concurrent_identical_apply_waits_for_failed_transaction_then_succeeds() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, first_args) = apply_fixture(temp.path());
-        let second_args = PersonaMaterializeArgs {
-            blueprint: first_args.blueprint.clone(),
-            compile_receipt: first_args.compile_receipt.clone(),
-            output_root: first_args.output_root.clone(),
-            force: first_args.force,
-            activate: first_args.activate,
-            json: first_args.json,
-        };
-        let (attempted_tx, attempted_rx) = mpsc::channel();
-        let second_handle = Arc::new(Mutex::new(None));
-        let second_handle_for_verifier = Arc::clone(&second_handle);
-        let second_manifest = manifest.clone();
+    #[test]
+    fn concurrent_identical_apply_waits_for_failed_transaction_then_succeeds() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, first_args) = apply_fixture(temp.path());
+            let second_args = PersonaMaterializeArgs {
+                blueprint: first_args.blueprint.clone(),
+                compile_receipt: first_args.compile_receipt.clone(),
+                output_root: first_args.output_root.clone(),
+                force: first_args.force,
+                activate: first_args.activate,
+                json: first_args.json,
+            };
+            let (attempted_tx, attempted_rx) = mpsc::channel();
+            let second_handle = Arc::new(Mutex::new(None));
+            let second_handle_for_verifier = Arc::clone(&second_handle);
+            let second_manifest = manifest.clone();
 
-        let first =
-            apply_reviewed_persona_with_verifier(Some(&manifest), &first_args, move |_, _, _| {
-                let handle = thread::spawn(move || {
-                    package::project_mutation_lock_test_probe::install(move || {
-                        attempted_tx.send(()).unwrap();
-                    });
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .unwrap()
-                        .block_on(apply_reviewed_persona(Some(&second_manifest), &second_args))
-                });
-                *second_handle_for_verifier.lock().unwrap() = Some(handle);
-                attempted_rx.recv().unwrap();
-                Err("forced verification failure".to_string())
-            })
+            let first = apply_reviewed_persona_with_verifier(
+                Some(&manifest),
+                &first_args,
+                move |_, _, _| {
+                    let handle = thread::Builder::new()
+                        .name("concurrent-persona-apply-test".into())
+                        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
+                        .spawn(move || {
+                            package::project_mutation_lock_test_probe::install(move || {
+                                attempted_tx.send(()).unwrap();
+                            });
+                            tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .unwrap()
+                                .block_on(apply_reviewed_persona(
+                                    Some(&second_manifest),
+                                    &second_args,
+                                ))
+                        })
+                        .expect("failed to spawn concurrent persona-apply test thread");
+                    *second_handle_for_verifier.lock().unwrap() = Some(handle);
+                    attempted_rx.recv().unwrap();
+                    Err("forced verification failure".to_string())
+                },
+            )
             .await;
-        assert!(!first.ok);
-        assert_eq!(first.stage, PersonaApplyStage::Verify);
+            assert!(!first.ok);
+            assert_eq!(first.stage, PersonaApplyStage::Verify);
 
-        let second = second_handle
-            .lock()
-            .unwrap()
-            .take()
-            .unwrap()
-            .join()
-            .unwrap();
-        assert!(second.ok, "{:#?}", second.error);
-        let persona_id = second.verification.unwrap().persona_id;
-        assert!(package::list_persona_activations(Some(&manifest))
-            .unwrap()
-            .iter()
-            .any(|activation| activation.persona_id == persona_id));
-        let project = package::load_manifest_context_for_anchor(Some(&manifest)).unwrap();
-        assert!(project
-            .manifest
-            .dependencies
-            .contains_key("harn-accepted-prompt-watch-persona"));
+            let second = second_handle
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .join()
+                .unwrap();
+            assert!(second.ok, "{:#?}", second.error);
+            let persona_id = second.verification.unwrap().persona_id;
+            assert!(package::list_persona_activations(Some(&manifest))
+                .unwrap()
+                .iter()
+                .any(|activation| activation.persona_id == persona_id));
+            let project = package::load_manifest_context_for_anchor(Some(&manifest)).unwrap();
+            assert!(project
+                .manifest
+                .dependencies
+                .contains_key("harn-accepted-prompt-watch-persona"));
+        });
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn apply_requires_an_explicit_project_manifest() {
-        let temp = tempfile::tempdir().unwrap();
-        let (_, args) = apply_fixture(temp.path());
+    #[test]
+    fn apply_requires_an_explicit_project_manifest() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (_, args) = apply_fixture(temp.path());
 
-        let receipt = apply_reviewed_persona(None, &args).await;
+            let receipt = apply_reviewed_persona(None, &args).await;
 
-        assert!(!receipt.ok);
-        assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
-        assert!(receipt.materialization.is_none());
-        assert!(receipt.install.is_none());
-        assert_eq!(receipt.error.unwrap().code, "manifest_required");
+            assert!(!receipt.ok);
+            assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
+            assert!(receipt.materialization.is_none());
+            assert!(receipt.install.is_none());
+            assert_eq!(receipt.error.unwrap().code, "manifest_required");
+        });
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn apply_rejects_relative_output_root_traversal_before_materialization() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, mut args) = apply_fixture(temp.path());
-        args.output_root = PathBuf::from("../outside");
+    #[test]
+    fn apply_rejects_relative_output_root_traversal_before_materialization() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, mut args) = apply_fixture(temp.path());
+            args.output_root = PathBuf::from("../outside");
 
-        let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
+            let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
 
-        assert!(!receipt.ok);
-        assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
-        assert!(receipt.materialization.is_none());
-        assert!(receipt.install.is_none());
-        assert_eq!(receipt.error.unwrap().code, "output_root_invalid");
+            assert!(!receipt.ok);
+            assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
+            assert!(receipt.materialization.is_none());
+            assert!(receipt.install.is_none());
+            assert_eq!(receipt.error.unwrap().code, "output_root_invalid");
+        });
     }
 
     #[cfg(unix)]
-    #[tokio::test(flavor = "current_thread")]
-    async fn apply_rejects_relative_output_root_symlink_escape() {
-        use std::os::unix::fs::symlink;
+    #[test]
+    fn apply_rejects_relative_output_root_symlink_escape() {
+        block_on_cli_stack_async(|| async {
+            use std::os::unix::fs::symlink;
 
-        let temp = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let (manifest, mut args) = apply_fixture(temp.path());
-        symlink(outside.path(), temp.path().join("linked-personas")).unwrap();
-        args.output_root = PathBuf::from("linked-personas");
+            let temp = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            let (manifest, mut args) = apply_fixture(temp.path());
+            symlink(outside.path(), temp.path().join("linked-personas")).unwrap();
+            args.output_root = PathBuf::from("linked-personas");
 
-        let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
+            let receipt = apply_reviewed_persona(Some(&manifest), &args).await;
 
-        assert!(!receipt.ok);
-        assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
-        assert!(receipt.materialization.is_none());
-        assert_eq!(receipt.error.unwrap().code, "output_root_invalid");
-        assert!(!outside.path().join("accepted_prompt_watch").exists());
+            assert!(!receipt.ok);
+            assert_eq!(receipt.stage, PersonaApplyStage::Preflight);
+            assert!(receipt.materialization.is_none());
+            assert_eq!(receipt.error.unwrap().code, "output_root_invalid");
+            assert!(!outside.path().join("accepted_prompt_watch").exists());
+        });
     }
 
     #[test]
@@ -800,173 +820,181 @@ mod tests {
         });
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn verification_failure_restores_the_exact_prior_activation() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, args) = apply_fixture(temp.path());
-        let first = apply_reviewed_persona(Some(&manifest), &args).await;
-        assert!(first.ok, "{:#?}", first.error);
-        let persona_id = first.verification.unwrap().persona_id;
+    #[test]
+    fn verification_failure_restores_the_exact_prior_activation() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, args) = apply_fixture(temp.path());
+            let first = apply_reviewed_persona(Some(&manifest), &args).await;
+            assert!(first.ok, "{:#?}", first.error);
+            let persona_id = first.verification.unwrap().persona_id;
 
-        package::activate_persona(
-            Some(&manifest),
-            &persona_id,
-            &PersonaAttenuation {
-                autonomy_tier: Some(PersonaAutonomyTier::Shadow),
-                ..PersonaAttenuation::default()
-            },
-            123_456,
-        )
-        .unwrap();
-        let ledger = package::activation_ledger_path(temp.path());
-        let ledger_before = fs::read(&ledger).unwrap();
-        let activation_before = package::list_persona_activations(Some(&manifest)).unwrap();
-
-        let failed = apply_reviewed_persona_with_verifier(Some(&manifest), &args, |_, _, _| {
-            Err("forced verification failure".to_string())
-        })
-        .await;
-
-        assert!(!failed.ok);
-        assert_eq!(failed.stage, PersonaApplyStage::Verify);
-        assert_eq!(failed.error.unwrap().code, "verification_failed");
-        assert_eq!(fs::read(&ledger).unwrap(), ledger_before);
-        assert_eq!(
-            package::list_persona_activations(Some(&manifest)).unwrap(),
-            activation_before
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn activation_rollback_refuses_to_clobber_a_newer_record() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, args) = apply_fixture(temp.path());
-        let applied = apply_reviewed_persona(Some(&manifest), &args).await;
-        assert!(applied.ok, "{:#?}", applied.error);
-        let expected = applied
-            .activation
-            .unwrap()
-            .activation
-            .expect("successful apply activation record");
-
-        package::activate_persona(
-            Some(&manifest),
-            &expected.persona_id,
-            &PersonaAttenuation {
-                autonomy_tier: Some(PersonaAutonomyTier::Shadow),
-                ..PersonaAttenuation::default()
-            },
-            234_567,
-        )
-        .unwrap();
-        let newer = package::list_persona_activations(Some(&manifest)).unwrap();
-
-        let error = package::restore_persona_activation(Some(&manifest), &expected, None)
-            .expect_err("rollback must compare-and-swap the expected activation");
-
-        assert!(matches!(
-            error,
-            package::PersonaActivationError::RollbackConflict { .. }
-        ));
-        assert_eq!(
-            package::list_persona_activations(Some(&manifest)).unwrap(),
-            newer
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn activation_mutation_returns_the_atomic_replaced_record() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, args) = apply_fixture(temp.path());
-        let applied = apply_reviewed_persona(Some(&manifest), &args).await;
-        assert!(applied.ok, "{:#?}", applied.error);
-        let persona_id = applied.verification.unwrap().persona_id;
-        let stale_observation = package::list_persona_activations(Some(&manifest))
-            .unwrap()
-            .pop()
+            package::activate_persona(
+                Some(&manifest),
+                &persona_id,
+                &PersonaAttenuation {
+                    autonomy_tier: Some(PersonaAutonomyTier::Shadow),
+                    ..PersonaAttenuation::default()
+                },
+                123_456,
+            )
             .unwrap();
+            let ledger = package::activation_ledger_path(temp.path());
+            let ledger_before = fs::read(&ledger).unwrap();
+            let activation_before = package::list_persona_activations(Some(&manifest)).unwrap();
 
-        package::activate_persona(
-            Some(&manifest),
-            &persona_id,
-            &PersonaAttenuation {
-                autonomy_tier: Some(PersonaAutonomyTier::Shadow),
-                ..PersonaAttenuation::default()
-            },
-            345_678,
-        )
-        .unwrap();
-        let interleaved = package::list_persona_activations(Some(&manifest))
-            .unwrap()
-            .pop()
-            .unwrap();
-        let (replacement, previous) = package::activate_persona_with_previous(
-            Some(&manifest),
-            &persona_id,
-            &PersonaAttenuation {
-                autonomy_tier: Some(PersonaAutonomyTier::Suggest),
-                ..PersonaAttenuation::default()
-            },
-            456_789,
-        )
-        .unwrap();
+            let failed = apply_reviewed_persona_with_verifier(Some(&manifest), &args, |_, _, _| {
+                Err("forced verification failure".to_string())
+            })
+            .await;
 
-        assert_ne!(interleaved, stale_observation);
-        assert_eq!(previous.as_ref(), Some(&interleaved));
-        package::restore_persona_activation(
-            Some(&manifest),
-            replacement.activation.as_ref().unwrap(),
-            previous,
-        )
-        .unwrap();
-        assert_eq!(
-            package::list_persona_activations(Some(&manifest)).unwrap(),
-            vec![interleaved]
-        );
+            assert!(!failed.ok);
+            assert_eq!(failed.stage, PersonaApplyStage::Verify);
+            assert_eq!(failed.error.unwrap().code, "verification_failed");
+            assert_eq!(fs::read(&ledger).unwrap(), ledger_before);
+            assert_eq!(
+                package::list_persona_activations(Some(&manifest)).unwrap(),
+                activation_before
+            );
+        });
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn trigger_verification_requires_guarded_complete_package_projection() {
-        let temp = tempfile::tempdir().unwrap();
-        let (manifest, args) = apply_fixture(temp.path());
-        let applied = apply_reviewed_persona(Some(&manifest), &args).await;
-        assert!(applied.ok, "{:#?}", applied.error);
-        let verification = applied.verification.unwrap();
-        let extensions = package::try_load_runtime_extensions(&manifest).unwrap();
-        let installed = extensions
-            .triggers
-            .iter()
-            .find(|trigger| verification.trigger_ids.contains(&trigger.id))
-            .unwrap()
-            .clone();
-        let handler = format!("persona://{}", verification.persona_id);
-
-        let mut root_trigger = installed.clone();
-        root_trigger.execution_guard = None;
-        root_trigger.manifest_path.clone_from(&manifest);
-        assert!(verified_projected_trigger_ids(
-            &[root_trigger],
-            &handler,
-            &installed.manifest_path,
-            &verification.trigger_ids,
-        )
-        .is_err());
-
-        let mut two_expected = verification.trigger_ids.clone();
-        two_expected.push("missing/second-trigger".to_string());
-        two_expected.sort();
-        assert!(verified_projected_trigger_ids(
-            &[installed],
-            &handler,
-            &extensions
-                .runtime_personas
-                .iter()
-                .find(|persona| persona.id == verification.persona_id)
+    #[test]
+    fn activation_rollback_refuses_to_clobber_a_newer_record() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, args) = apply_fixture(temp.path());
+            let applied = apply_reviewed_persona(Some(&manifest), &args).await;
+            assert!(applied.ok, "{:#?}", applied.error);
+            let expected = applied
+                .activation
                 .unwrap()
-                .manifest_path,
-            &two_expected,
-        )
-        .is_err());
+                .activation
+                .expect("successful apply activation record");
+
+            package::activate_persona(
+                Some(&manifest),
+                &expected.persona_id,
+                &PersonaAttenuation {
+                    autonomy_tier: Some(PersonaAutonomyTier::Shadow),
+                    ..PersonaAttenuation::default()
+                },
+                234_567,
+            )
+            .unwrap();
+            let newer = package::list_persona_activations(Some(&manifest)).unwrap();
+
+            let error = package::restore_persona_activation(Some(&manifest), &expected, None)
+                .expect_err("rollback must compare-and-swap the expected activation");
+
+            assert!(matches!(
+                error,
+                package::PersonaActivationError::RollbackConflict { .. }
+            ));
+            assert_eq!(
+                package::list_persona_activations(Some(&manifest)).unwrap(),
+                newer
+            );
+        });
+    }
+
+    #[test]
+    fn activation_mutation_returns_the_atomic_replaced_record() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, args) = apply_fixture(temp.path());
+            let applied = apply_reviewed_persona(Some(&manifest), &args).await;
+            assert!(applied.ok, "{:#?}", applied.error);
+            let persona_id = applied.verification.unwrap().persona_id;
+            let stale_observation = package::list_persona_activations(Some(&manifest))
+                .unwrap()
+                .pop()
+                .unwrap();
+
+            package::activate_persona(
+                Some(&manifest),
+                &persona_id,
+                &PersonaAttenuation {
+                    autonomy_tier: Some(PersonaAutonomyTier::Shadow),
+                    ..PersonaAttenuation::default()
+                },
+                345_678,
+            )
+            .unwrap();
+            let interleaved = package::list_persona_activations(Some(&manifest))
+                .unwrap()
+                .pop()
+                .unwrap();
+            let (replacement, previous) = package::activate_persona_with_previous(
+                Some(&manifest),
+                &persona_id,
+                &PersonaAttenuation {
+                    autonomy_tier: Some(PersonaAutonomyTier::Suggest),
+                    ..PersonaAttenuation::default()
+                },
+                456_789,
+            )
+            .unwrap();
+
+            assert_ne!(interleaved, stale_observation);
+            assert_eq!(previous.as_ref(), Some(&interleaved));
+            package::restore_persona_activation(
+                Some(&manifest),
+                replacement.activation.as_ref().unwrap(),
+                previous,
+            )
+            .unwrap();
+            assert_eq!(
+                package::list_persona_activations(Some(&manifest)).unwrap(),
+                vec![interleaved]
+            );
+        });
+    }
+
+    #[test]
+    fn trigger_verification_requires_guarded_complete_package_projection() {
+        block_on_cli_stack_async(|| async {
+            let temp = tempfile::tempdir().unwrap();
+            let (manifest, args) = apply_fixture(temp.path());
+            let applied = apply_reviewed_persona(Some(&manifest), &args).await;
+            assert!(applied.ok, "{:#?}", applied.error);
+            let verification = applied.verification.unwrap();
+            let extensions = package::try_load_runtime_extensions(&manifest).unwrap();
+            let installed = extensions
+                .triggers
+                .iter()
+                .find(|trigger| verification.trigger_ids.contains(&trigger.id))
+                .unwrap()
+                .clone();
+            let handler = format!("persona://{}", verification.persona_id);
+
+            let mut root_trigger = installed.clone();
+            root_trigger.execution_guard = None;
+            root_trigger.manifest_path.clone_from(&manifest);
+            assert!(verified_projected_trigger_ids(
+                &[root_trigger],
+                &handler,
+                &installed.manifest_path,
+                &verification.trigger_ids,
+            )
+            .is_err());
+
+            let mut two_expected = verification.trigger_ids.clone();
+            two_expected.push("missing/second-trigger".to_string());
+            two_expected.sort();
+            assert!(verified_projected_trigger_ids(
+                &[installed],
+                &handler,
+                &extensions
+                    .runtime_personas
+                    .iter()
+                    .find(|persona| persona.id == verification.persona_id)
+                    .unwrap()
+                    .manifest_path,
+                &two_expected,
+            )
+            .is_err());
+        });
     }
 
     #[test]
