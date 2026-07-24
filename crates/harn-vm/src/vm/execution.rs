@@ -73,14 +73,10 @@ impl Vm {
     /// runners and embedding hosts must be able to stop CPU-bound user code
     /// even when it never yields to the async runtime.
     ///
-    /// The returned future must be awaited to completion. Dropping it after it
-    /// has been polled is unsupported: Rust futures cannot synchronously unwind
-    /// interpreter frames or every thread-local program scope. The VM is then
-    /// poisoned, so every later execution returns
-    /// [`VmError::AbandonedExecution`], and dropping it aborts its spawned child
-    /// tasks. An embedding host must also exclusively own the polling execution
-    /// context and reset that context before running another VM on it; it must
-    /// not globally reset a context shared with unrelated executions.
+    /// Dropping the returned future after polling restores the caller's ambient
+    /// execution context and abandons spans opened by this execution. The VM
+    /// itself remains poisoned, so every later execution returns
+    /// [`VmError::AbandonedExecution`], and dropping it aborts spawned children.
     pub async fn execute_with_timeout(
         &mut self,
         chunk: &Chunk,
@@ -89,10 +85,15 @@ impl Vm {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             VmError::Runtime("execution timeout exceeds the platform clock range".to_string())
         })?;
-        let deadline_guard = self.execution_deadline.install(deadline);
-        let result = self.execute(chunk).await;
-        deadline_guard.complete();
-        result
+        crate::orchestration::scope_ambient_transaction(async {
+            let pipeline_checkpoint = crate::orchestration::checkpoint_pipeline_lifecycle();
+            let deadline_guard = self.execution_deadline.install(deadline);
+            let result = crate::tracing::checkpoint_future(self.execute(chunk)).await;
+            deadline_guard.complete();
+            pipeline_checkpoint.complete();
+            result
+        })
+        .await
     }
 
     /// Execute a shared compiled chunk without cloning its bytecode.
@@ -955,29 +956,24 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn dropping_timed_execution_poison_vm_reuse() {
+    async fn dropping_timed_execution_restores_ambient_state_and_poison_vm_reuse() {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let slow = compile_harn(
-                    r#"pipeline default() {
-  pipeline_on_finish({ _h, value -> value })
-  const child = spawn {
-    child_started()
-    wait_for_child_release()
-    child_effect()
-  }
-  __io_println("first-started")
-  sleep(5s)
-  return 7
-}"#,
-                );
+                crate::reset_thread_local_state();
+                let baseline_dir = tempfile::tempdir().unwrap();
+                let imported_dir = tempfile::tempdir().unwrap();
+                let poisoned_dir = tempfile::tempdir().unwrap();
                 let quick = compile_harn("pipeline default() { return 42 }");
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
+                crate::tracing::set_tracing_enabled(true);
+
                 let child_started = Arc::new(AtomicBool::new(false));
                 let child_effect = Arc::new(AtomicBool::new(false));
                 let child_release = Arc::new(tokio::sync::Notify::new());
+                let (ambient_started_tx, ambient_started_rx) = tokio::sync::oneshot::channel();
+                let ambient_started_tx = Arc::new(std::sync::Mutex::new(Some(ambient_started_tx)));
                 let started_for_builtin = Arc::clone(&child_started);
                 vm.register_builtin("child_started", move |_args, _output| {
                     started_for_builtin.store(true, Ordering::Release);
@@ -996,33 +992,194 @@ mod tests {
                         Ok(VmValue::Nil)
                     }
                 });
-                let callable = vm
+                vm.register_async_builtin("wait_forever", |_ctx, _args| async move {
+                    std::future::pending::<()>().await;
+                    Ok(VmValue::Nil)
+                });
+
+                let imported_path = imported_dir.path().join("cancelled.harn");
+                let imported_source_dir = imported_dir.path().to_path_buf();
+                let poisoned_source_dir = poisoned_dir.path().to_path_buf();
+                let ambient_started_for_builtin = Arc::clone(&ambient_started_tx);
+                vm.register_builtin("strand_ambient_state", move |_args, _output| {
+                    crate::step_runtime::register_persona(
+                        "cancellation_entry",
+                        crate::step_runtime::PersonaDefinition {
+                            name: "cancel_persona".into(),
+                            stages: vec![crate::personas::StageDecl {
+                                name: "cancel_step".into(),
+                                allowed_tools: Some(vec!["cancel_tool".into()]),
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        },
+                    );
+                    crate::step_runtime::register_step(
+                        "cancelled_step",
+                        crate::step_runtime::StepDefinition {
+                            name: "cancel_step".into(),
+                            function: "cancelled_step".into(),
+                            model: Some("cancel-model".into()),
+                            ..Default::default()
+                        },
+                    );
+                    assert!(crate::step_runtime::maybe_push_active_persona(
+                        "cancellation_entry",
+                        1
+                    ));
+                    assert!(crate::step_runtime::maybe_push_active_step(
+                        "cancelled_step",
+                        2,
+                        &[]
+                    ));
+                    assert_eq!(
+                        crate::stdlib::process::source_root_path(),
+                        imported_source_dir
+                    );
+                    assert_eq!(
+                        crate::step_runtime::current_persona_name().as_deref(),
+                        Some("cancel_persona")
+                    );
+                    assert_eq!(
+                        crate::step_runtime::active_step_model_default().as_deref(),
+                        Some("cancel-model")
+                    );
+                    assert_eq!(
+                        crate::orchestration::current_execution_policy()
+                            .unwrap()
+                            .tools,
+                        vec!["cancel_tool"]
+                    );
+                    crate::stdlib::process::set_thread_source_dir(&poisoned_source_dir);
+                    crate::stdlib::process::set_thread_execution_context(Some(
+                        crate::orchestration::RunExecutionRecord {
+                            adapter: Some("cancelled".into()),
+                            ..Default::default()
+                        },
+                    ));
+                    crate::orchestration::push_approval_policy(
+                        crate::orchestration::ToolApprovalPolicy {
+                            auto_deny: vec!["cancel_tool".into()],
+                            ..Default::default()
+                        },
+                    );
+                    if let Some(sender) = ambient_started_for_builtin.lock().unwrap().take() {
+                        let _ = sender.send(());
+                    }
+                    Ok(VmValue::Nil)
+                });
+
+                std::fs::write(
+                    &imported_path,
+                    r#"
+@persona(name: "cancel_persona", stages: [{name: "cancel_step", allowed_tools: ["cancel_tool"]}])
+pub fn cancellation_entry() {
+  return cancelled_step()
+}
+
+@step(name: "cancel_step", model: "cancel-model")
+fn cancelled_step() {
+  pipeline_on_finish({ _h, value -> value })
+  const child = spawn {
+    child_started()
+    wait_for_child_release()
+    child_effect()
+  }
+  strand_ambient_state()
+  wait_forever()
+}
+"#,
+                )
+                .unwrap();
+                let mut helper_exports = vm
                     .load_module_exports_from_source(
-                        "<abandoned-execution-test>",
-                        "pub fn answer() { return 42 }",
+                        "<cancellation-helper>",
+                        "pub fn outer_callback(_h, value) { return value }\n\
+                         pub fn answer() { return 42 }",
                     )
                     .await
-                    .unwrap()
-                    .remove("answer")
                     .unwrap();
+                let callable = helper_exports.remove("answer").unwrap();
+                let outer_callback = helper_exports.remove("outer_callback").unwrap();
+                let slow = compile_harn(&format!(
+                    "import {{ cancellation_entry }} from \"{}\"\n\
+                     pipeline default() {{ return cancellation_entry() }}",
+                    imported_path.display()
+                ));
+
+                let baseline_execution = crate::orchestration::RunExecutionRecord {
+                    cwd: Some(baseline_dir.path().display().to_string()),
+                    source_dir: Some(baseline_dir.path().display().to_string()),
+                    adapter: Some("baseline".into()),
+                    ..Default::default()
+                };
+                let baseline_policy = crate::orchestration::CapabilityPolicy {
+                    tools: vec!["baseline_tool".into(), "cancel_tool".into()],
+                    ..Default::default()
+                };
+                let baseline_approval = crate::orchestration::ToolApprovalPolicy {
+                    auto_approve: vec!["baseline_tool".into()],
+                    ..Default::default()
+                };
+                crate::stdlib::process::set_thread_source_dir(baseline_dir.path());
+                crate::stdlib::process::set_thread_execution_context(Some(
+                    baseline_execution.clone(),
+                ));
+                crate::orchestration::push_execution_policy(baseline_policy.clone());
+                crate::orchestration::push_approval_policy(baseline_approval.clone());
+                crate::orchestration::set_pipeline_on_finish(Arc::clone(&outer_callback));
+                let outer_span =
+                    crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "outer".into());
 
                 let mut execution =
                     Box::pin(vm.execute_with_timeout(&slow, Duration::from_secs(30)));
                 tokio::select! {
                     biased;
                     result = &mut execution => panic!("slow execution unexpectedly finished: {result:?}"),
-                    started = tokio::time::timeout(Duration::from_secs(1), async {
+                    started = async {
+                        ambient_started_rx.await.expect("step did not reach cancellation point");
                         while !child_started.load(Ordering::Acquire) {
                             tokio::task::yield_now().await;
                         }
-                    }) => started.expect("spawned child did not start"),
+                    } => started,
                 }
                 drop(execution);
 
                 assert!(!vm.execution_deadline.is_active());
-                assert!(vm.output().contains("first-started"));
                 assert!(!vm.frames.is_empty(), "fixture must abandon a live frame");
-                assert!(crate::orchestration::take_pipeline_on_finish().is_none());
+                assert_eq!(
+                    crate::stdlib::process::source_root_path(),
+                    baseline_dir.path()
+                );
+                assert_eq!(
+                    crate::stdlib::process::current_execution_context(),
+                    Some(baseline_execution.clone())
+                );
+                assert_eq!(
+                    crate::orchestration::current_execution_policy(),
+                    Some(baseline_policy.clone())
+                );
+                assert_eq!(
+                    crate::orchestration::current_approval_policy(),
+                    Some(baseline_approval.clone())
+                );
+                assert!(crate::step_runtime::current_persona_name().is_none());
+                assert!(crate::step_runtime::active_step_model_default().is_none());
+                assert_eq!(crate::tracing::current_span_id(), Some(outer_span));
+                let restored_callback =
+                    crate::orchestration::take_pipeline_on_finish().unwrap();
+                assert!(Arc::ptr_eq(&restored_callback, &outer_callback));
+                crate::orchestration::set_pipeline_on_finish(restored_callback);
+                let abandoned_spans = crate::tracing::peek_spans();
+                assert!(abandoned_spans.iter().any(|span| {
+                    span.name == "cancel_step"
+                        && span.metadata.get("status") == Some(&serde_json::json!("abandoned"))
+                }));
+                assert!(abandoned_spans.iter().any(|span| {
+                    span.name == "main"
+                        && span.metadata.get("status") == Some(&serde_json::json!("abandoned"))
+                }));
+
                 let frame_depth = vm.frames.len();
                 let output = vm.output().to_string();
                 let error = vm.execute(&quick).await.unwrap_err();
@@ -1047,6 +1204,40 @@ mod tests {
                 assert!(matches!(restart_error, VmError::AbandonedExecution));
                 assert_eq!(vm.frames.len(), frame_depth);
                 assert_eq!(vm.output(), output);
+
+                let mut vm_b = Vm::new();
+                register_vm_stdlib(&mut vm_b);
+                let observed_callback = Arc::clone(&outer_callback);
+                let observed_dir = baseline_dir.path().to_path_buf();
+                vm_b.register_builtin("observe_baseline", move |_args, _output| {
+                    assert_eq!(crate::stdlib::process::source_root_path(), observed_dir);
+                    assert_eq!(
+                        crate::stdlib::process::current_execution_context(),
+                        Some(baseline_execution.clone())
+                    );
+                    assert_eq!(
+                        crate::orchestration::current_execution_policy(),
+                        Some(baseline_policy.clone())
+                    );
+                    assert_eq!(
+                        crate::orchestration::current_approval_policy(),
+                        Some(baseline_approval.clone())
+                    );
+                    assert!(crate::step_runtime::current_persona_name().is_none());
+                    assert!(crate::step_runtime::active_step_model_default().is_none());
+                    let callback = crate::orchestration::take_pipeline_on_finish().unwrap();
+                    assert!(Arc::ptr_eq(&callback, &observed_callback));
+                    crate::orchestration::set_pipeline_on_finish(callback);
+                    Ok(VmValue::Nil)
+                });
+                let vm_b_chunk =
+                    compile_harn("pipeline default() { observe_baseline(); return 42 }");
+                assert!(matches!(
+                    vm_b.execute(&vm_b_chunk).await.unwrap(),
+                    VmValue::Int(42)
+                ));
+                assert_eq!(crate::tracing::current_span_id(), Some(outer_span));
+
                 drop(vm);
                 child_release.notify_one();
                 for _ in 0..10 {
@@ -1056,6 +1247,31 @@ mod tests {
                     !child_effect.load(Ordering::Acquire),
                     "dropping an abandoned VM must abort spawned side effects"
                 );
+                crate::reset_thread_local_state();
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn natural_host_deadline_is_terminal_not_abandoned() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let infinite = compile_harn("pipeline default() { while true {} }");
+                let quick = compile_harn("pipeline default() { return 42 }");
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+
+                let error = vm
+                    .execute_with_timeout(&infinite, Duration::ZERO)
+                    .await
+                    .unwrap_err();
+                assert!(matches!(error, VmError::ExecutionDeadlineExceeded));
+                assert!(!vm.execution_deadline.is_abandoned());
+                assert!(matches!(
+                    vm.execute(&quick).await.unwrap(),
+                    VmValue::Int(42)
+                ));
             })
             .await;
     }

@@ -17,6 +17,7 @@
 use crate::value::VmDictExt;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -171,6 +172,7 @@ thread_local! {
     static PERSONA_REGISTRY_LEN: Cell<usize> = const { Cell::new(0) };
     static PERSONA_STACK: RefCell<Vec<ActivePersona>> = const { RefCell::new(Vec::new()) };
     static STEP_STACK: RefCell<Vec<ActiveStep>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE_CONTEXT_SUSPENSION_STACK: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
     static COMPLETED_STEPS: RefCell<Vec<CompletedStep>> = const { RefCell::new(Vec::new()) };
     static PERSONA_HOOKS: RefCell<Vec<PersonaHookRegistration>> = const { RefCell::new(Vec::new()) };
 }
@@ -185,6 +187,7 @@ pub fn reset_thread_local_state() {
     PERSONA_REGISTRY_LEN.with(|len| len.set(0));
     PERSONA_STACK.with(|s| s.borrow_mut().clear());
     STEP_STACK.with(|s| s.borrow_mut().clear());
+    ACTIVE_CONTEXT_SUSPENSION_STACK.with(|s| s.borrow_mut().clear());
     COMPLETED_STEPS.with(|c| c.borrow_mut().clear());
     PERSONA_HOOKS.with(|h| h.borrow_mut().clear());
 }
@@ -535,21 +538,61 @@ pub fn clear_persona_hooks() {
     PERSONA_HOOKS.with(|hooks| hooks.borrow_mut().clear());
 }
 
-pub struct ActiveContextSnapshot {
+#[derive(Clone, Default)]
+pub(crate) struct ActiveContextSnapshot {
     steps: Vec<ActiveStep>,
     personas: Vec<ActivePersona>,
 }
 
-pub fn take_active_context() -> ActiveContextSnapshot {
+pub(crate) fn swap_active_context(snapshot: ActiveContextSnapshot) -> ActiveContextSnapshot {
     ActiveContextSnapshot {
-        steps: STEP_STACK.with(|stack| std::mem::take(&mut *stack.borrow_mut())),
-        personas: PERSONA_STACK.with(|stack| std::mem::take(&mut *stack.borrow_mut())),
+        steps: STEP_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), snapshot.steps)),
+        personas: PERSONA_STACK
+            .with(|stack| std::mem::replace(&mut *stack.borrow_mut(), snapshot.personas)),
     }
 }
 
-pub fn restore_active_context(snapshot: ActiveContextSnapshot) {
-    STEP_STACK.with(|stack| *stack.borrow_mut() = snapshot.steps);
-    PERSONA_STACK.with(|stack| *stack.borrow_mut() = snapshot.personas);
+pub(crate) fn swap_active_context_suspension_stack(next: Vec<u64>) -> Vec<u64> {
+    ACTIVE_CONTEXT_SUSPENSION_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
+static NEXT_ACTIVE_CONTEXT_SUSPENSION_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Temporarily clear the active step/persona context and restore it on drop.
+///
+/// The guard is deliberately held across callback/module futures. If one of
+/// those futures is cancelled, its drop path restores the caller's context
+/// instead of stranding the empty or nested context in the thread-local slots.
+pub(crate) fn suspend_active_context() -> ActiveContextGuard {
+    let id = NEXT_ACTIVE_CONTEXT_SUSPENSION_ID.fetch_add(1, Ordering::Relaxed);
+    ACTIVE_CONTEXT_SUSPENSION_STACK.with(|stack| stack.borrow_mut().push(id));
+    ActiveContextGuard {
+        id,
+        outer: Some(swap_active_context(ActiveContextSnapshot::default())),
+    }
+}
+
+pub(crate) struct ActiveContextGuard {
+    id: u64,
+    outer: Option<ActiveContextSnapshot>,
+}
+
+impl Drop for ActiveContextGuard {
+    fn drop(&mut self) {
+        let owns_current_scope = ACTIVE_CONTEXT_SUSPENSION_STACK.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if stack.last() == Some(&self.id) {
+                stack.pop();
+                true
+            } else {
+                false
+            }
+        });
+        if owns_current_scope {
+            let outer = self.outer.take().expect("active context snapshot");
+            let _ = swap_active_context(outer);
+        }
+    }
 }
 
 pub fn is_tracked_function(function_name: &str) -> bool {

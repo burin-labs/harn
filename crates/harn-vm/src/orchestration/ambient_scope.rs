@@ -75,6 +75,10 @@ pub(crate) struct AmbientExecutionScope {
     permissions: Vec<DynamicPermissionPolicy>,
     runtime_context: Vec<RuntimeContextOverlay>,
     autonomy: Vec<AutonomyPolicy>,
+    /// Active `@step` and persona frames. Inline work inherits them; spawned
+    /// workers start empty and establish their own frames.
+    active_step_context: crate::step_runtime::ActiveContextSnapshot,
+    active_context_suspensions: Vec<u64>,
     llm_render: Vec<LlmRenderContextFrame>,
     llm_transcript: LlmTranscriptAmbient,
     /// Inline fixtures and observations shared by one VM execution tree.
@@ -251,6 +255,10 @@ impl AmbientExecutionScope {
             permissions: clone_via_swap(swap_dynamic_permission_stack),
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
+            active_step_context: clone_via_swap(crate::step_runtime::swap_active_context),
+            active_context_suspensions: clone_via_swap(
+                crate::step_runtime::swap_active_context_suspension_stack,
+            ),
             llm_render: clone_via_swap(swap_llm_render_stack),
             llm_transcript: clone_via_swap(swap_llm_transcript_ambient),
             llm_mock: current_llm_mock_context(),
@@ -299,6 +307,14 @@ impl AmbientExecutionScope {
             swap_runtime_context_overlay_stack,
         );
         swap_slot(&mut self.autonomy, swap_autonomy_policy_stack);
+        swap_slot(
+            &mut self.active_step_context,
+            crate::step_runtime::swap_active_context,
+        );
+        swap_slot(
+            &mut self.active_context_suspensions,
+            crate::step_runtime::swap_active_context_suspension_stack,
+        );
         swap_slot(&mut self.llm_render, swap_llm_render_stack);
         swap_slot(&mut self.llm_transcript, swap_llm_transcript_ambient);
         swap_slot(&mut self.llm_mock, swap_llm_mock_context);
@@ -515,20 +531,9 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     ),
     // --- Uncaptured: shape-matches the naming convention but is structurally
     // not cross-task ambient context. ---
-    (
-        "PERSONA_STACK",
-        AmbientScoping::Uncaptured(
-            "step_runtime.rs snapshots+restores this at the worker boundary (own isolation \
-             path); not read raw across a fan-out child await.",
-        ),
-    ),
-    (
-        "STEP_STACK",
-        AmbientScoping::Uncaptured(
-            "step_runtime.rs snapshots+restores this at the worker boundary (own isolation \
-             path); not read raw across a fan-out child await.",
-        ),
-    ),
+    ("PERSONA_STACK", AmbientScoping::Captured),
+    ("STEP_STACK", AmbientScoping::Captured),
+    ("ACTIVE_CONTEXT_SUSPENSION_STACK", AmbientScoping::Captured),
     (
         "CURRENT_TOOL_CALL_STACK",
         AmbientScoping::Uncaptured(
@@ -584,6 +589,7 @@ pin_project! {
         // stack limit; adding one captured capability must not enlarge every
         // scoped future frame.
         scope: Box<AmbientExecutionScope>,
+        commit_on_ready: bool,
     }
 }
 
@@ -594,6 +600,20 @@ pub(crate) fn scope_ambient<F: Future>(scope: AmbientExecutionScope, inner: F) -
     Scoped {
         inner,
         scope: Box::new(scope),
+        commit_on_ready: false,
+    }
+}
+
+/// Run `inner` as a transaction over the current ambient execution scope.
+///
+/// A pending or panicking poll restores the exact caller scope. Once `inner`
+/// reaches `Ready`, its final ambient state stays installed, preserving the
+/// synchronous completion semantics of the wrapped operation.
+pub(crate) fn scope_ambient_transaction<F: Future>(inner: F) -> Scoped<F> {
+    Scoped {
+        inner,
+        scope: Box::new(AmbientExecutionScope::capture_for_inline_subtask()),
+        commit_on_ready: true,
     }
 }
 
@@ -606,11 +626,20 @@ pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
 /// the thread-locals are left correct even if the inner poll panics.
 struct RestoreGuard<'a> {
     scope: &'a mut AmbientExecutionScope,
+    armed: bool,
+}
+
+impl RestoreGuard<'_> {
+    fn commit(&mut self) {
+        self.armed = false;
+    }
 }
 
 impl Drop for RestoreGuard<'_> {
     fn drop(&mut self) {
-        self.scope.swap_in_place();
+        if self.armed {
+            self.scope.swap_in_place();
+        }
     }
 }
 
@@ -621,8 +650,15 @@ impl<F: Future> Future for Scoped<F> {
         let this = self.project();
         // Install this task's scope, capturing whatever the polling thread had.
         this.scope.swap_in_place();
-        let _restore = RestoreGuard { scope: this.scope };
-        this.inner.poll(cx)
+        let mut restore = RestoreGuard {
+            scope: this.scope,
+            armed: true,
+        };
+        let result = this.inner.poll(cx);
+        if result.is_ready() && *this.commit_on_ready {
+            restore.commit();
+        }
+        result
     }
 }
 
@@ -643,6 +679,23 @@ mod tests {
             tools: vec![tool.to_string()],
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn ambient_transaction_commits_on_ready() {
+        clear_execution_policy_stacks();
+        push_execution_policy(policy_named("outer"));
+
+        scope_ambient_transaction(async {
+            push_execution_policy(policy_named("committed"));
+        })
+        .await;
+
+        assert_eq!(
+            current_execution_policy().unwrap().tools,
+            vec!["committed".to_string()]
+        );
+        clear_execution_policy_stacks();
     }
 
     async fn spawn_pending_llm_context_task(
@@ -715,6 +768,48 @@ mod tests {
                 assert!(current_llm_render_context().is_none());
             })
             .await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_swapped_out_active_context_guard_preserves_parent() {
+        crate::step_runtime::reset_thread_local_state();
+        crate::step_runtime::register_persona(
+            "parent_persona",
+            crate::step_runtime::PersonaDefinition {
+                name: "parent".into(),
+                ..Default::default()
+            },
+        );
+        assert!(crate::step_runtime::maybe_push_active_persona(
+            "parent_persona",
+            1
+        ));
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let scope = AmbientExecutionScope::capture_for_inline_subtask();
+                let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+                let handle = tokio::task::spawn_local(scope_ambient(scope, async move {
+                    let _guard = crate::step_runtime::suspend_active_context();
+                    let _ = entered_tx.send(());
+                    pending::<()>().await;
+                }));
+                entered_rx.await.expect("child suspended active context");
+                assert_eq!(
+                    crate::step_runtime::current_persona_name().as_deref(),
+                    Some("parent")
+                );
+
+                handle.abort();
+                assert!(handle.await.unwrap_err().is_cancelled());
+                assert_eq!(
+                    crate::step_runtime::current_persona_name().as_deref(),
+                    Some("parent")
+                );
+            })
+            .await;
+        crate::step_runtime::reset_thread_local_state();
     }
 
     /// Two cooperatively-scheduled tasks on one `LocalSet`, each pushing a
@@ -1333,6 +1428,9 @@ mod tests {
             "DYNAMIC_PERMISSION_STACK",
             "RUNTIME_CONTEXT_OVERLAY_STACK",
             "AUTONOMY_POLICY_STACK",
+            "PERSONA_STACK",
+            "STEP_STACK",
+            "ACTIVE_CONTEXT_SUSPENSION_STACK",
             "LLM_RENDER_STACK",
             "ACTIVE_HARN_CONNECTOR_CTX",
             "TRUSTED_BRIDGE_CALL_DEPTH",

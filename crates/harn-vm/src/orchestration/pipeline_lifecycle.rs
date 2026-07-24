@@ -35,6 +35,59 @@ thread_local! {
     static LIFECYCLE_SEQ: RefCell<u64> = const { RefCell::new(0) };
 }
 
+#[derive(Clone, Default)]
+struct PipelineLifecycleState {
+    on_finish: Option<Arc<VmClosure>>,
+    audit_log: Vec<LifecycleAuditEntry>,
+    partial_handoffs: Vec<PartialHandoffEnvelope>,
+    disposition: Option<Value>,
+    seq: u64,
+}
+
+fn swap_pipeline_lifecycle_state(state: PipelineLifecycleState) -> PipelineLifecycleState {
+    PipelineLifecycleState {
+        on_finish: PIPELINE_ON_FINISH
+            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), state.on_finish)),
+        audit_log: LIFECYCLE_AUDIT_LOG
+            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), state.audit_log)),
+        partial_handoffs: PARTIAL_HANDOFF_REGISTRY
+            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), state.partial_handoffs)),
+        disposition: PIPELINE_DISPOSITION
+            .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), state.disposition)),
+        seq: LIFECYCLE_SEQ.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), state.seq)),
+    }
+}
+
+/// Roll back pipeline-lifecycle state if the owning future is cancelled.
+///
+/// Construction leaves the current state untouched. Reaching `complete`
+/// commits whatever the execution did; dropping first replaces it with the
+/// exact pre-execution snapshot.
+pub(crate) fn checkpoint_pipeline_lifecycle() -> PipelineLifecycleCheckpoint {
+    let current = swap_pipeline_lifecycle_state(PipelineLifecycleState::default());
+    let outer = current.clone();
+    let _ = swap_pipeline_lifecycle_state(current);
+    PipelineLifecycleCheckpoint { outer: Some(outer) }
+}
+
+pub(crate) struct PipelineLifecycleCheckpoint {
+    outer: Option<PipelineLifecycleState>,
+}
+
+impl PipelineLifecycleCheckpoint {
+    pub(crate) fn complete(mut self) {
+        self.outer = None;
+    }
+}
+
+impl Drop for PipelineLifecycleCheckpoint {
+    fn drop(&mut self) {
+        if let Some(outer) = self.outer.take() {
+            let _ = swap_pipeline_lifecycle_state(outer);
+        }
+    }
+}
+
 /// Register the callback `Vm::execute` will invoke after the pipeline's
 /// declared steps complete. Last-write-wins.
 pub fn set_pipeline_on_finish(callback: Arc<VmClosure>) {
