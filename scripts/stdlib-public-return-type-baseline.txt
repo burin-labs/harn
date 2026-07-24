@@ -119,7 +119,7 @@
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_collections.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_command.harn
 # count    6  crates/harn-stdlib/src/stdlib/stdlib_composition.harn
-# count   36  crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn
+# count   30  crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn
 # count   11  crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn
 # count    9  crates/harn-stdlib/src/stdlib/stdlib_connectors_notion.harn
 # count   11  crates/harn-stdlib/src/stdlib/stdlib_connectors_shared.harn
@@ -148,7 +148,6 @@
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_project.harn
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_prompt_library.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_review.harn
-# count    3  crates/harn-stdlib/src/stdlib/stdlib_run_artifacts.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_runtime.harn
 # count   34  crates/harn-stdlib/src/stdlib/stdlib_schema.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_signal.harn
@@ -975,9 +974,6 @@ crates/harn-stdlib/src/stdlib/stdlib_composition.harn::composition_mcp_execute
 crates/harn-stdlib/src/stdlib/stdlib_composition.harn::composition_mcp_manifest
 crates/harn-stdlib/src/stdlib/stdlib_composition.harn::composition_mcp_search
 crates/harn-stdlib/src/stdlib/stdlib_composition.harn::composition_mcp_tools
-crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::actions_workflow_dispatch
-crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::actions_workflow_run
-crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::actions_workflow_runs
 crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::add_labels
 crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::api_call
 crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::call
@@ -1008,9 +1004,6 @@ crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::reset
 crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::wait_until_ci_green
 crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::wait_until_deploy_succeeds
 crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::wait_until_pr_merged
-crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::workflow_dispatch
-crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::workflow_run
-crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn::workflow_runs
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::configure
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::create_comment
 crates/harn-stdlib/src/stdlib/stdlib_connectors_linear.harn::execute
