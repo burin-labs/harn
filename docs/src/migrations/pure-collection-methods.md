@@ -3,7 +3,7 @@
 Harn collection methods return new values and never modify their receivers.
 Their names now make that value semantics explicit:
 
-| Removed | Replacement |
+| Legacy spelling | Canonical replacement |
 |---|---|
 | `list.push(value)` | `list.appending(value)` |
 | `list.pop()` | `list.dropping_last()` |
@@ -21,8 +21,9 @@ Only the names changed. Return values, ordering, copy-on-write behavior, and
 error behavior are unchanged. In particular, `dropping_last()` returns a list
 without its last item; use `last()` to read the last item.
 
-The removed names have no compatibility aliases. Replace collection method
-calls, then run:
+The legacy spellings remain behavior-compatible aliases so existing scripts
+can upgrade without a flag day. New code should use the canonical spellings.
+Replace legacy collection method calls, then run:
 
 ```sh
 harn check .

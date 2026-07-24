@@ -1,0 +1,17 @@
+pipeline test(task) {
+  const values = [3, 1, 2]
+  log(values.push(4))
+  log(values.pop())
+  log(values.sort())
+  log(values.sort_by({ value -> 0 - value }))
+  log(values.reverse())
+  log("harn".reverse())
+  const original_set = set([1, 2])
+  log(original_set.add(3).to_list().sorted())
+  log(original_set.remove(1).to_list().sorted())
+  log(original_set.delete(2).to_list().sorted())
+  const original_dict = {a: 1, b: 2}
+  log(original_dict.merge({c: 3}))
+  log(original_dict.remove("a"))
+  log(original_dict.rekey({ key -> "x_" + key }))
+}

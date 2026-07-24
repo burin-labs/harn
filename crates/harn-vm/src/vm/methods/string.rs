@@ -85,7 +85,7 @@ impl crate::vm::Vm {
                 let repeated = crate::limits::checked_repeat(s, n.max(0) as usize)?;
                 Ok(VmValue::String(arcstr::ArcStr::from(repeated)))
             }
-            "reversed" => Ok(VmValue::String(arcstr::ArcStr::from(
+            "reversed" | "reverse" => Ok(VmValue::String(arcstr::ArcStr::from(
                 s.chars().rev().collect::<String>(),
             ))),
             "pad_left" | "pad_right" => {
