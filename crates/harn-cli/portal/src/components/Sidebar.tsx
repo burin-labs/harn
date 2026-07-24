@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom"
+import { NavLink } from "react-router"
 import { defineMessages, useIntl } from "react-intl"
 
 import { formatDuration } from "../lib/format"

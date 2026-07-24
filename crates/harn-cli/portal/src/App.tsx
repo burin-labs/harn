@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom"
+import { Navigate, Route, Routes } from "react-router"
 
 import { Sidebar } from "./components/Sidebar"
 import { CostsPage } from "./pages/CostsPage"

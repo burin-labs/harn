@@ -1,5 +1,5 @@
 import { defineMessages, useIntl } from "react-intl"
-import { useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router"
 
 import { LaunchPanel } from "../components/LaunchPanel"
 import { useLaunchData } from "../hooks/useLaunchData"

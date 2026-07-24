@@ -1,5 +1,5 @@
 import { defineMessages, useIntl } from "react-intl"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router"
 
 import { formatDuration, formatNumber, statusClass } from "../lib/format"
 import { type RunSortOrder, type RunStatusFilter, useRunsData } from "../hooks/useRunsData"

@@ -18,8 +18,10 @@
     "test:harn": "cargo run --quiet --bin harn -- test tests/code_librarian/query_nl_test.harn --filter"
   },
   "overrides": {
+    "js-yaml": "5.2.2",
     "react": "19.2.6",
     "react-dom": "19.2.6",
+    "shell-quote": "1.10.0",
     "smol-toml": "1.6.1"
   },
   "devDependencies": {
