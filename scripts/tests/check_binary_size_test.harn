@@ -158,15 +158,16 @@ pipeline test_workflow_budget_matches_helper_default(task) {
 }
 
 @test
-pipeline test_workflow_preserves_bloat_after_failed_warm_budget_gate(task) {
-  const warm_only =
-    "matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.build_mode == 'warm'"
-  const warm_diagnostics = "always() && " + warm_only
+pipeline test_workflow_preserves_bloat_after_failed_budget_gate(task) {
+  const diagnostic_mode =
+    "matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || needs.setup.outputs.build_mode == 'benchmark')"
+  const diagnostics = "always() && " + diagnostic_mode
   const steps = release_workflow().jobs.build.steps
-  const bloat = release_workflow_step(steps, "Generate cargo-bloat report (warm only)")
-  assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, warm_only)
-  assert_eq(bloat.if, warm_diagnostics)
+  const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
+  assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, diagnostic_mode)
+  assert_eq(bloat.if, diagnostics)
   assert_eq(bloat["continue-on-error"], true)
+  assert(bloat.run?.contains("cargo-bloat-deserialize.txt") ?? false)
   assert_eq(
     release_workflow_step(steps, "Check binary size budget").if,
     "matrix.target == 'x86_64-unknown-linux-gnu'",
