@@ -558,12 +558,7 @@ pub fn git_rebase(base_ref: string, repo = ".") -> GitRebaseReceipt {
  * @errors: []
  */
 pub fn git_push(remote: string, refspec: string, repo = ".", lease = nil) -> GitPushReceipt {
-  return git.appending(
-    repo,
-    __git_ref_arg(remote, "remote"),
-    __git_ref_arg(refspec, "refspec"),
-    lease,
-  )
+  return git.push(repo, __git_ref_arg(remote, "remote"), __git_ref_arg(refspec, "refspec"), lease)
 }
 
 /**

@@ -79,26 +79,29 @@ jobs:
       - name: Open or resolve the nightly-failure tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RESULT: ${{ needs.e2e.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TITLE: Nightly E2E suite is failing
         shell: bash
         run: |
           set -euo pipefail
-          existing=$(gh issue list --state open --search "\"$TITLE\" in:title" \
+          existing=$(gh issue list --repo "$GH_REPO" --state open --search "\"$TITLE\" in:title" \
             --json number,title --jq "[.[] | select(.title == \"$TITLE\")][0].number // empty")
           case "$RESULT" in
             success)
               if [ -n "$existing" ]; then
-                gh issue comment "$existing" --body "Nightly E2E suite is green again: $RUN_URL — closing."
-                gh issue close "$existing"
+                gh issue comment "$existing" --repo "$GH_REPO" \
+                  --body "Nightly E2E suite is green again: $RUN_URL — closing."
+                gh issue close "$existing" --repo "$GH_REPO"
               fi
               ;;
             failure | cancelled | timed_out)
               if [ -n "$existing" ]; then
-                gh issue comment "$existing" --body "Still failing (\`$RESULT\`): $RUN_URL"
+                gh issue comment "$existing" --repo "$GH_REPO" \
+                  --body "Still failing (\`$RESULT\`): $RUN_URL"
               else
-                gh issue create --title "$TITLE" --body \
+                gh issue create --repo "$GH_REPO" --title "$TITLE" --body \
                   "The scheduled nightly E2E suite did not pass (\`$RESULT\`): $RUN_URL
 
           Opened and closed automatically by \`.github/workflows/e2e.yml\`; stays open until a nightly run is green."
