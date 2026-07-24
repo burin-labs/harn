@@ -5,3 +5,5 @@
   security filter (`binary(harn_vm)`) now also matches the consolidated
   integration binary — the security lane still executes only its
   name-scoped Landlock proof.
+- The run/session view compatibility fixture moved into that consolidated test
+  binary without changing its schema or snapshots.
