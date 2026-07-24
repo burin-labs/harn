@@ -26,6 +26,6 @@ if [[ "${compile_requests:-0}" -ge 100 && "${cache_hits:-0}" -eq 0 ]]; then
   echo "::warning title=sccache is cold::${compile_requests} compile requests produced zero cache hits."
 fi
 
-if [[ "${HARN_SHARED_SCCACHE:-}" != "on" ]]; then
+if [[ "${HARN_RUNNER_TIER:-}" != "self-hosted" && "${HARN_SHARED_SCCACHE:-}" != "on" ]]; then
   "$sccache_bin" --stop-server >/dev/null 2>&1 || true
 fi

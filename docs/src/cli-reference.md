@@ -891,6 +891,25 @@ harn lint prompts/system.harn.prompt
 harn lint --require-public-api-types src/
 ```
 
+To ratchet strict linting onto newly added Harn source lines without making
+inherited warnings block unrelated work, let `harn lint` derive its source
+scope from two Git revisions:
+
+```bash
+harn lint --strict --changed-from origin/main
+harn lint --strict --changed-from origin/main --changed-to HEAD
+```
+
+`--changed-to` defaults to `HEAD`. Changed-line mode accepts no explicit path
+targets and cannot be combined with `--fix`. It resolves both revisions to
+commits, detects renames, and evaluates added physical line ranges in tracked
+`.harn` and `.harn.txt` files. Warning and error diagnostics are emitted only
+when their complete UTF-8 byte span overlaps an added line; information
+diagnostics remain visible in `--json` reports. Deleted, empty, and rename-only
+files are recorded but do not create lint targets. Git failures, unsafe paths,
+source contents that differ from the evaluated target revision, unreadable
+sources, and missing or invalid warning/error spans fail closed.
+
 `--require-public-api-types` reports every untyped public function or pipeline
 parameter and return as `HARN-LNT-067`. Set
 `[lint] require_public_api_types = true` in `harn.toml` to apply the same policy

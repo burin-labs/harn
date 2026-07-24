@@ -78,4 +78,9 @@ fn strict_json_reports_not_ok_on_warning() {
         stdout.contains("\"ok\": false"),
         "strict json envelope should report ok:false:\n{stdout}"
     );
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("lint JSON");
+    assert!(
+        report["data"].get("changed").is_none(),
+        "ordinary lint JSON must not gain changed-line metadata"
+    );
 }

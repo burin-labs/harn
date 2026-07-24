@@ -1,5 +1,6 @@
 mod analysis;
 mod bundle;
+mod changed_lint;
 mod check_cmd;
 mod command;
 mod config;
@@ -26,6 +27,7 @@ pub(crate) use analysis::{
     analyze_file, span_from_lexer_error, span_from_parser_error, FileAnalysisError,
 };
 pub(crate) use bundle::build_bundle_manifest;
+pub(crate) use changed_lint::{run_changed_lint_command, ChangedLintScope};
 pub(crate) use check_cmd::{check_file_inner, CheckReport, CHECK_SCHEMA_VERSION};
 pub(crate) use command::run_check_command;
 pub(crate) use config::{

@@ -24,6 +24,7 @@ use super::check_cmd::{
     check_diagnostic_from_analysis_error, check_span, CheckDiagnostic, CheckFileStatus,
 };
 use super::outcome::CommandOutcome;
+use super::ChangedLintScope;
 
 pub(crate) const LINT_SCHEMA_VERSION: u32 = 1;
 
@@ -44,6 +45,8 @@ pub(crate) struct LintJsonOptions {
 pub(crate) struct LintReport {
     pub files: Vec<LintFileReport>,
     pub summary: LintSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed: Option<ChangedLintScope>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +61,8 @@ pub(crate) struct LintFileReport {
     /// Number of edits actually applied by `--fix`. Always zero when
     /// `--fix` is not set.
     pub fixed: usize,
+    #[serde(skip)]
+    pub(crate) fixable_diagnostics: Vec<usize>,
 }
 
 impl LintFileReport {
@@ -94,7 +99,11 @@ impl LintReport {
             summary.fixable += file.fixable;
             summary.fixed += file.fixed;
         }
-        Self { files, summary }
+        Self {
+            files,
+            summary,
+            changed: None,
+        }
     }
 }
 
@@ -211,6 +220,7 @@ pub(crate) fn lint_file_report(
     let mut has_error = false;
     let mut has_warning = false;
     let mut fixable = 0usize;
+    let mut fixable_diagnostics = Vec::new();
     let mut diagnostics: Vec<CheckDiagnostic> = Vec::new();
 
     for diag in &lint_diagnostics {
@@ -221,6 +231,7 @@ pub(crate) fn lint_file_report(
         }
         if diag.fix.is_some() {
             fixable += 1;
+            fixable_diagnostics.push(diagnostics.len());
         }
         diagnostics.push(CheckDiagnostic {
             source: "lint",
@@ -240,6 +251,7 @@ pub(crate) fn lint_file_report(
         }
         if diag.fix.is_some() {
             fixable += 1;
+            fixable_diagnostics.push(diagnostics.len());
         }
         diagnostics.push(CheckDiagnostic {
             source: "lint",
@@ -289,6 +301,7 @@ pub(crate) fn lint_file_report(
         diagnostics,
         fixable,
         fixed: 0,
+        fixable_diagnostics,
     }
 }
 
@@ -318,6 +331,7 @@ fn file_analysis_error_report(path: String, error: FileAnalysisError) -> LintFil
         diagnostics: vec![diagnostic],
         fixable: 0,
         fixed: 0,
+        fixable_diagnostics: Vec::new(),
     }
 }
 

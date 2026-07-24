@@ -172,6 +172,63 @@ of whether they invoked `check` or `lint`.
 - `--json` is intentionally orthogonal to `--fix`: agents plan
   repairs from the report and apply them in a follow-up `harn lint
   --fix` or `harn fix apply`.
+- `--changed-from <REV>` adds `data.changed` without changing the ordinary lint
+  payload. It records the requested and resolved `from`/`to` commits plus every
+  evaluated source path, change status, previous rename/copy path when present,
+  and inclusive one-based `added_lines` ranges. `data.files[].diagnostics`
+  contains matching warning/error diagnostics and all information diagnostics;
+  the file statuses and summary counters are recomputed from that filtered set.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "data": {
+    "files": [
+      {
+        "path": "src/agent.harn",
+        "status": "warning",
+        "diagnostics": [
+          {
+            "source": "lint",
+            "severity": "warning",
+            "code": "HARN-LNT-032",
+            "message": "comparison to `false` is redundant",
+            "span": { "start": 128, "end": 142 }
+          }
+        ],
+        "fixable": 1,
+        "fixed": 0
+      }
+    ],
+    "summary": {
+      "ok": 0,
+      "warnings": 1,
+      "errors": 0,
+      "diagnostics": 1,
+      "fixable": 1,
+      "fixed": 0
+    },
+    "changed": {
+      "from": { "requested": "origin/main", "commit": "<full commit id>" },
+      "to": { "requested": "HEAD", "commit": "<full commit id>" },
+      "files": [
+        {
+          "path": "src/agent.harn",
+          "status": "modified",
+          "added_lines": [{ "start": 9, "end": 9 }]
+        }
+      ]
+    }
+  },
+  "error": {
+    "code": "lint_failed",
+    "message": "one or more changed lines failed `harn lint`",
+    "details": null
+  },
+  "warnings": []
+}
+```
 
 ### `harn replay --json`
 

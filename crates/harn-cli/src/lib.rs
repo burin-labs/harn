@@ -409,6 +409,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             commands::connect::run_connect(*args).await;
         }
         Command::Lint(args) => {
+            if commands::check::run_changed_lint_command(&args).await {
+                return;
+            }
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let (files, prompt_files) = commands::check::collect_lint_targets(&targets);
             if files.is_empty() && prompt_files.is_empty() {
@@ -440,10 +443,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             let module_graph =
                 commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
-            // `.harn`-authored custom lint rules (#2850) run in a sandboxed VM,
-            // so they're computed once here in the async handler and merged into
-            // each file's diagnostics below. Empty (near-zero cost) when the
-            // project declares no `*.lint.harn` rules.
+            // Run project script rules once, then merge their diagnostics per file.
             let script_rule_diags = commands::check::run_project_script_rules(&files).await;
             let script_diags_for = |file: &std::path::Path| -> &[harn_lint::LintDiagnostic] {
                 script_rule_diags
@@ -472,10 +472,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 for file in &prompt_files {
                     let lint_config = commands::check::load_harn_lint_config(file);
                     let config = package::load_check_config(Some(file));
-                    // The template lint rules don't carry autofix
-                    // edits yet (intentionally — see
-                    // `template_provider_identity::make_diagnostic`),
-                    // so `--fix` is equivalent to a regular run.
+                    // Template lint rules carry no autofix edits yet.
                     let outcome = commands::check::lint_prompt_file_inner(
                         file,
                         lint_config.template_variant_branch_threshold,
