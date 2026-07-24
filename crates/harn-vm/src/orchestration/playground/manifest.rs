@@ -8,8 +8,10 @@
 //! that state.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::Path;
 
+use serde::de::{DeserializeOwned, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
 use crate::value::VmError;
@@ -134,7 +136,7 @@ pub struct ScenarioStep {
 /// A single mutation applied to the playground state. Adding a variant here
 /// is a backwards-compatible change because `serde(other)` rejects unknown
 /// tags loudly so old binaries can't silently no-op a newer manifest.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScenarioAction {
     /// Update or insert a check run for a PR.
@@ -215,6 +217,127 @@ pub enum ScenarioAction {
     /// Advance the playground clock by N milliseconds. Steps that timestamp
     /// events use the playground clock so transcripts remain deterministic.
     AdvanceTimeMs { ms: u64 },
+}
+
+impl<'de> Deserialize<'de> for ScenarioAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(ScenarioActionVisitor)
+    }
+}
+
+struct ScenarioActionVisitor;
+
+impl<'de> Visitor<'de> for ScenarioActionVisitor {
+    type Value = ScenarioAction;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a scenario action object")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut fields = serde_json::Map::new();
+        while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+            if fields.insert(key.clone(), value).is_some() {
+                return Err(serde::de::Error::custom(format!("duplicate field `{key}`")));
+            }
+        }
+        parse_scenario_action(fields).map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_scenario_action(
+    mut fields: serde_json::Map<String, serde_json::Value>,
+) -> Result<ScenarioAction, String> {
+    let kind: String = take_required(&mut fields, "kind")?;
+    match kind.as_str() {
+        "set_check" => Ok(ScenarioAction::SetCheck {
+            repo: take_required(&mut fields, "repo")?,
+            pr_number: take_required(&mut fields, "pr_number")?,
+            name: take_required(&mut fields, "name")?,
+            status: take_required(&mut fields, "status")?,
+            conclusion: take_default(&mut fields, "conclusion")?,
+            details_url: take_default(&mut fields, "details_url")?,
+        }),
+        "add_pull_request" => Ok(ScenarioAction::AddPullRequest {
+            pr: serde_json::from_value(serde_json::Value::Object(fields))
+                .map_err(|error| error.to_string())?,
+        }),
+        "close_pull_request" => Ok(ScenarioAction::ClosePullRequest {
+            repo: take_required(&mut fields, "repo")?,
+            pr_number: take_required(&mut fields, "pr_number")?,
+        }),
+        "merge_pull_request" => Ok(ScenarioAction::MergePullRequest {
+            repo: take_required(&mut fields, "repo")?,
+            pr_number: take_required(&mut fields, "pr_number")?,
+            merge_method: take_default(&mut fields, "merge_method")?,
+        }),
+        "add_comment" => Ok(ScenarioAction::AddComment {
+            repo: take_required(&mut fields, "repo")?,
+            pr_number: take_required(&mut fields, "pr_number")?,
+            user: take_required(&mut fields, "user")?,
+            body: take_required(&mut fields, "body")?,
+        }),
+        "set_labels" => Ok(ScenarioAction::SetLabels {
+            repo: take_required(&mut fields, "repo")?,
+            pr_number: take_required(&mut fields, "pr_number")?,
+            labels: take_required(&mut fields, "labels")?,
+        }),
+        "set_merge_queue_status" => Ok(ScenarioAction::SetMergeQueueStatus {
+            repo: take_required(&mut fields, "repo")?,
+            pr_number: take_required(&mut fields, "pr_number")?,
+            status: take_required(&mut fields, "status")?,
+        }),
+        "force_push_author" => Ok(ScenarioAction::ForcePushAuthor {
+            repo: take_required(&mut fields, "repo")?,
+            branch: take_required(&mut fields, "branch")?,
+            files_set: take_required(&mut fields, "files_set")?,
+            files_delete: take_default(&mut fields, "files_delete")?,
+            commit_message: take_default(&mut fields, "commit_message")?,
+        }),
+        "advance_base" => Ok(ScenarioAction::AdvanceBase {
+            repo: take_required(&mut fields, "repo")?,
+            files_set: take_default(&mut fields, "files_set")?,
+            files_delete: take_default(&mut fields, "files_delete")?,
+            commit_message: take_default(&mut fields, "commit_message")?,
+        }),
+        "set_mergeability" => Ok(ScenarioAction::SetMergeability {
+            repo: take_required(&mut fields, "repo")?,
+            pr_number: take_required(&mut fields, "pr_number")?,
+            mergeable: take_default(&mut fields, "mergeable")?,
+            mergeable_state: take_required(&mut fields, "mergeable_state")?,
+        }),
+        "advance_time_ms" => Ok(ScenarioAction::AdvanceTimeMs {
+            ms: take_required(&mut fields, "ms")?,
+        }),
+        _ => Err(format!("unknown scenario action kind {kind:?}")),
+    }
+}
+
+fn take_required<T: DeserializeOwned>(
+    fields: &mut serde_json::Map<String, serde_json::Value>,
+    name: &'static str,
+) -> Result<T, String> {
+    let value = fields
+        .remove(name)
+        .ok_or_else(|| format!("missing field {name:?}"))?;
+    serde_json::from_value(value).map_err(|error| format!("invalid field {name:?}: {error}"))
+}
+
+fn take_default<T: DeserializeOwned + Default>(
+    fields: &mut serde_json::Map<String, serde_json::Value>,
+    name: &'static str,
+) -> Result<T, String> {
+    match fields.remove(name) {
+        Some(value) => serde_json::from_value(value)
+            .map_err(|error| format!("invalid field {name:?}: {error}")),
+        None => Ok(T::default()),
+    }
 }
 
 impl ScenarioManifest {
@@ -563,5 +686,24 @@ repos:
         );
         let actions = &m.steps[0].actions;
         assert_eq!(actions.len(), 10);
+    }
+
+    #[test]
+    fn action_decoder_handles_flattened_pr_and_rejects_duplicate_fields() {
+        let action: ScenarioAction = serde_json::from_str(
+            r#"{"kind":"add_pull_request","repo":"alpha","number":2,"head_branch":"feature/a","base_branch":"main","mergeable_state":"clean"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            action,
+            ScenarioAction::AddPullRequest {
+                pr: ScenarioPullRequest { number: 2, .. }
+            }
+        ));
+
+        let error =
+            serde_json::from_str::<ScenarioAction>(r#"{"kind":"advance_time_ms","ms":1,"ms":2}"#)
+                .unwrap_err();
+        assert!(error.to_string().contains("duplicate field `ms`"));
     }
 }
