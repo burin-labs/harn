@@ -111,14 +111,14 @@ release_gate_warm_prebuild() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_gate.sh audit [--receipt path] [--validate-only]
+  ./scripts/release_gate.sh audit [--receipt path] [--source-only] [--validate-only]
   ./scripts/release_gate.sh prepare --bump patch|minor|major
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
   ./scripts/release_gate.sh full --bump patch|minor|major [--dry-run]
 
 Commands:
-  audit    Run the full audit, or residual lanes authorized by an exact receipt.
+  audit    Run the full audit, source-only lanes, or receipt-authorized residual lanes.
   prepare  Bump the workspace version locally and print next tag/release steps.
   publish  Publish crates with scripts/publish.sh and print tag/release follow-up.
   notes    Render GitHub release notes for a version from CHANGELOG.md.
@@ -412,6 +412,7 @@ resolve_audit_plan() {
   local receipt_path="$1"
   local plan_path="$2"
   local certified_source_sha="$3"
+  local source_only="$4"
   local args=(
     run scripts/release_audit_contract.harn --
     --contract scripts/release_audit_contract.json
@@ -426,6 +427,8 @@ resolve_audit_plan() {
       warm_binary_sha256="$(file_sha256 "$HARN_BIN")"
     fi
     args+=(--warm-binary-sha256 "$warm_binary_sha256")
+  elif [[ "$source_only" -eq 1 ]]; then
+    args+=(--source-only)
   fi
   harn_cmd "${args[@]}" > "$plan_path"
 
@@ -474,6 +477,7 @@ resolve_audit_plan() {
 
 cmd_audit() {
   local receipt_path=""
+  local source_only=0
   local validate_only=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -489,6 +493,10 @@ cmd_audit() {
         validate_only=1
         shift
         ;;
+      --source-only)
+        source_only=1
+        shift
+        ;;
       *)
         echo "error: unknown audit arg: $1" >&2
         usage
@@ -496,12 +504,16 @@ cmd_audit() {
         ;;
     esac
   done
+  if [[ "$source_only" -eq 1 && -n "$receipt_path" ]]; then
+    echo "error: audit --source-only cannot be combined with --receipt" >&2
+    exit 1
+  fi
 
   local plan_path
   plan_path="$(mktemp)"
   local certified_source_sha
   certified_source_sha="$(git rev-parse HEAD)"
-  if ! resolve_audit_plan "$receipt_path" "$plan_path" "$certified_source_sha"; then
+  if ! resolve_audit_plan "$receipt_path" "$plan_path" "$certified_source_sha" "$source_only"; then
     rm -f "$plan_path"
     exit 1
   fi
@@ -526,7 +538,7 @@ cmd_audit() {
   local prebuild_started prebuild_elapsed
   prebuild_started="$(date +%s)"
   local cargo_harn_bin=""
-  if [[ "$AUDIT_RECEIPT_REUSED" == "true" && -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]]; then
+  if [[ ( "$AUDIT_RECEIPT_REUSED" == "true" || "$source_only" -eq 1 ) && -n "${HARN_BIN:-}" && -x "$HARN_BIN" ]]; then
     cargo_harn_bin="$HARN_BIN"
     echo ">>> warm-prebuild (reuse exact receipt-warmed HARN_BIN)"
   else

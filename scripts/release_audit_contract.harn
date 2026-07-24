@@ -328,6 +328,10 @@ fn residual_lanes(contract: ReleaseAuditContract) -> list<ReleaseAuditLane> {
   return contract.lanes.filter({ lane -> lane.proof == "residual" }).to_list()
 }
 
+fn source_lanes(contract: ReleaseAuditContract) -> list<ReleaseAuditLane> {
+  return contract.lanes.filter({ lane -> lane.proof == "merge_group" }).to_list()
+}
+
 fn audit_plan(
   lanes: list<ReleaseAuditLane>,
   receipt_reused: bool,
@@ -363,6 +367,20 @@ pub fn release_audit_full_plan(
     "full_local",
     lowercase(trim(expected_head_sha)),
     errors,
+  )
+}
+
+/** Return the contract-owned local source lanes used to close a hosted receipt. */
+pub fn release_audit_source_plan(
+  contract: ReleaseAuditContract,
+  expected_head_sha: string,
+) -> ReleaseAuditPlan {
+  return audit_plan(
+    source_lanes(contract),
+    false,
+    "source_only",
+    "local_source",
+    lowercase(trim(expected_head_sha)),
   )
 }
 
@@ -558,6 +576,7 @@ fn arg_spec() {
         {kind: "flag", name: "warm_binary_sha256", long: "--warm-binary-sha256", default: ""},
         {kind: "flag", name: "check_ci", long: "--check-ci", default: ""},
         {kind: "switch", name: "shell_plan", long: "--shell-plan", default: false},
+        {kind: "switch", name: "source_only", long: "--source-only", default: false},
       ],
     },
   )
@@ -625,6 +644,7 @@ fn main(harness: Harness) {
   const expected_sha = trim(parsed?.head_sha ?? "")
   const warm_binary_sha256 = trim(parsed?.warm_binary_sha256 ?? "")
   const shell_plan = parsed?.shell_plan ?? false
+  const source_only = parsed?.source_only ?? false
   if receipt_path == "" && expected_sha == "" {
     if ci_path != "" {
       harness.stdio.println(json_stringify({ok: true, reason: "ci_contract_matches", errors: []}))
@@ -634,6 +654,10 @@ fn main(harness: Harness) {
     exit(2)
   }
   if receipt_path == "" {
+    if source_only {
+      print_plan(harness, release_audit_source_plan(contract, expected_sha), shell_plan)
+      return nil
+    }
     print_plan(harness, release_audit_full_plan(contract, "no_receipt", expected_sha), shell_plan)
     return nil
   }

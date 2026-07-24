@@ -1,4 +1,8 @@
-import { release_audit_contract_parse, release_audit_receipt_plan } from "../release_audit_contract"
+import {
+  release_audit_contract_parse,
+  release_audit_receipt_plan,
+  release_audit_source_plan,
+} from "../release_audit_contract"
 
 const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
@@ -98,6 +102,10 @@ fn receipt() {
 pipeline test_release_audit_contract_and_hosted_receipt(task) {
   const cfg = release_audit_contract_parse(contract())
   assert(cfg != nil)
+  const source = release_audit_source_plan(cfg, SHA)
+  assert_eq(source.reason, "source_only")
+  assert_eq(source.proof_kind, "local_source")
+  assert_eq(source.lane_names, ["source-audit"])
   const accepted = release_audit_receipt_plan(cfg, receipt(), SHA, BINARY_SHA)
   assert_eq(accepted.ok, true)
   assert_eq(accepted.receipt_reused, true)

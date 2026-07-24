@@ -48,7 +48,8 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/render_release_notes.harn" ]]; t
   exit 0
 fi
 if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]]; then
-  printf '%s\n' '{"ok":true,"receipt_reused":false,"reason":"no_receipt","proof_kind":"full_local","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lane_names":["rust-audit"],"lane_runners":["run_rust_audit"],"lanes":[],"errors":[]}'
+  printf 'meta\tfalse\tno_receipt\n'
+  printf 'lane\trust-audit\trun_rust_audit\n'
   exit 0
 fi
 echo "unexpected fake harn invocation: $*" >&2
@@ -351,9 +352,27 @@ set -euo pipefail
 printf 'harn argv=%s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s self=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" "$0" >> "$FAKE_AUDIT_RECORD"
 if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]]; then
   if [[ " $* " == *" --receipt "* && "$*" != *"receipt-invalid.json"* ]]; then
-    printf '%s\n' '{"ok":true,"receipt_reused":true,"reason":"receipt_accepted","proof_kind":"merge_group","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lane_names":["generated-audit","docs-audit","grammar-audit","security-audit","smoke-audit"],"lane_runners":["run_generated_audit","run_docs_audit","run_grammar_audit","run_security_audit","run_smoke_audit"],"lanes":[],"errors":[]}'
+    printf 'meta\ttrue\treceipt_accepted\n'
+    printf 'lane\tgenerated-audit\trun_generated_audit\n'
+    printf 'lane\tdocs-audit\trun_docs_audit\n'
+    printf 'lane\tgrammar-audit\trun_grammar_audit\n'
+    printf 'lane\tsecurity-audit\trun_security_audit\n'
+    printf 'lane\tsmoke-audit\trun_smoke_audit\n'
+  elif [[ " $* " == *" --source-only "* ]]; then
+    printf 'meta\tfalse\tsource_only\n'
+    printf 'lane\trust-audit\trun_rust_audit\n'
+    printf 'lane\tharn-audit\trun_harn_audit\n'
+    printf 'lane\tpackage-audit\trun_package_audit\n'
   else
-    printf '%s\n' '{"ok":true,"receipt_reused":false,"reason":"no_receipt","proof_kind":"full_local","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lane_names":["rust-audit","harn-audit","generated-audit","docs-audit","grammar-audit","security-audit","package-audit","smoke-audit"],"lane_runners":["run_rust_audit","run_harn_audit","run_generated_audit","run_docs_audit","run_grammar_audit","run_security_audit","run_package_audit","run_smoke_audit"],"lanes":[],"errors":[]}'
+    printf 'meta\tfalse\tno_receipt\n'
+    printf 'lane\trust-audit\trun_rust_audit\n'
+    printf 'lane\tharn-audit\trun_harn_audit\n'
+    printf 'lane\tgenerated-audit\trun_generated_audit\n'
+    printf 'lane\tdocs-audit\trun_docs_audit\n'
+    printf 'lane\tgrammar-audit\trun_grammar_audit\n'
+    printf 'lane\tsecurity-audit\trun_security_audit\n'
+    printf 'lane\tpackage-audit\trun_package_audit\n'
+    printf 'lane\tsmoke-audit\trun_smoke_audit\n'
   fi
   exit 0
 fi
@@ -623,11 +642,33 @@ assert_arg_fails_before_work \
 
 invalid_receipt="$tmp_root/receipt-invalid.json"
 printf '{}\n' > "$invalid_receipt"
-run_audit invalid-receipt --receipt "$invalid_receipt"
-for lane in rust-audit harn-audit generated-audit docs-audit grammar-audit security-audit package-audit smoke-audit; do
-  if ! grep -Eq "ok: +$lane " "$tmp_root/audit-invalid-receipt.txt"; then
-    echo "rejected receipt did not fall back to full audit lane: $lane" >&2
-    cat "$tmp_root/audit-invalid-receipt.txt" >&2
+: > "$audit_record"
+if PATH="$fake_tools:$PATH" \
+  HARN_RELEASE_ROOT="$audit_root" \
+  HARN_BIN="$fake_audit_harn" \
+  TMPDIR="$tmp_root" \
+  FAKE_AUDIT_RECORD="$audit_record" \
+  env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    "$release_gate" audit --receipt "$invalid_receipt" \
+    > "$tmp_root/audit-invalid-receipt.txt" 2>&1; then
+  echo "rejected receipt unexpectedly fell back to an unauthenticated audit" >&2
+  exit 1
+fi
+grep -Fq "error: hosted audit receipt rejected: no_receipt" \
+  "$tmp_root/audit-invalid-receipt.txt"
+
+run_audit source-only --source-only
+for lane in rust-audit harn-audit package-audit; do
+  if ! grep -Eq "ok: +$lane " "$tmp_root/audit-source-only.txt"; then
+    echo "source-only audit omitted contract-owned lane: $lane" >&2
+    cat "$tmp_root/audit-source-only.txt" >&2
+    exit 1
+  fi
+done
+for lane in generated-audit docs-audit grammar-audit security-audit smoke-audit; do
+  if grep -Eq "ok: +$lane " "$tmp_root/audit-source-only.txt"; then
+    echo "source-only audit ran residual lane: $lane" >&2
+    cat "$tmp_root/audit-source-only.txt" >&2
     exit 1
   fi
 done
