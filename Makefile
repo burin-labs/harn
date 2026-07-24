@@ -229,7 +229,11 @@ bench-cli-cold-start:
 # Postgres hostlib loadgen. Self-skips (exit 0) when HARN_TEST_POSTGRES_URL
 # is unset; see perf/postgres/README.md for the tunable env vars.
 loadgen-postgres:
-	cargo run --release -p harn-postgres-perf --bin harn-postgres-loadgen
+	@if [ -z "$${HARN_TEST_POSTGRES_URL:-}" ]; then \
+		echo "harn-postgres-loadgen: HARN_TEST_POSTGRES_URL not set — skipping (no Postgres to drive)"; \
+	else \
+		cargo run --release -p harn-postgres-perf --bin harn-postgres-loadgen; \
+	fi
 
 # Lint markdown files
 lint-md:
@@ -395,6 +399,7 @@ test-pr-gate-scripts:
 	./scripts/tests/release_gate_stale_out_dir_test.sh
 	./scripts/tests/release_prepare_env_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
+	./scripts/tests/loadgen_postgres_gate_test.sh
 
 # Rust/Harn-backed shell integration tests run only after CI restores the Rust
 # toolchain/caches and exports the one warmed binary. Pure Harn semantics remain
