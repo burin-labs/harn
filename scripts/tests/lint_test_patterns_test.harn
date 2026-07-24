@@ -183,6 +183,33 @@ pipeline test_direct_harn_binary_ratchet(task) {
 }
 
 @test
+pipeline test_shell_spawn_literal_pattern(task) {
+  const direct = """
+Command::new("sh")
+std::process::Command::new("/bin/sh")
+TokioCommand::new(
+  "cmd",
+)
+"""
+  assert_eq(find_hits(direct, shell_spawn_literal_pattern()).count, 3)
+  assert_eq(find_hits("Command::new(\"bash\")\n", shell_spawn_literal_pattern()), [])
+  assert_eq(find_hits("Command::new(\"git\")\n", shell_spawn_literal_pattern()), [])
+  assert_eq(find_hits("vstr(\"sh\")\n", shell_spawn_literal_pattern()), [])
+}
+
+@test
+pipeline test_shell_spawn_literal_ratchet(task) {
+  assert_eq(
+    shell_spawn_literal_baseline(
+      "crates/harn-hostlib/tests/harn_hostlib/process_artifact_retention.rs",
+    ),
+    1,
+  )
+  assert_eq(shell_spawn_literal_baseline("crates/harn-vm/tests/new_probe.rs"), 0)
+  assert_eq(shell_spawn_literal_baseline_duplicates(), [])
+}
+
+@test
 pipeline test_wait_helper_pattern_line_anchored(task) {
   assert_eq(find_hits("fn wait_for_log_line() {}\n", wait_helper_pattern()).count, 1)
   // Indented (nested) definitions are not caught — same as the bash `^fn`.
