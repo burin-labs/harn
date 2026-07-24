@@ -9,6 +9,15 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.37
+
+### Fixed
+
+- **Structured handler facts now drive tool lifecycle events (#5214).** The VM
+  reads `mutation_status` and `changed_paths` from
+  `agent_tool_handler_result(...).data`, matching the documented producer
+  contract while retaining top-level compatibility.
+
 ## v0.10.36
 
 ### Added
