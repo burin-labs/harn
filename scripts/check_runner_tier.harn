@@ -1,0 +1,208 @@
+import { read_yaml } from "std/fs"
+
+// Runner-tier contract.
+//
+// Blacksmith runners register with GitHub as ordinary *self-hosted* runners,
+// so `runner.environment` reports `self-hosted` on them, identically to our
+// own boxes. Confirmed in a Blacksmith job log: "A job started hook has been
+// configured by the self-hosted runner administrator".
+//
+// Any job that can land on Blacksmith and branches on `runner.environment`
+// therefore takes the wrong branch there: `== 'self-hosted'` guards fire on
+// vendor capacity and `!= 'self-hosted'` guards skip the steps they were meant
+// to run. That is how sticky-disk mounts, dependency caches and core-count
+// tuning end up pointed at the wrong machine (observed on the burin-code Rust
+// TUI lanes, burin-code#5423).
+//
+// The fix is one owner per job: a job-level HARN_RUNNER_TIER env var mirroring
+// the `runs-on` ladder and resolving to exactly one TIER. Steps branch on that.
+//
+// Everything below is derived from the workflow itself — there is deliberately
+// no per-lane table to keep in sync, because a policy table that must be
+// hand-edited alongside ci.yml is the same drift risk one level removed.
+const WORKFLOW_PATH = ".github/workflows/ci.yml"
+
+const TIER_ENV = "HARN_RUNNER_TIER"
+
+const TIERS = ["self-hosted", "blacksmith", "github-hosted"]
+
+const BLACKSMITH_RUNNER_PREFIX = "blacksmith-"
+
+// Context reads that steer a ladder. `matrix.*` is deliberately excluded: it
+// carries runner *values* (`matrix.runner`) as well as predicates, so it is
+// not required to appear on both sides of the comparison below.
+const LADDER_INPUT_PATTERNS = [
+  "vars\\.[A-Za-z0-9_]+",
+  "needs\\.[A-Za-z0-9_-]+\\.outputs\\.[A-Za-z0-9_]+",
+]
+
+/** Collapse a folded YAML scalar and its `${{ }}` wrapper to a bare expression. */
+fn normalize_expression(raw) -> string {
+  let text = trim(to_string(raw ?? ""))
+  text = replace(text, "\n", " ")
+  if starts_with(text, "$" + "{{") {
+    text = trim(text.slice(3, len(text)))
+    if ends_with(text, "}}") {
+      text = trim(text.slice(0, len(text) - 2))
+    }
+  }
+  return join(split(text, " ").filter({ part -> part != "" }).to_list(), " ")
+}
+
+/** Every `${{ }}` body plus every bare `if:` condition reachable from a node. */
+fn expressions_in(value, path: string = "") -> list<string> {
+  if type_of(value) == "list" {
+    let found: list<string> = []
+    for {index, value: item} in value.enumerate() {
+      found = found + expressions_in(item, "${path}[${index}]")
+    }
+    return found
+  }
+  if type_of(value) == "dict" {
+    let found: list<string> = []
+    for key in value.keys().sorted() {
+      const child = path == "" ? to_string(key) : "${path}.${key}"
+      // `if:` is the one key whose value is an expression even without the
+      // `${{ }}` wrapper. A scan that only walks interpolations misses roughly
+      // half the sites — the first cut of this gate saw 6 of 14.
+      if key == "if" && type_of(value[key]) == "string" {
+        found = found + ["${child}: ${trim(to_string(value[key]))}"]
+        continue
+      }
+      found = found + expressions_in(value[key], child)
+    }
+    return found
+  }
+  if type_of(value) == "string" && contains(to_string(value), "$" + "{{") {
+    return ["${path}: ${trim(to_string(value))}"]
+  }
+  return []
+}
+
+/** The sorted, de-duplicated set of ladder inputs an expression reads. */
+fn ladder_inputs(expression: string) -> list<string> {
+  let found: list<string> = []
+  for pattern in LADDER_INPUT_PATTERNS {
+    // `regex_captures` yields match records (match/start/end), not bare
+    // strings; the offsets would make every comparison below unequal.
+    found = found
+      + regex_captures(pattern, expression).map({ hit -> to_string(hit.match) }).to_list()
+  }
+  return found.unique().sorted()
+}
+
+/** True when this job's `runs-on` can select a Blacksmith runner. */
+fn blacksmith_capable(job) -> bool {
+  if contains(to_string(job?.["runs-on"] ?? ""), BLACKSMITH_RUNNER_PREFIX) {
+    return true
+  }
+  for row in job?.strategy?.matrix?.include ?? [] {
+    if contains(to_string(row?.runner ?? ""), BLACKSMITH_RUNNER_PREFIX) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Reject `runner.environment` anywhere inside a Blacksmith-capable job. */
+fn runner_environment_errors(job_name: string, job) -> list<string> {
+  if !blacksmith_capable(job) {
+    return []
+  }
+  let errors: list<string> = []
+  for entry in expressions_in(job) {
+    if contains(entry, "runner.environment") {
+      errors = errors
+        + [
+        "ci.yml:${job_name} uses runner.environment on a Blacksmith-capable "
+          + "job, which cannot tell vendor capacity from our own boxes — "
+          + "branch on env.${TIER_ENV} instead\n      at ${entry}",
+      ]
+    }
+  }
+  return errors
+}
+
+/** A job that reads the tier must declare it, spanning every known value. */
+fn tier_declaration_errors(job_name: string, job) -> list<string> {
+  const declared = normalize_expression(job?.env?.[TIER_ENV] ?? "")
+  const reads = expressions_in({steps: job?.steps ?? []}).any(
+    { entry -> contains(entry, "env.${TIER_ENV}") },
+  )
+  if reads && declared == "" {
+    return ["ci.yml:${job_name} reads env.${TIER_ENV} without declaring it at job level"]
+  }
+  if declared == "" {
+    return []
+  }
+  let errors: list<string> = []
+  for tier in TIERS {
+    // Each branch must land on a known tier. A typo such as 'githubhosted'
+    // would otherwise sit inert until a step silently stopped matching it.
+    if !contains(declared, "'${tier}'") {
+      errors = errors + ["ci.yml:${job_name} ${TIER_ENV} never resolves to '${tier}'"]
+    }
+  }
+  return errors
+}
+
+/**
+ * The tier and the `runs-on` ladder must read the same inputs.
+ *
+ * This is what stops the two halves drifting apart: adding a condition to the
+ * ladder without teaching the tier about it (or the reverse) changes one input
+ * set and not the other. It does not prove the two agree on every combination
+ * — it proves neither can be edited in isolation.
+ */
+fn ladder_agreement_errors(job_name: string, job) -> list<string> {
+  const tier = normalize_expression(job?.env?.[TIER_ENV] ?? "")
+  if tier == "" {
+    return []
+  }
+  const runs_on = normalize_expression(job?.["runs-on"] ?? "")
+  const runs_on_inputs = ladder_inputs(runs_on)
+  const tier_inputs = ladder_inputs(tier)
+  if runs_on_inputs == tier_inputs {
+    return []
+  }
+  return [
+    "ci.yml:${job_name} ${TIER_ENV} and runs-on read different ladder inputs, "
+      + "so one was edited without the other\n"
+      + "      runs-on reads: ${join(runs_on_inputs, ", ")}\n"
+      + "      tier reads:    ${join(tier_inputs, ", ")}",
+  ]
+}
+
+/** Return every runner-tier violation without stopping at the first. */
+pub fn runner_tier_errors(workflow) -> list<string> {
+  let errors: list<string> = []
+  for {key: job_name, value: job} in workflow?.jobs ?? {} {
+    const name = to_string(job_name)
+    errors = errors + runner_environment_errors(name, job)
+    errors = errors + tier_declaration_errors(name, job)
+    errors = errors + ladder_agreement_errors(name, job)
+  }
+  return errors
+}
+
+fn main(harness: Harness) {
+  const workflow = read_yaml(WORKFLOW_PATH, nil)
+  guard workflow != nil else {
+    harness.stdio.eprintln("could not read ${WORKFLOW_PATH}")
+    exit(1)
+  }
+  const jobs = workflow?.jobs ?? {}
+  const tiered = jobs.keys().filter({ name -> (jobs[name]?.env?.[TIER_ENV] ?? "") != "" }).to_list()
+  const errors = runner_tier_errors(workflow)
+  if len(errors) > 0 {
+    harness.stdio.eprintln("Runner-tier contract violations:")
+    for error in errors {
+      harness.stdio.eprintln("  - " + error)
+    }
+    exit(1)
+  }
+  harness.stdio.println(
+    "runner-tier contract: OK (${len(jobs.keys())} jobs scanned, "
+      + "${len(tiered)} declaring ${TIER_ENV})",
+  )
+}
