@@ -1,4 +1,8 @@
-import { ci_cache_policy_errors, ci_cache_policy_parse } from "../check_ci_cache_policy"
+import {
+  ci_cache_policy_errors,
+  ci_cache_policy_parse,
+  macos_shared_cache_errors,
+} from "../check_ci_cache_policy"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -19,6 +23,7 @@ fn policy() -> CiCachePolicy {
         shared_key: "release-" + gha_expression("matrix.target"),
       },
       {workflow: "windows-nightly.yml", job: "nextest", shared_key: "workspace-windows"},
+      {workflow: "macos-nightly.yml", job: "nextest", shared_key: "workspace-macos"},
     ],
   }
 }
@@ -125,6 +130,22 @@ fn workflows() {
             },
           ],
         },
+        macos: {
+          env: {RUSTFLAGS: "-D warnings"},
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "./.github/actions/rust-toolchain"},
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {
+                "shared-key": "workspace-macos",
+                "source-key": gha_expression(
+                  "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
+                ),
+              },
+            },
+          ],
+        },
       },
     },
     "cli-cold-start-budget.yml": {
@@ -145,6 +166,27 @@ fn workflows() {
             {
               uses: "./.github/actions/rust-cache",
               with: {"shared-key": "workspace-windows", save: true},
+            },
+          ],
+        },
+      },
+    },
+    "macos-nightly.yml": {
+      env: {RUSTFLAGS: "-D warnings"},
+      jobs: {
+        nextest: {
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "./.github/actions/rust-toolchain"},
+            {
+              uses: "./.github/actions/rust-cache",
+              with: {
+                "shared-key": "workspace-macos",
+                "source-key": gha_expression(
+                  "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
+                ),
+                save: true,
+              },
             },
           ],
         },
@@ -305,6 +347,61 @@ pipeline test_ci_cache_policy_rejects_writer_key_drift(task) {
       "authorized persistent cache writer is not active: windows-nightly.yml:nextest:workspace-windows",
     ),
   )
+}
+
+pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(task) {
+  const invalid = {
+    ...workflows(),
+    "ci.yml": {
+      ...workflows()["ci.yml"],
+      jobs: {
+        ...workflows()["ci.yml"].jobs,
+        macos: {
+          ...workflows()["ci.yml"].jobs.macos,
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "mozilla-actions/sccache-action@exact-pin"},
+            {uses: "./.github/actions/configure-cargo-sccache"},
+            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-macos"}},
+          ],
+        },
+      },
+    },
+    "macos-nightly.yml": {
+      ...workflows()["macos-nightly.yml"],
+      jobs: {
+        nextest: {
+          ...workflows()["macos-nightly.yml"].jobs.nextest,
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "./.github/actions/rust-toolchain"},
+            {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-macos"}},
+          ],
+        },
+      },
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), action(), node_action(), invalid)
+    + macos_shared_cache_errors(
+    invalid["ci.yml"],
+    invalid["macos-nightly.yml"],
+  )
+  assert(
+    errors.contains(
+      "authorized persistent cache writer is not active: macos-nightly.yml:nextest:workspace-macos",
+    ),
+  )
+  assert(
+    errors.any(
+      { error -> error.starts_with("workspace-macos producer and consumer must use plain rustc:") },
+    ),
+  )
+  assert(
+    errors.contains(
+      "workspace-macos producer and consumer must use the canonical source fingerprint",
+    ),
+  )
+  assert(errors.any({ error -> error.starts_with("workspace-macos cache-key inputs drift:") }))
 }
 
 pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {

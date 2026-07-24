@@ -41,22 +41,21 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: ./.github/actions/rust-toolchain
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-        # sccache is a build-cache optimization, not a build requirement. The
-        # upstream action sometimes fails on merge_group / restricted-token
-        # events with "Bad credentials" when api.github.com gates the release
-        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
-        continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        shell: bash
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
+          # This default-branch nightly is the sole writer for the native
+          # macOS workspace cache. Path-routed PR jobs restore it without
+          # writing. Keep both participants on plain rustc: runner-local
+          # sccache measured 0 hits / 1,097 misses and added setup/teardown
+          # overhead without providing cross-run reuse.
           shared-key: workspace-macos
+          # Do not restore target artifacts containing embedded Harn sources
+          # across revisions; this is the same safety boundary as Windows.
+          source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           cache-on-failure: true
           cache-bin: false
+          save: true
       - name: Install cargo-nextest
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:

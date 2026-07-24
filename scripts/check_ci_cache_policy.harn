@@ -44,6 +44,9 @@ const PERSISTENT_SCCACHE_SIZE = "40G"
 
 const PERSISTENT_SCCACHE_PORT = "4227"
 
+const PERSISTENT_SCCACHE_IF =
+  "runner.environment == 'self-hosted' || vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true'"
+
 // Hang backstop for the archived-behavior consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test
 // command, no compiler caches, no compile fan-out), so the timeout only has to
@@ -94,12 +97,16 @@ const CLI_COLD_START_JOB_IF =
 
 const WINDOWS_CACHE_KEY = "workspace-windows"
 
-const WINDOWS_SOURCE_FINGERPRINT_BODY =
+const MACOS_CACHE_KEY = "workspace-macos"
+
+const NATIVE_SOURCE_FINGERPRINT_BODY =
   "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')"
 
-const WINDOWS_CACHE_INPUTS = ["CARGO_INCREMENTAL", "CARGO_TERM_COLOR", "RUSTC_WRAPPER", "RUSTFLAGS"]
+const NATIVE_CACHE_INPUTS = ["CARGO_INCREMENTAL", "CARGO_TERM_COLOR", "RUSTC_WRAPPER", "RUSTFLAGS"]
 
-const WINDOWS_SCCACHE_ACTION_PREFIX = "mozilla-actions/sccache-action@"
+const NATIVE_SCCACHE_ACTION_PREFIX = "mozilla-actions/sccache-action@"
+
+const CONFIGURE_CARGO_SCCACHE_ACTION = "./.github/actions/configure-cargo-sccache"
 
 fn policy_schema() {
   return schema_closed_object(
@@ -516,7 +523,7 @@ fn effective_job_env(workflow, job, key: string) -> string {
 }
 
 fn cache_key_inputs(workflow, job) -> list<string> {
-  let inputs = WINDOWS_CACHE_INPUTS.map(
+  let inputs = NATIVE_CACHE_INPUTS.map(
     { key -> return key + "=" + effective_job_env(workflow, job, key) },
   )
     .to_list()
@@ -538,12 +545,17 @@ fn cache_key_inputs(workflow, job) -> list<string> {
   return inputs
 }
 
-/** Keep the sole native-Windows cache writer byte-compatible with its restore-only PR consumer. */
-pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
-  const consumer = ci_workflow?.jobs?.windows
+fn native_shared_cache_errors(
+  ci_workflow,
+  nightly_workflow,
+  platform: string,
+  cache_key: string,
+  expected_source_key: string,
+) -> list<string> {
+  const consumer = ci_workflow?.jobs?.[platform]
   const producer = nightly_workflow?.jobs?.nextest
   if consumer == nil || producer == nil {
-    return ["workspace-windows must pair ci.yml:windows with windows-nightly.yml:nextest"]
+    return ["${cache_key} must pair ci.yml:${platform} with ${platform}-nightly.yml:nextest"]
   }
   let errors: list<string> = []
   const consumer_caches = matching_steps(consumer, "./.github/actions/rust-cache")
@@ -551,48 +563,77 @@ pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string
   const wrapper_steps = ((consumer?.steps ?? []) + (producer?.steps ?? [])).map(
     { step -> return step_uses(step) },
   )
-    .filter({ uses -> return uses.starts_with(WINDOWS_SCCACHE_ACTION_PREFIX) })
+    .filter(
+      { uses ->
+        return uses.starts_with(NATIVE_SCCACHE_ACTION_PREFIX)
+          || uses
+          == CONFIGURE_CARGO_SCCACHE_ACTION
+      },
+    )
     .to_list()
   if len(wrapper_steps) > 0 {
     errors = errors
       + [
-      "workspace-windows producer and consumer must use plain rustc: "
+      "${cache_key} producer and consumer must use plain rustc: "
         + json_stringify(wrapper_steps),
     ]
   }
   if len(consumer_caches) != 1
     || trim(consumer_caches[0]?.with?.["shared-key"] ?? "")
-    != WINDOWS_CACHE_KEY
+    != cache_key
     || save_requested(consumer_caches[0]) {
-    errors = errors + ["ci.yml:windows must restore workspace-windows exactly once without saving"]
+    errors = errors
+      + ["ci.yml:${platform} must restore ${cache_key} exactly once without saving"]
   }
   if len(producer_caches) != 1
     || trim(producer_caches[0]?.with?.["shared-key"] ?? "")
-    != WINDOWS_CACHE_KEY
+    != cache_key
     || !save_requested(producer_caches[0]) {
-    errors = errors + ["windows-nightly.yml:nextest must write workspace-windows exactly once"]
+    errors = errors
+      + ["${platform}-nightly.yml:nextest must write ${cache_key} exactly once"]
   }
   const consumer_source_key = trim(consumer_caches[0]?.with?.["source-key"] ?? "")
   const producer_source_key = trim(producer_caches[0]?.with?.["source-key"] ?? "")
-  const expected_source_key = "$" + "{{ " + WINDOWS_SOURCE_FINGERPRINT_BODY + " }}"
   if consumer_source_key != expected_source_key || producer_source_key != expected_source_key {
     errors = errors
-      + [
-      "workspace-windows producer and consumer must use the canonical source fingerprint",
-    ]
+      + ["${cache_key} producer and consumer must use the canonical source fingerprint"]
   }
   const consumer_inputs = cache_key_inputs(ci_workflow, consumer)
   const producer_inputs = cache_key_inputs(nightly_workflow, producer)
   if consumer_inputs != producer_inputs {
     errors = errors
       + [
-      "workspace-windows cache-key inputs drift: consumer="
+      "${cache_key} cache-key inputs drift: consumer="
         + json_stringify(consumer_inputs)
         + " producer="
         + json_stringify(producer_inputs),
     ]
   }
   return errors
+}
+
+/** Keep the sole native-Windows cache writer byte-compatible with its restore-only PR consumer. */
+pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
+  const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
+  return native_shared_cache_errors(
+    ci_workflow,
+    nightly_workflow,
+    "windows",
+    WINDOWS_CACHE_KEY,
+    source_key,
+  )
+}
+
+/** Keep the sole native-macOS cache writer byte-compatible with its restore-only PR consumer. */
+pub fn macos_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
+  const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
+  return native_shared_cache_errors(
+    ci_workflow,
+    nightly_workflow,
+    "macos",
+    MACOS_CACHE_KEY,
+    source_key,
+  )
 }
 
 fn persistent_sccache_job_errors(
@@ -639,6 +680,10 @@ fn persistent_sccache_job_errors(
   if len(caches) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure ${SCCACHE_ACTION} exactly once"]
   } else {
+    if trim(caches[0]?.if ?? "") != PERSISTENT_SCCACHE_IF {
+      errors = errors
+        + ["ci.yml:${job_name} must skip sccache on the GitHub-hosted fallback"]
+    }
     const sticky = trim(caches[0]?.with?.sticky ?? "")
     if !contains(sticky, BLACKSMITH_DISABLE_VAR) {
       errors = errors + ["ci.yml:${job_name} sticky cache must follow ${BLACKSMITH_DISABLE_VAR}"]
@@ -646,9 +691,8 @@ fn persistent_sccache_job_errors(
     if !contains(sticky, "runner.environment != 'self-hosted'") {
       errors = errors + ["ci.yml:${job_name} must disable sticky storage on self-hosted runners"]
     }
-    const gha_backend = trim(caches[0]?.with?.["gha-backend"] ?? "")
-    if !contains(gha_backend, "runner.environment != 'self-hosted'") {
-      errors = errors + ["ci.yml:${job_name} must disable GHA sccache on self-hosted runners"]
+    if caches[0]?.with?.["gha-backend"] != nil {
+      errors = errors + ["ci.yml:${job_name} must not enable per-object GHA sccache"]
     }
   }
   const fallback = matching_steps(job, "./.github/actions/rust-cache")
@@ -792,7 +836,10 @@ fn colocated_rust_proof_errors(workflow) -> list<string> {
 
 /** Validate the persistent local sccache action and every authorized heavy CI consumer. */
 pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
-  let errors: list<string> = []
+  let errors = remote_sccache_errors(action, SCCACHE_ACTION_PATH)
+  if action?.inputs?.["gha-backend"] != nil {
+    errors = errors + ["${SCCACHE_ACTION_PATH} must not expose per-object GHA sccache"]
+  }
   const action_steps = action?.runs?.steps ?? []
   const sticky = action_steps.filter({ step -> step_uses(step).starts_with(STICKY_DISK_PREFIX) })
     .to_list()
@@ -891,8 +938,21 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   errors = errors + colocated_rust_proof_errors(workflow)
   const allowed = ["package-audit", "rust-builds", "cli-build"]
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
-    if len(matching_steps(job, SCCACHE_ACTION)) > 0 && !allowed.contains(job_name) {
+    const sccache_steps = matching_steps(job, SCCACHE_ACTION)
+    if len(sccache_steps) == 0 {
+      continue
+    }
+    if !allowed.contains(job_name) {
       errors = errors + ["ci.yml:${job_name} uses persistent sccache without a lane policy"]
+      continue
+    }
+    for step in sccache_steps {
+      if trim(step?.if ?? "") != PERSISTENT_SCCACHE_IF {
+        errors = errors + ["ci.yml:${job_name} must skip sccache on the GitHub-hosted fallback"]
+      }
+      if step?.with?.["gha-backend"] != nil {
+        errors = errors + ["ci.yml:${job_name} must not enable per-object GHA sccache"]
+      }
     }
   }
   return errors
@@ -989,6 +1049,10 @@ fn main(harness: Harness) {
     workflows["ci.yml"],
   )
     + windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"])
+    + macos_shared_cache_errors(
+    workflows["ci.yml"],
+    workflows["macos-nightly.yml"],
+  )
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {
