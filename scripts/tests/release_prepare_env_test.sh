@@ -11,6 +11,7 @@ release_root="$tmp_root/release-root"
 mkdir -p \
   "$release_root/crates/example" \
   "$release_root/crates/excluded" \
+  "$release_root/crates/harn-hostlib/data/grammar-fitness" \
   "$release_root/tree-sitter-harn" \
   "$release_root/docs/src/spec/language" \
   "$release_root/docs/theme"
@@ -58,6 +59,7 @@ cat > "$release_root/docs/src/embedding-rust.md" <<'EOF'
 tag = "v1.2.3"
 EOF
 touch \
+  "$release_root/crates/harn-hostlib/data/grammar-fitness/receipt.v1.json" \
   "$release_root/docs/src/language-spec.md" \
   "$release_root/docs/src/SUMMARY.md" \
   "$release_root/docs/theme/harn-keywords.js"
@@ -123,6 +125,17 @@ if [[ "${ASSERT_DERIVED_PRE_BUMP:-0}" == "1" ]] \
   && grep -Fq 'version = "1.2.4"' Cargo.toml; then
   echo "derived target ran after the metadata version bump: $*" >&2
   exit 2
+fi
+if [[ "${ASSERT_DERIVED_PRE_BUMP:-0}" == "1" ]] \
+  && [[ "$*" == "gen-grammar-fitness" ]] \
+  && ! grep -Fq 'version = "1.2.4"' Cargo.toml; then
+  echo "version-derived target ran before the metadata version bump: $*" >&2
+  exit 2
+fi
+if [[ "$*" == "gen-grammar-fitness" ]]; then
+  sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml \
+    | head -n 1 \
+    > crates/harn-hostlib/data/grammar-fitness/receipt.v1.json
 fi
 if [[ -n "${SHIP_GATE_RECORD:-}" ]]; then
   printf 'make=%s\n' "$*" >> "$SHIP_GATE_RECORD"
@@ -383,12 +396,19 @@ for target in sync-language-spec gen-highlight; do
     exit 1
   fi
 done
+expected_record=$(printf 'target=gen-grammar-fitness\nversion=1.2.4')
+if ! grep -Fq "$expected_record" "$record_make"; then
+  echo "release_ship did not regenerate grammar fitness after the version bump" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
 
 assert_ordered_ship_events full \
   "gate=audit --validate-only" \
   "make=sync-language-spec" \
   "make=gen-highlight" \
   "gate=prepare --bump patch --allow-dirty" \
+  "make=gen-grammar-fitness" \
   "make=portal-check" \
   "gate=audit"
 
@@ -401,6 +421,7 @@ assert_ordered_ship_events residual \
   "make=sync-language-spec" \
   "make=gen-highlight" \
   "gate=prepare --bump patch --allow-dirty" \
+  "make=gen-grammar-fitness" \
   "make=portal-check" \
   "gate=audit --receipt $receipt"
 

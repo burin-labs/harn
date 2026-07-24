@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Runtime-installable builtin signature registry. Decouples harn-parser (consumer) from harn-vm (producer) without a dependency cycle."
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.34" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.35" }
 
 [lints]
 workspace = true

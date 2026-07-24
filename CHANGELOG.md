@@ -9,6 +9,119 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.35
+
+### Breaking
+
+- Rename pure collection methods so they read as value-producing operations:
+  `push` → `appending`, `pop` → `dropping_last`, `sort` → `sorted`,
+  `sort_by` → `sorted_by`, `reverse` → `reversed`, `add` → `adding`,
+  `remove` → `removing`, `merge` → `merging`, and `rekey` → `rekeyed`.
+  The pure set alias `delete` is removed. The old spellings have no
+  compatibility aliases; see the collection-method migration guide.
+
+### Added
+
+- **ACP permission prompts now include pre-approval file diffs (#4887).**
+  File-mutating tool calls carry canonical ACP diff content when Harn can
+  reconstruct the change exactly, plus bounded pre-image evidence and the
+  tool's declared ACP kind so clients can show an informed approval UI.
+- Add explicit, receipt-backed `--approve-risky <operation>` CLI grants for protected stdlib mutations in runs and user tests.
+- **Run records now expose authoritative observability projections (#5042).**
+  Persisted span trees use `parent_span_id` and expose per-LLM-span `ttft_ms`,
+  while `provider_call_response` events in `events.sqlite` carry Harn's
+  `parsed_tool_calls` and decoded `loop_state` so hosts no longer reconstruct
+  them from text or cumulative usage patches.
+- Add an optional build-attested `source_revision` to `harn version --json`, and
+  let provider tool-probe campaigns require an exact runtime revision before running.
+- Add `agent_tool_handler_result(text, data)` so Harn tool handlers can preserve
+  typed producer facts beside independently rendered model-visible feedback.
+- Extend `std/document.extract_text` with portable embedded-text extraction
+  from PDF bytes, structured failures, and explicit extractor capabilities.
+- **Exact-version Harn bootstrap command for local and non-GitHub automation
+  (#5311).** The dependency-free Node interface supports Linux, macOS, and
+  Windows; verifies immutable release checksum metadata and archives; commits
+  concurrent installs atomically; supports explicit cache/install directories
+  and offline reuse; emits a stable JSON receipt; and now owns the installation
+  logic used by the first-party setup action.
+
+### Changed
+
+- **Rust test authoring now rejects new direct shell process spawns (#5152).**
+  The test-pattern lint points process probes at the cross-platform
+  `harn-test-echo-env` helper while grandfathering the two existing
+  platform-specific cases behind a count ratchet.
+- Made AST-edit steering advisory and opt-in: agent loops now choose the
+  simplest safe edit mechanism, and exact localized text patches remain a
+  first-class choice even when Tree-Sitter grammar support is available.
+- CI self-hosted compile lanes now share a larger per-host sccache store, so a
+  job can reuse compiler objects produced by sibling workers instead of paying
+  a full rebuild after landing on a different local runner.
+- CI: the Behavior build+suite leg now routes to the big-labeled self-hosted
+  workers (one per box, with a persistent warm target directory and wider
+  compile fan-out), guarded by a new `linux_big` idle-capacity probe signal.
+  If the leg fails anywhere — including a box dying mid-run — a hosted
+  fallback job reruns the identical build+suite so degraded infrastructure
+  costs minutes, never a red build. A dedicated `cli-build` lane now produces
+  the small portable Harn CLI bundle, letting the audit lanes start minutes
+  into the run instead of waiting out the full behavior compile.
+- Internal: the `harn-cli` crate's ~92 separate integration-test binaries are
+  consolidated into two — `harn_cli_fast` (the in-process suite the nextest
+  `default`/`ci` profiles run) and `harn_cli_e2e` (the subprocess-spawning
+  suite). Each former `tests/<name>.rs` is now a submodule under
+  `tests/harn_cli_fast/` or `tests/harn_cli_e2e/`. Linking two binaries instead
+  of 92 cuts test link time and shrinks the nextest archive. The nextest
+  `default`/`ci` `default-filter` now selects the fast suite with
+  `binary(harn_cli_fast)` in place of the 15-binary allowlist; the `e2e` profile
+  keeps running `package(harn-cli) and kind(test)`, i.e. both binaries. No test
+  was added or removed.
+- Test infra: the integration-test suites of `harn-serve`, `harn-rules`,
+  `harn-mcp-rc-compat`, `harn-session-store`, and `harn-codegen` are each
+  consolidated from their per-file `tests/*.rs` binaries into a single
+  `tests/<crate>/main.rs` binary per crate (26 integration binaries down to
+  5), continuing the link-time and `cargo nextest` archive-size reduction
+  landed for `harn-hostlib` (#5427) and `harn-vm` (#5432). Every leaf test is
+  preserved unchanged; integration test names now carry their former file
+  name as a module prefix (e.g. `site_auth::…`). No product behavior change.
+- Tests: 36 of `harn-vm`'s 39 integration-test binaries are consolidated into
+  one (`harn_vm`), cutting link steps and archive weight while keeping three
+  process-isolation-sensitive suites separate. The 184-test set is unchanged.
+  The behavior-artifact
+  security filter (`binary(harn_vm)`) now also matches the consolidated
+  integration binary — the security lane still executes only its
+  name-scoped Landlock proof.
+- The run/session view compatibility fixture moved into that consolidated test
+  binary without changing its schema or snapshots.
+
+### Fixed
+
+- **Sandboxed `exec` now reports missing programs consistently on macOS
+  (#4885).** A missing executable throws the same spawn error with the default
+  sandbox and with `--no-sandbox`, while real programs can still return nonzero
+  statuses for scripts to inspect.
+- **Concurrent session changed-path receipts are owner-scoped (#5094).**
+  Resetting one VM execution no longer erases another live session's
+  `files_written` facts, while reset, close, eviction, and reused session IDs
+  still discard abandoned paths.
+- Price runtime LLM usage and observability with reported prompt-cache discounts.
+- **Session-store environment isolation (#5111).** Native database resolution
+  now follows the VM-visible environment so isolated child runs do not leak into
+  the ambient global store.
+- Scope JSON run-event sinks to their owning execution so concurrent and nested
+  in-process runs cannot mix stdout, stderr, hook, tool, transcript, persona, or
+  pack events.
+- **Headless agent event logs no longer retain every streamed tool-argument
+  delta (#5191).** Harn still delivers partial arguments to live subscribers,
+  while durable logs without a live consumer keep the settled tool call and its
+  lifecycle events.
+- Bound default-branch release Rust cache generations before each authorized
+  save while preserving the newest restore point, and keep post-prune budget
+  enforcement authoritative when aggregate GitHub telemetry is still converging.
+- The reusable Harn bump workflow now writes bare semantic versions to
+  `.harn-version` while retaining `v`-prefixed release tags in its receipts.
+- Make Windows smoke tests follow `CARGO_TARGET_DIR` when Dev Drive relocates
+  Cargo build output.
+
 ## v0.10.34
 
 ### Changed
