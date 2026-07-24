@@ -31,7 +31,8 @@ cat > "$fake_harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]]; then
-  printf '%s\n' '{"ok":true,"receipt_reused":false,"reason":"test","proof_kind":"full_local","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","lane_names":["security-audit"],"lane_runners":["run_security_audit"],"lanes":[],"errors":[]}'
+  printf 'meta\tfalse\ttest\n'
+  printf 'lane\tsecurity-audit\trun_security_audit\n'
   exit 0
 fi
 echo "unexpected fake harn invocation: $*" >&2
