@@ -180,6 +180,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/monologue_actuation_types" => "stdlib/agent/monologue_actuation_types.harn",
     "agent/stall_types" => "stdlib/agent/stall_types.harn",
     "agent/stall" => "stdlib/agent/stall.harn",
+    "agent/recurring_diagnostic" => "stdlib/agent/recurring_diagnostic.harn",
     "agent/stall_config" => "stdlib/agent/stall_config.harn",
     "agent/stall_feedback" => "stdlib/agent/stall_feedback.harn",
     "agent/stall_observation" => "stdlib/agent/stall_observation.harn",

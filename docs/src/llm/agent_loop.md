@@ -415,6 +415,23 @@ Same as `llm_call`, plus additional options:
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 | `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
 
+### Recurring diagnostic signal
+
+Hosts with their own repair loop can import
+`agent_unheeded_recurring_diagnostic` from `std/agent/stall`. Fold each
+authoritative verification attempt with the previous returned `state`. On the
+second consecutive unchanged diagnostic set, `signal` is an
+`UnheededRecurringDiagnostic` containing a location-invariant signature,
+catalog-derived category, streak, attempt range, path, and authoritative
+message. A falling diagnostic count, changed identity, clean result, or
+advisory diagnostic resets or suppresses the signal.
+
+Language knowledge remains data. Supply `DiagnosticCategories` with exact
+`codes` and ordered case-insensitive `patterns`; each maps to `syntax`,
+`resolution`, `type`, `semantic`, or `unknown`. Harn contains no
+language-specific classifier branches. The host persists the returned state
+and owns feature arming and category-specific remedy wording.
+
 `agent_loop` forwards `thinking`, `effort`, `interleaved_thinking`, and
 `anthropic_beta_features` to every model turn. When neither `thinking` nor
 `effort` is set, `reasoning_policy: "auto"` lowers provider quirks

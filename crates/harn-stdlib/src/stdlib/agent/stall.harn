@@ -1,3 +1,4 @@
+pub import { agent_unheeded_recurring_diagnostic } from "std/agent/recurring_diagnostic"
 pub import { agent_stall_initial_state } from "std/agent/stall_config"
 pub import {
   detector_action_of,
@@ -46,4 +47,40 @@ pub type DetectorSpec = {
     sigma?: float,
     stddev?: float,
   },
+}
+
+pub type RecurringDiagnosticCategory = "syntax" | "resolution" | "type" | "semantic" | "unknown"
+
+pub type DiagnosticCategoryPattern = {pattern: string, category: RecurringDiagnosticCategory}
+
+pub type DiagnosticCategories = {
+  codes?: dict<string, RecurringDiagnosticCategory>,
+  patterns?: list<DiagnosticCategoryPattern>,
+}
+
+pub type UnheededRecurringDiagnostic = {
+  signature: string,
+  category: RecurringDiagnosticCategory,
+  streak: int,
+  first_attempt: int,
+  last_attempt: int,
+  location: string?,
+  message: string,
+}
+
+pub type RecurringDiagnosticState = {
+  signatures: list<string>,
+  diagnostic_count: int,
+  signature: string,
+  category: RecurringDiagnosticCategory,
+  streak: int,
+  first_attempt: int,
+  last_attempt: int,
+  location: string?,
+  message: string,
+}
+
+pub type RecurringDiagnosticObservation = {
+  state: RecurringDiagnosticState?,
+  signal: UnheededRecurringDiagnostic?,
 }

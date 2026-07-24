@@ -1,0 +1,224 @@
+import { verification_diagnostic_delta } from "std/verification"
+
+pub type RecurringDiagnosticCategory = "syntax" | "resolution" | "type" | "semantic" | "unknown"
+
+pub type DiagnosticCategoryPattern = {pattern: string, category: RecurringDiagnosticCategory}
+
+/**
+ * Data-only diagnostic classifier supplied by a language catalog.
+ *
+ * `codes` matches an authoritative diagnostic's code, kind, or severity
+ * exactly (with a lowercase fallback). `patterns` are checked in order
+ * against its message with case-insensitive regular expressions.
+ */
+pub type DiagnosticCategories = {
+  codes?: dict<string, RecurringDiagnosticCategory>,
+  patterns?: list<DiagnosticCategoryPattern>,
+}
+
+pub type UnheededRecurringDiagnostic = {
+  signature: string,
+  category: RecurringDiagnosticCategory,
+  streak: int,
+  first_attempt: int,
+  last_attempt: int,
+  location: string?,
+  message: string,
+}
+
+/** Minimal host-persisted state for the next diagnostic observation. */
+pub type RecurringDiagnosticState = {
+  signatures: list<string>,
+  diagnostic_count: int,
+  signature: string,
+  category: RecurringDiagnosticCategory,
+  streak: int,
+  first_attempt: int,
+  last_attempt: int,
+  location: string?,
+  message: string,
+}
+
+pub type RecurringDiagnosticObservation = {
+  state: RecurringDiagnosticState?,
+  signal: UnheededRecurringDiagnostic?,
+}
+
+fn __agent_recurring_entries(current: dict) -> list {
+  if type_of(current?.diagnostics) == "list" {
+    return current.diagnostics
+  }
+  if type_of(current?.errors) == "list" {
+    return current.errors
+  }
+  if type_of(current?.diagnostic) == "dict" {
+    return [current.diagnostic]
+  }
+  return [current]
+}
+
+fn __agent_recurring_message(value) -> string {
+  if type_of(value) != "dict" {
+    return trim(to_string(value ?? ""))
+  }
+  return trim(
+    to_string(
+      value?.failureSignature
+        ?? value?.failure_signature
+        ?? value?.signature
+        ?? value?.message
+        ?? value?.text
+        ?? value?.error
+        ?? value?.stderr
+        ?? value?.stdout
+        ?? value?.combined
+        ?? value?.result
+        ?? "",
+    ),
+  )
+}
+
+fn __agent_recurring_location(value) -> string? {
+  if type_of(value) != "dict" {
+    return nil
+  }
+  const path = trim(to_string(value?.path ?? value?.file ?? value?.filename ?? value?.uri ?? ""))
+  return path == "" ? nil : path
+}
+
+fn __agent_recurring_category_value(value) -> RecurringDiagnosticCategory {
+  const category = lowercase(trim(to_string(value ?? "")))
+  if ["syntax", "resolution", "type", "semantic"].contains(category) {
+    return category
+  }
+  return "unknown"
+}
+
+fn __agent_recurring_category(
+  value,
+  categories: DiagnosticCategories,
+) -> RecurringDiagnosticCategory {
+  const codes = categories.codes ?? {}
+  if type_of(value) == "dict" {
+    for candidate in [value?.code, value?.kind, value?.severity, value?.level] {
+      const key = trim(to_string(candidate ?? ""))
+      if key == "" {
+        continue
+      }
+      const exact = codes[key]
+      if exact != nil {
+        return __agent_recurring_category_value(exact)
+      }
+      const folded = codes[lowercase(key)]
+      if folded != nil {
+        return __agent_recurring_category_value(folded)
+      }
+    }
+  }
+  const message = __agent_recurring_message(value)
+  for rule in categories.patterns ?? [] {
+    if regex_match(rule.pattern, message, "i") != nil {
+      return __agent_recurring_category_value(rule.category)
+    }
+  }
+  return "unknown"
+}
+
+fn __agent_recurring_facts(current: dict, categories: DiagnosticCategories, options: dict) -> list {
+  let facts = []
+  for entry in __agent_recurring_entries(current) {
+    const delta = verification_diagnostic_delta(nil, {diagnostics: [entry]}, options)
+    const signatures = delta.current.signatures
+    if len(signatures) == 0 {
+      continue
+    }
+    facts = facts
+      + [
+      {
+        signature: signatures[0],
+        category: __agent_recurring_category(entry, categories),
+        location: __agent_recurring_location(entry),
+        message: __agent_recurring_message(entry),
+      },
+    ]
+  }
+  return facts.sorted_by({ fact -> fact.signature })
+}
+
+fn __agent_recurring_candidate(facts: list, previous: RecurringDiagnosticState?) {
+  if previous != nil {
+    for fact in facts {
+      if fact.signature == previous.signature {
+        return fact
+      }
+    }
+  }
+  return len(facts) == 0 ? nil : facts[0]
+}
+
+/**
+ * Fold one authoritative verification attempt into a typed recurring-diagnostic signal.
+ *
+ * Harn owns identity and progress semantics by delegating to
+ * `verification_diagnostic_delta`. Paths remain part of the identity while
+ * line and column movement is collapsed. A changed signature set or falling
+ * diagnostic count resets the streak, so active repair does not fire. The
+ * signal arms on the second unchanged gate-bearing attempt.
+ *
+ * Hosts persist `observation.state`, supply language-catalog category data,
+ * and choose whether/how to render `observation.signal`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_unheeded_recurring_diagnostic(
+  previous: RecurringDiagnosticState?,
+  current: dict,
+  attempt: int,
+  categories: DiagnosticCategories = {},
+  normalization: dict = {},
+) -> RecurringDiagnosticObservation {
+  const options = normalization + {include_path: true, strip_locations: true}
+  const delta = verification_diagnostic_delta(nil, current, options)
+  const signatures = delta.current.signatures
+  if !delta.feedsGates || len(signatures) == 0 {
+    return {state: nil, signal: nil}
+  }
+  const facts = __agent_recurring_facts(current, categories, options)
+  const candidate = __agent_recurring_candidate(facts, previous)
+  if candidate == nil {
+    return {state: nil, signal: nil}
+  }
+  const diagnostic_count = delta.current.count
+  const unchanged = previous != nil
+    && previous.signatures
+    == signatures
+    && previous.diagnostic_count
+    == diagnostic_count
+  const state: RecurringDiagnosticState = {
+    signatures: signatures,
+    diagnostic_count: diagnostic_count,
+    signature: candidate.signature,
+    category: candidate.category,
+    streak: unchanged ? (previous?.streak ?? 0) + 1 : 1,
+    first_attempt: unchanged ? previous?.first_attempt ?? attempt : attempt,
+    last_attempt: attempt,
+    location: candidate.location,
+    message: candidate.message,
+  }
+  const signal: UnheededRecurringDiagnostic? = if state.streak >= 2 {
+    {
+      signature: state.signature,
+      category: state.category,
+      streak: state.streak,
+      first_attempt: state.first_attempt,
+      last_attempt: state.last_attempt,
+      location: state.location,
+      message: state.message,
+    }
+  } else {
+    nil
+  }
+  return {state: state, signal: signal}
+}

@@ -677,6 +677,13 @@ pub fn __verification_delta_location(value) -> string {
   return path
 }
 
+pub fn __verification_delta_path(value) -> string {
+  if type_of(value) != "dict" {
+    return ""
+  }
+  return trim(to_string(value?.path ?? value?.file ?? value?.filename ?? value?.uri ?? ""))
+}
+
 pub fn __verification_delta_replacement_pattern(entry) -> string {
   if type_of(entry) == "dict" {
     return trim(to_string(entry?.pattern ?? entry?.regex ?? ""))
@@ -730,7 +737,11 @@ pub fn __verification_delta_signature(value, cfg: dict) -> string {
   let parts: list<string> = []
   if type_of(value) == "dict" {
     if cfg?.include_path == true {
-      const location = __verification_delta_location(value)
+      const location = if cfg?.strip_locations != false {
+        __verification_delta_path(value)
+      } else {
+        __verification_delta_location(value)
+      }
       if location != "" {
         parts = parts.appending(location)
       }
