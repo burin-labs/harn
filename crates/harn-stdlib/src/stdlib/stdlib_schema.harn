@@ -7,8 +7,16 @@
  * @errors: []
  */
 pub import {
+  JsonTypedReport,
+  JsonTypedStage,
   SchemaContract,
   SchemaContractFailure,
+  SchemaFailure,
+  SchemaIssue,
+  SchemaReport,
+  SchemaResult,
+  SchemaValidator,
+  SchemaValidatorOptions,
   ValidationIssue,
   ValidationRule,
 } from "std/schema/contracts"
@@ -151,39 +159,93 @@ pub fn schema_contract_check<T>(
   return Ok(validated)
 }
 
-pub fn schema_any() {
+/**
+ * Build a schema that accepts any value.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_any() -> any {
   return {type: "any"}
 }
 
-pub fn schema_string() {
+/**
+ * Build a schema that accepts strings.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_string() -> any {
   return {type: "string"}
 }
 
-pub fn schema_int() {
+/**
+ * Build a schema that accepts integers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_int() -> any {
   return {type: "int"}
 }
 
-pub fn schema_float() {
+/**
+ * Build a schema that accepts floats.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_float() -> any {
   return {type: "float"}
 }
 
-pub fn schema_bool() {
+/**
+ * Build a schema that accepts booleans.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_bool() -> any {
   return {type: "bool"}
 }
 
-pub fn schema_nil() {
+/**
+ * Build a schema that accepts only `nil`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_nil() -> any {
   return {type: "nil"}
 }
 
-pub fn schema_literal(value) {
+/**
+ * Build a schema that accepts only the given constant value.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_literal(value: unknown) -> any {
   return {const: value}
 }
 
-pub fn schema_enum(values) {
+/**
+ * Build a schema that accepts any value in `values`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_enum(values: list<unknown>) -> any {
   return {enum: values}
 }
 
-pub fn schema_list(item_schema = nil, options = nil) {
+/**
+ * Build a list schema, optionally constraining item shape and adding options.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_list(item_schema: unknown = nil, options: dict? = nil) -> any {
   let out: dict = {type: "list"}
   if item_schema != nil {
     out = out + {items: item_schema}
@@ -194,11 +256,23 @@ pub fn schema_list(item_schema = nil, options = nil) {
   return out
 }
 
-pub fn schema_array(item_schema = nil, options = nil) {
+/**
+ * Alias for `schema_list(...)` using array terminology.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_array(item_schema: unknown = nil, options: dict? = nil) -> any {
   return schema_list(item_schema, options)
 }
 
-pub fn schema_dict(value_schema = nil, options = nil) {
+/**
+ * Build a dict schema, optionally constraining value shape and adding options.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_dict(value_schema: unknown = nil, options: dict? = nil) -> any {
   let out: dict = {type: "dict"}
   if value_schema != nil {
     out = out + {additional_properties: value_schema}
@@ -209,11 +283,24 @@ pub fn schema_dict(value_schema = nil, options = nil) {
   return out
 }
 
-pub fn schema_field(schema, required = true) {
+/**
+ * Tag a field schema as required or optional for use in `schema_object`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_field(schema: dict, required: bool = true) -> any {
   return schema + {required: required}
 }
 
-pub fn schema_object(fields, options = nil) {
+/**
+ * Build an object schema from a `{name: field_schema}` map. Fields default to
+ * required unless tagged with `schema_field(..., false)` or `schema_default`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_object(fields: dict, options: dict? = nil) -> any {
   let properties = {}
   let required = []
   for entry in fields {
@@ -245,7 +332,7 @@ pub fn schema_object(fields, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn schema_closed_object(fields, options = nil) {
+pub fn schema_closed_object(fields: dict, options: dict? = nil) -> any {
   if options == nil {
     return schema_object(fields, {additional_properties: false})
   }
@@ -258,43 +345,97 @@ pub fn schema_closed_object(fields, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn schema_strict_object(fields, options = nil) {
+pub fn schema_strict_object(fields: dict, options: dict? = nil) -> any {
   return schema_closed_object(fields, options)
 }
 
-pub fn schema_union(branches) {
+/**
+ * Build a union schema matching any one of `branches`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_union(branches: list<unknown>) -> any {
   return {union: branches}
 }
 
-pub fn schema_all_of(branches) {
+/**
+ * Build an intersection schema matching all of `branches`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_all_of(branches: list<unknown>) -> any {
   return {all_of: branches}
 }
 
-pub fn schema_nullable(schema) {
+/**
+ * Return `schema` widened to also accept `nil`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_nullable(schema: dict) -> any {
   return schema_extend(schema, {nullable: true})
 }
 
-pub fn schema_default(schema, value) {
+/**
+ * Return `schema` made optional with the given default value.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_default(schema: dict, value: unknown) -> any {
   return schema + {default: value, required: false}
 }
 
-pub fn schema_pick_keys(schema, keys) {
+/**
+ * Return a schema keeping only the named keys.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_pick_keys(schema: dict, keys: list<string>) -> any {
   return schema_pick(schema, keys)
 }
 
-pub fn schema_omit_keys(schema, keys) {
+/**
+ * Return a schema dropping the named keys.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_omit_keys(schema: dict, keys: list<string>) -> any {
   return schema_omit(schema, keys)
 }
 
-pub fn schema_partial_deep(schema) {
+/**
+ * Return a schema with every field made optional.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_partial_deep(schema: dict) -> any {
   return schema_partial(schema)
 }
 
-pub fn schema_json(schema) {
+/**
+ * Render `schema` as a JSON Schema dict.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_json(schema: unknown) -> dict {
   return schema_to_json_schema(schema)
 }
 
-pub fn schema_openapi(schema) {
+/**
+ * Render `schema` as an OpenAPI Schema dict.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn schema_openapi(schema: unknown) -> dict {
   return schema_to_openapi_schema(schema)
 }
 
@@ -308,7 +449,10 @@ pub fn schema_openapi(schema) {
  * @effects: []
  * @errors: []
  */
-pub fn schema_validator(schema, options = nil) {
+pub fn schema_validator<T>(
+  schema: dict | Schema<T>,
+  options: SchemaValidatorOptions? = nil,
+) -> SchemaValidator<T> {
   const default_apply_defaults = options?.apply_defaults ?? false
   return {
     schema: schema,
@@ -340,21 +484,37 @@ pub fn schema_validator(schema, options = nil) {
   }
 }
 
-pub fn from_json_schema(schema) {
-  return schema_from_json_schema(schema)
-}
-
-pub fn from_openapi_schema(schema) {
-  return schema_from_openapi_schema(schema)
-}
-
 /**
- * Validate a value and return `Result.Ok(value)` or `Result.Err(...)`.
+ * Convert a JSON Schema dict into a native schema definition.
  *
  * @effects: []
  * @errors: []
  */
-pub fn get_typed_result(value, schema, apply_defaults = false) {
+pub fn from_json_schema(schema: dict) -> any {
+  return schema_from_json_schema(schema)
+}
+
+/**
+ * Convert an OpenAPI Schema dict into a native schema definition.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn from_openapi_schema(schema: dict) -> any {
+  return schema_from_openapi_schema(schema)
+}
+
+/**
+ * Validate a value and return `Result.Ok(value)` or `Result.Err(SchemaFailure)`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn get_typed_result<T>(
+  value: unknown,
+  schema: dict | Schema<T>,
+  apply_defaults: bool = false,
+) -> SchemaResult<T> {
   if apply_defaults {
     return schema_parse(value, schema)
   }
@@ -362,32 +522,54 @@ pub fn get_typed_result(value, schema, apply_defaults = false) {
 }
 
 /**
- * Validate a value and return `{ok, message, errors, issues, value?}`.
+ * Validate a value and return a structured `SchemaReport`.
  *
  * @effects: []
  * @errors: []
  */
-pub fn get_typed_report(value, schema, apply_defaults = false) {
-  return schema_report(value, schema, apply_defaults)
+pub fn get_typed_report<T>(
+  value: unknown,
+  schema: dict | Schema<T>,
+  apply_defaults: bool = false,
+) -> SchemaReport<T> {
+  // `schema_report` builds the report shape dynamically; contracts.harn owns the
+  // `SchemaReport<T>` type. Bind through `any` so the runtime value adopts the
+  // declared contract without re-describing the shape here.
+  const report: any = schema_report(value, schema, apply_defaults)
+  return report
 }
 
 /**
  * Parse JSON text and validate the parsed value against a schema in one step.
- * Returns `{ok, message, errors, issues, value?, stage}` where `stage` is
- * `json_parse` or `schema`.
+ * `stage` is `json_parse` when the text is malformed, otherwise `schema`.
  *
  * @effects: []
  * @errors: []
  */
-pub fn parse_json_typed_report<T>(text: string, schema: Schema<T>, apply_defaults = false) -> dict {
+pub fn parse_json_typed_report<T>(
+  text: string,
+  schema: dict | Schema<T>,
+  apply_defaults: bool = false,
+) -> JsonTypedReport<T> {
   const parsed = try {
     json_parse(text ?? "")
   }
   if !is_ok(parsed) {
-    const message = unwrap_err(parsed).message
-    return {ok: false, message: message, errors: [message], issues: [], stage: "json_parse"}
+    // JSON never reached the schema; report the parse failure at the json_parse
+    // stage. Bind through `any` so the literal adopts the generic
+    // `JsonTypedReport<T>` contract owned in contracts.harn.
+    const message: string = to_string(unwrap_err(parsed)?.message ?? "invalid JSON")
+    const failure: any = {
+      ok: false,
+      message: message,
+      errors: [message],
+      issues: [],
+      stage: "json_parse",
+    }
+    return failure
   }
-  return get_typed_report(unwrap(parsed), schema, apply_defaults) + {stage: "schema"}
+  const report: any = get_typed_report(unwrap(parsed), schema, apply_defaults) + {stage: "schema"}
+  return report
 }
 
 /**
@@ -399,9 +581,9 @@ pub fn parse_json_typed_report<T>(text: string, schema: Schema<T>, apply_default
  */
 pub fn parse_json_typed<T>(
   text: string,
-  schema: Schema<T>,
+  schema: dict | Schema<T>,
   fallback: T? = nil,
-  apply_defaults = false,
+  apply_defaults: bool = false,
 ) -> T? {
   const report = parse_json_typed_report(text, schema, apply_defaults)
   if report.ok {
@@ -416,7 +598,11 @@ pub fn parse_json_typed<T>(
  * @effects: []
  * @errors: []
  */
-pub fn get_typed_issues(value, schema, apply_defaults = false) {
+pub fn get_typed_issues<T>(
+  value: unknown,
+  schema: dict | Schema<T>,
+  apply_defaults: bool = false,
+) -> list<SchemaIssue> {
   return get_typed_report(value, schema, apply_defaults).issues
 }
 
@@ -426,7 +612,11 @@ pub fn get_typed_issues(value, schema, apply_defaults = false) {
  * @effects: []
  * @errors: []
  */
-pub fn get_typed_errors(value, schema, apply_defaults = false) {
+pub fn get_typed_errors<T>(
+  value: unknown,
+  schema: dict | Schema<T>,
+  apply_defaults: bool = false,
+) -> list<string> {
   return get_typed_report(value, schema, apply_defaults).errors
 }
 
@@ -436,12 +626,12 @@ pub fn get_typed_errors(value, schema, apply_defaults = false) {
  * @effects: []
  * @errors: ["schema validation failure"]
  */
-pub fn get_typed_value(value, schema, apply_defaults = false) {
-  const report = get_typed_report(value, schema, apply_defaults)
-  if report.ok {
-    return report.value
-  }
-  throw_error(report.message)
+pub fn get_typed_value<T>(
+  value: unknown,
+  schema: dict | Schema<T>,
+  apply_defaults: bool = false,
+) -> T {
+  return schema_expect(value, schema, apply_defaults)
 }
 
 /**
@@ -450,10 +640,20 @@ pub fn get_typed_value(value, schema, apply_defaults = false) {
  * @effects: []
  * @errors: ["schema validation failure"]
  */
-pub fn expect_typed_value(value, schema, apply_defaults = false) {
+pub fn expect_typed_value<T>(
+  value: unknown,
+  schema: dict | Schema<T>,
+  apply_defaults: bool = false,
+) -> T {
   return get_typed_value(value, schema, apply_defaults)
 }
 
-pub fn is_type(value, schema) {
+/**
+ * Report whether `value` satisfies `schema`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_type(value: unknown, schema: unknown) -> bool {
   return schema_is(value, schema)
 }

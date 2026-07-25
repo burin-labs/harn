@@ -21,7 +21,7 @@
 //   split on `separator` (default `,`). Repeated list flags flatten into one
 //   list so the output shape does not depend on how many occurrences were
 //   supplied.
-import { get_typed_result } from "std/schema"
+import { SchemaFailure, get_typed_result } from "std/schema"
 
 pub type ArgKind = "positional" | "flag" | "switch"
 
@@ -347,29 +347,18 @@ fn __argv_failure(code: CliParseCode, arg: string, message: string) -> CliParseF
   }
 }
 
-fn __schema_failure(failure) -> CliParseFailure {
+fn __schema_failure(failure: SchemaFailure) -> CliParseFailure {
   let issues: list<CliParseIssue> = []
-  for issue in failure?.issues ?? [] {
+  for issue in failure.issues {
     issues = issues.appending(
-      {
-        stage: "schema",
-        code: issue?.code ?? "schema.validation",
-        message: issue?.message ?? "schema validation failed",
-        path: issue?.path ?? "root",
-      },
-    )
-  }
-  const message = failure?.message ?? "schema validation failed"
-  if len(issues) == 0 {
-    issues = issues.appending(
-      {stage: "schema", code: "schema.validation", message: message, path: "root"},
+      {stage: "schema", code: issue.code, message: issue.message, path: issue.path},
     )
   }
   return {
     kind: "cli_parse_failure",
     stage: "schema",
     code: "schema_mismatch",
-    message: message,
+    message: failure.message,
     issues: issues,
   }
 }

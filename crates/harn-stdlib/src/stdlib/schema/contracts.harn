@@ -1,3 +1,60 @@
+/**
+ * One structural validation issue produced by the schema runtime: the output
+ * of `schema_report`, `schema_check`, `schema_parse`, and the `get_typed_*`
+ * helpers. Every issue carries a `path` locator, a rendered `message`, and a
+ * stable `code`.
+ *
+ * This is the raw runtime vocabulary. `ValidationIssue` below is the separate
+ * rule-authoring vocabulary consumers build with `validation_issue(...)`.
+ */
+pub type SchemaIssue = {path: string, message: string, code: string}
+
+/**
+ * Failure payload carried by `Result.Err` from `schema_check`, `schema_parse`,
+ * and `get_typed_result`. `value` is the best-effort coerced value that failed
+ * validation, retained for inspection.
+ */
+pub type SchemaFailure = {
+  message: string,
+  errors: list<string>,
+  issues: list<SchemaIssue>,
+  value?: unknown,
+}
+
+/** Canonical result of validating a value against a schema. */
+pub type SchemaResult<T> = Result<T, SchemaFailure>
+
+/**
+ * Full validation report: the `ok` flag, the first rendered `message`, every
+ * rendered `error`, the structural `issues`, and — when validation produced one
+ * — the normalized/defaulted `value`.
+ */
+pub type SchemaReport<T> = {
+  ok: bool,
+  message: string,
+  errors: list<string>,
+  issues: list<SchemaIssue>,
+  value?: T,
+}
+
+/** Which stage a `parse_json_typed_report` result was produced by. */
+pub type JsonTypedStage = "json_parse" | "schema"
+
+/**
+ * A `SchemaReport` annotated with the `stage` that produced it, returned by
+ * `parse_json_typed_report`. `json_parse` means the JSON text was malformed and
+ * no schema validation ran; `schema` means parsing succeeded and the remaining
+ * fields reflect schema validation.
+ */
+pub type JsonTypedReport<T> = {
+  ok: bool,
+  message: string,
+  errors: list<string>,
+  issues: list<SchemaIssue>,
+  value?: T,
+  stage: JsonTypedStage,
+}
+
 pub type ValidationIssue = {
   code: string,
   message: string,
@@ -18,4 +75,26 @@ pub type SchemaContractFailure = {
   kind: "schema_invalid" | "rule_failed" | "rule_error",
   detail: string,
   issues: list<ValidationIssue>,
+}
+
+/** Construction options for `schema_validator`. */
+pub type SchemaValidatorOptions = {apply_defaults?: bool}
+
+/**
+ * A reusable validator bound to one schema, returned by `schema_validator`.
+ * Each method validates a value against the bound schema without repeating
+ * freeform `schema_*` calls. Methods that accept a per-call `apply_defaults`
+ * override still honor the validator's constructed default when it is omitted.
+ */
+pub type SchemaValidator<T> = {
+  schema: dict | Schema<T>,
+  is: fn(unknown) -> bool,
+  check: fn(unknown) -> SchemaResult<T>,
+  parse: fn(unknown) -> SchemaResult<T>,
+  report: fn(unknown) -> SchemaReport<T>,
+  expect: fn(unknown) -> T,
+  errors: fn(unknown) -> list<string>,
+  issues: fn(unknown) -> list<SchemaIssue>,
+  json_schema: fn() -> dict,
+  openapi_schema: fn() -> dict,
 }

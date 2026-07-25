@@ -1,0 +1,63 @@
+// Exercises the canonical std/schema typed contracts (SchemaResult,
+// SchemaFailure, SchemaReport, SchemaValidator) across the result, report,
+// default, and error paths — including closed-object rejection and
+// JSON-serializable failures.
+import "std/schema"
+
+type User = {name: string, role?: string}
+
+pipeline test(task) {
+  const user_schema = schema_closed_object(
+    {
+      name: schema_field(schema_string() + {min_length: 2}),
+      role: schema_default(schema_string(), "member"),
+    },
+  )
+  // get_typed_result: Ok path returns Result.Ok.
+  const ok_result = get_typed_result({name: "Ada"}, user_schema)
+  __io_println("result_ok=" + to_string(is_ok(ok_result)))
+  // get_typed_result: Err path returns Result.Err(SchemaFailure). "A" is below
+  // min_length and "extra" is an unexpected key on the closed object.
+  const err_result = get_typed_result({name: "A", extra: true}, user_schema)
+  __io_println("result_err=" + to_string(is_err(err_result)))
+  const failure = unwrap_err(err_result)
+  __io_println("failure_message_nonempty=" + to_string(len(failure.message) > 0))
+  __io_println("failure_has_issues=" + to_string(len(failure.issues) > 0))
+  __io_println("failure_has_errors=" + to_string(len(failure.errors) > 0))
+  // Failures are JSON-safe: every issue serializes with path/message/code.
+  const issues_json = json_stringify(failure.issues)
+  __io_println("json_has_path=" + to_string(contains(issues_json, "\"path\"")))
+  __io_println("json_has_message=" + to_string(contains(issues_json, "\"message\"")))
+  __io_println("json_has_code=" + to_string(contains(issues_json, "\"code\"")))
+  const first_issue = failure.issues[0]
+  __io_println("issue_code_is_string=" + to_string(type_of(first_issue.code) == "string"))
+  // Default path: apply_defaults fills the missing optional field.
+  const defaulted = get_typed_value({name: "Bo"}, user_schema, true)
+  __io_println("default_role=" + defaulted.role)
+  // Report path plus the issue/error projections.
+  const report = get_typed_report({name: "A"}, user_schema)
+  __io_println("report_ok=" + to_string(report.ok))
+  __io_println(
+    "report_issue_count_positive=" + to_string(len(get_typed_issues({name: "A"}, user_schema)) > 0),
+  )
+  __io_println(
+    "report_error_count_positive=" + to_string(len(get_typed_errors({name: "A"}, user_schema)) > 0),
+  )
+  // Validator object: is/check/parse/expect/issues over one bound schema.
+  const validator = schema_validator(user_schema, {apply_defaults: true})
+  __io_println("validator_is=" + to_string(validator.is({name: "Zo"})))
+  __io_println("validator_check_ok=" + to_string(is_ok(validator.check({name: "Zo"}))))
+  __io_println("validator_check_err=" + to_string(is_err(validator.check({name: "Z"}))))
+  __io_println("validator_expect_role=" + validator.expect({name: "Zo"}).role)
+  __io_println(
+    "validator_issue_count_positive=" + to_string(len(validator.issues({name: "Z"})) > 0),
+  )
+  // parse_json_typed_report: schema stage on valid text, json_parse on malformed.
+  const good_json = parse_json_typed_report("{\"name\":\"Ida\"}", user_schema)
+  __io_println("good_json=" + good_json.stage + ":" + to_string(good_json.ok))
+  const bad_json = parse_json_typed_report("{not json", user_schema)
+  __io_println("bad_json=" + bad_json.stage + ":" + to_string(bad_json.ok))
+  // parse_json_typed: fallback returned when parsing/validation fails.
+  const fallback: User? = parse_json_typed("nope", user_schema, {name: "fallback"})
+  __io_println("fallback_name=" + (fallback?.name ?? "none"))
+}
