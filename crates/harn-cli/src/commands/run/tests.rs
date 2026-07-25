@@ -1,4 +1,6 @@
 use super::harnpack::HarnpackRunOptions;
+#[cfg(unix)]
+use super::CapabilityProfileConfig;
 use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
     eval_source_for_code, execute_explain_cost, execute_run,
