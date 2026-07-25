@@ -1390,5 +1390,9 @@ mod tests;
 mod lazy_tests;
 
 #[cfg(test)]
+#[path = "extensions_provider_tests.rs"]
+mod provider_tests;
+
+#[cfg(test)]
 #[path = "persona_runtime_tests.rs"]
 mod persona_tests;
