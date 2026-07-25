@@ -242,11 +242,69 @@ premise of [harn#4432](https://github.com/burin-labs/harn/issues/4432)
 ephemeral-port drift): hardening a deprecated registration path is worth
 less than it was when that issue was written.
 
-Not yet checked for lifecycle status: the A2A and ACP target surfaces.
-A2A `#1858` targets the task state machine and ACP `#1233` targets
-session lifecycle; both look structural rather than deprecated, but
-neither has been confirmed against a deprecation registry the way the MCP
-surfaces now have.
+### A2A: no deprecation risk, two corrections
+
+Checked 2026-07-25 against the current A2A specification.
+
+A2A has a formal deprecation lifecycle in Appendix A: a renamed message or
+field keeps its old name, marked deprecated, until the next major release.
+Two breaking changes are recorded there, both already known to us — the
+`kind` discriminator removal and the extended-agent-card field relocation.
+**Nothing we target is deprecated.**
+
+**`TASK_STATE_PAUSED` still does not exist.** The current enum is
+`UNSPECIFIED`, `SUBMITTED`, `WORKING`, `COMPLETED`, `FAILED`, `CANCELED`,
+`INPUT_REQUIRED`, `REJECTED`, `AUTH_REQUIRED`. There is no caller-initiated
+pause and no mechanism for one, so the gap `#1858` describes is intact and
+unclaimed after two months.
+
+**Correction to `#1857`'s premise.** The filing implies no idempotency
+handle exists. The spec actually says Send Message operations MAY be
+idempotent and that agents may use `messageId` to detect duplicates. So a
+handle exists; what is missing is any obligation to honour it or any
+specification of the dedupe window and collision behaviour. That makes the
+right ask considerably smaller than the filing's: **specify dedupe
+semantics for the existing `messageId`, rather than add a new
+`Idempotency-Key`.** Recorded on
+[harn#5540](https://github.com/burin-labs/harn/issues/5540) — it partially
+reopens the option A versus B decision, since "tighten what already
+exists" is a much easier sell than "add a field."
+
+**Watch item for `#2028`.** The actor-chain extension is declared through
+`AgentExtension` entries under `AgentCapabilities`. One of A2A's two
+recorded breaking changes relocated an extended-agent-card field, so
+confirm the declaration location against the current schema before any
+follow-up post cites it.
+
+### ACP: no deprecation risk, and an open invitation
+
+Checked 2026-07-25 against the v2 overview RFD.
+
+`session/load` is removed in v2, with `session/resume` subsuming it via an
+optional `replayFrom` cursor. We already accounted for that in the
+2026-07-03 realignment on `#1233`, so no rework is needed.
+
+**`session/prompt` and `session/cancel` continue unchanged in v2**, which
+are the surfaces the inject and suspend proposals sit beside. The v2
+baseline session method set is `session/new`, `session/list`,
+`session/resume`, `session/close`, `session/prompt`, `session/cancel`, and
+`session/update`. Every one of our ACP proposals is an *addition* to a live
+surface rather than an extension of a deprecated one. Nothing is
+deprecated.
+
+**The v2 "RFDs to be Written" list now reads "MCP: tool timeouts, more
+lifecycle methods."** That second item is an open slot that
+`session/suspend` fits directly, and it is a stronger position than the
+thread has had. It also indicates the truncate/edit item previously on
+that list has been claimed, consistent with `htahaozlu` re-basing the
+rewind proposal onto the v2 lifecycle in the `#1261` thread.
+
+### Net result of the lifecycle sweep
+
+One filing died (MCP `#2736`), one is at risk and needs to differentiate
+(MCP `#3007`), one gained a stronger framing (ACP `#1233`, which fits a
+named open slot), and one had its premise corrected in a way that shrinks
+the ask (A2A `#1857`). The remaining seven are unaffected.
 
 ## Local follow-up candidates
 
