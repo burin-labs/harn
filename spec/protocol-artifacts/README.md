@@ -36,10 +36,10 @@ final `2026-07-28` specification lands.
 - `harn-protocol.ts`: TypeScript definitions for ACP session updates,
 tool lifecycle metadata, A2A task events, and MCP metadata.
 - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.
-- `harn-protocol.rs`: dependency-free Rust module of ACP method-name,
-session-update discriminator, content-extension key, and protocol
-version `pub const`s. The only binding that publishes the complete
-dispatched ACP method surface; an IDE host vendors it as
+- `harn-protocol.rs`: serde-backed Rust DTOs for ACP permission and Harn
+agent-event messages plus method-name, session-update discriminator,
+content-extension key, and protocol-version constants. It depends on
+`serde` (with `derive`) and `serde_json`; an IDE host vendors it as
 `protocol/src/generated.rs`.
 - `python/harn_protocol.py`: Python dataclasses, enums, and constants for
 the same host-facing surface (Python 3.9+, stdlib-only).

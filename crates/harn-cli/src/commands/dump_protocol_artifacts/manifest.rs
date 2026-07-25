@@ -84,6 +84,7 @@ pub(super) fn generate_manifest_for_version(
             "rust": {
                 "artifact": "harn-protocol.rs",
                 "vendorPath": "protocol/src/generated.rs",
+                "dependencies": ["serde", "serde_json"],
                 "stability": "stable",
             },
             "python": {
@@ -216,10 +217,10 @@ pub(super) fn generate_readme() -> String {
          - `harn-protocol.ts`: TypeScript definitions for ACP session updates,\n\
            tool lifecycle metadata, A2A task events, and MCP metadata.\n\
          - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.\n\
-         - `harn-protocol.rs`: dependency-free Rust module of ACP method-name,\n\
-           session-update discriminator, content-extension key, and protocol\n\
-           version `pub const`s. The only binding that publishes the complete\n\
-           dispatched ACP method surface; an IDE host vendors it as\n\
+         - `harn-protocol.rs`: serde-backed Rust DTOs for ACP permission and Harn\n\
+           agent-event messages plus method-name, session-update discriminator,\n\
+           content-extension key, and protocol-version constants. It depends on\n\
+           `serde` (with `derive`) and `serde_json`; an IDE host vendors it as\n\
            `protocol/src/generated.rs`.\n\
          - `python/harn_protocol.py`: Python dataclasses, enums, and constants for\n\
            the same host-facing surface (Python 3.9+, stdlib-only).\n\
