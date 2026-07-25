@@ -1,6 +1,6 @@
 use crate::llm::helpers::{
     extract_llm_options, is_transcript_value, new_transcript_with_events, project_llm_options,
-    transcript_asset_list, transcript_event, transcript_id, transcript_message_list,
+    transcript_asset_list, transcript_event_with_id, transcript_id, transcript_message_list,
     transcript_summary_text, vm_value_to_json,
 };
 use crate::orchestration::{
@@ -127,7 +127,8 @@ async fn compact_transcript_impl(
         assets.push(asset);
     }
     let mut extra_events = outcome.reminder_report.preserved_events;
-    extra_events.push(transcript_event(
+    extra_events.push(transcript_event_with_id(
+        &outcome.receipt.receipt_id,
         "compaction",
         "system",
         "internal",

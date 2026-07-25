@@ -636,67 +636,54 @@ impl AgentEventSink for AcpAgentEventSink {
             }
             AgentEvent::TranscriptCompacted {
                 session_id,
-                mode,
-                reason,
-                strategy,
-                archived_messages,
-                estimated_tokens_before,
-                estimated_tokens_after,
-                snapshot_asset_id,
-                instruction_mode,
-                instruction_source,
-                compaction_policy,
-                recap,
+                receipt,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "transcript_compacted",
                 });
                 let mut harn_meta = serde_json::Map::new();
-                harn_meta.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
-                harn_meta.insert(
-                    "reason".to_string(),
-                    serde_json::Value::String(reason.clone()),
+                let mut put = |key: &str, value: serde_json::Value| {
+                    harn_meta.insert(key.to_string(), value);
+                };
+                // `receiptId` + `schemaVersion` give ACP consumers the stable
+                // runtime identity so they no longer synthesize a host-local
+                // UUID (harn#4995).
+                put("receiptId", receipt.receipt_id.clone().into());
+                put("schemaVersion", receipt.schema_version.into());
+                put("mode", receipt.mode.clone().into());
+                put("reason", receipt.reason.clone().into());
+                put("strategy", receipt.strategy.clone().into());
+                put("engineStrategy", receipt.engine_strategy.clone().into());
+                put("archivedMessages", receipt.archived_messages.into());
+                put(
+                    "estimatedTokensBefore",
+                    receipt.estimated_tokens_before.into(),
                 );
-                harn_meta.insert(
-                    "strategy".to_string(),
-                    serde_json::Value::String(strategy.clone()),
+                put(
+                    "estimatedTokensAfter",
+                    receipt.estimated_tokens_after.into(),
                 );
-                harn_meta.insert(
-                    "archivedMessages".to_string(),
-                    serde_json::Value::from(*archived_messages),
+                put(
+                    "snapshotAssetId",
+                    receipt
+                        .snapshot_asset_id
+                        .clone()
+                        .map_or(serde_json::Value::Null, serde_json::Value::String),
                 );
-                harn_meta.insert(
-                    "estimatedTokensBefore".to_string(),
-                    serde_json::Value::from(*estimated_tokens_before),
-                );
-                harn_meta.insert(
-                    "estimatedTokensAfter".to_string(),
-                    serde_json::Value::from(*estimated_tokens_after),
-                );
-                harn_meta.insert(
-                    "snapshotAssetId".to_string(),
-                    match snapshot_asset_id {
-                        Some(id) => serde_json::Value::String(id.clone()),
-                        None => serde_json::Value::Null,
-                    },
-                );
-                if let Some(instruction_mode) = instruction_mode {
-                    harn_meta.insert(
-                        "instructionMode".to_string(),
-                        serde_json::Value::String(instruction_mode.clone()),
+                if let Some(instruction_mode) = &receipt.instruction_mode {
+                    put("instructionMode", instruction_mode.clone().into());
+                }
+                if let Some(instruction_source) = &receipt.instruction_source {
+                    put("instructionSource", instruction_source.clone().into());
+                }
+                if let Some(compaction_policy) = &receipt.compaction_policy {
+                    put("compactionPolicy", compaction_policy.clone());
+                }
+                if let Some(recap) = &receipt.recap {
+                    put(
+                        "recap",
+                        serde_json::to_value(recap).unwrap_or(serde_json::Value::Null),
                     );
-                }
-                if let Some(instruction_source) = instruction_source {
-                    harn_meta.insert(
-                        "instructionSource".to_string(),
-                        serde_json::Value::String(instruction_source.clone()),
-                    );
-                }
-                if let Some(compaction_policy) = compaction_policy {
-                    harn_meta.insert("compactionPolicy".to_string(), compaction_policy.clone());
-                }
-                if let Some(recap) = recap {
-                    harn_meta.insert("recap".to_string(), recap.clone());
                 }
                 merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({

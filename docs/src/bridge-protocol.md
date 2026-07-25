@@ -115,7 +115,7 @@ that route on it keep working unchanged. Concretely:
 | `log`                  | `level`, `message`, `fields`                                                                                                           |
 | `fs_watch`             | `subscriptionId`, `events`                                                                                                             |
 | `worker_update`        | `workerId`, `workerName`, `workerTask`, `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`                               |
-| `transcript_compacted` | `mode`, `reason`, `strategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy` |
+| `transcript_compacted` | `receiptId`, `schemaVersion`, `mode`, `reason`, `strategy`, `engineStrategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy`, `recap` |
 | `transcript_projected` | `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`, `providerSafetyBlocked`, `redactedCount`, `reclaimedTokens`, `rootsConsulted`, `redactionPointers` |
 | `handoff`              | `handoffId`, `artifactId`, `handoff`                                                                                                   |
 | `skill_activated`      | `skillName`, `iteration`, `reason`                                                                                                     |

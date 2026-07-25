@@ -309,11 +309,19 @@ pub struct RunTranscriptArtifactDescriptor {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct CompactionEventRecord {
+    /// Schema version of the receipt this record was projected from. `0` marks a
+    /// record migrated from a legacy transcript that predates the embedded
+    /// receipt (harn#4995), reconstructed from the flat event metadata.
+    pub schema_version: u32,
+    /// Stable identity, equal to the transcript event id and the receipt id.
     pub id: String,
     pub transcript_id: Option<String>,
     pub stage_id: Option<String>,
     pub node_id: Option<String>,
     pub mode: String,
+    /// Why compaction fired. Survives projection from the receipt; empty only
+    /// for legacy transcripts that never recorded a reason.
+    pub reason: String,
     pub strategy: String,
     pub archived_messages: usize,
     pub estimated_tokens_before: usize,
@@ -325,6 +333,8 @@ pub struct CompactionEventRecord {
     pub instruction_mode: String,
     pub instruction_source: Option<String>,
     pub compaction_policy: Option<serde_json::Value>,
+    /// Observation-mask recap metrics; `None` for non-masking strategies.
+    pub recap: Option<super::super::RecapMetrics>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

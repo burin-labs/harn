@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::super::{
     default_run_dir, new_id, now_unix_seconds_text, parse_json_payload, sync_run_handoffs,
+    CompactionReceipt, RecapMetrics,
 };
 use super::action_graph::{publish_action_graph_event, refresh_run_observability};
 use super::eval_pack::replay_fixture_from_run;
@@ -330,68 +331,141 @@ pub(super) fn compaction_events_from_transcript(
                     event.get("kind").and_then(|value| value.as_str()) == Some("compaction")
                 })
                 .map(|event| {
-                    let metadata = event.get("metadata");
-                    let snapshot_asset_id = metadata
-                        .and_then(|value| value.get("snapshot_asset_id"))
+                    let event_id = event
+                        .get("id")
                         .and_then(|value| value.as_str())
-                        .map(str::to_string);
-                    let available = snapshot_asset_id
-                        .as_ref()
-                        .is_some_and(|asset_id| asset_ids.contains(asset_id));
-                    let snapshot_location = snapshot_asset_id
-                        .as_ref()
-                        .map(|asset_id| format!("{location_prefix}.assets[{asset_id}]"))
-                        .unwrap_or_else(|| location_prefix.to_string());
-                    CompactionEventRecord {
-                        id: event
-                            .get("id")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        transcript_id: transcript_id.clone(),
-                        stage_id: stage_id.map(str::to_string),
-                        node_id: node_id.map(str::to_string),
-                        mode: metadata
-                            .and_then(|value| value.get("mode"))
-                            .and_then(|value| value.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        strategy: metadata
-                            .and_then(|value| value.get("strategy"))
-                            .and_then(|value| value.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        archived_messages: json_usize(
-                            metadata.and_then(|value| value.get("archived_messages")),
-                        ),
-                        estimated_tokens_before: json_usize(
-                            metadata.and_then(|value| value.get("estimated_tokens_before")),
-                        ),
-                        estimated_tokens_after: json_usize(
-                            metadata.and_then(|value| value.get("estimated_tokens_after")),
-                        ),
-                        snapshot_asset_id,
-                        snapshot_location,
-                        snapshot_path: persisted_path
-                            .map(|path| path.to_string_lossy().into_owned()),
-                        available,
-                        instruction_mode: metadata
-                            .and_then(|value| value.get("instruction_mode"))
-                            .and_then(|value| value.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        instruction_source: metadata
-                            .and_then(|value| value.get("instruction_source"))
-                            .and_then(|value| value.as_str())
-                            .map(str::to_string),
-                        compaction_policy: metadata
-                            .and_then(|value| value.get("compaction_policy"))
-                            .cloned(),
-                    }
+                        .unwrap_or_default()
+                        .to_string();
+                    compaction_event_record(
+                        event_id,
+                        event.get("metadata"),
+                        transcript_id.clone(),
+                        stage_id,
+                        node_id,
+                        location_prefix,
+                        persisted_path,
+                        &asset_ids,
+                    )
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Read a compaction event's flat metadata string field, defaulting to empty.
+fn flat_meta_str(metadata: Option<&serde_json::Value>, key: &str) -> String {
+    metadata
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Project one transcript `compaction` event into a [`CompactionEventRecord`].
+///
+/// Prefers the canonical [`CompactionReceipt`] embedded under `metadata.receipt`
+/// (deserialized typed, not scraped key-by-key); when it is absent — a legacy
+/// transcript written before receipts existed — it falls back to reconstructing
+/// the record from the flat event metadata and marks the record
+/// `schema_version: 0` as the explicit migration signal (harn#4995).
+#[allow(clippy::too_many_arguments)]
+fn compaction_event_record(
+    event_id: String,
+    metadata: Option<&serde_json::Value>,
+    transcript_id: Option<String>,
+    stage_id: Option<&str>,
+    node_id: Option<&str>,
+    location_prefix: &str,
+    persisted_path: Option<&Path>,
+    asset_ids: &std::collections::BTreeSet<String>,
+) -> CompactionEventRecord {
+    let receipt = CompactionReceipt::from_event_metadata(metadata);
+    // Snapshot provenance is a persistence concern (it needs the transcript's
+    // asset set and persisted path), so it is computed here in both paths from
+    // whichever snapshot id is available.
+    let snapshot_asset_id = receipt
+        .as_ref()
+        .and_then(|receipt| receipt.snapshot_asset_id.clone())
+        .or_else(|| {
+            metadata
+                .and_then(|value| value.get("snapshot_asset_id"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        });
+    let available = snapshot_asset_id
+        .as_ref()
+        .is_some_and(|asset_id| asset_ids.contains(asset_id));
+    let snapshot_location = snapshot_asset_id
+        .as_ref()
+        .map(|asset_id| format!("{location_prefix}.assets[{asset_id}]"))
+        .unwrap_or_else(|| location_prefix.to_string());
+    let snapshot_path = persisted_path.map(|path| path.to_string_lossy().into_owned());
+    let stage_id = stage_id.map(str::to_string);
+    let node_id = node_id.map(str::to_string);
+
+    if let Some(receipt) = receipt {
+        // Prefer the on-disk event id (it is the receipt id), falling back to the
+        // receipt's own id so identity is never lost.
+        let id = if event_id.is_empty() {
+            receipt.receipt_id
+        } else {
+            event_id
+        };
+        return CompactionEventRecord {
+            schema_version: receipt.schema_version,
+            id,
+            transcript_id,
+            stage_id,
+            node_id,
+            mode: receipt.mode,
+            reason: receipt.reason,
+            strategy: receipt.strategy,
+            archived_messages: receipt.archived_messages,
+            estimated_tokens_before: receipt.estimated_tokens_before,
+            estimated_tokens_after: receipt.estimated_tokens_after,
+            snapshot_asset_id,
+            snapshot_location,
+            snapshot_path,
+            available,
+            instruction_mode: receipt.instruction_mode.unwrap_or_default(),
+            instruction_source: receipt.instruction_source,
+            compaction_policy: receipt.compaction_policy,
+            recap: receipt.recap,
+        };
+    }
+
+    CompactionEventRecord {
+        schema_version: 0,
+        id: event_id,
+        transcript_id,
+        stage_id,
+        node_id,
+        mode: flat_meta_str(metadata, "mode"),
+        reason: flat_meta_str(metadata, "reason"),
+        strategy: flat_meta_str(metadata, "strategy"),
+        archived_messages: json_usize(metadata.and_then(|value| value.get("archived_messages"))),
+        estimated_tokens_before: json_usize(
+            metadata.and_then(|value| value.get("estimated_tokens_before")),
+        ),
+        estimated_tokens_after: json_usize(
+            metadata.and_then(|value| value.get("estimated_tokens_after")),
+        ),
+        snapshot_asset_id,
+        snapshot_location,
+        snapshot_path,
+        available,
+        instruction_mode: flat_meta_str(metadata, "instruction_mode"),
+        instruction_source: metadata
+            .and_then(|value| value.get("instruction_source"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        compaction_policy: metadata
+            .and_then(|value| value.get("compaction_policy"))
+            .cloned(),
+        recap: metadata
+            .and_then(|value| value.get("recap"))
+            .and_then(|value| serde_json::from_value::<RecapMetrics>(value.clone()).ok()),
+    }
 }
 
 pub(super) fn daemon_events_from_sidecar(run_path: &Path) -> Vec<DaemonEventRecord> {
@@ -486,4 +560,157 @@ pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
     sync_run_handoffs(&mut run);
     refresh_run_observability(&mut run, Some(path));
     Ok(run)
+}
+
+#[cfg(test)]
+mod compaction_projection_tests {
+    use super::*;
+
+    #[test]
+    fn projects_embedded_compaction_receipt_typed() {
+        // A transcript written by the unified path embeds the canonical receipt
+        // under `metadata.receipt`; the record is projected from it (typed), so
+        // reason, recap, policy, and the shared id all survive (harn#4995).
+        let transcript = serde_json::json!({
+            "_type": "transcript",
+            "id": "session-x",
+            "events": [{
+                "id": "compaction-shared-id",
+                "kind": "compaction",
+                "metadata": {
+                    // Flat sibling fields coexist, but the receipt is authoritative.
+                    "mode": "auto",
+                    "strategy": "hybrid",
+                    "receipt": {
+                        "schema_version": 1,
+                        "receipt_id": "compaction-shared-id",
+                        "mode": "auto",
+                        "reason": "threshold",
+                        "strategy": "hybrid",
+                        "engine_strategy": "observation_mask",
+                        "archived_messages": 5,
+                        "estimated_tokens_before": 900,
+                        "estimated_tokens_after": 300,
+                        "snapshot_asset_id": "snap-1",
+                        "instruction_mode": "extend",
+                        "instruction_source": "host",
+                        "compaction_policy": {"scope": "summary"},
+                        "recap": {
+                            "recap_bytes": 128,
+                            "budget_bytes": 16000,
+                            "kept_results_count": 2,
+                            "dropped_count": 1,
+                            "carried_prior_recap": true
+                        }
+                    }
+                }
+            }],
+            "assets": [{"id": "snap-1", "kind": "compaction_source_transcript"}]
+        });
+
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        // The record id is the shared receipt id, equal to the transcript event id.
+        assert_eq!(event.id, "compaction-shared-id");
+        assert_eq!(event.schema_version, 1);
+        assert_eq!(event.mode, "auto");
+        assert_eq!(event.reason, "threshold");
+        assert_eq!(event.strategy, "hybrid");
+        assert_eq!(event.estimated_tokens_after, 300);
+        assert_eq!(event.snapshot_asset_id.as_deref(), Some("snap-1"));
+        assert!(event.available);
+        assert_eq!(event.snapshot_location, "run.transcript.assets[snap-1]");
+        assert_eq!(event.instruction_mode, "extend");
+        assert_eq!(event.instruction_source.as_deref(), Some("host"));
+        assert_eq!(
+            event.compaction_policy,
+            Some(serde_json::json!({"scope": "summary"}))
+        );
+        let recap = event.recap.expect("recap survives projection");
+        assert_eq!(recap.recap_bytes, 128);
+        assert_eq!(recap.kept_results_count, 2);
+        assert!(recap.carried_prior_recap);
+    }
+
+    #[test]
+    fn migrates_legacy_transcript_without_embedded_receipt() {
+        // A transcript written before receipts existed carries only flat
+        // metadata. It must still project — reason/recap default and the record
+        // is marked `schema_version: 0` as the explicit migration signal.
+        let transcript = serde_json::json!({
+            "_type": "transcript",
+            "id": "session-legacy",
+            "events": [{
+                "id": "compaction-legacy",
+                "kind": "compaction",
+                "metadata": {
+                    "mode": "manual",
+                    "strategy": "truncate",
+                    "archived_messages": 3,
+                    "estimated_tokens_before": 120,
+                    "estimated_tokens_after": 48,
+                    "snapshot_asset_id": "snap-legacy"
+                }
+            }],
+            "assets": [{"id": "snap-legacy", "kind": "compaction_source_transcript"}]
+        });
+
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.id, "compaction-legacy");
+        assert_eq!(event.schema_version, 0);
+        assert_eq!(event.mode, "manual");
+        assert_eq!(event.reason, "");
+        assert_eq!(event.strategy, "truncate");
+        assert_eq!(event.archived_messages, 3);
+        assert!(event.available);
+        assert!(event.recap.is_none());
+    }
+
+    #[test]
+    fn marks_unavailable_snapshot_from_receipt() {
+        // Manual compaction whose receipt names a snapshot asset that is not
+        // present on the transcript: the record still projects, snapshot
+        // provenance is recorded, and `available` is false.
+        let transcript = serde_json::json!({
+            "_type": "transcript",
+            "id": "session-y",
+            "events": [{
+                "id": "compaction-nosnap",
+                "kind": "compaction",
+                "metadata": {"receipt": {
+                    "schema_version": 1,
+                    "receipt_id": "compaction-nosnap",
+                    "mode": "manual",
+                    "reason": "manual",
+                    "strategy": "truncate",
+                    "engine_strategy": "truncate",
+                    "archived_messages": 2,
+                    "estimated_tokens_before": 100,
+                    "estimated_tokens_after": 50,
+                    "snapshot_asset_id": "missing-asset"
+                }}
+            }],
+            "assets": []
+        });
+
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.id, "compaction-nosnap");
+        assert_eq!(event.mode, "manual");
+        assert_eq!(event.reason, "manual");
+        assert_eq!(event.snapshot_asset_id.as_deref(), Some("missing-asset"));
+        assert!(!event.available);
+        assert_eq!(
+            event.snapshot_location,
+            "run.transcript.assets[missing-asset]"
+        );
+        assert!(event.recap.is_none());
+    }
 }

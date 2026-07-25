@@ -1638,7 +1638,8 @@ async fn agent_session_compact_builtin(
 
     agent_sessions::replace_messages_with_summary(&id, &messages, Some(&outcome.summary))
         .map_err(err)?;
-    let compaction_event = crate::llm::helpers::transcript_event(
+    let compaction_event = crate::llm::helpers::transcript_event_with_id(
+        &outcome.receipt.receipt_id,
         "compaction",
         "system",
         "internal",

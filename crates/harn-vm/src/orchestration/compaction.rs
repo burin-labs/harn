@@ -508,10 +508,10 @@ impl Default for AutoCompactConfig {
 /// compaction.
 pub const DEFAULT_RECAP_BUDGET_BYTES: usize = 16_000;
 
-/// Observability metrics for a single observation-mask recap. Surfaced on the
-/// `TranscriptCompacted` receipt so recap behavior (budget spend, how many
-/// results survived, how much was dropped) is visible in the event stream.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Observation-mask recap metrics, carried verbatim (typed) inside
+/// [`super::CompactionReceipt`] so recap behavior survives every projection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RecapMetrics {
     pub recap_bytes: usize,
     pub budget_bytes: usize,

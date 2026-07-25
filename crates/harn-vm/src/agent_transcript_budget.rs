@@ -237,9 +237,7 @@ fn trim_transcript_for_budget(
 }
 
 struct BudgetCompactionLiveEvent {
-    policy: crate::orchestration::CompactionPolicy,
-    policy_strategy: String,
-    metrics: crate::orchestration::TranscriptCompactedEventMetrics,
+    receipt: crate::orchestration::CompactionReceipt,
 }
 
 struct BudgetCompactionResult {
@@ -308,25 +306,16 @@ fn compact_transcript_for_budget(
     let summary = outcome.as_ref().map(|outcome| outcome.summary.clone());
     let mut live_event = None;
     if let Some(outcome) = outcome {
-        events.push(crate::llm::helpers::transcript_event(
+        events.push(crate::llm::helpers::transcript_event_with_id(
+            &outcome.receipt.receipt_id,
             "compaction",
             "system",
             "internal",
             "",
-            Some(outcome.event_metadata.clone()),
+            Some(outcome.event_metadata),
         ));
         live_event = Some(BudgetCompactionLiveEvent {
-            policy: config.policy.clone(),
-            policy_strategy: outcome.policy_strategy,
-            metrics: crate::orchestration::TranscriptCompactedEventMetrics {
-                archived_messages: outcome.archived_messages,
-                estimated_tokens_before: outcome.estimated_tokens_before,
-                estimated_tokens_after: outcome.estimated_tokens_after,
-                snapshot_asset_id: outcome.snapshot_asset_id,
-                recap: outcome
-                    .recap_metrics
-                    .map(crate::orchestration::RecapMetrics::to_json),
-            },
+            receipt: outcome.receipt,
         });
     }
 
@@ -490,13 +479,7 @@ pub(crate) fn apply_transcript_with_budget(
             if let Some(event) = compacted.live_event {
                 crate::orchestration::emit_transcript_compacted_event_sync(
                     &state.id,
-                    crate::orchestration::CompactMode::Auto,
-                    crate::orchestration::CompactionTrigger::BudgetPressure
-                        .as_str()
-                        .to_string(),
-                    &event.policy,
-                    event.policy_strategy,
-                    event.metrics,
+                    event.receipt,
                 );
             }
             Ok(())

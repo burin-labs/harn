@@ -42,9 +42,10 @@ use crate::value::{VmError, VmValue};
 
 use super::{
     auto_compact_messages_with_result_with_ctx, compact_strategy_name,
-    compaction_policy_metadata_fields, estimate_message_tokens, parse_compact_strategy,
-    run_lifecycle_hooks_with_control_with_ctx, run_lifecycle_hooks_with_ctx, AutoCompactConfig,
-    CompactStrategy, CompactionPolicy, HookControl, HookEvent,
+    compaction_policy_metadata_fields, estimate_message_tokens, new_compaction_receipt_id,
+    parse_compact_strategy, run_lifecycle_hooks_with_control_with_ctx,
+    run_lifecycle_hooks_with_ctx, AutoCompactConfig, CompactStrategy, CompactionReceipt,
+    HookControl, HookEvent, COMPACTION_RECEIPT_SCHEMA_VERSION,
 };
 
 /// Identifies the call-site that initiated compaction. The string form is
@@ -240,8 +241,15 @@ pub struct CompactionOutcome {
     /// User-facing policy label resolved on the config.
     pub policy_strategy: String,
     /// `metadata` block ready to attach to the persisted transcript
-    /// `"compaction"` event. Includes policy fields + reminder counts.
+    /// `"compaction"` event. Carries the canonical [`CompactionReceipt`] under
+    /// its `receipt` key alongside the flat policy fields + reminder counts that
+    /// transcript-inspecting scripts and hosts read.
     pub event_metadata: JsonValue,
+    /// The one canonical receipt for this compaction. Its `receipt_id` is the
+    /// shared identity across the transcript event, the live event, ACP, and the
+    /// run-observability record. Callers attach the transcript `"compaction"`
+    /// event with `id = receipt.receipt_id`.
+    pub receipt: CompactionReceipt,
     /// Observation-mask recap receipt, `None` for non-masking strategies.
     pub recap_metrics: Option<super::RecapMetrics>,
 }
@@ -382,6 +390,25 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         recap: recap_metrics.map(super::RecapMetrics::to_json),
     };
 
+    let receipt = CompactionReceipt {
+        schema_version: COMPACTION_RECEIPT_SCHEMA_VERSION,
+        receipt_id: new_compaction_receipt_id(),
+        session_id: lifecycle.session_id.map(str::to_string),
+        transcript_id: lifecycle.transcript_id.map(str::to_string),
+        mode: lifecycle.mode.as_str().to_string(),
+        reason: lifecycle.trigger.as_str().to_string(),
+        strategy: config.policy_strategy.clone(),
+        engine_strategy: compact_strategy_name(&engine_strategy).to_string(),
+        archived_messages,
+        estimated_tokens_before,
+        estimated_tokens_after,
+        snapshot_asset_id: snapshot_asset_id.clone(),
+        instruction_mode: Some(config.policy.instruction_mode().to_string()),
+        instruction_source: config.policy.instruction_source().map(str::to_string),
+        compaction_policy: config.policy.metadata_json(),
+        recap: recap_metrics,
+    };
+
     let event_metadata = build_event_metadata(
         &lifecycle,
         config,
@@ -389,6 +416,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         &reminder_report,
         &summary,
         &engine_strategy,
+        &receipt,
     );
 
     if fires_hooks {
@@ -410,15 +438,7 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         run_lifecycle_hooks_with_ctx(ctx, HookEvent::PostCompact, &post_payload).await?;
 
         if let Some(session_id) = lifecycle.session_id {
-            emit_transcript_compacted_event(
-                ctx,
-                session_id,
-                lifecycle.mode,
-                lifecycle.trigger.as_str(),
-                config,
-                event_metrics.clone(),
-            )
-            .await;
+            emit_transcript_compacted_event(ctx, session_id, receipt.clone()).await;
             if lifecycle.evaluate_providers {
                 let _ = crate::llm::reminder_providers::evaluate_and_inject(
                     ctx,
@@ -443,66 +463,37 @@ pub(crate) async fn run_compaction_lifecycle_with_ctx(
         strategy: engine_strategy,
         policy_strategy: config.policy_strategy.clone(),
         event_metadata,
+        receipt,
         recap_metrics,
     }))
 }
 
-/// Emit `AgentEvent::TranscriptCompacted` with the shared payload shape.
-/// Exposed for the host-script `host_agent_record_compaction` builtin which
-/// records compactions performed entirely from `.harn` code; lifecycle
-/// callers reach this through [`run_compaction_lifecycle`].
+/// Emit `AgentEvent::TranscriptCompacted` carrying the canonical receipt.
+/// Lifecycle callers reach this through [`run_compaction_lifecycle`]; the
+/// host-script and budget-pressure paths build their own receipt and call the
+/// sync variant.
 pub async fn emit_transcript_compacted_event(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     session_id: &str,
-    mode: CompactMode,
-    reason: &str,
-    config: &AutoCompactConfig,
-    metrics: TranscriptCompactedEventMetrics,
+    receipt: CompactionReceipt,
 ) {
     crate::llm::emit_live_agent_event_with_ctx(
         ctx,
         &AgentEvent::TranscriptCompacted {
             session_id: session_id.to_string(),
-            mode: mode.as_str().to_string(),
-            reason: reason.to_string(),
-            strategy: config.policy_strategy.clone(),
-            archived_messages: metrics.archived_messages,
-            estimated_tokens_before: metrics.estimated_tokens_before,
-            estimated_tokens_after: metrics.estimated_tokens_after,
-            snapshot_asset_id: metrics.snapshot_asset_id,
-            instruction_mode: Some(config.policy.instruction_mode().to_string()),
-            instruction_source: config.policy.instruction_source().map(str::to_string),
-            compaction_policy: config.policy.metadata_json(),
-            recap: metrics.recap,
+            receipt,
         },
     )
     .await;
 }
 
 /// Synchronous variant of [`emit_transcript_compacted_event`]. Used by
-/// `host_agent_record_compaction` which runs in a sync builtin context and
-/// can't `.await` directly.
-pub fn emit_transcript_compacted_event_sync(
-    session_id: &str,
-    mode: CompactMode,
-    reason: String,
-    policy: &CompactionPolicy,
-    policy_strategy: String,
-    metrics: TranscriptCompactedEventMetrics,
-) {
+/// `host_agent_record_compaction` and the transcript-budget path, which run in
+/// sync contexts and can't `.await` directly.
+pub fn emit_transcript_compacted_event_sync(session_id: &str, receipt: CompactionReceipt) {
     crate::llm::emit_live_agent_event_sync(&AgentEvent::TranscriptCompacted {
         session_id: session_id.to_string(),
-        mode: mode.as_str().to_string(),
-        reason,
-        strategy: policy_strategy,
-        archived_messages: metrics.archived_messages,
-        estimated_tokens_before: metrics.estimated_tokens_before,
-        estimated_tokens_after: metrics.estimated_tokens_after,
-        snapshot_asset_id: metrics.snapshot_asset_id,
-        instruction_mode: Some(policy.instruction_mode().to_string()),
-        instruction_source: policy.instruction_source().map(str::to_string),
-        compaction_policy: policy.metadata_json(),
-        recap: metrics.recap,
+        receipt,
     });
 }
 
@@ -660,6 +651,7 @@ fn build_event_metadata(
     reminder_report: &ReminderCompactReport,
     summary: &str,
     engine_strategy: &CompactStrategy,
+    receipt: &CompactionReceipt,
 ) -> JsonValue {
     let mut metadata = serde_json::json!({
         "mode": lifecycle.mode.as_str(),
@@ -685,6 +677,11 @@ fn build_event_metadata(
         if let Some(recap) = metrics.recap.clone() {
             map.insert("recap".to_string(), recap);
         }
+        // Embed the canonical receipt verbatim so the record builder reads it
+        // typed instead of re-scraping the flat keys above. The flat keys stay
+        // for transcript-inspecting scripts/hosts; both are projections of one
+        // in-code `CompactionReceipt`, so they cannot drift.
+        map.insert("receipt".to_string(), receipt.to_json());
     }
     metadata
 }
