@@ -32,6 +32,19 @@ const SCCACHE_ACTION_PATH = ".github/actions/sccache/action.yml"
 
 const SCCACHE_ACTION = "./.github/actions/sccache"
 
+// Single pinned entry point for installing sccache. Everything else must route
+// through it: sccache allows one server per user and a client whose version
+// differs from the running server SHUTS IT DOWN, so an unpinned install on a
+// many-worker self-hosted host kills the shared server out from under whatever
+// unrelated job is mid-compile (burin-labs/burin-code#5328). The upstream action
+// installs the LATEST sccache when no version is given, which makes "unpinned"
+// a time bomb rather than a style question.
+const SCCACHE_INSTALL_ACTION_PATH = ".github/actions/sccache-install/action.yml"
+
+const SCCACHE_INSTALL_ACTION = "./.github/actions/sccache-install"
+
+const UPSTREAM_SCCACHE_PREFIX = "mozilla-actions/sccache-action"
+
 const STICKY_DISK_PREFIX = "useblacksmith/stickydisk@"
 
 const STICKY_DISK_PIN = "useblacksmith/stickydisk@6d373c96a74cbde0c99fedc5ea5d3a7ba66ba494"
@@ -50,7 +63,7 @@ const PERSISTENT_SCCACHE_PORT = "4227"
 // These lanes must NOT ask `runner.environment` instead: Blacksmith runners
 // register as ordinary self-hosted runners, so it reports `self-hosted` there
 // too and cannot tell vendor capacity from our own boxes. The tier is proved
-// to agree with each job's `runs-on` by scripts/check_runner_tier.py; this
+// to agree with each job's `runs-on` by scripts/check_runner_tier.harn; this
 // file owns only what the cache steps do with it.
 const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
@@ -926,10 +939,10 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
         + ["${SCCACHE_ACTION_PATH} must persist the lane-keyed local sccache directory"]
     }
   }
-  const upstream = matching_steps(
-    action?.runs,
-    "mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696",
-  )
+  // The install itself moved behind `SCCACHE_INSTALL_ACTION` so the pinned
+  // version lives in exactly one file; this action still owns the wrapper
+  // configuration and the non-fatal contract.
+  const upstream = matching_steps(action?.runs, SCCACHE_INSTALL_ACTION)
   if len(upstream) != 1
     || !(upstream[0]?.["continue-on-error"] ?? false)
     || len(
@@ -1042,6 +1055,12 @@ pub fn ci_cache_policy_errors(
         if uses.starts_with(UPSTREAM_CACHE_PREFIX) {
           errors = errors + ["${workflow}:${job} bypasses ${policy.rust_cache_action}"]
         }
+        if uses.starts_with(UPSTREAM_SCCACHE_PREFIX) {
+          errors = errors
+            + [
+            "${workflow}:${job} installs sccache directly; use ${SCCACHE_INSTALL_ACTION} so the version stays pinned to the self-hosted server",
+          ]
+        }
         const ephemeral_error = ephemeral_cache_writer_error(workflow, job, step, policy)
         if ephemeral_error != nil {
           errors = errors + [ephemeral_error]
@@ -1086,6 +1105,39 @@ pub fn ci_cache_policy_errors(
   return errors
 }
 
+/**
+ * The pin is load-bearing, not hygiene. sccache allows one server per user and
+ * a client whose version differs from the running server shuts it down, so an
+ * unpinned install on a many-worker self-hosted host kills the shared server
+ * under whatever unrelated job is mid-compile. The upstream action installs the
+ * LATEST sccache when no version is given, so an absent `version` is a delayed
+ * outage, not a style nit. Keep this in step with ~/.local/bin/sccache and the
+ * `sccache-server` systemd unit on the self-hosted Linux runners.
+ */
+fn sccache_install_action_errors(install_action) -> list<string> {
+  guard install_action != nil else {
+    return ["${SCCACHE_INSTALL_ACTION_PATH} must exist as the sole sccache install point"]
+  }
+  // `matching_steps` compares `uses` exactly; the upstream reference carries a
+  // `@<sha>` suffix, so match on the prefix here instead.
+  const upstream = (install_action?.runs?.steps ?? []).filter(
+    { step -> step_uses(step).starts_with(UPSTREAM_SCCACHE_PREFIX) },
+  )
+    .to_list()
+  if len(upstream) != 1 {
+    return [
+      "${SCCACHE_INSTALL_ACTION_PATH} must contain exactly one ${UPSTREAM_SCCACHE_PREFIX} step",
+    ]
+  }
+  const version = trim(to_string(upstream[0]?.with?.version ?? ""))
+  if version == "" {
+    return [
+      "${SCCACHE_INSTALL_ACTION_PATH} must pin an explicit sccache `version`; unpinned installs track LATEST and version-kill the shared self-hosted server",
+    ]
+  }
+  return []
+}
+
 fn main(harness: Harness) {
   const loaded = read_json_result(POLICY_PATH)
   guard is_ok(loaded) else {
@@ -1101,6 +1153,7 @@ fn main(harness: Harness) {
   const node_action = read_yaml(NODE_ACTION_PATH, nil)
   const setup_harn_action = read_yaml(SETUP_HARN_ACTION_PATH, nil)
   const sccache_action = read_yaml(SCCACHE_ACTION_PATH, nil)
+  const sccache_install_action = read_yaml(SCCACHE_INSTALL_ACTION_PATH, nil)
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(path, nil)
@@ -1109,12 +1162,16 @@ fn main(harness: Harness) {
     + setup_harn_cache_action_errors(
     setup_harn_action,
   )
-    + ci_sccache_policy_errors(sccache_action, workflows["ci.yml"])
-    + windows_shared_cache_errors(
+    + sccache_install_action_errors(sccache_install_action)
+    + ci_sccache_policy_errors(
+    sccache_action,
     workflows["ci.yml"],
-    workflows["windows-nightly.yml"],
   )
-    + macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"])
+    + windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"])
+    + macos_shared_cache_errors(
+    workflows["ci.yml"],
+    workflows["macos-nightly.yml"],
+  )
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {
