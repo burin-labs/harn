@@ -4,7 +4,23 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 script="$repo_root/scripts/ci/run_rust_test_lane.sh"
 tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
+
+# Every assertion below is a bare `grep -q` against a captured log or summary,
+# so under `set -e` a failure aborts with no indication of what the file
+# actually held. Print them before the temp dir goes away.
+cleanup() {
+  local status=$?
+  if [[ "$status" -ne 0 ]]; then
+    for captured in "$tmpdir"/*.log "$tmpdir"/*.md; do
+      [[ -f "$captured" ]] || continue
+      echo "--- $(basename "$captured") ---" >&2
+      cat "$captured" >&2
+    done
+  fi
+  rm -rf "$tmpdir"
+  exit "$status"
+}
+trap cleanup EXIT
 
 summary="$tmpdir/summary.md"
 log="$tmpdir/output.log"

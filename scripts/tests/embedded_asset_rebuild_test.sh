@@ -40,6 +40,20 @@ fi
 
 cleanup() {
   local status=$?
+  # `run_check` sends Cargo's stdout *and* stderr to a log file, so under
+  # `set -e` a failing check aborts the script with Cargo's status and nothing
+  # printed — the only `cat` of a log lives in `assert_rebuilt_for`, which a
+  # build failure never reaches. That has already cost three PRs a merge-queue
+  # rejection whose entire evidence was `Error 101`. Dump whatever the run
+  # produced before the temp dir goes away; doing it from the trap covers every
+  # failure path rather than the ones anticipated at each call site.
+  if [[ "$status" -ne 0 ]]; then
+    for log in "$tmp_root"/*.log; do
+      [[ -f "$log" ]] || continue
+      echo "--- $(basename "$log") ---" >&2
+      cat "$log" >&2
+    done
+  fi
   cp -p "$persona_backup" "$persona_asset"
   rm -rf "$portal_dist"
   if [[ "$portal_dist_existed" -eq 1 ]]; then
