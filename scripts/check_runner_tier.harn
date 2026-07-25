@@ -28,6 +28,8 @@ const TIERS = ["self-hosted", "blacksmith", "github-hosted"]
 
 const BLACKSMITH_RUNNER_PREFIX = "blacksmith-"
 
+const GITHUB_HOSTED_RUNNER_PATTERN = "(ubuntu|macos|windows)-[A-Za-z0-9.-]+"
+
 // Context reads that steer a ladder. `matrix.*` is deliberately excluded: it
 // carries runner *values* (`matrix.runner`) as well as predicates, so it is
 // not required to appear on both sides of the comparison below.
@@ -104,6 +106,25 @@ fn blacksmith_capable(job) -> bool {
   return false
 }
 
+/** The runner tiers named by this job's `runs-on` ladder and matrix rows. */
+fn runner_tiers(job) -> list<string> {
+  let runners = to_string(job?.["runs-on"] ?? "")
+  for row in job?.strategy?.matrix?.include ?? [] {
+    runners = runners + " " + to_string(row?.runner ?? "")
+  }
+  let tiers: list<string> = []
+  if contains(runners, "self-hosted") {
+    tiers = tiers + ["self-hosted"]
+  }
+  if contains(runners, BLACKSMITH_RUNNER_PREFIX) {
+    tiers = tiers + ["blacksmith"]
+  }
+  if regex_match(GITHUB_HOSTED_RUNNER_PATTERN, runners) != nil {
+    tiers = tiers + ["github-hosted"]
+  }
+  return tiers
+}
+
 /** Reject `runner.environment` anywhere inside a Blacksmith-capable job. */
 fn runner_environment_errors(job_name: string, job) -> list<string> {
   if !blacksmith_capable(job) {
@@ -123,7 +144,7 @@ fn runner_environment_errors(job_name: string, job) -> list<string> {
   return errors
 }
 
-/** A job that reads the tier must declare it, spanning every known value. */
+/** A job that reads the tier must declare exactly the tiers in its runner ladder. */
 fn tier_declaration_errors(job_name: string, job) -> list<string> {
   const declared = normalize_expression(job?.env?.[TIER_ENV] ?? "")
   const reads = expressions_in({steps: job?.steps ?? []}).any(
@@ -136,11 +157,16 @@ fn tier_declaration_errors(job_name: string, job) -> list<string> {
     return []
   }
   let errors: list<string> = []
-  for tier in TIERS {
-    // Each branch must land on a known tier. A typo such as 'githubhosted'
-    // would otherwise sit inert until a step silently stopped matching it.
+  const expected = runner_tiers(job)
+  for tier in expected {
     if !contains(declared, "'${tier}'") {
       errors = errors + ["ci.yml:${job_name} ${TIER_ENV} never resolves to '${tier}'"]
+    }
+  }
+  for tier in TIERS {
+    if !expected.contains(tier) && contains(declared, "'${tier}'") {
+      errors = errors
+        + ["ci.yml:${job_name} ${TIER_ENV} resolves to impossible tier '${tier}'"]
     }
   }
   return errors

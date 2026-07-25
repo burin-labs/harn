@@ -1,0 +1,54 @@
+import { runner_tier_errors } from "../check_runner_tier"
+
+fn gha_expression(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+fn cloud_job(tier: string) {
+  return {
+    "runs-on": gha_expression(
+      "vars.DISABLE_VENDOR == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404'",
+    ),
+    env: {HARN_RUNNER_TIER: gha_expression(tier)},
+    steps: [{if: "env.HARN_RUNNER_TIER == 'blacksmith'", run: "true"}],
+  }
+}
+
+@test
+pipeline test_cloud_only_ladder_accepts_cloud_tiers(task) {
+  const tier = "vars.DISABLE_VENDOR == 'true' && 'github-hosted' || 'blacksmith'"
+  assert_eq(runner_tier_errors({jobs: {artifacts: cloud_job(tier)}}), [])
+}
+
+@test
+pipeline test_cloud_only_ladder_rejects_impossible_self_hosted_tier(task) {
+  const tier = "vars.DISABLE_VENDOR == 'true' && 'github-hosted' || 'self-hosted'"
+  const errors = runner_tier_errors({jobs: {artifacts: cloud_job(tier)}})
+  assert_eq(errors.count, 2)
+  assert_eq(errors.any({ error -> error.contains("never resolves to 'blacksmith'") }), true)
+  assert_eq(errors.any({ error -> error.contains("impossible tier 'self-hosted'") }), true)
+}
+
+@test
+pipeline test_three_rung_ladder_still_requires_all_three_tiers(task) {
+  const job = {
+    ...cloud_job(
+      "vars.USE_LOCAL == 'true' && 'self-hosted' || "
+        + "(vars.DISABLE_VENDOR == 'true' && 'github-hosted' || 'blacksmith')",
+    ),
+    "runs-on": gha_expression(
+      "vars.USE_LOCAL == 'true' && fromJSON('[\"self-hosted\", \"Linux\"]') || "
+        + "(vars.DISABLE_VENDOR == 'true' && 'ubuntu-latest' || "
+        + "'blacksmith-4vcpu-ubuntu-2404')",
+    ),
+  }
+  assert_eq(runner_tier_errors({jobs: {build: job}}), [])
+}
+
+@test
+pipeline test_ladder_inputs_must_still_match(task) {
+  const tier = "vars.OTHER_SWITCH == 'true' && 'github-hosted' || 'blacksmith'"
+  const errors = runner_tier_errors({jobs: {artifacts: cloud_job(tier)}})
+  assert_eq(errors.count, 1)
+  assert_eq(errors.any({ error -> error.contains("read different ladder inputs") }), true)
+}
