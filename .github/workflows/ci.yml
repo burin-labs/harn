@@ -582,9 +582,11 @@ jobs:
         run: ./scripts/ci/run_rust_lint_lane.sh
       # When co-located tests are active (the default), the multi-gigabyte
       # neutral archive is neither built nor uploaded: the suite executes in
-      # this leg's warm workspace below, and the security lane consumes its
-      # own single-package archive. Flipping HARN_CI_DISABLE_COLOCATED_TESTS
-      # to 'true' restores the full producer/consumer artifact path.
+      # this leg's warm workspace below. The dedicated audit-artifact lane owns
+      # the security archive so a residential self-hosted runner never gates
+      # the suite on an Actions artifact upload. Flipping
+      # HARN_CI_DISABLE_COLOCATED_TESTS to 'true' restores the full
+      # producer/consumer behavior-artifact path.
       - name: Build portable behavior payload
         id: release-audit-behavior-build
         if: matrix.kind == 'behavior'
@@ -631,18 +633,8 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      # The portable Harn CLI artifact (harn-cli.tar.zst) is owned by the
-      # dedicated cli-build job so the audit lanes can start minutes into the
-      # run instead of waiting out this leg's full compile+suite.
-      - name: Upload security test archive
-        if: matrix.kind == 'behavior'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-security.tar.zst
-          path: ${{ runner.temp }}/harn-security.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
+      # The portable CLI and security artifacts are owned by cli-build so this
+      # compute-heavy lane never uploads from a residential self-hosted runner.
       - name: Report portable behavior payload upload
         if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         run: |
@@ -744,46 +736,27 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      - name: Upload security test archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-security.tar.zst
-          path: ${{ runner.temp }}/harn-security.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
-
-  # Dedicated producer of the small portable Harn CLI bundle. The audit lanes
-  # only need this ~tens-of-MB artifact, so building it in its own fast lane
-  # (idle self-hosted worker when available, hosted otherwise) unhooks them
-  # from the behavior leg's full compile+suite and takes them off the run's
-  # critical path entirely.
+  # Dedicated cloud producer of the portable CLI and security-test artifacts.
+  # Keeping Actions artifact uploads off the residential self-hosted runners
+  # avoids transfer stalls, while one warm build graph feeds all audit lanes in
+  # parallel with the behavior leg's full suite.
   cli-build:
     name: Harn CLI build
-    needs: [changes, runner-availability]
+    needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: >-
-      ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-        && needs.runner-availability.outputs.linux == 'true'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
-        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404') }}
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: 25
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       SCCACHE_CACHE_SIZE: 40G
       SCCACHE_SERVER_PORT: "4227"
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      # See the HARN_RUNNER_TIER comment on `package-audit`.
-      HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-          && needs.runner-availability.outputs.linux == 'true') && 'self-hosted'
-          || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
       - uses: ./.github/actions/free-disk-space
-        if: env.HARN_RUNNER_TIER != 'self-hosted'
       - name: Install mold linker
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
@@ -796,18 +769,40 @@ jobs:
         with:
           cache-key: workspace-cli
           sticky: ${{ env.HARN_RUNNER_TIER == 'blacksmith' }}
-      - name: Build portable Harn CLI
+      - uses: ./.github/actions/rust-cache
+        if: env.HARN_RUNNER_TIER == 'github-hosted'
+        continue-on-error: true
+        with:
+          shared-key: workspace-behavior
+          cache-on-failure: true
+          cache-bin: false
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: nextest@0.9.132
+      - name: Build portable audit payloads
         env:
           CARGO_BUILD_JOBS: "4"
+          HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: "1"
         run: >-
-          ./scripts/ci/behavior_artifact.sh build-cli
+          ./scripts/ci/behavior_artifact.sh build
+          "$RUNNER_TEMP/unused-behavior.tar.zst"
           "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-security.tar.zst"
           "$GITHUB_SHA"
       - name: Upload portable Harn CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: harn-cli.tar.zst
           path: ${{ runner.temp }}/harn-cli.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload security test archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-security.tar.zst
+          path: ${{ runner.temp }}/harn-security.tar.zst
           archive: false
           if-no-files-found: error
           retention-days: 1
@@ -914,15 +909,8 @@ jobs:
 
   rust-security:
     name: Rust security proof
-    needs: [changes, rust-builds, rust-behavior-fallback]
-    # Accepts the security archive from the behavior leg or its hosted
-    # fallback — see the rust-test comment for the always() rationale.
-    if: >-
-      always()
-      && needs.changes.result == 'success'
-      && needs.changes.outputs.rust == 'true'
-      && (needs.rust-builds.outputs.behavior_ok == 'true'
-        || needs.rust-behavior-fallback.result == 'success')
+    needs: [changes, cli-build]
+    if: needs.changes.outputs.rust == 'true' && needs.cli-build.result == 'success'
     runs-on: ubuntu-latest
     # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,
     # and the single-package security archive it consumes downloads in seconds
