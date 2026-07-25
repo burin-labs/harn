@@ -3,7 +3,8 @@ use serde_json::Value as JsonValue;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
-use super::{dispatch_process_exec_after_policy, process_exec_argv, HOST_CALL_BRIDGE};
+use super::process_exec::{dispatch_process_exec_after_policy, process_exec_argv};
+use super::HOST_CALL_BRIDGE;
 
 pub(crate) async fn dispatch_process_exec(
     params: &crate::value::DictMap,

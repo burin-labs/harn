@@ -175,16 +175,47 @@ pub fn store_by_name(name: &str, params: &DictMap, value: &VmValue) {
     }
 }
 
-/// Open a new turn: every entry written before this call becomes unreadable.
+/// Open a new turn: every entry written before this call becomes unreadable,
+/// on this thread and every other.
 ///
 /// Called at each agent-loop iteration boundary so a turn re-reads turn-stable
-/// host facts exactly once, and at run/embedder boundaries so a memo can never
-/// leak across runs on a reused thread. Bumping a global epoch rather than
+/// host facts exactly once, and at bridge install/teardown so a memo can never
+/// leak across embedders on a reused thread. Bumping a global epoch rather than
 /// clearing the thread-local map means a turn boundary observed on one thread
 /// invalidates entries cached on every thread — see [`TURN_EPOCH`].
 pub(crate) fn reset() {
     TURN_EPOCH.fetch_add(1, Ordering::AcqRel);
+    reset_local();
+}
+
+/// Drop this thread's entries without opening a new turn.
+///
+/// For `reset_host_state`, reached from `reset_stdlib_state` and in turn from
+/// [`crate::reset_thread_local_state`] — whose contract is to reset *this
+/// thread*, and which runs between VM runs on a reused thread rather than at any
+/// turn boundary. [`TURN_EPOCH`] is process-global, so bumping it from there
+/// reaches past that contract: every VM run that ended anywhere would invalidate
+/// the live memo of every concurrently-running session, costing each an extra
+/// round-trip. A thread-local reset should clear thread-local state only.
+///
+/// This is exactly the pre-epoch behaviour of [`reset`], so the call sites moved
+/// here keep the semantics they already had; only genuine turn boundaries and
+/// bridge swaps gained cross-thread reach.
+pub(crate) fn reset_local() {
     TURN_STABLE_HOST_CACHE.with(|cache| cache.borrow_mut().clear());
+}
+
+/// Serializes tests that bump [`TURN_EPOCH`] against tests that rely on a memo
+/// entry surviving between a `store` and a `lookup`.
+///
+/// The epoch is process-global, so without this a bridge swap in one test
+/// invalidates another test's entry mid-assertion. Mirrors the
+/// `LONG_RUNNING_TEST_LOCK` convention in `stdlib::fs::tests` for the same
+/// reason: process-global state needs process-global test exclusion.
+#[cfg(test)]
+pub(crate) fn epoch_test_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
 #[cfg(test)]
@@ -202,11 +233,6 @@ mod tests {
     /// `reset` in one invalidates entries another is mid-assertion about. Cargo
     /// runs them on separate threads by default, which made that a real
     /// cross-talk failure rather than a theoretical one. Serialize them.
-    fn epoch_lock() -> &'static Mutex<()> {
-        static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
     /// Bridge that counts dispatches per `(capability, operation)` and answers
     /// every op, so a test can assert how many times the host was actually hit.
     struct CountingRuntimeBridge {
@@ -249,7 +275,9 @@ mod tests {
 
     #[test]
     fn turn_stable_host_capability_is_fetched_once_per_turn() {
-        let _guard = epoch_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = super::epoch_test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         run_async(|| async {
             reset_host_state();
             let counts = Arc::new(Mutex::new(std::collections::HashMap::new()));
@@ -320,7 +348,9 @@ mod tests {
     /// hosts rely on to observe a mid-session `/model` switch.
     #[test]
     fn turn_boundary_on_another_thread_invalidates_this_thread() {
-        let _guard = epoch_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = super::epoch_test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let params = DictMap::new();
         let cached = VmValue::String(arcstr::ArcStr::from("turn-1"));
         super::store("runtime", "pipeline_input", &params, &cached);
@@ -329,7 +359,7 @@ mod tests {
             "same-turn read must hit"
         );
 
-        std::thread::spawn(|| reset()).join().expect("reset thread");
+        std::thread::spawn(reset).join().expect("reset thread");
 
         assert!(
             super::lookup("runtime", "pipeline_input", &params).is_none(),
@@ -342,7 +372,9 @@ mod tests {
     /// accidentally cache a write or a live read.
     #[test]
     fn store_ignores_non_turn_stable_operations() {
-        let _guard = epoch_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = super::epoch_test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let params = DictMap::new();
         let value = VmValue::String(arcstr::ArcStr::from("live"));
         super::store("session", "active_roots", &params, &value);
@@ -357,7 +389,9 @@ mod tests {
     /// memos and the ACP path would still pay every round-trip.
     #[test]
     fn dotted_name_helpers_share_the_split_pair_entry() {
-        let _guard = epoch_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = super::epoch_test_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         reset();
         let params = DictMap::new();
         let value = VmValue::String(arcstr::ArcStr::from("shared"));
