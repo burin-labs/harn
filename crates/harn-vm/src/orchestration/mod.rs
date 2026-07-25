@@ -60,6 +60,9 @@ mod repair_ledger;
 mod compact_lifecycle;
 pub use compact_lifecycle::*;
 
+mod compaction_receipt;
+pub use compaction_receipt::*;
+
 mod compaction_policy_registry;
 pub use compaction_policy_registry::*;
 

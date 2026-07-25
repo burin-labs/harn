@@ -16,7 +16,7 @@ use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use crate::agent_sessions;
-use crate::llm::helpers::{extract_llm_options, transcript_event};
+use crate::llm::helpers::{extract_llm_options, transcript_event_with_id};
 use crate::orchestration::{
     self, compact_strategy_name, estimate_message_tokens, parse_policy_dict, policy_for,
     reset_registry, run_compaction_lifecycle_with_ctx, set_policy, to_auto_compact_config,
@@ -206,7 +206,8 @@ async fn compaction_run_impl(
 
     agent_sessions::replace_messages_with_summary(&session_id, &messages, Some(&outcome.summary))
         .map_err(VmError::Runtime)?;
-    let compaction_event = transcript_event(
+    let compaction_event = transcript_event_with_id(
+        &outcome.receipt.receipt_id,
         "compaction",
         "system",
         "internal",

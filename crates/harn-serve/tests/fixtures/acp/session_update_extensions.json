@@ -197,12 +197,15 @@
               "instruction_source": "host",
               "instructions": "Preserve failing tests."
             },
+            "engineStrategy": "observation_mask",
             "estimatedTokensAfter": 40,
             "estimatedTokensBefore": 100,
             "instructionMode": "extend",
             "instructionSource": "host",
             "mode": "auto",
             "reason": "threshold",
+            "receiptId": "compaction-fixture-1",
+            "schemaVersion": 1,
             "snapshotAssetId": "asset-1",
             "strategy": "summary"
           }

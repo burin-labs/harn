@@ -2630,70 +2630,30 @@ fn host_agent_record_compaction_builtin(
         .get("iteration")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0) as usize;
-    let mode = payload_json
-        .get("mode")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("auto")
-        .to_string();
-    let reason = payload_json
-        .get("reason")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("threshold")
-        .to_string();
-    let strategy = payload_json
-        .get("strategy")
-        .or_else(|| payload_json.get("engine_strategy"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let estimated_tokens_before = payload_json
-        .get("estimated_tokens_before")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    let estimated_tokens_after = payload_json
-        .get("estimated_tokens_after")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0) as usize;
-    let snapshot_asset_id = payload_json
-        .get("snapshot_asset_id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    let instruction_mode = payload_json
-        .get("instruction_mode")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    let instruction_source = payload_json
-        .get("instruction_source")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    let compaction_policy = payload_json.get("compaction_policy").cloned();
     super::trace::emit_agent_event(super::trace::AgentTraceEvent::ContextCompaction {
         archived_messages,
         new_summary_len,
         iteration,
     });
-    let event = super::helpers::transcript_event(
+    // Normalize the host-script payload into the one canonical receipt at this
+    // builtin boundary, so a `.harn`-driven compaction yields the same unified
+    // receipt (and shared id) as the Rust lifecycle paths (harn#4995).
+    let receipt =
+        crate::orchestration::CompactionReceipt::from_host_payload(&session_id, &payload_json);
+    let mut metadata = payload_json;
+    if let Some(obj) = metadata.as_object_mut() {
+        obj.insert("receipt".to_string(), receipt.to_json());
+    }
+    let event = super::helpers::transcript_event_with_id(
+        &receipt.receipt_id,
         "compaction",
         "system",
         "internal",
         "",
-        Some(payload_json),
+        Some(metadata),
     );
     crate::agent_sessions::append_event(&session_id, event).map_err(VmError::Runtime)?;
-    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TranscriptCompacted {
-        session_id,
-        mode,
-        reason,
-        strategy,
-        archived_messages,
-        estimated_tokens_before,
-        estimated_tokens_after,
-        snapshot_asset_id,
-        instruction_mode,
-        instruction_source,
-        compaction_policy,
-        recap: None,
-    });
+    crate::orchestration::emit_transcript_compacted_event_sync(&session_id, receipt);
     Ok(VmValue::Nil)
 }
 

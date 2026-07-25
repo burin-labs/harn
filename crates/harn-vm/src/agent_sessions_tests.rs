@@ -412,15 +412,18 @@ fn transcript_budget_compaction_uses_llm_summary_when_available() {
     match &events[0] {
         AgentEvent::TranscriptCompacted {
             session_id,
-            mode,
-            reason,
-            strategy,
-            ..
+            receipt,
         } => {
             assert_eq!(session_id, &id);
-            assert_eq!(mode, "auto");
-            assert_eq!(reason, "budget_pressure");
-            assert_eq!(strategy, "llm");
+            assert_eq!(receipt.mode, "auto");
+            assert_eq!(receipt.reason, "budget_pressure");
+            assert_eq!(receipt.strategy, "llm");
+            // The live event's receipt id is the transcript compaction event's
+            // id — one identity across projections (harn#4995).
+            assert_eq!(
+                events_by_kind_json(&id, "compaction")[0]["id"].as_str(),
+                Some(receipt.receipt_id.as_str())
+            );
         }
         event => panic!("expected TranscriptCompacted event, got {event:?}"),
     }

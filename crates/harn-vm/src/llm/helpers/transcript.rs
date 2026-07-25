@@ -496,8 +496,31 @@ pub(crate) fn transcript_event(
     text: &str,
     metadata: Option<serde_json::Value>,
 ) -> VmValue {
+    transcript_event_with_id(
+        &uuid::Uuid::now_v7().to_string(),
+        kind,
+        role,
+        visibility,
+        text,
+        metadata,
+    )
+}
+
+/// Build a transcript event with a caller-supplied `id`. Used by the compaction
+/// producers so the transcript event's identity is the shared
+/// `CompactionReceipt::receipt_id` — the one id that also rides the live event,
+/// ACP, and the run-observability record. [`transcript_event`] delegates here
+/// with a fresh UUID for every other event kind.
+pub(crate) fn transcript_event_with_id(
+    id: &str,
+    kind: &str,
+    role: &str,
+    visibility: &str,
+    text: &str,
+    metadata: Option<serde_json::Value>,
+) -> VmValue {
     let mut event = BTreeMap::new();
-    event.put_str("id", uuid::Uuid::now_v7().to_string());
+    event.put_str("id", id);
     event.put_str("kind", kind);
     event.put_str("role", role);
     event.put_str("visibility", visibility);

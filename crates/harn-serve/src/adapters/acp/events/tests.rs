@@ -135,6 +135,34 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
     ]
 }
 
+/// A `CompactionReceipt` for ACP session-update fixtures. Only the fields the
+/// two fixtures differ on are parameters; the rest are fixed sample values.
+fn fixture_compaction_receipt(
+    receipt_id: &str,
+    instruction_mode: Option<&str>,
+    instruction_source: Option<&str>,
+    compaction_policy: Option<serde_json::Value>,
+) -> harn_vm::orchestration::CompactionReceipt {
+    harn_vm::orchestration::CompactionReceipt {
+        schema_version: harn_vm::orchestration::COMPACTION_RECEIPT_SCHEMA_VERSION,
+        receipt_id: receipt_id.to_string(),
+        session_id: Some("session-1".to_string()),
+        transcript_id: Some("session-1".to_string()),
+        mode: "auto".to_string(),
+        reason: "threshold".to_string(),
+        strategy: "summary".to_string(),
+        engine_strategy: "observation_mask".to_string(),
+        archived_messages: 3,
+        estimated_tokens_before: 100,
+        estimated_tokens_after: 40,
+        snapshot_asset_id: Some("asset-1".to_string()),
+        instruction_mode: instruction_mode.map(str::to_string),
+        instruction_source: instruction_source.map(str::to_string),
+        compaction_policy,
+        recap: None,
+    }
+}
+
 fn extension_fixture_events() -> Vec<AgentEvent> {
     vec![
         AgentEvent::Artifact {
@@ -211,21 +239,16 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
         },
         AgentEvent::TranscriptCompacted {
             session_id: "session-1".to_string(),
-            mode: "auto".to_string(),
-            reason: "threshold".to_string(),
-            strategy: "summary".to_string(),
-            archived_messages: 3,
-            estimated_tokens_before: 100,
-            estimated_tokens_after: 40,
-            snapshot_asset_id: Some("asset-1".to_string()),
-            instruction_mode: Some("extend".to_string()),
-            instruction_source: Some("host".to_string()),
-            compaction_policy: Some(serde_json::json!({
-                "instructions": "Preserve failing tests.",
-                "instruction_mode": "extend",
-                "instruction_source": "host"
-            })),
-            recap: None,
+            receipt: fixture_compaction_receipt(
+                "compaction-fixture-1",
+                Some("extend"),
+                Some("host"),
+                Some(serde_json::json!({
+                    "instructions": "Preserve failing tests.",
+                    "instruction_mode": "extend",
+                    "instruction_source": "host"
+                })),
+            ),
         },
         AgentEvent::TranscriptProjected {
             session_id: "session-1".to_string(),
@@ -1486,17 +1509,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         },
         AgentEvent::TranscriptCompacted {
             session_id: "session-1".to_string(),
-            mode: "auto".to_string(),
-            reason: "threshold".to_string(),
-            strategy: "summary".to_string(),
-            archived_messages: 3,
-            estimated_tokens_before: 100,
-            estimated_tokens_after: 40,
-            snapshot_asset_id: Some("asset-1".to_string()),
-            instruction_mode: None,
-            instruction_source: None,
-            compaction_policy: None,
-            recap: None,
+            receipt: fixture_compaction_receipt("compaction-fixture-2", None, None, None),
         },
         AgentEvent::TranscriptProjected {
             session_id: "session-1".to_string(),
@@ -2161,8 +2174,12 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
         (
             "transcript_compacted",
             &[
+                "receiptId",
+                "schemaVersion",
                 "mode",
+                "reason",
                 "strategy",
+                "engineStrategy",
                 "archivedMessages",
                 "estimatedTokensBefore",
                 "estimatedTokensAfter",

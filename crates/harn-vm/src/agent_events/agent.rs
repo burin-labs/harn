@@ -561,26 +561,15 @@ pub enum AgentEvent {
         strategy: String,
         mode: String,
     },
+    /// A transcript compaction completed. Carries the one canonical
+    /// [`CompactionReceipt`] (harn#4995) — the same receipt embedded verbatim in
+    /// the transcript `compaction` event, forwarded through ACP, and projected
+    /// into `RunObservabilityRecord.compaction_events`. `receipt.receipt_id` is
+    /// the stable identity shared across all four surfaces, so hosts never
+    /// synthesize their own.
     TranscriptCompacted {
         session_id: String,
-        mode: String,
-        reason: String,
-        strategy: String,
-        archived_messages: usize,
-        estimated_tokens_before: usize,
-        estimated_tokens_after: usize,
-        snapshot_asset_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        instruction_mode: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        instruction_source: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        compaction_policy: Option<serde_json::Value>,
-        /// Observation-mask recap receipt (harn#4731): `{recap_bytes,
-        /// budget_bytes, kept_results_count, dropped_count,
-        /// carried_prior_recap}`. Absent for non-masking strategies.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        recap: Option<serde_json::Value>,
+        receipt: crate::orchestration::CompactionReceipt,
     },
     /// Emitted whenever `transcript_project` derives a model-visible
     /// prefix from the immutable raw transcript. Hosts that render a
