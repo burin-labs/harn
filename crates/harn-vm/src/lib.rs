@@ -686,7 +686,17 @@ pub fn reset_thread_local_state() {
     events::reset_event_sinks();
     tracing::set_tracing_enabled(false);
     tracing::reset_tracing();
-    builtin_profile::reset();
+    // `builtin_profile` is deliberately NOT reset here. Its recorder is
+    // process-global (`static ENABLED` / `static TOTALS`), and this function
+    // runs from ~150 test setups and from production entry points like
+    // `execute_conformance_source` and the orchestrator lifecycle. Every one
+    // of those calls disarmed the recorder that a concurrently running
+    // profiled run had just enabled, so `harn run --profile` reported
+    // `vm/residual 100%` and named nothing. `builtin_profile::enable()`
+    // already discards the previous run's totals, so the profiling entry
+    // point owns the lifecycle without help from here. Same reasoning as
+    // `llm::rate_limit::reset_runtime_rate_limit_overrides` and the
+    // `long_running::reset_state` exclusion in `stdlib::reset_stdlib_state`.
     agent_events::reset_all_sinks();
     agent_sessions::reset_session_store();
     mcp_registry::reset();
@@ -719,15 +729,18 @@ mod reset_leak_tests {
 
     /// The recorder is enabled per RUN but lives for the PROCESS, so an
     /// embedder that runs one script with `--profile` and the next without it
-    /// would keep paying for bookkeeping nobody reads and fold the second run's
-    /// builtins into the first run's totals. Enablement therefore ends where
-    /// every other process-global ends: here.
+    /// would keep paying for bookkeeping nobody reads and fold the second
+    /// run's builtins into the first run's totals. Enablement therefore ends
+    /// with the run that asked for it — the guard `enable()` returns — and NOT
+    /// in `reset_thread_local_state`, which fires from ~150 test setups and
+    /// from production entry points that know nothing about an in-flight
+    /// profiled run.
     #[test]
-    fn reset_disables_and_drains_builtin_profile() {
-        let _guard = builtin_profile::test_lock()
+    fn builtin_profile_recording_ends_with_its_run_not_with_a_global_reset() {
+        let _lock = builtin_profile::test_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        builtin_profile::enable();
+        let recording = builtin_profile::enable();
         builtin_profile::record("run_shell", std::time::Duration::from_millis(5));
         assert!(builtin_profile::is_enabled());
         assert!(!builtin_profile::snapshot().is_empty());
@@ -735,12 +748,23 @@ mod reset_leak_tests {
         reset_thread_local_state();
 
         assert!(
+            builtin_profile::is_enabled(),
+            "an unrelated global reset must not disarm an in-flight profiled run"
+        );
+        assert!(
+            !builtin_profile::snapshot().is_empty(),
+            "an unrelated global reset must not drop totals the run still owns"
+        );
+
+        drop(recording);
+
+        assert!(
             !builtin_profile::is_enabled(),
             "a profiled run must not leave the recorder on for the next one"
         );
         assert!(
             builtin_profile::snapshot().is_empty(),
-            "builtin totals must be empty after reset"
+            "builtin totals must be empty once the run's guard drops"
         );
     }
 

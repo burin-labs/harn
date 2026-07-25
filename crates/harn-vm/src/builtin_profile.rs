@@ -28,7 +28,7 @@
 //! cost.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -58,9 +58,46 @@ pub struct BuiltinBucket {
 }
 
 /// Start recording, discarding anything from a previous run.
-pub fn enable() {
+///
+/// The recorder is enabled per RUN but lives for the PROCESS, so the returned
+/// guard ends the recording when the run that asked for it finishes. Without
+/// it an embedder that profiles one script and not the next would keep paying
+/// for bookkeeping nobody reads, and fold the second run's builtins into the
+/// first run's totals.
+///
+/// The lifecycle belongs to the caller and nowhere else. It used to also end
+/// at `reset_thread_local_state`, which runs from ~150 test setups and from
+/// production entry points like `execute_conformance_source`; any of them
+/// firing mid-run disarmed the recorder and the profile named nothing.
+#[must_use = "recording ends when the returned guard drops"]
+pub fn enable() -> RecordingGuard {
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     *TOTALS.lock().unwrap_or_else(|e| e.into_inner()) = Some(HashMap::new());
     ENABLED.store(true, Ordering::Relaxed);
+    RecordingGuard { generation }
+}
+
+/// Which `enable()` currently owns the recorder.
+///
+/// The recorder is one process-global, so two overlapping profiled runs cannot
+/// both have their own. The generation makes the overlap degrade predictably
+/// instead of silently: the later `enable()` takes ownership, and the earlier
+/// guard's drop becomes a no-op rather than disarming a run that is still
+/// going. Whoever holds the current generation ends the recording.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Ends builtin recording when dropped, unless a later [`enable`] has since
+/// taken ownership of the recorder.
+pub struct RecordingGuard {
+    generation: u64,
+}
+
+impl Drop for RecordingGuard {
+    fn drop(&mut self) {
+        if GENERATION.load(Ordering::SeqCst) == self.generation {
+            reset();
+        }
+    }
 }
 
 pub fn is_enabled() -> bool {
@@ -165,9 +202,10 @@ pub fn reset() {
 /// The one lock serializing tests that touch the process-global recorder.
 ///
 /// Lives outside `mod tests` because the lifecycle regression for this module
-/// belongs with `reset_thread_local_state` — the single owner of process-global
-/// resets — not here, and both sides must hold the SAME lock or they race each
-/// other's `enable`/`reset` under cargo's test threads.
+/// sits next to `reset_thread_local_state` — it asserts that a global reset
+/// does NOT disarm an in-flight profiled run — and both sides must hold the
+/// SAME lock or they race each other's `enable`/`reset` under cargo's test
+/// threads.
 #[cfg(test)]
 pub(crate) fn test_lock() -> &'static Mutex<()> {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -196,7 +234,7 @@ mod tests {
     #[test]
     fn aggregates_calls_by_name_and_ranks_by_total() {
         let _guard = TEST_LOCK().lock().unwrap_or_else(|e| e.into_inner());
-        enable();
+        let _recording = enable();
         record("to_string", Duration::from_millis(1));
         record("to_string", Duration::from_millis(3));
         record("project_fingerprint", Duration::from_millis(120));
@@ -218,14 +256,40 @@ mod tests {
     #[test]
     fn enable_discards_a_previous_run() {
         let _guard = TEST_LOCK().lock().unwrap_or_else(|e| e.into_inner());
-        enable();
+        let _recording = enable();
         record("run_shell", Duration::from_millis(5));
-        enable();
+        let _recording = enable();
         let buckets = snapshot();
         reset();
         assert!(
             buckets.is_empty(),
             "a fresh run must not inherit stale totals"
         );
+    }
+
+    /// Two profiled runs can overlap in one process — an embedder driving two
+    /// VMs, or a `--profile` run that starts while another is finishing. There
+    /// is only one recorder, so the later run owns it; the earlier run's guard
+    /// must not disarm it on the way out.
+    #[test]
+    fn an_outgoing_run_does_not_disarm_the_run_that_replaced_it() {
+        let _guard = TEST_LOCK().lock().unwrap_or_else(|e| e.into_inner());
+        let first = enable();
+        let second = enable();
+
+        drop(first);
+
+        assert!(
+            is_enabled(),
+            "the superseded run's guard must not stop the recorder"
+        );
+        record("run_shell", Duration::from_millis(5));
+        assert!(
+            !snapshot().is_empty(),
+            "the owning run must still be recording"
+        );
+
+        drop(second);
+        assert!(!is_enabled(), "the owning run's guard ends the recording");
     }
 }
