@@ -27,8 +27,8 @@ name = "harn-nativec"
 path = "src/bin/harn-nativec.rs"
 
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.38" }
-harn-parser = { path = "../harn-parser", version = "=0.10.38" }
+harn-vm = { path = "../harn-vm", version = "=0.10.39" }
+harn-parser = { path = "../harn-parser", version = "=0.10.39" }
 cranelift-codegen = "0.133"
 cranelift-frontend = "0.133"
 cranelift-module = "0.133"
