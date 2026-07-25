@@ -69,13 +69,8 @@ run_task() {
   generated_root="$(dirname "$report_source")"
   cp "$report_source" "$task_root/report.json"
   run_path="$(
-    python3 - "$task_root/report.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    print(json.load(handle).get("run_path", ""))
-PY
+    "$harn_bin" run "$experiment_root/matrix_support.harn" -- \
+      report-run-path --path "$task_root/report.json"
   )"
   if [[ -n "$run_path" && -f "$run_path" ]]; then
     cp "$run_path" "$task_root/run_record.json"

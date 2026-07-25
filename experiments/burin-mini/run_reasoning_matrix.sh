@@ -42,27 +42,14 @@ write_case_json() {
   local model="$3"
   local policy="$4"
   local suite_root="$5"
-  python3 - "$path" "$provider" "$model" "$policy" "$scale" "$semantic_mode" "$suite_root" <<'PY'
-import json
-import sys
-
-path, provider, model, policy, scale, semantic_mode, suite_root = sys.argv[1:]
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(
-        {
-            "provider": provider,
-            "model": model,
-            "reasoning_policy": policy,
-            "reasoning_scale": scale,
-            "semantic_eval_mode": semantic_mode,
-            "suite_root": suite_root,
-        },
-        handle,
-        indent=2,
-        sort_keys=True,
-    )
-    handle.write("\n")
-PY
+  "$harn_bin" run "$experiment_root/matrix_support.harn" -- write-case \
+    --path "$path" \
+    --provider "$provider" \
+    --model "$model" \
+    --policy "$policy" \
+    --scale "$scale" \
+    --semantic-mode "$semantic_mode" \
+    --suite-root "$suite_root"
 }
 
 run_case() {
@@ -96,14 +83,7 @@ run_case() {
 }
 
 split_words() {
-  python3 - "$1" <<'PY'
-import re
-import sys
-
-for item in re.split(r"[\s,]+", sys.argv[1].strip()):
-    if item:
-        print(item)
-PY
+  "$harn_bin" run "$experiment_root/matrix_support.harn" -- split-words --value "$1"
 }
 
 ollama_models() {
@@ -145,22 +125,7 @@ llamacpp_model() {
     rm -f "$tmp"
     return 0
   fi
-  python3 - "$tmp" <<'PY' || true
-import json
-import sys
-
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-except Exception:
-    raise SystemExit(0)
-
-data = payload.get("data") if isinstance(payload, dict) else None
-if isinstance(data, list) and data:
-    first = data[0]
-    if isinstance(first, dict) and first.get("id"):
-        print(first["id"])
-PY
+  "$harn_bin" run "$experiment_root/matrix_support.harn" -- first-model-id --path "$tmp" || true
   rm -f "$tmp"
 }
 
@@ -183,76 +148,8 @@ together_models() {
     rm -f "$tmp"
     return 0
   fi
-  python3 - "$tmp" "$together_limit" <<'PY'
-import json
-import re
-import sys
-
-path, limit_raw = sys.argv[1:]
-limit = int(limit_raw)
-with open(path, "r", encoding="utf-8") as handle:
-    payload = json.load(handle)
-
-models = payload.get("data", payload) if isinstance(payload, dict) else payload
-if not isinstance(models, list):
-    raise SystemExit(0)
-
-def numeric(value):
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        match = re.search(r"\d+(?:\.\d+)?", value)
-        if match:
-            return float(match.group(0))
-    return None
-
-def price_mtok(model, *keys):
-    pricing = model.get("pricing") if isinstance(model, dict) else None
-    if not isinstance(pricing, dict):
-        return None
-    for key in keys:
-        value = pricing.get(key)
-        parsed = numeric(value)
-        if parsed is not None:
-            return parsed
-    return None
-
-keywords = re.compile(r"(qwen|deepseek|kimi|moonshot|glm|zai|gemma|gpt-oss|coder)", re.I)
-selected = []
-for model in models:
-    if not isinstance(model, dict):
-        continue
-    if not str(model.get("uuid") or "").startswith("endpoint-"):
-        continue
-    model_id = model.get("id") or model.get("name") or model.get("model")
-    if not model_id or not keywords.search(model_id):
-        continue
-    input_price = price_mtok(model, "input", "input_per_mtok", "prompt")
-    output_price = price_mtok(model, "output", "output_per_mtok", "completion")
-    if input_price is None or output_price is None:
-        continue
-    if input_price <= 2.0 and output_price <= 2.0:
-        lower_id = model_id.lower()
-        priority = 50
-        if "qwen3-coder-next" in lower_id:
-            priority = 0
-        elif "qwen3-coder" in lower_id:
-            priority = 1
-        elif "qwen" in lower_id and "coder" in lower_id:
-            priority = 2
-        elif "qwen" in lower_id:
-            priority = 3
-        elif "deepseek" in lower_id or "glm" in lower_id or "kimi" in lower_id:
-            priority = 4
-        elif "gemma" in lower_id:
-            priority = 5
-        elif "gpt-oss" in lower_id:
-            priority = 6
-        selected.append((priority, output_price, input_price, model_id))
-
-for _, _, _, model_id in sorted(selected)[:limit]:
-    print(model_id)
-PY
+  "$harn_bin" run "$experiment_root/matrix_support.harn" -- together-models \
+    --path "$tmp" --limit "$together_limit"
   rm -f "$tmp"
 }
 

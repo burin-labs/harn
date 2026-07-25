@@ -1,0 +1,184 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+pub fn report_run_path(doc) -> string {
+  return type_of(doc) == "dict" ? to_string(doc?.run_path ?? "") : ""
+}
+
+pub fn split_matrix_words(text: string) -> list<string> {
+  return regex_split(text.trim(), r"[\s,]+").filter({ value -> value != "" }).to_list()
+}
+
+pub fn first_model_id(doc) -> string {
+  if type_of(doc) != "dict" || type_of(doc?.data) != "list" || doc.data.count == 0 {
+    return ""
+  }
+  const first = doc.data[0]
+  return type_of(first) == "dict" ? to_string(first?.id ?? "") : ""
+}
+
+fn numeric(value) -> float? {
+  if type_of(value) == "int" || type_of(value) == "float" {
+    return to_float(value)
+  }
+  if type_of(value) != "string" {
+    return nil
+  }
+  const matched = regex_match(r"\d+(?:\.\d+)?", value)
+  return matched == nil || matched.count == 0 ? nil : to_float(matched[0])
+}
+
+fn price_mtok(model, keys: list<string>) -> float? {
+  const pricing = model?.pricing
+  if type_of(pricing) != "dict" {
+    return nil
+  }
+  for key in keys {
+    const parsed = numeric(pricing.get(key))
+    if parsed != nil {
+      return parsed
+    }
+  }
+  return nil
+}
+
+fn model_priority(model_id: string) -> int {
+  const lowered = model_id.lower()
+  if lowered.contains("qwen3-coder-next") {
+    return 0
+  }
+  if lowered.contains("qwen3-coder") {
+    return 1
+  }
+  if lowered.contains("qwen") && lowered.contains("coder") {
+    return 2
+  }
+  if lowered.contains("qwen") {
+    return 3
+  }
+  if lowered.contains("deepseek") || lowered.contains("glm") || lowered.contains("kimi") {
+    return 4
+  }
+  if lowered.contains("gemma") {
+    return 5
+  }
+  if lowered.contains("gpt-oss") {
+    return 6
+  }
+  return 50
+}
+
+pub fn together_model_ids(payload, limit: int) -> list<string> {
+  const models = if type_of(payload) == "dict" {
+    payload?.data ?? payload
+  } else {
+    payload
+  }
+  if type_of(models) != "list" || limit <= 0 {
+    return []
+  }
+  let selected = []
+  for model in models {
+    if type_of(model) != "dict" || !to_string(model?.uuid ?? "").starts_with("endpoint-") {
+      continue
+    }
+    const model_id = to_string(model?.id ?? model?.name ?? model?.model ?? "")
+    if model_id == ""
+      || regex_captures(
+      r"(?i)(qwen|deepseek|kimi|moonshot|glm|zai|gemma|gpt-oss|coder)",
+      model_id,
+    ).count
+      == 0 {
+      continue
+    }
+    const input_price = price_mtok(model, ["input", "input_per_mtok", "prompt"])
+    const output_price = price_mtok(model, ["output", "output_per_mtok", "completion"])
+    if input_price == nil || output_price == nil || input_price > 2.0 || output_price > 2.0 {
+      continue
+    }
+    selected = selected
+      + [
+      {
+        id: model_id,
+        priority: model_priority(model_id),
+        input_price: input_price,
+        output_price: output_price,
+      },
+    ]
+  }
+  return selected.sort_by({ row -> [row.priority, row.output_price, row.input_price, row.id] })
+    .take(limit)
+    .map({ row -> row.id })
+    .to_list()
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "burin_mini_matrix_support",
+      args: [
+        {kind: "positional", name: "action", required: true},
+        {kind: "flag", name: "path", long: "--path", parse: "string", default: ""},
+        {kind: "flag", name: "value", long: "--value", parse: "string", default: ""},
+        {kind: "flag", name: "provider", long: "--provider", parse: "string", default: ""},
+        {kind: "flag", name: "model", long: "--model", parse: "string", default: ""},
+        {kind: "flag", name: "policy", long: "--policy", parse: "string", default: ""},
+        {kind: "flag", name: "scale", long: "--scale", parse: "string", default: ""},
+        {
+          kind: "flag",
+          name: "semantic_mode",
+          long: "--semantic-mode",
+          parse: "string",
+          default: "",
+        },
+        {kind: "flag", name: "suite_root", long: "--suite-root", parse: "string", default: ""},
+        {kind: "flag", name: "limit", long: "--limit", parse: "int", default: 0},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) -> int {
+  if help_requested(argv) {
+    harness.stdio.println("usage: harn run matrix_support.harn -- ACTION [options]")
+    return 0
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    return 2
+  }
+  const options = unwrap(parsed_result).options
+  const action = to_string(options.action)
+  try {
+    if action == "report-run-path" {
+      harness.stdio.println(
+        report_run_path(json_parse(harness.fs.read_text(to_string(options.path)))),
+      )
+    } else if action == "split-words" {
+      harness.stdio.println(split_matrix_words(to_string(options.value)).join("\n"))
+    } else if action == "first-model-id" {
+      harness.stdio.println(
+        first_model_id(json_parse(harness.fs.read_text(to_string(options.path)))),
+      )
+    } else if action == "together-models" {
+      const payload = json_parse(harness.fs.read_text(to_string(options.path)))
+      harness.stdio.println(together_model_ids(payload, to_int(options.limit) ?? 0).join("\n"))
+    } else if action == "write-case" {
+      const body = {
+        model: to_string(options.model),
+        provider: to_string(options.provider),
+        reasoning_policy: to_string(options.policy),
+        reasoning_scale: to_string(options.scale),
+        semantic_eval_mode: to_string(options.semantic_mode),
+        suite_root: to_string(options.suite_root),
+      }
+      harness.fs.write_text(to_string(options.path), json_stringify_pretty(body) + "\n")
+    } else {
+      throw "unknown action: " + action
+    }
+    return 0
+  } catch (e) {
+    harness.stdio.eprintln("error: " + to_string(e))
+    return 1
+  }
+}

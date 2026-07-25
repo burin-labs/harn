@@ -1,0 +1,332 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import * as semver from "std/semver"
+
+pub type ReleaseMetadataPlan = {
+  current_version: string,
+  next_version: string,
+  manifests: list<string>,
+  package_names: list<string>,
+}
+
+fn default_root() -> string {
+  return path_normalize(path_join(source_dir(), ".."))
+}
+
+fn cargo_path(root: string) -> string {
+  return path_join(root, "Cargo.toml")
+}
+
+fn normalized_rel(path: string, root: string) -> string {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
+  if normalized.starts_with(prefix) {
+    return normalized[len(prefix):]
+  }
+  return normalized
+}
+
+pub fn workspace_version_from_doc(doc) -> string {
+  const value = doc?.workspace?.package?.version ?? doc?.workspace?.version
+  if type_of(value) != "string" || to_string(value) == "" {
+    throw "missing workspace version"
+  }
+  const version = to_string(value)
+  if regex_captures(r"^\d+\.\d+\.\d+$", version).count != 1 {
+    throw "workspace version is not MAJOR.MINOR.PATCH: " + version
+  }
+  return version
+}
+
+pub fn current_version(root: string) -> string {
+  const path = cargo_path(root)
+  if !harness.fs.exists(path) {
+    throw "missing workspace manifest: " + path
+  }
+  return workspace_version_from_doc(toml_parse(harness.fs.read_text(path)))
+}
+
+fn workspace_entries(doc, key: string) -> list<string> {
+  const raw = doc?.workspace?.get(key)
+  if raw == nil && key == "exclude" {
+    return []
+  }
+  if type_of(raw) != "list" {
+    throw "workspace." + key + " must be a list"
+  }
+  let entries: list<string> = []
+  for value in raw {
+    if type_of(value) != "string" || to_string(value) == "" {
+      throw "workspace." + key + " contains a non-string or empty entry"
+    }
+    entries = entries + [to_string(value)]
+  }
+  return entries
+}
+
+fn manifests_for_entry(root: string, entry: string, owner: string) -> list<string> {
+  const manifest_pattern = if entry.ends_with("Cargo.toml") {
+    entry
+  } else {
+    entry + "/Cargo.toml"
+  }
+  const matches = harness.fs.glob(manifest_pattern, {base: root}).sort()
+  if matches.count == 0 {
+    throw owner + " entry matched no package manifest: " + entry
+  }
+  return matches
+}
+
+pub fn workspace_package_manifests(root: string) -> list<string> {
+  const doc = toml_parse(harness.fs.read_text(cargo_path(root)))
+  let manifests: list<string> = []
+  for key in ["members", "exclude"] {
+    for entry in workspace_entries(doc, key) {
+      manifests = manifests + manifests_for_entry(root, entry, "workspace." + key)
+    }
+  }
+  return manifests.unique().sort()
+}
+
+pub fn package_names_for_manifests(manifests: list<string>) -> list<string> {
+  let names: list<string> = []
+  for manifest in manifests {
+    const doc = toml_parse(harness.fs.read_text(manifest))
+    const raw = doc?.package?.name
+    if type_of(raw) != "string" || to_string(raw) == "" {
+      throw "missing package.name in " + manifest
+    }
+    const name = to_string(raw)
+    if names.contains(name) {
+      throw "duplicate workspace package name: " + name
+    }
+    names = names + [name]
+  }
+  return names.sort()
+}
+
+fn dependency_name(line: string) -> string? {
+  const matches = regex_captures(r"^\s*([A-Za-z0-9_-]+)\s*=\s*\{", line)
+  if matches.count == 0 {
+    return nil
+  }
+  return matches[0].groups[0]
+}
+
+pub fn rewrite_local_dependency_versions(
+  text: string,
+  package_names: list<string>,
+  version: string,
+) -> string {
+  let lines: list<string> = []
+  for line in text.split("\n") {
+    const name = dependency_name(line)
+    if name == nil || !package_names.contains(name) || !line.contains("path") {
+      lines = lines + [line]
+      continue
+    }
+    const versions = regex_captures(r#"version\s*=\s*"[^"]+""#, line)
+    if versions.count == 0 {
+      lines = lines + [line]
+      continue
+    }
+    if versions.count > 1 {
+      throw "local path dependency " + name + " contains multiple version fields"
+    }
+    lines = lines
+      + [regex_replace(r#"(version\s*=\s*")[^"]+(")"#, "$1=" + version + "$2", line)]
+  }
+  return join(lines, "\n")
+}
+
+fn replace_workspace_version(text: string, current: string, next: string) -> string {
+  const pattern = "(?m)^version\\s*=\\s*\"" + replace(current, ".", "\\.") + "\"\\s*$"
+  if regex_captures(pattern, text).count != 1 {
+    throw "workspace version literal must occur exactly once"
+  }
+  return regex_replace(pattern, "version = \"" + next + "\"", text)
+}
+
+fn rewrite_agent_manifest(root: string, current: string, next: string) -> nil {
+  const path = path_join(root, "spec/acp-registry/harn/agent.json")
+  if !harness.fs.exists(path) {
+    return nil
+  }
+  const original = harness.fs.read_text(path)
+  const doc = json_parse(original)
+  if to_string(doc?.version ?? "") != current {
+    throw "agent manifest version does not match workspace version"
+  }
+  const binary = doc?.distribution?.binary
+  if type_of(binary) != "dict" || binary.entries().count == 0 {
+    throw "agent manifest is missing distribution.binary entries"
+  }
+  for {key, value} in binary.entries() {
+    const archive = to_string(value?.archive ?? "")
+    if archive == "" || !archive.contains("/v" + current + "/") {
+      throw "agent manifest archive for " + key + " does not target v" + current
+    }
+  }
+  if regex_captures("\"version\": \"" + replace(current, ".", "\\.") + "\"", original).count
+    != 1 {
+    throw "agent manifest version literal must occur exactly once"
+  }
+  let updated = replace(
+    original,
+    "\"version\": \"" + current + "\"",
+    "\"version\": \"" + next + "\"",
+  )
+  updated = replace(updated, "/v" + current + "/", "/v" + next + "/")
+  const check = json_parse(updated)
+  if to_string(check?.version ?? "") != next {
+    throw "failed to update agent manifest version"
+  }
+  for {key, value} in check.distribution.binary.entries() {
+    if !to_string(value.archive).contains("/v" + next + "/") {
+      throw "failed to update agent manifest archive for " + key
+    }
+  }
+  harness.fs.write_text(path, updated)
+  return nil
+}
+
+fn rewrite_embedding_tags(root: string, next: string) -> nil {
+  const path = path_join(root, "docs/src/embedding-rust.md")
+  if !harness.fs.exists(path) {
+    return nil
+  }
+  const text = harness.fs.read_text(path)
+  const updated = regex_replace_all(r#"tag = "v\d+\.\d+\.\d+""#, "tag = \"v" + next + "\"", text)
+  if updated != text {
+    harness.fs.write_text(path, updated)
+  }
+  return nil
+}
+
+pub fn release_metadata_plan(
+  root: string,
+  bump: "major" | "minor" | "patch",
+) -> ReleaseMetadataPlan {
+  const current = current_version(root)
+  const manifests = workspace_package_manifests(root)
+  const names = package_names_for_manifests(manifests)
+  return {
+    current_version: current,
+    next_version: semver.next(current, bump),
+    manifests: manifests.map({ path -> normalized_rel(path, root) }).to_list(),
+    package_names: names,
+  }
+}
+
+pub fn apply_release_metadata(root: string, version: string) -> ReleaseMetadataPlan {
+  const current = current_version(root)
+  const plan = release_metadata_plan(root, "patch")
+    + {next_version: version}
+  if regex_captures(r"^\d+\.\d+\.\d+$", version).count != 1 {
+    throw "release version is not MAJOR.MINOR.PATCH: " + version
+  }
+  if !["major", "minor", "patch"].any({ bump -> semver.next(current, bump) == version }) {
+    throw "release version is not a single major, minor, or patch bump from " + current
+  }
+  const root_manifest = cargo_path(root)
+  const all_manifests = [root_manifest]
+    + plan.manifests.map({ path -> path_join(root, path) })
+    .to_list()
+  for manifest in all_manifests.unique() {
+    let text = harness.fs.read_text(manifest)
+    if path_normalize(manifest) == path_normalize(root_manifest) {
+      text = replace_workspace_version(text, current, version)
+    }
+    text = rewrite_local_dependency_versions(text, plan.package_names, version)
+    harness.fs.write_text(manifest, text)
+  }
+  rewrite_agent_manifest(root, current, version)
+  rewrite_embedding_tags(root, version)
+  return plan
+}
+
+pub fn verify_changelog_top(text: string, expected: string) -> nil {
+  const headings = regex_captures(r"(?m)^## ([^\r\n]+)\r?$", text)
+  if headings.count == 0 {
+    throw "CHANGELOG.md has no '## vX.Y.Z' heading"
+  }
+  const top = headings[0].groups[0].trim()
+  if top == "v" + expected {
+    return nil
+  }
+  if regex_captures(r"^v\d+\.\d+\.\d+$", top).count == 1 {
+    throw "CHANGELOG.md top heading is "
+      + top
+      + " but --bump implies v"
+      + expected
+      + "\nhint: edit CHANGELOG.md to add '## v"
+      + expected
+      + "' as the new top entry, then re-run"
+  }
+  throw "CHANGELOG.md top heading '"
+    + top
+    + "' is not '## v"
+    + expected
+    + "'\nhint: edit CHANGELOG.md to add '## v"
+    + expected
+    + "' as the new top entry, then re-run"
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "release_metadata",
+      args: [
+        {kind: "positional", name: "action", required: true},
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "flag", name: "bump", long: "--bump", parse: "string", default: ""},
+        {kind: "flag", name: "version", long: "--version", parse: "string", default: ""},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) -> int {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/release_metadata.harn -- ACTION [--root PATH] [--bump KIND] [--version X.Y.Z]",
+    )
+    return 0
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    return 2
+  }
+  const parsed = unwrap(parsed_result)
+  const action = to_string(parsed.options?.action ?? "")
+  const root_value = to_string(parsed.options?.root ?? "")
+  const root = path_normalize(root_value == "" ? default_root() : root_value)
+  try {
+    if action == "current" {
+      harness.stdio.println(current_version(root))
+    } else if action == "next" {
+      const bump = to_string(parsed.options?.bump ?? "")
+      if bump != "major" && bump != "minor" && bump != "patch" {
+        throw "--bump must be major, minor, or patch"
+      }
+      harness.stdio.println(semver.next(current_version(root), bump))
+    } else if action == "manifests" {
+      for path in workspace_package_manifests(root) {
+        harness.stdio.println(normalized_rel(path, root))
+      }
+    } else if action == "apply" {
+      const version = to_string(parsed.options?.version ?? "")
+      apply_release_metadata(root, version)
+    } else if action == "verify-changelog" {
+      const version = to_string(parsed.options?.version ?? "")
+      verify_changelog_top(harness.fs.read_text(path_join(root, "CHANGELOG.md")), version)
+    } else {
+      throw "unknown action: " + action
+    }
+    return 0
+  } catch (e) {
+    harness.stdio.eprintln("error: " + to_string(e))
+    return 1
+  }
+}

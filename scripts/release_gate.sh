@@ -137,124 +137,25 @@ require_clean_tree() {
 }
 
 current_version() {
-  python3 - <<'PY'
-from pathlib import Path
-import re
-text = Path("Cargo.toml").read_text()
-m = re.search(r'^version = "([^"]+)"', text, re.M)
-print(m.group(1) if m else "")
-PY
+  release_metadata current
+}
+
+release_metadata() {
+  if [[ -n "${HARN_RELEASE_METADATA_BIN:-}" ]]; then
+    "$HARN_RELEASE_METADATA_BIN" run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+  else
+    harn_cmd run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+  fi
 }
 
 next_version() {
   local bump="$1"
-  python3 - "$bump" <<'PY'
-from pathlib import Path
-import json, re, sys
-bump = sys.argv[1]
-text = Path("Cargo.toml").read_text()
-m = re.search(r'^version = "([^"]+)"', text, re.M)
-if not m:
-    raise SystemExit("missing workspace version")
-major, minor, patch = map(int, m.group(1).split("."))
-if bump == "major":
-    major, minor, patch = major + 1, 0, 0
-elif bump == "minor":
-    minor, patch = minor + 1, 0
-elif bump == "patch":
-    patch += 1
-else:
-    raise SystemExit(f"unsupported bump: {bump}")
-print(f"{major}.{minor}.{patch}")
-PY
+  release_metadata next --bump "$bump"
 }
 
 bump_version() {
   local next="$1"
-  python3 - "$next" <<'PY'
-from pathlib import Path
-import json, re, sys, tomllib
-
-next_version = sys.argv[1]
-
-root = Path("Cargo.toml")
-text = root.read_text()
-updated, count = re.subn(
-    r'^version = "[^"]+"', f'version = "{next_version}"', text, count=1, flags=re.M
-)
-if count != 1:
-    raise SystemExit("failed to update workspace version")
-root.write_text(updated)
-
-# Update inter-crate dep specs across workspace + excluded crates so a
-# published sibling can only resolve the exact version it was released
-# with. Pins are EXACT (`=X.Y.Z`) to match check-crate-sibling-versions;
-# every bump (patch included) rewrites them so a downstream pinning one
-# Harn crate cannot pull an older sibling from the same semver line.
-workspace = tomllib.loads(root.read_text()).get("workspace", {})
-
-
-def workspace_package_manifests() -> list[Path]:
-    manifests: set[Path] = set()
-    for key in ("members", "exclude"):
-        for entry in workspace.get(key, []):
-            paths = list(Path().glob(entry)) if any(ch in entry for ch in "*?[") else [Path(entry)]
-            for path in paths:
-                manifest = path if path.name == "Cargo.toml" else path / "Cargo.toml"
-                if manifest.exists():
-                    manifests.add(manifest)
-    return sorted(manifests)
-
-
-package_manifests = workspace_package_manifests()
-local_packages: set[str] = set()
-for manifest in package_manifests:
-    data = tomllib.loads(manifest.read_text())
-    name = data.get("package", {}).get("name")
-    if isinstance(name, str) and name:
-        local_packages.add(name)
-
-pattern = re.compile(
-    r'([A-Za-z0-9_-]+)(\s*=\s*\{\s*path\s*=\s*"[^"]+"\s*,\s*version\s*=\s*)"([^"]+)"'
-)
-
-
-def rewrite(match: re.Match) -> str:
-    name = match.group(1)
-    if name not in local_packages:
-        return match.group(0)
-    return f'{name}{match.group(2)}"={next_version}"'
-
-
-for manifest in [root, *package_manifests]:
-    original = manifest.read_text()
-    new_text = pattern.sub(rewrite, original)
-    if new_text != original:
-        manifest.write_text(new_text)
-
-# Keep the checked-in ACP Agent Registry submission aligned with the
-# release being prepared. The registry requires concrete archive URLs
-# for the first submission; after listing, its own updater follows
-# GitHub Releases, but this local artifact should not drift again.
-agent_manifest = Path("spec/acp-registry/harn/agent.json")
-if agent_manifest.exists():
-    data = json.loads(agent_manifest.read_text())
-    data["version"] = next_version
-    binary = data.get("distribution", {}).get("binary", {})
-    if isinstance(binary, dict):
-        for entry in binary.values():
-            if not isinstance(entry, dict):
-                continue
-            archive = entry.get("archive")
-            if not isinstance(archive, str) or "/" not in archive:
-                continue
-            filename = archive.rsplit("/", 1)[-1]
-            entry["archive"] = (
-                f"https://github.com/burin-labs/harn/releases/download/"
-                f"v{next_version}/{filename}"
-            )
-    agent_manifest.write_text(json.dumps(data, indent=2) + "\n")
-PY
+  release_metadata apply --version "$next"
 }
 
 reconcile_cargo_lock() {
@@ -732,22 +633,6 @@ cmd_prepare() {
   reconcile_cargo_lock
 
   harn_cmd run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
-  # Keep the embedding guide's `tag = "vX.Y.Z"` pins on the released version
-  # line. Nothing owned these before and they silently drifted ~46 versions
-  # behind; match any prior version rather than `$current` so a stale doc
-  # still converges.
-  python3 - "$next" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-next_version = sys.argv[1]
-doc = Path("docs/src/embedding-rust.md")
-text = doc.read_text()
-updated = re.sub(r'tag = "v\d+\.\d+\.\d+"', f'tag = "v{next_version}"', text)
-if updated != text:
-    doc.write_text(updated)
-PY
   # Artifact contents come from the already-audited source checkout. Stamp the
   # selected release version explicitly so a Cargo.toml-only rewrite does not
   # force a second full CLI build.

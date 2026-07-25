@@ -3,6 +3,12 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 real_path=$PATH
+release_metadata_harn="${HARN_RELEASE_METADATA_BIN:-${HARN_BIN:-}}"
+if [[ -z "$release_metadata_harn" || ! -x "$release_metadata_harn" ]]; then
+  echo "release_prepare_env_test requires HARN_RELEASE_METADATA_BIN or HARN_BIN" >&2
+  exit 1
+fi
+export HARN_RELEASE_METADATA_BIN="$release_metadata_harn"
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -324,13 +330,9 @@ BIN
     if [[ "${INJECT_HIDDEN_INDEX_CHANGE:-0}" == "1" ]]; then
       git update-index --assume-unchanged Cargo.toml
     fi
-    python3 - <<'PY'
-from pathlib import Path
-p = Path("Cargo.toml")
-p.write_text(p.read_text().replace('version = "1.2.3"', 'version = "1.2.4"'))
-lock = Path("Cargo.lock")
-lock.write_text(lock.read_text() + "# touched\n")
-PY
+    sed 's/version = "1.2.3"/version = "1.2.4"/' Cargo.toml > Cargo.toml.next
+    mv Cargo.toml.next Cargo.toml
+    printf '# touched\n' >> Cargo.lock
     ;;
   *)
     echo "unexpected release gate invocation: $*" >&2

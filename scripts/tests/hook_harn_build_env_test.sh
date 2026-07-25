@@ -42,11 +42,7 @@ BIN
     printf '%s\n' "$CARGO_TARGET_DIR/debug/harn"
     ;;
   "metadata --format-version=1 --no-deps")
-    python3 - <<'PY'
-import json
-import os
-print(json.dumps({"target_directory": os.environ["CARGO_TARGET_DIR"]}))
-PY
+    printf '{"target_directory":"%s"}\n' "$CARGO_TARGET_DIR"
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2

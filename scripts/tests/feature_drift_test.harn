@@ -1,0 +1,27 @@
+import { feature_drift, parse_feature_snapshot, render_feature_drift } from "../feature_drift.harn"
+
+@test
+pipeline test_feature_drift_unions_duplicate_rows_and_ignores_version_changes(task) {
+  const baseline = parse_feature_snapshot(
+    "alpha v1.0.0 a,b\nalpha v1.0.0 c\nbeta v1.0.0 old\ngamma v1.0.0 x\n",
+  )
+  const current = parse_feature_snapshot("alpha v1.0.0 a,c,d\nbeta v2.0.0 new\ngamma v1.0.0 x\n")
+  assert_eq(
+    feature_drift(baseline, current),
+    [{name: "alpha", version: "1.0.0", added: ["d"], removed: ["b"]}],
+  )
+}
+
+@test
+pipeline test_feature_drift_rendering_preserves_advisory_contract(task) {
+  const drift = [{name: "alpha", version: "1.0.0", added: ["new"], removed: ["old"]}]
+  const text = render_feature_drift(drift, "origin/main")
+  assert(text.contains("Feature drift against origin/main"))
+  assert(text.contains("  alpha v1.0.0"))
+  assert(text.contains("    + new"))
+  assert(text.contains("    - old"))
+  assert(text.contains("1 package(s) drifted. This is advisory"))
+  const clean = render_feature_drift([], "main")
+  assert(clean.contains("No feature drift against main."))
+  assert(clean.contains("Version changes are not reported"))
+}

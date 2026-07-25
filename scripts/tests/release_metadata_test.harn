@@ -1,0 +1,226 @@
+import { with_temp_dir } from "std/testing"
+import {
+  apply_release_metadata,
+  current_version,
+  package_names_for_manifests,
+  release_metadata_plan,
+  rewrite_local_dependency_versions,
+  verify_changelog_top,
+  workspace_package_manifests,
+} from "../release_metadata.harn"
+
+fn assert_throws_contains(body, fragment: string) -> nil {
+  let error_text = ""
+  try {
+    body()
+  } catch (e) {
+    error_text = to_string(e)
+  }
+  require error_text != "", "expected closure to throw"
+  require error_text.contains(fragment),
+    "expected error to contain " + fragment + ", got: "
+    + error_text
+  return nil
+}
+
+fn mkdirs(path: string) -> nil {
+  const parts = split(path_normalize(path), "/")
+  let current = path.starts_with("/") ? "/" : ""
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = current == "" || current == "/" ? current + part : path_join(current, part)
+    if !harness.fs.exists(current) {
+      harness.fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write(root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(dirname(path) ?? root)
+  harness.fs.write_text(path, text)
+  return nil
+}
+
+fn workspace(root: string) -> nil {
+  write(
+    root,
+    "Cargo.toml",
+    """
+[workspace]
+members = ["crates/*", "tree-sitter-harn"]
+exclude = ["crates/excluded"]
+
+[workspace.package]
+version = "1.2.3"
+
+[workspace.dependencies]
+member-a = { version = "1.2", path = "crates/member-a" }
+""",
+  )
+  write(
+    root,
+    "crates/member-a/Cargo.toml",
+    """
+[package]
+name = "member-a"
+version = "1.2.3"
+
+[dependencies]
+tree-sitter-harn = { path = "../../tree-sitter-harn", version = "1.2" }
+foreign = { path = "../foreign", version = "9" }
+""",
+  )
+  write(
+    root,
+    "crates/excluded/Cargo.toml",
+    """
+[package]
+name = "excluded"
+version = "1.2.3"
+""",
+  )
+  write(
+    root,
+    "tree-sitter-harn/Cargo.toml",
+    """
+[package]
+name = "tree-sitter-harn"
+version = "1.2.3"
+""",
+  )
+  write(
+    root,
+    "spec/acp-registry/harn/agent.json",
+    """
+{
+  "id": "harn",
+  "version": "1.2.3",
+  "distribution": {
+    "binary": {
+      "linux": {
+        "archive": "https://example.test/releases/download/v1.2.3/harn.tar.gz"
+      }
+    }
+  }
+}
+""",
+  )
+  write(root, "docs/src/embedding-rust.md", "tag = \"v1.0.0\"\n")
+  return nil
+}
+
+@test
+pipeline test_release_plan_preserves_members_and_excludes(task) {
+  with_temp_dir(
+    { root ->
+      workspace(root)
+      const plan = release_metadata_plan(root, "minor")
+      assert_eq(plan.current_version, "1.2.3")
+      assert_eq(plan.next_version, "1.3.0")
+      assert_eq(
+        plan.manifests,
+        ["crates/excluded/Cargo.toml", "crates/member-a/Cargo.toml", "tree-sitter-harn/Cargo.toml"],
+      )
+      assert_eq(plan.package_names, ["excluded", "member-a", "tree-sitter-harn"])
+    },
+  )
+}
+
+@test
+pipeline test_apply_normalizes_every_owned_release_surface(task) {
+  with_temp_dir(
+    { root ->
+      workspace(root)
+      apply_release_metadata(root, "1.3.0")
+      assert_eq(current_version(root), "1.3.0")
+      const root_text = harness.fs.read_text(path_join(root, "Cargo.toml"))
+      assert(root_text.contains("member-a = { version = \"=1.3.0\", path ="))
+      const member_text = harness.fs.read_text(path_join(root, "crates/member-a/Cargo.toml"))
+      assert(member_text.contains("tree-sitter-harn = { path ="))
+      assert(member_text.contains("version = \"=1.3.0\""))
+      assert(member_text.contains("foreign = { path = \"../foreign\", version = \"9\" }"))
+      const agent = json_parse(
+        harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
+      )
+      assert_eq(agent.version, "1.3.0")
+      assert(agent.distribution.binary.linux.archive.contains("/v1.3.0/"))
+      assert_eq(
+        harness.fs.read_text(path_join(root, "docs/src/embedding-rust.md")),
+        "tag = \"v1.3.0\"\n",
+      )
+    },
+  )
+}
+
+@test
+pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(task) {
+  with_temp_dir(
+    { root ->
+      write(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"bad\"\n",
+      )
+      assert_throws_contains(
+        { -> current_version(root) },
+        "workspace version is not MAJOR.MINOR.PATCH",
+      )
+    },
+  )
+  with_temp_dir(
+    { root ->
+      write(
+        root,
+        "Cargo.toml",
+        "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"1.2.3\"\n",
+      )
+      assert_throws_contains(
+        { -> workspace_package_manifests(root) },
+        "workspace.members entry matched no package manifest",
+      )
+    },
+  )
+  with_temp_dir(
+    { root ->
+      write(root, "a/Cargo.toml", "[package]\nname = \"same\"\nversion = \"1.0.0\"\n")
+      write(root, "b/Cargo.toml", "[package]\nname = \"same\"\nversion = \"1.0.0\"\n")
+      assert_throws_contains(
+        { ->
+          package_names_for_manifests(
+            [path_join(root, "a/Cargo.toml"), path_join(root, "b/Cargo.toml")],
+          )
+        },
+        "duplicate workspace package name",
+      )
+    },
+  )
+}
+
+@test
+pipeline test_versionless_unpublished_dependency_is_preserved(task) {
+  assert_eq(
+    rewrite_local_dependency_versions(
+      "member-a = { path = \"crates/member-a\" }\n",
+      ["member-a"],
+      "1.2.4",
+    ),
+    "member-a = { path = \"crates/member-a\" }\n",
+  )
+}
+
+@test
+pipeline test_changelog_top_validation(task) {
+  verify_changelog_top("# Changelog\n\n## v1.2.4\n\n- notes\n", "1.2.4")
+  assert_throws_contains(
+    { -> verify_changelog_top("# Changelog\n\n## v1.2.3\n", "1.2.4") },
+    "top heading is v1.2.3",
+  )
+  assert_throws_contains(
+    { -> verify_changelog_top("# Changelog\n", "1.2.4") },
+    "has no '## vX.Y.Z' heading",
+  )
+}

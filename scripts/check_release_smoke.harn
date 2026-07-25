@@ -1,0 +1,165 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+pub fn release_smoke_run_covers(run, tag: string) -> bool {
+  if to_string(run?.conclusion ?? "") != "success" {
+    return false
+  }
+  const title = to_string(run?.displayTitle ?? "")
+  const branch = to_string(run?.headBranch ?? "")
+  const event = to_string(run?.event ?? "")
+  if title.contains("(" + tag + ")") || branch == tag {
+    return true
+  }
+  if branch == "release/" + tag || branch.starts_with("release-attempt/" + tag + "/") {
+    return ["workflow_run", "workflow_dispatch", "release"].contains(event)
+  }
+  return false
+}
+
+pub fn release_smoke_log_covers(log: string, tag: string) -> bool {
+  for marker in [
+    "All release assets for " + tag + " are available",
+    "TAG: " + tag,
+    "ref: " + tag,
+    "refs/tags/" + tag,
+  ] {
+    if log.contains(marker) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn select_release_smoke_run(runs: list, tag: string, log_loader) {
+  let matches = runs.filter({ run -> release_smoke_run_covers(run, tag) })
+  if matches.count == 0 {
+    const candidates = runs.filter(
+      { run ->
+        to_string(run?.conclusion ?? "") == "success"
+          && [
+          "workflow_run",
+          "workflow_dispatch",
+          "release",
+        ]
+          .contains(to_string(run?.event ?? ""))
+      },
+    )
+      .sort_by({ run -> to_string(run?.createdAt ?? "") })
+      .reverse()
+      .take(40)
+    for run in candidates {
+      const log = log_loader(to_int(run?.databaseId) ?? 0)
+      if log != nil && release_smoke_log_covers(to_string(log), tag) {
+        matches = matches + [run]
+        break
+      }
+    }
+  }
+  if matches.count == 0 {
+    return nil
+  }
+  return matches.sort_by({ run -> to_string(run?.createdAt ?? "") }).reverse()[0]
+}
+
+fn gh(args: list<string>) -> string {
+  const result = harness.process.spawn_captured({cmd: "gh", args: args})
+  if result.exit_code != 0 {
+    throw "gh " + args.join(" ") + " failed: " + result.stderr.trim()
+  }
+  return result.stdout
+}
+
+fn missing_message(tag: string) -> string {
+  return "error: no successful Release smoke run found for "
+    + tag
+    + "\n  checklist: a published release is not declarable-ready until\n"
+    + "  Release smoke has passed against its artifacts (harn#5034).\n"
+    + "  Dispatch manually with:\n"
+    + "    gh workflow run 'Release smoke' -f tag="
+    + tag
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_release_smoke",
+      args: [{kind: "positional", name: "tag", parse: "string", required: true}],
+    },
+  )
+}
+
+fn main(harness: Harness) -> int {
+  if help_requested(argv) {
+    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vX.Y.Z")
+    return 2
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vX.Y.Z")
+    return 2
+  }
+  const tag = to_string(unwrap(parsed_result).options?.tag ?? "")
+  if regex_captures(r"^v\d+\.\d+\.\d+$", tag).count != 1 {
+    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vX.Y.Z")
+    return 2
+  }
+  try {
+    let repo = to_string(harness.env.get("GITHUB_REPOSITORY") ?? "")
+    if repo == "" {
+      const repo_doc = json_parse(gh(["repo", "view", "--json", "nameWithOwner"]))
+      repo = to_string(repo_doc?.nameWithOwner ?? "")
+      if repo == "" {
+        throw "gh repo view returned no nameWithOwner"
+      }
+    }
+    const runs = json_parse(
+      gh(
+        [
+          "run",
+          "list",
+          "--repo",
+          repo,
+          "--workflow",
+          "Release smoke",
+          "--limit",
+          "100",
+          "--json",
+          "databaseId,conclusion,event,displayTitle,headBranch,url,createdAt",
+        ],
+      ),
+    )
+    if type_of(runs) != "list" {
+      throw "gh run list returned a non-list payload"
+    }
+    const best = select_release_smoke_run(
+      runs,
+      tag,
+      { run_id ->
+        const result = harness.process.spawn_captured(
+          {cmd: "gh", args: ["run", "view", to_string(run_id), "--repo", repo, "--log"]},
+        )
+        return result.exit_code == 0 ? result.stdout : nil
+      },
+    )
+    if best == nil {
+      harness.stdio.eprintln(missing_message(tag))
+      return 1
+    }
+    harness.stdio.println(
+      "check_release_smoke: "
+        + tag
+        + " covered by run "
+        + to_string(best.databaseId)
+        + " ("
+        + to_string(best.event)
+        + ", "
+        + to_string(best.createdAt)
+        + ")",
+    )
+    harness.stdio.println(to_string(best?.url ?? ""))
+    return 0
+  } catch (e) {
+    harness.stdio.eprintln("error: " + to_string(e))
+    return 1
+  }
+}

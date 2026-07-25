@@ -1,0 +1,141 @@
+import { read_yaml } from "std/fs"
+
+@complexity(allow)
+fn release_smoke_workflow_errors(workflow, text: string) -> list<string> {
+  let errors: list<string> = []
+  const triggers = workflow?.on ?? {}
+  const push = triggers?.push
+  if push != nil && push?.tags != nil {
+    errors = errors + ["release-smoke must not run directly on tag pushes"]
+  }
+  const workflow_run = triggers?.workflow_run
+  if workflow_run == nil {
+    errors = errors + ["release-smoke must be triggered by build-release-binaries completion"]
+  } else {
+    if workflow_run?.workflows != ["Build release binaries"] {
+      errors = errors + ["workflow_run must listen only to Build release binaries"]
+    }
+    if workflow_run?.types != ["completed"] {
+      errors = errors + ["workflow_run must trigger only on completed runs"]
+    }
+  }
+  if !to_string(workflow?.get("run-name") ?? "").contains("github.event.workflow_run.head_branch") {
+    errors = errors + ["run-name must surface the triggering release ref for the Actions run list"]
+  }
+  for forbidden in [
+    "HARN_RELEASE_ASSET_WAIT_SECONDS",
+    "sleep 30",
+    "while true",
+    "Timed out waiting for release assets",
+  ] {
+    if text.contains(forbidden) {
+      errors = errors
+        + ["release-smoke must not hold a runner with polling loop token: " + forbidden]
+    }
+  }
+  const resolve = workflow?.jobs?.resolve ?? {}
+  const resolve_if = to_string(resolve?.if ?? "")
+  for required in [
+    "github.event.workflow_run.conclusion == 'success'",
+    "startsWith(github.event.workflow_run.head_branch, 'v')",
+    "startsWith(github.event.workflow_run.head_branch, 'release/v')",
+    "startsWith(github.event.workflow_run.head_branch, 'release-attempt/v')",
+  ] {
+    if !resolve_if.contains(required) {
+      errors = errors + ["resolve job must gate workflow_run releases with: " + required]
+    }
+  }
+  if resolve_if.contains("github.event.workflow_run.event == 'push'") {
+    errors = errors
+      + [
+      "resolve job must not require workflow_run.event == 'push' (recovery / release-attempt dispatches that finalize must also smoke)",
+    ]
+  }
+  const timeout = resolve?.get("timeout-minutes")
+  if type_of(timeout) != "int" || timeout > 10 {
+    errors = errors
+      + [
+      "resolve job must stay short because it validates assets once instead of waiting",
+    ]
+  }
+  const resolve_step = (resolve?.steps ?? []).find({ step -> step?.id == "resolve" })
+  if resolve_step == nil {
+    errors = errors + ["resolve job must keep an id=resolve step"]
+  } else {
+    const run = to_string(resolve_step?.run ?? "")
+    if !run.contains("Create GitHub release") {
+      errors = errors
+        + [
+        "resolve step must require the triggering run's Create GitHub release job to succeed",
+      ]
+    }
+    if !run.contains("extract_release_tag") {
+      errors = errors
+        + [
+        "resolve step must extract vX.Y.Z from tag and release-branch head_branch shapes",
+      ]
+    }
+    if regex_captures("gh release view", run).count != 1 {
+      errors = errors + ["resolve step must inspect release assets exactly once"]
+    }
+    if !run.contains("Missing release assets") {
+      errors = errors + ["resolve step must fail fast when finalized assets are absent"]
+    }
+    for asset in ["SHA256SUMS", "release-assets.json"] {
+      if !run.contains(asset) {
+        errors = errors + ["resolve step must require finalized release asset " + asset]
+      }
+    }
+  }
+  const smoke = workflow?.jobs?.smoke ?? {}
+  const smoke_if = to_string(smoke?.if ?? "")
+  if !smoke_if.contains("needs.resolve.outputs.mode == 'artifact'") {
+    errors = errors + ["smoke matrix must run only for artifact or source modes (not noop)"]
+  }
+  if !smoke_if.contains("needs.resolve.outputs.mode == 'source'") {
+    errors = errors + ["smoke matrix must still allow scheduled/manual source-health mode"]
+  }
+  const checkout = (smoke?.steps ?? []).find(
+    { step -> to_string(step?.uses ?? "").starts_with("actions/checkout@") },
+  )
+  if checkout == nil {
+    errors = errors + ["smoke matrix must check out repository scripts"]
+  } else if to_string(checkout?.with?.ref ?? "")
+    != "$" + "{{ needs.resolve.outputs.tag || github.sha }}" {
+    errors = errors
+      + [
+      "artifact smoke must check out the release tag, while source smoke keeps github.sha",
+    ]
+  }
+  const run_smoke = (smoke?.steps ?? []).find({ step -> step?.name == "Run release smoke" })
+  if run_smoke == nil {
+    errors = errors + ["smoke matrix must keep an attributable Run release smoke step"]
+  } else {
+    const run = to_string(run_smoke?.run ?? "")
+    for required in [
+      "\"$HARN_BINARY\" run --no-sandbox scripts/release_smoke.harn",
+      "--candidate \"$HARN_BINARY\"",
+      "--step-timeout-ms 120000",
+    ] {
+      if !run.contains(required) {
+        errors = errors
+          + ["release smoke must invoke the exact candidate through Harn: " + required]
+      }
+    }
+    for forbidden in ["release_smoke.sh", "cargo build", "sleep ", "while ", "kill ", "taskkill"] {
+      if run.contains(forbidden) {
+        errors = errors
+          + ["post-bootstrap release smoke must not own shell lifecycle: " + forbidden]
+      }
+    }
+  }
+  return errors
+}
+
+@test
+pipeline test_release_smoke_waits_for_finalized_build_output(task) {
+  const path = path_join(source_dir(), "../../.github/workflows/release-smoke.yml")
+  const text = harness.fs.read_text(path)
+  const workflow = read_yaml(path)
+  assert_eq(release_smoke_workflow_errors(workflow, text), [])
+}

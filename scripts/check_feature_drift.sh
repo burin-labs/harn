@@ -90,53 +90,7 @@ git worktree add --detach "$baseline_tree" "$baseline_ref" >/dev/null 2>&1
 echo "==> comparing feature sets"
 echo
 
-BASELINE_SNAPSHOT="$work_dir/baseline.txt" \
-CURRENT_SNAPSHOT="$work_dir/current.txt" \
-BASELINE_REF="$baseline_ref" \
-python3 - <<'PY'
-import os
-import re
-
-
-def load(path):
-    resolved = {}
-    with open(path) as handle:
-        for line in handle:
-            match = re.match(r"^(\S+) v(\S+)(?: (.*))?$", line.rstrip("\n"))
-            if not match:
-                continue
-            name, version, features = match.group(1), match.group(2), match.group(3) or ""
-            resolved.setdefault((name, version), set()).update(
-                part for part in features.split(",") if part
-            )
-    return resolved
-
-
-baseline = load(os.environ["BASELINE_SNAPSHOT"])
-current = load(os.environ["CURRENT_SNAPSHOT"])
-
-drifted = []
-for key in sorted(baseline.keys() & current.keys()):
-    added = current[key] - baseline[key]
-    removed = baseline[key] - current[key]
-    if added or removed:
-        drifted.append((key, added, removed))
-
-if not drifted:
-    print(f"No feature drift against {os.environ['BASELINE_REF']}.")
-    print("(Version changes are not reported here — see `git diff Cargo.lock`.)")
-else:
-    print(f"Feature drift against {os.environ['BASELINE_REF']}")
-    print("These packages did NOT change version, but their enabled features did:")
-    print()
-    for (name, version), added, removed in drifted:
-        print(f"  {name} v{version}")
-        if added:
-            print(f"    + {', '.join(sorted(added))}")
-        if removed:
-            print(f"    - {', '.join(sorted(removed))}")
-    print()
-    print(f"{len(drifted)} package(s) drifted. This is advisory, not a failure:")
-    print("feature drift is often intended. Confirm each one is understood, and")
-    print("that none of them changes behavior the test suite does not cover.")
-PY
+"$repo_root/scripts/harn_bin.sh" run "$repo_root/scripts/feature_drift.harn" -- \
+  --baseline "$work_dir/baseline.txt" \
+  --current "$work_dir/current.txt" \
+  --baseline-ref "$baseline_ref"

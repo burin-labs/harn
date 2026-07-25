@@ -31,6 +31,13 @@ fn write_file(root: string, rel: string) -> nil {
   return nil
 }
 
+fn write_text(root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(dirname(path) ?? root)
+  harness.fs.write_text(path, text)
+  return nil
+}
+
 @test
 pipeline test_current_repo_python_boundary_is_explicit(task) {
   const report = check_python_boundary()
@@ -76,7 +83,7 @@ pipeline test_temp_tree_reports_only_unclassified_python(task) {
       const report = check_python_boundary(root)
       assert_eq(report.violation_count, 4)
       assert_eq(
-        report.violations.map({ row -> row.path }).to_list().sorted(),
+        report.violations.map({ row -> row.path }).to_list().sort(),
         [
           "conformance/helpers/http_proxy_server.py",
           "conformance/helpers/new_mock_server.py",
@@ -86,4 +93,44 @@ pipeline test_temp_tree_reports_only_unclassified_python(task) {
       )
     },
   )
+}
+
+@test
+pipeline test_embedded_python_audit_rejects_control_plane_and_classifies_venv(task) {
+  with_temp_dir(
+    { root ->
+      write_text(root, "scripts/bad.sh", "#!/bin/sh\npython3 - <<'PY'\nPY\n")
+      write_text(root, "Makefile", "bad:\n\tpython -c 'print(1)'\n")
+      write_text(root, ".github/workflows/bad.yml", "steps:\n  - run: python3 -c 'print(1)'\n")
+      write_text(
+        root,
+        "scripts/generate_sdk_clients.sh",
+        "#!/bin/sh\n    python3 -m venv \"$venv\"\n",
+      )
+      write_text(
+        root,
+        "scripts/fake_guard.sh",
+        "cat > \"$fake_bin/python3\" <<'SH'\necho \"python3 must not run\" >&2\nSH\n",
+      )
+      const embedded = embedded_python_findings(root)
+      assert_eq(
+        embedded.violations.map({ row -> row.path }).to_list().sort(),
+        [".github/workflows/bad.yml", "Makefile", "scripts/bad.sh"],
+      )
+      assert_eq(embedded.allowed.count, 1)
+      assert_eq(embedded.allowed[0]?.owner, "Python SDK generator")
+      assert_eq(embedded.allowed[0]?.reason.contains("Python SDK artifact"), true)
+    },
+  )
+}
+
+@test
+pipeline test_python_invocation_pattern_ignores_mentions_but_catches_shell_commands(task) {
+  assert_eq(line_invokes_python("echo \"python3 must not run\""), false)
+  assert_eq(line_invokes_python("cat > \"$fake_bin/python3\" <<'SH'"), false)
+  assert_eq(line_invokes_python("python3 -c 'print(1)'"), true)
+  assert_eq(line_invokes_python("value | python -"), true)
+  assert_eq(line_invokes_python("run && python3.12 tool.py"), true)
+  assert_eq(line_invokes_python("if ! env MODE=x python3 tool.py; then"), true)
+  assert_eq(line_invokes_python("\t@python3 tool.py"), true)
 }

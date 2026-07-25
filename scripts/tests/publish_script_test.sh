@@ -16,6 +16,14 @@ printf 'arg=%s\n' "$@" >> "$FAKE_HARN_RECORD"
 SH
 chmod +x "$fake_harn"
 
+fake_release_metadata="$tmp_root/release-metadata-harn"
+cat > "$fake_release_metadata" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "0.10.39"
+SH
+chmod +x "$fake_release_metadata"
+
 entry_record="$tmp_root/entry-record.txt"
 (
   cd "$repo_root"
@@ -59,6 +67,7 @@ HARN_RELEASE_ROOT="$release_root" \
   HARN_PUBLISH_SCRIPT="$release_tools/publish.sh" \
   HARN_BIN="$fake_harn" \
   HARN_BIN_NO_BUILD=1 \
+  HARN_RELEASE_METADATA_BIN="$fake_release_metadata" \
   FAKE_HARN_RECORD="$release_gate_record" \
   "$repo_root/scripts/release_gate.sh" publish --dry-run > "$tmp_root/release-gate-output.txt"
 
