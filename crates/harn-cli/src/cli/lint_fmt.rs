@@ -20,8 +20,23 @@ pub(crate) struct PathTargetsArgs {
     /// See `docs/src/cli-json-contract.md` for the envelope shape.
     #[arg(long)]
     pub json: bool,
+    /// Only enforce diagnostics that overlap lines added since this Git revision.
+    #[arg(
+        long = "changed-from",
+        value_name = "REV",
+        conflicts_with_all = ["fix", "targets"]
+    )]
+    pub changed_from: Option<String>,
+    /// Compare added lines through this Git revision. Defaults to HEAD.
+    #[arg(
+        long = "changed-to",
+        value_name = "REV",
+        requires = "changed_from",
+        conflicts_with = "targets"
+    )]
+    pub changed_to: Option<String>,
     /// One or more .harn files or directories.
-    #[arg(required = true)]
+    #[arg(required_unless_present = "changed_from")]
     pub targets: Vec<String>,
 }
 

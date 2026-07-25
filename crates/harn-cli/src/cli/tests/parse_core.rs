@@ -18,6 +18,37 @@ fn test_parses_public_api_type_lint_override() {
 }
 
 #[test]
+fn lint_parses_changed_revision_mode_without_targets() {
+    let cli = Cli::parse_from([
+        "harn",
+        "lint",
+        "--strict",
+        "--json",
+        "--changed-from",
+        "origin/main",
+        "--changed-to",
+        "HEAD",
+    ]);
+    let Command::Lint(args) = cli.command.unwrap() else {
+        panic!("expected lint command");
+    };
+    assert_eq!(args.changed_from.as_deref(), Some("origin/main"));
+    assert_eq!(args.changed_to.as_deref(), Some("HEAD"));
+    assert!(args.targets.is_empty());
+    assert!(args.strict);
+    assert!(args.json);
+}
+
+#[test]
+fn lint_changed_revision_mode_rejects_fix_and_explicit_targets() {
+    assert!(Cli::try_parse_from(["harn", "lint", "--changed-from", "HEAD^", "--fix",]).is_err());
+    assert!(
+        Cli::try_parse_from(["harn", "lint", "--changed-from", "HEAD^", "main.harn",]).is_err()
+    );
+    assert!(Cli::try_parse_from(["harn", "lint", "--changed-to", "HEAD", "main.harn"]).is_err());
+}
+
+#[test]
 fn check_parses_independent_fixture_mode() {
     let cli = Cli::parse_from(["harn", "check", "--json", "--independent", "fixtures"]);
     let Command::Check(args) = cli.command.unwrap() else {

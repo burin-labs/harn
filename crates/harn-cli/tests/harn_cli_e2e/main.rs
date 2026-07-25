@@ -51,6 +51,7 @@ mod host_lease_cli;
 #[cfg(unix)]
 mod host_lease_crash_cli;
 mod json_schemas_cli;
+mod lint_changed_cli;
 mod lint_fix_exit_cli;
 mod lint_replay_version_upgrade_json_cli;
 mod lint_strict_cli;

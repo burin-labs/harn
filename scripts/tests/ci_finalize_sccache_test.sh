@@ -10,6 +10,8 @@ record="$tmp_root/record"
 summary="$tmp_root/summary"
 shared_record="$tmp_root/shared-record"
 shared_summary="$tmp_root/shared-summary"
+tier_record="$tmp_root/tier-record"
+tier_summary="$tmp_root/tier-summary"
 
 cat > "$tmp_root/bin/sccache" <<'SH'
 #!/usr/bin/env bash
@@ -47,6 +49,18 @@ PATH="$tmp_root/bin:$PATH" \
 grep -Fxq -- '--show-stats' "$shared_record"
 if grep -Fxq -- '--stop-server' "$shared_record"; then
   echo "shared sccache daemon must outlive a runner job" >&2
+  exit 1
+fi
+
+PATH="$tmp_root/bin:$PATH" \
+  SCCACHE_TEST_RECORD="$tier_record" \
+  GITHUB_STEP_SUMMARY="$tier_summary" \
+  HARN_RUNNER_TIER=self-hosted \
+  "$repo_root/scripts/ci/finalize_sccache.sh" >/dev/null
+
+grep -Fxq -- '--show-stats' "$tier_record"
+if grep -Fxq -- '--stop-server' "$tier_record"; then
+  echo "self-hosted runner must not stop its host-owned sccache daemon" >&2
   exit 1
 fi
 
