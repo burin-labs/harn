@@ -3,10 +3,15 @@ use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
     eval_source_for_code, execute_explain_cost, execute_run,
     execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
-    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header,
-    CapabilityProfileConfig, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
-    StdoutPassthroughGuard,
+    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
+    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
+// Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
+// a forked child), so an unconditional import is dead on Windows and trips
+// `-D warnings`. Mirrors the local `use super::CapabilityProfileArg;` already
+// inside one of those tests.
+#[cfg(unix)]
+use super::CapabilityProfileConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
