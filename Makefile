@@ -794,10 +794,14 @@ check-grammar-keywords:
 gen-grammar-fitness:
 	@$(HARN_CMD) run scripts/sync_grammar_fitness_receipt.harn
 
+# This generated-artifact guard only verifies that the committed receipt still
+# matches its inputs. The semantic parser-agreement corpus is a normal
+# harn-hostlib test and is already covered by `make test` / the CI behavior
+# suite; compiling it again here would make the script-only audit lane rebuild
+# a second Cargo graph.
 check-grammar-fitness:
 	@echo "=== Checking grammar artifact and corpus fitness receipt ==="
 	@$(HARN_CMD) run scripts/sync_grammar_fitness_receipt.harn -- --check
-	@cargo test -p harn-hostlib --test harn_hostlib parser_agreement_corpus
 
 # CI guard: fail if the tree-sitter grammar cannot parse the positive Harn
 # source sweep (conformance/tests, examples, tests/bridge). This is the same
