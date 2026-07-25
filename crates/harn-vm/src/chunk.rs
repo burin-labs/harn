@@ -310,10 +310,15 @@ pub struct Chunk {
     pub code: Vec<u8>,
     /// Constant pool.
     pub constants: Vec<Constant>,
-    /// Compile-time constant-pool side index. Derived from [`Chunk::constants`]
-    /// and intentionally omitted from [`CachedChunk`]; bytecode-cache loads
-    /// rebuild it from the serialized constant vector.
-    constant_index: HashMap<ConstantKey, u16>,
+    /// Compile-time constant-pool dedup index, derived from
+    /// [`Chunk::constants`] and intentionally omitted from [`CachedChunk`].
+    ///
+    /// Only [`Chunk::add_constant`] reads it, so only a chunk the compiler is
+    /// still emitting into needs it. Building it eagerly on a cache load would
+    /// hash every constant of every chunk of every module on a path that never
+    /// appends another constant. `None` means "not built yet"; it is derived on
+    /// the first append.
+    constant_index: Option<HashMap<ConstantKey, u16>>,
     /// Source line numbers for each instruction (for error reporting).
     pub lines: Vec<u32>,
     /// Source column numbers for each instruction (for error reporting).
@@ -719,7 +724,7 @@ impl Chunk {
             cache_id: next_chunk_cache_id(),
             code: Vec::new(),
             constants: Vec::new(),
-            constant_index: HashMap::new(),
+            constant_index: Some(HashMap::new()),
             lines: Vec::new(),
             columns: Vec::new(),
             source_file: None,
@@ -745,12 +750,19 @@ impl Chunk {
 
     /// Add a constant and return its index.
     pub fn add_constant(&mut self, constant: Constant) -> u16 {
+        if self.constant_index.is_none() {
+            self.constant_index = Some(build_constant_index(&self.constants));
+        }
+        let index_map = self
+            .constant_index
+            .as_mut()
+            .expect("constant side index was just derived");
         debug_assert!(
-            self.constant_index.len() <= self.constants.len(),
+            index_map.len() <= self.constants.len(),
             "constant side index cannot outgrow the constant pool"
         );
         let key = ConstantKey::from(&constant);
-        if let Some(index) = self.constant_index.get(&key) {
+        if let Some(index) = index_map.get(&key) {
             debug_assert!(
                 self.constants
                     .get(*index as usize)
@@ -761,8 +773,8 @@ impl Chunk {
         }
         let idx = self.constants.len();
         let idx = u16::try_from(idx).expect("constant pool exceeded u16 operand space");
+        index_map.insert(key, idx);
         self.constants.push(constant);
-        self.constant_index.insert(key, idx);
         idx
     }
 
@@ -1180,12 +1192,12 @@ impl Chunk {
                 inline_cache_index[op_offset] = slot as u32;
             }
         }
-        let constant_index = build_constant_index(&constants);
         Self {
             cache_id: next_chunk_cache_id(),
             code,
             constants,
-            constant_index,
+            // Derived on demand: a cache-loaded chunk is executed, not appended to.
+            constant_index: None,
             lines,
             columns,
             source_file,
