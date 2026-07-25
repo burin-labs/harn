@@ -371,6 +371,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/release-tools"
           cp scripts/release_ship.sh "$RUNNER_TEMP/release-tools/release_ship.sh"
           cp scripts/release_gate.sh "$RUNNER_TEMP/release-tools/release_gate.sh"
+          cp scripts/release_metadata.harn "$RUNNER_TEMP/release-tools/release_metadata.harn"
           cp scripts/publish.sh "$RUNNER_TEMP/release-tools/publish.sh"
           cp scripts/publish.harn "$RUNNER_TEMP/release-tools/publish.harn"
           cp scripts/publish_plan.harn "$RUNNER_TEMP/release-tools/publish_plan.harn"

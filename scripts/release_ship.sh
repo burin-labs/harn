@@ -218,33 +218,21 @@ require_clean_tree() {
 }
 
 current_version() {
-  python3 - <<'PY'
-from pathlib import Path
-import re
-text = Path("Cargo.toml").read_text()
-m = re.search(r'^version = "([^"]+)"', text, re.M)
-print(m.group(1) if m else "")
-PY
+  release_metadata current
+}
+
+release_metadata() {
+  if [[ -n "${HARN_RELEASE_METADATA_BIN:-}" ]]; then
+    "$HARN_RELEASE_METADATA_BIN" run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+  elif [[ -n "${HARN_BIN:-}" ]]; then
+    "$HARN_BIN" run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+  else
+    "$SCRIPT_DIR/harn_bin.sh" run "$SCRIPT_DIR/release_metadata.harn" -- "$@" --root "$ROOT_DIR"
+  fi
 }
 
 workspace_package_manifests() {
-  python3 - <<'PY'
-from pathlib import Path
-import tomllib
-
-workspace = tomllib.loads(Path("Cargo.toml").read_text()).get("workspace", {})
-manifests = set()
-for key in ("members", "exclude"):
-    for entry in workspace.get(key, []):
-        paths = list(Path().glob(entry)) if any(ch in entry for ch in "*?[") else [Path(entry)]
-        for path in paths:
-            manifest = path if path.name == "Cargo.toml" else path / "Cargo.toml"
-            if manifest.exists():
-                manifests.add(manifest)
-
-for manifest in sorted(manifests):
-    print(manifest.as_posix())
-PY
+  release_metadata manifests
 }
 
 stage_version_bump_manifests() {
@@ -258,25 +246,7 @@ stage_version_bump_manifests() {
 
 next_version() {
   local bump="$1"
-  python3 - "$bump" <<'PY'
-from pathlib import Path
-import re, sys
-bump = sys.argv[1]
-text = Path("Cargo.toml").read_text()
-m = re.search(r'^version = "([^"]+)"', text, re.M)
-if not m:
-    raise SystemExit("missing workspace version")
-major, minor, patch = map(int, m.group(1).split("."))
-if bump == "major":
-    major, minor, patch = major + 1, 0, 0
-elif bump == "minor":
-    minor, patch = minor + 1, 0
-elif bump == "patch":
-    patch += 1
-else:
-    raise SystemExit(f"unsupported bump: {bump}")
-print(f"{major}.{minor}.{patch}")
-PY
+  release_metadata next --bump "$bump"
 }
 
 export_warmed_harn_bin() {
@@ -409,42 +379,7 @@ require_release_harness_prepare() {
 # The human is expected to have authored "## vX.Y.Z" before running prepare.
 require_changelog_top_matches() {
   local expected="$1"
-  python3 - "$expected" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-expected = sys.argv[1]
-path = Path("CHANGELOG.md")
-text = path.read_text()
-lines = text.splitlines(keepends=True)
-top_index = None
-for i, line in enumerate(lines):
-    if re.match(r"^## ", line):
-        top_index = i
-        break
-
-if top_index is None:
-    sys.stderr.write("error: CHANGELOG.md has no '## vX.Y.Z' heading\n")
-    sys.exit(1)
-
-top = lines[top_index].rstrip("\n").rstrip("\r")
-m = re.match(r"^## v(\d+\.\d+\.\d+)\s*$", top)
-if m:
-    if m.group(1) == expected:
-        sys.exit(0)
-    sys.stderr.write(
-        f"error: CHANGELOG.md top heading is v{m.group(1)} but --bump implies v{expected}\n"
-        f"hint: edit CHANGELOG.md to add '## v{expected}' as the new top entry, then re-run\n"
-    )
-    sys.exit(1)
-
-sys.stderr.write(
-    f"error: CHANGELOG.md top heading '{top}' is not '## v{expected}'\n"
-    f"hint: edit CHANGELOG.md to add '## v{expected}' as the new top entry, then re-run\n"
-)
-sys.exit(1)
-PY
+  release_metadata verify-changelog --version "$expected"
 }
 
 # Fail loud if unfolded `changelog.d/<id>.<category>.md` fragments remain.

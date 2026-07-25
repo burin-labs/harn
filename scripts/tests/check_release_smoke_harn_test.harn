@@ -1,0 +1,74 @@
+import {
+  release_smoke_log_covers,
+  release_smoke_run_covers,
+  select_release_smoke_run,
+} from "../check_release_smoke.harn"
+
+const RUNS = [
+  {
+    databaseId: 111,
+    conclusion: "skipped",
+    event: "workflow_run",
+    displayTitle: "Release smoke (main)",
+    headBranch: "main",
+    url: "https://example.test/111",
+    createdAt: "2026-07-17T23:00:00Z",
+  },
+  {
+    databaseId: 222,
+    conclusion: "success",
+    event: "workflow_run",
+    displayTitle: "Release smoke (v0.10.23)",
+    headBranch: "main",
+    url: "https://example.test/222",
+    createdAt: "2026-07-17T23:45:00Z",
+  },
+  {
+    databaseId: 333,
+    conclusion: "success",
+    event: "workflow_run",
+    displayTitle: "Release smoke",
+    headBranch: "main",
+    url: "https://example.test/333",
+    createdAt: "2026-07-20T04:54:00Z",
+  },
+]
+
+@test
+pipeline test_release_smoke_direct_and_release_branch_coverage(task) {
+  assert_eq(release_smoke_run_covers(RUNS[1], "v0.10.23"), true)
+  assert_eq(
+    release_smoke_run_covers(
+      (RUNS[1] ?? {})
+        + {
+        displayTitle: "Release smoke",
+        headBranch: "release-attempt/v0.10.23/retry",
+        event: "workflow_dispatch",
+      },
+      "v0.10.23",
+    ),
+    true,
+  )
+  assert_eq(release_smoke_run_covers(RUNS[0], "v0.10.23"), false)
+}
+
+@test
+pipeline test_release_smoke_log_fallback_is_bounded_and_newest_first(task) {
+  let visited: list<int> = []
+  const selected = select_release_smoke_run(
+    RUNS,
+    "v0.10.29",
+    { run_id ->
+      visited = visited + [run_id]
+      return run_id == 333 ? "All release assets for v0.10.29 are available" : ""
+    },
+  )
+  assert_eq(selected.databaseId, 333)
+  assert_eq(visited, [333])
+  assert_eq(release_smoke_log_covers("refs/tags/v1.2.3", "v1.2.3"), true)
+}
+
+@test
+pipeline test_release_smoke_missing_evidence_fails_closed(task) {
+  assert_eq(select_release_smoke_run(RUNS, "v9.9.9", { _ -> return "" }), nil)
+}

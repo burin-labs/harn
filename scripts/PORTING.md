@@ -35,7 +35,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_changelog_no_retroactive_edits.harn` | `.github/workflows/ci.yml` + pre-push hook | Published-version CHANGELOG guard; bypasses require env/trailer review signal. |
 | `check_rust_prompt_prose.harn` | `scripts/check_no_rust_prompt_prose.sh` + pre-commit hook | Rust prompt-prose ratchet with stable allowlist/digest contract. |
 | `check_generated_registry.harn` | `make check-generated-registry` + pre-push hook | Registry/Makefile/workflow generated-artifact guard. |
-| `check_python_boundary.harn` | `make check-python-boundary` + audit gate | Ratchets Python usage to explicit bootstrap/platform/generated/fixture reasons. |
+| `check_python_boundary.harn` | `make check-python-boundary` + audit gate | Ratchets Python files and embedded shell/Makefile/workflow commands to explicit owned foreign-runtime/bootstrap reasons. |
 | `affected-crates.harn` | `make test-affected` + `ci.yml` Rust lanes | Canonical PR fast-feedback crate selector. The CI bootstrap path mirrors it in `scripts/ci/affected_crate_args.sh` so package selection can happen before compiling the Harn CLI. |
 | `nextest_filters_from_paths.harn` | `scripts/nextest_filters_from_paths.sh` + flake-detection workflow | Maps touched Rust paths to nextest binary/package filters while preserving integration-test-binary semantics. The shell file is only a workflow-compatible launcher. |
 | `bench_cli_cold_start.harn` | `scripts/bench_cli_cold_start.sh` + `cli-cold-start-budget.yml` | Cold-start benchmark controller; isolates measured Harn subprocesses with `env -i` so controller runtime state cannot leak into the timed child. |
@@ -56,9 +56,10 @@ or subprocess-fixture reason and must be allowlisted in
 
 ## Temporary Harn cutover debt
 
-There is no active repo-owned Python cutover debt. New Python requires a
-concrete foreign-toolchain, generated-binding, external-spec, or subprocess
-fixture reason and must be allowlisted in `check_python_boundary.harn`.
+There is no active repo-owned Python cutover debt. New Python files or embedded
+Python commands require a concrete foreign-toolchain, generated-binding,
+external-spec, or bootstrap reason and must be allowlisted with an owner and
+reason in `check_python_boundary.harn`.
 
 ## Out of scope — stays in its current language
 

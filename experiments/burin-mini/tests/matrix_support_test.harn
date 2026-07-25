@@ -1,0 +1,38 @@
+import {
+  first_model_id,
+  report_run_path,
+  split_matrix_words,
+  together_model_ids,
+} from "../matrix_support.harn"
+
+@test
+pipeline test_small_json_and_word_helpers(task) {
+  assert_eq(report_run_path({run_path: "/tmp/run.json"}), "/tmp/run.json")
+  assert_eq(report_run_path([]), "")
+  assert_eq(split_matrix_words(" off,auto\nhigh "), ["off", "auto", "high"])
+  assert_eq(first_model_id({data: [{id: "model-a"}, {id: "model-b"}]}), "model-a")
+  assert_eq(first_model_id({data: []}), "")
+}
+
+@test
+pipeline test_together_models_filter_price_and_order(task) {
+  const payload = {
+    data: [
+      {uuid: "endpoint-gemma", id: "gemma-model", pricing: {input: "1.0", output: "1.5"}},
+      {
+        uuid: "endpoint-qwen",
+        id: "qwen3-coder-next",
+        pricing: {input_per_mtok: 2, output_per_mtok: 2},
+      },
+      {uuid: "endpoint-z", id: "z-qwen3-coder", pricing: {input: 1, output: 1}},
+      {uuid: "endpoint-a", id: "a-qwen3-coder", pricing: {input: 1, output: 1}},
+      {uuid: "endpoint-expensive", id: "deepseek-expensive", pricing: {input: 3, output: 1}},
+      {uuid: "not-endpoint", id: "qwen-ignored", pricing: {input: 0, output: 0}},
+    ],
+  }
+  assert_eq(
+    together_model_ids(payload, 4),
+    ["qwen3-coder-next", "a-qwen3-coder", "z-qwen3-coder", "gemma-model"],
+  )
+  assert_eq(together_model_ids({data: "bad"}, 2), [])
+}

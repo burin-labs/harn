@@ -6,6 +6,67 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
 
+fake_release_metadata="$tmp_root/release-metadata-harn"
+cat > "$fake_release_metadata" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == "run" ]]
+shift 2
+[[ "${1:-}" == "--" ]]
+shift
+command="${1:-}"
+shift
+root=""
+version=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --root)
+      root="$2"
+      shift 2
+      ;;
+    --version)
+      version="$2"
+      shift 2
+      ;;
+    --bump)
+      [[ "$2" == "patch" ]]
+      shift 2
+      ;;
+    *)
+      exit 2
+      ;;
+  esac
+done
+current="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)"
+case "$command" in
+  current)
+    echo "$current"
+    ;;
+  next)
+    [[ "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]
+    echo "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+    ;;
+  apply)
+    tmp_manifest="$root/Cargo.toml.tmp"
+    awk -v version="$version" '
+      !updated && /^version = "/ {
+        print "version = \"" version "\""
+        updated = 1
+        next
+      }
+      { print }
+      END { if (!updated) exit 1 }
+    ' "$root/Cargo.toml" > "$tmp_manifest"
+    mv "$tmp_manifest" "$root/Cargo.toml"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+SH
+chmod +x "$fake_release_metadata"
+export HARN_RELEASE_METADATA_BIN="$fake_release_metadata"
+
 release_root="$tmp_root/release-root"
 mkdir -p "$release_root"
 cat > "$release_root/Cargo.toml" <<'EOF'
@@ -25,6 +86,7 @@ release_tools="$tmp_root/release-tools"
 mkdir -p "$release_tools"
 cp "$repo_root/scripts/release_ship.sh" "$release_tools/release_ship.sh"
 cp "$repo_root/scripts/release_gate.sh" "$release_tools/release_gate.sh"
+cp "$repo_root/scripts/release_metadata.harn" "$release_tools/release_metadata.harn"
 cp "$repo_root/scripts/publish.sh" "$release_tools/publish.sh"
 cp "$repo_root/scripts/harn_bin.sh" "$release_tools/harn_bin.sh"
 cp -R "$repo_root/scripts/lib" "$release_tools/lib"
@@ -686,6 +748,7 @@ git -C "$audit_root" reset --hard --quiet HEAD
 PATH="$fake_tools:$PATH" \
   HARN_RELEASE_ROOT="$audit_root" \
   HARN_BIN="$fake_audit_harn" \
+  HARN_RELEASE_METADATA_BIN="$fake_release_metadata" \
   HARN_PUBLISH_SCRIPT="$fake_publish" \
   TMPDIR="$tmp_root" \
   FAKE_AUDIT_RECORD="$audit_record" \
@@ -736,6 +799,7 @@ git -C "$audit_root" reset --hard --quiet HEAD
 if PATH="$fake_tools:$PATH" \
   HARN_RELEASE_ROOT="$audit_root" \
   HARN_BIN="$fake_audit_harn" \
+  HARN_RELEASE_METADATA_BIN="$fake_release_metadata" \
   HARN_PUBLISH_SCRIPT="$fake_publish" \
   TMPDIR="$tmp_root" \
   FAKE_AUDIT_RECORD="$audit_record" \

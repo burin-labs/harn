@@ -1,0 +1,132 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+pub type FeatureSnapshotRow = {name: string, version: string, features: list<string>}
+
+pub type FeatureDrift = {name: string, version: string, added: list<string>, removed: list<string>}
+
+fn row_key(name: string, version: string) -> string {
+  return name + "\t" + version
+}
+
+pub fn parse_feature_snapshot(text: string) -> list<FeatureSnapshotRow> {
+  let by_key = {}
+  for line in text.lines() {
+    const matched = regex_captures(r"^(\S+) v(\S+)(?: (.*))?$", line.trim())
+    if matched.count == 0 {
+      continue
+    }
+    const name = matched[0].groups[0]
+    const version = matched[0].groups[1]
+    const raw_features = matched[0].groups[2] ?? ""
+    let features: list<string> = []
+    for feature in to_string(raw_features).split(",") {
+      const value = feature.trim()
+      if value != "" {
+        features = features + [value]
+      }
+    }
+    const key = row_key(name, version)
+    const previous = by_key[key]?.features ?? []
+    by_key[key] = {name: name, version: version, features: (previous + features).unique().sort()}
+  }
+  return by_key.values().to_list().sort_by({ row -> row_key(row.name, row.version) })
+}
+
+pub fn feature_drift(
+  baseline: list<FeatureSnapshotRow>,
+  current: list<FeatureSnapshotRow>,
+) -> list<FeatureDrift> {
+  let baseline_by_key = {}
+  let current_by_key = {}
+  for row in baseline {
+    baseline_by_key[row_key(row.name, row.version)] = row
+  }
+  for row in current {
+    current_by_key[row_key(row.name, row.version)] = row
+  }
+  let drift: list<FeatureDrift> = []
+  for key in baseline_by_key.keys().sort() {
+    const before = baseline_by_key[key]
+    const after = current_by_key[key]
+    if after == nil {
+      continue
+    }
+    const added = after.features.filter({ feature -> !before.features.contains(feature) }).sort()
+    const removed = before.features.filter({ feature -> !after.features.contains(feature) }).sort()
+    if added.count > 0 || removed.count > 0 {
+      drift = drift
+        + [{name: before.name, version: before.version, added: added, removed: removed}]
+    }
+  }
+  return drift
+}
+
+pub fn render_feature_drift(drift: list<FeatureDrift>, baseline_ref: string) -> string {
+  if drift.count == 0 {
+    return "No feature drift against "
+      + baseline_ref
+      + ".\n(Version changes are not reported here — see `git diff Cargo.lock`.)"
+  }
+  let lines = [
+    "Feature drift against " + baseline_ref,
+    "These packages did NOT change version, but their enabled features did:",
+    "",
+  ]
+  for row in drift {
+    lines = lines + ["  " + row.name + " v" + row.version]
+    if row.added.count > 0 {
+      lines = lines + ["    + " + row.added.join(", ")]
+    }
+    if row.removed.count > 0 {
+      lines = lines + ["    - " + row.removed.join(", ")]
+    }
+  }
+  return (lines
+    + [
+    "",
+    to_string(drift.count) + " package(s) drifted. This is advisory, not a failure:",
+    "feature drift is often intended. Confirm each one is understood, and",
+    "that none of them changes behavior the test suite does not cover.",
+  ])
+    .join("\n")
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "feature_drift",
+      args: [
+        {kind: "flag", name: "baseline", long: "--baseline", parse: "string", required: true},
+        {kind: "flag", name: "current", long: "--current", parse: "string", required: true},
+        {
+          kind: "flag",
+          name: "baseline_ref",
+          long: "--baseline-ref",
+          parse: "string",
+          required: true,
+        },
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) -> int {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/feature_drift.harn -- --baseline PATH --current PATH --baseline-ref REF",
+    )
+    return 0
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    return 2
+  }
+  const options = unwrap(parsed_result).options
+  const baseline = parse_feature_snapshot(harness.fs.read_text(to_string(options.baseline)))
+  const current = parse_feature_snapshot(harness.fs.read_text(to_string(options.current)))
+  harness.stdio.println(
+    render_feature_drift(feature_drift(baseline, current), to_string(options.baseline_ref)),
+  )
+  return 0
+}

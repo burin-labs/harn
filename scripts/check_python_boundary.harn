@@ -41,6 +41,19 @@ const PYTHON_ALLOWLIST = [
   },
 ]
 
+const EMBEDDED_PYTHON_ALLOWLIST = [
+  {
+    path: "scripts/generate_sdk_clients.sh",
+    pattern: r"^\s*python3\s+-m\s+venv(?:\s|$)",
+    category: "foreign-runtime-bootstrap",
+    owner: "Python SDK generator",
+    reason:
+      "Creates the isolated Python environment required to generate and validate the Python SDK artifact.",
+  },
+]
+
+const EMBEDDED_TEXT_SUFFIXES = [".sh", ".mk", ".yml", ".yaml"]
+
 fn repo_root() -> string {
   return path_normalize(path_join(source_dir(), ".."))
 }
@@ -101,7 +114,133 @@ pub fn python_files(root: string = "") -> list<string> {
     }
     out = out + [rel]
   }
-  return out.sorted()
+  return out.sort()
+}
+
+pub fn line_invokes_python(line: string) -> bool {
+  return regex_captures(
+    r"(^|[|;&(:])\s*@?(?:(?:if|then|elif|while|until|do|!|env|exec|command|time)\s+)*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*python(?:3(?:\.\d+)?)?(?:\s|$)",
+    line,
+  ).count
+    > 0
+}
+
+pub fn embedded_python_rule_for(path: string, line: string) -> dict {
+  for rule in EMBEDDED_PYTHON_ALLOWLIST {
+    if path == rule.path && regex_captures(rule.pattern, line).count > 0 {
+      return rule + {allowed: true}
+    }
+  }
+  return {
+    allowed: false,
+    category: "forbidden",
+    owner: "unclassified",
+    reason:
+      "Embedded Python control-plane commands must move to a typed Harn or owning tool boundary.",
+  }
+}
+
+fn is_embedded_text_path(path: string) -> bool {
+  const normalized = replace(path, "\\", "/")
+  if normalized == "Makefile" || normalized.ends_with("/Makefile") {
+    return true
+  }
+  for suffix in EMBEDDED_TEXT_SUFFIXES {
+    if normalized.ends_with(suffix) {
+      return true
+    }
+  }
+  return false
+}
+
+fn git_embedded_text_files(root: string) -> list<string>? {
+  const top_level = harness.process.spawn_captured(
+    {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+  )
+  if top_level.exit_code != 0
+    || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
+    return nil
+  }
+  const listed = harness.process.spawn_captured({cmd: "git", args: ["-C", root, "ls-files"]})
+  if listed.exit_code != 0 {
+    return nil
+  }
+  return listed.stdout.lines().map({ path -> path.trim() }).filter(
+    { path ->
+      path != ""
+        && is_embedded_text_path(path)
+        && harness.fs.exists(path_join(root, path))
+    },
+  )
+    .to_list()
+    .sort()
+}
+
+pub fn embedded_python_text_files(root: string) -> list<string> {
+  const tracked = git_embedded_text_files(root)
+  if tracked != nil {
+    return tracked
+  }
+  let files: list<string> = []
+  for pattern in [
+    "**/*.sh",
+    "**/*.mk",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/Makefile",
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+  ] {
+    for path in find_files(root, pattern) {
+      const rel = rel_path(path, root)
+      if !is_skipped(rel) {
+        files = files + [rel]
+      }
+    }
+  }
+  const workflow_root = path_join(root, ".github/workflows")
+  if harness.fs.exists(workflow_root) {
+    for name in harness.fs.list_dir(workflow_root) {
+      const path = path_join(workflow_root, name)
+      if harness.fs.exists(path) && (name.ends_with(".yml") || name.ends_with(".yaml")) {
+        files = files + [rel_path(path, root)]
+      }
+    }
+  }
+  const root_makefile = path_join(root, "Makefile")
+  if harness.fs.exists(root_makefile) {
+    files = files + ["Makefile"]
+  }
+  return files.unique().sort()
+}
+
+pub fn embedded_python_findings(root: string) -> dict {
+  let allowed = []
+  let violations = []
+  for path in embedded_python_text_files(root) {
+    const text = harness.fs.read_text(path_join(root, path))
+    let line_no = 0
+    for line in text.lines() {
+      line_no = line_no + 1
+      if !line_invokes_python(line) {
+        continue
+      }
+      const rule = embedded_python_rule_for(path, line)
+      const row = {
+        path: path,
+        line: line_no,
+        category: rule.category,
+        owner: rule.owner,
+        reason: rule.reason,
+      }
+      if rule.allowed ?? false {
+        allowed = allowed + [row]
+      } else {
+        violations = violations + [row]
+      }
+    }
+  }
+  return {allowed: allowed, violations: violations}
 }
 
 pub fn check_python_boundary(root: string = "") -> dict {
@@ -114,12 +253,19 @@ pub fn check_python_boundary(root: string = "") -> dict {
   let violations = []
   for path in python_files(resolved_root) {
     const rule = python_boundary_rule_for(path)
-    const row = {path: path, category: rule.category, reason: rule.reason}
+    const row = {kind: "python-file", path: path, category: rule.category, reason: rule.reason}
     if rule.allowed ?? false {
       allowed = allowed + [row]
     } else {
       violations = violations + [row]
     }
+  }
+  const embedded = embedded_python_findings(resolved_root)
+  for row in embedded.allowed {
+    allowed = allowed + [row + {kind: "embedded-command"}]
+  }
+  for row in embedded.violations {
+    violations = violations + [row + {kind: "embedded-command"}]
   }
   return {
     root: resolved_root,
@@ -134,16 +280,18 @@ fn render_report(report: dict) -> string {
   if report.violation_count == 0 {
     return "python boundary check passed: "
       + to_string(report.allowed_count)
-      + " classified Python file(s); no unclassified Python scripts remain."
+      + " classified Python boundary use(s); no unclassified Python files or embedded control-plane commands remain."
   }
   let lines = [
     "python boundary check failed: " + to_string(report.violation_count)
-      + " unclassified Python file(s)",
+      + " unclassified Python boundary use(s)",
     "",
-    "Port repo orchestration to Harn, delete dead Python, or add a narrow bootstrap/platform/fixture allowlist entry.",
+    "Port repo orchestration to Harn, delete dead Python, or add a narrow foreign-runtime/bootstrap allowlist entry with an owner and reason.",
   ]
   for violation in report.violations {
-    lines = lines + ["- " + to_string(violation.path) + " (" + to_string(violation.reason) + ")"]
+    const suffix = violation?.line == nil ? "" : ":" + to_string(violation.line)
+    const location = to_string(violation.path) + suffix
+    lines = lines + ["- " + location + " (" + to_string(violation.reason) + ")"]
   }
   return join(lines, "\n")
 }
