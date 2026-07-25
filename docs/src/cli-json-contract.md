@@ -99,6 +99,8 @@ versions.
 | `harn models batch status --json` | Provider batch status receipt with dry-run cached status validation and normalized `lifecycle` counts |
 | `harn models batch cancel --json` | Batch cancellation receipt with redacted cancel operations, skipped-job reasons, and normalized `lifecycle` counts |
 | `harn models batch download --json` | Provider result-file download receipt with artifact paths, hashes, and normalized `lifecycle` counts |
+| `harn models batch execute init\|advance\|inspect\|cancel --json` | Durable execution receipt with stable identities, revision/history, artifact digests, and provider-operation recovery state |
+| `harn models batch rejoin --json` | Manifest-ordered normalized result artifact plus exact consumable/quarantine counts, ids, reasons, and source identities |
 | `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, promotion evidence, launch contract, `training.contract.tool_catalog`, and `serving.serving_requirements` |
 | `harn models lora inspect --json` | PEFT adapter compatibility report, launch metadata, and `serving.serving_requirements` |
 | `harn models lora export --json` | Trainer dataset export report with contract id, tool-catalog contract, stats, and promotion evidence contract |

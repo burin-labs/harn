@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{
     ModelsBatchArgs, ModelsBatchCancelArgs, ModelsBatchCommand, ModelsBatchDownloadArgs,
-    ModelsBatchManifestArgs, ModelsBatchPlanArgs, ModelsBatchPrepareArgs, ModelsBatchStatusArgs,
-    ModelsBatchSubmitArgs,
+    ModelsBatchManifestArgs, ModelsBatchPlanArgs, ModelsBatchPrepareArgs, ModelsBatchRejoinArgs,
+    ModelsBatchStatusArgs, ModelsBatchSubmitArgs,
 };
 use crate::commands::run::RunSandboxOptions;
 use crate::dispatch;
@@ -33,6 +33,9 @@ const BATCH_SUBMISSION_ENV: &str = "HARN_MODELS_BATCH_SUBMISSION";
 const BATCH_STATUS_OUT_ENV: &str = "HARN_MODELS_BATCH_STATUS_OUT";
 const BATCH_STATUS_ENV: &str = "HARN_MODELS_BATCH_STATUS";
 const BATCH_RESULTS_OUT_DIR_ENV: &str = "HARN_MODELS_BATCH_RESULTS_OUT_DIR";
+const BATCH_DOWNLOAD_RECEIPT_ENV: &str = "HARN_MODELS_BATCH_DOWNLOAD_RECEIPT";
+const BATCH_REJOIN_OUT_DIR_ENV: &str = "HARN_MODELS_BATCH_REJOIN_OUT_DIR";
+const BATCH_EXECUTION_ENV: &str = "HARN_MODELS_BATCH_EXECUTION";
 const BATCH_MAX_DOWNLOAD_BYTES_ENV: &str = "HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES";
 const BATCH_CANCEL_RECEIPT_ENV: &str = "HARN_MODELS_BATCH_CANCEL_RECEIPT";
 const BATCH_CANCEL_OUT_ENV: &str = "HARN_MODELS_BATCH_CANCEL_OUT";
@@ -42,13 +45,17 @@ const BATCH_ID_PREFIX_ENV: &str = "HARN_MODELS_BATCH_ID_PREFIX";
 
 static DISPATCH_BATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+mod execution;
+
 pub(crate) async fn run(args: ModelsBatchArgs) {
     let exit_code = match args.command {
         ModelsBatchCommand::Cancel(args) => Box::pin(run_cancel(args)).await,
         ModelsBatchCommand::Download(args) => Box::pin(run_download(args)).await,
+        ModelsBatchCommand::Execute(args) => Box::pin(execution::run(args)).await,
         ModelsBatchCommand::Manifest(args) => Box::pin(run_manifest(args)).await,
         ModelsBatchCommand::Plan(args) => Box::pin(run_plan(args)).await,
         ModelsBatchCommand::Prepare(args) => Box::pin(run_prepare(args)).await,
+        ModelsBatchCommand::Rejoin(args) => Box::pin(run_rejoin(args)).await,
         ModelsBatchCommand::Status(args) => Box::pin(run_status(args)).await,
         ModelsBatchCommand::Submit(args) => Box::pin(run_submit(args)).await,
     };
@@ -158,6 +165,32 @@ async fn run_prepare(args: ModelsBatchPrepareArgs) -> i32 {
     run_batch_script(args.json, Some(sandbox)).await
 }
 
+async fn run_rejoin(args: ModelsBatchRejoinArgs) -> i32 {
+    let _guard = DISPATCH_BATCH_LOCK.lock().await;
+    let execution_path = absolutize_path(&args.execution);
+    let manifest_path = absolutize_path(&args.manifest);
+    let download_path = absolutize_path(&args.download);
+    let out_dir = absolutize_path(&args.out_dir);
+    let mut roots = vec![
+        parent_dir(&execution_path),
+        parent_dir(&manifest_path),
+        parent_dir(&download_path),
+    ];
+    roots.sort();
+    roots.dedup();
+    roots.retain(|root| *root != out_dir && *root != parent_dir(&out_dir));
+    let mut sandbox = RunSandboxOptions::default().with_workspace_root(parent_dir(&out_dir));
+    if !roots.is_empty() {
+        sandbox = sandbox.with_read_only_roots(roots);
+    }
+    let _mode = ScopedEnvVar::set(BATCH_MODE_ENV, "rejoin");
+    let _execution = ScopedEnvVar::set(BATCH_EXECUTION_ENV, &execution_path.to_string_lossy());
+    let _manifest = ScopedEnvVar::set(BATCH_MANIFEST_ENV, &manifest_path.to_string_lossy());
+    let _download = ScopedEnvVar::set(BATCH_DOWNLOAD_RECEIPT_ENV, &download_path.to_string_lossy());
+    let _out = ScopedEnvVar::set(BATCH_REJOIN_OUT_DIR_ENV, &out_dir.to_string_lossy());
+    run_batch_script(args.json, Some(sandbox)).await
+}
+
 async fn run_submit(args: ModelsBatchSubmitArgs) -> i32 {
     let _guard = DISPATCH_BATCH_LOCK.lock().await;
     let receipt_path = absolutize_path(&args.receipt);
@@ -225,7 +258,21 @@ async fn run_plan(args: ModelsBatchPlanArgs) -> i32 {
 }
 
 async fn run_batch_script(json: bool, sandbox: Option<RunSandboxOptions>) -> i32 {
-    let outcome = match sandbox {
+    let outcome = capture_batch_script(json, sandbox).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    outcome.exit_code
+}
+
+pub(super) async fn capture_batch_script(
+    json: bool,
+    sandbox: Option<RunSandboxOptions>,
+) -> crate::commands::run::RunOutcome {
+    match sandbox {
         Some(sandbox) => {
             dispatch::run_embedded_script_with_sandbox(
                 "models/batch_plan",
@@ -236,14 +283,7 @@ async fn run_batch_script(json: bool, sandbox: Option<RunSandboxOptions>) -> i32
             .await
         }
         None => dispatch::run_embedded_script("models/batch_plan", Vec::new(), json).await,
-    };
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
     }
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
-    outcome.exit_code
 }
 
 fn absolutize_path(path: &Path) -> PathBuf {

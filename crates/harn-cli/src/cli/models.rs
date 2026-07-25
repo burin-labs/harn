@@ -38,16 +38,105 @@ pub(crate) enum ModelsBatchCommand {
     Cancel(ModelsBatchCancelArgs),
     /// Download provider result files for completed batch jobs.
     Download(ModelsBatchDownloadArgs),
+    /// Initialize, advance, inspect, or cancel a durable batch execution.
+    Execute(ModelsBatchExecuteArgs),
     /// Write a durable provider-neutral manifest for offline batch requests.
     Manifest(ModelsBatchManifestArgs),
     /// Plan discounted/asynchronous provider batch use for model workloads.
     Plan(ModelsBatchPlanArgs),
     /// Prepare provider-native request files from a model batch manifest.
     Prepare(ModelsBatchPrepareArgs),
+    /// Normalize provider results and rejoin them to the durable execution.
+    Rejoin(ModelsBatchRejoinArgs),
     /// Poll provider state for submitted batch jobs and write a status receipt.
     Status(ModelsBatchStatusArgs),
     /// Submit prepared provider-native batch jobs and write a submission receipt.
     Submit(ModelsBatchSubmitArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchExecuteArgs {
+    #[command(subcommand)]
+    pub command: ModelsBatchExecuteCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ModelsBatchExecuteCommand {
+    /// Advance one legal transition and persist its receipt.
+    Advance(ModelsBatchExecuteAdvanceArgs),
+    /// Cancel all cancelable jobs and persist the transition.
+    Cancel(ModelsBatchExecuteCancelArgs),
+    /// Initialize a durable execution from a request ledger.
+    Init(ModelsBatchExecuteInitArgs),
+    /// Validate and print the current durable execution state.
+    Inspect(ModelsBatchExecuteInspectArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchExecuteAdvanceArgs {
+    /// Durable execution directory created by `execute init`.
+    #[arg(long = "execution-dir", value_name = "DIR")]
+    pub execution_dir: std::path::PathBuf,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchExecuteCancelArgs {
+    /// Durable execution directory created by `execute init`.
+    #[arg(long = "execution-dir", value_name = "DIR")]
+    pub execution_dir: std::path::PathBuf,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchExecuteInitArgs {
+    /// JSONL request ledger to execute.
+    #[arg(long, value_name = "PATH")]
+    pub requests: std::path::PathBuf,
+    /// Directory that will own all execution state, receipts, and artifacts.
+    #[arg(long = "execution-dir", value_name = "DIR")]
+    pub execution_dir: std::path::PathBuf,
+    /// Default provider for rows that omit `provider`.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Default model alias or provider-native id for rows that omit `model`.
+    #[arg(long, value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub model: Option<String>,
+    /// Offline workload class (`eval`, `judge`, `corpus`, or `generic`).
+    #[arg(long, default_value = "eval")]
+    pub workload: String,
+    /// Default tool-call convention for rows that omit `tool_format`.
+    #[arg(long = "tool-format", default_value = "auto")]
+    pub tool_format: String,
+    /// Prefix for generated custom ids when rows omit `custom_id` / `id`.
+    #[arg(long = "id-prefix", default_value = "harn-batch")]
+    pub id_prefix: String,
+    /// Require at least this published batch discount percentage.
+    #[arg(long = "min-discount-percent")]
+    pub min_discount_percent: Option<u32>,
+    /// Require provider-published completion within this many hours.
+    #[arg(long = "max-turnaround-hours")]
+    pub max_turnaround_hours: Option<u32>,
+    /// Exercise the complete lifecycle without provider network calls.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchExecuteInspectArgs {
+    /// Durable execution directory created by `execute init`.
+    #[arg(long = "execution-dir", value_name = "DIR")]
+    pub execution_dir: std::path::PathBuf,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -125,6 +214,25 @@ pub(crate) struct ModelsBatchPrepareArgs {
     #[arg(long, value_name = "PATH")]
     pub manifest: std::path::PathBuf,
     /// Directory for provider-native request files and the prepare receipt.
+    #[arg(long = "out-dir", value_name = "DIR")]
+    pub out_dir: std::path::PathBuf,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchRejoinArgs {
+    /// Durable execution receipt that owns this lifecycle.
+    #[arg(long, value_name = "PATH")]
+    pub execution: std::path::PathBuf,
+    /// Exact manifest owned by the durable execution.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: std::path::PathBuf,
+    /// Exact download receipt owned by the durable execution.
+    #[arg(long, value_name = "PATH")]
+    pub download: std::path::PathBuf,
+    /// Directory for normalized rows and the rejoin receipt.
     #[arg(long = "out-dir", value_name = "DIR")]
     pub out_dir: std::path::PathBuf,
     /// Emit structured JSON.

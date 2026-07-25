@@ -571,9 +571,19 @@ without network calls when requested, and submits supported provider jobs using
 provider API credentials. `harn models batch status` reads the submission
 receipt and polls provider lifecycle state behind the same Harn boundary.
 `harn models batch download` consumes status receipts for completed jobs and
-writes provider result files plus a durable results receipt. Provider batch
-envelopes, submission state, and poll/download/rejoin logic stay in Harn instead
-of host products.
+writes provider result files plus a durable results receipt. `harn models batch
+execute` now owns that whole sequence as a resumable,
+lock-serialized execution directory. Each advance validates the full digest
+chain and records provider create intent before a side effect; ambiguous
+acceptance is reconcile-only unless the adapter explicitly declares a
+deterministic create token. Terminal `harn models batch rejoin` normalizes
+provider result rows and quarantines incomplete, duplicate, malformed, failed,
+or hash-mismatched results before downstream consumption. The lower-level
+commands remain useful for inspecting individual lifecycle stages, while
+product integrations should use the durable execution receipt rather than
+sequencing those stages themselves.
+Provider batch envelopes, submission state, and poll/download/rejoin logic stay
+in Harn instead of host products.
 
 Current live batch adapters cover OpenAI, OpenAI-compatible Groq, Together, and
 Parasail, Gemini File API JSONL batches, Anthropic Messages, Mistral, Fireworks

@@ -40,6 +40,8 @@ logs and progress always go to stderr.
   - `harn models batch submit --dry-run --json` — validate prepared jobs and write a submission receipt.
   - `harn models batch status --dry-run --json` — validate/poll submitted jobs and write a status receipt.
   - `harn models batch download --dry-run --json` — validate/download completed result files.
+  - `harn models batch execute init|advance|inspect|cancel --json` — own a resumable, hash-bound batch lifecycle.
+  - `harn models batch rejoin --json` — normalize provider rows and emit a typed consumable/quarantine receipt.
 
 ## Files and execution
 
