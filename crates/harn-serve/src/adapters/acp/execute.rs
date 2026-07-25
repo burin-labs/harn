@@ -342,18 +342,32 @@ pub(super) async fn execute_chunk(
     // their environment through the closed allowlist + grants resolver. `None`
     // leaves the legacy inherit-the-server-env behavior untouched.
     harn_vm::stdlib::process::set_session_profile(setup.session_profile.clone());
+    // Module preparation is lazy: imports are resolved while the chunk runs, so
+    // this work lands inside `execute_ms` rather than in `vm_setup_ms`. Without
+    // this attribution a pipeline whose import tree dominates the turn is
+    // indistinguishable from one doing real work — the recorder exists in
+    // harn-vm but nothing in production had ever switched it on.
+    let module_phases = vm.enable_module_phase_timing();
     let execute_started = Instant::now();
     let result = match vm.execute_arc(std::sync::Arc::new(chunk)).await {
         Ok(_) => Ok(vm.output().to_string()),
         Err(e) => Err(PromptExecutionError::from_vm_error(&vm, &e)),
     };
     let execute_ms = execute_started.elapsed().as_millis() as u64;
+    let modules = module_phases.snapshot();
     bridge.send_log(
         "info",
-        &format!("ACP_BOOT: execute_ms={execute_ms} pipeline={pipeline_name}"),
+        &format!(
+            "ACP_BOOT: execute_ms={execute_ms} module_load_ms={} module_compile_ms={} modules_loaded={} pipeline={pipeline_name}",
+            modules.module_load_ms, modules.module_compile_ms, modules.modules_loaded,
+        ),
         Some(serde_json::json!({
             "pipeline": pipeline_name.as_str(),
             "execute_ms": execute_ms,
+            "module_load_ms": modules.module_load_ms,
+            "module_compile_ms": modules.module_compile_ms,
+            "modules_loaded": modules.modules_loaded,
+            "modules_compiled": modules.modules_compiled,
         })),
     );
     harn_vm::stdlib::process::set_session_profile(None);
