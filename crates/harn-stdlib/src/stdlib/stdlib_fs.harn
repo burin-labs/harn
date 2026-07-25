@@ -3,6 +3,7 @@ import { pretty } from "std/json"
 import {
   SchemaContract,
   SchemaContractFailure,
+  SchemaIssue,
   get_typed_result,
   schema_contract_check,
 } from "std/schema"
@@ -86,7 +87,7 @@ pub type SchemaValidationFailure = {
   format: StructuredDataFormat,
   path: string,
   detail: string,
-  issues: list<unknown>,
+  issues: list<SchemaIssue>,
 }
 
 pub type ContractValidationFailure = SchemaContractFailure \

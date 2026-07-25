@@ -1089,6 +1089,9 @@ jobs:
       # Public stdlib return-type ratchet: no new unannotated public exports
       # (HARN-STD-102) beyond the checked-in AST-derived baseline.
       - run: make check-stdlib-public-return-types
+      # Zero-baseline strict gate for the std/schema facade: strict-types and
+      # strict lint must both be clean on stdlib_schema.harn and its contracts.
+      - run: make check-schema-strict
       # Sync guards. check-generated-registry is the meta-guard
       # that keeps scripts/generated_artifacts.toml in agreement with the
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the

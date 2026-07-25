@@ -149,7 +149,6 @@
 # count   13  crates/harn-stdlib/src/stdlib/stdlib_prompt_library.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_review.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_runtime.harn
-# count   34  crates/harn-stdlib/src/stdlib/stdlib_schema.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_signal.harn
 # count    9  crates/harn-stdlib/src/stdlib/stdlib_slug.harn
 # count   25  crates/harn-stdlib/src/stdlib/stdlib_testing.harn
@@ -1253,40 +1252,6 @@ crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::process_run
 crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::process_shell
 crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::record_run_metadata
 crates/harn-stdlib/src/stdlib/stdlib_runtime.harn::runtime_pipeline_input
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::expect_typed_value
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::from_json_schema
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::from_openapi_schema
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::get_typed_errors
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::get_typed_issues
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::get_typed_report
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::get_typed_result
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::get_typed_value
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::is_type
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_all_of
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_any
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_array
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_bool
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_closed_object
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_default
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_dict
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_enum
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_field
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_float
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_int
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_json
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_list
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_literal
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_nil
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_nullable
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_object
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_omit_keys
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_openapi
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_partial_deep
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_pick_keys
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_strict_object
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_string
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_union
-crates/harn-stdlib/src/stdlib/stdlib_schema.harn::schema_validator
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::off_interrupt
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::on_interrupt
 crates/harn-stdlib/src/stdlib/stdlib_signal.harn::with_interrupt

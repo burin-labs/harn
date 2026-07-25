@@ -55,6 +55,7 @@ exempt_checks = [
   "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
   "check-stdlib-strict-types",      # strict-types boundary ratchet over the stdlib, not a mirror
   "check-stdlib-public-return-types", # public stdlib return-type ratchet, not a mirror
+  "check-schema-strict",             # zero-baseline strict gate for the std/schema facade, not a mirror
   "check-release-audit-contract",  # validates typed release proof mapping against CI, not a mirror
   "check-generated-registry",       # the auditor itself
   "check-drift",                    # fast preflight aggregator (derives members from [preflight.dispatch])
@@ -439,6 +440,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-site-snippets" = "binary"
 "check-stdlib-strict-types" = "binary"
 "check-stdlib-public-return-types" = "binary"
+"check-schema-strict" = "binary"
 # --- excluded: build/test, external toolchain, cross-repo, runtime fixtures, or perf soak ---
 "check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
 "check-run-view-fixtures" = "excluded"        # cargo test -p harn-vm (build + test)
