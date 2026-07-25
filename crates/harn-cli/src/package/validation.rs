@@ -1338,20 +1338,35 @@ pub(crate) async fn build_manifest_provider_schemas(
     Ok(schemas)
 }
 
+/// Build a catalog that exists only for the caller: the builtin schemas plus
+/// this manifest's, with nothing installed anywhere. Validation reads it and
+/// drops it.
+pub(crate) fn manifest_provider_catalog(
+    schemas: Vec<Arc<dyn harn_vm::ProviderSchema>>,
+) -> Result<harn_vm::ProviderCatalog, PackageError> {
+    harn_vm::ProviderCatalog::with_defaults_and(schemas)
+        .map_err(|error| PackageError::Validation(error.to_string()))
+}
+
+/// Contribute this manifest's providers to the process-wide catalog, leaving
+/// whatever another package already contributed in place.
+pub(crate) fn register_manifest_provider_schemas(
+    schemas: Vec<Arc<dyn harn_vm::ProviderSchema>>,
+) -> Result<(), PackageError> {
+    harn_vm::register_provider_schemas(schemas)
+        .map_err(|error| PackageError::Validation(error.to_string()))
+}
+
 pub(crate) async fn build_manifest_provider_catalog(
     extensions: &RuntimeExtensions,
 ) -> Result<harn_vm::ProviderCatalog, PackageError> {
-    let schemas = build_manifest_provider_schemas(extensions).await?;
-    harn_vm::ProviderCatalog::with_defaults_and(schemas)
-        .map_err(|error| PackageError::Validation(error.to_string()))
+    manifest_provider_catalog(build_manifest_provider_schemas(extensions).await?)
 }
 
 pub(crate) async fn install_manifest_provider_schemas(
     extensions: &RuntimeExtensions,
 ) -> Result<(), PackageError> {
-    let catalog = build_manifest_provider_catalog(extensions).await?;
-    harn_vm::install_provider_catalog(catalog);
-    Ok(())
+    register_manifest_provider_schemas(build_manifest_provider_schemas(extensions).await?)
 }
 
 pub(crate) fn is_trigger_event_type(ty: &harn_parser::TypeExpr) -> bool {

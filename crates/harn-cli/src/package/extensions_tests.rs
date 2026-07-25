@@ -1153,6 +1153,55 @@ handler = "worker://echo-queue"
     );
 }
 
+/// The reported failure was an orchestrator harness losing its `echo`
+/// connector because a persona command loaded a package in the same process a
+/// moment later. Loading a package contributes providers; it does not declare
+/// the whole catalog.
+#[tokio::test(flavor = "current_thread")]
+async fn loading_a_second_package_keeps_the_first_packages_providers() {
+    let _provider_schema_guard = lock_manifest_provider_schemas().await;
+    harn_vm::reset_provider_catalog();
+
+    let mut tmpdirs = Vec::new();
+    for provider in ["echo-first", "echo-second"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let harn_file = write_trigger_project(
+            tmp.path(),
+            &format!(
+                r#"
+[[providers]]
+id = "{provider}"
+connector = {{ harn = "./echo_connector.harn" }}
+"#
+            ),
+            None,
+        );
+        fs::write(
+            tmp.path().join("echo_connector.harn"),
+            test_harn_connector_source(provider),
+        )
+        .unwrap();
+        let schemas = build_manifest_provider_schemas(&load_runtime_extensions(&harn_file))
+            .await
+            .expect("manifest provider schemas build");
+        register_manifest_provider_schemas(schemas).expect("providers register");
+        tmpdirs.push(tmp);
+    }
+
+    for provider in ["echo-first", "echo-second"] {
+        assert!(
+            harn_vm::provider_metadata(provider).is_some(),
+            "provider '{provider}' was erased by another package's load"
+        );
+    }
+    assert!(
+        harn_vm::provider_metadata("github").is_some(),
+        "builtin providers survive package loads"
+    );
+
+    harn_vm::reset_provider_catalog();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn build_manifest_provider_catalog_keeps_dynamic_providers_scoped() {
     let _provider_schema_guard = lock_manifest_provider_schemas().await;

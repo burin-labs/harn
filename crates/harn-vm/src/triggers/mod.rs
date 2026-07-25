@@ -22,10 +22,9 @@ pub use dispatcher::{
     DispatcherDrainReport, DispatcherStatsSnapshot, RetryPolicy, TriggerRetryConfig,
 };
 pub use event::{
-    install_provider_catalog, provider_metadata, redact_headers, register_provider_schema,
-    registered_provider_metadata, registered_provider_schema_names, reset_provider_catalog,
-    reset_provider_catalog_with, A2aPushPayload, ChannelEventPayload, CronEventPayload,
-    ExtensionProviderPayload, GenericWebhookPayload, GitForgePullRequestEvent,
+    provider_metadata, redact_headers, register_provider_schemas, registered_provider_metadata,
+    registered_provider_schema_names, reset_provider_catalog, A2aPushPayload, ChannelEventPayload,
+    CronEventPayload, ExtensionProviderPayload, GenericWebhookPayload, GitForgePullRequestEvent,
     GitForgePullRequestRef, GitForgeRepositoryRef, GitForgeWritebackTarget, GitHubEventPayload,
     HeaderRedactionPolicy, LinearEventPayload, NotionEventPayload, NotionPolledChangeEvent,
     ProviderCatalog, ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod,
