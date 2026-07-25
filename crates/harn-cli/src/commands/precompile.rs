@@ -17,6 +17,7 @@
 //! run` that doesn't actually exist in the current codebase; the
 //! preconditions for porting each are filed as #2348 (`harn bench` →
 //! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
+use harn_vm::bytecode_cache::{CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
 use std::path::{Path, PathBuf};
 
 use harn_parser::DiagnosticSeverity;
@@ -189,23 +190,14 @@ fn precompile_one(
     let artifacts = compile_artifacts(source_path, &source, &program)?;
     let entry_key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
 
-    let entry_dest = output_path(
-        source_path,
-        source_root,
-        out_root,
-        harn_vm::bytecode_cache::CACHE_EXTENSION,
-    )?;
+    let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
     harn_vm::bytecode_cache::store_at(&entry_dest, &entry_key, &artifacts.entry_chunk)
         .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
 
     if let Some(module_artifact) = &artifacts.module_artifact {
-        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(&source);
-        let module_dest = output_path(
-            source_path,
-            source_root,
-            out_root,
-            harn_vm::bytecode_cache::MODULE_CACHE_EXTENSION,
-        )?;
+        let module_source = harn_vm::module_source::ModuleSource::from_text(source.as_str());
+        let module_key = harn_vm::bytecode_cache::CacheKey::from_module_source(&module_source);
+        let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
         harn_vm::bytecode_cache::store_module_at(&module_dest, &module_key, module_artifact)
             .map_err(|e| format!("write {}: {e}", module_dest.display()))?;
     }

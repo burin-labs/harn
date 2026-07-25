@@ -87,6 +87,7 @@ pub mod mcp_sampling;
 pub mod mcp_server;
 pub mod metadata;
 pub mod module_artifact;
+pub mod module_source;
 pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;

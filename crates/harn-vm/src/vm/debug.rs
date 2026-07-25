@@ -348,7 +348,7 @@ impl Vm {
 
         let key = std::path::PathBuf::from(path);
         if let Some(source) = self.source_cache.get(&key) {
-            return Some(source.clone());
+            return Some(source.to_string());
         }
 
         if let Some(module) = path
