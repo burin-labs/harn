@@ -49,7 +49,7 @@ derive_target_dir() {
 derive_storage_root() {
   if [[ -n "${HARN_DEV_SETUP_STORAGE_ROOT:-}" ]]; then
     printf '%s\n' "${HARN_DEV_SETUP_STORAGE_ROOT}"
-  elif [[ "${SETUP_PROFILE}" == "rust" ]]; then
+  elif [[ "${SETUP_PROFILE}" == "rust" || "${SETUP_PROFILE}" == "bootstrap" ]]; then
     printf '%s/harn/dev-setup\n' "${XDG_CACHE_HOME:-$HOME/.cache}"
   else
     printf '%s\n' "${TMPDIR:-/tmp}"
@@ -211,6 +211,42 @@ write_build_config() {
   mv "${tmp_path}" "${config_path}"
 }
 
+write_sccache_env_config() {
+  local enabled="$1"
+  local config_path=".cargo/config.toml"
+  local tmp_path
+
+  [[ -f "${config_path}" ]] || return 0
+  tmp_path="$(mktemp)"
+
+  # Drop only our generated value. A user-owned SCCACHE_BASEDIRS remains
+  # authoritative and suppresses insertion below.
+  awk -v managed_marker="${MANAGED_CARGO_CONFIG_MARKER}" '
+    $0 ~ /^[[:space:]]*SCCACHE_BASEDIRS[[:space:]]*=/ &&
+      $0 ~ "#[[:space:]]*" managed_marker "[[:space:]]*$" { next }
+    { print }
+  ' "${config_path}" > "${tmp_path}"
+  mv "${tmp_path}" "${config_path}"
+
+  if [[ "${enabled}" != "1" ]] \
+    || grep -Eq '^[[:space:]]*SCCACHE_BASEDIRS[[:space:]]*=' "${config_path}"; then
+    return 0
+  fi
+
+  local managed_line
+  managed_line='SCCACHE_BASEDIRS = { value = ".", relative = true, force = true } # harn-dev-setup-managed'
+  if grep -Eq '^\[env\][[:space:]]*$' "${config_path}"; then
+    tmp_path="$(mktemp)"
+    awk -v managed_line="${managed_line}" '
+      { print }
+      /^\[env\][[:space:]]*$/ { print managed_line }
+    ' "${config_path}" > "${tmp_path}"
+    mv "${tmp_path}" "${config_path}"
+  else
+    printf '\n[env]\n%s\n' "${managed_line}" >> "${config_path}"
+  fi
+}
+
 hash_setup_inputs() {
   local name="$1"
   shift
@@ -234,7 +270,7 @@ hash_setup_inputs() {
 
 cargo_setup_fingerprint() {
   {
-    printf 'cargo-check:v1\n'
+    printf 'cargo-check:v2-locked\n'
     find . \
       \( -name target -o -name '.target-*' -o -name .codex -o -name .claude -o -name node_modules -o -name .git \) -prune \
       -o \( -name Cargo.toml -o -name Cargo.lock -o -name build.rs \) -type f -print0 \
@@ -285,10 +321,10 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 case "${SETUP_PROFILE}" in
-  full | rust)
+  full | rust | bootstrap)
     ;;
   *)
-    echo "error: HARN_DEV_SETUP_PROFILE must be 'full' or 'rust' (got '${SETUP_PROFILE}')" >&2
+    echo "error: HARN_DEV_SETUP_PROFILE must be 'full', 'rust', or 'bootstrap' (got '${SETUP_PROFILE}')" >&2
     exit 1
     ;;
 esac
@@ -315,6 +351,11 @@ if command -v sccache >/dev/null 2>&1; then
 fi
 
 write_build_config "${rustc_wrapper}" "${target_dir}" "${build_dir}"
+if [[ -n "${rustc_wrapper}" ]]; then
+  write_sccache_env_config 1
+else
+  write_sccache_env_config 0
+fi
 if [[ -n "${rustc_wrapper}" ]]; then
   echo "Configured sccache as rustc wrapper in .cargo/config.toml"
 fi
@@ -439,13 +480,17 @@ elif [[ "${SETUP_PROFILE}" == "full" ]]; then
   echo "warning: npm not found; skipping markdown, portal, tree-sitter, VS Code extension, and docs-site dependencies"
 fi
 
-cargo_target_root="${target_dir:-$ROOT_DIR/target}"
-cargo_fp="$(cargo_setup_fingerprint)"
-run_setup_step \
-  "Running a quick workspace build check" \
-  "${SETUP_STATE_DIR}/cargo-check-${cargo_fp}.stamp" \
-  "${cargo_target_root}/debug" \
-  -- cargo check --workspace
+if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
+  cargo_target_root="${target_dir:-$ROOT_DIR/target}"
+  cargo_fp="$(cargo_setup_fingerprint)"
+  run_setup_step \
+    "Running a quick workspace build check" \
+    "${SETUP_STATE_DIR}/cargo-check-${cargo_fp}.stamp" \
+    "${cargo_target_root}/debug" \
+    -- cargo check --locked --workspace
+else
+  echo "Bootstrap profile configured the worktree; deferring compilation to the final task lane."
+fi
 
 # macOS-only: sign any locally-built harn binaries with the team Developer
 # ID Application identity so Gatekeeper doesn't pop up "Verifying harn..."
