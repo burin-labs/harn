@@ -356,9 +356,10 @@ fn schema_report_includes_structured_issues() {
     };
     assert_eq!(errors.len(), 2);
     assert!(
-        errors
-            .iter()
-            .any(|error| error.display().contains("at age: expected value >= 0")),
+        errors.iter().any(|error| {
+            let message = error.display();
+            message.contains("at age:") && message.contains("minimum")
+        }),
         "expected path-aware age error, got: {errors:?}"
     );
 
@@ -413,6 +414,43 @@ fn union_still_applies_sibling_constraints() {
     assert!(schema_is_value(&s("allowed"), &schema).unwrap());
     assert!(schema_is_value(&VmValue::Int(7), &schema).unwrap());
     assert!(!schema_is_value(&s("blocked"), &schema).unwrap());
+}
+
+#[test]
+fn union_defaults_come_from_the_matching_same_shape_branch() {
+    let branch = |tag: &str, field: &str, default: &str| {
+        make_vm_dict(vec![
+            ("type", s("dict")),
+            (
+                "properties",
+                make_vm_dict(vec![
+                    ("kind", make_vm_dict(vec![("const", s(tag))])),
+                    (
+                        field,
+                        make_vm_dict(vec![("type", s("string")), ("default", s(default))]),
+                    ),
+                ]),
+            ),
+            ("required", make_list(vec![s("kind")])),
+        ])
+    };
+    let schema = make_vm_dict(vec![(
+        "union",
+        make_list(vec![branch("a", "alpha", "A"), branch("b", "beta", "B")]),
+    )]);
+    let result = validate_schema_value(
+        &make_vm_dict(vec![("kind", s("b"))]),
+        &schema,
+        ValidationOptions {
+            apply_defaults: true,
+            numeric_compat: false,
+        },
+    );
+
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let fields = result.value.as_dict().expect("defaulted dict");
+    assert!(matches!(fields.get("beta"), Some(VmValue::String(value)) if value.as_str() == "B"));
+    assert!(!fields.contains_key("alpha"));
 }
 
 #[test]
@@ -627,9 +665,10 @@ fn invalid_pattern_surfaces_a_clear_error() {
         other => panic!("expected errors list, got {other:?}"),
     };
     assert!(
-        errors
-            .iter()
-            .any(|err| err.display().contains("invalid regex pattern")),
+        errors.iter().any(|err| {
+            let message = err.display();
+            message.contains("invalid JSON Schema") && message.contains("regex")
+        }),
         "expected an invalid regex error, got: {errors:?}"
     );
     // Calling again hits the cached error path and must produce the same

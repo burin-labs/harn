@@ -4015,6 +4015,7 @@ dependencies = [
  "ignore",
  "imbl",
  "ipnet",
+ "jsonschema",
  "jsonwebtoken",
  "keyring-core",
  "libc",
@@ -4028,6 +4029,7 @@ dependencies = [
  "pin-project-lite",
  "postcard",
  "proptest",
+ "quick_cache",
  "rand 0.10.2",
  "rcgen",
  "regex",
@@ -6657,6 +6659,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "quick_cache"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "403c1a912fec895cafb223201e368234842acb9220aaf08ab042ae89ba5f135c"
+dependencies = [
+ "equivalent",
+ "foldhash",
+ "hashbrown 0.17.1",
+ "parking_lot",
 ]
 
 [[package]]

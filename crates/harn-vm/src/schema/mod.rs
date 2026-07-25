@@ -2,6 +2,7 @@ use crate::value::VmValue;
 
 mod api;
 mod canonicalize;
+mod jsonschema_validate;
 mod limits;
 mod result;
 mod transform;
@@ -136,7 +137,7 @@ pub(crate) fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
     })
 }
 
-fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
+pub(super) fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Nil => serde_json::Value::Null,
         VmValue::Bool(value) => serde_json::Value::Bool(*value),
@@ -152,6 +153,14 @@ fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
         }
         VmValue::Dict(items) => serde_json::Value::Object(
             items
+                .iter()
+                .map(|(key, value)| (key.to_string(), vm_value_to_serde_json(value)))
+                .collect(),
+        ),
+        VmValue::StructInstance(_) => serde_json::Value::Object(
+            value
+                .struct_fields_map()
+                .unwrap_or_default()
                 .iter()
                 .map(|(key, value)| (key.to_string(), vm_value_to_serde_json(value)))
                 .collect(),
