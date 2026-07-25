@@ -966,7 +966,8 @@ it; Harn keeps `modes` available for clients still on `session/set_mode`.
         { "value": "low",      "name": "Low",    "description": "..." },
         { "value": "medium",   "name": "Medium", "description": "..." },
         { "value": "high",     "name": "High",   "description": "..." },
-        { "value": "xhigh",    "name": "Extra High", "description": "..." }
+        { "value": "xhigh",    "name": "Extra High", "description": "..." },
+        { "value": "max",      "name": "Maximum",  "description": "..." }
       ]
     },
     {
@@ -1127,7 +1128,7 @@ route's native thinking representation before the provider call.
 ```
 
 Accepted values are `auto`, `off`, `minimal`, `low`, `medium`, `high`,
-and `xhigh`; `none`, `disabled`, `no_think`, and `nothink` are accepted
+`xhigh`, and `max`; `none`, `disabled`, `no_think`, and `nothink` are accepted
 aliases for `off`. Setting `"@inherit"` clears the pin.
 
 Lowering examples:

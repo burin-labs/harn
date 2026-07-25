@@ -319,6 +319,11 @@ fn reasoning_policy_select_options() -> Vec<serde_json::Value> {
             (
                 "xhigh",
                 "Extra High",
+                "Extended reasoning for routes that expose it.",
+            ),
+            (
+                "max",
+                "Maximum",
                 "Maximum reasoning for routes that expose it.",
             ),
         ]
@@ -612,10 +617,15 @@ mod tests {
             .iter()
             .map(|entry| entry["value"].as_str().expect("value string"))
             .collect();
-        assert!(values.contains(&"@inherit"));
-        assert!(values.contains(&"auto"));
-        assert!(values.contains(&"off"));
-        assert!(values.contains(&"xhigh"));
+        let expected: Vec<&str> =
+            std::iter::once(harn_vm::llm::reasoning_policy::INHERIT_POLICY_VALUE)
+                .chain(
+                    harn_vm::llm::reasoning_policy::policy_values()
+                        .iter()
+                        .copied(),
+                )
+                .collect();
+        assert_eq!(values, expected);
     }
 
     #[test]
