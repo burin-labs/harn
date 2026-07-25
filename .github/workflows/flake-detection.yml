@@ -91,7 +91,7 @@ jobs:
 
       - uses: ./.github/actions/rust-toolchain
         if: steps.touched.outputs.has_tests == 'true'
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - uses: ./.github/actions/sccache-install
         if: steps.touched.outputs.has_tests == 'true'
         # sccache is a build-cache optimization, not a build requirement. The
         # upstream action sometimes fails on merge_group / restricted-token
