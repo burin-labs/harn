@@ -35,8 +35,9 @@ runtime-facing source instead of separate registry and docs tables.
 ## External connector repository guidance
 
 This page is the canonical authoring guide for first-party connector package
-repositories. Repo-local `CLAUDE.md` and `AGENTS.md` files should stay as thin
-pointers plus provider-specific notes.
+repositories. Each repo keeps one `AGENTS.md` holding a pointer here plus its
+provider-specific notes, and a `CLAUDE.md` symlinked to it so the two names
+cannot drift apart.
 
 Keep repo-local guidance limited to details that differ by provider:
 
@@ -80,8 +81,8 @@ Harn setup:
         exit 1
       fi
     done
-    if [[ -f CLAUDE.md ]] && ! grep -Eq '^## Provider Notes$' CLAUDE.md; then
-      echo "CLAUDE.md must keep local content under a Provider Notes section." >&2
+    if [[ -f AGENTS.md ]] && ! grep -Eiq '^## Provider notes$' AGENTS.md; then
+      echo "AGENTS.md must keep local content under a Provider notes section." >&2
       exit 1
     fi
 ```
