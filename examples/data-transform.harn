@@ -1,3 +1,5 @@
+import { sum_by } from "std/collections"
+
 pipeline default(task) {
   const users = [
     {name: "Alice", age: 30, role: "engineer"},
@@ -12,7 +14,7 @@ pipeline default(task) {
   }
   const names = users.map({ u -> u.name })
   log("All names: ${names}")
-  const total_age = users.reduce(0, { acc, u -> acc + u.age })
+  const total_age = sum_by(users, { u -> u.age })
   log("Total age: ${total_age}")
   const has_senior = users.any({ u -> u.age > 30 })
   log("Has someone over 30: ${has_senior}")

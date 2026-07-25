@@ -116,7 +116,6 @@
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_async.harn
 # count    3  crates/harn-stdlib/src/stdlib/stdlib_cache.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_checkpoint.harn
-# count    1  crates/harn-stdlib/src/stdlib/stdlib_collections.harn
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_command.harn
 # count    6  crates/harn-stdlib/src/stdlib/stdlib_composition.harn
 # count   30  crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn
@@ -137,7 +136,7 @@
 # count    2  crates/harn-stdlib/src/stdlib/stdlib_io.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_json.harn
 # count   10  crates/harn-stdlib/src/stdlib/stdlib_lifecycle.harn
-# count    8  crates/harn-stdlib/src/stdlib/stdlib_math.harn
+# count    7  crates/harn-stdlib/src/stdlib/stdlib_math.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_memory.harn
 # count    7  crates/harn-stdlib/src/stdlib/stdlib_net_policy.harn
 # count   12  crates/harn-stdlib/src/stdlib/stdlib_observability.harn
@@ -964,7 +963,6 @@ crates/harn-stdlib/src/stdlib/stdlib_checkpoint.harn::checkpoint_stage
 crates/harn-stdlib/src/stdlib/stdlib_checkpoint.harn::checkpoint_stage_retry
 crates/harn-stdlib/src/stdlib/stdlib_checkpoint.harn::typed_output_checkpoint
 crates/harn-stdlib/src/stdlib/stdlib_checkpoint.harn::typed_output_checkpoint_from_text
-crates/harn-stdlib/src/stdlib/stdlib_collections.harn::sum_by
 crates/harn-stdlib/src/stdlib/stdlib_command.harn::command_json
 crates/harn-stdlib/src/stdlib/stdlib_command.harn::command_last_failed_step
 crates/harn-stdlib/src/stdlib/stdlib_composition.harn::composition_crystallization_input
@@ -1168,7 +1166,6 @@ crates/harn-stdlib/src/stdlib/stdlib_math.harn::lerp
 crates/harn-stdlib/src/stdlib/stdlib_math.harn::mean
 crates/harn-stdlib/src/stdlib/stdlib_math.harn::median
 crates/harn-stdlib/src/stdlib/stdlib_math.harn::percentile
-crates/harn-stdlib/src/stdlib/stdlib_math.harn::sum
 crates/harn-stdlib/src/stdlib/stdlib_math.harn::weighted_choice
 crates/harn-stdlib/src/stdlib/stdlib_memory.harn::memory_forget
 crates/harn-stdlib/src/stdlib/stdlib_memory.harn::memory_list

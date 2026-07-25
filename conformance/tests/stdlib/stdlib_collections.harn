@@ -12,9 +12,17 @@ pipeline default() {
   __io_println(picked.c)
   __io_println(contains(picked.keys(), "missing"))
   __io_println(contains(picked.keys(), "b"))
-  const rows = [{tokens: 3, ok: true}, {tokens: nil, ok: false}, {ok: true}, {tokens: 7, ok: true}]
+  const rows = [
+    {tokens: 3, ok: true},
+    nil,
+    {tokens: nil, ok: false},
+    {ok: true},
+    {tokens: 7, ok: true},
+  ]
   __io_println(sum_by(rows, { row -> row?.tokens }))
   __io_println(sum_by([], { row -> row?.tokens }))
-  __io_println(count_where(rows, { row -> row.ok }))
+  __io_println(sum_by([nil], { row -> row?.tokens }))
+  __io_println(count_where(rows, { row -> row?.ok ?? false }))
   __io_println(count_where([], { row -> row.ok }))
+  __io_println(count_where([nil, true, nil], { item -> item == nil }))
 }

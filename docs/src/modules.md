@@ -412,6 +412,8 @@ Collection utilities and store helpers:
 |---|---|
 | `filter_nil<V>(dict<string, V>)` | Remove entries where value is nil, empty string, or "null"; preserves the value type |
 | `pick_keys<V>(dict<string, V>, keys, options: PickKeysOptions = {})` | Project a dict onto a key list; pass `{drop_nil: true}` to omit nil values |
+| `sum_by<T>(items, project)` | Sum non-nil numeric projection results; returns 0 for an empty or all-nil projection |
+| `count_where<T>(items, predicate)` | Count matching items without materializing a filtered list |
 | `store_stale(key, max_age_seconds)` | Check if a store key's timestamp is stale |
 | `store_refresh(key)` | Update a store key's timestamp to now |
 
@@ -432,7 +434,7 @@ Extended math utilities:
 | `map_range(value, in_lo, in_hi, out_lo, out_hi)` | Map a value from one range to another |
 | `deg_to_rad(degrees)` | Convert degrees to radians |
 | `rad_to_deg(radians)` | Convert radians to degrees |
-| `sum(items)` | Sum a list of numbers |
+| `sum(items)` | Sum numeric list elements, skipping nil; returns 0 for an empty or all-nil list |
 | `avg(items)` | Average of a list of numbers (returns 0 for empty lists) |
 | `mean(items)` | Arithmetic mean of a list of numbers |
 | `median(items)` | Median of a non-empty numeric list |
@@ -469,6 +471,7 @@ log(clamp(150, 0, 100))         // 100
 log(lerp(0, 10, 0.5))           // 5
 log(map_range(50, 0, 100, 0, 1)) // 0.5
 log(sum([1, 2, 3, 4]))          // 10
+log(sum([1, nil, 3]))            // 4
 log(avg([10, 20, 30]))          // 20
 log(percentile([1, 2, 3, 4], 75)) // 3.25
 log(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) })) // ["bbbb", "cc"]
