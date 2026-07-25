@@ -1089,34 +1089,89 @@ fn process_command_config(
 pub(crate) fn session_closed_env(
     overlay: impl Iterator<Item = (String, String)>,
 ) -> Result<Option<Vec<(String, String)>>, VmError> {
+    let Some(mut env) = session_env()? else {
+        return Ok(None);
+    };
+    env.extend(overlay);
+    Ok(Some(env.into_iter().collect()))
+}
+
+/// The current session's whole effective environment, or `None` on the legacy
+/// no-profile path. The base [`session_closed_env`] layers a caller overlay onto.
+pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError> {
     let Some(profile) = current_session_profile() else {
         return Ok(None);
     };
-    let workspace_defaults: BTreeMap<String, String> =
-        crate::process_sandbox::active_workspace_process_env()
-            .into_iter()
-            .collect();
-    let resolved = crate::security::resolve_env(
+    let workspace_defaults = workspace_env_defaults();
+    let mut env = crate::security::resolve_env(
         &profile,
-        &|name| {
-            workspace_defaults
-                .get(name)
-                .cloned()
-                .or_else(|| std::env::var(name).ok())
-        },
+        &session_env_lookup(&workspace_defaults),
         &resolve_grant_secret,
     )
-    .map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "session grant env resolution failed: {error}"
-        ))))
-    })?;
-    let mut env: BTreeMap<String, String> = resolved;
+    .map_err(grant_env_error)?;
     for (key, value) in workspace_defaults {
         env.entry(key).or_insert(value);
     }
-    env.extend(overlay);
-    Ok(Some(env.into_iter().collect()))
+    Ok(Some(env))
+}
+
+/// The session-governed value of one environment variable.
+///
+/// This is the in-process counterpart of [`session_closed_env`], and it is the
+/// read every *credential* consumer inside harn's own process must use. Reading
+/// `std::env::var` for a provider key instead would make a hermetic session
+/// hermetic only for its children while harn itself still saw the launcher's
+/// key, and would leave a lane unable to use the very credential it was granted
+/// (harn#4992). `security::lookup_env` gives the same answer `resolve_env` puts
+/// in the map, so the in-process and subprocess views cannot drift.
+///
+/// With no profile installed this is exactly `std::env::var(name).ok()` — the
+/// legacy path, unchanged. Folding that fallback in here rather than at each
+/// call site means a caller cannot accidentally keep reading the raw
+/// environment when a profile *is* active.
+pub(crate) fn session_env_var(name: &str) -> Result<Option<String>, VmError> {
+    let Some(profile) = current_session_profile() else {
+        return Ok(std::env::var(name).ok());
+    };
+    let workspace_defaults = workspace_env_defaults();
+    let resolved = crate::security::lookup_env(
+        &profile,
+        name,
+        &session_env_lookup(&workspace_defaults),
+        &resolve_grant_secret,
+    )
+    .map_err(grant_env_error)?;
+    // Workspace defaults sit under the resolved value exactly as they do in
+    // `session_env`, so a var the sandbox preset supplies stays visible.
+    Ok(resolved.or_else(|| workspace_defaults.get(name).cloned()))
+}
+
+/// Sandbox-preset environment defaults for the active workspace. These are
+/// process-shaping facts set by the run's own policy, never launcher
+/// credentials, so they sit beneath the profile-resolved environment.
+fn workspace_env_defaults() -> BTreeMap<String, String> {
+    crate::process_sandbox::active_workspace_process_env()
+        .into_iter()
+        .collect()
+}
+
+/// The parent-environment reader both profile paths resolve against: the
+/// workspace preset first, then the real process environment.
+fn session_env_lookup(
+    workspace_defaults: &BTreeMap<String, String>,
+) -> impl Fn(&str) -> Option<String> + '_ {
+    |name: &str| {
+        workspace_defaults
+            .get(name)
+            .cloned()
+            .or_else(|| std::env::var(name).ok())
+    }
+}
+
+fn grant_env_error(error: crate::security::GrantError) -> VmError {
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        "session grant env resolution failed: {error}"
+    ))))
 }
 
 /// Resolve a `secret_store` grant pointer to its value through the crate's

@@ -43,7 +43,7 @@ pub use exfil_precision::{
     precise_exfil_gate_fires,
 };
 pub use file_provenance::{command_string, path_arguments, FileProvenanceLedger};
-pub use hermetic_env::{resolve_env, ENV_ALLOWLIST};
+pub use hermetic_env::{lookup_env, resolve_env, ENV_ALLOWLIST};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 pub use session_grants::{
     GrantError, GrantReceipt, GrantSource, GrantSourceSpec, GrantSpec, SessionGrant,

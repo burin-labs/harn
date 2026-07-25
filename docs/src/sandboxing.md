@@ -38,7 +38,10 @@ inherits the launcher's environment, so an ambient `GH_TOKEN` or provider
 key crosses in unbidden. `--capability-profile` closes that env and
 `--grant` reopens it for exactly one named, receipted credential — the
 scoped path a headless lane uses to open its PR without leaking every
-other secret. See
+other secret. The profile governs harn's own credential lookup as well as
+the environment handed to subprocesses, so a hermetic run does not fall
+back to an exported provider key for its own `llm_call`, and a lane's
+granted key is usable by that call. See
 [Capability profiles and grants](./cli-reference.md#capability-profiles-and-grants)
 for the flag grammar; like the filesystem grants, both require the
 sandbox and are rejected with `--no-sandbox`.

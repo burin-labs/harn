@@ -124,7 +124,13 @@ impl RunSandboxOptions {
     }
 }
 
-pub(crate) fn run_sandbox_options_from_args(args: &crate::cli::RunArgs) -> RunSandboxOptions {
+/// Build the run's confinement options from the shared sandbox flag block.
+///
+/// Every command that launches a run goes through here, so `harn run` and
+/// `harn time run` cannot end up enforcing different policies for the same
+/// flags — the reason [`crate::cli::SandboxArgs`] is one struct rather than a
+/// block copied per command.
+pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSandboxOptions {
     if args.no_sandbox {
         return RunSandboxOptions::disabled();
     }

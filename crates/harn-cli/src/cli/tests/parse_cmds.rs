@@ -82,9 +82,12 @@ fn test_parses_capability_profile_and_grants() {
     let Command::Run(args) = cli.command.unwrap() else {
         panic!("expected run command");
     };
-    assert_eq!(args.capability_profile, Some(CapabilityProfileArg::Lane));
     assert_eq!(
-        args.grant,
+        args.sandbox.capability_profile,
+        Some(CapabilityProfileArg::Lane)
+    );
+    assert_eq!(
+        args.sandbox.grant,
         vec![
             "gh_token=secret://gh/token,expose=GH_TOKEN".to_string(),
             "fireworks=env:FIREWORKS_API_KEY".to_string(),
@@ -151,19 +154,22 @@ fn test_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
         panic!("expected run command");
     };
     assert_eq!(
-        args.write_root,
+        args.sandbox.write_root,
         vec![PathBuf::from("../receipts"), PathBuf::from("/tmp/cache")]
     );
     assert_eq!(
-        args.read_only_root,
+        args.sandbox.read_only_root,
         vec![PathBuf::from("../shared"), PathBuf::from("/tmp/assets")]
     );
-    assert_eq!(args.sandbox_read_root, vec![PathBuf::from("/opt/sdk")]);
     assert_eq!(
-        args.sandbox_write_root,
+        args.sandbox.sandbox_read_root,
+        vec![PathBuf::from("/opt/sdk")]
+    );
+    assert_eq!(
+        args.sandbox.sandbox_write_root,
         vec![PathBuf::from("/tmp/tool-cache")]
     );
-    assert!(args.allow_process_network);
+    assert!(args.sandbox.allow_process_network);
 
     let err = Cli::try_parse_from([
         "harn",
@@ -234,16 +240,22 @@ fn test_time_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
     };
     let TimeCommand::Run(args) = args.command;
     assert_eq!(
-        args.write_root,
+        args.sandbox.write_root,
         vec![PathBuf::from("../receipts"), PathBuf::from("/tmp/cache")]
     );
-    assert_eq!(args.read_only_root, vec![PathBuf::from("../shared")]);
-    assert_eq!(args.sandbox_read_root, vec![PathBuf::from("/opt/sdk")]);
     assert_eq!(
-        args.sandbox_write_root,
+        args.sandbox.read_only_root,
+        vec![PathBuf::from("../shared")]
+    );
+    assert_eq!(
+        args.sandbox.sandbox_read_root,
+        vec![PathBuf::from("/opt/sdk")]
+    );
+    assert_eq!(
+        args.sandbox.sandbox_write_root,
         vec![PathBuf::from("/tmp/tool-cache")]
     );
-    assert!(args.allow_process_network);
+    assert!(args.sandbox.allow_process_network);
 
     let err = Cli::try_parse_from([
         "harn",
@@ -267,6 +279,52 @@ fn test_time_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
     ])
     .unwrap_err();
     assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn test_time_run_shares_the_run_confinement_surface() {
+    use crate::commands::run::CapabilityProfileArg;
+
+    // `harn run` and `harn time run` launch the same script under the same
+    // runtime, so a confinement flag accepted by one must be accepted by the
+    // other. This used to be two hand-maintained flag blocks and `harn time
+    // run` silently lacked the capability flags; both now flatten one
+    // `SandboxArgs`, and this pins that they stay in step.
+    let flags = [
+        "--capability-profile",
+        "lane",
+        "--grant",
+        "gh_token=secret://gh/token,expose=GH_TOKEN",
+        "--write-root",
+        "../receipts",
+        "--allow-process-network",
+    ];
+
+    let run = {
+        let mut argv = vec!["harn", "run"];
+        argv.extend(flags);
+        argv.push("main.harn");
+        let Command::Run(args) = Cli::parse_from(argv).command.unwrap() else {
+            panic!("expected run command");
+        };
+        args.sandbox
+    };
+    let timed = {
+        let mut argv = vec!["harn", "time", "run"];
+        argv.extend(flags);
+        argv.push("main.harn");
+        let Command::Time(args) = Cli::parse_from(argv).command.unwrap() else {
+            panic!("expected time command");
+        };
+        let TimeCommand::Run(args) = args.command;
+        args.sandbox
+    };
+
+    assert_eq!(timed.capability_profile, Some(CapabilityProfileArg::Lane));
+    assert_eq!(timed.capability_profile, run.capability_profile);
+    assert_eq!(timed.grant, run.grant);
+    assert_eq!(timed.write_root, run.write_root);
+    assert_eq!(timed.allow_process_network, run.allow_process_network);
 }
 
 #[test]

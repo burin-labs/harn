@@ -31,10 +31,23 @@
 //!
 //! "Single code path" here means the two profiles do not branch — it is not by
 //! itself a guarantee that every spawn seam calls this. That coverage is what
-//! [`crate::stdlib::process::session_closed_env`] owns: it is the one adapter
-//! from a live profile to a child environment, and any new `Command` builder
-//! must route through it or it silently reopens the boundary. `harn-vm`'s
+//! [`crate::stdlib::process::session_env`] owns: it is the one adapter from a
+//! live profile to an environment, and any new `Command` builder must route
+//! through it or it silently reopens the boundary. `harn-vm`'s
 //! `session_profile_env_leak` test pins each seam against that regression.
+//!
+//! # The same environment in-process
+//!
+//! A child process is not the only thing that reads a credential. harn's own
+//! `llm_call` resolves a provider key from the process environment, so a
+//! profile that closed the *subprocess* boundary while harn itself still read
+//! the launcher's `ANTHROPIC_API_KEY` would be hermetic in name only — and a
+//! lane that granted `FIREWORKS_API_KEY` to its children could not use that key
+//! for its own model calls. [`lookup_env`] answers the same question
+//! [`resolve_env`] answers, for one variable, so the in-process credential path
+//! and the subprocess path cannot disagree: `resolve_env` is *defined* as
+//! `lookup_env` over the admitted key set, so there is one rule, not two
+//! implementations that must be kept in step (harn#4992).
 //!
 //! # Single owner
 //!
@@ -230,6 +243,38 @@ pub fn resolve_env(
     Ok(env)
 }
 
+/// The profile-governed value of a single environment variable — the same
+/// answer [`resolve_env`] would put in the map under `name`, without building
+/// the map.
+///
+/// Grants win over the allowlist (matching `resolve_env`'s overlay order), so a
+/// lane that grants `FIREWORKS_API_KEY` sees the granted value here even though
+/// the allowlist would never admit a credential. A name that is neither granted
+/// nor allowlisted resolves to `None` — which is exactly what makes a hermetic
+/// session credential-free *in-process*, not merely for its children.
+///
+/// This exists so the in-process credential path (`llm_call`'s provider key
+/// resolution) reads the session's environment rather than the launcher's raw
+/// `std::env`. The equivalence with `resolve_env` is pinned by a test in this
+/// module rather than left to the reader.
+pub fn lookup_env(
+    profile: &SessionProfile,
+    name: &str,
+    env_lookup: &dyn Fn(&str) -> Option<String>,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<Option<String>, GrantError> {
+    // Only the grant targeting `name` is resolved: probing an unrelated
+    // variable must not reach the secret store, and one unresolvable grant must
+    // not mask an unrelated credential.
+    if let Some(value) = profile.env_exposure_for(name, resolve_secret)? {
+        return Ok(Some(value));
+    }
+    if ENV_ALLOWLIST.contains(&name) {
+        return Ok(env_lookup(name));
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +304,10 @@ mod tests {
     /// `harn-hostlib::is_sensitive_env_name` (that crate depends on this one), so
     /// the drift test carries its own copy of the suffix/prefix rules; if those
     /// rules ever diverge the allowlist is still independently pinned here.
+    ///
+    /// This is a heuristic backstop for names no catalog declares (a vendor
+    /// token a toolchain wants, say). The catalog-derived check in
+    /// `allowlist_is_single_owned_and_secret_free` is the authoritative half.
     fn looks_like_secret(name: &str) -> bool {
         let upper = name.to_ascii_uppercase();
         const SECRET_PREFIXES: &[&str] = &[
@@ -302,6 +351,23 @@ mod tests {
                 "allowlist admits a secret-shaped variable '{name}' — a credential must \
                  cross via a grant, never the allowlist"
             );
+        }
+        // Stronger than the shape heuristic, and self-maintaining: no variable
+        // any catalogued provider declares as its credential may be admitted.
+        // The catalog is the single owner of that mapping, so adding a provider
+        // with a novel key name — one the prefix list above would not
+        // recognize — cannot silently open the door.
+        for provider in crate::llm_config::provider_names() {
+            let Some(definition) = crate::llm_config::provider_config(&provider) else {
+                continue;
+            };
+            for auth_env in crate::llm_config::auth_env_names(&definition.auth_env) {
+                assert!(
+                    !ENV_ALLOWLIST.contains(&auth_env.as_str()),
+                    "allowlist admits '{auth_env}', the credential variable provider \
+                     '{provider}' declares — a credential must cross via a grant"
+                );
+            }
         }
         // Base essentials present: without these a child cannot resolve tools or
         // its home/temp, so a hermetic build would fail for a trivial reason.
@@ -392,6 +458,150 @@ mod tests {
         );
         // ...and the secret_store grant resolved through the closure.
         assert_eq!(env.get("GH_TOKEN").map(String::as_str), Some("ghp"));
+    }
+
+    #[test]
+    fn single_name_lookup_agrees_with_the_full_resolver() {
+        // `lookup_env` is the in-process credential path and `resolve_env` is
+        // the subprocess path; if they ever disagree, a hermetic session leaks
+        // in-process or a lane's own llm_call cannot see its granted key. Pin
+        // the equivalence over every interesting class of name at once: an
+        // allowlisted var, a granted var, a granted var that shadows an
+        // allowlisted one, and an unlisted/ungranted var.
+        let parent = env_from(&[
+            ("PATH", "/usr/bin"),
+            ("RUST_LOG", "from_parent"),
+            ("FIREWORKS_API_KEY", "fw-secret"),
+            ("ANTHROPIC_API_KEY", "sk-launcher"),
+            ("SOME_UNLISTED_VAR", "whatever"),
+        ]);
+        let specs = vec![
+            GrantSpec {
+                name: "fireworks".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "FIREWORKS_API_KEY".to_string(),
+                },
+                expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
+            },
+            GrantSpec {
+                name: "log".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "RUST_LOG".to_string(),
+                },
+                expose_as_env: Some("RUST_LOG".to_string()),
+            },
+            GrantSpec {
+                name: "gh".to_string(),
+                source: GrantSourceSpec::SecretStore {
+                    account: "gh".to_string(),
+                    key: "token".to_string(),
+                },
+                expose_as_env: Some("GH_TOKEN".to_string()),
+            },
+        ];
+        let resolve_secret = |account: &str, key: &str| {
+            (account == "gh" && key == "token").then(|| "ghp".to_string())
+        };
+        let probes = [
+            "PATH",
+            "RUST_LOG",
+            "FIREWORKS_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GH_TOKEN",
+            "SOME_UNLISTED_VAR",
+            "HOME",
+        ];
+
+        for profile in [
+            SessionProfile::hermetic(),
+            SessionProfile::launch(SessionProfileKind::Lane, specs, &parent).unwrap(),
+        ] {
+            let map = resolve_env(&profile, &parent, &resolve_secret).unwrap();
+            for name in probes {
+                assert_eq!(
+                    lookup_env(&profile, name, &parent, &resolve_secret).unwrap(),
+                    map.get(name).cloned(),
+                    "lookup_env disagreed with resolve_env for {name} under {:?}",
+                    profile.kind()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_single_name_lookup_touches_only_its_own_grant() {
+        // Resolving one variable must not drag every other secret_store grant
+        // through the secret store: probing an unrelated name would otherwise
+        // cost N store round-trips, and a single unresolvable grant would mask
+        // an unrelated credential that resolves perfectly well.
+        let parent = env_from(&[("FIREWORKS_API_KEY", "fw-secret")]);
+        let specs = vec![
+            GrantSpec {
+                name: "fireworks".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "FIREWORKS_API_KEY".to_string(),
+                },
+                expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
+            },
+            GrantSpec {
+                name: "broken".to_string(),
+                source: GrantSourceSpec::SecretStore {
+                    account: "vault".to_string(),
+                    key: "absent".to_string(),
+                },
+                expose_as_env: Some("OTHER_TOKEN".to_string()),
+            },
+        ];
+        let profile = SessionProfile::launch(SessionProfileKind::Lane, specs, &parent).unwrap();
+        let explode = |_: &str, _: &str| -> Option<String> {
+            panic!("an unrelated grant's secret must not be resolved")
+        };
+
+        // The env-snapshot grant resolves without consulting the store at all.
+        assert_eq!(
+            lookup_env(&profile, "FIREWORKS_API_KEY", &parent, &explode).unwrap(),
+            Some("fw-secret".to_string())
+        );
+        // ...as does an ungranted, unlisted name.
+        assert_eq!(
+            lookup_env(&profile, "UNRELATED_VAR", &parent, &explode).unwrap(),
+            None
+        );
+
+        // The broken grant still fails loudly when it is the one being asked
+        // for — the failure is scoped to it, not spread across the profile.
+        let missing = |_: &str, _: &str| -> Option<String> { None };
+        assert_eq!(
+            lookup_env(&profile, "OTHER_TOKEN", &parent, &missing),
+            Err(GrantError::MissingSecret {
+                name: "broken".to_string()
+            })
+        );
+        assert_eq!(
+            lookup_env(&profile, "FIREWORKS_API_KEY", &parent, &missing).unwrap(),
+            Some("fw-secret".to_string()),
+            "one unresolvable grant must not mask a healthy one"
+        );
+    }
+
+    #[test]
+    fn hermetic_hides_a_launcher_credential_from_the_in_process_reader() {
+        // The load-bearing property for evals: under a hermetic profile, harn's
+        // OWN credential read sees nothing, even though the launcher env has a
+        // key sitting right there.
+        let parent = env_from(&[("PATH", "/usr/bin"), ("ANTHROPIC_API_KEY", "sk-launcher")]);
+        let never_secret = |_: &str, _: &str| None;
+        let hermetic = SessionProfile::hermetic();
+        assert_eq!(
+            lookup_env(&hermetic, "ANTHROPIC_API_KEY", &parent, &never_secret).unwrap(),
+            None
+        );
+        // ...while an ordinary allowlisted var still resolves, so a hermetic run
+        // is credential-free rather than environment-free.
+        assert_eq!(
+            lookup_env(&hermetic, "PATH", &parent, &never_secret).unwrap(),
+            Some("/usr/bin".to_string())
+        );
     }
 
     #[test]
