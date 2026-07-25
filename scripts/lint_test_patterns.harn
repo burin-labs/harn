@@ -418,6 +418,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/stdlib/fs.rs",
   "crates/harn-vm/src/stdlib/hitl.rs",
   "crates/harn-vm/src/stdlib/host.rs",
+  // stdlib/host/process_exec.rs enforces the `process.exec` timeout against a
+  // real child process, which runs on host time regardless of VM virtual time.
+  // Split verbatim out of the allowlisted stdlib/host.rs; no new time reads.
+  "crates/harn-vm/src/stdlib/host/process_exec.rs",
   // stdlib/io.rs uses host monotonic time to enforce real terminal input
   // deadlines; VM virtual time cannot decide whether stdin became readable.
   "crates/harn-vm/src/stdlib/io.rs",
