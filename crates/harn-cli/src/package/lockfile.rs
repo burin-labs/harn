@@ -1062,72 +1062,48 @@ pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), PackageErro
     Ok(())
 }
 
-pub(crate) fn dependency_section_bounds(lines: &[String]) -> Option<(usize, usize)> {
-    let start = lines
-        .iter()
-        .position(|line| line.trim() == "[dependencies]")?;
-    let end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find(|(_, line)| line.trim_start().starts_with('['))
-        .map(|(index, _)| index)
-        .unwrap_or(lines.len());
-    Some((start, end))
-}
-
-pub(crate) fn render_dependency_line(
+fn dependency_manifest_item(
     alias: &str,
     dependency: &Dependency,
-) -> Result<String, PackageError> {
+) -> Result<toml_edit::Item, PackageError> {
     validate_package_alias(alias)?;
-    match dependency {
-        Dependency::Path(path) => Ok(format!(
-            "{alias} = {{ path = {} }}",
-            toml_string_literal(path)?
-        )),
-        Dependency::Table(table) => {
-            let mut fields = Vec::new();
-            if let Some(path) = table.path.as_deref() {
-                fields.push(format!("path = {}", toml_string_literal(path)?));
-            }
-            if let Some(git) = table.git.as_deref() {
-                fields.push(format!("git = {}", toml_string_literal(git)?));
-            }
-            if let Some(archive) = table.archive.as_deref() {
-                fields.push(format!("archive = {}", toml_string_literal(archive)?));
-            }
-            if let Some(branch) = table.branch.as_deref() {
-                fields.push(format!("branch = {}", toml_string_literal(branch)?));
-            } else if let Some(tag) = table.tag.as_deref() {
-                fields.push(format!("tag = {}", toml_string_literal(tag)?));
-            } else if let Some(rev) = table.rev.as_deref() {
-                fields.push(format!("rev = {}", toml_string_literal(rev)?));
-            }
-            if let Some(version) = table.version.as_deref() {
-                fields.push(format!("version = {}", toml_string_literal(version)?));
-            }
-            if let Some(package) = table.package.as_deref() {
-                fields.push(format!("package = {}", toml_string_literal(package)?));
-            }
-            if let Some(checksum) = table.checksum.as_deref() {
-                fields.push(format!("checksum = {}", toml_string_literal(checksum)?));
-            }
-            if let Some(registry) = table.registry.as_deref() {
-                fields.push(format!("registry = {}", toml_string_literal(registry)?));
-            }
-            if let Some(name) = table.registry_name.as_deref() {
-                fields.push(format!("registry_name = {}", toml_string_literal(name)?));
-            }
-            if let Some(version) = table.registry_version.as_deref() {
-                fields.push(format!(
-                    "registry_version = {}",
-                    toml_string_literal(version)?
-                ));
-            }
-            Ok(format!("{alias} = {{ {} }}", fields.join(", ")))
+    let mut fields = toml_edit::InlineTable::new();
+    let table = match dependency {
+        Dependency::Path(path) => {
+            fields.insert("path", path.clone().into());
+            return Ok(toml_edit::Item::Value(fields.into()));
+        }
+        Dependency::Table(table) => table,
+    };
+    for (name, value) in [
+        ("path", table.path.as_deref()),
+        ("git", table.git.as_deref()),
+        ("archive", table.archive.as_deref()),
+    ] {
+        if let Some(value) = value {
+            fields.insert(name, value.into());
         }
     }
+    if let Some(branch) = table.branch.as_deref() {
+        fields.insert("branch", branch.into());
+    } else if let Some(tag) = table.tag.as_deref() {
+        fields.insert("tag", tag.into());
+    } else if let Some(rev) = table.rev.as_deref() {
+        fields.insert("rev", rev.into());
+    }
+    for (name, value) in [
+        ("version", table.version.as_deref()),
+        ("package", table.package.as_deref()),
+        ("checksum", table.checksum.as_deref()),
+        ("registry", table.registry.as_deref()),
+        ("registry_name", table.registry_name.as_deref()),
+        ("registry_version", table.registry_version.as_deref()),
+    ] {
+        if let Some(value) = value {
+            fields.insert(name, value.into());
+        }
+    }
+    Ok(toml_edit::Item::Value(fields.into()))
 }
 
 pub(crate) fn ensure_manifest_exists(manifest_path: &Path) -> Result<String, PackageError> {
@@ -1148,36 +1124,31 @@ pub(crate) fn upsert_dependency_in_manifest_locked(
     dependency: &Dependency,
 ) -> Result<(), PackageError> {
     let content = ensure_manifest_exists(manifest_path)?;
-    let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
-    if dependency_section_bounds(&lines).is_none() {
-        if !lines.is_empty() && !lines.last().is_some_and(|line| line.is_empty()) {
-            lines.push(String::new());
-        }
-        lines.push("[dependencies]".to_string());
-    }
-    let (start, end) = dependency_section_bounds(&lines).ok_or_else(|| {
-        format!(
-            "failed to locate [dependencies] in {}",
+    let mut document = content.parse::<toml_edit::DocumentMut>().map_err(|error| {
+        PackageError::Manifest(format!(
+            "failed to parse {} for editing: {error}",
             manifest_path.display()
-        )
+        ))
     })?;
-    let rendered = render_dependency_line(alias, dependency)?;
-    if let Some((index, _)) = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .take(end - start - 1)
-        .find(|(_, line)| {
-            line.split('=')
-                .next()
-                .is_some_and(|key| key.trim() == alias)
-        })
-    {
-        lines[index] = rendered;
-    } else {
-        lines.insert(end, rendered);
+    if document.get("dependencies").is_none() {
+        document["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
     }
-    write_manifest_content_locked(manifest_path, &(lines.join("\n") + "\n"))
+    let dependencies = document["dependencies"].as_table_mut().ok_or_else(|| {
+        PackageError::Manifest(format!(
+            "[dependencies] in {} is not a table",
+            manifest_path.display()
+        ))
+    })?;
+    let mut replacement = dependency_manifest_item(alias, dependency)?;
+    if let Some((_key, existing)) = dependencies.get_key_value_mut(alias) {
+        if let (Some(old), Some(new)) = (existing.as_value(), replacement.as_value_mut()) {
+            *new.decor_mut() = old.decor().clone();
+        }
+        *existing = replacement;
+    } else {
+        dependencies.insert(alias, replacement);
+    }
+    write_manifest_content_locked(manifest_path, &document.to_string())
 }
 
 pub(crate) fn remove_dependency_from_manifest_locked(
@@ -1186,34 +1157,23 @@ pub(crate) fn remove_dependency_from_manifest_locked(
 ) -> Result<bool, PackageError> {
     let content = fs::read_to_string(manifest_path)
         .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
-    let mut lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
-    let Some((start, end)) = dependency_section_bounds(&lines) else {
+    let mut document = content.parse::<toml_edit::DocumentMut>().map_err(|error| {
+        PackageError::Manifest(format!(
+            "failed to parse {} for editing: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let Some(dependencies) = document
+        .get_mut("dependencies")
+        .and_then(toml_edit::Item::as_table_mut)
+    else {
         return Ok(false);
     };
-    let mut removed = false;
-    lines = lines
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            if index <= start || index >= end {
-                return Some(line);
-            }
-            let matches = line
-                .split('=')
-                .next()
-                .is_some_and(|key| key.trim() == alias);
-            if matches {
-                removed = true;
-                None
-            } else {
-                Some(line)
-            }
-        })
-        .collect();
-    if removed {
-        write_manifest_content_locked(manifest_path, &(lines.join("\n") + "\n"))?;
+    if dependencies.remove(alias).is_some() {
+        write_manifest_content_locked(manifest_path, &document.to_string())?;
+        return Ok(true);
     }
-    Ok(removed)
+    Ok(false)
 }
 
 pub(crate) fn install_packages_impl(
@@ -2507,9 +2467,15 @@ checksum = "{checksum}"
         )
         .unwrap();
         assert_eq!(alias, "harn-openapi");
+        let item = dependency_manifest_item(&alias, &dependency).unwrap();
+        let table = item.as_inline_table().unwrap();
         assert_eq!(
-            render_dependency_line(&alias, &dependency).unwrap(),
-            "harn-openapi = { git = \"https://github.com/burin-labs/harn-openapi\", rev = \"v1.2.3\" }"
+            table.get("git").and_then(toml_edit::Value::as_str),
+            Some("https://github.com/burin-labs/harn-openapi")
+        );
+        assert_eq!(
+            table.get("rev").and_then(toml_edit::Value::as_str),
+            Some("v1.2.3")
         );
     }
     #[test]
@@ -2662,15 +2628,18 @@ checksum = "{checksum}"
     #[test]
     fn rendered_dependency_values_are_toml_escaped() {
         let path = "dep\" \nmalicious = true";
-        let line = render_dependency_line(
+        let item = dependency_manifest_item(
             "safe",
             &Dependency::Table(Box::new(DepTable {
                 path: Some(path.to_string()),
                 ..DepTable::default()
             })),
         )
-        .expect("dependency line");
-        let parsed: Manifest = toml::from_str(&format!("[dependencies]\n{line}\n")).unwrap();
+        .expect("dependency item");
+        let mut document = toml_edit::DocumentMut::new();
+        document["dependencies"] = toml_edit::Item::Table(toml_edit::Table::new());
+        document["dependencies"]["safe"] = item;
+        let parsed: Manifest = toml::from_str(&document.to_string()).unwrap();
         assert_eq!(parsed.dependencies.len(), 1);
         assert_eq!(
             parsed
@@ -2679,6 +2648,36 @@ checksum = "{checksum}"
                 .and_then(Dependency::local_path),
             Some(path)
         );
+    }
+
+    #[test]
+    fn dependency_edits_preserve_unrelated_formatting_and_comments() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest_path = tmp.path().join(MANIFEST);
+        fs::write(
+            &manifest_path,
+            "# project\n[dependencies] # managed here\n\"acme.lib\" = { path = \"old\" } # retain\n\n[tool]\ncustom = true\n",
+        )
+        .unwrap();
+
+        upsert_dependency_in_manifest_locked(
+            &manifest_path,
+            "acme.lib",
+            &Dependency::Table(Box::new(DepTable {
+                path: Some("new".to_string()),
+                ..DepTable::default()
+            })),
+        )
+        .unwrap();
+
+        let updated = fs::read_to_string(&manifest_path).unwrap();
+        assert!(updated.starts_with("# project\n[dependencies] # managed here\n"));
+        assert!(updated.contains("\"acme.lib\" = { path = \"new\" } # retain"));
+        assert!(updated.ends_with("\n[tool]\ncustom = true\n"));
+        assert!(remove_dependency_from_manifest_locked(&manifest_path, "acme.lib").unwrap());
+        let removed = fs::read_to_string(&manifest_path).unwrap();
+        assert!(removed.starts_with("# project\n[dependencies] # managed here\n"));
+        assert!(removed.ends_with("\n[tool]\ncustom = true\n"));
     }
 
     #[test]
