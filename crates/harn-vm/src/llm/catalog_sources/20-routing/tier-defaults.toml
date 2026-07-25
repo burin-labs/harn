@@ -3,6 +3,9 @@
 # "frontier" | "reasoning"`. The legacy pattern-based [[tier_rules]] table
 # has been removed; the catalog is the single source of truth. Models
 # without an explicit `tier` resolve to `tier_defaults.default`.
+#
+# Picking the right value for a row is a judgement call with real downstream
+# effects. See "Choosing a tier" in ../README.md before setting one.
 
 [tier_defaults]
 default = "mid"

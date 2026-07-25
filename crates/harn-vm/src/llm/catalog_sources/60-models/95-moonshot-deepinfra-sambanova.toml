@@ -225,7 +225,7 @@ context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
@@ -293,7 +293,7 @@ context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.22, output_per_mtok = 0.59 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
