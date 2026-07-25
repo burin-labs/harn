@@ -1,7 +1,7 @@
 //! OS-native secret-store smoke tests.
 //!
-//! Exercises the live Keychain (macOS/iOS) and Credential Manager (Windows)
-//! backends end-to-end. These tests:
+//! Exercises the live keyring ecosystem adapter on macOS and Windows. These
+//! tests:
 //!
 //! * Are skipped when `HARN_SECRET_STORE_BACKEND=file` is set in the
 //!   environment — CI matrices that explicitly opt into the file backend
@@ -10,9 +10,8 @@
 //!   leftover entries from prior failed runs cannot cause cross-contamination.
 //! * Always clean up after themselves, even on assertion failure.
 //!
-//! On Linux there is no OS-native backend yet (secret-service is tracked
-//! as a follow-on; see `docs/src/hostlib/secret_store.md`), so this file
-//! compiles down to nothing on Linux targets.
+//! Linux uses Secret Service too, but headless CI generally has no unlocked
+//! session collection, so live coverage stays on desktop runners.
 
 #![cfg(any(target_os = "macos", target_os = "windows"))]
 
@@ -129,10 +128,7 @@ fn os_native_round_trip_get_set_delete_list() {
     .unwrap();
     assert_eq!(as_string(dict_get(&g1, "value")), "value-1");
     let backend = as_string(dict_get(&g1, "backend"));
-    assert!(
-        backend == "keychain" || backend == "wincred",
-        "expected OS-native backend, got {backend}"
-    );
+    assert_eq!(backend, "keyring");
 
     let listed = (list.handler)(&dict_arg(&[("account", vm_string(&account))])).unwrap();
     let keys = match dict_get(&listed, "keys") {

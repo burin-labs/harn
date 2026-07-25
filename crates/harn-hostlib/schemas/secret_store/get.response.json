@@ -7,7 +7,7 @@
     "account": { "type": "string" },
     "key": { "type": "string" },
     "value": { "type": ["string", "null"] },
-    "backend": { "type": "string", "enum": ["keychain", "wincred", "file"] }
+    "backend": { "type": "string", "enum": ["keyring", "file"] }
   },
   "required": ["account", "key", "value", "backend"],
   "additionalProperties": false

@@ -216,17 +216,9 @@ arcstr = { version = "1", features = ["serde", "std"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Per-OS secret-store backends. The file backend is always compiled in
-# (and is the universal fallback when `HARN_SECRET_STORE_BACKEND=file` is
-# set); the OS-native backends are gated behind target_os so headless
-# Linux CI doesn't pull in macOS or Windows toolchains.
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
-security-framework = "3.7"
-
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
-    "Win32_Security_Credentials",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
     "Win32_System_Threading",

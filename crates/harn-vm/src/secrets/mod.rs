@@ -11,7 +11,7 @@ mod env;
 mod keyring;
 
 pub use env::EnvSecretProvider;
-pub use keyring::KeyringSecretProvider;
+pub use keyring::{KeyringSecretProvider, NativeKeyring, NativeKeyringError};
 
 pub const DEFAULT_SECRET_PROVIDER_CHAIN: &str = "env,keyring";
 pub const SECRET_PROVIDER_CHAIN_ENV: &str = "HARN_SECRET_PROVIDERS";
@@ -821,18 +821,11 @@ pub(crate) fn emit_secret_access_event(provider: &str, id: &SecretId) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex, Once};
+    use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
 
     use super::*;
-
-    fn install_mock_keyring() {
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            ::keyring::set_default_credential_builder(::keyring::mock::default_credential_builder());
-        });
-    }
 
     struct FakeProvider {
         namespace: String,
@@ -1038,9 +1031,10 @@ mod tests {
 
     #[tokio::test]
     async fn keyring_provider_round_trips_and_zeroes_on_drop() {
-        install_mock_keyring();
-
-        let provider = KeyringSecretProvider::new("harn.test");
+        let provider = KeyringSecretProvider::with_store(
+            "harn.test",
+            keyring_core::mock::Store::new().unwrap(),
+        );
         let id = SecretId::new("", format!("mock-{}", uuid::Uuid::now_v7()));
         provider
             .put(&id, SecretBytes::from("round-trip-secret"))
