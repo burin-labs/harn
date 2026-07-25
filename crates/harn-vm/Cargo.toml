@@ -85,6 +85,7 @@ rcgen = "0.14"
 libc = "0.2"
 tokio-stream = "0.1"
 base64 = "0.22"
+cookie = { version = "0.18.1", features = ["signed", "key-expansion"] }
 bytes = "1"
 data-encoding = "2"
 ed25519-dalek = { version = "3", features = ["pem", "pkcs8", "rand_core"] }

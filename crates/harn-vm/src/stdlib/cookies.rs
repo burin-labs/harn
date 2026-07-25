@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
-use std::time::SystemTime;
 
 use base64::Engine;
+use cookie::time::{Duration, OffsetDateTime};
+use cookie::{Cookie, CookieJar, Key, SameSite};
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -92,56 +93,11 @@ fn option_i64(
     }
 }
 
-fn valid_cookie_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.bytes().all(|byte| {
-            matches!(
-                byte,
-                b'!' | b'#'
-                    | b'$'
-                    | b'%'
-                    | b'&'
-                    | b'\''
-                    | b'*'
-                    | b'+'
-                    | b'-'
-                    | b'.'
-                    | b'0'..=b'9'
-                    | b'A'..=b'Z'
-                    | b'^'
-                    | b'_'
-                    | b'`'
-                    | b'a'..=b'z'
-                    | b'|'
-                    | b'~'
-            )
-        })
-}
-
-fn valid_cookie_value(value: &str) -> bool {
-    value
-        .bytes()
-        .all(|byte| !byte.is_ascii_control() && !matches!(byte, b';' | b',' | b'\\' | b'"' | b' '))
-}
-
-fn validate_attr_value(label: &str, value: &str) -> Result<(), VmError> {
-    if value.is_empty()
-        || value
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b';')
-    {
-        return Err(cookie_error(format!(
-            "{label} contains an invalid cookie attribute value"
-        )));
-    }
-    Ok(())
-}
-
-fn normalize_same_site(raw: &str) -> Result<&'static str, VmError> {
+fn parse_same_site(raw: &str) -> Result<SameSite, VmError> {
     match raw.to_ascii_lowercase().as_str() {
-        "lax" => Ok("Lax"),
-        "strict" => Ok("Strict"),
-        "none" => Ok("None"),
+        "lax" => Ok(SameSite::Lax),
+        "strict" => Ok(SameSite::Strict),
+        "none" => Ok(SameSite::None),
         _ => Err(cookie_error(
             "same_site must be one of Lax, Strict, or None",
         )),
@@ -199,6 +155,45 @@ fn raw_cookie_headers(value: &VmValue) -> Result<Vec<String>, VmError> {
     }
 }
 
+fn valid_cookie_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'0'..=b'9'
+                    | b'A'..=b'Z'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'a'..=b'z'
+                    | b'|'
+                    | b'~'
+            )
+        })
+}
+
+fn valid_cookie_value(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| !byte.is_ascii_control() && !matches!(byte, b';' | b',' | b'\\' | b'"' | b' '))
+}
+
+fn valid_attribute_value(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| !byte.is_ascii_control() && byte != b';')
+}
+
 fn invalid_segment(segment: &str, reason: &str) -> VmValue {
     dict(crate::value::DictMap::from_iter([
         (
@@ -230,24 +225,17 @@ fn parse_cookie_header_value(raw: &str) -> ParsedCookieHeader {
         if trimmed.is_empty() {
             continue;
         }
-        let Some((name, value)) = trimmed.split_once('=') else {
-            invalid.push(invalid_segment(trimmed, "missing '='"));
-            continue;
+        let cookie = match Cookie::parse(trimmed.to_string()) {
+            Ok(cookie) => cookie,
+            Err(error) => {
+                invalid.push(invalid_segment(trimmed, &error.to_string()));
+                continue;
+            }
         };
-        let name = name.trim_matches(|ch| ch == ' ' || ch == '\t');
-        if !valid_cookie_name(name) {
-            invalid.push(invalid_segment(trimmed, "invalid name"));
-            continue;
-        }
-        let mut value = value.trim_matches(|ch| ch == ' ' || ch == '\t').to_string();
-        if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-            value = value[1..value.len() - 1].to_string();
-        }
-        if value
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b';')
-        {
-            invalid.push(invalid_segment(trimmed, "invalid value"));
+        let name = cookie.name();
+        let value = cookie.value().to_string();
+        if !valid_cookie_name(name) || !valid_cookie_value(&value) {
+            invalid.push(invalid_segment(trimmed, "invalid name or value"));
             continue;
         }
         cookies
@@ -318,46 +306,52 @@ fn serialize_cookie_with_defaults(
     options: Option<&crate::value::DictMap>,
     defaults: CookieDefaults,
 ) -> Result<String, VmError> {
-    if !valid_cookie_name(name) {
+    if !valid_cookie_name(name) || !valid_cookie_value(value) {
         return Err(cookie_error(
-            "cookie name is empty or contains invalid characters",
+            "cookie name or value contains characters forbidden by RFC 6265",
         ));
     }
-    if !valid_cookie_value(value) {
+    let base = format!("{name}={value}");
+    let mut cookie = Cookie::parse(base)
+        .map_err(|error| cookie_error(format!("invalid name or value: {error}")))?
+        .into_owned();
+    if cookie.name() != name || cookie.value() != value {
         return Err(cookie_error(
-            "cookie value contains spaces, quotes, separators, or control characters; encode it first",
+            "cookie name or value contains attribute separators",
         ));
     }
 
-    let mut out = format!("{name}={value}");
     let path =
         option_string(options, &["path", "Path"]).or_else(|| defaults.path.map(str::to_string));
     if let Some(path) = path {
-        validate_attr_value("Path", &path)?;
-        out.push_str("; Path=");
-        out.push_str(&path);
+        if !valid_attribute_value(&path) {
+            return Err(cookie_error("Path contains forbidden characters"));
+        }
+        cookie.set_path(path);
     }
 
     if let Some(domain) = option_string(options, &["domain", "Domain"]) {
-        validate_attr_value("Domain", &domain)?;
-        out.push_str("; Domain=");
-        out.push_str(&domain);
+        if !valid_attribute_value(&domain) {
+            return Err(cookie_error("Domain contains forbidden characters"));
+        }
+        cookie.set_domain(domain);
     }
 
     if let Some(max_age) = option_i64(options, &["max_age", "Max-Age", "maxAge"])? {
-        out.push_str("; Max-Age=");
-        out.push_str(&max_age.to_string());
+        cookie.set_max_age(Duration::seconds(max_age));
     } else if let Some(max_age) = defaults.max_age {
-        out.push_str("; Max-Age=");
-        out.push_str(&max_age.to_string());
+        cookie.set_max_age(Duration::seconds(max_age));
     }
 
     let expires = option_string(options, &["expires", "Expires"])
         .or_else(|| defaults.expires.map(str::to_string));
     if let Some(expires) = expires {
-        validate_attr_value("Expires", &expires)?;
-        out.push_str("; Expires=");
-        out.push_str(&expires);
+        let parsed = Cookie::parse(format!("harn={}; Expires={expires}", cookie.value()))
+            .map_err(|error| cookie_error(format!("invalid Expires value: {error}")))?;
+        let expires = parsed
+            .expires_datetime()
+            .ok_or_else(|| cookie_error("invalid Expires value"))?;
+        cookie.set_expires(expires);
     }
 
     let http_only = option_bool(
@@ -365,26 +359,18 @@ fn serialize_cookie_with_defaults(
         &["http_only", "HttpOnly", "httponly"],
         defaults.http_only,
     );
-    let secure = option_bool(options, &["secure", "Secure"], defaults.secure);
+    let mut secure = option_bool(options, &["secure", "Secure"], defaults.secure);
     let same_site = option_string(options, &["same_site", "SameSite", "sameSite"])
         .or_else(|| defaults.same_site.map(str::to_string));
-    let same_site = same_site.as_deref().map(normalize_same_site).transpose()?;
-    if same_site == Some("None") && !secure {
-        return Err(cookie_error("SameSite=None requires Secure"));
+    let same_site = same_site.as_deref().map(parse_same_site).transpose()?;
+    if same_site == Some(SameSite::None) {
+        secure = true;
     }
+    cookie.set_http_only(http_only);
+    cookie.set_secure(secure);
+    cookie.set_same_site(same_site);
 
-    if http_only {
-        out.push_str("; HttpOnly");
-    }
-    if secure {
-        out.push_str("; Secure");
-    }
-    if let Some(same_site) = same_site {
-        out.push_str("; SameSite=");
-        out.push_str(same_site);
-    }
-
-    Ok(out)
+    Ok(cookie.to_string())
 }
 
 #[derive(Clone, Copy)]
@@ -451,22 +437,52 @@ fn cookie_delete_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     )?))
 }
 
-fn hmac_sha256_base64url(key: &str, message: &str) -> String {
-    let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), message.as_bytes());
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac)
+fn signing_key(secret: &str) -> Result<Key, VmError> {
+    if secret.len() < 32 {
+        return Err(cookie_error(
+            "signing secret must contain at least 32 bytes of cryptographically random data",
+        ));
+    }
+    Ok(Key::derive_from(secret.as_bytes()))
+}
+
+fn sign_value(value: String, secret: &str) -> Result<String, VmError> {
+    let key = signing_key(secret)?;
+    if !valid_cookie_value(&value) {
+        return Err(cookie_error(
+            "cookie value contains characters forbidden by RFC 6265",
+        ));
+    }
+    let cookie = Cookie::parse(format!("harn={value}"))
+        .map_err(|error| cookie_error(format!("invalid cookie value: {error}")))?;
+    if cookie.value() != value {
+        return Err(cookie_error(
+            "cookie value contains attribute separators or control characters",
+        ));
+    }
+    let mut jar = CookieJar::new();
+    jar.signed_mut(&key).add(cookie.into_owned());
+    Ok(jar
+        .get("harn")
+        .expect("signed jar retains inserted cookie")
+        .value()
+        .to_string())
+}
+
+fn verify_value(value: String, secret: &str) -> Result<Option<String>, VmError> {
+    let key = signing_key(secret)?;
+    let jar = CookieJar::new();
+    Ok(jar
+        .signed(&key)
+        .verify(Cookie::new("harn", value))
+        .map(|cookie| cookie.value().to_string()))
 }
 
 fn cookie_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     require_args(args, 2, "cookie_sign")?;
     let value = args[0].display();
     let secret = args[1].display();
-    if value.contains(';') || value.bytes().any(|byte| byte.is_ascii_control()) {
-        return Err(cookie_error(
-            "cookie_sign value must not contain separators or control characters",
-        ));
-    }
-    let signature = hmac_sha256_base64url(&secret, &value);
-    Ok(string(format!("{value}.{signature}")))
+    Ok(string(sign_value(value, &secret)?))
 }
 
 fn cookie_verify_result(ok: bool, value: Option<String>, error: Option<&str>) -> VmValue {
@@ -487,15 +503,13 @@ fn cookie_verify_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     require_args(args, 2, "cookie_verify")?;
     let signed = args[0].display();
     let secret = args[1].display();
-    let Some((value, signature)) = signed.rsplit_once('.') else {
+    if signed.len() < 44 {
         return Ok(cookie_verify_result(false, None, Some("malformed")));
-    };
-    let expected = hmac_sha256_base64url(&secret, value);
-    if crate::connectors::hmac::secure_eq(signature.as_bytes(), expected.as_bytes()) {
-        Ok(cookie_verify_result(true, Some(value.to_string()), None))
-    } else {
-        Ok(cookie_verify_result(false, None, Some("invalid_signature")))
     }
+    Ok(match verify_value(signed, &secret)? {
+        Some(value) => cookie_verify_result(true, Some(value), None),
+        None => cookie_verify_result(false, None, Some("invalid_signature")),
+    })
 }
 
 fn session_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -503,8 +517,7 @@ fn session_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let payload_json = super::json::vm_value_to_json(&args[0]);
     let secret = args[1].display();
     let encoded_payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json);
-    let signature = hmac_sha256_base64url(&secret, &encoded_payload);
-    Ok(string(format!("v1.{encoded_payload}.{signature}")))
+    Ok(string(sign_value(encoded_payload, &secret)?))
 }
 
 fn session_verify_result(ok: bool, payload: VmValue, error: Option<&str>) -> VmValue {
@@ -518,37 +531,59 @@ fn session_verify_result(ok: bool, payload: VmValue, error: Option<&str>) -> VmV
     ]))
 }
 
-fn session_verify_token(token: &str, secret: &str) -> VmValue {
-    let parts = token.split('.').collect::<Vec<_>>();
-    if parts.len() != 3 || parts[0] != "v1" {
-        return session_verify_result(false, nil(), Some("malformed"));
-    }
-
-    let expected = hmac_sha256_base64url(secret, parts[1]);
-    if !crate::connectors::hmac::secure_eq(parts[2].as_bytes(), expected.as_bytes()) {
-        return session_verify_result(false, nil(), Some("invalid_signature"));
-    }
-
-    let payload_bytes = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
-        Ok(bytes) => bytes,
-        Err(_) => return session_verify_result(false, nil(), Some("malformed_payload")),
+fn session_verify_token(token: &str, secret: &str) -> Result<VmValue, VmError> {
+    let encoded_payload = match verify_value(token.to_string(), secret)? {
+        Some(payload) => payload,
+        None if token.len() < 44 => {
+            return Ok(session_verify_result(false, nil(), Some("malformed")));
+        }
+        None => {
+            return Ok(session_verify_result(
+                false,
+                nil(),
+                Some("invalid_signature"),
+            ));
+        }
     };
+    let payload_bytes =
+        match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded_payload) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return Ok(session_verify_result(
+                    false,
+                    nil(),
+                    Some("malformed_payload"),
+                ))
+            }
+        };
     let payload_json = match String::from_utf8(payload_bytes) {
         Ok(text) => text,
-        Err(_) => return session_verify_result(false, nil(), Some("malformed_payload")),
+        Err(_) => {
+            return Ok(session_verify_result(
+                false,
+                nil(),
+                Some("malformed_payload"),
+            ))
+        }
     };
     let payload = match serde_json::from_str::<serde_json::Value>(&payload_json) {
         Ok(value) => crate::schema::json_to_vm_value(&value),
-        Err(_) => return session_verify_result(false, nil(), Some("malformed_payload")),
+        Err(_) => {
+            return Ok(session_verify_result(
+                false,
+                nil(),
+                Some("malformed_payload"),
+            ))
+        }
     };
-    session_verify_result(true, payload, None)
+    Ok(session_verify_result(true, payload, None))
 }
 
 fn session_verify_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     require_args(args, 2, "session_verify")?;
     let token = args[0].display();
     let secret = args[1].display();
-    Ok(session_verify_token(&token, &secret))
+    session_verify_token(&token, &secret)
 }
 
 fn session_cookie_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -578,7 +613,7 @@ fn session_from_cookies_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         _ => None,
     };
     match token {
-        Some(token) => Ok(session_verify_token(&token, &secret)),
+        Some(token) => session_verify_token(&token, &secret),
         None => Ok(session_verify_result(false, nil(), Some("missing_cookie"))),
     }
 }
@@ -614,42 +649,22 @@ fn raw_set_cookie_headers(value: &VmValue) -> Result<Vec<String>, VmError> {
 }
 
 fn parse_set_cookie(header: &str) -> Option<(String, String, bool)> {
-    let mut segments = header.split(';');
-    let first = segments.next()?.trim_matches(|ch| ch == ' ' || ch == '\t');
-    let (name, value) = first.split_once('=')?;
-    // Trim optional whitespace around the name/value, the same way
-    // `parse_cookie_header_value` does — `valid_cookie_name` rejects spaces, so
-    // without this a `name = value` pair would be dropped entirely (and the
-    // value would keep a stray leading space).
-    let name = name.trim_matches(|ch| ch == ' ' || ch == '\t');
-    let value = value.trim_matches(|ch| ch == ' ' || ch == '\t');
-    if !valid_cookie_name(name) {
-        return None;
-    }
-
-    let mut delete = false;
-    for attr in segments {
-        let attr = attr.trim_matches(|ch| ch == ' ' || ch == '\t');
-        let (attr_name, attr_value) = attr.split_once('=').unwrap_or((attr, ""));
-        if attr_name.eq_ignore_ascii_case("Max-Age") {
-            if attr_value.trim().parse::<i64>().is_ok_and(|age| age <= 0) {
-                delete = true;
-            }
-        } else if attr_name.eq_ignore_ascii_case("Expires")
-            && httpdate::parse_http_date(attr_value.trim())
-                .is_ok_and(|expires| expires <= SystemTime::now())
-        {
-            delete = true;
-        }
-    }
-
-    Some((name.to_string(), value.to_string(), delete))
+    let cookie = Cookie::parse(header.to_string()).ok()?;
+    let delete = cookie.max_age().is_some_and(|age| age <= Duration::ZERO)
+        || cookie
+            .expires_datetime()
+            .is_some_and(|expires| expires <= OffsetDateTime::now_utc());
+    Some((
+        cookie.name().to_string(),
+        cookie.value().to_string(),
+        delete,
+    ))
 }
 
 fn cookie_header_from_map(cookies: &BTreeMap<String, String>) -> String {
     cookies
         .iter()
-        .map(|(name, value)| format!("{name}={value}"))
+        .map(|(name, value)| Cookie::new(name.clone(), value.clone()).to_string())
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -794,7 +809,11 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::parse_set_cookie;
+    use super::{
+        parse_set_cookie, serialize_cookie_with_defaults, sign_value, verify_value, Cookie,
+        CookieDefaults, SameSite,
+    };
+    use crate::value::{intern_key, DictMap, VmValue};
 
     #[test]
     fn parse_set_cookie_trims_name_before_validation() {
@@ -812,5 +831,45 @@ mod tests {
         let (name, _value, delete) = parse_set_cookie("sid=abc; Max-Age=0").expect("should parse");
         assert_eq!(name, "sid");
         assert!(delete);
+    }
+
+    #[test]
+    fn serialization_rejects_invalid_names_and_secures_same_site_none() {
+        assert!(
+            serialize_cookie_with_defaults("bad name", "value", None, CookieDefaults::NONE)
+                .is_err()
+        );
+        let mut injected_path = DictMap::new();
+        injected_path.insert(
+            intern_key("path"),
+            VmValue::string("/; Secure; Domain=attacker.example"),
+        );
+        assert!(serialize_cookie_with_defaults(
+            "sid",
+            "value",
+            Some(&injected_path),
+            CookieDefaults::NONE,
+        )
+        .is_err());
+        let mut options = DictMap::new();
+        options.insert(intern_key("same_site"), VmValue::string("None"));
+        let serialized =
+            serialize_cookie_with_defaults("sid", "value", Some(&options), CookieDefaults::NONE)
+                .unwrap();
+        let parsed = Cookie::parse(serialized).unwrap();
+        assert_eq!(parsed.same_site(), Some(SameSite::None));
+        assert_eq!(parsed.secure(), Some(true));
+    }
+
+    #[test]
+    fn signed_values_use_the_cookie_crate_wire_format() {
+        let secret = "0123456789abcdef0123456789abcdef";
+        let signed = sign_value("plain-value".to_string(), secret).unwrap();
+        assert_ne!(signed, "plain-value");
+        assert_eq!(
+            verify_value(signed.clone(), secret).unwrap().as_deref(),
+            Some("plain-value")
+        );
+        assert_eq!(verify_value(format!("{signed}x"), secret).unwrap(), None);
     }
 }
