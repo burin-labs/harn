@@ -79,11 +79,28 @@ pub fn metadata_dir(base_dir: &Path) -> PathBuf {
 }
 
 pub fn event_log_dir(base_dir: &Path) -> PathBuf {
-    state_root(base_dir).join("events")
+    event_log_dir_at_state_root(&state_root(base_dir))
 }
 
 pub fn event_log_sqlite_path(base_dir: &Path) -> PathBuf {
-    state_root(base_dir).join("events.sqlite")
+    event_log_sqlite_path_at_state_root(&state_root(base_dir))
+}
+
+/// Event-log directory under an already-resolved state root.
+///
+/// Callers that own their state root exactly — an orchestrator told where to
+/// keep its state, an embedder running concurrent isolated VMs — use this and
+/// the sibling sqlite helper instead of the `base_dir` forms, which route
+/// through [`state_root`] and therefore let an absolute `HARN_STATE_DIR`
+/// discard the caller's path entirely.
+pub fn event_log_dir_at_state_root(state_root: &Path) -> PathBuf {
+    state_root.join("events")
+}
+
+/// Sqlite event-log path under an already-resolved state root. See
+/// [`event_log_dir_at_state_root`].
+pub fn event_log_sqlite_path_at_state_root(state_root: &Path) -> PathBuf {
+    state_root.join("events.sqlite")
 }
 
 pub fn workflow_dir(base_dir: &Path) -> PathBuf {

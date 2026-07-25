@@ -328,6 +328,22 @@ pub trait EventLog: Send + Sync {
     async fn compact(&self, topic: &Topic, before: EventId) -> Result<CompactReport, LogError>;
 }
 
+fn backend_from_env() -> Result<EventLogBackendKind, LogError> {
+    Ok(std::env::var(HARN_EVENT_LOG_BACKEND_ENV)
+        .ok()
+        .map(|value| value.parse())
+        .transpose()?
+        .unwrap_or(EventLogBackendKind::Sqlite))
+}
+
+fn queue_depth_from_env() -> usize {
+    std::env::var(HARN_EVENT_LOG_QUEUE_DEPTH_ENV)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(RuntimeLimits::DEFAULT.default_event_log_queue_depth)
+        .max(1)
+}
+
 #[derive(Clone, Debug)]
 pub struct EventLogConfig {
     pub backend: EventLogBackendKind,
@@ -338,17 +354,6 @@ pub struct EventLogConfig {
 
 impl EventLogConfig {
     pub fn for_base_dir(base_dir: &Path) -> Result<Self, LogError> {
-        let backend = std::env::var(HARN_EVENT_LOG_BACKEND_ENV)
-            .ok()
-            .map(|value| value.parse())
-            .transpose()?
-            .unwrap_or(EventLogBackendKind::Sqlite);
-        let queue_depth = std::env::var(HARN_EVENT_LOG_QUEUE_DEPTH_ENV)
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(RuntimeLimits::DEFAULT.default_event_log_queue_depth)
-            .max(1);
-
         let file_dir = match std::env::var(HARN_EVENT_LOG_DIR_ENV) {
             Ok(value) if !value.trim().is_empty() => util::resolve_path(base_dir, &value),
             _ => crate::runtime_paths::event_log_dir(base_dir),
@@ -359,10 +364,28 @@ impl EventLogConfig {
         };
 
         Ok(Self {
-            backend,
+            backend: backend_from_env()?,
             file_dir,
             sqlite_path,
-            queue_depth,
+            queue_depth: queue_depth_from_env(),
+        })
+    }
+
+    /// Config for a state root the caller resolved itself.
+    ///
+    /// Backend and queue depth still come from the environment — those are
+    /// operator tuning knobs that apply to whichever log the process opens.
+    /// The *location* does not: it is taken from `state_root` verbatim, so
+    /// neither `HARN_STATE_DIR` nor the `HARN_EVENT_LOG_*` path overrides can
+    /// redirect a caller that already knows where its state lives. Use this
+    /// whenever the state root is a parameter rather than ambient
+    /// configuration — see [`install_default_at_state_root`].
+    pub fn for_state_root(state_root: &Path) -> Result<Self, LogError> {
+        Ok(Self {
+            backend: backend_from_env()?,
+            file_dir: crate::runtime_paths::event_log_dir_at_state_root(state_root),
+            sqlite_path: crate::runtime_paths::event_log_sqlite_path_at_state_root(state_root),
+            queue_depth: queue_depth_from_env(),
         })
     }
 
@@ -382,8 +405,13 @@ thread_local! {
 }
 
 pub fn install_default_for_base_dir(base_dir: &Path) -> Result<Arc<AnyEventLog>, LogError> {
-    let config = EventLogConfig::for_base_dir(base_dir)?;
-    let log = open_event_log(&config)?;
+    install_active(&EventLogConfig::for_base_dir(base_dir)?)
+}
+
+/// Open `config` and make it this thread's active log, clearing any pending
+/// lazy default so it cannot later replace what the caller just installed.
+fn install_active(config: &EventLogConfig) -> Result<Arc<AnyEventLog>, LogError> {
+    let log = open_event_log(config)?;
     ACTIVE_EVENT_LOG.with(|slot| {
         *slot.borrow_mut() = Some(log.clone());
     });
@@ -391,6 +419,19 @@ pub fn install_default_for_base_dir(base_dir: &Path) -> Result<Arc<AnyEventLog>,
         *slot.borrow_mut() = None;
     });
     Ok(log)
+}
+
+/// Install the active event log at a state root the caller resolved itself.
+///
+/// The `_for_base_dir` variants derive their location through
+/// [`crate::runtime_paths::state_root`], so an absolute `HARN_STATE_DIR` in the
+/// environment silently replaces the `base_dir` they were handed. Callers that
+/// were *told* where their state lives — an orchestrator with a configured
+/// state dir, an embedder running isolated VMs side by side — must not be
+/// redirected that way, and must not have to publish their path to the whole
+/// process to be obeyed.
+pub fn install_default_at_state_root(state_root: &Path) -> Result<Arc<AnyEventLog>, LogError> {
+    install_active(&EventLogConfig::for_state_root(state_root)?)
 }
 
 pub fn install_lazy_default_for_base_dir(base_dir: &Path) -> Result<(), LogError> {

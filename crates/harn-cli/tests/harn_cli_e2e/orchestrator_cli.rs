@@ -210,11 +210,13 @@ async fn wait_for_consumer_cursor(
 }
 
 fn open_state_event_log(state_dir: &Path) -> Arc<AnyEventLog> {
-    let mut config = EventLogConfig::for_base_dir(state_dir).unwrap();
-    let file_dir = state_dir.join("events");
-    if file_dir.join("topics").is_dir() {
+    // `for_state_root`, not `for_base_dir`: the orchestrator's state dir IS the
+    // state root, and the `base_dir` form would nest another `.harn` under it.
+    // This used to resolve correctly only because the orchestrator exported
+    // `HARN_STATE_DIR`, which overrode that nesting for the whole process.
+    let mut config = EventLogConfig::for_state_root(state_dir).unwrap();
+    if config.file_dir.join("topics").is_dir() {
         config.backend = EventLogBackendKind::File;
-        config.file_dir = file_dir;
     }
     harn_vm::event_log::open_event_log(&config).unwrap()
 }
