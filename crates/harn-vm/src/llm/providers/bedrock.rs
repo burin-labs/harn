@@ -1,11 +1,14 @@
 //! Amazon Bedrock Runtime provider.
 //!
 //! Uses Bedrock's Converse API so Claude, Llama, Titan, Mistral, and other
-//! Bedrock model IDs share one request shape. Auth is hand-rolled AWS SigV4
-//! to avoid pulling the full AWS SDK into the VM crate.
+//! Bedrock model IDs share one request shape. AWS's maintained credential
+//! provider chain and SigV4 implementation own authentication.
 
 use std::collections::BTreeMap;
 
+use aws_config::default_provider::credentials::DefaultCredentialsChain;
+use aws_config::Region;
+use aws_credential_types::provider::ProvideCredentials;
 use chrono::Utc;
 
 use crate::aws_sigv4::{sign as sign_sigv4_request, AwsSigV4Input};
@@ -131,8 +134,8 @@ impl BedrockProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        let region = resolve_region(request.region.as_deref())?;
-        let credentials = resolve_aws_credentials().await?;
+        let region = resolve_live_region(request.region.as_deref()).await?;
+        let credentials = resolve_aws_credentials(&region).await?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
         strip_anthropic_sampling_params(&mut body, request);
@@ -159,15 +162,11 @@ impl BedrockProvider {
         .map_err(|error| vm_err(format!("bedrock request signing failed: {error}")))?;
         let mut req = crate::llm::blocking_client_for_base_url(&base_url)
             .post(url)
-            .header("Content-Type", "application/json")
             .header("Accept", "application/json")
-            .header("X-Amz-Date", signed.amz_date)
-            .header("X-Amz-Content-Sha256", signed.content_sha256)
-            .header("Authorization", signed.authorization)
             .timeout(std::time::Duration::from_secs(request.resolve_timeout()))
             .body(body_bytes);
-        if let Some(token) = signed.security_token {
-            req = req.header("X-Amz-Security-Token", token);
+        for (name, value) in signed.headers {
+            req = req.header(name, value);
         }
         let response = req.send().await.map_err(|error| {
             vm_err(format!(
@@ -467,13 +466,12 @@ fn bedrock_base_url(region: &str) -> String {
         .unwrap_or_else(|| format!("https://bedrock-runtime.{region}.amazonaws.com"))
 }
 
-/// Resolve the AWS region for a Bedrock call.
+/// Resolve the immediately available region for synchronous catalog
+/// introspection.
 ///
-/// An explicit per-call override (from a routing-policy chain link's
-/// `region` field, threaded through `LlmRequestPayload::region`) wins
-/// over every environment/profile source. When the override is `None`
-/// or blank, resolution falls back to the historical env/profile chain,
-/// so existing scripts that never set a region are unaffected.
+/// Live calls use the AWS SDK's async default region chain below, including
+/// profile overrides, custom profile paths, and EC2 metadata. Catalog reads
+/// retain this non-networking snapshot so introspection never blocks on IMDS.
 fn resolve_region(override_region: Option<&str>) -> Result<String, VmError> {
     if let Some(region) = override_region {
         let trimmed = region.trim();
@@ -497,39 +495,46 @@ fn resolve_region(override_region: Option<&str>) -> Result<String, VmError> {
     ))
 }
 
-async fn resolve_aws_credentials() -> Result<AwsCredentials, VmError> {
-    if let (Ok(access_key_id), Ok(secret_access_key)) = (
-        std::env::var("AWS_ACCESS_KEY_ID"),
-        std::env::var("AWS_SECRET_ACCESS_KEY"),
-    ) {
-        if !access_key_id.trim().is_empty() && !secret_access_key.trim().is_empty() {
-            return Ok(AwsCredentials {
-                access_key_id,
-                secret_access_key,
-                session_token: std::env::var("AWS_SESSION_TOKEN").ok(),
-            });
+async fn resolve_live_region(override_region: Option<&str>) -> Result<String, VmError> {
+    if let Some(region) = override_region {
+        let trimmed = region.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
         }
     }
-    let profile = std::env::var("AWS_PROFILE").unwrap_or_else(|_| "default".to_string());
-    if let (Some(access_key_id), Some(secret_access_key)) = (
-        read_aws_profile_value("credentials", &profile, "aws_access_key_id"),
-        read_aws_profile_value("credentials", &profile, "aws_secret_access_key"),
-    ) {
-        return Ok(AwsCredentials {
-            access_key_id,
-            secret_access_key,
-            session_token: read_aws_profile_value("credentials", &profile, "aws_session_token"),
-        });
+    if let Ok(region) = std::env::var("BEDROCK_REGION") {
+        let trimmed = region.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
     }
-    if let Some(credentials) = resolve_container_credentials().await? {
-        return Ok(credentials);
-    }
-    if let Some(credentials) = resolve_instance_profile_credentials().await? {
-        return Ok(credentials);
-    }
-    Err(vm_err(
-        "AWS credentials not found: set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, configure an AWS profile, or run on an instance/container role",
-    ))
+    aws_config::default_provider::region::DefaultRegionChain::builder()
+        .build()
+        .region()
+        .await
+        .map(|region| region.as_ref().to_string())
+        .ok_or_else(|| {
+            vm_err(
+                "AWS region is not configured; set AWS_REGION, AWS_DEFAULT_REGION, or BEDROCK_REGION",
+            )
+        })
+}
+
+async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentials, VmError> {
+    let provider = DefaultCredentialsChain::builder()
+        .region(Region::new(region.to_string()))
+        .build()
+        .await;
+    let credentials = provider.provide_credentials().await.map_err(|error| {
+        vm_err(format!(
+            "AWS credential provider chain could not load credentials: {error}"
+        ))
+    })?;
+    Ok(AwsCredentials {
+        access_key_id: credentials.access_key_id().to_string(),
+        secret_access_key: credentials.secret_access_key().to_string(),
+        session_token: credentials.session_token().map(str::to_string),
+    })
 }
 
 fn read_aws_profile_value(file_kind: &str, profile: &str, key: &str) -> Option<String> {
@@ -570,96 +575,6 @@ fn parse_ini_value(text: &str, section: &str, key: &str) -> Option<String> {
         }
     }
     None
-}
-
-async fn resolve_container_credentials() -> Result<Option<AwsCredentials>, VmError> {
-    let url = if let Ok(full) = std::env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI") {
-        full
-    } else if let Ok(relative) = std::env::var("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") {
-        format!("http://169.254.170.2{relative}")
-    } else {
-        return Ok(None);
-    };
-    let mut req = crate::llm::shared_utility_client()
-        .get(url)
-        .timeout(std::time::Duration::from_secs(2));
-    if let Ok(token) = std::env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN") {
-        req = req.header("Authorization", token);
-    }
-    let response = match req.send().await {
-        Ok(response) => response,
-        Err(_) => return Ok(None),
-    };
-    if !response.status().is_success() {
-        return Ok(None);
-    }
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|error| vm_err(format!("container credential parse error: {error}")))?;
-    Ok(credentials_from_metadata_json(&json))
-}
-
-async fn resolve_instance_profile_credentials() -> Result<Option<AwsCredentials>, VmError> {
-    let client = crate::llm::shared_utility_client();
-    let token = match client
-        .put("http://169.254.169.254/latest/api/token")
-        .header("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-        .timeout(std::time::Duration::from_secs(2))
-        .send()
-        .await
-    {
-        Ok(response) if response.status().is_success() => response.text().await.ok(),
-        _ => None,
-    };
-    let mut role_req = client
-        .get("http://169.254.169.254/latest/meta-data/iam/security-credentials/")
-        .timeout(std::time::Duration::from_secs(2));
-    if let Some(token) = token.as_deref() {
-        role_req = role_req.header("X-aws-ec2-metadata-token", token);
-    }
-    let role = match role_req.send().await {
-        Ok(response) if response.status().is_success() => response.text().await.ok(),
-        _ => None,
-    };
-    let Some(role) = role
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(None);
-    };
-    let mut cred_req = client
-        .get(format!(
-            "http://169.254.169.254/latest/meta-data/iam/security-credentials/{role}"
-        ))
-        .timeout(std::time::Duration::from_secs(2));
-    if let Some(token) = token.as_deref() {
-        cred_req = cred_req.header("X-aws-ec2-metadata-token", token);
-    }
-    let response = match cred_req.send().await {
-        Ok(response) if response.status().is_success() => response,
-        _ => return Ok(None),
-    };
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|error| vm_err(format!("instance profile credential parse error: {error}")))?;
-    Ok(credentials_from_metadata_json(&json))
-}
-
-fn credentials_from_metadata_json(json: &serde_json::Value) -> Option<AwsCredentials> {
-    Some(AwsCredentials {
-        access_key_id: json
-            .get("AccessKeyId")
-            .or_else(|| json.get("AccessKeyID"))?
-            .as_str()?
-            .to_string(),
-        secret_access_key: json.get("SecretAccessKey")?.as_str()?.to_string(),
-        session_token: json
-            .get("Token")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-    })
 }
 
 #[cfg(test)]
@@ -965,6 +880,16 @@ mod tests {
         assert_eq!(
             resolve_region(Some("  ap-southeast-2  ")).expect("trimmed region"),
             "ap-southeast-2"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_region_uses_explicit_override_without_provider_lookup() {
+        assert_eq!(
+            resolve_live_region(Some("  eu-central-1  "))
+                .await
+                .expect("explicit region"),
+            "eu-central-1"
         );
     }
 

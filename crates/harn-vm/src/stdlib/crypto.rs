@@ -729,9 +729,6 @@ fn aws_sigv4_headers_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         "amz_date": signed.amz_date,
         "content_sha256": signed.content_sha256,
         "signed_headers": signed.signed_headers,
-        "credential_scope": signed.credential_scope,
-        "canonical_request": signed.canonical_request,
-        "string_to_sign": signed.string_to_sign,
     })))
 }
 
