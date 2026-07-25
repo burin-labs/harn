@@ -9,6 +9,43 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.39
+
+### Changed
+
+- Make the scheduled macOS workspace test lane the sole main-branch writer for
+  the native Cargo cache, keep pull-request consumers restore-only, and reject
+  ownerless or incompatible platform-cache pairs in the typed CI policy guard.
+  Remove runner-local macOS sccache after measuring zero hits, and retire the
+  hosted per-object GHA sccache trial after it consumed 5.35 GiB of the shared
+  10 GiB pool for a 31% warm hit rate.
+
+### Fixed
+
+- Kill managed background process groups when their supervising Harn process exits unexpectedly.
+- **ACP and MCP stdio servers now protect their JSON-RPC stream (#4818).**
+  `harn serve acp` and stdio `harn serve mcp` reject `--obs stdout` with a
+  diagnostic that points operators to stderr, OTel, or disabled observability;
+  HTTP and WebSocket transports continue to allow stdout observability.
+- Restore `std/git.git_push` after the pure-list API migration so protected
+  pushes and operator-grant workflows dispatch through the Git host capability.
+- Keep release pre-tag benchmarks on the authoritative byte/ELF size gate by
+  default, while making the expensive cargo-bloat diagnostic tail an explicit
+  opt-in.
+- Keep checksum-verified setup-Harn release archives reusable from pull requests
+  and merge groups without writing a duplicate platform archive cache on every
+  ephemeral ref. The caller repository's default branch is now the sole writer.
+- Restore behavior-compatible aliases for the collection methods renamed in
+  v0.10.37 so downstream scripts can migrate without a flag-day upgrade.
+- Prevented `harn orchestrator queue drain` from dispatching the same deferred
+  job repeatedly when its short claim TTL expired before the drain loop
+  completed.
+
+### Security
+
+- Cleared the remaining npm audit findings in repository tooling and the portal,
+  including migrating the portal to the patched React Router 8 package.
+
 ## v0.10.38
 
 ### Added
