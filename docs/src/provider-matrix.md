@@ -12,11 +12,14 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 
 | Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Video | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|
+| `anthropic` | `claude-mythos-preview*` | `any; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `anthropic` | `anthropic/claude-mythos-preview*` | `any; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-fable-*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-mythos-*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-fable-*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-mythos-*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-haiku-*` | `>=4.7` | `adaptive` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-opus-*` | `>=5.0; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-opus-*` | `>=4.8; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `anthropic` | `claude-opus-*` | `>=4.7` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-sonnet-5*` | `any` | `adaptive,effort` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
@@ -273,6 +276,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-opus-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-opus-4-7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-opus-4-8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-opus-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-20250514` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-5-20250929` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -414,6 +418,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `anthropic/claude-haiku-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-opus-4.8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-opus-4.8-fast` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `anthropic/claude-opus-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `bytedance-seed/seed-2.0-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

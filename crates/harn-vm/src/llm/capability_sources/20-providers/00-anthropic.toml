@@ -1,5 +1,33 @@
 # ---------- Anthropic (Claude) ------------------------------------------------
 
+# `prompt_cache_min_prefix_tokens` is the shortest prefix Anthropic will
+# actually cache. Below it a `cache_control` breakpoint is accepted and then
+# silently ignored — no error, no cache_creation_input_tokens. The value is
+# per-model and NOT monotonic across generations (512 on Opus 5 / Fable 5 /
+# Mythos 5, 1024 on Opus 4.8 and the Sonnet 4.5+ line, 2048 on Opus 4.7 and
+# Mythos Preview, 4096 on Opus 4.6/4.5 and Haiku 4.5), which is why it lives
+# per rule rather than as one Anthropic-dialect constant. Spot-checked against
+# the live API on 2026-07-24: a 1404-token prefix cached on Opus 5 and Opus 4.8
+# and silently did not on Opus 4.7 or Haiku 4.5.
+
+# Mythos Preview predates the 512-token floor: its minimum cacheable prefix is
+# 2048. `claude_generation` cannot parse the non-numeric `preview` tail, so a
+# version gate can't express this — it needs its own row ahead of the
+# `claude-mythos-*` catch-all.
+[[provider.anthropic]]
+model_match = "claude-mythos-preview*"
+extends = true
+prompt_cache_min_prefix_tokens = 2048
+
+# Mythos Preview predates the 512-token floor: its minimum cacheable prefix is
+# 2048. `claude_generation` cannot parse the non-numeric `preview` tail, so a
+# version gate can't express this — it needs its own row ahead of the
+# `anthropic/claude-mythos-*` catch-all.
+[[provider.anthropic]]
+model_match = "anthropic/claude-mythos-preview*"
+extends = true
+prompt_cache_min_prefix_tokens = 2048
+
 # Claude Fable 5 / Mythos 5 — the Mythos-class tier above Opus (launched
 # 2026-06-09). Same surface as Opus 4.7+: adaptive thinking (and on
 # this family thinking is always on — an explicit `disabled` is a 400, so
@@ -10,6 +38,7 @@
 # file, which wrongly grants `thinking_modes = ["enabled"]` and prefill.
 [[provider.anthropic]]
 model_match = "claude-fable-*"
+prompt_cache_min_prefix_tokens = 512
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -39,6 +68,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "claude-mythos-*"
+prompt_cache_min_prefix_tokens = 512
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -68,6 +98,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-fable-*"
+prompt_cache_min_prefix_tokens = 512
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -97,6 +128,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-mythos-*"
+prompt_cache_min_prefix_tokens = 512
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -151,18 +183,31 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Opus 5 halves the minimum cacheable prefix to 512 tokens. Verified against
+# the live API on 2026-07-24: a 691-token prefix produced
+# cache_creation_input_tokens on claude-opus-5 and zero (silently uncached) on
+# claude-opus-4-8. Everything else layers onto the 4.7 row below.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [5, 0]
+extends = true
+prompt_cache_min_prefix_tokens = 512
+
 # Opus 4.8 accepts a mid-conversation `system` section. Layer the native
 # placement onto the 4.7 capability row below via `extends`; older Opus models
-# keep folding the section to a `<system-reminder>` user block.
+# keep folding the section to a `<system-reminder>` user block. Opus 5 inherits
+# this via the same version_min gate.
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 8]
 extends = true
 system_message_placement = "native_directive"
+prompt_cache_min_prefix_tokens = 1024
 
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 7]
+prompt_cache_min_prefix_tokens = 2048
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -191,6 +236,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "claude-sonnet-5*"
+prompt_cache_min_prefix_tokens = 1024
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -248,6 +294,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "claude-haiku-*"
 version_min = [4, 5]
+prompt_cache_min_prefix_tokens = 4096
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -275,6 +322,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 4096
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -329,6 +377,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "claude-sonnet-*"
 version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 1024
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -409,6 +458,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
 version_min = [4, 7]
+prompt_cache_min_prefix_tokens = 2048
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -437,6 +487,7 @@ thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-5*"
+prompt_cache_min_prefix_tokens = 1024
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -493,6 +544,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "anthropic/claude-haiku-*"
 version_min = [4, 5]
+prompt_cache_min_prefix_tokens = 4096
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -519,6 +571,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
 version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 4096
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"
@@ -572,6 +625,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-*"
 version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 1024
 native_tools = true
 computer_use_style = "native_anthropic"
 screenshot_scaling = "xga"

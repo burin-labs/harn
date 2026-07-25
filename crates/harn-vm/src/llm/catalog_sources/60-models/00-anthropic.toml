@@ -276,6 +276,9 @@ provider = "anthropic"
 context_window = 1000000
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+deprecated = true
+deprecation_note = "Superseded by claude-opus-5 (same $5/$25 pricing). No formal sunset yet; switch when convenient."
+superseded_by = "claude-opus-5"
 tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
@@ -285,6 +288,47 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 serving_tiers = [
   { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." },
 ]
+
+# Claude Opus 5 (released 2026-07-24) — the current Opus generation and the
+# `opus` alias target: a drop-in upgrade from Opus 4.8 at identical $5 / $25
+# per MTok pricing (cache read 0.1x, 5-min cache write 1.25x). Inherits the
+# Opus 4.7+ request surface (adaptive thinking only, sampling params rejected,
+# no assistant prefill) with two changes verified against the live API on
+# 2026-07-24:
+#   1. Thinking is ON by default — omitting `thinking` returns thinking blocks,
+#      unlike Opus 4.7/4.8 where omission meant no thinking. `Disabled` must be
+#      sent explicitly as `{"type": "disabled"}`.
+#   2. Disabling thinking is capped at effort `high`. `thinking:{disabled}`
+#      with effort `xhigh`/`max` is a 400 ("Use effort 'high' or below, or
+#      enable thinking").
+# The minimum cacheable prefix also halves to 512 tokens (measured: a
+# 691-token prefix caches on Opus 5 and silently does not on Opus 4.8) — see
+# `prompt_cache_min_prefix_tokens` in the capability rules.
+# Rate limits are a bucket separate from the combined Opus 4.x pool.
+[models."claude-opus-5"]
+name = "Claude Opus 5"
+provider = "anthropic"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+# Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
+serving_tiers = [
+  { id = "fast", label = "Fast mode", mode = "synchronous", economics = "premium", request = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01" }, otps_speedup = 2.5, cost_multiplier = 2.0, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, latency = "higher output-token throughput than standard Claude serving", reliability = "research preview, account-manager gated", unsuitable_workloads = ["batch"], note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache." },
+]
+
+[models."anthropic/claude-opus-5"]
+name = "Claude Opus 5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
 
 [models."anthropic/claude-opus-4.8"]
 name = "Claude Opus 4.8 (via OpenRouter)"

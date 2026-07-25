@@ -60,7 +60,7 @@
             "unsuitable_workloads": [
               "batch"
             ],
-            "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated."
+            "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache."
           }
         ],
         "usage_accounting_confidence": "high"

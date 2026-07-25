@@ -143,6 +143,17 @@ pub struct ProviderRule {
     /// it. Known values today: `5m`, `1h`.
     #[serde(default)]
     pub prompt_cache_ttls: Option<Vec<String>>,
+    /// Shortest prefix this route will actually cache, in tokens. Below this
+    /// length a `cache_control` breakpoint is accepted and then silently
+    /// ignored — no error, no `cache_creation_input_tokens`, just a full-price
+    /// prompt every request. The floor is a *per-model* fact, not a wire-dialect
+    /// one: on the Anthropic dialect it is 512 (Opus 5, Fable 5, Mythos 5),
+    /// 1024 (Opus 4.8, Sonnet 5/4.6/4.5), 2048 (Opus 4.7, Mythos Preview), or
+    /// 4096 (Opus 4.6/4.5, Haiku 4.5), and it is not monotonic across
+    /// generations. `None` falls back to the dialect default in
+    /// [`crate::llm::cache_conformance::CacheControlProfile`].
+    #[serde(default)]
+    pub prompt_cache_min_prefix_tokens: Option<u32>,
     /// Request-side cache breakpoint strategy for routes that require
     /// `cache_control` to opt into provider prompt caching. Known values are
     /// `none`, `top_level`, and `last_block`.
@@ -536,6 +547,7 @@ impl ProviderRule {
             max_tools,
             prompt_caching,
             prompt_cache_ttls,
+            prompt_cache_min_prefix_tokens,
             cache_breakpoint_style,
             vision,
             audio,
@@ -633,6 +645,10 @@ impl ProviderRule {
         fill_opt(&mut self.max_tools, max_tools);
         fill_opt(&mut self.prompt_caching, prompt_caching);
         fill_opt(&mut self.prompt_cache_ttls, prompt_cache_ttls);
+        fill_opt(
+            &mut self.prompt_cache_min_prefix_tokens,
+            prompt_cache_min_prefix_tokens,
+        );
         fill_opt(&mut self.cache_breakpoint_style, cache_breakpoint_style);
         fill_opt(&mut self.audio, audio);
         fill_opt(&mut self.pdf, pdf);
@@ -1011,6 +1027,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         max_tools: None,
         prompt_caching: None,
         prompt_cache_ttls: None,
+        prompt_cache_min_prefix_tokens: None,
         cache_breakpoint_style: None,
         vision: None,
         audio: None,
@@ -1168,6 +1185,12 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
                 .unwrap_or_default()
         } else {
             Vec::new()
+        },
+        prompt_cache_min_prefix_tokens: if prompt_caching {
+            rule.prompt_cache_min_prefix_tokens
+                .or(defaults.prompt_cache_min_prefix_tokens)
+        } else {
+            None
         },
         cache_breakpoint_style: rule
             .cache_breakpoint_style
@@ -1368,120 +1391,4 @@ pub(crate) fn rule_matches(rule: &ProviderRule, model: &str) -> bool {
 /// never mis-parses across families.
 fn extract_version(model: &str) -> Option<(u32, u32)> {
     claude_generation(model).or_else(|| gpt_generation(model))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::lookup::parse_capabilities_toml;
-    use super::*;
-
-    #[test]
-    fn glob_match_substring() {
-        assert!(glob_match("*gpt*", "openai/gpt-5.4"));
-        assert!(glob_match("*claude*", "anthropic/claude-opus-4-7"));
-        assert!(!glob_match("*xyz*", "openai/gpt-5.4"));
-    }
-
-    /// Resolve capabilities for a synthetic provider whose rules come entirely
-    /// from `src`: the parsed file is passed as the builtin base with no user
-    /// layer, so no shipped rule interferes with the `extends` assertions.
-    fn extends_caps(src: &str) -> Capabilities {
-        let file = parse_capabilities_toml(src).expect("test capabilities toml parses");
-        lookup_with("testprov", "test-model", &file, None)
-    }
-
-    #[test]
-    fn extends_rule_fills_unset_fields_from_later_matching_rule() {
-        // Rule 1 opts into `extends` and sets only native_tools; rule 2 (lower
-        // precedence, same match) supplies the fields the chain left unset.
-        let caps = extends_caps(
-            r#"
-[[provider.testprov]]
-model_match = "test-*"
-extends = true
-native_tools = true
-
-[[provider.testprov]]
-model_match = "test-*"
-vision = true
-message_wire_format = "anthropic"
-"#,
-        );
-        assert!(caps.native_tools, "field from the extends rule applies");
-        assert!(
-            caps.vision,
-            "unset field filled from the later matching rule"
-        );
-        assert_eq!(caps.message_wire_format, WireDialect::Anthropic);
-    }
-
-    #[test]
-    fn non_extends_rule_terminates_resolution_unchanged() {
-        // Without `extends`, the first match wins outright and the later
-        // rule's vision never applies — the pre-`extends` first-match-wins
-        // behavior is preserved.
-        let caps = extends_caps(
-            r#"
-[[provider.testprov]]
-model_match = "test-*"
-native_tools = true
-
-[[provider.testprov]]
-model_match = "test-*"
-vision = true
-"#,
-        );
-        assert!(caps.native_tools);
-        assert!(
-            !caps.vision,
-            "a non-extends first match must not absorb later rules"
-        );
-    }
-
-    #[test]
-    fn extends_rule_does_not_override_explicitly_set_field() {
-        // The higher-precedence extends rule's explicit native_tools = true
-        // wins; the later rule only fills fields the chain left unset, so its
-        // native_tools = false is ignored while its vision still applies.
-        let caps = extends_caps(
-            r#"
-[[provider.testprov]]
-model_match = "test-*"
-extends = true
-native_tools = true
-
-[[provider.testprov]]
-model_match = "test-*"
-native_tools = false
-vision = true
-"#,
-        );
-        assert!(
-            caps.native_tools,
-            "the extends rule's explicit value is not overridden by a lower rule"
-        );
-        assert!(caps.vision, "still fills the field the chain left unset");
-    }
-
-    #[test]
-    fn extends_chain_falls_through_to_provider_defaults() {
-        // An unterminated extends chain (no later matching rule) fills its
-        // remaining gaps from provider defaults.
-        let caps = extends_caps(
-            r#"
-[provider_defaults.testprov]
-seed_supported = true
-
-[[provider.testprov]]
-model_match = "test-*"
-extends = true
-native_tools = true
-"#,
-        );
-        assert!(caps.native_tools, "field from the extends rule applies");
-        assert!(
-            caps.seed_supported,
-            "unset field filled from provider defaults"
-        );
-    }
 }

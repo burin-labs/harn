@@ -20,11 +20,20 @@ id = "claude-sonnet-4-6"
 provider = "anthropic"
 
 [aliases.opus]
+id = "claude-opus-5"
+provider = "anthropic"
+
+[aliases.opus5]
+id = "claude-opus-5"
+provider = "anthropic"
+
+# Previous Opus generation, kept addressable for pinned workflows.
+[aliases.opus48]
 id = "claude-opus-4-8"
 provider = "anthropic"
 
 # Fable is the Mythos-class tier above Opus, not an Opus successor — the
-# `opus` alias intentionally stays on claude-opus-4-8.
+# `opus` alias tracks the current Opus generation (claude-opus-5), not Fable.
 [aliases.fable]
 id = "claude-fable-5"
 provider = "anthropic"

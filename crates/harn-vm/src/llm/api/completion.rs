@@ -107,7 +107,7 @@ async fn vm_call_completion_openai_style(
         opts.provider_overrides.as_ref(),
     );
     if crate::llm::provider::provider_uses_anthropic_messages(&opts.provider, &opts.model) {
-        crate::llm::providers::anthropic::strip_unsupported_sampling_params(
+        crate::llm::providers::anthropic::reconcile_request_body(
             &mut body,
             &opts.model,
             &opts.thinking,

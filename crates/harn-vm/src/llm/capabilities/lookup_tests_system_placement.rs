@@ -8,20 +8,25 @@ use super::{
 fn native_directive_gated_to_opus_4_8_and_layers_via_extends() {
     clear_user_overrides();
 
-    let opus_48 = lookup("anthropic", "claude-opus-4-8");
-    assert_eq!(
-        opus_48.system_message_placement,
-        Some(SystemMessagePlacement::NativeDirective)
-    );
-    assert!(
-        opus_48.native_tools,
-        "extends must layer the placement, not replace the 4.7 capabilities"
-    );
-    assert!(!opus_48.thinking_modes.is_empty());
-    assert_eq!(
-        resolve_system_message_placement(&opus_48),
-        SystemMessagePlacement::NativeDirective
-    );
+    // Opus 5 inherits the same >= 4.8 gate through a second `extends` hop.
+    for model in ["claude-opus-4-8", "claude-opus-5"] {
+        let caps = lookup("anthropic", model);
+        assert_eq!(
+            caps.system_message_placement,
+            Some(SystemMessagePlacement::NativeDirective),
+            "{model}"
+        );
+        assert!(
+            caps.native_tools,
+            "{model}: extends must layer the placement, not replace the 4.7 capabilities"
+        );
+        assert!(!caps.thinking_modes.is_empty(), "{model}");
+        assert_eq!(
+            resolve_system_message_placement(&caps),
+            SystemMessagePlacement::NativeDirective,
+            "{model}"
+        );
+    }
     for model in [
         "claude-fable-5",
         "claude-mythos-5",

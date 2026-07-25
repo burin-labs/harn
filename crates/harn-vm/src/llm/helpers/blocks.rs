@@ -77,8 +77,17 @@ pub(super) fn overall_visibility(blocks: &[VmValue], default_visibility: &str) -
     resolved
 }
 
+/// Flatten a message's content blocks into one display string.
+///
+/// Adjacent `text` / `output_text` blocks are concatenated with **no**
+/// separator: a streamed assistant turn arrives as chunks split at arbitrary
+/// byte offsets, so `["El Al", "to above it"]` is one word broken across two
+/// blocks. Space-joining those corrupts the text ("El Al to above it").
+/// Label-ish blocks (`<tool_call:…>`, `<image:…>`) are standalone tokens and
+/// do get a space between them and their neighbours.
 pub(super) fn render_blocks_text(blocks: &[VmValue]) -> String {
-    let mut parts = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
+    let mut previous_was_text = false;
     for block in blocks {
         let Some(dict) = block.as_dict() else {
             continue;
@@ -87,6 +96,7 @@ pub(super) fn render_blocks_text(blocks: &[VmValue]) -> String {
             .get("type")
             .map(|value| value.display())
             .unwrap_or_else(|| "text".to_string());
+        let is_text = matches!(kind.as_str(), "text" | "output_text");
         let text = match kind.as_str() {
             "text" | "output_text" => dict
                 .get("text")
@@ -112,9 +122,14 @@ pub(super) fn render_blocks_text(blocks: &[VmValue]) -> String {
             "file" | "document" | "attachment" => render_assetish_label(&kind, dict),
             other => format!("<{other}>"),
         };
-        if !text.is_empty() {
-            parts.push(text);
+        if text.is_empty() {
+            continue;
         }
+        match parts.last_mut() {
+            Some(last) if is_text && previous_was_text => last.push_str(&text),
+            _ => parts.push(text),
+        }
+        previous_was_text = is_text;
     }
     parts.join(" ")
 }
@@ -128,4 +143,57 @@ fn render_assetish_label(kind: &str, dict: &crate::value::DictMap) -> String {
         .map(|value| value.display())
         .unwrap_or_else(|| kind.to_string());
     format!("<{kind}:{label}>")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_blocks_text;
+    use crate::value::{DictMap, VmDictExt, VmValue};
+
+    fn block(kind: &str, text: &str) -> VmValue {
+        let mut dict = DictMap::new();
+        dict.put_str("type", kind);
+        dict.put_str("text", text);
+        VmValue::dict(dict)
+    }
+
+    #[test]
+    fn streamed_text_chunks_concatenate_without_a_separator() {
+        // A streamed assistant turn is chunked at arbitrary byte offsets, so
+        // consecutive text blocks routinely split a word. Reproduced live
+        // against claude-opus-5 on 2026-07-24, where the transcript rendered
+        // "El Al" + "to above it" as "El Al to above it".
+        let rendered = render_blocks_text(&[
+            block("output_text", "La"),
+            block("output_text", " Paz sits above sea level, with El Al"),
+            block("output_text", "to above it."),
+        ]);
+        assert_eq!(
+            rendered,
+            "La Paz sits above sea level, with El Alto above it."
+        );
+    }
+
+    #[test]
+    fn label_blocks_stay_space_separated_from_text() {
+        let mut tool = DictMap::new();
+        tool.put_str("type", "tool_call");
+        tool.put_str("name", "read_file");
+        let rendered = render_blocks_text(&[
+            block("text", "before"),
+            VmValue::dict(tool),
+            block("text", "after"),
+        ]);
+        assert_eq!(rendered, "before <tool_call:read_file> after");
+    }
+
+    #[test]
+    fn empty_blocks_do_not_split_a_run_of_text() {
+        let rendered = render_blocks_text(&[
+            block("output_text", "one"),
+            block("output_text", ""),
+            block("output_text", "two"),
+        ]);
+        assert_eq!(rendered, "onetwo");
+    }
 }

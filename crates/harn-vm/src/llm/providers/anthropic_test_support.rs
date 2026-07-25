@@ -1,0 +1,60 @@
+//! Shared request-payload fixture for the Anthropic provider tests.
+//! One owner so `anthropic.rs` and its sibling test modules do not each
+//! carry a drifting copy.
+
+use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
+
+pub(super) fn base_payload() -> LlmRequestPayload {
+    LlmRequestPayload {
+        provider: "anthropic".to_string(),
+        model: "claude-sonnet-4-6".to_string(),
+        region: None,
+        api_key: String::new(),
+        api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
+        session_id: None,
+        messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
+        system: Some("system prompt".to_string()),
+        max_tokens: 64,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        logprobs: false,
+        top_logprobs: None,
+        stop: None,
+        seed: None,
+        frequency_penalty: None,
+        presence_penalty: None,
+        fast: false,
+        output_format: crate::llm::api::OutputFormat::Text,
+        response_format: None,
+        json_schema: None,
+        output_schema: None,
+        schema_stream_abort: false,
+        thinking: ThinkingConfig::Disabled,
+        anthropic_beta_features: Vec::new(),
+        vision: false,
+        native_tools: Some(vec![serde_json::json!({
+            "name": "read_file",
+            "description": "Read a file",
+            "input_schema": {"type": "object"},
+        })]),
+        provider_tools: Vec::new(),
+        tool_choice: None,
+        cache: false,
+        prompt_cache_ttl: None,
+        timeout: None,
+        stream: true,
+        provider_overrides: None,
+        previous_response_id: None,
+        store: None,
+        background: None,
+        truncation: None,
+        compact: None,
+        include: None,
+        max_tool_calls: None,
+        prefill: None,
+        reminder_lifecycle: Vec::new(),
+        cli_llm_mock_scope: None,
+        mock_scope: None,
+    }
+}

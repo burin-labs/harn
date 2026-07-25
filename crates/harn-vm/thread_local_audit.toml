@@ -232,7 +232,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/providers/anthropic.rs"
-statics = ["ANTHROPIC_PREFILL_WARN_ONCE", "ANTHROPIC_SAMPLING_WARN_ONCE", "ANTHROPIC_ADAPTIVE_WARN_ONCE", "ANTHROPIC_FORCED_JSON_WARN_ONCE"]
+statics = ["ANTHROPIC_PREFILL_WARN_ONCE", "ANTHROPIC_SAMPLING_WARN_ONCE", "ANTHROPIC_ADAPTIVE_WARN_ONCE", "ANTHROPIC_DISABLED_EFFORT_WARN_ONCE", "ANTHROPIC_FORCED_JSON_WARN_ONCE"]
 category = "thread_private"
 plan = "thread_private_cache"
 

@@ -1,0 +1,91 @@
+// Tests for scripts/claude_bash_guard.harn — the PreToolUse Bash guard.
+import "../claude_bash_guard.harn"
+
+fn payload(command: string) -> string {
+  return json_stringify({tool_name: "Bash", tool_input: {command: command}})
+}
+
+@test
+pipeline test_program_of_sees_through_env_prefixes(task) {
+  assert_eq(program_of("cargo test"), "cargo")
+  assert_eq(program_of("  cargo   test  "), "cargo")
+  assert_eq(program_of("env -u HARN_EGRESS_BLOCK_PRIVATE cargo test"), "cargo")
+  assert_eq(program_of("RUST_MIN_STACK=16777216 cargo build"), "cargo")
+  assert_eq(program_of("./target/release/harn run x.harn"), "harn")
+  assert_eq(program_of("/usr/bin/make test"), "make")
+  assert_eq(program_of(""), "")
+}
+
+@test
+pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(task) {
+  for verb in ["build", "check", "clippy", "fmt", "test", "nextest", "bench"] {
+    assert(
+      cargo_violation("cargo " + verb + " -p harn-vm") != "",
+      "cargo " + verb + " should be denied",
+    )
+  }
+  // The message names the replacement so the caller does not have to guess.
+  assert(cargo_violation("cargo test -p harn-vm").contains("make test"))
+  assert(cargo_violation("cargo clippy").contains("make lint"))
+}
+
+@test
+pipeline test_one_off_cargo_verbs_pass_through(task) {
+  // No Makefile owner: these are inspection commands, not build/test lanes.
+  for command in ["cargo tree -p harn-vm", "cargo add serde", "cargo --version"] {
+    assert_eq(cargo_violation(command), "")
+  }
+}
+
+@test
+pipeline test_cargo_is_caught_anywhere_in_a_pipeline(task) {
+  assert(cargo_violation("cd /repo && cargo test") != "")
+  assert(cargo_violation("make build; cargo test | tail") != "")
+  // A `cargo` substring inside another word is not a cargo call.
+  assert_eq(cargo_violation("grep cargo-test README.md"), "")
+}
+
+@test
+pipeline test_piping_a_slow_command_into_a_filter_is_denied(task) {
+  for command in [
+    "cargo test -p harn-vm | grep FAILED",
+    "make test | tail -20",
+    "pnpm run test | head",
+    "swift build 2>&1 | grep error",
+  ] {
+    assert(
+      discarded_output_violation(command) != "",
+      command + " discards output that only a rerun could recover",
+    )
+  }
+}
+
+@test
+pipeline test_redirecting_first_is_allowed(task) {
+  for command in [
+    "make test > /tmp/out.log 2>&1; grep FAILED /tmp/out.log",
+    "cargo test 2>&1 | tee /tmp/out.log | tail",
+    "make check-drift > .harn-runs/cmd.log 2>&1",
+  ] {
+    assert_eq(discarded_output_violation(command), "", command + " keeps the full output")
+  }
+}
+
+@test
+pipeline test_fast_commands_may_pipe_freely(task) {
+  for command in ["git status --short | head", "ls -la | grep harn", "echo hi | wc -l"] {
+    assert_eq(discarded_output_violation(command), "")
+  }
+}
+
+@test
+pipeline test_decision_only_gates_bash_and_honors_the_escape_hatch(task) {
+  assert(!decision(payload("cargo test")).allow)
+  assert(decision(payload("HARN_ALLOW_RAW_CARGO=1 cargo test")).allow)
+  assert(decision(payload("make test")).allow)
+  // Non-Bash tools and unparseable payloads never deny — a broken guard must
+  // not read as a rejection.
+  assert(decision(json_stringify({tool_name: "Read", tool_input: {}})).allow)
+  assert(decision("not json at all").allow)
+  assert(decision("").allow)
+}
