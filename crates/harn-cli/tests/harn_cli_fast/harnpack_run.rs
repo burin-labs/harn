@@ -21,7 +21,7 @@ use harn_cli::commands::run::harnpack::HarnpackRunOptions;
 use harn_cli::commands::run::{
     execute_run_with_harnpack_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
 };
-use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use harn_vm::orchestration::{build_harnpack, read_harnpack};
 use tempfile::TempDir;
 use tokio::runtime::Builder;
@@ -80,7 +80,7 @@ fn execute(pack_path: &Path, cache_dir: &Path, options: HarnpackRunOptions) -> R
         .build()
         .expect("tokio current-thread runtime")
         .block_on(async move {
-            let _env = env_lock::lock_env().lock().await;
+            let _env = harn_state_lock::lock_harn_state_async().await;
             let _cwd = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
             let prev_cache = std::env::var("HARN_CACHE_DIR").ok();

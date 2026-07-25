@@ -20,7 +20,7 @@ use std::thread;
 
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
-use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use tempfile::TempDir;
 
 fn write_file(dir: &Path, relative: &str, contents: &str) -> PathBuf {
@@ -65,7 +65,7 @@ fn run_harn_in_process(
     env: Vec<EnvOverride>,
 ) -> RunOutcome {
     run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let original_cwd = std::env::current_dir().ok();
@@ -112,7 +112,7 @@ fn run_playground_in_process(
 ) -> Result<String, String> {
     let task = task.to_string();
     run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let original_cwd = std::env::current_dir().ok();

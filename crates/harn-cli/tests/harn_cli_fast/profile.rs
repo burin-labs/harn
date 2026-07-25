@@ -14,7 +14,7 @@ use std::fs;
 use std::thread;
 
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
-use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use harn_vm::profile::RunProfile;
 use tempfile::TempDir;
 
@@ -57,7 +57,7 @@ pipeline main() {
     let outcome: RunOutcome = run_in_harn_runtime({
         let json_path = json_path.clone();
         move || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
             execute_run(
@@ -145,7 +145,7 @@ pipeline main() {
     let outcome: RunOutcome = run_in_harn_runtime({
         let json_path = json_path.clone();
         move || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
             execute_run(
@@ -220,7 +220,7 @@ pipeline main() {
     let outcome: RunOutcome = run_in_harn_runtime({
         let json_path = json_path.clone();
         move || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
             execute_run(
@@ -272,7 +272,7 @@ pipeline main() {
 
     let outcome: RunOutcome = run_in_harn_runtime({
         move || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
             execute_run(
@@ -319,7 +319,7 @@ pipeline main() {
     let outcome: RunOutcome = run_in_harn_runtime({
         let json_path = json_path.clone();
         move || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
             execute_run(
@@ -384,7 +384,7 @@ pipeline main() {
     .expect("write script");
 
     let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         execute_run(

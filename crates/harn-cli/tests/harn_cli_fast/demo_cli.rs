@@ -16,7 +16,7 @@ use harn_cli::commands::run::{
     RunSandboxOptions,
 };
 use harn_cli::env_guard::ScopedEnvVar;
-use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -110,7 +110,7 @@ fn run_demo_scenario(id: &str) -> RunOutcome {
         "missing tape.jsonl for {id}"
     );
     run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         let isolated_assets = tempfile::TempDir::new().expect("create isolated demo assets dir");
         copy_demo_assets(&assets, isolated_assets.path());

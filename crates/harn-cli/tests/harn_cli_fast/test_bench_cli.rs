@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::thread;
 
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
-use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use harn_vm::testbench::fidelity::{compare, FidelityMode};
 use harn_vm::testbench::overlay_fs::{DiffKind, OverlayFs};
 use harn_vm::testbench::process_tape::{
@@ -57,7 +57,7 @@ fn run_under_testbench(
     configure: impl FnOnce() -> Testbench + Send + 'static,
 ) -> RunOutcome {
     run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let original_cwd = std::env::current_dir().ok();
@@ -587,7 +587,7 @@ where
                 .build()
                 .expect("build DES runtime");
             let outcome = rt.block_on(async move {
-                let _env_guard = env_lock::lock_env().lock().await;
+                let _env_guard = harn_state_lock::lock_harn_state_async().await;
                 let _cwd_guard = cwd_lock::lock_cwd_async().await;
                 harn_vm::reset_thread_local_state();
                 let original_cwd = std::env::current_dir().ok();

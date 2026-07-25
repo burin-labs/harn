@@ -677,7 +677,7 @@ __io_println(llm_call("prompt", "system"))
 
     #[tokio::test(flavor = "current_thread")]
     async fn local_provider_env_counts_as_configured() {
-        let _guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let _guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
         let previous_base = std::env::var("LOCAL_LLM_BASE_URL").ok();
         let previous_model = std::env::var("LOCAL_LLM_MODEL").ok();
         std::env::set_var("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8000");

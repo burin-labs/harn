@@ -14,7 +14,7 @@ use std::thread;
 use harn_cli::cli::PrecompileArgs;
 use harn_cli::commands::precompile;
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
-use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use tempfile::TempDir;
 
 fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
@@ -41,7 +41,7 @@ fn run_harn(cache_dir: &Path, script: &Path) -> RunOutcome {
     let cache_dir = cache_dir.to_path_buf();
     let script = script.to_path_buf();
     run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let prev_cache = std::env::var("HARN_CACHE_DIR").ok();
@@ -195,7 +195,7 @@ fn precompile_then_run_skips_compile() {
     run_in_harn_runtime({
         let target = script.clone();
         move || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             harn_vm::reset_thread_local_state();
             // Call the in-process Rust path directly. The async dispatch
             // wrapper (`precompile::run`) spawns child processes which
@@ -259,7 +259,7 @@ fn relocated_precompiled_module_uses_adjacent_artifact_and_rebinds_diagnostics()
     run_in_harn_runtime({
         let target = build_lib.clone();
         move || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             harn_vm::reset_thread_local_state();
             // Call the in-process Rust path directly. The async dispatch
             // wrapper (`precompile::run`) spawns child processes which
@@ -327,7 +327,7 @@ fn disabled_cache_does_not_write_files() {
 
     let cache_dir = cache.path().to_path_buf();
     let outcome = run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         let prev_cache = std::env::var("HARN_CACHE_DIR").ok();

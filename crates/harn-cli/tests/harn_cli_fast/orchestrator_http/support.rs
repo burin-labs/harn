@@ -17,7 +17,7 @@ pub(super) use harn_cli::commands::orchestrator::harness::{
     OrchestratorConfig, OrchestratorHarness,
 };
 pub(super) use harn_cli::env_guard::ScopedEnvVar;
-pub(super) use harn_cli::tests::common::env_lock;
+pub(super) use harn_cli::tests::common::harn_state_lock;
 pub(super) use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 pub(super) use hmac::{Hmac, KeyInit, Mac};
 pub(super) use rcgen::generate_simple_self_signed;
@@ -28,7 +28,6 @@ pub(super) use serde_json::Value as JsonValue;
 pub(super) use sha2::Sha256;
 pub(super) use tempfile::TempDir;
 pub(super) use time::OffsetDateTime;
-pub(super) use tokio::sync::MutexGuard;
 
 pub(super) use crate::test_util::connectors::github_connector_module;
 use crate::test_util::connectors::{provider_declarations, write_first_party_connector_modules};
@@ -615,7 +614,7 @@ pub fn on_task(event: TriggerEvent) {
 /// guards for the test's lifetime so concurrent tests don't clobber
 /// each other's process-wide env vars.
 pub(super) struct EnvGuards {
-    pub(super) _lock: MutexGuard<'static, ()>,
+    pub(super) _lock: harn_state_lock::HarnStateGuard,
     pub(super) _vars: Vec<ScopedEnvVar>,
 }
 
@@ -623,7 +622,7 @@ pub(super) struct EnvGuards {
 /// scoped env vars. Variables are removed when the returned [`EnvGuards`]
 /// drops, after the harness has shut down.
 pub(super) async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
-    let lock = env_lock::lock_env().lock().await;
+    let lock = harn_state_lock::lock_harn_state_async().await;
     let vars = envs
         .iter()
         .map(|(key, value)| ScopedEnvVar::set(key, value))

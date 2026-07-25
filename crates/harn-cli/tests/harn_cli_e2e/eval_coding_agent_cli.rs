@@ -10,7 +10,7 @@ use harn_cli::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
     RunSandboxOptions,
 };
-use harn_cli::tests::common::env_lock;
+use harn_cli::tests::common::harn_state_lock;
 
 const PARITY_DIRECTORY: &str = "parity";
 const PARITY_OVERLAY_FILENAME: &str = "tool_mode_parity_overlay.toml";
@@ -65,7 +65,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     };
 
     let exit = run_in_harn_runtime(|| async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         harn_cli::commands::eval_coding_agent::run(args).await
     });
     assert_eq!(exit, 0, "mock coding-agent eval should pass");
@@ -254,7 +254,7 @@ fn json_tool_run_stops_after_required_tool_and_final_answer() {
     };
 
     let exit = run_in_harn_runtime(|| async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         harn_cli::commands::eval_coding_agent::run(args).await
     });
     assert_eq!(exit, 0, "mock JSON coding-agent eval should pass");
@@ -314,7 +314,7 @@ fn mock_matrix_resumes_completed_live_verify_cell_from_ledger() {
     let first_exit = run_in_harn_runtime({
         let args = args();
         || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             harn_cli::commands::eval_coding_agent::run(args).await
         }
     });
@@ -336,7 +336,7 @@ fn mock_matrix_resumes_completed_live_verify_cell_from_ledger() {
     let second_exit = run_in_harn_runtime({
         let args = args();
         || async move {
-            let _env_guard = env_lock::lock_env().lock().await;
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             harn_cli::commands::eval_coding_agent::run(args).await
         }
     });
@@ -379,7 +379,7 @@ fn mock_matrix_output_dir_can_be_workspace_root() {
     };
 
     let exit = run_in_harn_runtime(|| async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         harn_cli::commands::eval_coding_agent::run(args).await
     });
     assert_eq!(exit, 0, "mock coding-agent eval should pass");
@@ -393,7 +393,7 @@ fn read_only_audit_verifier_accepts_repeated_read_file_calls() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let fixture = manifest_dir.join("tests/fixtures/read_only_audit_verifier.harn");
     let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         harn_vm::reset_thread_local_state();
         execute_run_with_sandbox_options(
             &fixture.to_string_lossy(),
@@ -441,7 +441,7 @@ fn coding_agent_suite_default_structural_validator_vetoes_phantom_completion() {
     let output_dir = workspace.join("out");
     let output_dir_for_run = output_dir.clone();
     let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         harn_vm::reset_thread_local_state();
         execute_run_with_sandbox_options(
             &suite.to_string_lossy(),
@@ -499,7 +499,7 @@ fn coding_agent_suite_records_tool_format_override_transcript_event() {
     let output_dir = workspace.join("out");
     let output_dir_for_run = output_dir.clone();
     let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         harn_vm::reset_thread_local_state();
         execute_run_with_sandbox_options(
             &suite.to_string_lossy(),

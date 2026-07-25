@@ -214,7 +214,7 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
 
 #[tokio::test]
 async fn failures_and_timeout_do_not_leak_module_timing_to_later_runs() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write("suite/helper.harn", "pub fn value() { return 42 }\n");
     temp.write(
@@ -307,7 +307,7 @@ handler = "handlers::missing"
 
 #[tokio::test]
 async fn reusable_session_hits_prepared_cache_without_sharing_module_state() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/counter.harn",
@@ -404,7 +404,7 @@ fn discover_test_files_returns_canonical_absolute_paths() {
 #[tokio::test]
 async fn run_tests_uses_file_parent_as_execution_cwd_and_restores_shell_cwd() {
     let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_cwd.harn",
@@ -430,7 +430,7 @@ pipeline test_current_dir(task) {
 #[tokio::test]
 async fn parallel_run_tests_uses_each_file_parent_as_execution_cwd() {
     let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/a/test_one.harn",
@@ -456,7 +456,7 @@ pipeline test_two(task) {
 
 #[tokio::test]
 async fn run_tests_loads_cli_skill_dirs() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "skills/review/SKILL.md",
@@ -507,7 +507,7 @@ pipeline test_cli_skills_again(task) {
 
 #[tokio::test]
 async fn user_tests_default_to_memory_event_log() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let _backend_guard = ScopedEnvVar::unset(harn_vm::event_log::HARN_EVENT_LOG_BACKEND_ENV);
     let _dir_guard = ScopedEnvVar::unset(harn_vm::event_log::HARN_EVENT_LOG_DIR_ENV);
     let _sqlite_guard = ScopedEnvVar::unset(harn_vm::event_log::HARN_EVENT_LOG_SQLITE_PATH_ENV);
@@ -779,7 +779,7 @@ fn resource_gate_caps_heavy_weight_at_capacity() {
 async fn parallel_scheduler_runs_heavy_tests_without_oversubscribing() {
     // Heavy(2) should never run concurrently with another test when
     // the pool only has two workers — there are no spare permits.
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_heavy.harn",
@@ -805,7 +805,7 @@ pipeline test_light(task) {}
 
 #[tokio::test]
 async fn parallel_scheduler_handles_serial_group_annotation() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_serial.harn",
@@ -832,7 +832,7 @@ pipeline test_serial_two(task) {}
 
 #[tokio::test]
 async fn parallel_pipelines_isolate_egress_policy_and_http_mocks() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let _egress_env = [
         harn_vm::egress::HARN_EGRESS_ALLOW_ENV,
         harn_vm::egress::HARN_EGRESS_DENY_ENV,
@@ -882,7 +882,7 @@ pipeline test_policy_{index}(_task) {{
 
 #[tokio::test]
 async fn environment_egress_policy_precedes_each_pipeline_policy() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let _allow = ScopedEnvVar::unset(harn_vm::egress::HARN_EGRESS_ALLOW_ENV);
     let _deny = ScopedEnvVar::unset(harn_vm::egress::HARN_EGRESS_DENY_ENV);
     let _default = ScopedEnvVar::set(harn_vm::egress::HARN_EGRESS_DEFAULT_ENV, "deny");
@@ -920,7 +920,7 @@ pipeline test_environment_two(_task) {
 
 #[tokio::test]
 async fn parallel_scheduler_persists_timings_cache() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_timed.harn",
@@ -962,7 +962,7 @@ pipeline test_second(task) {}
 /// land on the same scheduler thread.
 #[tokio::test]
 async fn worker_resets_thread_local_state_between_cases() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_isolation.harn",
@@ -1003,7 +1003,6 @@ pipeline test_b_clock_is_fresh(task) {
 // would reintroduce the cross-test state race this fixture covers.
 #[tokio::test(flavor = "current_thread")]
 async fn user_tests_isolate_persistent_runtime_state_per_case() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
     let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let ambient_state = tempfile::tempdir().expect("ambient state tempdir");
     let _ambient_state_guard = ScopedEnvVar::set(
@@ -1120,7 +1119,7 @@ pipeline test_safe_text_patch_uses_case_state(task) {
 
 #[tokio::test]
 async fn summary_aggregate_timings_sum_phases_across_results() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_phases.harn",
@@ -1150,7 +1149,7 @@ pipeline test_two(task) { assert_eq(2, 2) }
 
 #[tokio::test]
 async fn parallel_scheduler_emits_progress_events() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_events.harn",
@@ -1188,7 +1187,7 @@ pipeline test_b(task) {}
 
 #[tokio::test]
 async fn fail_fast_stops_sequential_execution_after_first_failure() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_fail_fast.harn",
@@ -1211,7 +1210,7 @@ pipeline test_z_must_not_run(task) { assert(false, "second case ran") }
 
 #[tokio::test]
 async fn fail_fast_discovery_error_prevents_case_execution() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write("suite/test_broken.harn", "pipeline test_broken( {");
     temp.write(
@@ -1245,7 +1244,7 @@ fn fail_fast_parallel_claim_refuses_queued_case_after_cancellation() {
 
 #[tokio::test]
 async fn parameterized_test_rows_bind_values_and_report_independently() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_parameterized.harn",
@@ -1282,7 +1281,7 @@ pipeline test_equal(actual, expected) {
 
 #[tokio::test]
 async fn parameterized_test_filter_selects_individual_row() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_parameterized.harn",
@@ -1311,7 +1310,7 @@ pipeline test_length(value, expected) { assert_eq(len(value), expected) }
 
 #[tokio::test]
 async fn malformed_parameterized_rows_fail_during_discovery() {
-    let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
     temp.write(
         "suite/test_parameterized.harn",

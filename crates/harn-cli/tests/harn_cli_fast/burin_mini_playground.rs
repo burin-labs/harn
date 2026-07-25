@@ -21,7 +21,7 @@ use harn_cli::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
     RunSandboxOptions,
 };
-use harn_cli::tests::common::{cwd_lock, env_lock};
+use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use tempfile::TempDir;
 
 fn repo_root() -> PathBuf {
@@ -110,10 +110,10 @@ fn run_playground_case(
 
     run_in_harn_runtime(move || {
         async move {
-            // env_lock + cwd_lock together: pipeline/host scripts read both
-            // process-wide env vars (HARN_TASK / HARN_LLM_*) and the cwd via
-            // RunExecutionRecord.cwd, so we must serialize on both fronts.
-            let _env_guard = env_lock::lock_env().lock().await;
+            // harn_state_lock + cwd_lock together: pipeline/host scripts read
+            // both process-wide env vars (HARN_TASK / HARN_LLM_*) and the cwd
+            // via RunExecutionRecord.cwd, so we must serialize on both fronts.
+            let _env_guard = harn_state_lock::lock_harn_state_async().await;
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             // Each test invocation runs in the same process, so wipe any
             // FIFO/LLM state left by a previous case before installing the
@@ -476,7 +476,7 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
     let sandbox_root = temp.path().to_path_buf();
 
     let outcome: RunOutcome = run_in_harn_runtime(move || async move {
-        let _env_guard = env_lock::lock_env().lock().await;
+        let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
         std::env::set_var("BURIN_MINI_SEMANTIC_EVAL_MODE", "heuristic");

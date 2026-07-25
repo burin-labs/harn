@@ -90,7 +90,7 @@ amount: event.provider_payload.raw.value.amount,
 async fn stream_trigger_route_uses_generic_stream_connector_in_process() {
     // Env vars are process-global; hold the lock for the entire test so
     // concurrent unit tests that also set env vars don't race.
-    let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_lock = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
 
     let temp = tempfile::TempDir::new().unwrap();
@@ -170,7 +170,7 @@ async fn stream_trigger_route_uses_generic_stream_connector_in_process() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cron_persona_route_executes_entry_workflow_before_completion() {
-    let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_lock = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
     let clock = harn_vm::clock::PausedClock::new(
         time::OffsetDateTime::from_unix_timestamp(1_784_195_970).unwrap(),
@@ -264,7 +264,7 @@ pub pipeline run(event) {{
 #[test]
 fn materialized_cron_persona_executes_its_generated_entry_workflow() {
     crate::tests::common::async_runtime::block_on_cli_stack_multi_thread(|| async {
-        let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+        let _env_lock = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
         let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
         let clock = harn_vm::clock::PausedClock::new(
             time::OffsetDateTime::from_unix_timestamp(1_784_195_970).unwrap(),
@@ -328,7 +328,7 @@ fn materialized_cron_persona_executes_its_generated_entry_workflow() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn harness_start_waits_for_topic_pumps_before_ready() {
-    let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+    let _env_lock = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
 
     let temp = tempfile::TempDir::new().unwrap();

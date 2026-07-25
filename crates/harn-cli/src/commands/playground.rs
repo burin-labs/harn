@@ -485,7 +485,7 @@ pub fn request_permission(tool_name, request_args) { return true }
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_executes_host_backed_script() {
-        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -547,7 +547,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_reports_missing_capability_with_caller_context() {
-        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -584,7 +584,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_replays_cli_llm_mock_fixtures() {
-        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
@@ -632,7 +632,7 @@ pipeline default(task) {
 
     #[tokio::test(flavor = "current_thread")]
     async fn playground_replays_cli_llm_mock_error_envelopes() {
-        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
         let temp = tempfile::tempdir().unwrap();
         let host = temp.path().join("host.harn");
         let script = temp.path().join("pipeline.harn");
