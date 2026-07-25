@@ -2258,6 +2258,31 @@ harn runs view --json .harn-runs/<run>.json
 harn runs view --json --session .harn-runs/
 ```
 
+Project one authoritative run into a `harn.agent_training_example.v1`
+training example.
+
+```bash
+harn runs export-training .harn-runs/<run>.json --json
+harn runs export-training .harn-runs/<run>.json --out example.jsonl
+harn runs export-training .harn-runs/ --run-id <run-id> --session-id <session-id>
+```
+
+The example carries the exact provider-visible message sequence, typed
+tool-call/result pairs, the tool catalog exactly as it was served to the model,
+and provenance binding the run id, session id, route, tool format, token usage,
+terminal status, and the source transcript's SHA-256 and event span.
+
+The projection is strict. Malformed JSONL, a missing, orphaned, duplicated, or
+out-of-order tool result, an unknown event schema version, a truncated terminal
+record, a sidecar edited after the run finalized, and a mismatched run or
+session id each fail with a structured diagnostic instead of being skipped.
+Pass `--run-id` to name which run to project when the path is a directory
+holding several; nothing is selected by output length or a `DONE` marker.
+
+`harn models lora export` consumes the projected example directly, carrying the
+served catalog through to the trainer rather than inferring one from prompt
+prose or observed argument values.
+
 ## harn replay
 
 Replay a persisted workflow run record from saved output, a replay-oracle

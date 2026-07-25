@@ -10,14 +10,14 @@ mod behavior;
 mod export;
 mod manifest;
 mod preflight;
+mod projected;
 mod promote;
 mod promotion_templates;
-mod render;
 mod train;
 mod trainer;
 
+pub(super) use crate::commands::embedded_report::{render_embedded_report, run_embedded_report};
 use promotion_templates::lora_promotion_probe_command_templates;
-pub(super) use render::{render_embedded_lora_report, run_embedded_lora_report};
 use trainer::{
     normalize_lora_trainer, parse_trainer_identity, read_trainer_identity_file,
     trainer_environment_check, trainer_identity_args, trainer_identity_check,
@@ -59,7 +59,7 @@ async fn inspect(args: &ModelsLoraInspectArgs) -> i32 {
             return 1;
         }
     };
-    render_embedded_lora_report(
+    render_embedded_report(
         &report,
         LORA_INSPECT_PAYLOAD_ENV,
         LORA_INSPECT_PAYLOAD_PRETTY_ENV,
@@ -78,7 +78,7 @@ async fn plan(args: &ModelsLoraPlanArgs) -> i32 {
             return 1;
         }
     };
-    render_embedded_lora_report(
+    render_embedded_report(
         &report,
         LORA_PLAN_PAYLOAD_ENV,
         LORA_PLAN_PAYLOAD_PRETTY_ENV,

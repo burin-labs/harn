@@ -35,10 +35,6 @@ struct CapturingAgentEventSink {
     events: Arc<std::sync::Mutex<Vec<crate::agent_events::AgentEvent>>>,
 }
 
-thread_local! {
-    static FALLBACK_TEXT_TOOL_CALL_SEQ: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
 impl crate::agent_events::AgentEventSink for CapturingAgentEventSink {
     fn handle_event(&self, event: &crate::agent_events::AgentEvent) {
         if event.session_id() != self.session_id {
@@ -668,7 +664,10 @@ async fn host_agent_parse_tool_calls_impl(
     };
     let format = tools::TextToolFormat::from_option(&tool_format);
     let mut parsed = tools::parse_text_tool_calls_in_format(&text, tools.as_ref(), format);
-    tools::stamp_synthetic_tool_call_ids(&mut parsed.calls, next_text_tool_call_seq_for_parse);
+    tools::stamp_synthetic_tool_call_ids(
+        &mut parsed.calls,
+        crate::agent_sessions::next_text_tool_call_seq_for_parse,
+    );
     Ok(json_to_vm_value(&serde_json::json!({
         "calls": parsed.calls,
         "tool_calls": parsed.calls,
@@ -680,19 +679,6 @@ async fn host_agent_parse_tool_calls_impl(
         "done_marker": parsed.done_marker,
         "canonical_text": parsed.canonical,
     })))
-}
-
-fn next_text_tool_call_seq_for_parse() -> u64 {
-    if let Some(session_id) = crate::agent_sessions::current_session_id() {
-        if let Some(seq) = crate::agent_sessions::next_text_tool_call_seq(&session_id) {
-            return seq;
-        }
-    }
-    FALLBACK_TEXT_TOOL_CALL_SEQ.with(|cell| {
-        let seq = cell.get();
-        cell.set(seq.checked_add(1).unwrap_or(0));
-        seq
-    })
 }
 
 fn agent_primitive_max_concurrent_tools(options: &crate::value::DictMap) -> usize {
@@ -796,6 +782,7 @@ async fn host_agent_dispatch_tool_batch_impl(
     let tools = agent_primitive_tools_value_arg(args.next(), "__host_agent_dispatch_tool_batch")?;
     let options =
         agent_primitive_options_value_arg(args.next(), "__host_agent_dispatch_tool_batch")?;
+    crate::llm::pairing_receipts::emit_tool_call_receipts(&calls);
     let cap = agent_primitive_max_concurrent_tools(&options);
     let results = if cap <= 1 || calls.len() <= 1 {
         let mut results = Vec::with_capacity(calls.len());
@@ -971,6 +958,7 @@ async fn host_agent_dispatch_tool_call_impl(
     let tools = agent_primitive_tools_value_arg(args.next(), "__host_agent_dispatch_tool_call")?;
     let options =
         agent_primitive_options_value_arg(args.next(), "__host_agent_dispatch_tool_call")?;
+    crate::llm::pairing_receipts::emit_tool_call_receipts(std::slice::from_ref(&call));
     host_agent_dispatch_tool_call(ctx, call, tools.as_ref(), &options).await
 }
 

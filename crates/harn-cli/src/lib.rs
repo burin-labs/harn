@@ -39,7 +39,7 @@ use cli::{
     refresh_provider_catalog_if_requested, Cli, Command, CompletionShell, EvalCommand,
     GuardCommand, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
-    PgCommand, ProviderCatalogCommand, ProviderCommand, RunsCommand, SkillCommand, SkillKeyCommand,
+    PgCommand, ProviderCatalogCommand, ProviderCommand, SkillCommand, SkillKeyCommand,
     SkillTrustCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
@@ -832,14 +832,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(1);
             }
         }
-        Command::Runs(args) => match args.command {
-            RunsCommand::Inspect(inspect) => {
-                inspect_run_record(&inspect.path, inspect.compare.as_deref());
-            }
-            RunsCommand::View(view) => {
-                cli::print_runs_view(&view.path, view.session, view.json);
-            }
-        },
+        Command::Runs(args) => cli::run_runs_command(args).await,
         Command::Session(args) => commands::session::run(args),
         Command::Replay(args) => {
             let exit = commands::replay::run(args);

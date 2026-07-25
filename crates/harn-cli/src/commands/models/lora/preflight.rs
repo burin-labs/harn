@@ -14,7 +14,7 @@ use super::export::{
     source_tool_format, ExportRegexes,
 };
 use super::{
-    normalize_plan_tool_format, render_embedded_lora_report, resolve_lora_provider,
+    normalize_plan_tool_format, render_embedded_report, resolve_lora_provider,
     source_tool_format_required_for_target, BaseModelReport, ToolCallingReport,
 };
 
@@ -31,7 +31,7 @@ pub(super) async fn preflight(args: &ModelsLoraPreflightArgs) -> i32 {
         }
     };
     let check = report.request.check;
-    let exit_code = render_embedded_lora_report(
+    let exit_code = render_embedded_report(
         &report,
         LORA_PREFLIGHT_PAYLOAD_ENV,
         LORA_PREFLIGHT_PAYLOAD_PRETTY_ENV,

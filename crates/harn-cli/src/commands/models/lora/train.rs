@@ -20,7 +20,7 @@ use super::{
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
-    parse_target_metadata, precision_contract_for_method, render_embedded_lora_report,
+    parse_target_metadata, precision_contract_for_method, render_embedded_report,
     resolve_lora_provider, serving_recipe, sha256_file, target_module_contract,
     target_modules_args, teacher_report, template_recipe_for_route, tool_catalog_args,
     tool_catalog_contract, trainer_contract_for_dataset, trainer_environment_check,
@@ -62,7 +62,7 @@ pub(super) async fn train(args: &ModelsLoraTrainArgs) -> i32 {
             return 1;
         }
     }
-    render_embedded_lora_report(
+    render_embedded_report(
         &report,
         LORA_TRAIN_PAYLOAD_ENV,
         LORA_TRAIN_PAYLOAD_PRETTY_ENV,

@@ -127,6 +127,9 @@ mod workflow_test_fixtures;
 mod records;
 pub use records::*;
 
+mod training_example;
+pub use training_example::*;
+
 mod context_eval;
 pub use context_eval::*;
 
