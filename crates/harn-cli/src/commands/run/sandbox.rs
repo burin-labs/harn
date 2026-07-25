@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use super::CapabilityProfileConfig;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunSandboxOptions {
     /// Install the default `harn run` sandbox for this invocation.
@@ -22,6 +24,14 @@ pub struct RunSandboxOptions {
     /// Raise the direct-run side-effect ceiling to permit network-capable
     /// subprocesses without disabling filesystem or process confinement.
     pub allow_process_network: bool,
+    /// Session-scoped capability profile (hermetic / grant-carrying lane) for
+    /// this run. `None` is the legacy no-profile path: subprocesses inherit the
+    /// launcher environment unchanged. `Some(_)` closes the subprocess
+    /// environment and admits only the profile's declared grants (harn#4992).
+    ///
+    /// `pub(crate)`: the profile is a launcher-internal concept parsed from
+    /// CLI flags, not part of the in-process `execute_run` API surface.
+    pub(crate) capability: Option<CapabilityProfileConfig>,
 }
 
 impl Default for RunSandboxOptions {
@@ -34,6 +44,7 @@ impl Default for RunSandboxOptions {
             process_read_roots: Vec::new(),
             process_write_roots: Vec::new(),
             allow_process_network: false,
+            capability: None,
         }
     }
 }
@@ -55,13 +66,19 @@ impl RunSandboxOptions {
     pub fn disabled() -> Self {
         Self {
             enabled: false,
-            workspace_root: None,
-            write_roots: Vec::new(),
-            read_only_roots: Vec::new(),
-            process_read_roots: Vec::new(),
-            process_write_roots: Vec::new(),
-            allow_process_network: false,
+            ..Self::default()
         }
+    }
+
+    /// Attach a session-scoped capability profile (hermetic / lane) to this
+    /// run. The profile closes the subprocess environment and admits only its
+    /// declared grants; `None` leaves the legacy inherit-the-launcher-env path.
+    pub(crate) fn with_capability_profile(
+        mut self,
+        capability: Option<CapabilityProfileConfig>,
+    ) -> Self {
+        self.capability = capability;
+        self
     }
 
     /// Constrain the default sandbox to an explicit workspace root.
@@ -111,11 +128,16 @@ pub(crate) fn run_sandbox_options_from_args(args: &crate::cli::RunArgs) -> RunSa
     if args.no_sandbox {
         return RunSandboxOptions::disabled();
     }
+    // Parse the capability posture at the same args boundary as the filesystem
+    // roots; a malformed `--grant` fails the invocation loudly here.
+    let capability = CapabilityProfileConfig::from_flags(args.capability_profile, &args.grant)
+        .unwrap_or_else(|error| crate::command_error(&error));
     RunSandboxOptions::sandboxed(args.allow_process_network)
         .with_write_roots(args.write_root.iter().cloned())
         .with_read_only_roots(args.read_only_root.iter().cloned())
         .with_process_read_roots(args.sandbox_read_root.iter().cloned())
         .with_process_write_roots(args.sandbox_write_root.iter().cloned())
+        .with_capability_profile(capability)
 }
 
 struct ExecutionPolicyGuard;

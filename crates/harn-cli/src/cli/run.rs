@@ -87,6 +87,28 @@ pub(crate) struct RunArgs {
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_write_root: Vec<PathBuf>,
+    /// Session credential posture: `hermetic` closes the subprocess
+    /// environment and admits no credentials; `lane` carries the declared
+    /// `--grant` set. Absent, the run inherits the launcher environment
+    /// unchanged (the legacy path). See `--grant`.
+    #[arg(
+        long = "capability-profile",
+        value_enum,
+        value_name = "PROFILE",
+        conflicts_with = "no_sandbox"
+    )]
+    pub capability_profile: Option<crate::commands::run::CapabilityProfileArg>,
+    /// Grant one named credential to this session's subprocesses. Repeatable.
+    ///
+    /// `NAME=SOURCE[,expose=ENV_VAR]`, where `SOURCE` is `env:VAR_NAME` (a
+    /// launcher variable, snapshotted at launch) or `secret://ACCOUNT/KEY` (a
+    /// secret-store pointer). The optional `,expose=ENV_VAR` injects the value
+    /// into spawned commands as `ENV_VAR`. Any `--grant` selects the `lane`
+    /// profile; nothing else from the launcher environment crosses the sandbox
+    /// boundary. For example
+    /// `--grant gh_token=secret://gh/token,expose=GH_TOKEN`.
+    #[arg(long = "grant", value_name = "SPEC", conflicts_with = "no_sandbox")]
+    pub grant: Vec<String>,
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,

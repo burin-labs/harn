@@ -32,6 +32,17 @@ When only a spawned compiler or package manager needs the path, use
 These flags populate `process_sandbox.write_roots` and `.read_roots`;
 Harn filesystem builtins do not gain access to the path.
 
+The filesystem grants above widen *where* a subprocess reaches; the
+credential boundary is separate. By default a sandboxed subprocess still
+inherits the launcher's environment, so an ambient `GH_TOKEN` or provider
+key crosses in unbidden. `--capability-profile` closes that env and
+`--grant` reopens it for exactly one named, receipted credential — the
+scoped path a headless lane uses to open its PR without leaking every
+other secret. See
+[Capability profiles and grants](./cli-reference.md#capability-profiles-and-grants)
+for the flag grammar; like the filesystem grants, both require the
+sandbox and are rejected with `--no-sandbox`.
+
 The process-network opt-in is deliberately broader than Harn's egress
 allowlist. `HARN_EGRESS_ALLOW` and `egress_policy(...)` constrain HTTP,
 provider, connector, and other network calls owned by the Harn runtime.
