@@ -138,11 +138,12 @@ ignore = "0.4"
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 unicode-width = "0.2"
-keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+keyring-core = "1.0"
 rusqlite = { version = "0.40", features = ["bundled"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "component"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
+thiserror = "2"
 opentelemetry = { version = "0.32", optional = true }
 opentelemetry_sdk = { version = "0.32", optional = true, features = ["rt-tokio", "experimental_trace_batch_span_processor_with_async_runtime"] }
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["http-json", "reqwest-client", "reqwest-rustls"], optional = true }
@@ -163,6 +164,7 @@ arcstr = { version = "1", features = ["serde", "std"] }
 similar = "3"
 
 [target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = "1.1"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",
@@ -178,6 +180,15 @@ windows-sys = { version = "0.61.2", features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 seccompiler = "0.5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0", features = ["keychain"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1.0", features = ["protected"] }
+
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
+zbus-secret-service-keyring-store = { version = "1.0", features = ["rt-async-io-crypto-rust"] }
 
 [dev-dependencies]
 criterion = "0.8"

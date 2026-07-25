@@ -9,7 +9,7 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "backend": { "type": "string", "enum": ["keychain", "wincred", "file"] }
+    "backend": { "type": "string", "enum": ["keyring", "file"] }
   },
   "required": ["account", "keys", "backend"],
   "additionalProperties": false

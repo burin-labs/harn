@@ -13,20 +13,21 @@ four builtins:
 | `hostlib_secret_store_delete`      | `{account, key, deleted, backend}`         |
 | `hostlib_secret_store_list`        | `{account, keys, backend}`                 |
 
-`value` is `nil` when the key is absent. `backend` is one of
-`"keychain"`, `"wincred"`, or `"file"` so callers can surface backend
-status in diagnostics without re-deriving it.
+`value` is `nil` when the key is absent. `backend` is `"keyring"` or
+`"file"` so callers can surface backend status without re-deriving it.
 
 ## Backend selection
 
 The active backend is resolved on every call (selection is essentially
 free) so an env-var override takes effect without a process restart.
 
-| OS               | Default backend                                              |
-|------------------|--------------------------------------------------------------|
-| macOS / iOS      | Apple Keychain (`security-framework`, generic password item) |
-| Windows          | Credential Manager (`CredRead`/`CredWrite`, generic type)    |
-| Linux and other  | File backend at `$XDG_CONFIG_HOME/<account>/credentials.json`|
+| OS               | Default backend                                      |
+|------------------|------------------------------------------------------|
+| macOS            | Apple Keychain through `apple-native-keyring-store`  |
+| iOS              | Protected Data through `apple-native-keyring-store`  |
+| Windows          | Credential Manager through its keyring store crate   |
+| Linux / Unix     | Secret Service through its keyring store crate       |
+| Other targets    | File backend                                         |
 
 ### Forcing the file backend
 
@@ -41,12 +42,10 @@ The `account` argument scopes every key to the calling application
 (`my-app`, `cloud-admin`, etc.) so two applications can use the same
 key name without collision:
 
-* **Keychain** — `account` maps to `kSecAttrService`; `key` maps to
-  `kSecAttrAccount`. Matches the layout used by a legacy Swift
-  `KeychainCredentialStore` in an IDE host so existing entries are
-  reachable without migration.
-* **Credential Manager** — `account/key` becomes the credential's target
-  name (e.g. `my-app/OPENAI_API_KEY`).
+* **Native keyring** — `account` maps to the ecosystem's `service` field and
+  `key` maps to its `user` field. On Apple this retains the standard
+  Keychain service/account mapping; the maintained platform adapters own the
+  corresponding Credential Manager and Secret Service representations.
 * **File backend** — credentials land at
   `$XDG_CONFIG_HOME/<account>/credentials.json`
   (or `%APPDATA%\<account>\credentials.json` on Windows). The file is
@@ -78,15 +77,7 @@ HARN_SECRET_STORE_BACKEND=file cargo test -p harn-hostlib --test harn_hostlib se
 ```
 
 `tests/harn_hostlib/secret_store.rs` (file backend) runs on every CI runner.
-`tests/harn_hostlib/secret_store_os_native.rs` exercises the Keychain (macOS)
-and Credential Manager (Windows) backends end-to-end; on Linux it compiles
-down to nothing because there is no OS-native backend yet.
-
-## Open follow-up
-
-* **Linux libsecret / secret-service backend.** Implemented as a wrapper
-  around the `keyring` crate's `linux-native` feature when a consumer
-  needs it — `harn-vm::secrets::KeyringSecretProvider` already pulls the
-  same crate, so the dependency is free. Headless Linux CI keeps using
-  the file backend (the same fallback `HARN_SECRET_STORE_BACKEND=file`
-  selects) so behavior is identical to today.
+`tests/harn_hostlib/secret_store_os_native.rs` exercises desktop native stores
+end-to-end on macOS and Windows. Linux builds and uses Secret Service by
+default; headless jobs should force the deterministic file backend because
+they generally have no unlocked desktop session collection.

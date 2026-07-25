@@ -3,11 +3,12 @@
 //! Stores credentials in a per-application namespace (`account`) keyed by
 //! a free-form `key`. The active backend is picked at call time:
 //!
-//! | OS               | Default backend                                              |
-//! |------------------|--------------------------------------------------------------|
-//! | macOS / iOS      | Apple Keychain (`security-framework`, generic password item) |
-//! | Windows          | Credential Manager (`CredRead`/`CredWrite`, generic type)    |
-//! | Linux / other    | File backend at `$XDG_CONFIG_HOME/<account>/credentials.json`|
+//! | OS               | Default backend                                      |
+//! |------------------|------------------------------------------------------|
+//! | macOS / iOS      | Keychain / Protected Data via the keyring ecosystem |
+//! | Windows          | Windows Credential Manager via the keyring ecosystem|
+//! | Linux / Unix     | Secret Service via the keyring ecosystem            |
+//! | Other targets    | File backend                                         |
 //!
 //! Setting `HARN_SECRET_STORE_BACKEND=file` forces the file backend on every
 //! OS — useful for sandboxed CI, eval harnesses, and anything that must not
@@ -29,10 +30,16 @@ use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{build_dict, dict_arg, require_string, str_value};
 
 mod file;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-mod keychain;
-#[cfg(target_os = "windows")]
-mod wincred;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows",
+    all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    )
+))]
+mod native;
 
 const GET_BUILTIN: &str = "hostlib_secret_store_get";
 const SET_BUILTIN: &str = "hostlib_secret_store_set";
@@ -174,15 +181,27 @@ fn select_backend() -> Box<dyn Backend> {
         return Box::new(file::FileStore::new());
     }
 
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows",
+        all(
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        )
+    ))]
     {
-        Box::new(keychain::KeychainStore::new())
+        Box::new(native::NativeStore::new())
     }
-    #[cfg(target_os = "windows")]
-    {
-        Box::new(wincred::WinCredStore::new())
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows",
+        all(
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        )
+    )))]
     {
         Box::new(file::FileStore::new())
     }
