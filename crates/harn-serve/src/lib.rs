@@ -23,6 +23,16 @@ pub mod tls;
 pub mod transport;
 pub mod ws;
 
+/// Enter Harn hostlib's private process-guardian mode, when requested.
+///
+/// Executables enabling the `hostlib` feature must call this at the beginning
+/// of `main`, before parsing public command-line arguments. Normal invocations
+/// return `false`; Unix guardian invocations do not return.
+#[cfg(feature = "hostlib")]
+pub fn run_process_guardian_if_requested() -> bool {
+    harn_hostlib::process::owner_death::run_if_requested()
+}
+
 /// Default 10 MiB body size cap applied to every HTTP router exposed by
 /// the `harn-serve` adapters (MCP, A2A, API). Matches the orchestrator
 /// listener's `DEFAULT_MAX_BODY_BYTES` so large/malicious POSTs cannot

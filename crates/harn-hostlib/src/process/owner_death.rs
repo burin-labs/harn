@@ -1,11 +1,12 @@
 //! Native owner-death containment for managed background processes.
 //!
-//! Unix re-executes the current Harn binary as a small reaper plus a
-//! process-group-leading guardian. The supervisor retains the only write end
-//! of their stdin pipe. Kernel EOF therefore remains reliable even when the
-//! supervisor is killed before Rust destructors or session cleanup can run,
-//! while the out-of-group reaper makes guardian PGID disappearance
-//! deterministic.
+//! Unix re-executes the current embedding executable as a small reaper plus a
+//! process-group-leading guardian. The executable must dispatch
+//! [`run_if_requested`] before its public argument parser. The supervisor
+//! retains the only write end of the guardian's stdin pipe. Kernel EOF
+//! therefore remains reliable even when the supervisor is killed before Rust
+//! destructors or session cleanup can run, while the out-of-group reaper makes
+//! guardian PGID disappearance deterministic.
 
 #[cfg(unix)]
 use std::cell::RefCell;
@@ -458,6 +459,13 @@ fn propagate_exit(status: ExitStatus) -> ! {
 }
 
 /// Enter the private guardian mode before public CLI parsing.
+///
+/// Executables embedding `harn-hostlib` process tools must call this at the
+/// beginning of `main`, before inspecting or rejecting command-line arguments.
+/// Unix owner-death containment re-executes the embedding executable with a
+/// private argument; omitting this dispatch makes contained process startup
+/// fail. The function returns `false` for normal invocations and on platforms
+/// that do not use the re-exec guardian. Guardian invocations do not return.
 #[cfg(unix)]
 pub fn run_if_requested() -> bool {
     if std::env::args_os().nth(1).as_deref() != Some(OsStr::new(GUARDIAN_ARG)) {
