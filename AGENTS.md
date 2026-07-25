@@ -22,10 +22,22 @@ local `harn` binary so it matches the version in use.
 
 ## Setup
 
-- Run `make setup` on a fresh clone. It installs hooks, optional developer
-  tools, repo-local Node tooling when available, sccache config, per-worktree
-  Cargo target config when `CODEX_WORKTREE_PATH` is set, and
-  `cargo check --workspace`.
+- Run `make setup` on a fresh clone **and in each new worktree**. It installs
+  hooks, optional developer tools, repo-local Node tooling when available,
+  sccache config, per-worktree Cargo target config when `CODEX_WORKTREE_PATH` is
+  set, and `cargo check --workspace`. A worktree created with `git worktree add`
+  has no `.cargo/config.toml` until setup runs there, so it gets neither the
+  shared target dir nor the compiler wrapper and every build starts cold — long
+  enough that `make gen-*` and `check-*` targets hit the Cargo probe deadline and
+  fail with exit 124 rather than producing anything. `scripts/harn_bin.sh` warns
+  when it sees an unconfigured checkout and prints the two ways past a timeout:
+  `HARN_BIN=<path> HARN_BIN_NO_BUILD=1` to reuse a binary you already built, or
+  `HARN_BIN_CARGO_TIMEOUT_SECONDS=3600` to allow the cold build.
+- `HARN_DEV_TARGET_WORKTREE_PATH` and `CODEX_WORKTREE_PATH` name the worktree a
+  target dir belongs to. Setup ignores either one when it does not name the
+  checkout being set up, and says so: a shell that exports the path of one
+  checkout while you work in a sibling would otherwise give both the same
+  mutable target dir.
 - Build caching is two layers, written into `.cargo/config.toml` by
   `scripts/dev_setup.sh`:
   1. **Per-worktree `target-dir`** (`$TMPDIR/harn-target/<parent>-<leaf>`):

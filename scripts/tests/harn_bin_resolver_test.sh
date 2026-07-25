@@ -53,6 +53,11 @@ case "${FAKE_CARGO_MODE:-success}" in
     echo "ordinary cargo failure" >&2
     exit 17
     ;;
+  plain-timeout)
+    tail -f /dev/null &
+    printf '%s\n' "$!" > "${FAKE_CARGO_CHILD_PID_FILE:?}"
+    wait "$!"
+    ;;
   wrapper-timeout|wrapper-timeout-retry-failure)
     if [[ -n "${RUSTC_WRAPPER:-}" || -n "${CARGO_BUILD_RUSTC_WRAPPER:-}" ]]; then
       tail -f /dev/null &
@@ -285,6 +290,41 @@ fi
 if [[ "$status" -ne 19 ]]; then
   echo "wrapper-disabled retry failure status changed: expected 19, got $status" >&2
   cat "$tmp_root/retry-failure.err" >&2
+  exit 1
+fi
+
+# A probe that runs out of time with no compiler wrapper to disable has no
+# retry left, and a cold workspace build legitimately exceeds the deadline. The
+# bare timeout reads like a hang, so the failure has to say how to get past it.
+: > "$record"
+plain_timeout_child="$tmp_root/plain-timeout-child.pid"
+if CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=plain-timeout \
+  FAKE_CARGO_CHILD_PID_FILE="$plain_timeout_child" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/plain-timeout.out" \
+  2> "$tmp_root/plain-timeout.err"; then
+  echo "harn_bin resolver accepted an unrecoverable probe timeout" >&2
+  exit 1
+else
+  status=$?
+fi
+if [[ "$status" -ne 124 ]]; then
+  echo "unrecoverable probe timeout status changed: expected 124, got $status" >&2
+  cat "$tmp_root/plain-timeout.err" >&2
+  exit 1
+fi
+if ! grep -Fq "HARN_BIN=<path-to-harn> HARN_BIN_NO_BUILD=1" "$tmp_root/plain-timeout.err"; then
+  echo "probe timeout did not offer the prebuilt-binary escape hatch" >&2
+  cat "$tmp_root/plain-timeout.err" >&2
+  exit 1
+fi
+if ! grep -Fq "HARN_BIN_CARGO_TIMEOUT_SECONDS=" "$tmp_root/plain-timeout.err"; then
+  echo "probe timeout did not offer a longer deadline" >&2
+  cat "$tmp_root/plain-timeout.err" >&2
   exit 1
 fi
 

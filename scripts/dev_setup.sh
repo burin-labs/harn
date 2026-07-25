@@ -13,9 +13,31 @@ log() {
 }
 
 derive_target_dir() {
-  local worktree_path="${HARN_DEV_TARGET_WORKTREE_PATH:-${CODEX_WORKTREE_PATH:-}}"
+  local worktree_var="HARN_DEV_TARGET_WORKTREE_PATH"
+  local worktree_path="${HARN_DEV_TARGET_WORKTREE_PATH:-}"
+  if [[ -z "${worktree_path}" ]]; then
+    worktree_var="CODEX_WORKTREE_PATH"
+    worktree_path="${CODEX_WORKTREE_PATH:-}"
+  fi
   if [[ -z "${worktree_path}" ]]; then
     return 1
+  fi
+
+  # The configured path names the worktree this target dir belongs to. When it
+  # points somewhere other than the checkout being set up, honouring it hands
+  # two checkouts the same target dir, and generated OUT_DIR contents are
+  # mutable -- the concurrent-worktree hazard AGENTS.md forbids. This is easy to
+  # hit without noticing: an agent session that exports its primary checkout
+  # path keeps exporting it while working in a sibling worktree, and a value
+  # inherited from a parent shell outlives the worktree it was set for. Derive
+  # from the checkout actually being set up instead, and say so.
+  local configured_root actual_root
+  actual_root="$(cd "${ROOT_DIR}" && pwd -P)"
+  configured_root="$(cd "${worktree_path}" 2>/dev/null && pwd -P)" || configured_root=""
+  if [[ "${configured_root}" != "${actual_root}" ]]; then
+    printf 'warning: %s=%s does not name this checkout (%s); deriving the target dir from this checkout so concurrent worktrees do not share one\n' \
+      "${worktree_var}" "${worktree_path}" "${actual_root}" >&2
+    worktree_path="${actual_root}"
   fi
 
   local worktree_leaf worktree_parent
