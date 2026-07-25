@@ -257,13 +257,14 @@
       "classification": "hosted",
       "auth_env": [],
       "recommended": {
-        "selector": "bedrock:anthropic.claude-*",
+        "selector": "bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0",
         "provider": "bedrock",
-        "model": "anthropic.claude-*",
-        "display_name": null,
+        "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "display_name": "Claude Sonnet 4.5 (Amazon Bedrock)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"bedrock\"",
+          "model = \"anthropic.claude-sonnet-4-5-20250929-v1:0\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"xml_tagged\""
         ]

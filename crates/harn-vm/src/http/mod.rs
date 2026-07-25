@@ -9,6 +9,7 @@ use crate::vm::Vm;
 mod client;
 pub(crate) mod framing;
 mod mock;
+mod sigv4;
 mod streaming;
 #[cfg(test)]
 mod tests;

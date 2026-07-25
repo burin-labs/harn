@@ -9,9 +9,21 @@
 # come before the broader `*claude*` fallback so the canonical Bedrock
 # model identifiers pick up the anthropic wire-format fields.
 [[provider.bedrock]]
+model_match = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+extends = true
+batch_api = true
+batch_regions = ["us-east-1", "us-west-2"]
+
+[[provider.bedrock]]
+model_match = "meta.llama3-1-70b-instruct-v1:0"
+extends = true
+batch_api = true
+batch_regions = ["us-west-2"]
+
+[[provider.bedrock]]
 model_match = "anthropic.claude-*"
 native_tools = true
-batch_api = true
+batch_api = false
 preferred_tool_format = "native"
 message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
@@ -32,7 +44,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*claude*"
 native_tools = true
-batch_api = true
+batch_api = false
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 # Bedrock Converse has only a top-level `system[]` field — no positional system
@@ -51,7 +63,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*"
 native_tools = true
-batch_api = true
+batch_api = false
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 # Bedrock Converse has only a top-level `system[]` field — no positional system

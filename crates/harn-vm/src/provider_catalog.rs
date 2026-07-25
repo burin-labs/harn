@@ -963,10 +963,10 @@ fn validate_batch_support(
 ) {
     if !matches!(
         batch.wire_format.as_str(),
-        "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai"
+        "openai" | "anthropic_messages" | "gemini" | "mistral" | "fireworks" | "xai" | "bedrock"
     ) {
         result.errors.push(format!(
-            "model {} batch.wire_format {:?} is not one of openai|anthropic_messages|gemini|mistral|fireworks|xai",
+            "model {} batch.wire_format {:?} is not one of openai|anthropic_messages|gemini|mistral|fireworks|xai|bedrock",
             model.id, batch.wire_format
         ));
     }

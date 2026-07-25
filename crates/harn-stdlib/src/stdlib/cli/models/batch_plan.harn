@@ -72,6 +72,7 @@ const BATCH_ROW_META_FIELDS: list<string> = [
   "body",
   "params",
   "request",
+  "provider_policy",
 ]
 
 /**
@@ -96,6 +97,7 @@ type BatchModelCapability = {
   cancellation: string,
   security_notes: list,
   operational_notes: list,
+  regions: list,
   harn_live_adapter: BatchLiveAdapter,
 }
 
@@ -320,6 +322,7 @@ fn __candidate(entry: dict, workload: string) -> BatchCandidate {
       cancellation: safe_string(batch_entry["cancellation"], "unknown"),
       security_notes: safe_list(batch_entry["security_notes"]),
       operational_notes: safe_list(batch_entry["operational_notes"]),
+      regions: safe_list(batch_entry["regions"]),
       harn_live_adapter: live_adapter,
     },
     workload: workload,
@@ -483,6 +486,7 @@ fn __group_key(
   batch: dict,
   tool_format: string,
   endpoint: string,
+  provider_policy: dict,
 ) -> string {
   return provider
     + "\t"
@@ -495,6 +499,8 @@ fn __group_key(
     + tool_format
     + "\t"
     + endpoint
+    + "\t"
+    + json_stringify(provider_policy)
 }
 
 fn __group_summary(group: dict) -> BatchGroupSummary {
@@ -536,7 +542,7 @@ fn __body_from_row(row: dict, model: string, include_model: bool) -> dict {
 }
 
 fn __include_model_for_batch_wire(wire: string) -> bool {
-  return wire != "gemini" && wire != "fireworks"
+  return wire != "gemini" && wire != "fireworks" && wire != "bedrock"
 }
 
 fn __body_from_row_for_batch_wire(row: dict, model: string, wire: string) -> dict {
@@ -606,6 +612,9 @@ fn __provider_request_record(group: dict, request: dict, endpoint: string, body:
   if wire == "fireworks" {
     return {custom_id: custom_id, body: body}
   }
+  if wire == "bedrock" {
+    return {recordId: custom_id, modelInput: body}
+  }
   return {custom_id: custom_id, method: "POST", url: endpoint, body: body}
 }
 
@@ -616,6 +625,7 @@ fn __supported_prepare_wire(wire: string) -> bool {
     || wire == "xai"
     || wire == "gemini"
     || wire == "anthropic_messages"
+    || wire == "bedrock"
 }
 
 fn __request_file_text(wire: string, records: list) -> string {
@@ -688,6 +698,22 @@ fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dic
       result_stream: "GET /v1/batches/{batch_id}/results after state.num_pending reaches 0",
     }
   }
+  if wire == "bedrock" {
+    const policy = safe_dict(group["provider_policy"])
+    return {
+      provider: provider,
+      operation: "CreateModelInvocationJob",
+      model: model,
+      input: {
+        mode: "s3_jsonl",
+        file: request_path,
+        s3_uri: safe_string(policy["input_s3_uri"], ""),
+      },
+      output_s3_uri: safe_string(policy["output_s3_uri"], ""),
+      role_arn: "<redacted>",
+      request_line_shape: "{recordId, modelInput}",
+    }
+  }
   if provider == "together" && wire == "openai" {
     return {
       provider: provider,
@@ -757,6 +783,7 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
     endpoint: endpoint,
     tool_format: safe_string(group["tool_format"], ""),
     batch: batch,
+    provider_policy: safe_dict(group["provider_policy"]),
     create_recovery: __batch_create_recovery(safe_string(group["provider"], ""), wire),
     input_mode: safe_string(batch["input_mode"], ""),
     request_count: len(records),
@@ -853,6 +880,32 @@ fn __build_manifest(
     )
     const request = __request_entry(row, line_no, id_prefix)
     const wire = safe_string(batch["wire_format"], "")
+    const provider_policy = safe_dict(row["provider_policy"])
+    if wire == "bedrock" {
+      const region = safe_string(provider_policy["region"], "")
+      const role_arn = safe_string(provider_policy["role_arn"], "")
+      const input_s3_uri = safe_string(provider_policy["input_s3_uri"], "")
+      const output_s3_uri = safe_string(provider_policy["output_s3_uri"], "")
+      if region == "" || !safe_list(batch["regions"]).contains(region) {
+        errors = errors.appending(
+          "line " + to_string(line_no) + ": unsupported Bedrock batch region '" + region
+            + "' for model "
+            + safe_string(candidate["id"], ""),
+        )
+        continue
+      }
+      if !starts_with(role_arn, "arn:aws:iam::") || !contains(role_arn, ":role/") {
+        errors = errors.appending("line " + to_string(line_no) + ": invalid Bedrock role_arn")
+        continue
+      }
+      if !starts_with(input_s3_uri, "s3://") || !starts_with(output_s3_uri, "s3://") {
+        errors = errors.appending(
+          "line " + to_string(line_no)
+            + ": Bedrock input_s3_uri and output_s3_uri must use s3://",
+        )
+        continue
+      }
+    }
     const body = __body_from_row_for_batch_wire(row, safe_string(candidate["id"], ""), wire)
     const body_errors = __non_streaming_batch_errors(
       __batch_request_location("", safe_string(request["custom_id"], ""), line_no),
@@ -869,6 +922,7 @@ fn __build_manifest(
       batch,
       tool_format,
       endpoint,
+      provider_policy,
     )
     const current = safe_dict(groups[key])
     if current == {} {
@@ -882,6 +936,7 @@ fn __build_manifest(
         endpoint: endpoint,
         tool_format: tool_format,
         batch: batch,
+        provider_policy: provider_policy,
         requests: [request],
       }
       groups = groups + {[key]: group}

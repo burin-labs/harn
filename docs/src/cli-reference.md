@@ -1890,14 +1890,19 @@ harn models batch submit --receipt ./.harn/batches/eval-001/receipt.json \
 `--dry-run` verifies the prepare receipt, re-hashes every request file, renders
 the provider operation with credential names redacted, and writes a durable
 `harn.model_batch_submission_receipt` without network calls. Live submit
-currently supports OpenAI-compatible batch jobs for OpenAI, Groq, Together, and
-Parasail; Mistral file-backed batch jobs; Fireworks dataset-backed batch jobs;
-Gemini File API JSONL batches; Anthropic Message Batches; and xAI batches.
+currently supports OpenAI-compatible batch jobs for OpenAI, Azure OpenAI, Groq,
+Together, and Parasail; Mistral file-backed batch jobs; Fireworks
+dataset-backed batch jobs; Gemini File API JSONL batches; Anthropic Message
+Batches; xAI batches; and catalog-eligible Amazon Bedrock model/region jobs
+backed by typed S3 input/output locations.
 Provider API keys must be present
 in the provider's normal environment variable (`OPENAI_API_KEY`,
 `GROQ_API_KEY`, `TOGETHER_AI_API_KEY` or `TOGETHER_API_KEY`,
 `PARASAIL_API_KEY`, `MISTRAL_API_KEY`, `FIREWORKS_API_KEY`, `GEMINI_API_KEY`
-or `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, or `XAI_API_KEY`); Fireworks live
+or `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`,
+`AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_AD_TOKEN`, or
+`AZURE_OPENAI_BEARER_TOKEN`); Bedrock uses the AWS SDK credential and region
+chains rather than a provider API key. Fireworks live
 submit/status/download also needs `HARN_BATCH_FIREWORKS_ACCOUNT_ID` or
 `FIREWORKS_ACCOUNT_ID`.
 Subscription-plan
@@ -1920,7 +1925,8 @@ harn models batch status --submission ./.harn/batches/eval-001/submission.json \
 
 `--dry-run` validates the submission receipt and summarizes cached job state
 without network calls. Live status currently polls OpenAI/Groq/Together-
-compatible `batches/{id}`, Fireworks `batchInferenceJobs/{id}`, Gemini
+compatible `batches/{id}`, Azure OpenAI `batches/{id}`, Bedrock
+`model-invocation-job/{id}`, Fireworks `batchInferenceJobs/{id}`, Gemini
 `batches/{id}`, Anthropic Message Batches, Mistral batch jobs, and xAI batches
 from the Harn provider adapter boundary, then writes a
 `harn.model_batch_status_receipt` with stable job ids, normalized lifecycle
@@ -1943,8 +1949,9 @@ harn models batch cancel --receipt ./.harn/batches/eval-001/status.json \
 `--dry-run` mode it validates provider job ids and records redacted cancellation
 operations without network calls. Live cancellation is implemented only where
 the provider catalog says cancellation is supported and Harn has a known
-adapter: OpenAI batch jobs, Anthropic Message Batches, and Gemini Batch API
-operations. Jobs that are already terminal, missing provider ids, or backed by
+adapter: OpenAI and Azure OpenAI batch jobs, Amazon Bedrock model invocation
+jobs, Anthropic Message Batches, and Gemini Batch API operations. Jobs that are
+already terminal, missing provider ids, or backed by
 providers with unknown cancellation semantics are skipped with structured
 `skip_reason` values rather than treated as hard failures. The command writes a
 `harn.model_batch_cancel_receipt` with per-job cancel operations, provider
@@ -1964,9 +1971,9 @@ harn models batch download --status ./.harn/batches/eval-001/status.json \
 
 `--dry-run` validates the status receipt, requires completed jobs, and records
 the redacted provider download operations without network calls. Live download
-currently retrieves OpenAI/Groq/Together-compatible, Gemini, and Mistral file
-content plus Fireworks output dataset signed URLs, Anthropic Message Batch
-`results_url`, and xAI result pages, writes provider
+currently retrieves OpenAI/Azure OpenAI/Groq/Together-compatible, Gemini, and
+Mistral file content plus Bedrock S3 output, Fireworks output dataset signed
+URLs, Anthropic Message Batch `results_url`, and xAI result pages, writes provider
 JSONL files under `--out-dir`, and emits a `harn.model_batch_results_receipt`
 containing artifact paths, handles, hashes, source receipt metadata, and
 normalized download lifecycle counts. Use

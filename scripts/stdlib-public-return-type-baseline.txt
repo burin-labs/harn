@@ -70,7 +70,6 @@
 # count    8  crates/harn-stdlib/src/stdlib/agent/user.harn
 # count   16  crates/harn-stdlib/src/stdlib/agent/workers.harn
 # count    4  crates/harn-stdlib/src/stdlib/artifact/web.harn
-# count    1  crates/harn-stdlib/src/stdlib/cli/models/batch_transport.harn
 # count    5  crates/harn-stdlib/src/stdlib/cli/models/lora_render.harn
 # count    3  crates/harn-stdlib/src/stdlib/cli/render.harn
 # count    1  crates/harn-stdlib/src/stdlib/context/maintenance.harn
@@ -694,7 +693,6 @@ crates/harn-stdlib/src/stdlib/artifact/web.harn::web_artifact_apply_patch
 crates/harn-stdlib/src/stdlib/artifact/web.harn::web_artifact_extract
 crates/harn-stdlib/src/stdlib/artifact/web.harn::web_artifact_text_fallback
 crates/harn-stdlib/src/stdlib/artifact/web.harn::web_artifact_validate
-crates/harn-stdlib/src/stdlib/cli/models/batch_transport.harn::__mkdirp
 crates/harn-stdlib/src/stdlib/cli/models/lora_render.harn::render_peft_save_policy
 crates/harn-stdlib/src/stdlib/cli/models/lora_render.harn::render_probe_command_templates
 crates/harn-stdlib/src/stdlib/cli/models/lora_render.harn::render_required_probe_cases

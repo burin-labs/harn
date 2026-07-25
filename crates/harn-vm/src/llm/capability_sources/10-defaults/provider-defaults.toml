@@ -50,6 +50,21 @@ batch_operational_notes = [
 ]
 top_k_supported = false
 
+[provider_defaults.bedrock]
+batch_wire_format = "bedrock"
+batch_input_mode = "jsonl_file"
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Batch input and output artifacts are stored in caller-owned Amazon S3 locations.",
+  "Harn resolves AWS credentials through the maintained AWS SDK credential chain and never persists credential values in receipts.",
+]
+batch_operational_notes = [
+  "A Bedrock batch job requires a service role ARN plus typed input and output S3 URIs in the same region as the selected model.",
+  "Harn derives clientRequestToken from the durable operation identity so an ambiguous create response can be retried safely.",
+]
+
 [provider_defaults.azure_openai]
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"

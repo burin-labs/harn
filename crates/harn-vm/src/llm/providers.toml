@@ -678,7 +678,7 @@ path = "/models"
 # AWS Bedrock — resolves credentials through env, profile, container, or
 # EC2 instance roles, then signs Converse API calls with SigV4.
 [providers.bedrock]
-base_url = ""
+base_url = "https://bedrock-runtime.{region}.amazonaws.com"
 base_url_env = "BEDROCK_BASE_URL"
 auth_style = "aws_sigv4"
 credential_resolution = "platform_managed"
@@ -4068,6 +4068,29 @@ rate_limits = { rpm = 1800, tpm = 10000000, tier = "us-east-1", source_url = "ht
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
+
+# --- source: 60-models/91-bedrock-batch.toml ---
+# Conservative Bedrock batch catalog rows. Add a row only after AWS documents
+# batch inference support for the exact model and region combination; ordinary
+# Bedrock Converse availability is intentionally broader than this list.
+
+[models."anthropic.claude-sonnet-4-5-20250929-v1:0"]
+name = "Claude Sonnet 4.5 (Amazon Bedrock)"
+provider = "bedrock"
+context_window = 200000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
+
+[models."meta.llama3-1-70b-instruct-v1:0"]
+name = "Llama 3.1 70B Instruct (Amazon Bedrock)"
+provider = "bedrock"
+context_window = 128000
+capabilities = ["tools", "streaming"]
+tier = "mid"
+open_weight = true
+strengths = ["general", "tool_use"]
 
 # --- source: 60-models/95-moonshot-deepinfra-sambanova.toml ---
 # Direct first-party / fast-inference routes for models also available through

@@ -1,5 +1,36 @@
 import { safe_bool, safe_dict, safe_string } from "std/cli/render"
 
+let __batch_http_fixture_loaded = false
+
+fn __load_batch_http_fixture(harness: Harness) {
+  if __batch_http_fixture_loaded {
+    return
+  }
+  __batch_http_fixture_loaded = true
+  const path = trim(harness.env.get_or("HARN_MODELS_BATCH_TEST_HTTP_FIXTURE", ""))
+  if path == "" {
+    return
+  }
+  const fixture = safe_dict(json_parse(harness.fs.read_text(path)))
+  for raw_mock in fixture["mocks"] ?? [] {
+    const mock = safe_dict(raw_mock)
+    http_mock(
+      safe_string(mock["method"], ""),
+      safe_string(mock["url"], ""),
+      safe_dict(mock["response"]),
+    )
+  }
+}
+
+fn __persist_batch_http_fixture_calls(harness: Harness) {
+  const path = trim(harness.env.get_or("HARN_MODELS_BATCH_TEST_HTTP_CALLS", ""))
+  if path == "" {
+    return
+  }
+  __mkdirp(harness, dirname(path) ?? ".")
+  harness.fs.write_text(path, json_stringify_pretty(http_mock_calls()) + "\n")
+}
+
 /**
  * Declare the live operations supported by one provider transport.
  *
@@ -92,6 +123,12 @@ pub fn __live_batch_adapter_key(provider: string, wire: string) -> string {
   if provider == "openai" && wire == "openai" {
     return "openai"
   }
+  if provider == "azure_openai" && wire == "openai" {
+    return "azure_openai"
+  }
+  if provider == "bedrock" && wire == "bedrock" {
+    return "bedrock"
+  }
   if provider == "groq" && wire == "openai" {
     return "groq"
   }
@@ -128,7 +165,11 @@ pub fn __live_batch_adapter(provider: string, wire: string) -> BatchLiveAdapter 
   return {
     submit: supported,
     status: supported,
-    cancel: adapter == "anthropic" || adapter == "openai" || adapter == "gemini",
+    cancel: adapter == "anthropic"
+      || adapter == "openai"
+      || adapter == "azure_openai"
+      || adapter == "bedrock"
+      || adapter == "gemini",
     download: supported,
   }
 }
@@ -140,7 +181,11 @@ pub fn __live_batch_adapter(provider: string, wire: string) -> BatchLiveAdapter 
  * @errors: []
  */
 pub fn __is_openai_compatible_live_adapter(adapter: string) -> bool {
-  return adapter == "openai" || adapter == "groq" || adapter == "together" || adapter == "parasail"
+  return adapter == "openai"
+    || adapter == "azure_openai"
+    || adapter == "groq"
+    || adapter == "together"
+    || adapter == "parasail"
 }
 
 /**
@@ -165,7 +210,7 @@ pub fn __live_batch_operation_error(operation: string, provider: string, wire: s
  * @effects: [fs.write]
  * @errors: []
  */
-pub fn __mkdirp(harness: Harness, path: string) {
+pub fn __mkdirp(harness: Harness, path: string) -> nil {
   if trim(path) == "" {
     return
   }
@@ -248,6 +293,9 @@ fn __provider_auth_env_candidates(provider: string) -> list {
   if provider == "fireworks" {
     return ["FIREWORKS_API_KEY"]
   }
+  if provider == "azure_openai" {
+    return ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_AD_TOKEN", "AZURE_OPENAI_BEARER_TOKEN"]
+  }
   return [__provider_auth_env(provider)]
 }
 
@@ -263,6 +311,36 @@ pub fn __provider_base_url(harness: Harness, provider: string) -> string {
       harness.env.get_or(
         "HARN_BATCH_OPENAI_BASE_URL",
         harness.env.get_or("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+      ),
+    )
+  }
+  if provider == "azure_openai" {
+    let endpoint = trim(
+      harness.env.get_or(
+        "HARN_BATCH_AZURE_OPENAI_BASE_URL",
+        harness.env.get_or("AZURE_OPENAI_ENDPOINT", ""),
+      ),
+    )
+    endpoint = regex_replace("/openai/v1/?$", "", endpoint) ?? endpoint
+    endpoint = regex_replace("/openai/?$", "", endpoint) ?? endpoint
+    endpoint = regex_replace("/+$", "", endpoint) ?? endpoint
+    if endpoint == "" {
+      return ""
+    }
+    return endpoint + "/openai/v1"
+  }
+  if provider == "bedrock" {
+    const region = trim(
+      harness.env.get_or("HARN_BATCH_BEDROCK_REGION", harness.env.get_or("AWS_REGION", "")),
+    )
+    return trim(
+      harness.env.get_or(
+        "HARN_BATCH_BEDROCK_BASE_URL",
+        if region == "" {
+          ""
+        } else {
+          "https://bedrock." + region + ".amazonaws.com"
+        },
       ),
     )
   }
@@ -382,9 +460,11 @@ fn __parse_response_body(body: string) {
  * @errors: [runtime]
  */
 pub fn __http_result(harness: Harness, method: string, url: string, options: dict) -> dict {
+  __load_batch_http_fixture(harness)
   const result = try {
     harness.net.request(method, url, options)
   }
+  __persist_batch_http_fixture_calls(harness)
   if is_err(result) {
     return {ok: false, error: "network error: " + to_string(unwrap_err(result))}
   }
@@ -487,12 +567,16 @@ pub fn __submission_job_base(harness: Harness, job: dict, payload: dict, dry_run
  * @errors: []
  */
 pub fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict {
+  const policy = safe_dict(job["provider_policy"])
   return {
     ok: true,
     job: __submission_job_base(harness, job, payload, true)
       + {
       status: "ready",
       provider_batch_id: nil,
+      region: policy["region"],
+      input_s3_uri: policy["input_s3_uri"],
+      output_s3_uri: policy["output_s3_uri"],
       response: nil,
     },
     errors: [],
@@ -520,6 +604,67 @@ pub fn __api_key_for_job(harness: Harness, provider: string) -> dict {
     env: primary,
     error: "missing provider API key env " + primary + " (accepted: " + aliases + ")",
   }
+}
+
+/**
+ * Build the provider's credential header without exposing its value in receipts.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __provider_auth_headers(provider: string, credential_env: string, value: string) -> dict {
+  if provider == "azure_openai" && credential_env == "AZURE_OPENAI_API_KEY" {
+    return {"api-key": value}
+  }
+  return {Authorization: "Bearer " + value}
+}
+
+/**
+ * Execute an AWS-signed request through the host credential chain.
+ * @api_stability: internal
+ * @effects: [http.request, env.read]
+ * @errors: []
+ */
+pub fn __bedrock_http_result(
+  harness: Harness,
+  method: string,
+  url: string,
+  region: string,
+  service: string,
+  body: string,
+  max_response_bytes: int,
+) -> dict {
+  let options = {
+    headers: {"content-type": "application/json"},
+    aws_sigv4: {service: service, region: region},
+    timeout_ms: 120000,
+    max_response_bytes: max_response_bytes,
+  }
+  if body != "" {
+    options = options + {body: body}
+  }
+  return __http_result(harness, method, url, options)
+}
+
+/**
+ * Parse a typed S3 URI into a virtual-hosted HTTPS request URL.
+ * @api_stability: internal
+ * @effects: [env.read]
+ * @errors: []
+ */
+pub fn __s3_request_url(harness: Harness, s3_uri: string, region: string) -> string {
+  const without_scheme = substring(s3_uri, 5)
+  const separator = without_scheme.index_of("/")
+  if separator < 1 || separator >= len(without_scheme) - 1 {
+    return ""
+  }
+  const bucket = substring(without_scheme, 0, separator)
+  const key = substring(without_scheme, separator + 1)
+  const base_override = trim(harness.env.get_or("HARN_BATCH_S3_BASE_URL", ""))
+  if base_override != "" {
+    return __join_url(base_override, "/" + bucket + "/" + key)
+  }
+  return "https://" + bucket + ".s3." + region + ".amazonaws.com/" + key
 }
 
 /**
@@ -720,7 +865,7 @@ pub fn __upload_jsonl_file(
     "POST",
     url,
     {
-      headers: {Authorization: "Bearer " + api_key},
+      headers: __provider_auth_headers(provider, credential_env, api_key),
       multipart: [
         {name: "purpose", value: purpose},
         {

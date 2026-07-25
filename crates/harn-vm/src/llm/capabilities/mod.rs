@@ -35,6 +35,8 @@ mod lookup;
 #[cfg(test)]
 mod lookup_tests_anthropic_cache;
 #[cfg(test)]
+mod lookup_tests_bedrock_batch;
+#[cfg(test)]
 mod lookup_tests_gateway;
 #[cfg(test)]
 mod lookup_tests_kimi;

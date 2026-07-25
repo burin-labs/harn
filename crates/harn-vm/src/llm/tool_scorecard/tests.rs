@@ -454,14 +454,10 @@ fn scorecard_plan_filters_catalog_routes_and_names_required_cases() {
     assert!(tgi.local_runtime);
     assert!(!tgi.auth_required);
     assert!(tgi.credential_env_names.is_empty());
-    let bedrock = unscorecardable_by_provider
-        .get("bedrock")
-        .expect("Bedrock provider state should be explicit");
-    assert_eq!(bedrock.reason, "catalog_provider_has_no_models");
-    assert_eq!(bedrock.model_count, 0);
-    assert!(!bedrock.local_runtime);
-    assert!(bedrock.auth_required);
-    assert!(bedrock.credential_env_names.is_empty());
+    assert!(
+        !unscorecardable_by_provider.contains_key("bedrock"),
+        "Bedrock has catalog models and routing routes"
+    );
     let single_tool_case = plan.routes[0]
         .cases
         .iter()

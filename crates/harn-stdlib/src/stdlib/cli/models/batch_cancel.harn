@@ -9,12 +9,14 @@ import {
 } from "std/cli/models/batch_lifecycle"
 import {
   __api_key_for_job,
+  __bedrock_http_result,
   __http_result,
   __join_url,
   __live_batch_adapter_key,
   __live_batch_operation_error,
   __mkdirp,
   __provider_auth_env,
+  __provider_auth_headers,
   __provider_base_url,
   __redact_download_url,
   __safe_int,
@@ -157,10 +159,12 @@ fn __cancel_openai_compatible(harness: Harness, job: dict, provider: string) -> 
     "POST",
     __cancel_url_for_job(harness, job, provider),
     {
-      headers: {
-        Authorization: "Bearer " + safe_string(auth["value"], ""),
-        "content-type": "application/json",
-      },
+      headers: __provider_auth_headers(
+        provider,
+        safe_string(auth["env"], ""),
+        safe_string(auth["value"], ""),
+      )
+        + {"content-type": "application/json"},
       timeout_ms: 120000,
       max_response_bytes: 1048576,
     },
@@ -278,15 +282,64 @@ fn __cancel_gemini(harness: Harness, job: dict) -> dict {
   }
 }
 
+fn __cancel_bedrock(harness: Harness, job: dict) -> dict {
+  const base_job = __cancel_status(job, false)
+  const region = safe_string(
+    job["region"],
+    safe_string(safe_dict(job["provider_policy"])["region"], ""),
+  )
+  const handle = safe_string(
+    job["provider_batch_handle"],
+    safe_string(job["provider_batch_id"], ""),
+  )
+  const url = __join_url(
+    __provider_base_url(harness, "bedrock"),
+    "/model-invocation-job/" + handle + "/stop",
+  )
+  const response = __bedrock_http_result(harness, "POST", url, region, "bedrock", "{}", 1048576)
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["Bedrock batch cancel failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const provider_status = body["status"] ?? "Stopping"
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      provider_batch_handle: handle,
+      region: region,
+      cancel_requested: true,
+      skipped: false,
+      cancel_operation: {
+        provider: "bedrock",
+        operation: "POST " + __redact_download_url(url),
+        auth: "aws_sdk_default_chain",
+      },
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
 fn __cancel_live(harness: Harness, job: dict, provider: string, adapter: string) -> dict {
   if adapter == "anthropic" {
     return __cancel_anthropic(harness, job)
   }
-  if adapter == "openai" {
+  if adapter == "openai" || adapter == "azure_openai" {
     return __cancel_openai_compatible(harness, job, provider)
   }
   if adapter == "gemini" {
     return __cancel_gemini(harness, job)
+  }
+  if adapter == "bedrock" {
+    return __cancel_bedrock(harness, job)
   }
   return {
     ok: false,

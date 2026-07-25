@@ -15,7 +15,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Atlas` | OpenAI-compatible chat completions | `atlas` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Azure Openai` | OpenAI-compatible chat completions | `azure_openai:gpt-*` | `native` | yes | yes | `none` / `native_json` | none | no | Yes (50%) | none | `provider_default` | `not_recorded` |
 | `Baseten` | OpenAI-compatible chat completions | `baseten:baseten/openai/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | yes | No | none | `high` | `not_recorded` |
-| `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-*` | `native` | yes | yes | `none` / `xml_tagged` | none | no | Yes | none | `provider_default` | `not_recorded` |
+| `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0` | `native` | yes | yes | `none` / `xml_tagged` | none | no | Yes | none | `provider_default` | `not_recorded` |
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | none | `high` | `not_recorded` |
 | `Cloudflare Ai Gateway` | OpenAI-compatible chat completions | `cloudflare_ai_gateway` | `text` | no | yes | `none` / `none` | none | no | No | none | `provider_default` | `not_recorded` |
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | No | none | `high` | `not_recorded` |

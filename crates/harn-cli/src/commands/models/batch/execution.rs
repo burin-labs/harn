@@ -278,6 +278,30 @@ async fn advance(execution_dir: &Path, json_mode: bool) -> Result<(), String> {
                 report(&state, json_mode);
                 return Ok(());
             }
+            if operation.kind == "submit"
+                && operation.idempotency_mode == "deterministic_client_token"
+            {
+                let operation_id = operation.id.clone();
+                state
+                    .operation
+                    .as_mut()
+                    .expect("dispatching operation exists")
+                    .status = "planned".to_string();
+                let phase = state.phase.clone();
+                bump(
+                    &mut state,
+                    phase,
+                    json!({
+                        "operation": "retry_planned",
+                        "operationId": operation_id,
+                        "reason": "deterministic_client_token",
+                    }),
+                );
+                save_state(&mut state, Some(&observed_sha))?;
+                let retry_sha = hash_file(&execution_dir.join(EXECUTION_FILE))?;
+                drop(lock);
+                return dispatch_planned(state, retry_sha, json_mode).await;
+            }
             return Err(format!(
                 "provider operation {} requires reconciliation; Harn will not retry it",
                 operation.id

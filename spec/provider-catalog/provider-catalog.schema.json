@@ -756,7 +756,8 @@
             "gemini",
             "mistral",
             "fireworks",
-            "xai"
+            "xai",
+            "bedrock"
           ]
         }
       },

@@ -84,7 +84,8 @@ pub struct ProviderRule {
     #[serde(default)]
     pub batch_api: Option<bool>,
     /// Provider batch request/result family. Known values are `openai`,
-    /// `anthropic_messages`, `gemini`, `mistral`, `fireworks`, and `xai`.
+    /// `anthropic_messages`, `gemini`, `mistral`, `fireworks`, `xai`, and
+    /// `bedrock`.
     #[serde(default)]
     pub batch_wire_format: Option<String>,
     /// How a batch accepts work: `jsonl_file`, `inline_requests`, or
@@ -131,6 +132,9 @@ pub struct ProviderRule {
     /// branches.
     #[serde(default)]
     pub batch_operational_notes: Option<Vec<String>>,
+    /// Explicit provider regions where this model's batch API is available.
+    #[serde(default)]
+    pub batch_regions: Option<Vec<String>>,
     /// Approval policy modes available when provider-hosted tools execute.
     #[serde(default)]
     pub tool_approval_policy: Option<String>,
@@ -543,6 +547,7 @@ impl ProviderRule {
             batch_cancellation,
             batch_security_notes,
             batch_operational_notes,
+            batch_regions,
             tool_approval_policy,
             max_tools,
             prompt_caching,
@@ -641,6 +646,7 @@ impl ProviderRule {
         fill_opt(&mut self.batch_cancellation, batch_cancellation);
         fill_opt(&mut self.batch_security_notes, batch_security_notes);
         fill_opt(&mut self.batch_operational_notes, batch_operational_notes);
+        fill_opt(&mut self.batch_regions, batch_regions);
         fill_opt(&mut self.tool_approval_policy, tool_approval_policy);
         fill_opt(&mut self.max_tools, max_tools);
         fill_opt(&mut self.prompt_caching, prompt_caching);
@@ -1024,6 +1030,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         batch_cancellation: None,
         batch_security_notes: None,
         batch_operational_notes: None,
+        batch_regions: None,
         max_tools: None,
         prompt_caching: None,
         prompt_cache_ttls: None,
@@ -1174,6 +1181,11 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .batch_operational_notes
             .clone()
             .or_else(|| defaults.batch_operational_notes.clone())
+            .unwrap_or_default(),
+        batch_regions: rule
+            .batch_regions
+            .clone()
+            .or_else(|| defaults.batch_regions.clone())
             .unwrap_or_default(),
         tool_approval_policy: rule.tool_approval_policy.clone(),
         max_tools: rule.max_tools,
