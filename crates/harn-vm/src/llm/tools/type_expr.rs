@@ -3,7 +3,7 @@
 // map cleanly becomes `Unknown` — never fabricate types the runtime won't
 // honour.
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) enum TypeExpr {
     /// Primitive type name as used in TypeScript: string, number, boolean, null, any, unknown, void.
     Primitive(String),
@@ -22,10 +22,12 @@ pub(crate) enum TypeExpr {
     /// Harn-side `types/Foo` references.
     Ref(String),
     /// Fallback for shapes we cannot map cleanly.
+    #[default]
     Unknown,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub(crate) struct ObjectField {
     pub(crate) name: String,
     pub(crate) ty: TypeExpr,

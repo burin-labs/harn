@@ -273,8 +273,14 @@ pub enum LiveClientMode {
 mod host_injection;
 mod live_clients;
 mod metadata;
+mod text_tool_call_seq;
 mod transcript_lifecycle;
 mod types;
+
+pub(crate) use text_tool_call_seq::next_text_tool_call_seq_for_parse;
+use text_tool_call_seq::{
+    next_text_tool_call_seq_from_json_messages, next_text_tool_call_seq_from_transcript,
+};
 
 pub use host_injection::*;
 pub use live_clients::*;
@@ -414,73 +420,6 @@ pub(crate) fn pop_current_session() {
 
 pub fn current_session_id() -> Option<String> {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow().last().cloned())
-}
-
-pub(crate) fn next_text_tool_call_seq(id: &str) -> Option<u64> {
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let state = map.get_mut(id)?;
-        let seq = state.text_tool_call_seq;
-        state.text_tool_call_seq = state.text_tool_call_seq.checked_add(1).unwrap_or(0);
-        state.touch();
-        Some(seq)
-    })
-}
-
-fn parse_text_tool_call_seq(id: &str) -> Option<u64> {
-    let digits = id.strip_prefix("tc_")?;
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    digits.parse().ok()
-}
-
-fn update_next_text_tool_call_seq(value: &serde_json::Value, next_seq: &mut u64) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                update_next_text_tool_call_seq(item, next_seq);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for key in ["id", "tool_call_id"] {
-                if let Some(seq) = map
-                    .get(key)
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(parse_text_tool_call_seq)
-                {
-                    *next_seq = (*next_seq).max(seq.saturating_add(1));
-                }
-            }
-            for item in map.values() {
-                update_next_text_tool_call_seq(item, next_seq);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn next_text_tool_call_seq_from_json_messages(messages: &[serde_json::Value]) -> u64 {
-    let mut next_seq = 0;
-    for message in messages {
-        update_next_text_tool_call_seq(message, &mut next_seq);
-    }
-    next_seq
-}
-
-fn next_text_tool_call_seq_from_transcript(transcript: &VmValue) -> u64 {
-    let Some(dict) = transcript.as_dict() else {
-        return 0;
-    };
-    let Some(VmValue::List(messages)) = dict.get("messages") else {
-        return 0;
-    };
-    next_text_tool_call_seq_from_json_messages(
-        &messages
-            .iter()
-            .map(crate::llm::helpers::vm_value_to_json)
-            .collect::<Vec<_>>(),
-    )
 }
 
 pub fn current_actor_chain() -> Option<ActorChain> {
@@ -741,6 +680,28 @@ pub fn transcript(id: &str) -> Option<VmValue> {
         s.borrow()
             .get(id)
             .map(|state| transcript_with_session_metadata(state.transcript.clone(), state))
+    })
+}
+
+/// Index the next message injected into this session will take.
+///
+/// Used to stamp a dispatch-time receipt with the assistant turn it belongs
+/// to: the calls being dispatched were parsed from the message immediately
+/// before this index. Returns `None` for an unknown session.
+pub fn next_message_index(id: &str) -> Option<usize> {
+    SESSIONS.with(|s| {
+        let map = s.borrow();
+        let state = map.get(id)?;
+        let messages = state
+            .transcript
+            .as_dict()
+            .and_then(|dict| dict.get("messages"))
+            .and_then(|value| match value {
+                VmValue::List(list) => Some(list.len()),
+                _ => None,
+            })
+            .unwrap_or(0);
+        Some(messages)
     })
 }
 
@@ -1201,7 +1162,12 @@ pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
 
 /// Append a message dict to the session transcript. The message must
 /// have at least a string `role`; anything else is merged verbatim.
-pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
+///
+/// Returns the index the message took in the session's message list. Callers
+/// that record a typed receipt for the message they just injected (tool
+/// results, which must name the call they answer) use it to bind the receipt
+/// to the exact message rather than to "whatever came next".
+pub fn inject_message(id: &str, message: VmValue) -> Result<usize, String> {
     let Some(msg_dict) = message.as_dict().cloned() else {
         return Err("agent_session_inject: message must be a dict".into());
     };
@@ -1259,7 +1225,7 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         );
         emit_identified_user_message_event(id, &persisted_message);
         emit_llm_message_event(id, message_index, &persisted_message);
-        Ok(())
+        Ok(message_index)
     })
 }
 

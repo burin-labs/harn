@@ -140,6 +140,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/models_dispatch.rs",
   "crates/harn-cli/tests/harn_cli_e2e/providers_dispatch.rs",
   "crates/harn-cli/tests/harn_cli_e2e/routes_graph_dispatch.rs",
+  // The projector must be proven against a run the real agent loop produced,
+  // so the fixture run and the export both go through the actual CLI.
+  "crates/harn-cli/tests/harn_cli_e2e/runs_export_training_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/flow_ship_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/host_lease_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",

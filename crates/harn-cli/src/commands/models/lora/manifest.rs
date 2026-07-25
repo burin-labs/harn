@@ -10,7 +10,7 @@ use super::{
     lora_training_contract, merge_serving_target_metadata, normalize_lora_alpha,
     normalize_lora_dropout, normalize_lora_method, normalize_lora_rank, normalize_lora_trainer,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
-    parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, serving_recipe,
+    parse_target_metadata, render_embedded_report, resolve_lora_provider, serving_recipe,
     sha256_file, target_module_contract, teacher_report, template_recipe_for_route,
     tool_catalog_contract, trainer_identity_check, trainer_identity_from_args, BaseModelReport,
     EvaluationRecipe, LoraContractReport, LoraContractReportInput, LoraEvaluationRecipeInput,
@@ -35,7 +35,7 @@ pub(super) async fn manifest(args: &ModelsLoraManifestArgs) -> i32 {
             return 1;
         }
     }
-    render_embedded_lora_report(
+    render_embedded_report(
         &report,
         LORA_MANIFEST_PAYLOAD_ENV,
         LORA_MANIFEST_PAYLOAD_PRETTY_ENV,

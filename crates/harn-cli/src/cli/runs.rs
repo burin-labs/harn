@@ -14,6 +14,28 @@ pub(crate) enum RunsCommand {
     Inspect(RunsInspectArgs),
     /// Print the stable harn.run_view.v1 / harn.session_view.v1 JSON projection.
     View(RunsViewArgs),
+    /// Project one authoritative run into a harn.agent_training_example.v1 example.
+    ExportTraining(RunsExportTrainingArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RunsExportTrainingArgs {
+    /// Path to a run record JSON file, or a directory holding run records.
+    /// A directory with more than one record requires `--run-id`.
+    pub path: String,
+    /// Run id this export must project. Required to disambiguate a directory
+    /// holding several runs, and otherwise asserted against the record.
+    #[arg(long)]
+    pub run_id: Option<String>,
+    /// Session id the transcript must belong to.
+    #[arg(long)]
+    pub session_id: Option<String>,
+    /// Write the example as one JSONL row to this path instead of stdout.
+    #[arg(long)]
+    pub out: Option<String>,
+    /// Emit the structured report as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -35,6 +57,25 @@ pub(crate) struct RunsViewArgs {
     /// Emit JSON. Accepted for consistency with other CLI surfaces.
     #[arg(long)]
     pub json: bool,
+}
+
+/// Dispatch a `harn runs` subcommand.
+///
+/// Lives beside the argument definitions rather than in the top-level command
+/// match, so the surface's parsing and its wiring stay in one file.
+pub(crate) async fn run_runs_command(args: RunsArgs) {
+    match args.command {
+        RunsCommand::Inspect(inspect) => {
+            crate::inspect_run_record(&inspect.path, inspect.compare.as_deref());
+        }
+        RunsCommand::View(view) => print_view(&view.path, view.session, view.json),
+        RunsCommand::ExportTraining(export) => {
+            let code = crate::commands::runs_export_training::run(&export).await;
+            if code != 0 {
+                process::exit(code);
+            }
+        }
+    }
 }
 
 pub(crate) fn print_view(path: &str, force_session: bool, _json: bool) {

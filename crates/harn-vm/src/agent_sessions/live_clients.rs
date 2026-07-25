@@ -202,7 +202,7 @@ pub fn inject_prompt_from_live_client(
             }
         })),
     );
-    inject_message(id, VmValue::dict(message))
+    inject_message(id, VmValue::dict(message)).map(|_| ())
 }
 
 pub fn route_live_permission_request(

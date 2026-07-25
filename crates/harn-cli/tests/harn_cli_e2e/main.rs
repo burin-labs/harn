@@ -81,6 +81,7 @@ mod run_eval_cleanup_e2e;
 mod run_eval_imports;
 mod run_exit_codes;
 mod run_json_cli;
+mod runs_export_training_cli;
 mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;

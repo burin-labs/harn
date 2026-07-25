@@ -9,7 +9,7 @@ pub(crate) use super::provider::{
     ProviderDispatchAuditVariantArg, ProviderToolProbeCaseArg, ProviderToolProbeFormatArg,
     ProviderToolProbeModeArg,
 };
-pub(crate) use super::{
+use super::{
     CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
     FlowCommand, HarnessThreadingMode, HostCommand, HostLeaseCommand, HostLeasePriorityArg,
@@ -18,10 +18,11 @@ pub(crate) use super::{
     OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
     OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
     PackageScaffoldCommand, PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand,
-    ProviderCatalogCommand, ProviderCommand, PublishArgs, RuleCommand, RunsCommand, SessionCommand,
+    ProviderCatalogCommand, ProviderCommand, PublishArgs, RuleCommand, SessionCommand,
     SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand, TriggerCommand,
     TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
+pub(crate) use crate::cli::runs::RunsCommand;
 
 mod parse_cmds;
 mod parse_core;

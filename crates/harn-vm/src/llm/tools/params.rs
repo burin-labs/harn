@@ -66,7 +66,8 @@ fn vm_dict_to_json(dict: &crate::value::DictMap) -> serde_json::Value {
     super::super::vm_value_to_json(&VmValue::dict(dict.clone()))
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub(crate) struct ToolParamSchema {
     pub(crate) name: String,
     pub(crate) ty: TypeExpr,

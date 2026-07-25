@@ -416,6 +416,7 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliSc
     "providers/tool_probe" => "stdlib/cli/providers/tool_probe.harn",
     "providers/tool_scorecard" => "stdlib/cli/providers/tool_scorecard.harn",
     "routes" => "stdlib/cli/routes.harn",
+    "runs/export_training" => "stdlib/cli/runs/export_training.harn",
     "scan" => "stdlib/cli/scan.harn",
     "scaffold/init" => "stdlib/cli/scaffold/init.harn",
     "scaffold/tool_new" => "stdlib/cli/scaffold/tool_new.harn",

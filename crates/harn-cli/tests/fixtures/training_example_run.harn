@@ -1,0 +1,84 @@
+/**
+ * Drive one real agent run through the public lifecycle and persist it.
+ *
+ * Used by the `harn runs export-training` integration tests, which need a run
+ * produced by the actual agent loop — not a hand-written sidecar — so the
+ * projector is exercised against whatever the runtime really records.
+ *
+ * `TRAINING_RUN_CHANNEL` selects how the model asks for its tool:
+ *   native - a provider-native tool_calls array
+ *   text   - an inline `<tool_call>` block, whose result rides back to the
+ *            model as an ordinary `user` echo with no id on it anywhere
+ *
+ * `read_file` declares `start_line` and `end_line` but the run only ever
+ * passes `path`, so a schema inferred from observed arguments would visibly
+ * differ from the one the model was served.
+ */
+import { llm_done, llm_text, llm_tool_call, with_llm_mocks } from "std/testing"
+import { tool_registry_from } from "std/tools"
+
+fn main(harness: Harness) -> int {
+  const out_dir = harness.env.get_or("TRAINING_RUN_DIR", "")
+  const channel = harness.env.get_or("TRAINING_RUN_CHANNEL", "native")
+  const run_id = harness.env.get_or("TRAINING_RUN_ID", "run_training_example")
+
+  const tools = tool_registry_from(
+    [
+      {
+        name: "read_file",
+        description: "Read a file from the workspace.",
+        parameters: {
+          path: {type: "string"},
+          start_line: {type: "integer", required: false},
+          end_line: {type: "integer", required: false},
+        },
+        handler: { args -> {ok: true, observation: "fn main() {}"} },
+      },
+    ],
+  )
+
+  const first_turn = if channel == "text" {
+    llm_text(
+      "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"main.rs\"}}\n</tool_call>",
+    )
+  } else {
+    llm_tool_call("read_file", {path: "main.rs"}, "call_read_1")
+  }
+  const options = if channel == "text" {
+    {tool_format: "text"}
+  } else {
+    {}
+  }
+
+  const result = with_llm_mocks(
+    [first_turn, llm_done()],
+    { _ ->
+      agent_loop(
+        "read main.rs and report",
+        "You are a coding agent.",
+        {
+          model: "mock",
+          provider: "mock",
+          max_iterations: 4,
+          llm_transcript_dir: out_dir + "/" + run_id + "-llm",
+          tools: tools,
+        }
+          + options,
+      )
+    },
+  )
+
+  const persisted = run_record_save(
+    run_record(
+      {
+        id: run_id,
+        task: "read main.rs and report",
+        status: "completed",
+        transcript: result?.transcript,
+      },
+    ),
+    out_dir + "/" + run_id + ".json",
+  )
+  harness.stdio.println(to_string(persisted?.path))
+  return 0
+}

@@ -27,6 +27,12 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
+path = "src/agent_sessions/text_tool_call_seq.rs"
+statics = ["FALLBACK_TEXT_TOOL_CALL_SEQ"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
 path = "src/autonomy.rs"
 statics = ["AUTONOMY_POLICY_STACK"]
 category = "logical_task"
@@ -145,12 +151,6 @@ path = "src/llm/agent_session_host.rs"
 statics = ["AGENT_HOST_SESSIONS"]
 category = "runtime_registry"
 plan = "arc_registry_scope"
-
-[[thread_local]]
-path = "src/llm/agent_host_primitives.rs"
-statics = ["FALLBACK_TEXT_TOOL_CALL_SEQ"]
-category = "thread_private"
-plan = "thread_private_cache"
 
 [[thread_local]]
 path = "src/llm/autonomy_budget.rs"

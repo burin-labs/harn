@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::cli::ModelsLoraPromoteArgs;
 
-use super::{render_embedded_lora_report, run_embedded_lora_report, sha256_file};
+use super::{render_embedded_report, run_embedded_report, sha256_file};
 
 const LORA_PROMOTE_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PROMOTE_PAYLOAD_JSON";
 const LORA_PROMOTE_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_PROMOTE_PAYLOAD_PRETTY";
@@ -24,7 +24,7 @@ pub(super) async fn promote(args: &ModelsLoraPromoteArgs) -> i32 {
             eprintln!("error: {error}");
             return 1;
         }
-        let outcome = match run_embedded_lora_report(
+        let outcome = match run_embedded_report(
             &bundle,
             LORA_PROMOTE_PAYLOAD_ENV,
             LORA_PROMOTE_PAYLOAD_PRETTY_ENV,
@@ -56,7 +56,7 @@ pub(super) async fn promote(args: &ModelsLoraPromoteArgs) -> i32 {
             }
         }
     }
-    render_embedded_lora_report(
+    render_embedded_report(
         &bundle,
         LORA_PROMOTE_PAYLOAD_ENV,
         LORA_PROMOTE_PAYLOAD_PRETTY_ENV,

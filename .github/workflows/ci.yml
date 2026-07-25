@@ -528,6 +528,16 @@ jobs:
             du -sh "$GITHUB_WORKSPACE/target" 2>/dev/null || echo "target/: absent (cold workspace)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      # The self-hosted checkout above keeps the untracked tree so `target/`
+      # stays warm. That also preserves `crates/harn-cli/generated/`, which is
+      # gitignored and left behind by whichever earlier run produced it. A
+      # payload from an older commit still parses, so harn-cli/build.rs embeds
+      # it and reports AOT as present — while missing bytecode for any CLI
+      # script added since. Drop it so this build either regenerates the
+      # payload deliberately or uses the source fallback.
+      - name: Drop stale generated CLI AOT payload
+        if: env.HARN_RUNNER_TIER == 'self-hosted'
+        run: rm -rf crates/harn-cli/generated
       # Install mold and steer rustc at it via RUSTFLAGS above. apt's `mold`
       # only drops the binary in PATH; it does NOT replace /usr/bin/ld, so the
       # stock linker stays intact and rustc opts in explicitly through the

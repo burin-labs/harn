@@ -15,11 +15,12 @@ use super::behavior::{
     record_behavior_classes, should_emit_no_tool_completion, text_tool_row_behavior_classes,
     BehaviorStrataReport,
 };
+use super::projected::{convert_projected_example, is_projected_example};
 use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format, normalize_lora_method,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
-    parse_target_metadata, render_embedded_lora_report, resolve_lora_provider, sha256_file,
+    parse_target_metadata, render_embedded_report, resolve_lora_provider, sha256_file,
     target_module_contract, tool_catalog_contract, BaseModelReport, EvaluationRecipe,
     LoraContractReport, LoraContractReportInput, LoraEvaluationRecipeInput, ToolCallingReport,
     ToolCatalogContract,
@@ -41,7 +42,7 @@ pub(super) async fn export_dataset(args: &ModelsLoraExportArgs) -> i32 {
             return 1;
         }
     };
-    render_embedded_lora_report(
+    render_embedded_report(
         &report,
         LORA_EXPORT_PAYLOAD_ENV,
         LORA_EXPORT_PAYLOAD_PRETTY_ENV,
@@ -186,7 +187,9 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         }
         let behavior_classes = record_behavior_classes(record)?;
         increment_counts(&mut source_behavior_counts, &behavior_classes);
-        let converted = if dataset_format == "messages_with_tool_calls" {
+        let converted = if is_projected_example(record) {
+            convert_projected_example(record, &target, &dataset_format, &behavior_classes)
+        } else if dataset_format == "messages_with_tool_calls" {
             convert_structured_record(record, &target, &regexes, &behavior_classes)
         } else {
             convert_text_records(
@@ -435,7 +438,7 @@ impl ExportRegexes {
 }
 
 #[derive(Clone)]
-struct ExportTarget {
+pub(super) struct ExportTarget {
     base_model: String,
     provider: String,
     adapter_name: Option<String>,
@@ -453,11 +456,11 @@ pub(super) struct ParsedToolCall {
     arguments: Value,
 }
 
-struct ConvertedExport {
-    rows: Vec<Value>,
-    tool_calls: u64,
-    tool_results: u64,
-    behavior_classes: BTreeSet<String>,
+pub(super) struct ConvertedExport {
+    pub(super) rows: Vec<Value>,
+    pub(super) tool_calls: u64,
+    pub(super) tool_results: u64,
+    pub(super) behavior_classes: BTreeSet<String>,
 }
 
 fn convert_structured_record(
@@ -717,7 +720,7 @@ pub(super) fn record_messages(
         .collect())
 }
 
-fn normalized_message(role: &str, content: &str) -> Value {
+pub(super) fn normalized_message(role: &str, content: &str) -> Value {
     json!({
         "role": role,
         "content": content,
@@ -976,7 +979,7 @@ fn json_schema_type(value: &Value) -> Value {
     json!({ "type": type_name })
 }
 
-fn export_metadata(
+pub(super) fn export_metadata(
     record: &Map<String, Value>,
     target: &ExportTarget,
     exporter: &str,
@@ -1250,7 +1253,7 @@ fn export_serving_report(
     }
 }
 
-fn record_string(record: &Map<String, Value>, key: &str) -> String {
+pub(super) fn record_string(record: &Map<String, Value>, key: &str) -> String {
     record
         .get(key)
         .and_then(Value::as_str)

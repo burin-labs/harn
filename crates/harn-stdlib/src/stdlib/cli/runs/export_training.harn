@@ -1,0 +1,153 @@
+/**
+ * `harn runs export-training` renderer.
+ *
+ * The dispatch shim projects one authoritative run into a
+ * `harn.agent_training_example.v1` example. This Harn source owns the report
+ * presentation and JSON passthrough.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_RUNS_EXPORT_TRAINING_PAYLOAD_JSON   - compact report JSON.
+ *   HARN_RUNS_EXPORT_TRAINING_PAYLOAD_PRETTY - pretty report JSON.
+ *   HARN_OUTPUT_JSON                         - "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+fn __message_summary(item: unknown) -> string {
+  const message = safe_dict(item)
+  const role = safe_string(message["role"], "")
+  const calls = safe_list(message["tool_calls"])
+  let line = "    - " + role
+  if len(calls) > 0 {
+    const names = calls.map(
+      { call -> safe_string(safe_dict(safe_dict(call)["function"])["name"], "") },
+    )
+    line = line + " calls " + join(names, ", ")
+  }
+  const call_id = safe_string(message["tool_call_id"], "")
+  if call_id != "" {
+    line = line + " answers " + call_id
+  }
+  return line + " (" + safe_int_string(len(safe_string(message["content"], "")), "0") + " chars)"
+}
+
+fn __render_human(harness: Harness, report: dict) {
+  const ok = safe_bool(report["ok"], false)
+  harness.stdio.println(
+    "Training example export from " + safe_string(report["run_record_path"], ""),
+  )
+  if !ok {
+    const error = safe_dict(report["error"])
+    harness.stdio.eprintln("  refused: " + safe_string(error["kind"], "unknown"))
+    harness.stdio.eprintln("  " + safe_string(error["message"], ""))
+    const event_index = error["event_index"]
+    if event_index != nil {
+      harness.stdio.eprintln("  source event: " + safe_int_string(event_index, "0"))
+    }
+    return
+  }
+  const example = safe_dict(report["example"])
+  const provenance = safe_dict(example["provenance"])
+  const source = safe_dict(provenance["source"])
+  const usage = safe_dict(provenance["usage"])
+  const messages = safe_list(example["messages"])
+  const tools = safe_list(example["tools"])
+  harness.stdio.println("  schema: " + safe_string(example["schema_version"], ""))
+  harness.stdio.println("  run: " + safe_string(provenance["run_id"], ""))
+  harness.stdio.println("  session: " + safe_string(provenance["session_id"], ""))
+  harness.stdio.println(
+    "  route: "
+      + safe_string(provenance["provider"], "")
+      + "/"
+      + safe_string(provenance["model"], "")
+      + " tool_format="
+      + safe_string(provenance["effective_tool_format"], ""),
+  )
+  harness.stdio.println("  terminal status: " + safe_string(provenance["terminal_status"], ""))
+  harness.stdio.println(
+    "  tool catalog: "
+      + safe_int_string(len(tools), "0")
+      + " schemas, hash "
+      + safe_string(provenance["tool_catalog_hash"], ""),
+  )
+  harness.stdio.println(
+    "  usage: "
+      + safe_int_string(usage["provider_calls"], "0")
+      + " provider calls, "
+      + safe_int_string(usage["input_tokens"], "0")
+      + " in / "
+      + safe_int_string(usage["output_tokens"], "0")
+      + " out",
+  )
+  harness.stdio.println("  source transcript: " + safe_string(source["transcript_path"], ""))
+  harness.stdio.println("  source digest: " + safe_string(source["transcript_sha256"], ""))
+  harness.stdio.println(
+    "  source events: "
+      + safe_int_string(source["first_event_index"], "0")
+      + "-"
+      + safe_int_string(source["last_event_index"], "0")
+      + " of "
+      + safe_int_string(source["event_count"], "0"),
+  )
+  harness.stdio.println("  messages (" + safe_int_string(len(messages), "0") + "):")
+  for item in messages {
+    harness.stdio.println(__message_summary(item))
+  }
+  const output_path = safe_string(report["output_path"], "")
+  if output_path != "" {
+    harness.stdio.println("  wrote: " + output_path)
+  }
+}
+
+fn __render_json(report: dict) -> string {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
+    cli_json_envelope({schema_version: 1, ok: true, data: report})
+  } else {
+    const error = safe_dict(report["error"])
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: safe_string(error["kind"], "training_example_export_failed"),
+          message: safe_string(error["message"], "Training example projection failed."),
+          details: report,
+        },
+      },
+    )
+  }
+  return json_stringify_pretty(envelope)
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_RUNS_EXPORT_TRAINING_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("internal error: HARN_RUNS_EXPORT_TRAINING_PAYLOAD_JSON not set")
+    return 70
+  }
+  const report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln(
+      "internal error: failed to parse training example export payload: " + e.message,
+    )
+    return 70
+  }
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness, report)
+  }
+  if safe_bool(report["ok"], false) {
+    return 0
+  }
+  return 1
+}

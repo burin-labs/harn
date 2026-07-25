@@ -5,16 +5,22 @@ use super::json_schema::json_schema_to_type_expr;
 use super::params::{extract_examples, extract_params_from_vm_dict, ToolParamSchema};
 use crate::value::VmValue;
 
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ToolSchema {
+    // `name` deliberately has no default: a catalog row without one is not a
+    // tool schema, and a consumer reading the sidecar back must fail on it
+    // rather than materialize a nameless tool.
     pub(crate) name: String,
+    #[serde(default)]
     pub(crate) description: String,
+    #[serde(default)]
     pub(crate) params: Vec<ToolParamSchema>,
     /// When true, render as a compact one-liner (name + params type + first
     /// sentence of description) instead of the full TypeScript declaration with
     /// JSDoc. Tools marked compact are still fully dispatchable — only the
     /// prompt rendering changes. The model can call `tool_schema({ name })`
     /// to get the full description on demand.
+    #[serde(default)]
     pub(crate) compact: bool,
 }
 

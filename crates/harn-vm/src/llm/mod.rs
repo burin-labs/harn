@@ -218,6 +218,7 @@ pub use fake::{
 };
 pub use mock::drain_tool_recordings;
 mod healthcheck;
+pub(crate) mod pairing_receipts;
 pub(crate) mod provider;
 mod provider_auth;
 pub(crate) mod providers;
