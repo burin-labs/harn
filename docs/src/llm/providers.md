@@ -48,7 +48,7 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 | Parasail | `PARASAIL_API_KEY` | explicit model ID from `/v1/models` |
 | Atlas Cloud | `ATLAS_API_KEY` or `ATLASCLOUD_API_KEY` | explicit model ID from `/v1/models` |
 | HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
-| Bedrock | AWS env/profile/instance role | explicit Bedrock `model` |
+| Bedrock | AWS SDK credential chain | explicit Bedrock `model` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` | deployment name in `model` |
 | Gemini API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-flash` or explicit Gemini model ID |
 | Vertex AI | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` | Gemini model ID |
@@ -282,12 +282,11 @@ formats midway through the process.
 
 ### Enterprise providers
 
-Bedrock uses the AWS credential chain. Harn checks `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` first, then the
-selected `AWS_PROFILE` or default profile under `~/.aws/credentials`, then
-container credentials, then EC2 instance profile credentials. Set
-`AWS_REGION`, `AWS_DEFAULT_REGION`, or `BEDROCK_REGION`. The model is a
-Bedrock model ID such as `anthropic.claude-3-5-sonnet-20240620-v1:0` or
+Bedrock uses the AWS SDK credential chain, including environment credentials,
+shared profiles (assume-role, SSO, and `credential_process`), web identity,
+container credentials, and EC2 instance profile credentials. Set `AWS_REGION`,
+`AWS_DEFAULT_REGION`, or `BEDROCK_REGION`. The model is a Bedrock model ID such
+as `anthropic.claude-3-5-sonnet-20240620-v1:0` or
 `meta.llama3-70b-instruct-v1:0`.
 
 Azure OpenAI requires `AZURE_OPENAI_ENDPOINT`, for example

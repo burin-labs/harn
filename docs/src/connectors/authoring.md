@@ -725,11 +725,11 @@ const response = harness.net.request("POST", url, {
 ```
 
 `timestamp` is required so signing is deterministic in tests. The helper returns
-`headers`, `authorization`, `amz_date`, `content_sha256`, `signed_headers`,
-`credential_scope`, `canonical_request`, and `string_to_sign`; it never returns
-derived signing keys. Validation errors identify the invalid field without
-echoing access keys, secret access keys, session tokens, canonical requests, or
-signed headers. The normal redaction policy scrubs `Authorization` and
+`headers`, `authorization`, `amz_date`, `content_sha256`, and `signed_headers`;
+it never returns derived signing keys or the AWS signer's canonicalization
+internals. Validation errors identify the invalid field without echoing access
+keys, secret access keys, session tokens, or signed headers. The normal
+redaction policy scrubs `Authorization` and
 `X-Amz-Security-Token` from recorded HTTP mock calls and transcripts unless a
 test explicitly opts into sensitive values.
 
