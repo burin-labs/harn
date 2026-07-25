@@ -299,6 +299,7 @@
   - [A2A: actor-chain extension](./protocol-contributions/a2a-actor-chain-extension.md)
   - [MCP: `authenticatedIdentity`](./protocol-contributions/mcp-authenticated-identity.md)
   - [MCP/OAuth: actor-token positioning](./protocol-contributions/oauth-actor-chain-positioning.md)
+  - [MCP: sampling budget caps](./protocol-contributions/mcp-sampling-budget-caps.md)
 
 ## Architecture decisions
 
