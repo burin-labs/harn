@@ -158,6 +158,19 @@ if ! grep -Fq "check-ported-handler-loc" "$record"; then
   cat "$record" >&2
   exit 1
 fi
+if ! grep -Fq "lint-actions-harn" "$record"; then
+  echo "required audit fanout omitted the Harn-backed Actions lint" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq -- "- run: make lint-actions-source" "$repo_root/.github/workflows/ci.yml"; then
+  echo "Actions hygiene job must use the source-only lint target" >&2
+  exit 1
+fi
+if grep -Eq -- '^[[:space:]]*- run: make lint-actions[[:space:]]*$' "$repo_root/.github/workflows/ci.yml"; then
+  echo "Actions hygiene job must not invoke the compile-bearing aggregate target" >&2
+  exit 1
+fi
 if ! grep -Fq $'invocation\tcheck-test-case-performance' "$record"; then
   echo "performance gate did not run as an isolated phase" >&2
   cat "$record" >&2

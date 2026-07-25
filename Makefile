@@ -1,4 +1,4 @@
-.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint gen-openapi-snapshot check-openapi-snapshot test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-generated-registry check-release-audit-contract check-ci-cache-policy
+.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn spec-lint gen-openapi-snapshot check-openapi-snapshot test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-generated-registry check-release-audit-contract check-ci-cache-policy
 .PHONY: test-pr-gate-post-warm-integrations
 
 HARN_BIN ?=
@@ -264,8 +264,9 @@ check-openapi-snapshot:
 	@$(HARN_CMD) run scripts/check_openapi_snapshot.harn
 	@echo "    OpenAPI snapshot OK."
 
-# Lint GitHub Actions workflows.
-lint-actions:
+# Lint GitHub Actions workflows without requiring the Harn binary. Keep this
+# target source-only so the dedicated hygiene job never pays for a Rust build.
+lint-actions-source:
 	@if command -v actionlint >/dev/null 2>&1; then \
 		actionlint; \
 	else \
@@ -277,11 +278,17 @@ lint-actions:
 		echo "Pin org runner-availability workflow references to a full commit SHA." >&2; \
 		exit 1; \
 	fi
+
+# Validate the Harn-specific runner-tier contract in a lane that already has a
+# warm, exact-commit Harn binary.
+lint-actions-harn:
 	@# Keep each Blacksmith-capable job off `runner.environment` and its declared
 	@# HARN_RUNNER_TIER in step with its runs-on ladder. Unlike actionlint above
 	@# this is NOT allowed to skip: the failure it guards against is silent, so
 	@# a gate that can silently not-run would be worthless against it.
 	@$(HARN_CMD) run scripts/check_runner_tier.harn
+
+lint-actions: lint-actions-source lint-actions-harn
 
 # Reject unreviewed conformance diagnostics while preserving the explicitly
 # triaged baseline. Paired .error/.lint fixtures own their diagnostics in the

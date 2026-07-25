@@ -1650,7 +1650,7 @@ jobs:
           install -m 0755 "${RUNNER_TEMP}/actionlint" "${HOME}/.local/bin/actionlint"
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
           "${HOME}/.local/bin/actionlint" -version
-      - run: make lint-actions
+      - run: make lint-actions-source
       # Keep the required hygiene gate deterministic. Online audits such as
       # `known-vulnerable-actions` depend on the GitHub Advisories API, whose
       # transport failures are indistinguishable from audit failures to
