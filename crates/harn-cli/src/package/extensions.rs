@@ -291,7 +291,8 @@ async fn collect_manifest_triggers_with_mode(
     lazy_vm_callables: bool,
 ) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
     let _provider_schema_guard = lock_manifest_provider_schemas().await;
-    let provider_catalog = build_manifest_provider_catalog(extensions).await?;
+    let provider_schemas = build_manifest_provider_schemas(extensions).await?;
+    let provider_catalog = manifest_provider_catalog(provider_schemas.clone())?;
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
@@ -384,7 +385,7 @@ async fn collect_manifest_triggers_with_mode(
         });
     }
 
-    harn_vm::install_provider_catalog(provider_catalog);
+    register_manifest_provider_schemas(provider_schemas)?;
     Ok(collected)
 }
 
@@ -1387,6 +1388,10 @@ mod tests;
 #[cfg(test)]
 #[path = "extensions_lazy_tests.rs"]
 mod lazy_tests;
+
+#[cfg(test)]
+#[path = "extensions_provider_tests.rs"]
+mod provider_tests;
 
 #[cfg(test)]
 #[path = "persona_runtime_tests.rs"]

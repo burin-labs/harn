@@ -97,6 +97,71 @@ fn provider_catalog_rejects_duplicates() {
 }
 
 #[test]
+fn merging_a_second_contribution_keeps_the_first() {
+    let mut catalog = ProviderCatalog::with_defaults();
+    catalog
+        .merge(vec![owned_provider_schema("runtime-a", "RuntimeAPayload")])
+        .unwrap();
+    catalog
+        .merge(vec![owned_provider_schema("runtime-b", "RuntimeBPayload")])
+        .unwrap();
+
+    assert!(catalog.metadata_for("runtime-a").is_some());
+    assert!(catalog.metadata_for("runtime-b").is_some());
+    assert!(catalog.metadata_for("github").is_some());
+}
+
+#[test]
+fn merging_the_same_contribution_twice_is_a_no_op() {
+    let mut catalog = ProviderCatalog::with_defaults();
+    let schemas = || vec![owned_provider_schema("runtime-a", "RuntimeAPayload")];
+    catalog.merge(schemas()).unwrap();
+    catalog.merge(schemas()).expect("reloading is idempotent");
+
+    assert_eq!(
+        catalog.metadata_for("runtime-a").unwrap().schema_name,
+        "RuntimeAPayload"
+    );
+}
+
+#[test]
+fn merging_a_conflicting_schema_reports_the_provider() {
+    let mut catalog = ProviderCatalog::with_defaults();
+    catalog
+        .merge(vec![owned_provider_schema("runtime-a", "RuntimeAPayload")])
+        .unwrap();
+    let error = catalog
+        .merge(vec![owned_provider_schema("runtime-a", "OtherPayload")])
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ProviderCatalogError::DuplicateProvider("runtime-a".to_string())
+    );
+    assert_eq!(
+        catalog.metadata_for("runtime-a").unwrap().schema_name,
+        "RuntimeAPayload",
+        "a rejected contribution must not have displaced the existing schema"
+    );
+}
+
+#[test]
+fn merging_over_a_builtin_leaves_the_builtin_schema_in_place() {
+    let mut catalog = ProviderCatalog::with_defaults();
+    catalog
+        .merge(vec![owned_provider_schema(
+            "github",
+            "PackageGitHubPayload",
+        )])
+        .expect("a package may name a builtin provider");
+
+    assert_eq!(
+        catalog.metadata_for("github").unwrap().schema_name,
+        "GitHubEventPayload"
+    );
+}
+
+#[test]
 fn provider_catalog_builds_independent_owned_dynamic_catalogs() {
     let first = ProviderCatalog::with_defaults_and(vec![owned_provider_schema(
         "runtime-a",

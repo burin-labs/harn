@@ -152,14 +152,35 @@ impl ProviderCatalog {
         schemas: Vec<Arc<dyn ProviderSchema>>,
     ) -> Result<Self, ProviderCatalogError> {
         let mut catalog = Self::with_defaults();
-        let builtin_providers: BTreeSet<String> = catalog.schema_names().into_keys().collect();
-        for schema in schemas {
-            if builtin_providers.contains(schema.provider_id()) {
-                continue;
-            }
-            catalog.register(schema)?;
-        }
+        catalog.merge(schemas)?;
         Ok(catalog)
+    }
+
+    /// Add `schemas` to this catalog without disturbing what is already in it.
+    ///
+    /// A contribution is skipped when its id belongs to a builtin schema — a
+    /// package cannot redefine `github` — and when it re-registers a provider
+    /// under the schema name already recorded for it, which is what reloading
+    /// the same manifest looks like. Anything else is a real disagreement
+    /// about what a provider id means, and is reported rather than settled by
+    /// load order.
+    pub fn merge(
+        &mut self,
+        schemas: Vec<Arc<dyn ProviderSchema>>,
+    ) -> Result<(), ProviderCatalogError> {
+        for schema in schemas {
+            let provider = schema.provider_id().to_string();
+            match self.providers.get(provider.as_str()) {
+                Some(existing)
+                    if default_provider_ids().contains(provider.as_str())
+                        || existing.harn_schema_name() == schema.harn_schema_name() => {}
+                Some(_) => return Err(ProviderCatalogError::DuplicateProvider(provider)),
+                None => {
+                    self.providers.insert(provider, schema);
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn register(
@@ -207,33 +228,26 @@ impl ProviderCatalog {
     }
 }
 
-pub fn register_provider_schema(
-    schema: Arc<dyn ProviderSchema>,
+/// Contribute `schemas` to the process-wide catalog.
+///
+/// Loading a package's runtime extensions says what that package provides; it
+/// does not describe the whole world. Components that load packages
+/// independently — an orchestrator harness and a persona command sharing a
+/// process — therefore compose rather than erase each other's providers.
+pub fn register_provider_schemas(
+    schemas: Vec<Arc<dyn ProviderSchema>>,
 ) -> Result<(), ProviderCatalogError> {
     provider_catalog()
         .write()
         .expect("provider catalog poisoned")
-        .register(schema)
+        .merge(schemas)
 }
 
+/// Drop every contributed provider, leaving the builtin schemas.
 pub fn reset_provider_catalog() {
     *provider_catalog()
         .write()
         .expect("provider catalog poisoned") = ProviderCatalog::with_defaults();
-}
-
-pub fn reset_provider_catalog_with(
-    schemas: Vec<Arc<dyn ProviderSchema>>,
-) -> Result<(), ProviderCatalogError> {
-    let catalog = ProviderCatalog::with_defaults_and(schemas)?;
-    install_provider_catalog(catalog);
-    Ok(())
-}
-
-pub fn install_provider_catalog(catalog: ProviderCatalog) {
-    *provider_catalog()
-        .write()
-        .expect("provider catalog poisoned") = catalog;
 }
 
 pub fn registered_provider_schema_names() -> BTreeMap<String, String> {
@@ -260,6 +274,16 @@ pub fn provider_metadata(provider: &str) -> Option<ProviderMetadata> {
 fn provider_catalog() -> &'static RwLock<ProviderCatalog> {
     static PROVIDER_CATALOG: OnceLock<RwLock<ProviderCatalog>> = OnceLock::new();
     PROVIDER_CATALOG.get_or_init(|| RwLock::new(ProviderCatalog::with_defaults()))
+}
+
+fn default_provider_ids() -> &'static BTreeSet<String> {
+    static DEFAULT_PROVIDER_IDS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    DEFAULT_PROVIDER_IDS.get_or_init(|| {
+        default_provider_schemas()
+            .iter()
+            .map(|schema| schema.provider_id().to_string())
+            .collect()
+    })
 }
 
 struct BuiltinProviderSchema {
