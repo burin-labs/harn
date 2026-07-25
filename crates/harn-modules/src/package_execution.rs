@@ -542,14 +542,19 @@ fn collect_hashable_files(
             .file_type()
             .map_err(|error| PackageExecutionError::io("stat", path.clone(), error))?;
         let name = entry.file_name();
+        // Exclusion first: a path that never reaches the content hash cannot
+        // make the package invalid, whatever kind of file it is. Checking the
+        // symlink before the exclusion rejected packages over a symlinked
+        // `.gitignore` or a symlinked cache-metadata file that the installer
+        // was about to skip anyway.
+        if excluded_package_name(&name) {
+            continue;
+        }
         if file_type.is_symlink() {
             return Err(PackageExecutionError::Invalid(format!(
                 "package content contains unsupported symlink: {}",
                 path.display()
             )));
-        }
-        if excluded_package_name(&name) {
-            continue;
         }
         if file_type.is_dir() {
             collect_hashable_files(root, &path, out)?;
@@ -897,6 +902,22 @@ mod tests {
 
         let error = compute_package_content_hash(temp.path()).unwrap_err();
         assert!(error.to_string().contains("unsupported symlink"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn content_hash_ignores_symlinks_at_excluded_paths() {
+        // The symlink rejection guards package *content*. A path the installer
+        // was going to skip anyway cannot invalidate the package, so a
+        // symlinked `.gitignore` must not fail the hash the way a symlinked
+        // source file does.
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("target.harn"), "pub fn value() { 1 }\n").unwrap();
+        fs::write(temp.path().join("ignore-target"), "target/\n").unwrap();
+        std::os::unix::fs::symlink("ignore-target", temp.path().join(".gitignore")).unwrap();
+
+        compute_package_content_hash(temp.path())
+            .expect("a symlink at an excluded path must not invalidate the package");
     }
 
     #[cfg(unix)]
