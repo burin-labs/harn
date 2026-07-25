@@ -20,6 +20,8 @@ mod core;
 mod lora_fixtures;
 #[path = "models_dispatch/lora_inspect_plan.rs"]
 mod lora_inspect_plan;
+#[path = "models_dispatch/lora_migration.rs"]
+mod lora_migration;
 #[path = "models_dispatch/lora_projected_corpus.rs"]
 mod lora_projected_corpus;
 #[path = "models_dispatch/lora_workflows.rs"]

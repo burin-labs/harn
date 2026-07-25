@@ -160,9 +160,9 @@ pub(crate) use models::{
     ModelsBatchExecuteInitArgs, ModelsBatchManifestArgs, ModelsBatchPlanArgs,
     ModelsBatchPrepareArgs, ModelsBatchRejoinArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs,
     ModelsCommand, ModelsInstallArgs, ModelsListArgs, ModelsListSort, ModelsLoraArgs,
-    ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs, ModelsLoraManifestArgs,
-    ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsLoraPromoteArgs, ModelsLoraTrainArgs,
-    ModelsTestArgs,
+    ModelsLoraBehaviorStrataPolicy, ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs,
+    ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsLoraPromoteArgs,
+    ModelsLoraTrainArgs, ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,

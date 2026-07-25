@@ -333,6 +333,49 @@ pub(super) fn write_lora_corpus_fixture() -> tempfile::TempDir {
     tmp
 }
 
+pub(super) fn write_lora_behavior_migration_fixture(
+    behavior_class: Option<&str>,
+) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let mut metadata = serde_json::json!({
+        "tool_format": "json",
+        "verification": "PASS"
+    });
+    if let Some(behavior_class) = behavior_class {
+        metadata["behavior_class"] = serde_json::Value::String(behavior_class.to_string());
+    }
+    let record = serde_json::json!({
+        "id": "legacy-read",
+        "language": "rust",
+        "task_type": "explain",
+        "eval_name": "legacy-read",
+        "model": "manual",
+        "metadata": metadata,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Available tools: read\ndeclare function read(args: { path: string }): string;"
+            },
+            {"role": "user", "content": "Read src/lib.rs."},
+            {
+                "role": "assistant",
+                "content": "<tool_call>\n{\"name\":\"read\",\"arguments\":{\"path\":\"src/lib.rs\"}}\n</tool_call>"
+            },
+            {
+                "role": "user",
+                "content": "[result of read]\npub fn add() {}\n[end of read result]"
+            },
+            {"role": "assistant", "content": "The file defines add."}
+        ]
+    });
+    fs::write(
+        tmp.path().join("burin-tool-calling-corpus.jsonl"),
+        serde_json::to_string(&record).expect("serialize record") + "\n",
+    )
+    .expect("write corpus");
+    tmp
+}
+
 pub(super) fn write_lora_generic_placeholder_corpus_fixture() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().expect("tempdir");
     let record = serde_json::json!({

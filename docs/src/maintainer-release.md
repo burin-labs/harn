@@ -26,6 +26,14 @@ creation, tag push, crate publishing, and GitHub release creation.
 The tag is pushed before crate publishing so release-binary workflows and other
 downstream automation can start in parallel with crates.io publication.
 
+Before cutting a release that adds a new hard preflight requirement, verify its
+user-facing documentation includes an equivalent migration note: the exact
+command for auditing data accepted by the prior release, a typed non-success
+status that cannot be mistaken for compliance, the records requiring review,
+and the exact command that returns the user to strict mode. A compatibility
+path may support review, but it must not manufacture evidence or weaken the
+final production/export gate.
+
 ## Hosted platform certification
 
 Release preparation is fail-closed on the frozen remote source SHA. Before the

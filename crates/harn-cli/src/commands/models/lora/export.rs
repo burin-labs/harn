@@ -13,7 +13,7 @@ use crate::cli::ModelsLoraExportArgs;
 use super::behavior::{
     behavior_strata_report, increment_counts, no_tool_row_behavior_classes,
     record_behavior_classes, should_emit_no_tool_completion, text_tool_row_behavior_classes,
-    BehaviorStrataReport,
+    BehaviorStrataPolicy, BehaviorStrataReport,
 };
 use super::projected::{convert_projected_example, is_projected_example};
 use super::{
@@ -238,7 +238,12 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     } else {
         args.out.as_deref().map(sha256_file).transpose()?
     };
-    stats.behavior_strata = behavior_strata_report(source_behavior_counts, emitted_behavior_counts);
+    stats.behavior_strata = behavior_strata_report(
+        source_behavior_counts,
+        emitted_behavior_counts,
+        BehaviorStrataPolicy::Strict,
+        Vec::new(),
+    );
     if !stats.behavior_strata.missing_required.is_empty() {
         errors.push(format!(
             "missing required behavior strata: {}",

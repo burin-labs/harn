@@ -11,12 +11,32 @@ pub(super) const REQUIRED_BEHAVIOR_STRATA: &[&str] = &[
     "multi_turn_continuation",
 ];
 
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum BehaviorStrataPolicy {
+    #[default]
+    Strict,
+    LegacyUnclassified,
+}
+
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum BehaviorStrataStatus {
+    Covered,
+    #[default]
+    Incomplete,
+    LegacyUnclassified,
+}
+
 #[derive(Default, Debug, Serialize)]
 pub(super) struct BehaviorStrataReport {
+    pub(super) policy: BehaviorStrataPolicy,
+    pub(super) status: BehaviorStrataStatus,
     pub(super) required: Vec<String>,
     pub(super) source: BTreeMap<String, u64>,
     pub(super) emitted: BTreeMap<String, u64>,
     pub(super) missing_required: Vec<String>,
+    pub(super) unclassified_record_ids: Vec<String>,
 }
 
 pub(super) fn record_behavior_classes(
@@ -80,13 +100,27 @@ pub(super) fn increment_counts(counts: &mut BTreeMap<String, u64>, classes: &BTr
 pub(super) fn behavior_strata_report(
     source: BTreeMap<String, u64>,
     emitted: BTreeMap<String, u64>,
+    policy: BehaviorStrataPolicy,
+    unclassified_record_ids: Vec<String>,
 ) -> BehaviorStrataReport {
     let missing_required = REQUIRED_BEHAVIOR_STRATA
         .iter()
         .filter(|class| emitted.get(**class).copied().unwrap_or(0) == 0)
         .map(|class| (*class).to_string())
-        .collect();
+        .collect::<Vec<_>>();
+    let status = if missing_required.is_empty() {
+        BehaviorStrataStatus::Covered
+    } else if policy == BehaviorStrataPolicy::LegacyUnclassified
+        && source.is_empty()
+        && !unclassified_record_ids.is_empty()
+    {
+        BehaviorStrataStatus::LegacyUnclassified
+    } else {
+        BehaviorStrataStatus::Incomplete
+    };
     BehaviorStrataReport {
+        policy,
+        status,
         required: REQUIRED_BEHAVIOR_STRATA
             .iter()
             .map(|class| (*class).to_string())
@@ -94,6 +128,7 @@ pub(super) fn behavior_strata_report(
         source,
         emitted,
         missing_required,
+        unclassified_record_ids,
     }
 }
 
