@@ -38,7 +38,7 @@ pipeline default(args) {
   const p99_index = measured_count - 1
   const p50 = sorted[p50_index]
   const p99 = sorted[p99_index]
-  const mean = sorted.reduce(0, { acc, ms -> acc + ms }) / measured_count
+  const mean = sorted.sum() / measured_count
   log("")
   log("Cerebras latency baseline — model=${model} iterations=${iterations} warmup=${warmup}")
   log("  p50  : ${p50}ms")

@@ -1,4 +1,5 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import { count_where } from "std/collections"
 import { read_json_result, read_yaml } from "std/fs"
 import {
   schema_closed_object,
@@ -277,7 +278,7 @@ pub fn release_audit_contract_parse(value) -> ReleaseAuditContract? {
   ) {
     return nil
   }
-  if len(contract.lanes.filter({ lane -> lane.proof == "residual" }).to_list()) == 0 {
+  if count_where(contract.lanes, { lane -> lane.proof == "residual" }) == 0 {
     return nil
   }
   for job in contract.merge_group_jobs {

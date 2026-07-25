@@ -1,3 +1,4 @@
+import { sum_by } from "std/collections"
 import "std/eval/stats"
 import { is_absolute } from "std/path"
 import { persona_prompt_eval_manifest } from "./run.harn"
@@ -58,7 +59,7 @@ fn __case_fingerprints(manifest: dict) -> dict<string, string> {
 pub fn persona_prompt_eval_cohort(rows: list, minimum_trials: int = 5) -> dict {
   const aggregated = __aggregate_rows(rows)
   const fingerprint_integrity = eval_fingerprint_integrity(rows)
-  const total_cost = aggregated.reduce(0.0, { total, row -> total + (row.total_cost_usd ?? 0.0) })
+  const total_cost = sum_by(aggregated, { row -> row.total_cost_usd })
   const valid_trials = rows.filter({ row -> row.verification == "PASS" }).count()
   return {
     cases: len(aggregated),
@@ -78,10 +79,8 @@ pub fn persona_prompt_eval_cohort(rows: list, minimum_trials: int = 5) -> dict {
     },
     total_cost_usd: total_cost,
     mean_wall_time_seconds: if len(aggregated) > 0 {
-      aggregated.reduce(0.0, { total, row -> total + row.mean_wall_time_seconds })
-        / to_float(
-        len(aggregated),
-      )
+      sum_by(aggregated, { row -> row.mean_wall_time_seconds })
+        / to_float(len(aggregated))
     } else {
       0.0
     },

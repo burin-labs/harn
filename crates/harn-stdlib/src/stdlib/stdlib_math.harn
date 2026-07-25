@@ -340,15 +340,22 @@ pub fn rad_to_deg(radians) -> float {
 }
 
 /**
- * Sum a list of numbers.
- * Sum the numbers in `items`.
+ * Sum a list of numbers, skipping nil elements.
+ * Returns zero when `items` is empty or contains only nil values.
  *
  * @effects: []
- * @errors: []
+ * @errors: [TypeError]
  */
-pub fn sum(items) {
-  _require_numeric_list(items)
-  return items.reduce(0, { acc, x -> acc + x })
+pub fn sum(items) -> int | float {
+  require type_of(items) == "list", "items must be a list"
+  let total = 0
+  for item in items {
+    if item != nil {
+      require _is_number(item), "items must contain only numbers or nil"
+      total = total + item
+    }
+  }
+  return total
 }
 
 /**

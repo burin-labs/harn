@@ -106,15 +106,15 @@ pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
  * @errors: [TypeError]
  * @example: sum_by(rows, { row -> row?.input_tokens })
  */
-pub fn sum_by<T>(items: list<T>, project) {
-  let projected = []
+pub fn sum_by<T>(items: list<T>, project) -> int | float {
+  let total = 0
   for item in items ?? [] {
     const value = project(item)
     if value != nil {
-      projected = projected.appending(value)
+      total = total + value
     }
   }
-  return projected.sum()
+  return total
 }
 
 /**
