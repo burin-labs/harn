@@ -1076,19 +1076,21 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_exec_profile_allows_swiftpm_test_to_use_outer_sandbox() {
+    fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
         if !Path::new(SANDBOX_EXEC_PATH).exists() || !Path::new("/usr/bin/swift").exists() {
             return;
         }
         let temp = tempfile::TempDir::new().expect("temp Swift package");
-        write_swift_package(temp.path());
+        write_swift_package_manifest(temp.path());
         let policy = macos_policy_with_workspace_ops(&["write_text"]);
-        let args = strings(["test", "--filter", "SysMonCoreTests"]);
+        // Manifest evaluation exercises SwiftPM's own sandbox and toolchain
+        // lookup without paying to compile and link an unrelated test bundle.
+        let args = strings(["package", "dump-package"]);
         let PrepareOutcome::WrappedExec {
             wrapper,
             args: wrapped_args,
         } = wrap_with_sandbox_exec("swift", &args, &policy, SandboxProfile::Worktree)
-            .expect("wrap swift test")
+            .expect("wrap SwiftPM manifest evaluation")
         else {
             panic!("macOS backend should wrap with sandbox-exec");
         };
@@ -1097,13 +1099,18 @@ mod tests {
             .args(wrapped_args)
             .current_dir(temp.path())
             .output()
-            .expect("run sandboxed swift test smoke");
+            .expect("run sandboxed SwiftPM manifest evaluation");
 
         assert!(
             output.status.success(),
-            "swift test should run inside Harn's outer sandbox\nstdout:\n{}\nstderr:\n{}",
+            "SwiftPM should evaluate a manifest inside Harn's outer sandbox\nstdout:\n{}\nstderr:\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("\"name\" : \"SandboxSmoke\""),
+            "SwiftPM should return the evaluated package manifest: {}",
+            String::from_utf8_lossy(&output.stdout)
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
@@ -1326,49 +1333,17 @@ mod tests {
             .any(|pair| pair[0] == first && pair[1] == second)
     }
 
-    fn write_swift_package(root: &Path) {
-        std::fs::create_dir_all(root.join("Sources/SysMonCore")).expect("create source dir");
-        std::fs::create_dir_all(root.join("Tests/SysMonCoreTests")).expect("create test dir");
+    fn write_swift_package_manifest(root: &Path) {
         std::fs::write(
             root.join("Package.swift"),
             r#"// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
-    name: "SysMonSmoke",
-    products: [
-        .library(name: "SysMonCore", targets: ["SysMonCore"]),
-    ],
-    targets: [
-        .target(name: "SysMonCore"),
-        .testTarget(name: "SysMonCoreTests", dependencies: ["SysMonCore"]),
-    ]
+    name: "SandboxSmoke"
 )
 "#,
         )
         .expect("write package manifest");
-        std::fs::write(
-            root.join("Sources/SysMonCore/Sample.swift"),
-            r"public enum SysMonSmoke {
-    public static func sample() -> Int {
-        42
-    }
-}
-",
-        )
-        .expect("write source");
-        std::fs::write(
-            root.join("Tests/SysMonCoreTests/SysMonCoreTests.swift"),
-            r"import XCTest
-@testable import SysMonCore
-
-final class SysMonCoreTests: XCTestCase {
-    func testSample() {
-        XCTAssertEqual(SysMonSmoke.sample(), 42)
-    }
-}
-",
-        )
-        .expect("write tests");
     }
 }
