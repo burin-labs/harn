@@ -68,11 +68,12 @@ run_setup() {
 }
 
 rust_repo=$(make_fixture_repo rust)
+add_available_cargo_tools "$rust_repo"
 rust_cargo="$tmp_root/rust-cargo.txt"
 run_setup "$rust_repo" rust "$tmp_root/rust-output.txt" "$rust_cargo"
 
-if ! grep -Fxq 'check --workspace' "$rust_cargo"; then
-  echo "rust setup did not run the workspace check" >&2
+if ! grep -Fxq 'check --locked --workspace' "$rust_cargo"; then
+  echo "rust setup did not run the locked workspace check" >&2
   exit 1
 fi
 if grep -Fq 'install ' "$rust_cargo"; then
@@ -83,18 +84,56 @@ if [[ -e "$rust_repo/node_modules" || -e "$rust_repo/crates/harn-cli/portal/node
   echo "rust setup installed frontend dependencies" >&2
   exit 1
 fi
+
+bootstrap_repo=$(make_fixture_repo bootstrap)
+add_available_cargo_tools "$bootstrap_repo"
+bootstrap_cargo="$tmp_root/bootstrap-cargo.txt"
+run_setup "$bootstrap_repo" bootstrap "$tmp_root/bootstrap-output.txt" "$bootstrap_cargo"
+if [[ -s "$bootstrap_cargo" ]]; then
+  echo "bootstrap setup invoked Cargo instead of deferring compilation" >&2
+  exit 1
+fi
+if ! grep -Fq 'deferring compilation to the final task lane' "$tmp_root/bootstrap-output.txt"; then
+  echo "bootstrap setup did not report its deferred build" >&2
+  exit 1
+fi
+bootstrap_target_dir="$tmp_root/cache-bootstrap/harn/dev-setup/harn-target/$(basename "$tmp_root")-bootstrap"
+if ! grep -Fxq "target-dir = \"$bootstrap_target_dir\" # harn-dev-setup-managed" \
+  "$bootstrap_repo/.cargo/config.toml"; then
+  echo "bootstrap setup did not configure a durable private target directory" >&2
+  exit 1
+fi
+
+no_sccache_repo=$(make_fixture_repo no-sccache)
+run_setup "$no_sccache_repo" bootstrap "$tmp_root/no-sccache-output.txt" "$tmp_root/no-sccache-cargo.txt"
+if grep -Eq 'rustc-wrapper|SCCACHE_BASEDIRS' "$no_sccache_repo/.cargo/config.toml"; then
+  echo "bootstrap setup configured sccache when it was unavailable" >&2
+  exit 1
+fi
+
 rust_storage_root="$tmp_root/cache-rust/harn/dev-setup"
 rust_target_dir="$rust_storage_root/harn-target/$(basename "$tmp_root")-rust"
 if ! grep -Fxq "target-dir = \"$rust_target_dir\" # harn-dev-setup-managed" "$rust_repo/.cargo/config.toml"; then
   echo "rust setup did not use the durable per-worktree target directory" >&2
   exit 1
 fi
+if ! grep -Fxq \
+  'SCCACHE_BASEDIRS = { value = ".", relative = true, force = true } # harn-dev-setup-managed' \
+  "$rust_repo/.cargo/config.toml"; then
+  echo "rust setup did not normalize sccache paths across worktrees" >&2
+  exit 1
+fi
 if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
   echo "rust setup shared Cargo build scratch across worktrees" >&2
   exit 1
 fi
-printf 'build-dir = "%s/cargo-build-shared" # harn-dev-setup-managed\n' \
-  "$rust_storage_root" >> "$rust_repo/.cargo/config.toml"
+awk -v build_dir="$rust_storage_root/cargo-build-shared" '
+  /^\[env\][[:space:]]*$/ {
+    printf "build-dir = \"%s\" # harn-dev-setup-managed\n", build_dir
+  }
+  { print }
+' "$rust_repo/.cargo/config.toml" > "$rust_repo/.cargo/config.toml.tmp"
+mv "$rust_repo/.cargo/config.toml.tmp" "$rust_repo/.cargo/config.toml"
 run_setup "$rust_repo" rust "$tmp_root/rust-migration-output.txt" "$rust_cargo"
 if grep -Eq '^[[:space:]]*build-dir[[:space:]]*=' "$rust_repo/.cargo/config.toml"; then
   echo "rust setup did not remove the legacy shared build directory" >&2
@@ -177,7 +216,13 @@ fi
 
 user_repo=$(make_fixture_repo user-config)
 mkdir -p "$user_repo/.cargo"
-printf '%s\n' '[build]' 'target-dir = "/mnt/team/harn-target/release"' 'build-dir = "/mnt/team/cargo-build-shared"' > "$user_repo/.cargo/config.toml"
+printf '%s\n' \
+  '[build]' \
+  'target-dir = "/mnt/team/harn-target/release"' \
+  'build-dir = "/mnt/team/cargo-build-shared"' \
+  '[env]' \
+  'SCCACHE_BASEDIRS = "/mnt/team/source"' \
+  > "$user_repo/.cargo/config.toml"
 add_available_cargo_tools "$user_repo"
 mkdir -p "$tmp_root/tmp-user-config"
 HARN_DEV_SETUP_STORAGE_ROOT= \
@@ -197,6 +242,10 @@ if ! grep -Fxq 'target-dir = "/mnt/team/harn-target/release"' "$user_repo/.cargo
 fi
 if ! grep -Fxq 'build-dir = "/mnt/team/cargo-build-shared"' "$user_repo/.cargo/config.toml"; then
   echo "setup rewrote a user-owned build directory" >&2
+  exit 1
+fi
+if ! grep -Fxq 'SCCACHE_BASEDIRS = "/mnt/team/source"' "$user_repo/.cargo/config.toml"; then
+  echo "setup rewrote a user-owned sccache base directory" >&2
   exit 1
 fi
 
@@ -246,7 +295,7 @@ if [[ -s "$invalid_cargo" ]]; then
   echo "invalid setup profile started dependency work" >&2
   exit 1
 fi
-if ! grep -Fq "HARN_DEV_SETUP_PROFILE must be 'full' or 'rust'" "$tmp_root/invalid-output.txt"; then
+if ! grep -Fq "HARN_DEV_SETUP_PROFILE must be 'full', 'rust', or 'bootstrap'" "$tmp_root/invalid-output.txt"; then
   echo "invalid setup profile did not explain the accepted values" >&2
   exit 1
 fi

@@ -49,13 +49,19 @@ local `harn` binary so it matches the version in use.
      equivalent serialization boundary.
   2. **sccache** (`rustc-wrapper`): caches same-path recompiles. Immutable,
      commit-bound CI artifacts provide cross-run reuse where appropriate.
+     Setup also configures a worktree-relative `SCCACHE_BASEDIRS`, allowing
+     identical sources in different worktrees to share compiler objects.
   Orphaned per-worktree target dirs are reclaimed by
   `scripts/prune_stale_targets.sh` (run from setup at most daily).
+- The setup build uses `cargo check --locked --workspace`; dependency drift
+  fails without modifying the checkout.
 - Setup phases are fingerprinted under `.codex/dev-setup/`, so repeated setup
   is normally a fast no-op. Use `HARN_DEV_SETUP_FORCE=1 make setup` to refresh
   every phase.
 - Codex app worktrees use `.codex/environments/environment.toml`, which calls
-  `make setup` through the same repo bootstrap path.
+  `make setup-bootstrap` to configure hooks, sccache, and a private target
+  without compiling a disposable staging checkout. Run `make setup` or
+  `make setup-rust` once in the final task worktree.
 - Claude Code project settings run `scripts/claude-dev-setup-once.sh` on
   session startup. It delegates to the same setup path once per dependency
   fingerprint and stores ignored logs under `.claude/dev-setup/`.

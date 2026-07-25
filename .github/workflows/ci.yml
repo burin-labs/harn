@@ -416,9 +416,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
 
-  # The compile-bearing Linux Rust lanes are intentionally one matrix job with
-  # fail-fast enabled: if any required Rust lane fails, GitHub cancels the
-  # sibling Rust lane that is still queued or running. The behavior row is the
+  # The compile-bearing Linux Rust lanes share one matrix job but must complete
+  # independently. A behavior-row infrastructure failure has a hosted fallback;
+  # canceling the lint sibling would discard its distinct required proof and
+  # make that fallback incapable of recovering the run. The behavior row is the
   # one producer: it compiles the suite once on persistent storage and
   # publishes an exact-SHA nextest archive for execution-only proof consumers.
   # Consumers execute that compiled archive without requiring cross-job Cargo
@@ -478,7 +479,7 @@ jobs:
             || matrix.selfhosted == 'big' && needs.runner-availability.outputs.linux_big == 'true')) && 'self-hosted'
           || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - kind: lint
