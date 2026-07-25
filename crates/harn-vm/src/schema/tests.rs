@@ -417,6 +417,18 @@ fn union_still_applies_sibling_constraints() {
 }
 
 #[test]
+fn union_accepts_overlapping_branches_and_exports_as_any_of() {
+    let branch = make_vm_dict(vec![("type", s("string"))]);
+    let schema = make_vm_dict(vec![("union", make_list(vec![branch.clone(), branch]))]);
+
+    assert!(schema_is_value(&s("overlap"), &schema).unwrap());
+    let exported = schema_to_json_schema_value(&schema).unwrap();
+    let dict = exported.as_dict().expect("exported schema object");
+    assert!(dict.contains_key("anyOf"));
+    assert!(!dict.contains_key("oneOf"));
+}
+
+#[test]
 fn union_defaults_come_from_the_matching_same_shape_branch() {
     let branch = |tag: &str, field: &str, default: &str| {
         make_vm_dict(vec![
