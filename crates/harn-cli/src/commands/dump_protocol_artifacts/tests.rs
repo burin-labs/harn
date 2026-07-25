@@ -30,6 +30,10 @@ use super::typescript::*;
 use super::values::*;
 use super::*;
 
+#[rustfmt::skip]
+#[path = "../../../../../spec/protocol-artifacts/harn-protocol.rs"]
+mod generated_rust_binding;
+
 fn protocol_source() -> ProtocolArtifactSource {
     ProtocolArtifactSource::from_anchor(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
         .expect("harn-cli is compiled from the Harn workspace")
@@ -241,6 +245,11 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     ));
     assert!(rust.contains("pub const HARN_CONTENT_EXTENSION_FIELDS: &[&str] = &["));
     assert!(rust.contains("pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["));
+    assert!(rust.contains("pub enum ACPPermissionOptionKind"));
+    assert!(rust.contains("pub struct ACPSessionRequestPermissionParams"));
+    assert!(rust.contains("pub enum ACPPermissionOutcome"));
+    assert!(rust.contains("pub struct HarnAgentEventParams"));
+    assert!(rust.contains("pub enum HarnAgentEventKind"));
     // Dotted / slashed wire names must collapse to valid const identifiers.
     assert!(rust.contains(
         "pub const ACP_DISPATCHED_METHOD_HARN_HITL_RESPOND: &str = \"harn.hitl.respond\""
@@ -267,6 +276,90 @@ fn generated_rust_includes_harn_wire_vocabularies() {
 }
 
 #[test]
+fn generated_rust_permission_shapes_round_trip() {
+    use generated_rust_binding::{
+        ACPPermissionOptionKind, ACPPermissionOutcome, ACPSessionRequestPermissionParams,
+        ACPSessionRequestPermissionResult,
+    };
+
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../conformance/protocols/fixtures/acp/session_request_permission.valid.json"
+    )))
+    .expect("canonical permission fixture parses");
+    let request = fixture["documents"][0]["params"].clone();
+    let decoded: ACPSessionRequestPermissionParams =
+        serde_json::from_value(request.clone()).expect("generated permission request decodes");
+    assert_eq!(decoded.session_id, "session-1");
+    assert_eq!(decoded.tool_call.tool_call_id, "tool-1");
+    assert_eq!(decoded.options[0].kind, ACPPermissionOptionKind::AllowOnce);
+    assert_eq!(
+        serde_json::to_value(decoded).expect("generated permission request encodes"),
+        request
+    );
+
+    let result = fixture["documents"][1]["result"].clone();
+    let decoded: ACPSessionRequestPermissionResult =
+        serde_json::from_value(result.clone()).expect("generated permission result decodes");
+    assert_eq!(
+        decoded.outcome,
+        ACPPermissionOutcome::Selected {
+            option_id: "allow".to_string()
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(decoded).expect("generated permission result encodes"),
+        result
+    );
+}
+
+#[test]
+fn generated_rust_agent_event_shapes_round_trip() {
+    use generated_rust_binding::{
+        HarnAgentEventKind, HarnAgentEventNotification, HarnAgentEventParams,
+    };
+
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../conformance/protocols/fixtures/acp/agent_event_ext_notifications.valid.json"
+    )))
+    .expect("canonical agent-event fixture parses");
+    let mut notification = fixture["documents"]
+        .as_array()
+        .expect("agent-event documents")
+        .iter()
+        .find(|document| document["params"]["kind"] == "iteration_end")
+        .expect("iteration_end fixture")
+        .clone();
+    notification["_harn"] = json!({"replayed": true});
+    let decoded: HarnAgentEventNotification =
+        serde_json::from_value(notification.clone()).expect("generated agent event decodes");
+    assert_eq!(decoded.params.kind, HarnAgentEventKind::IterationEnd);
+    assert_eq!(decoded.params.fields["iteration"], json!(0));
+    assert_eq!(decoded.fields["_harn"]["replayed"], json!(true));
+    assert_eq!(
+        serde_json::to_value(decoded).expect("generated agent event encodes"),
+        notification
+    );
+
+    let future = json!({
+        "sessionId": "session-2",
+        "kind": "future_agent_event",
+        "payload": {"kept": true}
+    });
+    let decoded: HarnAgentEventParams =
+        serde_json::from_value(future.clone()).expect("unknown agent event kind decodes");
+    assert_eq!(
+        decoded.kind,
+        HarnAgentEventKind::Other("future_agent_event".to_string())
+    );
+    assert_eq!(
+        serde_json::to_value(decoded).expect("unknown agent event kind encodes"),
+        future
+    );
+}
+
+#[test]
 fn rust_const_name_sanitizes_wire_values() {
     assert_eq!(
         rust_const_name("ACP_AGENT_METHOD", "session/prompt"),
@@ -284,6 +377,8 @@ fn rust_const_name_sanitizes_wire_values() {
     assert_eq!(rust_const_name("X", "/"), "X");
     // A leading digit is escaped so the identifier stays valid.
     assert_eq!(rust_const_name("V", "2026-07-28"), "V_2026_07_28");
+    assert_eq!(rust_type_name("iteration_end"), "IterationEnd");
+    assert_eq!(rust_type_name("mcp_auth_required"), "McpAuthRequired");
 }
 
 #[test]
@@ -612,6 +707,10 @@ fn manifest_advertises_python_and_go_bindings() {
     assert_eq!(
         manifest["bindings"]["rust"]["vendorPath"],
         json!("protocol/src/generated.rs")
+    );
+    assert_eq!(
+        manifest["bindings"]["rust"]["dependencies"],
+        json!(["serde", "serde_json"])
     );
     assert_eq!(manifest["bindings"]["rust"]["stability"], json!("stable"));
     assert_eq!(

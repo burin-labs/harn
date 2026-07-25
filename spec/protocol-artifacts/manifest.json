@@ -406,6 +406,10 @@
     },
     "rust": {
       "artifact": "harn-protocol.rs",
+      "dependencies": [
+        "serde",
+        "serde_json"
+      ],
       "stability": "stable",
       "vendorPath": "protocol/src/generated.rs"
     },
