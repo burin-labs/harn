@@ -20,6 +20,8 @@ pub(crate) enum ProviderCatalogCommand {
     Generate(ProvidersGenerateArgs),
     /// Export provider catalog artifacts for an explicit overlay.
     Export(ProvidersExportArgs),
+    /// Report overlay entries the baseline catalog already covers.
+    OverlayAudit(ProvidersOverlayAuditArgs),
     /// Generate or check the provider capability matrix docs.
     Matrix(ProvidersMatrixArgs),
     /// Generate or check provider recommendation docs and JSON support data.
@@ -101,6 +103,29 @@ pub(crate) struct ProvidersExportArgs {
     /// keeping exported and served catalogs in agreement.
     #[arg(long = "capabilities-overlay")]
     pub capabilities_overlay: Option<PathBuf>,
+}
+
+/// Arguments for `provider catalog overlay-audit`.
+///
+/// An overlay entry that restates the baseline is a second copy of a fact Harn
+/// already owns, so a pricing or context-window refresh upstream stops short of
+/// the product — silently, because the stale overlay copy is the one that wins
+/// the merge. This audit names those entries and, for whole-row model copies,
+/// prints the smaller `[patch.models]` that keeps the rest tracking upstream.
+#[derive(Debug, Args)]
+pub(crate) struct ProvidersOverlayAuditArgs {
+    /// providers.toml-style overlay to audit against the embedded catalog.
+    #[arg(long)]
+    pub overlay: PathBuf,
+    /// Emit findings as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Exit non-zero when any entry has a behavior-preserving fix. Advisory
+    /// findings (ordered rules that duplicate the baseline) never fail the
+    /// check: overlay rules are prepended, so removing one can change which
+    /// rule wins.
+    #[arg(long)]
+    pub check: bool,
 }
 
 #[derive(Debug, Args)]

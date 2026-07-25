@@ -182,6 +182,11 @@ replacement — see "Field-wise catalog patches" in the providers guide:
 stream_timeout = 1200.0
 ```
 
+`harn provider catalog overlay-audit --overlay <file> --check` finds the
+entries that have already drifted into whole-row copies or stopped saying
+anything at all. Run it from the embedding product's CI, with the Harn release
+that product pins — see "Auditing an overlay" in the providers guide.
+
 Structured capability fields (`tool_support`, `modalities`,
 `reasoning`, `prompt_cache`) come from the capability matrix, not from
 `models.*.capabilities` tags (legacy, parse-only). For overlay-declared

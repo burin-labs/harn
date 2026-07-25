@@ -2,19 +2,52 @@ use std::fs;
 
 use tokio::process::Command;
 
-use crate::cli::{ProvidersMatrixArgs, ProvidersRecommendArgs, ProvidersRefreshArgs};
+use crate::cli::{
+    ProviderCatalogCommand, ProvidersMatrixArgs, ProvidersRecommendArgs, ProvidersRefreshArgs,
+};
 
 mod artifacts;
 mod build;
+mod overlay_audit;
 mod tool_probe_audit;
 mod tool_probe_request;
 
 pub(crate) use artifacts::{run_export, run_validate};
 pub(crate) use build::run_generate;
+pub(crate) use overlay_audit::run_overlay_audit;
 pub(crate) use tool_probe_audit::run as run_audit;
 pub(crate) use tool_probe_request::{
     render as render_tool_probe_request, resolve_tool_probe_wire_model,
 };
+
+/// Route one `harn provider catalog <sub>` invocation to its command.
+///
+/// Lives beside the commands rather than in the top-level `Command` match so
+/// adding a catalog subcommand touches this file and the arg definitions, not
+/// the crate root.
+pub(crate) async fn dispatch_catalog(command: ProviderCatalogCommand) {
+    let outcome = match &command {
+        ProviderCatalogCommand::Refresh(refresh) => run_refresh(refresh).await,
+        ProviderCatalogCommand::Validate(validate) => run_validate(validate),
+        ProviderCatalogCommand::Generate(generate) => run_generate(generate),
+        ProviderCatalogCommand::Export(export) => run_export(export),
+        ProviderCatalogCommand::OverlayAudit(audit) => run_overlay_audit(audit),
+        ProviderCatalogCommand::Matrix(matrix) => run_matrix(matrix),
+        ProviderCatalogCommand::Support(support) => crate::commands::provider_support::run(support),
+        ProviderCatalogCommand::Recommend(recommend) => run_recommend(recommend).await,
+        // `show` owns its own exit path: it refreshes first, then reports the
+        // dispatcher's exit code rather than a Result.
+        ProviderCatalogCommand::Show(show) => {
+            crate::cli::refresh_provider_catalog_if_requested(show).await;
+            let exit_code = crate::dispatch_provider_catalog(show.available_only).await;
+            crate::runtime::exit_on_error(exit_code);
+            Ok(())
+        }
+    };
+    if let Err(error) = outcome {
+        crate::command_error(&error);
+    }
+}
 
 pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), String> {
     if !args.script.exists() {

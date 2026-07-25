@@ -746,11 +746,15 @@ pub struct ModelDef {
     pub runtime_context_window: Option<u64>,
     #[serde(default)]
     pub stream_timeout: Option<f64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub pricing: Option<ModelPricing>,
-    #[serde(default)]
+    // Serialized only when true. A field that always serializes cannot tell
+    // "the author never mentioned it" from "the author wrote the default",
+    // which is how a whole-row overlay copy silently un-deprecates a route it
+    // simply forgot to mention.
+    #[serde(default, skip_serializing_if = "is_false")]
     pub deprecated: bool,
     #[serde(default)]
     pub deprecation_note: Option<String>,
@@ -772,14 +776,15 @@ pub struct ModelDef {
     /// Loose catalog annotations for selectors and UI. Conventional tags
     /// include `avoid_reviewer` for routes that should not be auto-selected as
     /// independent reviewers even when they are routable and cheap.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub quality_tags: Vec<String>,
     /// Whether the model can be reached over a normal API-key serverless call,
     /// or only via a dedicated/provisioned endpoint that the caller must spin
     /// up out-of-band. Providers like Together list dedicated-only routes
     /// alongside serverless ones in `/v1/models`, so this metadata lets clients
     /// avoid presenting them as one-click options.
-    #[serde(default)]
+    // Serialized only when non-default, for the reason on `deprecated`.
+    #[serde(default, skip_serializing_if = "ModelAvailability::is_default")]
     pub availability: ModelAvailability,
     /// Popular-consensus tier label. Enum-typed string: "small" | "mid" |
     /// "frontier" | "reasoning". Self-declared per model (no pattern-matched
@@ -799,7 +804,7 @@ pub struct ModelDef {
     /// `coding`, `summarization`, `long_context`, `tool_use`, `reasoning`,
     /// `vision`, `speed`, `cheap`, `agentic`. Selectors should treat
     /// missing entries as "no claim" rather than "no strength."
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub strengths: Vec<String>,
     /// Public benchmark numbers, keyed by a snake_case identifier
     /// (`swe_bench_verified`, `humaneval`, `aa_intelligence_index`, etc.).
@@ -818,12 +823,16 @@ pub struct ModelDef {
     #[serde(default)]
     pub lineage: Option<String>,
     /// Preferred reviewer families for critique/review workloads.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub complementary_with: Vec<String>,
     /// Author families, lineages, model ids, or provider/model selectors
     /// this row should not review.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub avoid_as_reviewer_for: Vec<String>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -845,6 +854,10 @@ pub enum ModelAvailability {
 }
 
 impl ModelAvailability {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Serverless => "serverless",

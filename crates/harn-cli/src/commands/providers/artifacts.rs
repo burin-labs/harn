@@ -105,9 +105,16 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
 /// top of the embedded catalog. Returning the parsed overlay (instead of
 /// installing it via `set_user_overrides`) keeps generation hermetic: only this
 /// declared overlay influences the artifacts, never ambient thread-local state.
-struct LoadedOverlay {
-    config: Option<ProvidersConfig>,
-    diagnostics: Vec<String>,
+pub(super) struct LoadedOverlay {
+    pub(super) config: Option<ProvidersConfig>,
+    pub(super) diagnostics: Vec<String>,
+}
+
+/// Load a required `--overlay` file. Sibling commands share this so there is
+/// one parser, one diagnostic format, and one path-qualified error message for
+/// every overlay-taking surface.
+pub(super) fn load_overlay_config(path: &Path) -> Result<LoadedOverlay, String> {
+    load_overlay(Some(path))
 }
 
 fn load_overlay(path: Option<&Path>) -> Result<LoadedOverlay, String> {

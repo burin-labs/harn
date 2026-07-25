@@ -36,11 +36,10 @@ use std::sync::{Arc, Once};
 use std::{env, fs, panic, process, thread};
 
 use cli::{
-    refresh_provider_catalog_if_requested, Cli, Command, CompletionShell, EvalCommand,
-    GuardCommand, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
-    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
-    PgCommand, ProviderCatalogCommand, ProviderCommand, SkillCommand, SkillKeyCommand,
-    SkillTrustCommand, TimeCommand, ToolCommand,
+    Cli, Command, CompletionShell, EvalCommand, GuardCommand, MergeCaptainCommand,
+    MergeCaptainMockCommand, ModelInfoArgs, PackageArtifactsCommand, PackageCacheCommand,
+    PackageCommand, PackageScaffoldCommand, PgCommand, ProviderCommand, SkillCommand,
+    SkillKeyCommand, SkillTrustCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_modules::project_config;
@@ -613,48 +612,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             ProviderCommand::Capabilities(capabilities) => {
                 commands::provider_capabilities::run_or_exit(capabilities);
             }
-            ProviderCommand::Catalog(catalog) => match catalog.command {
-                ProviderCatalogCommand::Refresh(refresh) => {
-                    if let Err(error) = commands::providers::run_refresh(&refresh).await {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::Validate(validate) => {
-                    if let Err(error) = commands::providers::run_validate(&validate) {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::Generate(generate) => {
-                    if let Err(error) = commands::providers::run_generate(&generate) {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::Export(export) => {
-                    if let Err(error) = commands::providers::run_export(&export) {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::Matrix(matrix) => {
-                    if let Err(error) = commands::providers::run_matrix(&matrix) {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::Support(support) => {
-                    if let Err(error) = commands::provider_support::run(&support) {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::Recommend(recommend) => {
-                    if let Err(error) = commands::providers::run_recommend(&recommend).await {
-                        command_error(&error);
-                    }
-                }
-                ProviderCatalogCommand::Show(show) => {
-                    refresh_provider_catalog_if_requested(&show).await;
-                    let exit_code = dispatch_provider_catalog(show.available_only).await;
-                    runtime::exit_on_error(exit_code);
-                }
-            },
+            ProviderCommand::Catalog(catalog) => {
+                commands::providers::dispatch_catalog(catalog.command).await;
+            }
             ProviderCommand::Ready(ready) => {
                 run_provider_ready(
                     &ready.provider,

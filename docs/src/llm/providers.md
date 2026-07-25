@@ -649,6 +649,63 @@ The same schema works at every overlay layer, including `harn.toml`
 tools cover field tweaks, route removal, and route addition/renames
 without forking the baseline catalog.
 
+### Auditing an overlay with `overlay-audit`
+
+Overlays rot quietly. An entry that restates the baseline keeps winning the
+merge after upstream changes, so a pricing or context-window refresh reaches
+everything except the routes someone once copied. A whole-row `[models.<id>]`
+copy is worse: it also drops every baseline field it forgot to restate —
+`strengths`, `tier`, a deprecation marker, sometimes `wire_model` — and the
+loss looks exactly like upstream never having the field.
+
+`overlay-audit` reads one overlay and reports the entries that no longer earn
+their keep:
+
+```console
+$ harn provider catalog overlay-audit --overlay path/to/providers.toml
+path/to/providers.toml: 3 findings
+
+  delete — the merged catalog is identical without them (1)
+    aliases.opus48
+
+  review — nothing in the catalog matches; may be a route that arrives later (1)
+    suppress.routes."openrouter:Qwen/Qwen3.5-9B" -> missing route openrouter:Qwen/Qwen3.5-9B
+
+  narrow to a field patch — also restores baseline fields the row drops (1)
+    models.claude-opus-4-8 — hands back name, provider, context_window, pricing
+      restores deprecated, superseded_by, strengths, tier
+      [patch.models.claude-opus-4-8]
+      capabilities = ["tools", "vision", "streaming", "prompt_caching", "adaptive_thinking"]
+```
+
+Each suggestion is checked by construction: the audit re-runs the real merge
+with the entry removed or rewritten and confirms the resulting catalog. A
+`restores ...` line marks the one case where applying the fix *changes* the
+shipped catalog — by handing those fields back to the baseline. That is
+usually the point, but read the regenerated artifact before committing, and
+pin a field in the patch if the overlay means to keep its own value. Note
+that a restored row-level field can outrank an overlay rule: a row carrying
+`tier` beats any `[[tier_rules]]` entry that used to match it.
+
+`--check` fails on the findings whose fix the audit can prove safe from the
+merge itself. Two kinds are reported but never gate, because only a human can
+judge them:
+
+- An ordered `[[inference_rules]]` / `[[tier_rules]]` entry that duplicates a
+  baseline rule. Overlay rules are *prepended*, so deleting the duplicate can
+  change which rule wins for inputs that also match something in between.
+- An entry matching nothing in the catalog. The catalog is not the whole
+  universe of routes: a `[model_defaults."qwen3.6:*"]` glob or a `[suppress]`
+  entry can legitimately speak about routes that arrive later — Ollama image
+  tags discovered at runtime, a locally installed GGUF, a stale route some
+  upstream `/v1/models` listing still returns.
+
+Run it with the same Harn build that consumes the overlay. The audit answers
+"does this entry still say anything the baseline does not", and the baseline
+is whichever release the product pins.
+
+`--json` emits the findings as data, including the suggested patch body.
+
 ### ACP agent providers
 
 External ACP agents can be registered as LLM providers by declaring
