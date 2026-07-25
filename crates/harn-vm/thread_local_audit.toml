@@ -39,6 +39,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/bytecode_cache.rs"
+statics = ["WALKS_PERFORMED"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/call_budget.rs"
 statics = ["MCP_CALL_BUDGET", "MCP_CALL_COUNT", "PG_QUERY_BUDGET", "PG_QUERY_COUNT"]
 category = "logical_task"
