@@ -48,6 +48,7 @@ GATES=(
   test-agent-scripts
   protocol-conformance
   lint-no-xfail-regression
+  lint-actions-harn
   lint-harn
   fmt-harn
   check-highlight
