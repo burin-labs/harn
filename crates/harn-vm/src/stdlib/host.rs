@@ -207,6 +207,7 @@ fn capability_manifest_map() -> crate::value::DictMap {
             &[
                 op("task", "Read the current runtime task."),
                 op("pipeline_input", "Read the active pipeline input payload."),
+                op("prompt_content", "Read the active session prompt content."),
                 op("dry_run", "Read whether the runtime is in dry-run mode."),
                 op("approved_plan", "Read the approved plan text."),
                 op("record_run", "Record run metadata with the host."),
@@ -962,13 +963,12 @@ async fn dispatch_builtin_host_operation(
         ("project", "metadata_refresh_hashes") => {
             crate::metadata::project_metadata_host_refresh_hashes(params)
         }
-        // Standalone-run fallbacks for capabilities normally supplied by
-        // an embedder's JSON-RPC bridge. `runtime.task` lets a debugger or
-        // CLI invocation read the pipeline input from `HARN_TASK` without
-        // the host explicitly wiring a callback for every op.
+        // Standalone fallbacks for host-supplied capabilities. `HARN_TASK`
+        // backs `runtime.task` for debugger and CLI invocations.
         ("runtime", "task") => Ok(VmValue::String(arcstr::ArcStr::from(
             std::env::var("HARN_TASK").unwrap_or_default(),
         ))),
+        ("runtime", "prompt_content") => Ok(VmValue::List(Arc::new(Vec::new()))),
         ("runtime", "set_result") => {
             // No-op when no host is attached; swallow silently so standalone
             // scripts can still call `set_result` without crashing.

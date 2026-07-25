@@ -394,8 +394,9 @@ Mapping:
 - the `_harn/providerCatalog` extension method returns the same normalized
   provider catalog v6 artifact shape as Harn's checked-in catalog
 - each `session/prompt` exposes `prompt` as the text-only prompt string,
-  `prompt_content` as normalized Harn content blocks, and `prompt_messages` as a
-  user-role message list suitable for `llm_call(..., {messages: prompt_messages})`
+  `runtime_prompt_content()` from `std/runtime` as typed, normalized Harn
+  content blocks. The legacy `prompt_content` and `prompt_messages` globals
+  remain available during the downstream migration window.
 
 ## Design rule
 

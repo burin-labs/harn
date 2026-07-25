@@ -114,6 +114,15 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/project-metadata/tape.jsonl"),
     },
     Scenario {
+        id: "runtime-prompt-content",
+        title: "runtime.prompt_content reads typed multimodal session input",
+        description: "Mock an ACP session prompt at the runtime host boundary, read its typed text \
+                      and image blocks through `runtime_prompt_content()`, and emit a structured \
+                      receipt. Fully offline.",
+        script: include_str!("../../assets/demo/runtime-prompt-content/scenario.harn"),
+        tape: include_str!("../../assets/demo/runtime-prompt-content/tape.jsonl"),
+    },
+    Scenario {
         id: "verification-snapshot",
         title: "verification_file_hash_snapshot binds checks to current file bytes",
         description: "Build a throw-away Rust workspace, seed the code index, then capture a \

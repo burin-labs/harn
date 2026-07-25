@@ -54,7 +54,11 @@ pub(super) async fn host_call_via_bridge(
 }
 
 /// Register builtins that delegate to the ACP client (editor).
-pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Arc<AcpBridge>) {
+pub(super) async fn register_acp_builtins(
+    vm: &mut harn_vm::Vm,
+    bridge: Arc<AcpBridge>,
+    prompt_content: harn_vm::VmValue,
+) {
     let host_capability_manifest = bridge
         .call_client(
             "host/capabilities",
@@ -67,6 +71,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Arc<AcpB
             normalize_host_capability_manifest(harn_vm::bridge::json_result_to_vm_value(&result))
         })
         .unwrap_or_else(|_| harn_vm::VmValue::dict_map(Default::default()));
+    let host_capability_manifest = advertise_runtime_prompt_content(host_capability_manifest);
     let selected_shell =
         if manifest_has_operation(&host_capability_manifest, "process", "get_default_shell") {
             bridge
@@ -107,10 +112,15 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Arc<AcpB
     });
 
     let b = bridge.clone();
+    let local_prompt_content = prompt_content;
     vm.register_async_builtin("host_call", move |_ctx, args| {
         let bridge = b.clone();
+        let prompt_content = local_prompt_content.clone();
         async move {
             let name = args.first().map(|a| a.display()).unwrap_or_default();
+            if name == "runtime.prompt_content" {
+                return Ok(prompt_content);
+            }
             let call_args = args.get(1).cloned().unwrap_or(harn_vm::VmValue::Nil);
             host_call_via_bridge(&bridge, &name, &call_args).await
         }
@@ -448,6 +458,39 @@ pub(super) fn normalize_host_capability_manifest(value: harn_vm::VmValue) -> har
     }
 
     harn_vm::VmValue::dict(normalized)
+}
+
+pub(super) fn advertise_runtime_prompt_content(manifest: harn_vm::VmValue) -> harn_vm::VmValue {
+    let mut root = manifest.as_dict().cloned().unwrap_or_default();
+    let mut runtime = root
+        .get("runtime")
+        .and_then(|value| value.as_dict())
+        .cloned()
+        .unwrap_or_default();
+    let mut operations = runtime
+        .get("ops")
+        .and_then(|value| match value {
+            harn_vm::VmValue::List(values) => Some(values.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| Arc::new(Vec::new()));
+    if !operations
+        .iter()
+        .any(|value| value.display() == "prompt_content")
+    {
+        Arc::make_mut(&mut operations).push(harn_vm::VmValue::String(arcstr::ArcStr::from(
+            "prompt_content",
+        )));
+    }
+    runtime.insert(
+        harn_vm::value::intern_key("ops"),
+        harn_vm::VmValue::List(operations),
+    );
+    root.insert(
+        harn_vm::value::intern_key("runtime"),
+        harn_vm::VmValue::dict(runtime),
+    );
+    harn_vm::VmValue::dict(root)
 }
 
 fn operation_names_from_value(

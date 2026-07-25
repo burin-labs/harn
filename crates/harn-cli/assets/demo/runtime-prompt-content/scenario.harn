@@ -1,0 +1,28 @@
+import "std/runtime"
+
+/**
+ * Exercise the typed ACP session-prompt capability with representative text
+ * and image blocks. `host_mock` keeps the demo fully offline while preserving
+ * the same `runtime.prompt_content` boundary used by an attached ACP host.
+ */
+pipeline default(_task) {
+  host_mock(
+    "runtime",
+    "prompt_content",
+    [
+      {type: "text", text: "Inspect this screenshot."},
+      {type: "image", media_type: "image/png", url: "https://example.invalid/screenshot.png"},
+    ],
+  )
+  const blocks = runtime_prompt_content()
+  const receipt = {
+    receipt_kind: "runtime_prompt_content_receipt",
+    block_count: len(blocks),
+    first_text: blocks[0]?.text,
+    image_media_type: blocks[1]?.media_type,
+    image_url: blocks[1]?.url,
+  }
+  __io_println("=== typed runtime prompt content ===")
+  __io_println(json_stringify(receipt))
+  return receipt
+}

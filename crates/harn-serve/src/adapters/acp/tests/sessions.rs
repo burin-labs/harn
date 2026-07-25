@@ -1457,10 +1457,11 @@ async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
             let pipeline_path = dir.path().join("multimodal.harn");
             std::fs::write(
                 &pipeline_path,
-                r#"pipeline default(task) {
+                r#"import { runtime_prompt_content } from "std/runtime"
+pipeline default(task) {
   llm_mock_clear()
   llm_mock({text: "ok"})
-  llm_call("", nil, {provider: "mock", messages: prompt_messages})
+  llm_call("", nil, {provider: "mock", messages: [{role: "user", content: runtime_prompt_content()}]})
   const blocks = llm_mock_calls()[0].messages[0].content
   __io_println(blocks[0].text == "Please inspect this context.")
   __io_println(blocks[1].type == "image")
@@ -1547,7 +1548,6 @@ async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
                 !output.contains("false"),
                 "multimodal prompt assertions failed; output was:\n{output}"
             );
-
             drop(request_tx);
             server.await.expect("ACP channel server task");
         })
@@ -1563,8 +1563,9 @@ async fn acp_session_prompt_surfaces_multimodal_capability_errors() {
             let pipeline_path = dir.path().join("unsupported_vision.harn");
             std::fs::write(
                 &pipeline_path,
-                r#"pipeline default(task) {
-  llm_call("", nil, {provider: "mock", model: "gpt-3.5-turbo", messages: prompt_messages})
+                r#"import { runtime_prompt_content } from "std/runtime"
+pipeline default(task) {
+  llm_call("", nil, {provider: "mock", model: "gpt-3.5-turbo", messages: [{role: "user", content: runtime_prompt_content()}]})
 }"#,
             )
             .expect("write pipeline");
@@ -1621,7 +1622,6 @@ async fn acp_session_prompt_surfaces_multimodal_capability_errors() {
                 }
             }
             assert!(saw_error, "prompt should return a capability error");
-
             drop(request_tx);
             server.await.expect("ACP channel server task");
         })

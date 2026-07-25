@@ -4,6 +4,27 @@ use super::*;
 use std::sync::Arc;
 use tokio::task::LocalSet;
 
+#[test]
+fn acp_manifest_advertises_local_runtime_prompt_content() {
+    let manifest = super::super::builtins::advertise_runtime_prompt_content(VmValue::dict_map(
+        Default::default(),
+    ));
+    let operations = manifest
+        .as_dict()
+        .and_then(|root| root.get("runtime"))
+        .and_then(|value| value.as_dict())
+        .and_then(|runtime| runtime.get("ops"))
+        .and_then(|value| match value {
+            VmValue::List(values) => Some(values),
+            _ => None,
+        })
+        .expect("runtime operation list");
+
+    assert!(operations
+        .iter()
+        .any(|value| value.display() == "prompt_content"));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_provider_catalog_method_matches_export_artifact_with_overrides() {
     let _reset = crate::test_support::LlmOverrideReset;
