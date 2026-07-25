@@ -337,9 +337,13 @@ jobs:
     # unless the speculative merge diff is a proven docs-only tail.
     if: needs.changes.outputs.package_audit == 'true'
     # Self-hosted when an idle runner exists, else Blacksmith when enabled,
-    # else the free hosted runner.
+    # else the free hosted runner. Merge groups always use elastic capacity:
+    # GitHub creates a burst of speculative groups, so their independent
+    # availability snapshots can all claim the same idle worker and then form
+    # a head-of-line-blocking queue behind it.
     runs-on: >-
       ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+        && github.event_name != 'merge_group'
         && needs.runner-availability.outputs.linux == 'true'
         && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
         || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404') }}
@@ -368,6 +372,7 @@ jobs:
       # the build if they disagree or if `runner.environment` reappears here.
       HARN_RUNNER_TIER: >-
         ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+          && github.event_name != 'merge_group'
           && needs.runner-availability.outputs.linux == 'true') && 'self-hosted'
           || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
     steps:
@@ -432,9 +437,12 @@ jobs:
     # and disk headroom) so a 60 GB build workspace can never starve the small
     # lanes. Since co-location the behavior leg ships only small bundles, so
     # residential uplink no longer disqualifies it; if it fails on a box for
-    # any reason, rust-behavior-fallback reruns it on a hosted runner.
+    # any reason, rust-behavior-fallback reruns it on a hosted runner. Merge
+    # groups use elastic capacity because their bursty speculative fan-out
+    # makes an idle-runner snapshot unsafe as a reservation.
     runs-on: >-
       ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+        && github.event_name != 'merge_group'
         && (matrix.selfhosted == 'stable' && needs.runner-availability.outputs.linux == 'true'
           && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
         || matrix.selfhosted == 'big' && needs.runner-availability.outputs.linux_big == 'true'
@@ -465,6 +473,7 @@ jobs:
       # Blacksmith / hosted rung as `runs-on`.
       HARN_RUNNER_TIER: >-
         ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
+          && github.event_name != 'merge_group'
           && (matrix.selfhosted == 'stable' && needs.runner-availability.outputs.linux == 'true'
             || matrix.selfhosted == 'big' && needs.runner-availability.outputs.linux_big == 'true')) && 'self-hosted'
           || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
@@ -1025,18 +1034,17 @@ jobs:
   audit-scripts:
     name: Audit scripts
     # Consumes only the small portable CLI bundle from cli-build (see
-    # harn-audit); runner-availability stays a dependency for routing.
-    needs: [changes, cli-build, runner-availability]
+    # harn-audit).
+    needs: [changes, cli-build]
     if: needs.changes.outputs.rust == 'true' && needs.cli-build.result == 'success'
-    # This is now an execution-only consumer of the exact Harn CLI built by
-    # rust-builds. Four CPUs are ample once the duplicate Cargo graph is gone.
-    # Self-hosted when an idle runner exists (small CLI artifact only — safe on
-    # either box's link), else Blacksmith when enabled, else hosted.
+    # Keep this execution-only lane on elastic capacity. It gains no compiler
+    # cache benefit from a persistent worker, and merge-queue bursts otherwise
+    # leave it waiting behind compile-bearing jobs on the scarce stable pool.
     runs-on: >-
-      ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-        && needs.runner-availability.outputs.linux == 'true'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
-        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404') }}
+      ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
+        && 'ubuntu-latest'
+        || 'blacksmith-4vcpu-ubuntu-2404' }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
