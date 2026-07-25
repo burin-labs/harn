@@ -66,6 +66,58 @@ fn test_parses_explicit_risky_operation_grants() {
 }
 
 #[test]
+fn test_parses_capability_profile_and_grants() {
+    use crate::commands::run::CapabilityProfileArg;
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--capability-profile",
+        "lane",
+        "--grant",
+        "gh_token=secret://gh/token,expose=GH_TOKEN",
+        "--grant",
+        "fireworks=env:FIREWORKS_API_KEY",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.capability_profile, Some(CapabilityProfileArg::Lane));
+    assert_eq!(
+        args.grant,
+        vec![
+            "gh_token=secret://gh/token,expose=GH_TOKEN".to_string(),
+            "fireworks=env:FIREWORKS_API_KEY".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn test_capability_flags_conflict_with_no_sandbox() {
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--grant",
+        "t=env:X",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--capability-profile",
+        "hermetic",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
 fn test_parses_dap_subcommand() {
     let cli = Cli::parse_from(["harn", "dap"]);
 

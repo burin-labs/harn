@@ -3,8 +3,9 @@ use super::{
     build_denied_builtins, default_run_capability_policy, default_run_workspace_root,
     eval_source_for_code, execute_explain_cost, execute_run,
     execute_run_with_harnpack_and_sandbox_options, install_cli_llm_mock_mode,
-    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
-    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header,
+    CapabilityProfileConfig, CliLlmMockMode, RunProfileOptions, RunSandboxOptions,
+    StdoutPassthroughGuard,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -592,6 +593,142 @@ pipeline main() {{
             .stderr
             .contains("sandbox active; extra subprocess read root:"),
         "process-only grant should be disclosed: {}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+/// A `--grant NAME=env:SRC,expose=CHILD` lane profile must inject the
+/// snapshotted value into a spawned subprocess's environment — the launcher
+/// surface that lets a headless `harn run` open its PR (`GH_TOKEN`) or reach a
+/// provider key. The parent process holds `SRC` but not `CHILD`, so the child
+/// seeing `CHILD` proves the grant injected it rather than ambient inheritance.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_lane_grant_injects_into_subprocess_env() {
+    harn_vm::reset_thread_local_state();
+    let src = "HARN_TEST_LANE_GRANT_SRC";
+    // SAFETY: this test process mutates its own env; the vars are unique to it
+    // and removed before returning.
+    std::env::set_var(src, "lane-secret-value");
+    std::env::remove_var("HARN_TEST_CHILD_VAR");
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { command_run } from "std/command"
+
+pipeline main() {
+  const result = command_run(
+    {argv: ["sh", "-c", "printf %s \"$HARN_TEST_CHILD_VAR\""]},
+    {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
+  )
+  if !result.success {
+    throw "command_run failed: exit_code=${result.exit_code} stderr=${result.stderr}"
+  }
+  __io_println(result.stdout)
+}
+"#,
+    )
+    .expect("write script");
+
+    let config = CapabilityProfileConfig::from_flags(
+        None,
+        &[format!("lane_src=env:{src},expose=HARN_TEST_CHILD_VAR")],
+    )
+    .expect("valid grant")
+    .expect("grants select a lane profile");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_capability_profile(Some(config)),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    std::env::remove_var(src);
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "lane-secret-value");
+    assert!(
+        outcome.stderr.contains("capability profile: lane"),
+        "the lane grant must be disclosed; stderr:\n{}",
+        outcome.stderr
+    );
+    harn_vm::reset_thread_local_state();
+}
+
+/// The counterpart to the injection test: a hermetic profile closes the child
+/// environment, so a secret-shaped variable set in the launcher must NOT reach
+/// a subprocess. Proves `--capability-profile hermetic` is the strict-empty
+/// posture, not just a label.
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_run_hermetic_profile_closes_subprocess_env() {
+    use super::CapabilityProfileArg;
+    harn_vm::reset_thread_local_state();
+    let secret = "HARN_TEST_HERMETIC_SECRET";
+    // SAFETY: unique to this test; removed before returning.
+    std::env::set_var(secret, "must-not-cross");
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project = temp.path().join("project");
+    std::fs::create_dir(&project).expect("create project");
+    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
+    let script = project.join("main.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { command_run } from "std/command"
+
+pipeline main() {
+  const result = command_run(
+    {argv: ["sh", "-c", "printf %s \"$HARN_TEST_HERMETIC_SECRET\""]},
+    {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
+  )
+  __io_println(result.stdout == "" ? "CLOSED" : "LEAKED")
+}
+"#,
+    )
+    .expect("write script");
+
+    let config = CapabilityProfileConfig::from_flags(Some(CapabilityProfileArg::Hermetic), &[])
+        .expect("valid posture")
+        .expect("explicit hermetic is a posture");
+
+    let outcome = execute_run_with_harnpack_and_sandbox_options(
+        &script.to_string_lossy(),
+        false,
+        HashSet::new(),
+        Vec::new(),
+        Vec::new(),
+        CliLlmMockMode::Off,
+        None,
+        RunProfileOptions::default(),
+        RunSandboxOptions::default().with_capability_profile(Some(config)),
+        HarnpackRunOptions::default(),
+    )
+    .await;
+
+    std::env::remove_var(secret);
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert_eq!(outcome.stdout.trim(), "CLOSED");
+    assert!(
+        outcome.stderr.contains("capability profile: hermetic"),
+        "the hermetic posture must be disclosed; stderr:\n{}",
         outcome.stderr
     );
     harn_vm::reset_thread_local_state();
