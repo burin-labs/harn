@@ -254,6 +254,7 @@ export const HARN_TOOL_CALL_ERROR_CATEGORIES = [
   "resource_busy",
   "cancelled",
   "abandoned_at_loop_exit",
+  "environment",
   "unknown",
 ] as const
 export type HarnToolCallErrorCategory = (typeof HARN_TOOL_CALL_ERROR_CATEGORIES)[number]

@@ -269,6 +269,37 @@ pub enum ErrorCategory {
 }
 
 impl ErrorCategory {
+    /// Every category, in declaration order.
+    ///
+    /// Sibling taxonomies (`ToolCallErrorCategory::ALL`,
+    /// `AgentTerminalKind::ALL`) already publish theirs, and code that has to
+    /// decide something for EVERY category — a wire projection, a docs table,
+    /// a round-trip guard — needs to enumerate them. While this list lived in
+    /// one module's test scope, the tool-call wire projection could not consult
+    /// it, and a category with no decided wire bucket went unnoticed (#5537).
+    pub const ALL: [Self; 20] = [
+        Self::Timeout,
+        Self::Auth,
+        Self::RateLimit,
+        Self::Overloaded,
+        Self::ServerError,
+        Self::TransientNetwork,
+        Self::ResourceBusy,
+        Self::SchemaValidation,
+        Self::SchemaStreamAborted,
+        Self::ToolError,
+        Self::ToolRejected,
+        Self::EgressBlocked,
+        Self::Cancelled,
+        Self::ChannelClosed,
+        Self::NotFound,
+        Self::CircuitOpen,
+        Self::BudgetExceeded,
+        Self::Internal,
+        Self::Environment,
+        Self::Generic,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             ErrorCategory::Timeout => "timeout",
@@ -591,38 +622,12 @@ impl std::error::Error for VmError {}
 mod tests {
     use super::*;
 
-    /// Every category. `as_str` already matches exhaustively, so a new
-    /// variant fails to compile until it is spelled there; this list is what
-    /// the round-trip and documentation guards below enumerate.
-    const ALL_CATEGORIES: &[ErrorCategory] = &[
-        ErrorCategory::Timeout,
-        ErrorCategory::Auth,
-        ErrorCategory::RateLimit,
-        ErrorCategory::Overloaded,
-        ErrorCategory::ServerError,
-        ErrorCategory::TransientNetwork,
-        ErrorCategory::ResourceBusy,
-        ErrorCategory::SchemaValidation,
-        ErrorCategory::SchemaStreamAborted,
-        ErrorCategory::ToolError,
-        ErrorCategory::ToolRejected,
-        ErrorCategory::EgressBlocked,
-        ErrorCategory::Cancelled,
-        ErrorCategory::ChannelClosed,
-        ErrorCategory::NotFound,
-        ErrorCategory::CircuitOpen,
-        ErrorCategory::BudgetExceeded,
-        ErrorCategory::Internal,
-        ErrorCategory::Environment,
-        ErrorCategory::Generic,
-    ];
-
-    /// A new variant must be added to `ALL_CATEGORIES`, or the guards below
+    /// A new variant must be added to [`ErrorCategory::ALL`], or the guards below
     /// silently stop covering it. This match is the tripwire: it fails to
     /// compile until the variant is named, and the arm points at the list.
     #[test]
     fn all_categories_is_exhaustive() {
-        for category in ALL_CATEGORIES {
+        for category in &ErrorCategory::ALL {
             match category {
                 ErrorCategory::Timeout
                 | ErrorCategory::Auth
@@ -647,16 +652,16 @@ mod tests {
             }
         }
         assert_eq!(
-            ALL_CATEGORIES.len(),
+            ErrorCategory::ALL.len(),
             20,
-            "a category was added or removed — update ALL_CATEGORIES and the \
+            "a category was added or removed — update `ErrorCategory::ALL` and the \
              `Error categories` table in docs/src/builtins.md"
         );
     }
 
     #[test]
     fn every_category_round_trips_through_parse() {
-        for category in ALL_CATEGORIES {
+        for category in &ErrorCategory::ALL {
             assert_eq!(
                 &ErrorCategory::parse(category.as_str()),
                 category,
@@ -684,7 +689,7 @@ mod tests {
             })
             .1;
         let table = table.split_once("\n## ").map_or(table, |(head, _)| head);
-        for category in ALL_CATEGORIES {
+        for category in &ErrorCategory::ALL {
             let row = format!("| `{}` |", category.as_str());
             assert!(
                 table.contains(&row),

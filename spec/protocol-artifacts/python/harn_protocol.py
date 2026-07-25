@@ -312,6 +312,7 @@ HARN_TOOL_CALL_ERROR_CATEGORIES: tuple = (
     "resource_busy",
     "cancelled",
     "abandoned_at_loop_exit",
+    "environment",
     "unknown",
 )
 HARN_TOOL_MUTATION_STATUSES: tuple = (
@@ -605,6 +606,7 @@ class HarnToolCallErrorCategory(str, Enum):
     RESOURCE_BUSY = "resource_busy"
     CANCELLED = "cancelled"
     ABANDONED_AT_LOOP_EXIT = "abandoned_at_loop_exit"
+    ENVIRONMENT = "environment"
     UNKNOWN = "unknown"
 
 
