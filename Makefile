@@ -707,7 +707,7 @@ check-site-snippets:
 # bundle digests, executed-node sequences, and connector-status shapes
 # the docs claim.
 check-docs-workflow-quickstart:
-	@HARN_SECRET_PROVIDER_CHAIN=env $(HARN_CMD) run scripts/check_docs_workflow_quickstart.harn
+	@$(HARN_CMD) run scripts/check_docs_workflow_quickstart.harn
 
 # Lint test files for wall-clock polling patterns that cause flaky tests.
 # See docs/src/dev/testing.md for approved alternatives and the opt-out mechanism.

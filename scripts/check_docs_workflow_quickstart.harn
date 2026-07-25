@@ -130,7 +130,7 @@ fn resolve_harn_bin() -> string {
  * (the bash `set -e` behavior).
  */
 fn harn_json(harn_bin: string, args: list<string>, cwd: string?) {
-  let spec = {cmd: harn_bin, args: args}
+  let spec = {cmd: harn_bin, args: args, env: {HARN_SECRET_PROVIDER_CHAIN: "env"}}
   if cwd != nil {
     spec = {...spec, cwd: cwd}
   }
