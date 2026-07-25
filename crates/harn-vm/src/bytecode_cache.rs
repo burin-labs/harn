@@ -1062,6 +1062,95 @@ mod tests {
     }
 
     #[test]
+    fn import_hash_sees_a_dependency_that_appears_between_walks() {
+        // The sibling tests cover a dependency whose *contents* change. This
+        // one covers an import whose *resolution* changes: unresolved first,
+        // resolved once the file lands. The walk records unresolved imports as
+        // a sentinel, so nothing about the entry source moves — only what the
+        // import resolves to.
+        //
+        // Recomputed in the same process, because the invariant is that import
+        // resolution is walk-local: no answer may outlive the walk that
+        // produced it. The walk resolves once per import edge and can only
+        // dedup afterwards, which makes a cross-walk resolution cache a
+        // standing temptation (#5545) — one would keep reporting the sentinel
+        // and serve stale bytecode for a graph that just gained a real
+        // dependency.
+        let tmp = tempfile::tempdir().unwrap();
+        let entry = tmp.path().join("entry.harn");
+        std::fs::write(&entry, "import \"./late\"\n__io_println(\"hi\")\n").unwrap();
+
+        let missing =
+            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
+        std::fs::write(
+            tmp.path().join("late.harn"),
+            "pub fn late() -> int { return 1 }\n",
+        )
+        .unwrap();
+        let present =
+            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
+
+        assert_ne!(
+            missing, present,
+            "an import that resolves only after the file appears must change the \
+             import-graph hash"
+        );
+    }
+
+    #[test]
+    fn identical_import_strings_in_different_directories_resolve_separately() {
+        // An import string is only meaningful relative to the directory of the
+        // file that wrote it, and the same string appears in many directories:
+        // `./dep` is one of the most repeated edges in a real graph. Anything
+        // that resolves imports by string alone lets one directory's `./dep`
+        // answer for another's, silently collapsing two distinct modules into
+        // one and pinning the entry to bytecode built from the wrong file.
+        let tmp = tempfile::tempdir().unwrap();
+        for (dir, body) in [("left", "return 1"), ("right", "return 2")] {
+            std::fs::create_dir_all(tmp.path().join(dir)).unwrap();
+            std::fs::write(
+                tmp.path().join(dir).join("dep.harn"),
+                format!("pub fn dep() -> int {{ {body} }}\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                tmp.path().join(dir).join("mod.harn"),
+                "import \"./dep\"\npub fn use_dep() -> int { return dep() }\n",
+            )
+            .unwrap();
+        }
+        let entry = tmp.path().join("entry.harn");
+        std::fs::write(
+            &entry,
+            "import \"./left/mod\"\nimport \"./right/mod\"\n__io_println(\"hi\")\n",
+        )
+        .unwrap();
+
+        // Edit each directory's `dep` in turn and require the hash to move both
+        // times. Resolving by import string alone lets one `./dep` answer for
+        // the other, which leaves exactly one of these two files out of the
+        // graph entirely — but *which* one depends on traversal order, so
+        // editing a single file is not a reliable falsifier. Editing both is.
+        let mut hash =
+            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
+        for dir in ["left", "right"] {
+            std::fs::write(
+                tmp.path().join(dir).join("dep.harn"),
+                "pub fn dep() -> int { return 999 }\n",
+            )
+            .unwrap();
+            let next =
+                hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
+            assert_ne!(
+                hash, next,
+                "editing {dir}/dep.harn must move the hash: each directory's \
+                 `./dep` resolves to its own file"
+            );
+            hash = next;
+        }
+    }
+
+    #[test]
     fn import_hash_busts_on_same_length_edit_in_same_process() {
         // The per-file read/scan memo is keyed by `(path, len, mtime_ns)`. The
         // hardest case for that key is an edit that preserves byte length: only
