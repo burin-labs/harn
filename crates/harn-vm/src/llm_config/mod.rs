@@ -11,6 +11,7 @@ mod catalog;
 mod config;
 mod loading;
 mod model_def;
+mod overlay_audit;
 mod presentation;
 mod provider_def;
 mod resolution;
@@ -24,6 +25,8 @@ mod logical_defaults_tests;
 #[cfg(test)]
 mod model_generation_tests;
 #[cfg(test)]
+mod overlay_audit_tests;
+#[cfg(test)]
 mod provider_endpoint_tests;
 #[cfg(test)]
 mod tests;
@@ -34,6 +37,7 @@ pub use catalog::*;
 pub use config::*;
 pub use loading::*;
 pub use model_def::*;
+pub use overlay_audit::*;
 pub use presentation::*;
 pub use provider_def::*;
 pub use resolution::*;

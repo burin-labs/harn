@@ -204,7 +204,8 @@ pub(crate) use provider::{
 };
 pub(crate) use providers::{
     ProviderCatalogCommand, ProvidersExportArgs, ProvidersGenerateArgs, ProvidersMatrixArgs,
-    ProvidersRecommendArgs, ProvidersRefreshArgs, ProvidersSupportArgs, ProvidersValidateArgs,
+    ProvidersOverlayAuditArgs, ProvidersRecommendArgs, ProvidersRefreshArgs, ProvidersSupportArgs,
+    ProvidersValidateArgs,
 };
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;

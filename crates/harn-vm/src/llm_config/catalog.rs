@@ -10,6 +10,14 @@ use harn_glob::match_name as glob_match;
 const LOGICAL_MODEL_DEFAULT_PREFIX: &str = "logical:";
 const MODEL_DEFAULT_UNSET_KEY: &str = "_unset";
 
+/// True for `[model_defaults."logical:<model>"]` selectors, which name one
+/// exact publisher-level logical model rather than globbing serving routes.
+/// The two selector kinds resolve through different lookups, so every site
+/// that must tell them apart asks here instead of re-testing the prefix.
+pub(crate) fn is_logical_model_selector(selector: &str) -> bool {
+    selector.starts_with(LOGICAL_MODEL_DEFAULT_PREFIX)
+}
+
 /// Get provider config for resolving base_url, auth, etc.
 pub fn provider_config(name: &str) -> Option<ProviderDef> {
     let mut provider = effective_config().providers.get(name).cloned()?;
@@ -56,7 +64,7 @@ fn apply_matching_model_params(
     params: &mut BTreeMap<String, toml::Value>,
 ) {
     for (pattern, defaults) in &config.model_defaults {
-        if !pattern.starts_with(LOGICAL_MODEL_DEFAULT_PREFIX) && glob_match(pattern, model_id) {
+        if !is_logical_model_selector(pattern) && glob_match(pattern, model_id) {
             apply_model_param_layer(params, defaults);
         }
     }
@@ -187,7 +195,7 @@ pub fn model_default_issues(config: &ProvidersConfig) -> Vec<String> {
     let mut issues = Vec::new();
     for (selector, defaults) in &config.model_defaults {
         if let Some(unset) = defaults.get(MODEL_DEFAULT_UNSET_KEY) {
-            let valid = !selector.starts_with(LOGICAL_MODEL_DEFAULT_PREFIX)
+            let valid = !is_logical_model_selector(selector)
                 && unset.as_array().is_some_and(|keys| {
                     !keys.is_empty()
                         && keys.iter().all(|key| {

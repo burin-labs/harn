@@ -29,6 +29,7 @@ mod parse_core;
 mod parse_models;
 mod parse_orchestration;
 mod parse_packaging;
+mod parse_provider_catalog;
 mod parse_provider_dispatch_audit;
 mod parse_provider_tool_calibrate;
 mod parse_provider_tool_probe_audit;
