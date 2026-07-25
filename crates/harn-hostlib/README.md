@@ -150,6 +150,24 @@ orchestration capability policy: Linux seccomp/landlock filters via
 `pre_exec`, macOS `sandbox-exec` wrapping, and cwd enforcement against the
 workspace roots the embedder configured.
 
+Executables that embed these process tools must dispatch Harn's private
+owner-death guardian before parsing their public CLI:
+
+```rust
+fn main() {
+    if harn_hostlib::process::owner_death::run_if_requested() {
+        unreachable!("process guardian execution does not return");
+    }
+
+    // Normal application startup.
+}
+```
+
+On Unix, managed background commands re-exec the embedding executable in this
+mode so the kernel can terminate their process groups if the supervisor dies.
+Omitting the early dispatch makes owner-death-contained commands fail during
+startup. Windows uses a Job Object and the function returns `false`.
+
 - `tools/run_command` is the canonical command runner. It accepts
   `mode: "argv"` with `argv: [string]` as the recommended path, or
   `mode: "shell"` with `command`; shell mode uses the shared

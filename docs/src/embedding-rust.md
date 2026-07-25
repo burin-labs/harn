@@ -62,6 +62,24 @@ harn-serve = { git = "...", tag = "v0.10.39", features = ["full"] }
 harn-serve = { git = "...", tag = "v0.10.39", features = ["hostlib"] }
 ```
 
+When either hostlib feature is enabled, dispatch the private process guardian
+at the very beginning of the embedding executable's `main`:
+
+```rust
+fn main() {
+    if harn_serve::run_process_guardian_if_requested() {
+        unreachable!("process guardian execution does not return");
+    }
+
+    // Normal application startup.
+}
+```
+
+This must run before public CLI parsing. On Unix, owner-death-contained
+commands re-exec the embedding executable in guardian mode; without the
+dispatch, those commands fail during startup. Windows uses a Job Object and
+the function returns `false`.
+
 Finer control is available one layer down: `harn-hostlib` exposes per-family
 grammar features (`grammar-web`, `grammar-systems`, `grammar-scripting`,
 `grammar-jvm`, `grammar-enterprise`, `grammar-data`) so a client that only ever
