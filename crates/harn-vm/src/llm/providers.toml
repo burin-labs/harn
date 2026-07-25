@@ -1015,6 +1015,9 @@ provider = "deepseek"
 # "frontier" | "reasoning"`. The legacy pattern-based [[tier_rules]] table
 # has been removed; the catalog is the single source of truth. Models
 # without an explicit `tier` resolve to `tier_defaults.default`.
+#
+# Picking the right value for a row is a judgement call with real downstream
+# effects. See "Choosing a tier" in ../README.md before setting one.
 
 [tier_defaults]
 default = "mid"
@@ -2950,7 +2953,7 @@ architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe 
 # `tier`/`open_weight`/`strengths` match the rest of the openai-gpt-oss-120b
 # equivalence group (the validator requires one tier per logical model — the
 # conservative shared baseline is `frontier`).
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "tool_use", "reasoning"]
 
@@ -3152,7 +3155,7 @@ capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.35, output_per_mtok = 0.75 }
 rate_limits = { rpm = 250, tpm = 250000, tph = 1000000, tpd = 1000000, tier = "developer", source_url = "https://inference-docs.cerebras.ai/support/rate-limits", last_verified = "2026-06-12", notes = "Developer (Pay as You Go) tier confirmed live from x-ratelimit-limit-requests/tokens response headers 2026-06-12 (250 RPM / 250K TPM). The prior Free Trial row (5 RPM / 30K TPM) needlessly throttled the proactive sliding-window limiter to a crawl. Override per-deployment with HARN_RATE_LIMIT_CEREBRAS_RPM / HARN_RATE_LIMIT_CEREBRAS_TPM." }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
 [models."zai-glm-4.7"]
@@ -3839,7 +3842,7 @@ capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
@@ -3880,7 +3883,7 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-19" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
@@ -4294,7 +4297,7 @@ context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
@@ -4362,7 +4365,7 @@ context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.22, output_per_mtok = 0.59 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
@@ -4581,7 +4584,7 @@ served_variant = "nvidia-nim"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking"]
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-20" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["cheap", "tool_use", "reasoning"]
 
@@ -4734,7 +4737,7 @@ context_window = 128072
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.10 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, quantization = "fp4", license = "Apache-2.0", source_url = "https://www.baseten.co/library/gpt-oss-120b/", last_verified = "2026-06-23" }
-tier = "frontier"
+tier = "mid"
 open_weight = true
 strengths = ["cheap", "tool_use", "reasoning", "coding"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]

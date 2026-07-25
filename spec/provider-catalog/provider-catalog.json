@@ -4274,7 +4274,7 @@
         "deepseek",
         "kimi"
       ],
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "cheap",
@@ -4717,7 +4717,7 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "speed",
@@ -6336,7 +6336,7 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "speed",
@@ -7030,7 +7030,7 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "speed",
@@ -8714,7 +8714,7 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "speed",
@@ -12452,7 +12452,7 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "cheap",
@@ -18566,7 +18566,7 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "cheap",
@@ -20478,7 +20478,7 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "tier": "frontier",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "speed",
