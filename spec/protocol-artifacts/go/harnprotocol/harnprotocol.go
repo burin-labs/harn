@@ -268,6 +268,7 @@ var HarnToolCallErrorCategories = []HarnToolCallErrorCategory{
 	"resource_busy",
 	"cancelled",
 	"abandoned_at_loop_exit",
+	"environment",
 	"unknown",
 }
 

@@ -18,8 +18,14 @@ fn tool_call_error_category_serializes_as_snake_case() {
             ToolCallErrorCategory::AbandonedAtLoopExit,
             "abandoned_at_loop_exit",
         ),
+        (ToolCallErrorCategory::Environment, "environment"),
         (ToolCallErrorCategory::Unknown, "unknown"),
     ];
+    assert_eq!(
+        pairs.len(),
+        ToolCallErrorCategory::ALL.len(),
+        "the wire table above must name every variant",
+    );
     for (variant, wire) in pairs {
         let encoded = serde_json::to_string(&variant).unwrap();
         assert_eq!(encoded, format!("\"{wire}\""));
@@ -104,56 +110,70 @@ fn tool_executor_round_trips_with_adjacent_tag() {
     }
 }
 
+/// The internal → wire projection, named for EVERY internal category.
+///
+/// The old test spot-checked a subset, which is how `Environment` sat folded
+/// into `HostBridgeError` unnoticed: a category nobody listed still had a
+/// mapping, just not one anybody had decided (#5537). This table is exhaustive
+/// and asserted against [`ErrorCategory::ALL`], so adding an internal
+/// category now fails here until someone picks its wire bucket on purpose.
 #[test]
-fn tool_call_error_category_from_internal_collapses_transient_family() {
+fn tool_call_error_category_from_internal_is_decided_for_every_internal_category() {
     use crate::value::ErrorCategory as Internal;
-    assert_eq!(
-        ToolCallErrorCategory::from_internal(&Internal::Timeout),
-        ToolCallErrorCategory::Timeout
-    );
-    for net in [
-        Internal::RateLimit,
-        Internal::Overloaded,
-        Internal::ServerError,
-        Internal::TransientNetwork,
-    ] {
+    let expected = [
+        (Internal::Timeout, ToolCallErrorCategory::Timeout),
+        (Internal::RateLimit, ToolCallErrorCategory::Network),
+        (Internal::Overloaded, ToolCallErrorCategory::Network),
+        (Internal::ServerError, ToolCallErrorCategory::Network),
+        (Internal::TransientNetwork, ToolCallErrorCategory::Network),
+        (Internal::ResourceBusy, ToolCallErrorCategory::ResourceBusy),
+        (
+            Internal::SchemaValidation,
+            ToolCallErrorCategory::SchemaValidation,
+        ),
+        (
+            Internal::SchemaStreamAborted,
+            ToolCallErrorCategory::SchemaValidation,
+        ),
+        (Internal::ToolError, ToolCallErrorCategory::ToolError),
+        (
+            Internal::ToolRejected,
+            ToolCallErrorCategory::PermissionDenied,
+        ),
+        (Internal::Cancelled, ToolCallErrorCategory::Cancelled),
+        // The host-configuration family: the fix is to the machine, not the
+        // agent's work, so both reach the wire as `environment`.
+        (Internal::Environment, ToolCallErrorCategory::Environment),
+        (Internal::EgressBlocked, ToolCallErrorCategory::Environment),
+        // Genuinely bridge/engine-side or unclassified.
+        (Internal::Auth, ToolCallErrorCategory::HostBridgeError),
+        (
+            Internal::ChannelClosed,
+            ToolCallErrorCategory::HostBridgeError,
+        ),
+        (Internal::NotFound, ToolCallErrorCategory::HostBridgeError),
+        (
+            Internal::CircuitOpen,
+            ToolCallErrorCategory::HostBridgeError,
+        ),
+        (
+            Internal::BudgetExceeded,
+            ToolCallErrorCategory::HostBridgeError,
+        ),
+        (Internal::Internal, ToolCallErrorCategory::HostBridgeError),
+        (Internal::Generic, ToolCallErrorCategory::HostBridgeError),
+    ];
+    for (internal, wire) in &expected {
         assert_eq!(
-            ToolCallErrorCategory::from_internal(&net),
-            ToolCallErrorCategory::Network,
-            "{net:?} should map to Network",
+            ToolCallErrorCategory::from_internal(internal),
+            *wire,
+            "{internal:?} should map to {wire:?}",
         );
     }
-    assert_eq!(
-        ToolCallErrorCategory::from_internal(&Internal::ResourceBusy),
-        ToolCallErrorCategory::ResourceBusy
-    );
-    assert_eq!(
-        ToolCallErrorCategory::from_internal(&Internal::SchemaValidation),
-        ToolCallErrorCategory::SchemaValidation
-    );
-    assert_eq!(
-        ToolCallErrorCategory::from_internal(&Internal::ToolError),
-        ToolCallErrorCategory::ToolError
-    );
-    assert_eq!(
-        ToolCallErrorCategory::from_internal(&Internal::ToolRejected),
-        ToolCallErrorCategory::PermissionDenied
-    );
-    assert_eq!(
-        ToolCallErrorCategory::from_internal(&Internal::Cancelled),
-        ToolCallErrorCategory::Cancelled
-    );
-    for bridge in [
-        Internal::Auth,
-        Internal::EgressBlocked,
-        Internal::NotFound,
-        Internal::CircuitOpen,
-        Internal::Generic,
-    ] {
-        assert_eq!(
-            ToolCallErrorCategory::from_internal(&bridge),
-            ToolCallErrorCategory::HostBridgeError,
-            "{bridge:?} should map to HostBridgeError",
+    for internal in &Internal::ALL {
+        assert!(
+            expected.iter().any(|(named, _)| named == internal),
+            "{internal:?} has no decided wire bucket — add it to the table above",
         );
     }
 }

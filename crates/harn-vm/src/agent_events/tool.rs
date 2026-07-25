@@ -112,12 +112,21 @@ pub enum ToolCallErrorCategory {
     /// (an explicit `cancel_in_flight_tool_call` / user preemption) so an
     /// auditor can tell loop-lifecycle abandonment from a user-initiated stop.
     AbandonedAtLoopExit,
+    /// A host environment / infrastructure gap: a required toolchain root or
+    /// cache lies outside the sandbox profile, a needed system binary is
+    /// missing, or the machine is otherwise not provisioned for the work. The
+    /// fix is to widen the sandbox/config or provision the host, never to
+    /// change what the agent did. Distinct from [`Self::HostBridgeError`] (the
+    /// bridge itself failed) and [`Self::PermissionDenied`] (the host
+    /// deliberately refused) so a host can tell a user to fix their machine
+    /// instead of blaming the model.
+    Environment,
     /// Default when classification was not performed.
     Unknown,
 }
 
 impl ToolCallErrorCategory {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::SchemaValidation,
         Self::ToolError,
         Self::McpServerError,
@@ -130,6 +139,7 @@ impl ToolCallErrorCategory {
         Self::ResourceBusy,
         Self::Cancelled,
         Self::AbandonedAtLoopExit,
+        Self::Environment,
         Self::Unknown,
     ];
 
@@ -158,6 +168,7 @@ impl ToolCallErrorCategory {
             Self::ResourceBusy => "resource_busy",
             Self::Cancelled => "cancelled",
             Self::AbandonedAtLoopExit => "abandoned_at_loop_exit",
+            Self::Environment => "environment",
             Self::Unknown => "unknown",
         }
     }
@@ -181,8 +192,16 @@ impl ToolCallErrorCategory {
             Internal::ToolError => Self::ToolError,
             Internal::ToolRejected => Self::PermissionDenied,
             Internal::Cancelled => Self::Cancelled,
+            // A machine-provisioning gap. It reaches the wire under its own
+            // name because "widen the sandbox / install the toolchain" is a
+            // different instruction from every other bucket here, and folding
+            // it into `HostBridgeError` left hosts unable to give it (#5537).
+            Internal::Environment => Self::Environment,
+            // Blocked outbound egress is host CONFIGURATION the operator chose,
+            // so it belongs with the environment family for the same reason:
+            // the fix is to widen the policy, not to change the agent's work.
+            Internal::EgressBlocked => Self::Environment,
             Internal::Auth
-            | Internal::EgressBlocked
             | Internal::ChannelClosed
             | Internal::NotFound
             | Internal::CircuitOpen
@@ -192,9 +211,6 @@ impl ToolCallErrorCategory {
             // is ever recorded as a tool event, `HostBridgeError` is the honest
             // wire bucket.
             | Internal::Internal
-            // A host environment/infrastructure gap (e.g. a toolchain root
-            // outside the sandbox) is host-side, not the tool's fault.
-            | Internal::Environment
             | Internal::Generic => Self::HostBridgeError,
         }
     }
