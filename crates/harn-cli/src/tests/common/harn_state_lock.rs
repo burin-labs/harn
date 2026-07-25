@@ -120,10 +120,12 @@ fn finish_acquire(inner: MutexGuard<'static, ()>) -> HarnStateGuard {
 ///
 /// Covers:
 /// - `HARN_STATE_DIR` and sibling env vars read by
-///   `harn_vm::runtime_paths::state_root()` / `event_log_*` and written
-///   by `OrchestratorRole::build_vm()`. The lock helper unsets them on
-///   entry so each test starts from a clean env instead of inheriting
-///   a previous test's absolute state path.
+///   `harn_vm::runtime_paths::state_root()` / `event_log_*`. The lock
+///   helper unsets them on entry so each test starts from a clean env
+///   instead of inheriting a previous test's absolute state path. No
+///   production code writes them any more — `OrchestratorRole::build_vm()`
+///   used to, and every test in the binary inherited its state dir — so
+///   this now guards only tests that set them deliberately.
 /// - The thread-local `ACTIVE_EVENT_LOG`, which is reused across
 ///   cargo test-thread handoffs.
 /// - The process-global `harn_vm` trigger registry mutated by
