@@ -178,25 +178,26 @@ pub(crate) fn read(path: &Path) -> io::Result<Arc<ModuleSource>> {
 /// correctness; comments and string literals are skipped so neither a
 /// commented-out import nor a `"import …"` value appearing inside an
 /// unrelated string gates the hash.
+///
+/// Comments are skipped in place rather than scrubbed into a rewritten copy
+/// first. The entry-chunk cache key runs this over every transitively
+/// reachable file — several megabytes of source per spawn — and materializing
+/// a comment-free copy cost more than the scan it fed, and more than the
+/// SHA-256 the scan's output is folded into.
 fn collect_user_imports(source: &str) -> Vec<String> {
-    let scrubbed = strip_comments(source);
+    let bytes = source.as_bytes();
     let mut out: Vec<String> = Vec::new();
-    let bytes = scrubbed.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
+        if let Some(end) = comment_end(bytes, i) {
+            i = end;
+            continue;
+        }
         if bytes[i] == b'"' {
             // Skip past any string literal so identifiers inside string
             // values cannot trigger the keyword match below.
-            match read_string_literal(bytes, i) {
-                Some((_, end)) => {
-                    i = end;
-                    continue;
-                }
-                None => {
-                    i += 1;
-                    continue;
-                }
-            }
+            i = string_literal_end(bytes, i).unwrap_or(i + 1);
+            continue;
         }
         if !matches_keyword(bytes, i, b"import") {
             i += 1;
@@ -207,6 +208,13 @@ fn collect_user_imports(source: &str) -> Vec<String> {
         let mut j = i + b"import".len();
         let mut depth = 0i32;
         while j < bytes.len() {
+            // A comment may sit between the keyword and the path, and a block
+            // comment may carry the newline that would otherwise end the
+            // clause. Stepping over it whole keeps both cases intact.
+            if let Some(end) = comment_end(bytes, j) {
+                j = end;
+                continue;
+            }
             match bytes[j] {
                 b'"' => {
                     if let Some((path, end)) = read_string_literal(bytes, j) {
@@ -246,6 +254,55 @@ fn collect_user_imports(source: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// End of the comment starting at `at`, or `None` if none starts there.
+///
+/// An unterminated block comment runs to end of input, matching how the rest
+/// of this scan degrades: it can only hide imports, and a missed import only
+/// costs a cache miss.
+fn comment_end(bytes: &[u8], at: usize) -> Option<usize> {
+    if bytes[at] != b'/' || at + 1 >= bytes.len() {
+        return None;
+    }
+    match bytes[at + 1] {
+        b'/' => {
+            let mut i = at + 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            // Stop *on* the newline: the import clause below treats it as the
+            // end of a logical line.
+            Some(i)
+        }
+        b'*' => {
+            let mut i = at + 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            Some((i + 2).min(bytes.len()))
+        }
+        _ => None,
+    }
+}
+
+/// End of the string literal starting at `at`, without decoding it.
+///
+/// [`read_string_literal`] allocates the unescaped value, which the scan
+/// throws away everywhere except the import path itself.
+fn string_literal_end(bytes: &[u8], at: usize) -> Option<usize> {
+    debug_assert_eq!(bytes[at], b'"');
+    let mut i = at + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => return Some(i + 1),
+            b'\\' if i + 1 < bytes.len() => i += 2,
+            b'\\' => return None,
+            b'\n' => return None,
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 fn matches_keyword(bytes: &[u8], at: usize, keyword: &[u8]) -> bool {
@@ -300,38 +357,6 @@ fn read_string_literal(bytes: &[u8], at: usize) -> Option<(String, usize)> {
     None
 }
 
-fn strip_comments(source: &str) -> String {
-    let bytes = source.as_bytes();
-    let mut out = String::with_capacity(source.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
-            }
-            continue;
-        }
-        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
-            i += 2;
-            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                i += 1;
-            }
-            i = (i + 2).min(bytes.len());
-            continue;
-        }
-        if bytes[i] == b'"' {
-            if let Some((_, end)) = read_string_literal(bytes, i) {
-                out.push_str(&source[i..end]);
-                i = end;
-                continue;
-            }
-        }
-        out.push(bytes[i] as char);
-        i += 1;
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,6 +380,44 @@ mod tests {
             import "./real"
         "#;
         assert_eq!(collect_user_imports(source), vec!["./real".to_string()]);
+    }
+
+    #[test]
+    fn comments_around_and_inside_an_import_clause_are_stepped_over() {
+        // The scan skips comments in place rather than scrubbing them out of a
+        // rewritten copy first, so every position a comment can occupy has to
+        // be handled by the scan itself — including between the keyword and its
+        // path, where a block comment can also carry the newline that would
+        // otherwise end the clause.
+        let source = concat!(
+            "/* leading */ import \"./before\"\n",
+            "import /* between */ \"./between\"\n",
+            "import /* spans\na line */ \"./across\"\n",
+            "import \"./trailing\" // after\n",
+            "/* import \"./blocked/out\" */\n",
+        );
+        assert_eq!(
+            collect_user_imports(source),
+            vec!["./before", "./between", "./across", "./trailing"],
+            "a block comment must not hide an import, or expose a commented-out one"
+        );
+    }
+
+    #[test]
+    fn an_escaped_quote_does_not_end_the_string_it_appears_in() {
+        // Skipping a string literal no longer decodes it, so the skip has to
+        // honour escapes on its own: reading `\"` as the closing quote would
+        // leave the scan inside string data and surface the fake import.
+        let source = "const s = \"a \\\" import \\\"./fake\\\"\"\nimport \"./real\"\n";
+        assert_eq!(collect_user_imports(source), vec!["./real".to_string()]);
+    }
+
+    #[test]
+    fn an_unterminated_block_comment_hides_the_rest_of_the_file() {
+        // Defines the degradation rather than leaving it to chance. Hiding an
+        // import can only cost a cache miss; the file does not parse anyway.
+        let source = "import \"./seen\"\n/* unterminated\nimport \"./hidden\"\n";
+        assert_eq!(collect_user_imports(source), vec!["./seen".to_string()]);
     }
 
     #[test]
