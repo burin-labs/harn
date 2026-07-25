@@ -690,3 +690,99 @@ pipeline default() {
         "unexpected result: {result:?}"
     );
 }
+
+#[test]
+fn module_loading_reuses_the_bytes_the_entry_cache_key_already_read() {
+    // Computing an entry chunk's cache key walks the transitive import graph
+    // and reads every module in it. The module loader must consume those same
+    // bytes rather than reading each file a second time and keeping a private
+    // copy: on a large graph the duplicate read and copy are paid on every
+    // spawn. Pointer identity between the loader's `source_cache` entry and the
+    // shared owner's bytes is the invariant that keeps them a single read.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let entry = temp.path().join("entry.harn");
+    let dependency = temp.path().join("value.harn");
+    std::fs::write(
+        &entry,
+        "import { value } from \"./value\"\npub fn read() { return value() }\n",
+    )
+    .expect("write entry");
+    std::fs::write(&dependency, "pub fn value() { return 1 }\n").expect("write dependency");
+
+    // Fold the entry key exactly as the run path does, warming the shared owner.
+    let entry_source = std::fs::read_to_string(&entry).expect("read entry");
+    let _ = crate::bytecode_cache::CacheKey::from_source(&entry, &entry_source);
+    let walked = crate::module_source::read(&dependency).expect("dependency was read by the walk");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        vm.load_module_exports(&entry)
+            .await
+            .expect("module load succeeds");
+
+        let canonical = dependency.canonicalize().unwrap_or(dependency.clone());
+        let cached = vm
+            .source_cache
+            .get(&canonical)
+            .expect("the loaded dependency is retained for debugger retrieval");
+        assert!(
+            Arc::ptr_eq(cached, walked.text()),
+            "the module loader must bind the bytes the import-graph walk already \
+             read instead of reading and copying the file again"
+        );
+    });
+}
+
+#[test]
+fn an_edited_dependency_is_re_read_rather_than_served_from_the_shared_owner() {
+    // The shared owner is keyed by stat identity, so it must never let a warm
+    // process observe stale module bytes. This is the correctness anchor for
+    // reusing the entry-key walk's reads.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let entry = temp.path().join("entry.harn");
+    let dependency = temp.path().join("value.harn");
+    std::fs::write(
+        &entry,
+        "import { value } from \"./value\"\npub fn read() { return value() }\n",
+    )
+    .expect("write entry");
+    std::fs::write(&dependency, "pub fn value() { return 1 }\n").expect("write dependency");
+
+    runtime.block_on(async {
+        let mut first_vm = Vm::new();
+        let first = first_vm
+            .load_module_exports(&entry)
+            .await
+            .expect("first module load succeeds");
+        let first_result = first_vm
+            .call_closure_pub(first.get("read").expect("first export"), &[])
+            .await;
+        assert!(
+            matches!(first_result, Ok(VmValue::Int(1))),
+            "unexpected first dependency result: {first_result:?}"
+        );
+
+        std::fs::write(&dependency, "pub fn value() { return 2 }\n").expect("rewrite dependency");
+
+        let mut second_vm = Vm::new();
+        let second = second_vm
+            .load_module_exports(&entry)
+            .await
+            .expect("second module load succeeds");
+        let second_result = second_vm
+            .call_closure_pub(second.get("read").expect("second export"), &[])
+            .await;
+        assert!(
+            matches!(second_result, Ok(VmValue::Int(2))),
+            "an edited dependency must be re-read in the same process: {second_result:?}"
+        );
+    });
+}

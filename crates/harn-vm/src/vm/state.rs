@@ -475,8 +475,10 @@ pub struct Vm {
     /// The complete export set is retained so handlers and predicates from the
     /// same module share one module state across repeated child invocations.
     pub(crate) lazy_callable_modules: LazyCallableModuleCache,
-    /// Source text keyed by canonical or synthetic module path for debugger retrieval.
-    pub(crate) source_cache: Arc<BTreeMap<std::path::PathBuf, String>>,
+    /// Source text keyed by canonical or synthetic module path for debugger
+    /// retrieval. Entries share the bytes owned by
+    /// [`crate::module_source`] rather than copying them.
+    pub(crate) source_cache: Arc<BTreeMap<std::path::PathBuf, Arc<str>>>,
     /// Source file path for error reporting.
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
@@ -567,7 +569,7 @@ impl VmBaseline {
         crate::initialize_runtime_assets();
         let mut source_cache = BTreeMap::new();
         if let (Some(file), Some(text)) = (&self.source_file, &self.source_text) {
-            source_cache.insert(std::path::PathBuf::from(file), text.clone());
+            source_cache.insert(std::path::PathBuf::from(file), Arc::from(text.as_str()));
         }
         if let Some(dir) = &self.source_dir {
             crate::stdlib::set_thread_source_dir(dir);
@@ -956,7 +958,7 @@ impl Vm {
             cov.set_primary_file(file);
         }
         Arc::make_mut(&mut self.source_cache)
-            .insert(std::path::PathBuf::from(file), text.to_string());
+            .insert(std::path::PathBuf::from(file), Arc::from(text));
     }
 
     /// Initialize execution (push the initial frame).

@@ -9,6 +9,7 @@ use harn_modules::DefKind;
 
 use crate::bytecode_cache;
 use crate::module_artifact::compile_module_artifact_from_source;
+use crate::module_source::{self, ModuleSource};
 use crate::prepared_module::PreparedModuleArtifact;
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
@@ -232,9 +233,10 @@ fn stdlib_module_artifact(
     // legitimately change between processes; that means the disk cache
     // for stdlib can use a synthetic source_path. The harn_version field
     // of the cache key gates correctness across releases.
+    let embedded = ModuleSource::from_text(source);
     let lookup = {
         let _load_span = recorder.map(super::ModulePhaseRecorder::load_span);
-        bytecode_cache::load_module(synthetic, source)
+        bytecode_cache::load_module(synthetic, &embedded)
     };
     let artifact = if let Some(artifact) = lookup.artifact {
         artifact
@@ -417,7 +419,7 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
-        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
+        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::from(source));
 
         let mut compile_span = self.module_compile_span();
         let compiled = compile_module_artifact_from_source(&synthetic, source)?;
@@ -476,7 +478,7 @@ impl Vm {
         if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
             return Ok(loaded);
         }
-        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
+        Arc::make_mut(&mut self.source_cache).insert(synthetic.clone(), Arc::from(source));
 
         let artifact = stdlib_module_artifact(
             module,
@@ -919,8 +921,8 @@ impl Vm {
             }
             if let Some(loaded) = self.module_cache.get(&canonical).cloned() {
                 if let Some(source) = &verified_source {
-                    let cached_source = self.source_cache.get(&canonical);
-                    if cached_source != Some(source) {
+                    let cached_source = self.source_cache.get(&canonical).map(Arc::as_ref);
+                    if cached_source != Some(source.as_str()) {
                         return Err(VmError::Runtime(format!(
                             "installed package {} rejected: cached module {} was not compiled from the verified package bytes",
                             projection.package_rejection_kind(),
@@ -946,8 +948,10 @@ impl Vm {
             let source = {
                 let _load_span = self.module_load_span();
                 match verified_source {
-                    Some(source) => source,
-                    None => std::fs::read_to_string(&file_path).map_err(|e| {
+                    // Guard-verified package bytes are their own authority and
+                    // never come from the shared on-disk memo.
+                    Some(source) => Arc::new(ModuleSource::from_text(source)),
+                    None => module_source::read(&file_path).map_err(|e| {
                         // Name the resolution base: relative imports resolve against the
                         // importing file's dir (or CWD when unset), so an error that
                         // prints only the joined path leaves the author guessing which
@@ -960,8 +964,11 @@ impl Vm {
                     })?,
                 }
             };
-            Arc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
-            Arc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
+            {
+                let source_cache = Arc::make_mut(&mut self.source_cache);
+                source_cache.insert(canonical.clone(), Arc::clone(source.text()));
+                source_cache.insert(file_path.clone(), Arc::clone(source.text()));
+            }
 
             let prepared = {
                 let _load_span = self.module_load_span();
@@ -985,7 +992,8 @@ impl Vm {
                     artifact
                 } else {
                     let mut compile_span = self.module_compile_span();
-                    let compiled = compile_module_artifact_from_source(&file_path, &source)?;
+                    let compiled =
+                        compile_module_artifact_from_source(&file_path, source.as_str())?;
                     if let Some(span) = &mut compile_span {
                         span.mark_compile_succeeded();
                     }

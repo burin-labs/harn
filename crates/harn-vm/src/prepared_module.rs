@@ -14,6 +14,7 @@ use parking_lot::Mutex;
 
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::module_artifact::{ModuleArtifact, ModuleImportSpec};
+use crate::module_source::ModuleSource;
 
 const DEFAULT_MAX_ENTRIES: usize = 512;
 
@@ -68,10 +69,10 @@ struct PreparedModuleCacheKey {
 }
 
 impl PreparedModuleCacheKey {
-    fn new(canonical_path: PathBuf, source: &str) -> Self {
+    fn new(canonical_path: PathBuf, source: &ModuleSource) -> Self {
         Self {
             canonical_path,
-            source_hash: *blake3::hash(source.as_bytes()).as_bytes(),
+            source_hash: source.blake3(),
             harn_version: crate::bytecode_cache::HARN_VERSION,
             codegen_fingerprint: crate::bytecode_cache::CODEGEN_FINGERPRINT,
             optimizations_enabled: crate::compiler::CompilerOptions::from_env()
@@ -142,7 +143,7 @@ impl PreparedModuleCache {
     pub(crate) fn get(
         &self,
         canonical_path: &Path,
-        source: &str,
+        source: &ModuleSource,
     ) -> Option<Arc<PreparedModuleArtifact>> {
         let key = PreparedModuleCacheKey::new(canonical_path.to_path_buf(), source);
         let mut inner = self.inner.lock();
@@ -158,7 +159,7 @@ impl PreparedModuleCache {
     pub(crate) fn insert(
         &self,
         canonical_path: PathBuf,
-        source: &str,
+        source: &ModuleSource,
         artifact: Arc<PreparedModuleArtifact>,
     ) -> Arc<PreparedModuleArtifact> {
         let key = PreparedModuleCacheKey::new(canonical_path, source);
@@ -212,18 +213,20 @@ mod tests {
     #[test]
     fn bounded_cache_evicts_oldest_exact_key() {
         let cache = PreparedModuleCache::with_capacity(NonZeroUsize::new(1).unwrap());
-        let first_source = "pub fn first() { 1 }";
-        let second_source = "pub fn second() { 2 }";
+        let first_source = ModuleSource::from_text("pub fn first() { 1 }");
+        let second_source = ModuleSource::from_text("pub fn second() { 2 }");
         let first = empty_artifact();
-        let _ = cache.insert(PathBuf::from("first.harn"), first_source, first);
+        let _ = cache.insert(PathBuf::from("first.harn"), &first_source, first);
         let _ = cache.insert(
             PathBuf::from("second.harn"),
-            second_source,
+            &second_source,
             empty_artifact(),
         );
 
-        assert!(cache.get(Path::new("first.harn"), first_source).is_none());
-        assert!(cache.get(Path::new("second.harn"), second_source).is_some());
+        assert!(cache.get(Path::new("first.harn"), &first_source).is_none());
+        assert!(cache
+            .get(Path::new("second.harn"), &second_source)
+            .is_some());
         assert_eq!(cache.stats().evictions, 1);
         assert_eq!(cache.stats().entries, 1);
     }
@@ -231,7 +234,8 @@ mod tests {
     #[test]
     fn cache_key_separates_compiler_configuration() {
         let path = PathBuf::from("module.harn");
-        let key = PreparedModuleCacheKey::new(path, "pub fn value() { 1 }");
+        let key =
+            PreparedModuleCacheKey::new(path, &ModuleSource::from_text("pub fn value() { 1 }"));
         let mut other_compiler = key.clone();
         other_compiler.optimizations_enabled = !key.optimizations_enabled;
 
@@ -242,10 +246,10 @@ mod tests {
     fn dropping_last_cache_handle_releases_prepared_artifacts() {
         let cache = PreparedModuleCache::default();
         let path = PathBuf::from("module.harn");
-        let source = "pub fn value() { 1 }";
+        let source = ModuleSource::from_text("pub fn value() { 1 }");
         let artifact = empty_artifact();
         let weak = Arc::downgrade(&artifact);
-        let _ = cache.insert(path, source, artifact);
+        let _ = cache.insert(path, &source, artifact);
         let clone = cache.clone();
 
         drop(cache);

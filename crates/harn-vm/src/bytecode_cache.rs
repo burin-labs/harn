@@ -49,16 +49,7 @@ use sha2::{Digest, Sha256};
 use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
 use crate::module_artifact::ModuleArtifact;
-
-struct ImportScan {
-    content: Arc<str>,
-    imports: Vec<Arc<str>>,
-}
-
-type SharedImportScan = Arc<ImportScan>;
-type ImportsFileMemoKey = (PathBuf, u64, i128);
-type ImportsFileMemo =
-    std::sync::Mutex<std::collections::HashMap<ImportsFileMemoKey, SharedImportScan>>;
+use crate::module_source::{self, ModuleSource};
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
@@ -152,9 +143,9 @@ impl CacheKey {
     /// the runtime loads every dependency under its own source-local key.
     /// Diagnostic paths are rebound when the artifact is loaded, so adjacent
     /// and packaged artifacts remain relocatable without aliasing attribution.
-    pub fn from_module_source(source: &str) -> Self {
+    pub fn from_module_source(source: &ModuleSource) -> Self {
         Self {
-            source_hash: sha256(source.as_bytes()),
+            source_hash: source.sha256(),
             context_hash: module_compilation_context_hash(),
             harn_version: HARN_VERSION,
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
@@ -288,7 +279,7 @@ pub fn store_at(path: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
 
 /// Look up the [`ModuleArtifact`] for `source_path` (whose contents are
 /// `source`). Mirrors [`load`] but for the `.harnmod` family.
-pub fn load_module(source_path: &Path, source: &str) -> ModuleLookupOutcome {
+pub fn load_module(source_path: &Path, source: &ModuleSource) -> ModuleLookupOutcome {
     let key = CacheKey::from_module_source(source);
     if !cache_enabled() {
         return ModuleLookupOutcome {
@@ -552,165 +543,6 @@ fn hex(bytes: &[u8]) -> String {
     out
 }
 
-/// Lightweight regex-free scan that surfaces user imports without paying
-/// a full lex+parse. False positives only increase cache churn, never
-/// correctness; comments and string literals are skipped so neither a
-/// commented-out import nor a `"import …"` value appearing inside an
-/// unrelated string gates the hash.
-fn collect_user_imports(source: &str) -> Vec<String> {
-    let scrubbed = strip_comments(source);
-    let mut out: Vec<String> = Vec::new();
-    let bytes = scrubbed.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'"' {
-            // Skip past any string literal so identifiers inside string
-            // values cannot trigger the keyword match below.
-            match read_string_literal(bytes, i) {
-                Some((_, end)) => {
-                    i = end;
-                    continue;
-                }
-                None => {
-                    i += 1;
-                    continue;
-                }
-            }
-        }
-        if !matches_keyword(bytes, i, b"import") {
-            i += 1;
-            continue;
-        }
-        // Skip past `import` and any selective `{ ... } from` clause; we
-        // only need the source-position of the path string literal.
-        let mut j = i + b"import".len();
-        let mut depth = 0i32;
-        while j < bytes.len() {
-            match bytes[j] {
-                b'"' => {
-                    if let Some((path, end)) = read_string_literal(bytes, j) {
-                        if !path.starts_with("std/") {
-                            out.push(path);
-                        }
-                        i = end;
-                        break;
-                    }
-                    j += 1;
-                }
-                b'{' => {
-                    depth += 1;
-                    j += 1;
-                }
-                b'}' => {
-                    depth -= 1;
-                    j += 1;
-                }
-                b'\n' if depth == 0 => {
-                    // No string literal on this logical line; bail and
-                    // continue scanning after the keyword to avoid an
-                    // infinite loop.
-                    i = j;
-                    break;
-                }
-                _ => j += 1,
-            }
-        }
-        if j >= bytes.len() {
-            break;
-        }
-        if i < j {
-            // Defensive: ensure forward progress when the inner loop
-            // exited without setting `i`.
-            i = j;
-        }
-    }
-    out
-}
-
-fn matches_keyword(bytes: &[u8], at: usize, keyword: &[u8]) -> bool {
-    let end = at + keyword.len();
-    if end > bytes.len() {
-        return false;
-    }
-    if &bytes[at..end] != keyword {
-        return false;
-    }
-    if at > 0 && is_ident_char(bytes[at - 1]) {
-        return false;
-    }
-    if end < bytes.len() && is_ident_char(bytes[end]) {
-        return false;
-    }
-    true
-}
-
-fn is_ident_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-fn read_string_literal(bytes: &[u8], at: usize) -> Option<(String, usize)> {
-    debug_assert_eq!(bytes[at], b'"');
-    let mut out = String::new();
-    let mut i = at + 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'"' => return Some((out, i + 1)),
-            b'\\' => {
-                if i + 1 >= bytes.len() {
-                    return None;
-                }
-                match bytes[i + 1] {
-                    b'"' => out.push('"'),
-                    b'\\' => out.push('\\'),
-                    b'n' => out.push('\n'),
-                    b'r' => out.push('\r'),
-                    b't' => out.push('\t'),
-                    other => out.push(other as char),
-                }
-                i += 2;
-            }
-            b'\n' => return None,
-            byte => {
-                out.push(byte as char);
-                i += 1;
-            }
-        }
-    }
-    None
-}
-
-fn strip_comments(source: &str) -> String {
-    let bytes = source.as_bytes();
-    let mut out = String::with_capacity(source.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'/' {
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
-            }
-            continue;
-        }
-        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
-            i += 2;
-            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                i += 1;
-            }
-            i = (i + 2).min(bytes.len());
-            continue;
-        }
-        if bytes[i] == b'"' {
-            if let Some((_, end)) = read_string_literal(bytes, i) {
-                out.push_str(&source[i..end]);
-                i = end;
-                continue;
-            }
-        }
-        out.push(bytes[i] as char);
-        i += 1;
-    }
-    out
-}
-
 /// Stable digest over every embedded stdlib source. Folded into the
 /// user-file cache key so that bumping a stdlib module (changing its
 /// embedded `.harn` content) invalidates cached user bytecode that may
@@ -774,107 +606,6 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
     hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT)
 }
 
-/// Process-wide memo of `(file content, collect_user_imports(content))` keyed by
-/// the resolved file path plus its stat identity `(len, mtime_ns)`. Walking a
-/// large pipeline's import graph re-encounters the same shared library files for
-/// nearly every module, so without this memo `from_source` re-reads and
-/// re-scans those files hundreds of times in a single cold run. Because the key
-/// includes `(len, mtime_ns)`, any on-disk edit produces a fresh key and the
-/// stale entry is never reused — a warm long-lived process recompiles edited
-/// pipelines correctly. Source and import strings stay shared across graph
-/// walks, while the returned bytes remain identical to the un-memoized path, so
-/// cache keys are byte-for-byte unchanged.
-fn imports_file_memo() -> &'static ImportsFileMemo {
-    use std::sync::OnceLock;
-    static MEMO: OnceLock<ImportsFileMemo> = OnceLock::new();
-    MEMO.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-/// Process-wide memo of `Path::canonicalize`. The import-graph walk canonicalizes
-/// the same resolved module paths hundreds of times across a cold `from_source`
-/// fan-out, and each call is a `realpath(3)` syscall. A successful
-/// canonicalization is stable for the process lifetime (the pipeline tree is not
-/// moved mid-run), so it is memoized. A *failed* canonicalization (the path does
-/// not exist yet) is NOT memoized: a file that later appears — or a symlink that
-/// is created — must canonicalize freshly so the folded path key matches what a
-/// cold process would produce. This keeps the memo a pure speed optimization with
-/// byte-identical output.
-fn canonicalize_cached(path: &Path) -> PathBuf {
-    use std::sync::OnceLock;
-    static MEMO: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, PathBuf>>> =
-        OnceLock::new();
-    let memo = MEMO.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    if let Some(hit) = memo.lock().unwrap().get(path).cloned() {
-        return hit;
-    }
-    match path.canonicalize() {
-        Ok(canonical) => {
-            memo.lock()
-                .unwrap()
-                .insert(path.to_path_buf(), canonical.clone());
-            canonical
-        }
-        // Unresolved path: fall back to the input, but do not memoize, so a file
-        // that appears later canonicalizes correctly on the next walk.
-        Err(_) => path.to_path_buf(),
-    }
-}
-
-fn file_stat_identity(path: &Path) -> Option<(u64, i128)> {
-    let meta = fs::metadata(path).ok()?;
-    let len = meta.len();
-    // Nanosecond mtime where available; fall back to coarse seconds. Any change
-    // to either component on disk invalidates the memo entry.
-    let mtime_ns = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_nanos() as i128)
-        .unwrap_or(0);
-    Some((len, mtime_ns))
-}
-
-fn scan_imports(content: String) -> SharedImportScan {
-    let imports = collect_user_imports(&content)
-        .into_iter()
-        .map(Arc::from)
-        .collect();
-    Arc::new(ImportScan {
-        content: Arc::from(content),
-        imports,
-    })
-}
-
-/// Read `path` and scan its user imports, memoized by stat identity. On an I/O
-/// error, returns the `ErrorKind` string the un-memoized path folded in (errors
-/// are not memoized — a transient failure should not be sticky).
-fn read_and_scan_imports_cached(path: &Path) -> Result<SharedImportScan, String> {
-    if let Some((len, mtime_ns)) = file_stat_identity(path) {
-        let key = (path.to_path_buf(), len, mtime_ns);
-        if let Some(hit) = imports_file_memo().lock().unwrap().get(&key).cloned() {
-            return Ok(hit);
-        }
-        match fs::read_to_string(path) {
-            Ok(content) => {
-                let entry = scan_imports(content);
-                imports_file_memo()
-                    .lock()
-                    .unwrap()
-                    .insert(key, Arc::clone(&entry));
-                Ok(entry)
-            }
-            Err(err) => Err(err.kind().to_string()),
-        }
-    } else {
-        // No stat (file vanished between resolve and read): fall back to a direct
-        // read so behavior matches the un-memoized path exactly.
-        match fs::read_to_string(path) {
-            Ok(content) => Ok(scan_imports(content)),
-            Err(err) => Err(err.kind().to_string()),
-        }
-    }
-}
-
 /// Inner form of [`hash_transitive_user_imports`] parameterized on the compiler
 /// fingerprint so tests can vary it; production always passes
 /// [`CODEGEN_FINGERPRINT`].
@@ -885,9 +616,11 @@ fn hash_transitive_user_imports_fingerprinted(
 ) -> [u8; 32] {
     let mut visited: std::collections::BTreeMap<PathBuf, ImportNode> =
         std::collections::BTreeMap::new();
-    let mut frontier: Vec<(PathBuf, Arc<str>)> = collect_user_imports(source)
-        .into_iter()
-        .map(|import| (source_path.to_path_buf(), Arc::from(import)))
+    let entry = ModuleSource::from_text(source);
+    let mut frontier: Vec<(PathBuf, Arc<str>)> = entry
+        .imports()
+        .iter()
+        .map(|import| (source_path.to_path_buf(), Arc::clone(import)))
         .collect();
 
     while let Some((anchor, import)) = frontier.pop() {
@@ -901,34 +634,35 @@ fn hash_transitive_user_imports_fingerprinted(
                 .or_insert(ImportNode::Unresolved { import });
             continue;
         };
-        let canonical = canonicalize_cached(&resolved);
+        let canonical = module_source::canonical_identity(&resolved);
         if visited.contains_key(&canonical) {
             continue;
         }
-        // Per-file read + import-scan is memoized process-wide, keyed by the
-        // file's identity stat `(len, mtime)`. The same handful of core library
-        // modules (`lib/host/*`, `lib/runtime/*`, ...) sit on the import graph of
-        // nearly every module, so a cold `from_source` over a large pipeline used
-        // to re-read and re-scan the same files hundreds of times across the
-        // module-load fan-out. The memo is invalidated automatically the moment a
-        // file's stat changes on disk, so a warm long-lived process still recompiles
-        // edited pipelines correctly. The folded hash bytes are byte-identical to
-        // the un-memoized path (same content + same `collect_user_imports` output),
-        // so cache keys are unchanged. See `imports_file_memo`.
-        match read_and_scan_imports_cached(&resolved) {
-            Ok(scan) => {
+        // The read and the import scan are owned by [`module_source`], which
+        // memoizes both by the file's stat identity. The same handful of core
+        // library modules (`lib/host/*`, `lib/runtime/*`, ...) sit on the import
+        // graph of nearly every module, and the VM's module loader reads every
+        // one of these files again — so without a shared owner a single spawn
+        // re-reads and re-scans the same sources many times over.
+        match module_source::read(&resolved) {
+            Ok(module) => {
                 visited.insert(
                     canonical.clone(),
                     ImportNode::Resolved {
-                        content: Arc::clone(&scan.content),
+                        content: Arc::clone(module.text()),
                     },
                 );
-                for nested_import in &scan.imports {
+                for nested_import in module.imports() {
                     frontier.push((resolved.clone(), Arc::clone(nested_import)));
                 }
             }
-            Err(kind) => {
-                visited.insert(canonical, ImportNode::IoError { kind });
+            Err(error) => {
+                visited.insert(
+                    canonical,
+                    ImportNode::IoError {
+                        kind: error.kind().to_string(),
+                    },
+                );
             }
         }
     }
@@ -1122,9 +856,10 @@ mod tests {
         std::fs::write(&importer, importer_source).unwrap();
 
         let entry_before = CacheKey::from_source(&importer, importer_source);
-        let module_before = CacheKey::from_module_source(importer_source);
-        let dependency_before =
-            CacheKey::from_module_source(&std::fs::read_to_string(&dependency).unwrap());
+        let module_before = CacheKey::from_module_source(&ModuleSource::from_text(importer_source));
+        let dependency_before = CacheKey::from_module_source(&ModuleSource::from_text(
+            std::fs::read_to_string(&dependency).unwrap(),
+        ));
 
         std::fs::write(&dependency, "pub fn value() { return 2 }\n").unwrap();
         let future = std::fs::metadata(&dependency).unwrap().modified().unwrap()
@@ -1137,9 +872,10 @@ mod tests {
             .unwrap();
 
         let entry_after = CacheKey::from_source(&importer, importer_source);
-        let module_after = CacheKey::from_module_source(importer_source);
-        let dependency_after =
-            CacheKey::from_module_source(&std::fs::read_to_string(&dependency).unwrap());
+        let module_after = CacheKey::from_module_source(&ModuleSource::from_text(importer_source));
+        let dependency_after = CacheKey::from_module_source(&ModuleSource::from_text(
+            std::fs::read_to_string(&dependency).unwrap(),
+        ));
 
         assert_ne!(
             entry_before, entry_after,
@@ -1160,7 +896,7 @@ mod tests {
         let source = "pub fn answer() { fn inner() { return 42 }; return inner() }\n";
         let first_path = Path::new("/workspace/first/module.harn");
         let second_path = Path::new("/workspace/second/module.harn");
-        let key = CacheKey::from_module_source(source);
+        let key = CacheKey::from_module_source(&ModuleSource::from_text(source));
 
         let artifact =
             crate::module_artifact::compile_module_artifact_from_source(first_path, source)
@@ -1214,7 +950,7 @@ mod tests {
         let artifact =
             crate::module_artifact::compile_module_artifact_from_source(source_path, source)
                 .expect("compile module");
-        let key = CacheKey::from_module_source(source);
+        let key = CacheKey::from_module_source(&ModuleSource::from_text(source));
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("source-local-module.harnmod");
 
@@ -1252,21 +988,6 @@ mod tests {
     }
 
     #[test]
-    fn collect_user_imports_ignores_stdlib_and_comments() {
-        let source = r#"
-            // import "comment/should/be/ignored"
-            import "std/agents"
-            import { foo } from "pkg/bar"
-            import "./relative/path"
-        "#;
-        let imports = collect_user_imports(source);
-        assert_eq!(
-            imports,
-            vec!["pkg/bar".to_string(), "./relative/path".to_string()]
-        );
-    }
-
-    #[test]
     fn cache_enabled_respects_env() {
         std::env::set_var(CACHE_ENABLED_ENV, "0");
         assert!(!cache_enabled());
@@ -1274,16 +995,6 @@ mod tests {
         assert!(cache_enabled());
         std::env::remove_var(CACHE_ENABLED_ENV);
         assert!(cache_enabled());
-    }
-
-    #[test]
-    fn import_path_inside_string_literal_is_ignored() {
-        let source = r#"
-            const payload = "import { foo } from \"./other\""
-            import "./real"
-        "#;
-        let imports = collect_user_imports(source);
-        assert_eq!(imports, vec!["./real".to_string()]);
     }
 
     #[test]
@@ -1396,26 +1107,6 @@ mod tests {
             "a same-length edit to a transitively-imported file must still change \
              the import-graph hash when recomputed in a warm process"
         );
-    }
-
-    #[test]
-    fn import_scan_memo_shares_source_and_import_allocations() {
-        let tmp = tempfile::tempdir().unwrap();
-        let source_path = tmp.path().join("module.harn");
-        std::fs::write(
-            &source_path,
-            "import \"./first\"\nimport \"./second\"\npub fn value() -> int { return 7 }\n",
-        )
-        .unwrap();
-
-        let first = read_and_scan_imports_cached(&source_path).unwrap();
-        let second = read_and_scan_imports_cached(&source_path).unwrap();
-
-        assert!(
-            std::sync::Arc::ptr_eq(&first, &second),
-            "a memo hit must reuse the complete scan instead of copying its source and imports"
-        );
-        assert_eq!(first.imports.len(), 2);
     }
 
     #[test]
