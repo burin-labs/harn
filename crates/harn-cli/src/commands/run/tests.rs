@@ -8,12 +8,6 @@ use super::{
     persist_cli_llm_mock_recording, run_sandbox_attestation, split_eval_header, CliLlmMockMode,
     RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
 };
-// Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
-// a forked child), so an unconditional import is dead on Windows and trips
-// `-D warnings`. Mirrors the local `use super::CapabilityProfileArg;` already
-// inside one of those tests.
-#[cfg(unix)]
-use super::CapabilityProfileConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
