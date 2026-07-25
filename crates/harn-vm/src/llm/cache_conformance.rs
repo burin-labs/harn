@@ -67,10 +67,17 @@ pub struct CacheControlProfile {
 }
 
 impl CacheControlProfile {
-    /// Derive the cache-control profile from resolved [`Capabilities`]. Minimum
-    /// prefix, TTL notes, and the usage-field mapping are wire-dialect facts, so
-    /// they live here keyed off the one capability path rather than duplicated
-    /// per model row or per call site.
+    /// Derive the cache-control profile from resolved [`Capabilities`]. TTL
+    /// notes and the usage-field mapping are wire-dialect facts, so they live
+    /// here keyed off the one capability path rather than duplicated per model
+    /// row or per call site.
+    ///
+    /// The minimum cacheable prefix is *not* a dialect fact. On the Anthropic
+    /// dialect alone it ranges 512..=4096 tokens and is not monotonic across
+    /// generations (Opus 5 caches a 512-token prefix; Opus 4.6 and Haiku 4.5
+    /// need 4096). A rule that declares `prompt_cache_min_prefix_tokens`
+    /// therefore wins; the per-dialect number below is only the fallback for
+    /// routes with no measured floor.
     pub fn from_capabilities(caps: &Capabilities) -> Self {
         if !caps.prompt_caching {
             return Self {
@@ -83,7 +90,7 @@ impl CacheControlProfile {
                 cache_write_usage_field: String::new(),
             };
         }
-        let (min_prefix, ttl, read_field, write_field) = match caps.message_wire_format {
+        let (dialect_min_prefix, ttl, read_field, write_field) = match caps.message_wire_format {
             WireDialect::Anthropic => (
                 1024,
                 "5m default breakpoint TTL; 1h with the extended-cache-ttl beta",
@@ -109,6 +116,9 @@ impl CacheControlProfile {
             // fields and let the miss classify on capability support.
             WireDialect::Ollama => (0, "No provider-reported cache accounting", "", ""),
         };
+        let min_prefix = caps
+            .prompt_cache_min_prefix_tokens
+            .unwrap_or(dialect_min_prefix);
         Self {
             prompt_caching: true,
             cache_breakpoint_style: caps.cache_breakpoint_style.clone(),

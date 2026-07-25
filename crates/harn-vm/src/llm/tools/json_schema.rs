@@ -157,7 +157,32 @@ pub(crate) fn json_schema_to_type_expr(
     }
 }
 
+/// True when a `parameters` dict is unambiguously a JSON Schema object rather
+/// than Harn's flat `{param_name: type}` map.
+///
+/// Harn's tool `parameters` is a param map — `{city: "string"}`. Callers coming
+/// from the OpenAI or Anthropic tool shapes reach for a full JSON Schema
+/// instead, and the flat reading then treats `type`, `properties`, and
+/// `required` as three parameter *names*. The provider accepts the resulting
+/// nonsense schema and the model fills the schema's own keys in as arguments,
+/// so the failure surfaces as a confidently wrong tool call rather than an
+/// error. Detect the schema shape and pass it through verbatim.
+fn looks_like_json_schema_object(params: &crate::value::DictMap) -> bool {
+    let declares_object = params
+        .get("type")
+        .is_some_and(|value| value.display() == "object");
+    declares_object && matches!(params.get("properties"), Some(VmValue::Dict(_)))
+}
+
 pub(super) fn vm_build_json_schema(params: Option<&crate::value::DictMap>) -> serde_json::Value {
+    if let Some(params) = params {
+        if looks_like_json_schema_object(params) {
+            let mut json = super::super::vm_value_to_json(&VmValue::dict(params.clone()));
+            crate::schema::normalize_json_schema_type_names(&mut json);
+            return json;
+        }
+    }
+
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
 
@@ -206,5 +231,70 @@ fn vm_param_to_json_schema(value: &VmValue) -> (serde_json::Value, bool) {
             (json, is_required)
         }
         _ => (serde_json::json!({"type": "string"}), true),
+    }
+}
+
+#[cfg(test)]
+mod json_schema_shape_tests {
+    use super::vm_build_json_schema;
+    use crate::value::{DictMap, VmDictExt, VmValue};
+
+    fn dict(pairs: Vec<(&str, VmValue)>) -> DictMap {
+        let mut map = DictMap::new();
+        for (key, value) in pairs {
+            map.insert(crate::value::intern_key(key), value);
+        }
+        map
+    }
+
+    #[test]
+    fn flat_param_map_builds_an_object_schema() {
+        let params = dict(vec![("city", VmValue::string("string"))]);
+        let schema = vm_build_json_schema(Some(&params));
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["city"]["type"], "string");
+        assert_eq!(schema["required"], serde_json::json!(["city"]));
+    }
+
+    #[test]
+    fn a_full_json_schema_passes_through_instead_of_being_read_as_param_names() {
+        // Reproduces a live misfire on claude-opus-5: a caller passing the
+        // OpenAI/Anthropic tool shape got `type`, `properties`, and `required`
+        // treated as parameter names, and the model answered with
+        // `{"properties": {"city": "La Paz"}, "required": "city", ...}`.
+        let mut city = DictMap::new();
+        city.put_str("type", "string");
+        let properties = dict(vec![("city", VmValue::dict(city))]);
+        let params = dict(vec![
+            ("type", VmValue::string("object")),
+            ("properties", VmValue::dict(properties)),
+            (
+                "required",
+                VmValue::List(std::sync::Arc::new(vec![VmValue::string("city")])),
+            ),
+        ]);
+
+        let schema = vm_build_json_schema(Some(&params));
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["city"]["type"], "string");
+        assert_eq!(schema["required"], serde_json::json!(["city"]));
+        assert!(
+            schema["properties"].get("properties").is_none(),
+            "the schema's own keys must not become parameters: {schema}"
+        );
+    }
+
+    #[test]
+    fn a_param_literally_named_type_still_reads_as_a_param_map() {
+        // Only the full `{type: "object", properties: {...}}` pair triggers
+        // pass-through, so a tool that genuinely takes a `type` argument is
+        // unaffected.
+        let params = dict(vec![
+            ("type", VmValue::string("string")),
+            ("value", VmValue::string("int")),
+        ]);
+        let schema = vm_build_json_schema(Some(&params));
+        assert_eq!(schema["properties"]["type"]["type"], "string");
+        assert_eq!(schema["properties"]["value"]["type"], "integer");
     }
 }

@@ -59,6 +59,15 @@ local `harn` binary so it matches the version in use.
 - `crates/harn-wasm` is outside the Cargo workspace. Build it with
   `cd crates/harn-wasm && wasm-pack build`.
 
+Two Claude Code hooks are configured in `.claude/settings.json`: session setup
+(above) and a Bash guard, `scripts/claude_bash_guard.harn`. The guard rejects
+`cargo build/check/clippy/fmt/test/bench` in favour of the Makefile target that
+sets the right environment, and rejects piping a build or test straight into a
+filter, because that throws away every line the filter did not print and the
+only way to get one back is to run the whole thing again. Redirect to a file
+first, then grep the file. `HARN_ALLOW_RAW_CARGO=1` in the command is the escape
+hatch for a genuine one-off.
+
 Keep installed hooks on. The default pre-commit hook runs cheap staged guards
 and a read-only Rust format check; the default pre-push hook enforces signed
 commits, merge-queue safety, and cheap drift guards. Required CI owns compiling,

@@ -153,7 +153,7 @@ fn __validate_pin_policy(kind, pin_policy) {
  * preemptively kill legitimate calls.
  */
 fn __builtin_preset_specs() {
-  const frontier_ladder = ["claude-opus-4-8", "claude-sonnet-4-5"]
+  const frontier_ladder = ["claude-opus-5", "claude-sonnet-5"]
   const cheap_ladder = ["gpt-4o-mini"]
   // Long-running captains pin their binding context (goal, constraints, key
   // decisions) so it survives compaction by construction (see std/agent/pins).

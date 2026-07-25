@@ -33,6 +33,8 @@ pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml"
 mod audit;
 mod lookup;
 #[cfg(test)]
+mod lookup_tests_anthropic_cache;
+#[cfg(test)]
 mod lookup_tests_gateway;
 #[cfg(test)]
 mod lookup_tests_kimi;
@@ -43,6 +45,8 @@ mod lookup_tests_system_placement;
 mod model;
 mod overrides;
 mod rule;
+#[cfg(test)]
+mod rule_tests;
 mod tool_format;
 
 pub(crate) use lookup::should_use_responses_transport;

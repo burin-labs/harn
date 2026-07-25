@@ -2736,7 +2736,166 @@
       "name": "Claude Opus 4.8",
       "provider": "anthropic",
       "aliases": [
-        "opus"
+        "opus48"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "anthropic_messages",
+        "input_mode": "inline_requests",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 100000,
+        "max_input_bytes": 268435456,
+        "result_retention_days": 29,
+        "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
+          "Batch data is scoped to the workspace that owns the API key.",
+          "Request and response data is retained for up to 29 days unless deleted after processing."
+        ],
+        "operational_notes": [
+          "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+          "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+          "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+          "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 25.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Superseded by claude-opus-5 (same $5/$25 pricing). No formal sunset yet; switch when convenient.",
+        "superseded_by": "claude-opus-5"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-opus-adaptive",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 69.2,
+        "swe_bench_verified": 88.6
+      },
+      "serving_tiers": [
+        {
+          "id": "fast",
+          "label": "Fast mode",
+          "mode": "synchronous",
+          "economics": "premium",
+          "request": {
+            "param": "speed",
+            "value": "fast",
+            "beta_header": "fast-mode-2026-02-01"
+          },
+          "otps_speedup": 2.5,
+          "cost_multiplier": 2.0,
+          "status": "research_preview",
+          "pricing": {
+            "input_per_mtok": 10.0,
+            "output_per_mtok": 50.0,
+            "cache_read_per_mtok": 1.0,
+            "cache_write_per_mtok": 12.5
+          },
+          "latency": "higher output-token throughput than standard Claude serving",
+          "reliability": "research preview, account-manager gated",
+          "unsuitable_workloads": [
+            "batch"
+          ],
+          "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated."
+        }
+      ]
+    },
+    {
+      "id": "claude-opus-5",
+      "name": "Claude Opus 5",
+      "provider": "anthropic",
+      "aliases": [
+        "opus",
+        "opus5"
       ],
       "context_window": 1000000,
       "modalities": {
@@ -2838,7 +2997,7 @@
         "batch"
       ],
       "family": "anthropic-claude",
-      "lineage": "claude-opus-adaptive",
+      "lineage": "claude-sonnet-opus",
       "complementary_with": [
         "openai-gpt",
         "google-gemini",
@@ -2854,10 +3013,6 @@
         "long_context",
         "agentic"
       ],
-      "benchmarks": {
-        "swe_bench_pro": 69.2,
-        "swe_bench_verified": 88.6
-      },
       "serving_tiers": [
         {
           "id": "fast",
@@ -2883,7 +3038,7 @@
           "unsuitable_workloads": [
             "batch"
           ],
-          "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated."
+          "note": "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache."
         }
       ]
     },
@@ -15655,6 +15810,74 @@
       ]
     },
     {
+      "id": "anthropic/claude-opus-5",
+      "name": "Claude Opus 5 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 25.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ]
+    },
+    {
       "id": "anthropic/claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6 (via OpenRouter)",
       "provider": "openrouter",
@@ -23557,7 +23780,17 @@
     },
     {
       "name": "opus",
+      "model_id": "claude-opus-5",
+      "provider": "anthropic"
+    },
+    {
+      "name": "opus48",
       "model_id": "claude-opus-4-8",
+      "provider": "anthropic"
+    },
+    {
+      "name": "opus5",
+      "model_id": "claude-opus-5",
       "provider": "anthropic"
     },
     {
@@ -23985,10 +24218,10 @@
     },
     {
       "provider": "anthropic",
-      "model": "claude-opus-4-8",
+      "model": "claude-opus-5",
       "base_url": "https://api.anthropic.com/v1",
       "secret_env": "ANTHROPIC_API_KEY",
-      "label": "Claude Opus 4.8",
+      "label": "Claude Opus 5",
       "family": "anthropic-claude",
       "capabilities": [
         "audio",
@@ -26510,6 +26743,24 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "Claude Opus 4.8 Fast (via OpenRouter)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-5",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Claude Opus 5 (via OpenRouter)",
       "family": "anthropic-claude",
       "capabilities": [
         "native_tools",

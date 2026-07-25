@@ -1,0 +1,187 @@
+// PreToolUse guard for Bash commands.
+//
+// Two failure modes this exists to stop:
+//
+//   1. Bare `cargo ...`. The Makefile targets set the env the workspace needs
+//      (worktree-local build dir, RUST_MIN_STACK, egress unset, nextest when
+//      present). A raw `cargo` call silently skips all of that and can also
+//      contend with a concurrent lane's target-dir lock.
+//
+//   2. Piping a long build or test straight into a filter. `cargo test | grep
+//      -c ok` throws the run away: the moment you want a line the filter did
+//      not print, the only way to get it is to run the whole thing again.
+//      Commands over the slow-command threshold must land their full output in
+//      a file first, then be grepped from there.
+//
+// Contract: reads the Claude Code PreToolUse payload on stdin, prints a
+// permission decision on stdout. Exit status is always 0 — a crashed guard
+// must not look like a denial.
+// Commands whose full output is worth keeping. Grepping any of these through a
+// pipe without a redirect is what forces a rerun.
+const SLOW_COMMANDS = ["cargo", "make", "nextest", "swift", "pnpm", "npm", "xcodebuild"]
+
+// `cargo <verb>` calls that have a Makefile owner. Anything not listed here is
+// a one-off (`cargo tree`, `cargo add`) and passes through.
+const CARGO_VERB_TARGETS = {
+  bench: "make bench-vm",
+  build: "make build",
+  check: "make check",
+  clippy: "make lint",
+  fmt: "make fmt",
+  nextest: "make test",
+  test: "make test",
+}
+
+pub fn strip_env_prefix(words: list<string>) -> list<string> {
+  // Skip `env -u FOO BAR=baz` and bare `VAR=value` prefixes so the guard sees
+  // the real program name.
+  let rest = words
+  while len(rest) > 0 {
+    const head = rest[0] ?? ""
+    if head == "env" {
+      rest = rest.slice(1, len(rest))
+    } else if head == "-u" && len(rest) > 1 {
+      rest = rest.slice(2, len(rest))
+    } else if head.contains("=") && !head.starts_with("-") {
+      rest = rest.slice(1, len(rest))
+    } else {
+      return rest
+    }
+  }
+  return rest
+}
+
+pub fn program_of(segment: string) -> string {
+  const words = segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list()
+  const stripped = strip_env_prefix(words)
+  if len(stripped) == 0 {
+    return ""
+  }
+  // Keep only the basename so `./target/release/harn` and `/usr/bin/make`
+  // classify the same as their bare names.
+  const parts = (stripped[0] ?? "").split("/")
+  return parts[len(parts) - 1] ?? ""
+}
+
+/**
+ * Split on `|`, `&&`, `||`, and `;` so each pipeline stage is classified on
+ * its own. Quoting is not parsed: a literal separator inside a quoted string
+ * over-splits, which can only make the guard more cautious, never less.
+ */
+pub fn segments_of(command: string) -> list<string> {
+  let normalized = command
+  for separator in ["&&", "||", ";", "\n"] {
+    normalized = normalized.replace(separator, "|")
+  }
+  return normalized.split("|").map(fn(part: string) { return part.trim() }).to_list()
+}
+
+pub fn cargo_violation(command: string) -> string {
+  for segment in segments_of(command) {
+    if program_of(segment) != "cargo" {
+      continue
+    }
+    const words = strip_env_prefix(
+      segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list(),
+    )
+    const verb = if len(words) > 1 {
+      words[1] ?? ""
+    } else {
+      ""
+    }
+    const target = CARGO_VERB_TARGETS[verb] ?? ""
+    if target == "" {
+      continue
+    }
+    return "`cargo " + verb + "` bypasses the Makefile environment (worktree-local "
+      + "build dir, RUST_MIN_STACK, egress unset, nextest). Run `"
+      + target
+      + "` instead. "
+      + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
+  }
+  return ""
+}
+
+pub fn is_slow(segment: string) -> bool {
+  return SLOW_COMMANDS.contains(program_of(segment))
+}
+
+/**
+ * True when the command lands its output somewhere re-readable.
+ *
+ * `2>&1` and `>&2` duplicate a descriptor rather than opening a file, so they
+ * are stripped before looking for a redirect — otherwise `swift build 2>&1 |
+ * grep error` reads as "already captured" when nothing was captured at all.
+ * `&>file` survives the strip and still counts.
+ */
+pub fn writes_to_file(command: string) -> bool {
+  let without_dups = command
+  for dup in [">&1", ">&2", ">&"] {
+    without_dups = without_dups.replace(dup, "")
+  }
+  return without_dups.contains(">") || without_dups.contains("tee ")
+}
+
+pub fn discarded_output_violation(command: string) -> string {
+  const segments = segments_of(command)
+  if len(segments) < 2 || writes_to_file(command) {
+    return ""
+  }
+  // A slow command anywhere upstream of a filter loses everything the filter
+  // did not print.
+  for index in range(0, len(segments) - 1) {
+    const segment = segments[index] ?? ""
+    if is_slow(segment) {
+      return "`" + program_of(segment) + "` output is piped into a filter "
+        + "and then discarded, so recovering any other line costs a full rerun. "
+        + "Redirect first, then read the file:\n"
+        + "  <command> > .harn-runs/cmd.log 2>&1; echo \"exit=$?\"; grep ... .harn-runs/cmd.log\n"
+        + "Any stable path works; .harn-runs/ is already ignored."
+    }
+  }
+  return ""
+}
+
+pub fn decision(payload: string) -> dict {
+  let parsed = nil
+  try {
+    parsed = json_parse(payload)
+  } catch (_) {
+    return {allow: true, reason: ""}
+  }
+  if type_of(parsed) != "dict" || to_string(parsed?.tool_name ?? "") != "Bash" {
+    return {allow: true, reason: ""}
+  }
+  const command = to_string(parsed?.tool_input?.command ?? "")
+  if command == "" || command.contains("HARN_ALLOW_RAW_CARGO=1") {
+    return {allow: true, reason: ""}
+  }
+  const cargo = cargo_violation(command)
+  if cargo != "" {
+    return {allow: false, reason: cargo}
+  }
+  const discarded = discarded_output_violation(command)
+  if discarded != "" {
+    return {allow: false, reason: discarded}
+  }
+  return {allow: true, reason: ""}
+}
+
+fn main(harness: Harness) {
+  const verdict = decision(read_stdin() ?? "")
+  if verdict.allow {
+    return nil
+  }
+  harness.stdio.println(
+    json_stringify(
+      {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: verdict.reason,
+        },
+      },
+    ),
+  )
+  return nil
+}

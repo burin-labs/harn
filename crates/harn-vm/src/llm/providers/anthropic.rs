@@ -26,6 +26,8 @@ thread_local! {
         RefCell::new(HashSet::new());
     static ANTHROPIC_ADAPTIVE_WARN_ONCE: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
+    static ANTHROPIC_DISABLED_EFFORT_WARN_ONCE: RefCell<HashSet<String>> =
+        RefCell::new(HashSet::new());
     static ANTHROPIC_FORCED_JSON_WARN_ONCE: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
 }
@@ -113,12 +115,59 @@ fn model_requires_adaptive_thinking(model: &str) -> bool {
 
 /// True for Claude models whose adaptive thinking is on by default. These
 /// models don't need a `thinking: {type:"adaptive"}` request field when
-/// `output_config.effort` is enough to steer the default-on reasoning.
-fn model_defaults_to_adaptive_thinking(model: &str) -> bool {
-    let lower = model.to_lowercase();
-    lower.contains("claude-fable-")
-        || lower.contains("claude-mythos-")
-        || lower.contains("claude-sonnet-5")
+/// `output_config.effort` is enough to steer the default-on reasoning — and,
+/// conversely, an omitted `thinking` field is *not* an off switch on them, so
+/// a `Disabled` config has to be sent explicitly.
+///
+/// Generation 5 is the dividing line: Fable 5, Mythos 5, Sonnet 5, and
+/// Opus 5 all think when `thinking` is omitted, while Opus 4.8 and every
+/// earlier model do not. Keying off the parsed generation rather than a list
+/// of ids means the next gen-5 family lands correctly instead of silently
+/// inheriting the 4.x "omitted means off" assumption.
+pub(super) fn model_defaults_to_adaptive_thinking(model: &str) -> bool {
+    matches!(claude_generation(model), Some((major, _)) if major >= 5)
+}
+
+/// Anthropic's `output_config.effort` ladder, lowest first. Used to compare
+/// two effort strings without threading the provider-neutral
+/// [`ReasoningEffort`] enum through the raw-body path.
+const ANTHROPIC_EFFORT_LADDER: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// Clamp `output_config.effort` to the highest level that is legal alongside an
+/// explicit `thinking: {type: "disabled"}`.
+///
+/// Generation-5 Claude models reject the pair above `high`:
+/// `output_config.effort 'xhigh' is not supported when thinking is disabled on
+/// this model. Use effort 'high' or below, or enable thinking.` The two halves
+/// of that pair are set independently — thinking by the request builder,
+/// effort possibly by a caller override merged in afterwards — so the check
+/// reads both off the final body rather than off the [`ThinkingConfig`].
+fn clamp_effort_for_disabled_thinking(body: &mut serde_json::Value, model: &str) {
+    const CEILING: &str = "high";
+    if !matches!(claude_generation(model), Some((major, _)) if major >= 5) {
+        return;
+    }
+    let thinking_disabled = body
+        .get("thinking")
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(serde_json::Value::as_str)
+        == Some("disabled");
+    if !thinking_disabled {
+        return;
+    }
+    let Some(effort) = body
+        .get("output_config")
+        .and_then(|config| config.get("effort"))
+        .and_then(serde_json::Value::as_str)
+    else {
+        return;
+    };
+    let rank = |level: &str| ANTHROPIC_EFFORT_LADDER.iter().position(|&e| e == level);
+    if rank(effort) <= rank(CEILING) {
+        return;
+    }
+    warn_disabled_thinking_effort_clamped(model, effort);
+    set_output_config_effort(body, CEILING);
 }
 
 /// Fable/Mythos always think and reject an explicit disabled thinking config.
@@ -217,10 +266,25 @@ fn warn_sampling_stripped(model: &str) {
     });
 }
 
+/// Reconcile a fully-merged Anthropic request body against the resolved
+/// model's constraints, immediately before egress.
+///
+/// This is the one seam that sees the *final* body — after
+/// `apply_provider_wire_overrides` has merged caller-supplied fields on top of
+/// whatever the provider builder produced. Guards that must not be defeated by
+/// a caller override belong here rather than in `build_request_body`.
+pub(crate) fn reconcile_request_body(
+    body: &mut serde_json::Value,
+    model: &str,
+    thinking: &ThinkingConfig,
+) {
+    strip_unsupported_sampling_params(body, model, thinking);
+    clamp_effort_for_disabled_thinking(body, model);
+}
+
 /// Remove Anthropic sampling parameters when the resolved Claude request
-/// surface rejects them. This is the single egress policy used by the primary
-/// Messages builder and by legacy/override paths that can otherwise reinsert
-/// provider options after provider-specific body construction.
+/// surface rejects them. Call [`reconcile_request_body`] instead from egress
+/// paths; this stays separate so the sampling policy is testable on its own.
 pub(crate) fn strip_unsupported_sampling_params(
     body: &mut serde_json::Value,
     model: &str,
@@ -320,6 +384,22 @@ fn output_config_activates_thinking(value: Option<&serde_json::Value>) -> bool {
         .and_then(|config| config.get("effort"))
         .and_then(serde_json::Value::as_str)
         .is_some_and(|effort| !effort.eq_ignore_ascii_case("none") && !effort.is_empty())
+}
+
+fn warn_disabled_thinking_effort_clamped(model: &str, requested: &str) {
+    ANTHROPIC_DISABLED_EFFORT_WARN_ONCE.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.insert(model.to_string()) {
+            crate::events::log_warn(
+                "llm.thinking",
+                &format!(
+                    "effort `{requested}` is rejected for {model} while thinking is \
+                     disabled; clamping to `high` (enable thinking to use \
+                     `{requested}`)",
+                ),
+            );
+        }
+    });
 }
 
 fn warn_adaptive_thinking_rewrite(model: &str) {
@@ -548,6 +628,10 @@ impl AnthropicProvider {
             // Claude Opus 4.7+ replaced extended thinking with adaptive
             // thinking; `type: enabled` returns HTTP 400. Rewrite the
             // payload transparently rather than fighting the deprecation.
+            // Omitting `thinking` is only an off switch through Opus 4.8. On
+            // generation-5 models the field defaults to adaptive, so a
+            // `Disabled` config has to say so explicitly or the model thinks
+            // anyway (and bills for it).
             ThinkingConfig::Disabled => {
                 if model_defaults_to_adaptive_thinking(&opts.model)
                     && !model_rejects_disabled_thinking(&opts.model)
@@ -1065,64 +1149,9 @@ fn warn_forced_json_overrides_tools(model: &str) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::anthropic_test_support::base_payload;
     use super::*;
     use crate::llm::api::{LlmErrorKind, LlmErrorReason};
-    use crate::llm::api::{LlmRequestPayload, ReasoningEffort};
-
-    fn base_payload() -> LlmRequestPayload {
-        LlmRequestPayload {
-            provider: "anthropic".to_string(),
-            model: "claude-sonnet-4-6".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            session_id: None,
-            messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
-            system: Some("system prompt".to_string()),
-            max_tokens: 64,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: false,
-            top_logprobs: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            fast: false,
-            output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
-            native_tools: Some(vec![serde_json::json!({
-                "name": "read_file",
-                "description": "Read a file",
-                "input_schema": {"type": "object"},
-            })]),
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            stream: true,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-        }
-    }
 
     // Full live-path diagnostic: a computer screenshot recorded through the real
     // `record_tool_results` path must reach the Anthropic request body as an
@@ -1930,95 +1959,6 @@ mod tests {
     }
 
     #[test]
-    fn fable_and_mythos_parse_generation_and_inherit_guards() {
-        // Fable/Mythos 5 (launched 2026-06-09) share the Opus 4.7+ request
-        // surface; the generation parser must recognize the families or none
-        // of the >= (4, 6) / (4, 7) guards (prefill removal, sampling strip,
-        // adaptive-thinking rewrite) fire for them.
-        assert_eq!(claude_generation("claude-fable-5"), Some((5, 0)));
-        assert_eq!(claude_generation("claude-mythos-5"), Some((5, 0)));
-        assert_eq!(claude_generation("anthropic/claude-fable-5"), Some((5, 0)));
-        assert_eq!(
-            claude_generation("anthropic.claude-opus-4-7-v1:0"),
-            Some((4, 7))
-        );
-        assert_eq!(
-            claude_generation("anthropic.claude-3-5-sonnet-20240620-v1:0"),
-            Some((3, 5))
-        );
-        // Mythos Preview has no numeric generation — stays unrecognized.
-        assert_eq!(claude_generation("claude-mythos-preview"), None);
-        assert!(claude_model_supports_tool_search("claude-fable-5"));
-    }
-
-    #[test]
-    fn fable_thinking_payloads_match_always_on_surface() {
-        // Extended-thinking budgets are a 400 on Fable — rewritten to adaptive.
-        let mut payload = base_payload();
-        payload.model = "claude-fable-5".to_string();
-        payload.thinking = ThinkingConfig::Enabled {
-            budget_tokens: Some(4096),
-        };
-        let body = AnthropicProvider::build_request_body(&payload);
-        assert_eq!(body["thinking"], serde_json::json!({ "type": "adaptive" }));
-
-        // Thinking is always on for Fable, and an explicit
-        // `thinking: {type: "disabled"}` is also a 400 — a Disabled config
-        // must leave the field out of the payload entirely.
-        let mut payload2 = base_payload();
-        payload2.model = "claude-fable-5".to_string();
-        payload2.thinking = ThinkingConfig::Disabled;
-        payload2.temperature = Some(0.0);
-        let body2 = AnthropicProvider::build_request_body(&payload2);
-        assert!(body2.get("thinking").is_none());
-        // Sampling params are rejected on the 4.7+ surface — stripped.
-        assert!(
-            body2.get("temperature").is_none(),
-            "temperature must be stripped for claude-fable-5"
-        );
-    }
-
-    #[test]
-    fn sonnet_5_effort_uses_output_config_and_default_on_thinking() {
-        let mut payload = base_payload();
-        payload.model = "claude-sonnet-5".to_string();
-        payload.thinking = ThinkingConfig::Effort {
-            level: ReasoningEffort::High,
-        };
-        let body = AnthropicProvider::build_request_body(&payload);
-        assert_eq!(body["output_config"]["effort"], serde_json::json!("high"));
-        assert!(
-            body.get("thinking").is_none(),
-            "Sonnet 5 defaults adaptive thinking on; effort should not send legacy thinking budgets"
-        );
-
-        let mut disabled = base_payload();
-        disabled.model = "claude-sonnet-5".to_string();
-        disabled.thinking = ThinkingConfig::Disabled;
-        let disabled_body = AnthropicProvider::build_request_body(&disabled);
-        assert_eq!(
-            disabled_body["thinking"],
-            serde_json::json!({ "type": "disabled" })
-        );
-        assert!(
-            disabled_body.get("output_config").is_none(),
-            "turning Sonnet 5 thinking off should not also send an effort level"
-        );
-    }
-
-    #[test]
-    fn opus_adaptive_effort_uses_output_config_with_adaptive_thinking() {
-        let mut payload = base_payload();
-        payload.model = "claude-opus-4-7".to_string();
-        payload.thinking = ThinkingConfig::Effort {
-            level: ReasoningEffort::Max,
-        };
-        let body = AnthropicProvider::build_request_body(&payload);
-        assert_eq!(body["thinking"], serde_json::json!({ "type": "adaptive" }));
-        assert_eq!(body["output_config"]["effort"], serde_json::json!("max"));
-    }
-
-    #[test]
     fn tool_search_unsupported_for_older_claude() {
         // Opus/Sonnet 3.x predate the feature.
         assert!(!claude_model_supports_tool_search("claude-opus-3-5"));
@@ -2100,128 +2040,6 @@ mod tests {
         payload.fast = false;
         let body = AnthropicProvider::build_request_body(&payload);
         assert!(body.get("speed").is_none());
-    }
-
-    #[test]
-    fn temperature_stripped_when_thinking_active() {
-        // Anthropic rejects HTTP 400 if `temperature != 1` when thinking is
-        // active. Strip the temperature transparently so callers can default
-        // to temperature=0 for determinism without having to know which
-        // models silently auto-enable thinking.
-        let mut payload = base_payload();
-        payload.temperature = Some(0.0);
-        payload.thinking = ThinkingConfig::Adaptive;
-        let body = AnthropicProvider::build_request_body(&payload);
-        assert!(
-            body.get("temperature").is_none(),
-            "temperature must be stripped when thinking is active to avoid HTTP 400"
-        );
-        // Sanity: temperature is preserved when thinking is disabled.
-        let mut payload2 = base_payload();
-        payload2.temperature = Some(0.0);
-        payload2.thinking = ThinkingConfig::Disabled;
-        let body2 = AnthropicProvider::build_request_body(&payload2);
-        assert_eq!(body2["temperature"], serde_json::json!(0.0));
-    }
-
-    #[test]
-    fn sampling_params_stripped_by_shared_helper_for_rejecting_models() {
-        let mut body = serde_json::json!({
-            "model": "claude-opus-4-7",
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "top_k": 20,
-        });
-
-        strip_unsupported_sampling_params(&mut body, "claude-opus-4-7", &ThinkingConfig::Disabled);
-
-        assert!(body.get("temperature").is_none());
-        assert!(body.get("top_p").is_none());
-        assert!(body.get("top_k").is_none());
-        assert_eq!(body["model"], serde_json::json!("claude-opus-4-7"));
-    }
-
-    #[test]
-    fn sampling_params_stripped_by_shared_helper_when_thinking_active() {
-        let mut body = serde_json::json!({
-            "model": "claude-sonnet-4-6",
-            "temperature": 0.0,
-            "top_p": 0.9,
-            "top_k": 20,
-        });
-
-        strip_unsupported_sampling_params(
-            &mut body,
-            "claude-sonnet-4-6",
-            &ThinkingConfig::Adaptive,
-        );
-
-        assert!(body.get("temperature").is_none());
-        assert!(body.get("top_p").is_none());
-        assert!(body.get("top_k").is_none());
-    }
-
-    #[test]
-    fn sampling_params_preserved_by_shared_helper_for_supported_disabled_thinking() {
-        let mut body = serde_json::json!({
-            "model": "claude-sonnet-4-6",
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "top_k": 20,
-        });
-
-        strip_unsupported_sampling_params(
-            &mut body,
-            "claude-sonnet-4-6",
-            &ThinkingConfig::Disabled,
-        );
-
-        assert_eq!(body["temperature"], serde_json::json!(0.2));
-        assert_eq!(body["top_p"], serde_json::json!(0.9));
-        assert_eq!(body["top_k"], serde_json::json!(20));
-    }
-
-    #[test]
-    fn sampling_params_stripped_when_body_thinking_override_is_active() {
-        let mut body = serde_json::json!({
-            "model": "claude-sonnet-4-6",
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "thinking": {"type": "enabled", "budget_tokens": 1024},
-        });
-
-        strip_unsupported_sampling_params(
-            &mut body,
-            "claude-sonnet-4-6",
-            &ThinkingConfig::Disabled,
-        );
-
-        assert!(body.get("temperature").is_none());
-        assert!(body.get("top_p").is_none());
-        assert_eq!(
-            body["thinking"],
-            serde_json::json!({"type": "enabled", "budget_tokens": 1024})
-        );
-    }
-
-    #[test]
-    fn sampling_params_stripped_when_body_output_config_effort_override_is_active() {
-        let mut body = serde_json::json!({
-            "model": "claude-sonnet-4-6",
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "output_config": {"effort": "high"},
-        });
-
-        strip_unsupported_sampling_params(
-            &mut body,
-            "claude-sonnet-4-6",
-            &ThinkingConfig::Disabled,
-        );
-
-        assert!(body.get("temperature").is_none());
-        assert!(body.get("top_p").is_none());
-        assert_eq!(body["output_config"], serde_json::json!({"effort": "high"}));
     }
 
     #[test]
