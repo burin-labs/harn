@@ -48,6 +48,9 @@ use sha2::{Digest, Sha256};
 
 use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
+use crate::context_manifest::{
+    ContextManifest, ManifestFile, ManifestUnreadable, ManifestUnresolved,
+};
 use crate::module_artifact::ModuleArtifact;
 use crate::module_source::{self, ModuleSource};
 
@@ -62,7 +65,9 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// chunk that resolves imported aliases in the module environment.
 /// v7: `ModuleArtifact` replaced split name sets with the typed public export
 /// contract shared by the module graph and runtime.
-pub const SCHEMA_VERSION: u32 = 7;
+/// v8: entry-chunk payload carries a [`ContextManifest`] so a warm lookup can
+/// prove the import graph is unchanged with stats instead of re-walking it.
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -105,6 +110,23 @@ pub const CACHE_ENABLED_ENV: &str = "HARN_BYTECODE_CACHE";
 pub struct LookupOutcome {
     pub key: CacheKey,
     pub chunk: Option<Chunk>,
+    /// Graph observations to persist alongside the chunk, so the next spawn can
+    /// re-check them with stats instead of walking. `None` when the graph holds
+    /// something stats cannot describe.
+    pub manifest: Option<ContextManifest>,
+}
+
+impl LookupOutcome {
+    /// Persist `chunk` under the key this lookup computed, with the manifest it
+    /// observed.
+    ///
+    /// The pairing is the point: the key and the manifest describe one walk of
+    /// one graph, and storing a chunk against a manifest from a different walk
+    /// would let a later spawn prove the wrong thing. Callers cannot get that
+    /// pairing wrong if they never have to assemble it.
+    pub fn store(&self, chunk: &Chunk) -> io::Result<()> {
+        store(&self.key, chunk, self.manifest.as_ref())
+    }
 }
 
 /// Cache key components for a single pipeline source. Equality of all
@@ -232,40 +254,123 @@ pub fn cache_enabled() -> bool {
 /// `source`. Returns the key alongside the (optional) chunk so callers
 /// avoid recomputing the key on miss.
 pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
-    let key = CacheKey::from_source(source_path, source);
+    // Only the entry file's own hash is needed to find candidates. The context
+    // hash — the expensive half — is deferred until a candidate actually asks
+    // for it, because a candidate carrying a still-valid manifest never does.
+    let mut key = CacheKey {
+        source_hash: sha256(source.as_bytes()),
+        context_hash: [0u8; 32],
+        harn_version: HARN_VERSION,
+        compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+    };
+    let mut walk = GraphWalk::new(source_path, source);
+
     if !cache_enabled() {
-        return LookupOutcome { key, chunk: None };
+        let (context_hash, manifest) = walk.finish();
+        key.context_hash = context_hash;
+        return LookupOutcome {
+            key,
+            chunk: None,
+            manifest,
+        };
     }
+
     let mut candidates: Vec<PathBuf> = Vec::with_capacity(2);
     if let Some(adjacent) = adjacent_cache_path(source_path) {
         candidates.push(adjacent);
     }
     candidates.push(cache_dir().join(key.filename()));
+
     for path in candidates {
-        match read_chunk_if_matches(&path, &key) {
-            Ok(Some(chunk)) => {
-                return LookupOutcome {
-                    key,
-                    chunk: Some(chunk),
-                }
-            }
-            Ok(None) => continue,
-            Err(_) => continue,
+        let Ok(Some(candidate)) = read_entry_candidate(&path, &key) else {
+            continue;
+        };
+        if candidate
+            .manifest
+            .as_ref()
+            .is_some_and(ContextManifest::still_valid)
+        {
+            // The graph is provably unchanged, so the stored context hash is
+            // still the one this source would produce.
+            key.context_hash = candidate.context_hash;
+            return LookupOutcome {
+                key,
+                chunk: Some(candidate.chunk),
+                manifest: candidate.manifest,
+            };
+        }
+        if walk.context_hash() != candidate.context_hash {
+            continue;
+        }
+        // The graph moved in a way that does not change the key — a touched
+        // mtime, a restored checkout. Refresh the artifact so the next spawn
+        // gets the fast path back instead of re-walking forever.
+        key.context_hash = candidate.context_hash;
+        let manifest = walk.manifest().cloned();
+        let _ = write_atomic_chunk(&path, &key, &candidate.chunk, manifest.as_ref());
+        return LookupOutcome {
+            key,
+            chunk: Some(candidate.chunk),
+            manifest,
+        };
+    }
+
+    let (context_hash, manifest) = walk.finish();
+    key.context_hash = context_hash;
+    LookupOutcome {
+        key,
+        chunk: None,
+        manifest,
+    }
+}
+
+/// The import-graph walk, run at most once per lookup and only when a
+/// candidate cannot prove itself with its manifest.
+struct GraphWalk<'a> {
+    source_path: &'a Path,
+    source: &'a str,
+    result: Option<([u8; 32], Option<ContextManifest>)>,
+}
+
+impl<'a> GraphWalk<'a> {
+    fn new(source_path: &'a Path, source: &'a str) -> Self {
+        Self {
+            source_path,
+            source,
+            result: None,
         }
     }
-    LookupOutcome { key, chunk: None }
+
+    fn run(&mut self) -> &([u8; 32], Option<ContextManifest>) {
+        self.result.get_or_insert_with(|| {
+            hash_transitive_user_imports_with_manifest(self.source_path, self.source)
+        })
+    }
+
+    fn context_hash(&mut self) -> [u8; 32] {
+        self.run().0
+    }
+
+    fn manifest(&mut self) -> Option<&ContextManifest> {
+        self.run().1.as_ref()
+    }
+
+    fn finish(mut self) -> ([u8; 32], Option<ContextManifest>) {
+        self.run();
+        self.result.expect("the walk was just run")
+    }
 }
 
 /// Persist `chunk` to the shared cache directory under `key`. Atomic: a
 /// temp file is written then renamed into place. Concurrent invocations
 /// on the same key race safely.
-pub fn store(key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
+pub fn store(key: &CacheKey, chunk: &Chunk, manifest: Option<&ContextManifest>) -> io::Result<()> {
     if !cache_enabled() {
         return Ok(());
     }
     let dir = cache_dir();
     fs::create_dir_all(&dir)?;
-    write_atomic_chunk(&dir.join(key.filename()), key, chunk)
+    write_atomic_chunk(&dir.join(key.filename()), key, chunk, manifest)
 }
 
 /// Write a precompiled entry-chunk artifact to an explicit path, for
@@ -274,7 +379,7 @@ pub fn store(key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
 /// like any other cache hit.
 pub fn store_at(path: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
     ensure_parent_dir(path)?;
-    write_atomic_chunk(path, key, chunk)
+    write_atomic_chunk(path, key, chunk, None)
 }
 
 /// Look up the [`ModuleArtifact`] for `source_path` (whose contents are
@@ -366,8 +471,13 @@ fn ensure_parent_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn write_atomic_chunk(target: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
-    let buf = serialize_chunk_artifact(key, chunk)?;
+fn write_atomic_chunk(
+    target: &Path,
+    key: &CacheKey,
+    chunk: &Chunk,
+    manifest: Option<&ContextManifest>,
+) -> io::Result<()> {
+    let buf = serialize_chunk_artifact_with_manifest(key, chunk, manifest)?;
     crate::atomic_io::atomic_write(target, &buf)
 }
 
@@ -382,8 +492,25 @@ fn write_atomic_module(target: &Path, key: &CacheKey, artifact: &ModuleArtifact)
 /// artifacts into a container (e.g. `harn pack`) without going through
 /// the filesystem.
 pub fn serialize_chunk_artifact(key: &CacheKey, chunk: &Chunk) -> io::Result<Vec<u8>> {
-    let cached = chunk.freeze_for_cache();
-    let payload = serialize_cache_payload(&cached)?;
+    serialize_chunk_artifact_with_manifest(key, chunk, None)
+}
+
+/// As [`serialize_chunk_artifact`], but records `manifest` so a later lookup
+/// can prove the graph unchanged without walking it.
+///
+/// Callers producing *relocatable* artifacts (`harn pack`, `harn precompile`)
+/// pass `None`: a manifest names absolute paths on the machine that built it,
+/// which say nothing on the machine that runs it. Those artifacts stay on the
+/// walk, which is correct everywhere.
+pub fn serialize_chunk_artifact_with_manifest(
+    key: &CacheKey,
+    chunk: &Chunk,
+    manifest: Option<&ContextManifest>,
+) -> io::Result<Vec<u8>> {
+    let payload = serialize_cache_payload(&EntryPayload {
+        manifest: manifest.cloned(),
+        chunk: chunk.freeze_for_cache(),
+    })?;
     Ok(encode_artifact(key, KIND_ENTRY_CHUNK, &payload))
 }
 
@@ -392,6 +519,15 @@ pub fn serialize_chunk_artifact(key: &CacheKey, chunk: &Chunk) -> io::Result<Vec
 pub fn serialize_module_artifact(key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<Vec<u8>> {
     let payload = serialize_cache_payload(artifact)?;
     Ok(encode_artifact(key, KIND_MODULE_ARTIFACT, &payload))
+}
+
+/// Entry-chunk payload. The manifest rides with the chunk so one atomic write
+/// keeps them consistent: a chunk can never be paired with a manifest that
+/// describes a different graph.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct EntryPayload {
+    manifest: Option<ContextManifest>,
+    chunk: CachedChunk,
 }
 
 fn serialize_cache_payload<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
@@ -427,10 +563,20 @@ fn encode_artifact(key: &CacheKey, kind: u8, payload: &[u8]) -> Vec<u8> {
 /// header-validation logic stays in one place.
 struct ParsedHeader {
     kind: u8,
+    context_hash: [u8; 32],
     payload: Vec<u8>,
 }
 
-fn read_header_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<ParsedHeader>> {
+/// Read and validate a header.
+///
+/// `expected_context` is `None` for entry chunks, which decide validity from
+/// the artifact's own manifest before they are willing to pay for the
+/// context hash. Every other field is checked the same way for both families.
+fn read_header_if_matches(
+    path: &Path,
+    key: &CacheKey,
+    expected_context: Option<&[u8; 32]>,
+) -> io::Result<Option<ParsedHeader>> {
     let mut file = match fs::File::open(path) {
         Ok(f) => f,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -471,28 +617,49 @@ fn read_header_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Pars
     if file.read_exact(&mut hashes).is_err() {
         return Ok(None);
     }
-    if hashes[..32] != key.source_hash || hashes[32..] != key.context_hash {
+    if hashes[..32] != key.source_hash {
+        return Ok(None);
+    }
+    let mut context_hash = [0u8; 32];
+    context_hash.copy_from_slice(&hashes[32..]);
+    if expected_context.is_some_and(|expected| *expected != context_hash) {
         return Ok(None);
     }
     let mut payload = Vec::new();
     if file.read_to_end(&mut payload).is_err() {
         return Ok(None);
     }
-    Ok(Some(ParsedHeader { kind, payload }))
+    Ok(Some(ParsedHeader {
+        kind,
+        context_hash,
+        payload,
+    }))
 }
 
-fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk>> {
-    let Some(header) = read_header_if_matches(path, key)? else {
+/// A candidate entry artifact whose header matches everything except the
+/// context hash, which the caller decides about.
+struct CandidateEntry {
+    context_hash: [u8; 32],
+    manifest: Option<ContextManifest>,
+    chunk: Chunk,
+}
+
+fn read_entry_candidate(path: &Path, key: &CacheKey) -> io::Result<Option<CandidateEntry>> {
+    let Some(header) = read_header_if_matches(path, key, None)? else {
         return Ok(None);
     };
     if header.kind != KIND_ENTRY_CHUNK {
         return Ok(None);
     }
-    let cached: CachedChunk = match deserialize_cache_payload(&header.payload) {
-        Ok(c) => c,
+    let payload: EntryPayload = match deserialize_cache_payload(&header.payload) {
+        Ok(p) => p,
         Err(_) => return Ok(None),
     };
-    Ok(Some(Chunk::from_cached(cached)))
+    Ok(Some(CandidateEntry {
+        context_hash: header.context_hash,
+        manifest: payload.manifest,
+        chunk: Chunk::from_cached(payload.chunk),
+    }))
 }
 
 fn read_module_if_matches(
@@ -500,7 +667,7 @@ fn read_module_if_matches(
     key: &CacheKey,
     source_path: &Path,
 ) -> io::Result<Option<ModuleArtifact>> {
-    let Some(header) = read_header_if_matches(path, key)? else {
+    let Some(header) = read_header_if_matches(path, key, Some(&key.context_hash))? else {
         return Ok(None);
     };
     if header.kind != KIND_MODULE_ARTIFACT {
@@ -592,6 +759,18 @@ fn module_compilation_context_hash_fingerprinted(codegen_fingerprint: &str) -> [
     hasher.finalize().into()
 }
 
+// Test seam: how many times the import-graph walk has actually run on this
+// thread.
+//
+// The manifest fast path and the walk agree on results *by construction* —
+// both trust the same `(len, mtime_ns)` identity — so no observable output can
+// tell them apart. Only the work done differs, and this counts it. Thread-local
+// so tests running in parallel cannot perturb each other.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static WALKS_PERFORMED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Walk the user-import graph rooted at `source_path` and produce a
 /// stable hash of every transitively-reachable file. The hash is
 /// order-independent: each visited file is keyed by canonical path and
@@ -603,6 +782,15 @@ fn module_compilation_context_hash_fingerprinted(codegen_fingerprint: &str) -> [
 /// disk files), so without this fold a stdlib edit between development
 /// builds would leave user-file caches pinned to a stale stdlib snapshot.
 fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
+    hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT).0
+}
+
+/// As [`hash_transitive_user_imports`], but also returns the manifest that
+/// proves the walk's observations, for callers that will persist it.
+fn hash_transitive_user_imports_with_manifest(
+    source_path: &Path,
+    source: &str,
+) -> ([u8; 32], Option<ContextManifest>) {
     hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT)
 }
 
@@ -613,7 +801,10 @@ fn hash_transitive_user_imports_fingerprinted(
     source_path: &Path,
     source: &str,
     codegen_fingerprint: &str,
-) -> [u8; 32] {
+) -> ([u8; 32], Option<ContextManifest>) {
+    #[cfg(test)]
+    WALKS_PERFORMED.with(|c| c.set(c.get() + 1));
+
     let mut visited: std::collections::BTreeMap<PathBuf, ImportNode> =
         std::collections::BTreeMap::new();
     let entry = ModuleSource::from_text(source);
@@ -622,6 +813,10 @@ fn hash_transitive_user_imports_fingerprinted(
         .iter()
         .map(|import| (source_path.to_path_buf(), Arc::clone(import)))
         .collect();
+    // Built alongside the hash: the same observations, in a form a later
+    // process can re-check with stats instead of repeating this walk. Set to
+    // `None` the moment the graph contains something stats cannot describe.
+    let mut manifest = Some(ContextManifest::default());
 
     while let Some((anchor, import)) = frontier.pop() {
         let Some(resolved) = harn_modules::resolve_import_path(&anchor, &import) else {
@@ -629,9 +824,17 @@ fn hash_transitive_user_imports_fingerprinted(
             // anchor so that dropping a real file under that anchor later
             // produces a different key.
             let sentinel = anchor.join(format!("__unresolved__/{import}"));
-            visited
-                .entry(sentinel)
-                .or_insert(ImportNode::Unresolved { import });
+            if let std::collections::btree_map::Entry::Vacant(slot) = visited.entry(sentinel) {
+                slot.insert(ImportNode::Unresolved {
+                    import: Arc::clone(&import),
+                });
+                if let Some(m) = manifest.as_mut() {
+                    m.unresolved.push(ManifestUnresolved {
+                        anchor: anchor.clone(),
+                        import: import.to_string(),
+                    });
+                }
+            }
             continue;
         };
         let canonical = module_source::canonical_identity(&resolved);
@@ -652,17 +855,39 @@ fn hash_transitive_user_imports_fingerprinted(
                         content: Arc::clone(module.text()),
                     },
                 );
+                match ManifestFile::observe(&canonical) {
+                    Some(file) => {
+                        if let Some(m) = manifest.as_mut() {
+                            m.files.push(file);
+                        }
+                    }
+                    // Read succeeded but the file cannot be stat'ed now. Rather
+                    // than record a fact we could not re-check, drop the
+                    // manifest and leave this graph on the walk.
+                    None => manifest = None,
+                }
                 for nested_import in module.imports() {
                     frontier.push((resolved.clone(), Arc::clone(nested_import)));
                 }
             }
             Err(error) => {
+                let unreadable_path = canonical.clone();
                 visited.insert(
                     canonical,
                     ImportNode::IoError {
                         kind: error.kind().to_string(),
                     },
                 );
+                // Real trees contain these — an `import "./types"` where
+                // `types/` is a directory resolves, then fails to read. Dropping
+                // the manifest for them would silently disable the fast path on
+                // exactly the graphs it exists for.
+                if let Some(m) = manifest.as_mut() {
+                    m.unreadable.push(ManifestUnreadable {
+                        path: unreadable_path,
+                        kind: error.kind().to_string(),
+                    });
+                }
             }
         }
     }
@@ -697,7 +922,15 @@ fn hash_transitive_user_imports_fingerprinted(
         }
         hasher.update(b"\0");
     }
-    hasher.finalize().into()
+    // Sorted so one graph always serializes to one byte sequence, whatever
+    // order the frontier happened to pop.
+    if let Some(m) = manifest.as_mut() {
+        m.files.sort_by(|a, b| a.path.cmp(&b.path));
+        m.unresolved
+            .sort_by(|a, b| (&a.anchor, &a.import).cmp(&(&b.anchor, &b.import)));
+        m.unreadable.sort_by(|a, b| a.path.cmp(&b.path));
+    }
+    (hasher.finalize().into(), manifest)
 }
 
 enum ImportNode {
@@ -707,518 +940,5 @@ enum ImportNode {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::compile_source;
-
-    #[test]
-    fn header_round_trips_chunk() {
-        let chunk = compile_source("__io_println(\"hello\")").expect("compile");
-        let key = CacheKey::from_source(Path::new("/tmp/example.harn"), "__io_println(\"hello\")");
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("entry.harnbc");
-        store_at(&path, &key, &chunk).expect("write");
-        let loaded = read_chunk_if_matches(&path, &key).unwrap();
-        assert!(loaded.is_some(), "expected cached chunk to load");
-    }
-
-    #[test]
-    fn serialize_chunk_artifact_matches_store_at() {
-        // `serialize_chunk_artifact` packages an artifact into a buffer for
-        // in-memory consumers (e.g. `harn pack` writing into a tar.zst
-        // bundle). The contract is: the resulting bytes match what
-        // `store_at` would have written for the same key+chunk, so the
-        // shipped artifact is byte-identical to the on-disk cache form.
-        let chunk = compile_source("__io_println(\"hi\")").expect("compile");
-        let key = CacheKey::from_source(Path::new("/tmp/pack.harn"), "__io_println(\"hi\")");
-        let tmp = tempfile::tempdir().unwrap();
-        let on_disk = tmp.path().join("pack.harnbc");
-        store_at(&on_disk, &key, &chunk).expect("write");
-        let on_disk_bytes = std::fs::read(&on_disk).unwrap();
-        let in_memory_bytes = serialize_chunk_artifact(&key, &chunk).expect("serialize");
-        assert_eq!(in_memory_bytes, on_disk_bytes);
-    }
-
-    #[test]
-    fn cache_payload_rejects_trailing_bytes() {
-        let chunk = compile_source("1 + 1").expect("compile");
-        let cached = chunk.freeze_for_cache();
-        let mut payload = serialize_cache_payload(&cached).expect("serialize");
-        payload.push(0xFF);
-
-        assert!(deserialize_cache_payload::<CachedChunk>(&payload).is_err());
-    }
-
-    #[test]
-    fn header_mismatch_returns_none() {
-        let chunk = compile_source("1 + 1").expect("compile");
-        let key = CacheKey::from_source(Path::new("/tmp/a.harn"), "1 + 1");
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("a.harnbc");
-        store_at(&path, &key, &chunk).expect("write");
-        let other = CacheKey {
-            source_hash: [0xAB; 32],
-            context_hash: key.context_hash,
-            harn_version: HARN_VERSION,
-            compiler_tag: key.compiler_tag,
-        };
-        assert!(read_chunk_if_matches(&path, &other).unwrap().is_none());
-    }
-
-    #[test]
-    fn schema_mismatch_returns_none() {
-        let chunk = compile_source("1 + 1").expect("compile");
-        let key = CacheKey::from_source(Path::new("/tmp/schema.harn"), "1 + 1");
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("schema.harnbc");
-        store_at(&path, &key, &chunk).expect("write");
-
-        let mut bytes = std::fs::read(&path).expect("read cache");
-        bytes[8..12].copy_from_slice(&(SCHEMA_VERSION - 1).to_le_bytes());
-        std::fs::write(&path, bytes).expect("rewrite cache");
-
-        assert!(read_chunk_if_matches(&path, &key).unwrap().is_none());
-    }
-
-    #[test]
-    fn compiler_tag_mismatch_returns_none() {
-        let chunk = compile_source("1 + 1").expect("compile");
-        let key = CacheKey::from_source(Path::new("/tmp/b.harn"), "1 + 1");
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("b.harnbc");
-        store_at(&path, &key, &chunk).expect("write");
-        let other = CacheKey {
-            compiler_tag: key.compiler_tag ^ 0xFF,
-            ..key
-        };
-        assert!(
-            read_chunk_if_matches(&path, &other).unwrap().is_none(),
-            "flipped HARN_DISABLE_OPTIMIZATIONS must not reuse a chunk \
-             compiled under the opposite setting"
-        );
-    }
-
-    #[test]
-    fn codegen_fingerprint_is_populated() {
-        // In-workspace builds always hash real compiler sources, so the
-        // fingerprint must be a non-empty digest; an empty value would silently
-        // disable the within-version compiler-staleness guard.
-        assert!(!CODEGEN_FINGERPRINT.is_empty());
-    }
-
-    #[test]
-    fn codegen_fingerprint_changes_cache_key() {
-        // A compiler whose code-generation source differs must produce a
-        // different cache key for the *same* user source, so a stale artifact
-        // compiled by a prior compiler at the same version misses on load
-        // rather than being replayed (#2621). The fingerprint is a compile-time
-        // constant, so exercise the parameterized inner hash directly.
-        let tmp = tempfile::tempdir().unwrap();
-        let entry = tmp.path().join("entry.harn");
-        std::fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
-        let source = std::fs::read_to_string(&entry).unwrap();
-        let a = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A");
-        let b = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-B");
-        let a_again = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A");
-        assert_ne!(
-            a, b,
-            "differing compiler fingerprints must change the cache key"
-        );
-        assert_eq!(
-            a, a_again,
-            "an unchanged compiler fingerprint must be stable"
-        );
-    }
-
-    #[test]
-    fn module_context_hash_tracks_codegen_fingerprint() {
-        let first = module_compilation_context_hash_fingerprinted("compiler-A");
-        let second = module_compilation_context_hash_fingerprinted("compiler-B");
-        assert_ne!(
-            first, second,
-            "module artifacts must miss when compiler code generation changes"
-        );
-        assert_eq!(
-            first,
-            module_compilation_context_hash_fingerprinted("compiler-A"),
-            "an unchanged module compilation context must be stable"
-        );
-    }
-
-    #[test]
-    fn module_key_excludes_dependency_graph_while_entry_key_tracks_it() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dependency = tmp.path().join("value.harn");
-        let importer = tmp.path().join("reader.harn");
-        let importer_source =
-            "import { value } from \"./value\"\npub fn read() { return value() }\n";
-        std::fs::write(&dependency, "pub fn value() { return 1 }\n").unwrap();
-        std::fs::write(&importer, importer_source).unwrap();
-
-        let entry_before = CacheKey::from_source(&importer, importer_source);
-        let module_before = CacheKey::from_module_source(&ModuleSource::from_text(importer_source));
-        let dependency_before = CacheKey::from_module_source(&ModuleSource::from_text(
-            std::fs::read_to_string(&dependency).unwrap(),
-        ));
-
-        std::fs::write(&dependency, "pub fn value() { return 2 }\n").unwrap();
-        let future = std::fs::metadata(&dependency).unwrap().modified().unwrap()
-            + std::time::Duration::from_secs(10);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&dependency)
-            .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(future))
-            .unwrap();
-
-        let entry_after = CacheKey::from_source(&importer, importer_source);
-        let module_after = CacheKey::from_module_source(&ModuleSource::from_text(importer_source));
-        let dependency_after = CacheKey::from_module_source(&ModuleSource::from_text(
-            std::fs::read_to_string(&dependency).unwrap(),
-        ));
-
-        assert_ne!(
-            entry_before, entry_after,
-            "entry chunks compile the full graph and must track dependency edits"
-        );
-        assert_eq!(
-            module_before, module_after,
-            "a parent module artifact must not be invalidated by dependency contents"
-        );
-        assert_ne!(
-            dependency_before, dependency_after,
-            "the edited dependency must invalidate its own module artifact"
-        );
-    }
-
-    #[test]
-    fn module_artifact_is_relocatable_and_rebinds_exact_source_path() {
-        let source = "pub fn answer() { fn inner() { return 42 }; return inner() }\n";
-        let first_path = Path::new("/workspace/first/module.harn");
-        let second_path = Path::new("/workspace/second/module.harn");
-        let key = CacheKey::from_module_source(&ModuleSource::from_text(source));
-
-        let artifact =
-            crate::module_artifact::compile_module_artifact_from_source(first_path, source)
-                .expect("compile module");
-        let first_source_file = first_path.display().to_string();
-        let second_source_file = second_path.display().to_string();
-        assert_eq!(
-            artifact.functions["answer"].chunk.source_file.as_deref(),
-            Some(first_source_file.as_str())
-        );
-
-        let tmp = tempfile::tempdir().unwrap();
-        let cache_path = tmp.path().join(key.module_filename());
-        store_module_at(&cache_path, &key, &artifact).expect("store module");
-        let first_loaded = read_module_if_matches(&cache_path, &key, first_path)
-            .expect("read first module")
-            .expect("first module key matches");
-        let second_loaded = read_module_if_matches(&cache_path, &key, second_path)
-            .expect("read second module")
-            .expect("second module key matches");
-        assert_eq!(
-            first_loaded.functions["answer"]
-                .chunk
-                .source_file
-                .as_deref(),
-            Some(first_source_file.as_str())
-        );
-        assert_eq!(
-            second_loaded.functions["answer"]
-                .chunk
-                .source_file
-                .as_deref(),
-            Some(second_source_file.as_str())
-        );
-        let nested = second_loaded.functions["answer"]
-            .chunk
-            .functions
-            .first()
-            .expect("nested function survives artifact roundtrip");
-        assert_eq!(
-            nested.chunk.source_file.as_deref(),
-            Some(second_source_file.as_str()),
-            "rebinding must reach nested compiled functions"
-        );
-    }
-
-    #[test]
-    fn source_local_module_artifact_round_trips() {
-        let source = "import \"./dependency\"\npub fn answer() { return 42 }\n";
-        let source_path = Path::new("/tmp/source-local-module.harn");
-        let artifact =
-            crate::module_artifact::compile_module_artifact_from_source(source_path, source)
-                .expect("compile module");
-        let key = CacheKey::from_module_source(&ModuleSource::from_text(source));
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("source-local-module.harnmod");
-
-        store_module_at(&path, &key, &artifact).expect("write module artifact");
-        let loaded = read_module_if_matches(&path, &key, source_path)
-            .expect("read module artifact")
-            .expect("matching artifact");
-
-        assert_eq!(loaded.imports.len(), 1);
-        assert_eq!(loaded.imports[0].path, "./dependency");
-        assert!(loaded.public_exports.contains_key("answer"));
-    }
-
-    #[test]
-    fn module_artifact_payload_round_trips() {
-        let source = "pub fn answer() { fn inner() { return 42 }; return inner() }\n";
-        let source_path = Path::new("/tmp/module-payload.harn");
-        let artifact =
-            crate::module_artifact::compile_module_artifact_from_source(source_path, source)
-                .expect("compile module");
-
-        let payload = serialize_cache_payload(&artifact).expect("serialize module artifact");
-        let round_tripped: ModuleArtifact =
-            deserialize_cache_payload(&payload).expect("deserialize module artifact");
-
-        assert_eq!(
-            round_tripped.public_exports.get("answer"),
-            Some(&harn_modules::DefKind::Function)
-        );
-        assert!(round_tripped.functions["answer"]
-            .chunk
-            .functions
-            .iter()
-            .any(|function| function.name == "inner"));
-    }
-
-    #[test]
-    fn cache_enabled_respects_env() {
-        std::env::set_var(CACHE_ENABLED_ENV, "0");
-        assert!(!cache_enabled());
-        std::env::set_var(CACHE_ENABLED_ENV, "1");
-        assert!(cache_enabled());
-        std::env::remove_var(CACHE_ENABLED_ENV);
-        assert!(cache_enabled());
-    }
-
-    #[test]
-    fn import_hash_is_stable_across_import_order() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("a.harn"),
-            "pub fn a() -> int { return 1 }\n",
-        )
-        .unwrap();
-        std::fs::write(
-            tmp.path().join("b.harn"),
-            "pub fn b() -> int { return 2 }\n",
-        )
-        .unwrap();
-        let ab = tmp.path().join("entry_ab.harn");
-        std::fs::write(
-            &ab,
-            "import \"./a\"\nimport \"./b\"\n__io_println(\"hi\")\n",
-        )
-        .unwrap();
-        let ba = tmp.path().join("entry_ba.harn");
-        std::fs::write(
-            &ba,
-            "import \"./b\"\nimport \"./a\"\n__io_println(\"hi\")\n",
-        )
-        .unwrap();
-        let hash_ab = hash_transitive_user_imports(&ab, &std::fs::read_to_string(&ab).unwrap());
-        let hash_ba = hash_transitive_user_imports(&ba, &std::fs::read_to_string(&ba).unwrap());
-        assert_eq!(
-            hash_ab, hash_ba,
-            "import-graph hash must be order-independent so reordering imports \
-             does not bust the cache"
-        );
-    }
-
-    #[test]
-    fn import_hash_picks_up_nested_imports() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("leaf.harn"),
-            "pub fn x() -> int { return 1 }\n",
-        )
-        .unwrap();
-        std::fs::write(
-            tmp.path().join("mid.harn"),
-            "import \"./leaf\"\npub fn y() -> int { return 2 }\n",
-        )
-        .unwrap();
-        let entry = tmp.path().join("entry.harn");
-        std::fs::write(&entry, "import \"./mid\"\n__io_println(\"hi\")\n").unwrap();
-
-        let before =
-            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-        std::fs::write(
-            tmp.path().join("leaf.harn"),
-            "pub fn x() -> int { return 999 }\n",
-        )
-        .unwrap();
-        let after = hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-        assert_ne!(
-            before, after,
-            "editing a transitively-imported file must change the import-graph hash"
-        );
-    }
-
-    #[test]
-    fn import_hash_sees_a_dependency_that_appears_between_walks() {
-        // The sibling tests cover a dependency whose *contents* change. This
-        // one covers an import whose *resolution* changes: unresolved first,
-        // resolved once the file lands. The walk records unresolved imports as
-        // a sentinel, so nothing about the entry source moves — only what the
-        // import resolves to.
-        //
-        // Recomputed in the same process, because the invariant is that import
-        // resolution is walk-local: no answer may outlive the walk that
-        // produced it. The walk resolves once per import edge and can only
-        // dedup afterwards, which makes a cross-walk resolution cache a
-        // standing temptation (#5545) — one would keep reporting the sentinel
-        // and serve stale bytecode for a graph that just gained a real
-        // dependency.
-        let tmp = tempfile::tempdir().unwrap();
-        let entry = tmp.path().join("entry.harn");
-        std::fs::write(&entry, "import \"./late\"\n__io_println(\"hi\")\n").unwrap();
-
-        let missing =
-            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-        std::fs::write(
-            tmp.path().join("late.harn"),
-            "pub fn late() -> int { return 1 }\n",
-        )
-        .unwrap();
-        let present =
-            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-
-        assert_ne!(
-            missing, present,
-            "an import that resolves only after the file appears must change the \
-             import-graph hash"
-        );
-    }
-
-    #[test]
-    fn identical_import_strings_in_different_directories_resolve_separately() {
-        // An import string is only meaningful relative to the directory of the
-        // file that wrote it, and the same string appears in many directories:
-        // `./dep` is one of the most repeated edges in a real graph. Anything
-        // that resolves imports by string alone lets one directory's `./dep`
-        // answer for another's, silently collapsing two distinct modules into
-        // one and pinning the entry to bytecode built from the wrong file.
-        let tmp = tempfile::tempdir().unwrap();
-        for (dir, body) in [("left", "return 1"), ("right", "return 2")] {
-            std::fs::create_dir_all(tmp.path().join(dir)).unwrap();
-            std::fs::write(
-                tmp.path().join(dir).join("dep.harn"),
-                format!("pub fn dep() -> int {{ {body} }}\n"),
-            )
-            .unwrap();
-            std::fs::write(
-                tmp.path().join(dir).join("mod.harn"),
-                "import \"./dep\"\npub fn use_dep() -> int { return dep() }\n",
-            )
-            .unwrap();
-        }
-        let entry = tmp.path().join("entry.harn");
-        std::fs::write(
-            &entry,
-            "import \"./left/mod\"\nimport \"./right/mod\"\n__io_println(\"hi\")\n",
-        )
-        .unwrap();
-
-        // Edit each directory's `dep` in turn and require the hash to move both
-        // times. Resolving by import string alone lets one `./dep` answer for
-        // the other, which leaves exactly one of these two files out of the
-        // graph entirely — but *which* one depends on traversal order, so
-        // editing a single file is not a reliable falsifier. Editing both is.
-        let mut hash =
-            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-        for dir in ["left", "right"] {
-            std::fs::write(
-                tmp.path().join(dir).join("dep.harn"),
-                "pub fn dep() -> int { return 999 }\n",
-            )
-            .unwrap();
-            let next =
-                hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-            assert_ne!(
-                hash, next,
-                "editing {dir}/dep.harn must move the hash: each directory's \
-                 `./dep` resolves to its own file"
-            );
-            hash = next;
-        }
-    }
-
-    #[test]
-    fn import_hash_busts_on_same_length_edit_in_same_process() {
-        // The per-file read/scan memo is keyed by `(path, len, mtime_ns)`. The
-        // hardest case for that key is an edit that preserves byte length: only
-        // the mtime distinguishes the two versions. Guard that a same-length edit
-        // to a transitively-imported file, recomputed in the SAME process so the
-        // memo is warm, still busts the import-graph hash. Without a working
-        // staleness check a warm long-lived process would replay stale bytecode.
-        let tmp = tempfile::tempdir().unwrap();
-        let leaf = tmp.path().join("leaf.harn");
-        std::fs::write(&leaf, "pub fn x() -> int { return 111 }\n").unwrap();
-        let entry = tmp.path().join("entry.harn");
-        std::fs::write(&entry, "import \"./leaf\"\n__io_println(\"hi\")\n").unwrap();
-
-        let before =
-            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-
-        // Same byte length (`111` -> `222`), so the memo must rely on mtime.
-        // Instead of sleeping out the coarsest plausible mtime granularity,
-        // push the rewritten file's mtime deterministically into the future so
-        // the `(path, len, mtime_ns)` stat key changes instantly on every
-        // filesystem this runs on.
-        std::fs::write(&leaf, "pub fn x() -> int { return 222 }\n").unwrap();
-        // Bump from the file's own current mtime by a fixed margin instead of
-        // sleeping or using a large absolute timestamp literal.
-        let future = std::fs::metadata(&leaf).unwrap().modified().unwrap()
-            + std::time::Duration::from_secs(10);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&leaf)
-            .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(future))
-            .unwrap();
-        assert_eq!(
-            std::fs::metadata(&leaf).unwrap().len(),
-            33,
-            "the two leaf versions must be the same byte length for this test to \
-             exercise the mtime path"
-        );
-
-        let after = hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
-        assert_ne!(
-            before, after,
-            "a same-length edit to a transitively-imported file must still change \
-             the import-graph hash when recomputed in a warm process"
-        );
-    }
-
-    #[test]
-    fn import_hash_stable_across_repeated_calls_same_process() {
-        // The memo must be a pure speed optimization: repeated `from_source`
-        // calls over an unchanged tree (the cold-start module-load fan-out
-        // pattern) must return byte-identical hashes.
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("dep.harn"),
-            "pub fn d() -> int { return 7 }\n",
-        )
-        .unwrap();
-        let entry = tmp.path().join("entry.harn");
-        std::fs::write(&entry, "import \"./dep\"\n__io_println(\"hi\")\n").unwrap();
-        let src = std::fs::read_to_string(&entry).unwrap();
-        let first = hash_transitive_user_imports(&entry, &src);
-        for _ in 0..50 {
-            assert_eq!(
-                hash_transitive_user_imports(&entry, &src),
-                first,
-                "repeated import-graph hashing over an unchanged tree must be stable"
-            );
-        }
-    }
-}
+#[path = "bytecode_cache_tests.rs"]
+mod tests;
