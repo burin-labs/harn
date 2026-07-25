@@ -13,7 +13,10 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 
 mod operation_registry;
 mod process_dispatch;
-pub(crate) mod turn_cache;
+// Public so embedder `host_call` replacements (e.g. the ACP adapter, which
+// re-registers the builtin and therefore never reaches the dispatch path
+// below) can share this one memo and allowlist. harn#5190.
+pub mod turn_cache;
 
 use process_dispatch::dispatch_process_exec_with_policy;
 pub(crate) use process_dispatch::{dispatch_process_exec, dispatch_reviewed_git_push_with_lease};
@@ -844,6 +847,25 @@ pub(crate) async fn dispatch_host_operation(
     dispatch_host_operation_with_ctx(None, capability, operation, params).await
 }
 
+/// Canonical `host_call` dispatch — but **not the only one**.
+///
+/// `HostCallBridge::dispatch` is synchronous, so an embedder whose host is
+/// reached over a network protocol cannot implement it. `harn-serve`'s ACP
+/// adapter therefore re-registers the `host_call` builtin outright
+/// (`adapters/acp/builtins.rs`) and forwards to the editor itself, which means
+/// **everything added to this function is invisible to ACP-hosted sessions** —
+/// and ACP is how the editor runs every agent turn.
+///
+/// That is not hypothetical: the per-turn memo below shipped in v0.10.38 and did
+/// nothing on that route for its entire life, leaving ~26 `runtime.pipeline_input`
+/// round-trips per turn that it exists to collapse to one
+/// (burin-labs/burin-code#5432). The memo is now shared explicitly via
+/// [`turn_cache::lookup`] / [`turn_cache::store`].
+///
+/// So: when adding cross-cutting behaviour here, decide explicitly whether the
+/// ACP route needs it and wire it there too. The durable repair is an async
+/// bridge trait so that adapter can stop replacing the builtin at all — tracked
+/// separately; until then this duplication is load-bearing, not incidental.
 pub(crate) async fn dispatch_host_operation_with_ctx(
     ctx: Option<&AsyncBuiltinCtx>,
     capability: &str,

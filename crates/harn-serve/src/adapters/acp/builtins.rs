@@ -9,6 +9,50 @@ use std::sync::Arc;
 
 use super::AcpBridge;
 
+/// Serve one `host_call`, front-running the ACP round-trip with the per-turn
+/// memo for turn-stable reads.
+///
+/// Split out of the builtin closure so the caching contract is reachable from a
+/// test without standing up a VM or completing the `host/capabilities`
+/// handshake that [`register_acp_builtins`] performs.
+///
+/// The memo matters *here* specifically: this adapter REPLACES the stdlib
+/// `host_call` builtin, so the memo harn-vm applies inside its own dispatch path
+/// never sees an ACP-hosted session — and ACP is how the editor runs every agent
+/// turn. harn#5190 measured ~20 identical `runtime.pipeline_input` reads per
+/// turn; without this the ACP path paid every one as a full JSON-RPC round-trip
+/// to the editor instead of an in-process call. Measured at 105 round-trips
+/// across 4 iterations of one real turn (burin-labs/burin-code#5432), which is
+/// what pushed that turn past its wall-clock budget on a loaded runner.
+///
+/// The allowlist and the memo live in harn-vm so the two `host_call` routes
+/// cannot drift apart, and entries there are epoch-tagged so a turn boundary
+/// observed on another thread still invalidates them.
+pub(super) async fn host_call_via_bridge(
+    bridge: &AcpBridge,
+    name: &str,
+    call_args: &harn_vm::VmValue,
+) -> Result<harn_vm::VmValue, harn_vm::VmError> {
+    let params = call_args.as_dict().cloned().unwrap_or_default();
+    if let Some(hit) = harn_vm::host_turn_cache::lookup_by_name(name, &params) {
+        return Ok(hit);
+    }
+    let args_json = harn_vm::llm::vm_value_to_json(call_args);
+    let result = bridge
+        .call_client(
+            "host/call",
+            serde_json::json!({
+                "sessionId": bridge.session_id,
+                "name": name,
+                "args": args_json,
+            }),
+        )
+        .await?;
+    let value = harn_vm::bridge::json_result_to_vm_value(&result);
+    harn_vm::host_turn_cache::store_by_name(name, &params, &value);
+    Ok(value)
+}
+
 /// Register builtins that delegate to the ACP client (editor).
 pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Arc<AcpBridge>) {
     let host_capability_manifest = bridge
@@ -68,18 +112,7 @@ pub(super) async fn register_acp_builtins(vm: &mut harn_vm::Vm, bridge: Arc<AcpB
         async move {
             let name = args.first().map(|a| a.display()).unwrap_or_default();
             let call_args = args.get(1).cloned().unwrap_or(harn_vm::VmValue::Nil);
-            let args_json = harn_vm::llm::vm_value_to_json(&call_args);
-            let result = bridge
-                .call_client(
-                    "host/call",
-                    serde_json::json!({
-                        "sessionId": bridge.session_id,
-                        "name": name,
-                        "args": args_json,
-                    }),
-                )
-                .await?;
-            Ok(harn_vm::bridge::json_result_to_vm_value(&result))
+            host_call_via_bridge(&bridge, &name, &call_args).await
         }
     });
 
