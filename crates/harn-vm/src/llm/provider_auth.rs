@@ -206,30 +206,47 @@ enum ProviderCredentialError {
     Resolution(VmError),
 }
 
+/// Read one credential-bearing variable through the session's capability
+/// profile rather than the raw process environment.
+///
+/// Under a hermetic profile no credential resolves — that is what makes an eval
+/// run reproducible instead of quietly picking up the launcher's key. Under a
+/// lane, a granted variable resolves to the granted value, so harn's own
+/// `llm_call` can use a credential the session was given. With no profile
+/// installed this is `std::env::var(name).ok()`, unchanged (harn#4992).
+///
+/// A grant-resolution failure (an unresolvable `secret_store` pointer) is a
+/// missing credential from this path's point of view; `resolve_api_key` renders
+/// the same loud "Missing API key" guidance it renders for an unset variable,
+/// and the spawn boundary still reports the underlying `MissingSecret`.
+fn session_auth_env(name: &str) -> Option<String> {
+    crate::stdlib::process::session_env_var(name)
+        .ok()
+        .flatten()
+        .filter(|value| !value.is_empty())
+}
+
 fn probe_api_key(
     definition: Option<&ProviderDef>,
 ) -> Result<Option<String>, ProviderCredentialError> {
     let Some(definition) = definition else {
-        return std::env::var("ANTHROPIC_API_KEY")
+        return session_auth_env("ANTHROPIC_API_KEY")
             .map(Some)
-            .map_err(|_| ProviderCredentialError::Missing);
+            .ok_or(ProviderCredentialError::Missing);
     };
     match &definition.auth_env {
         llm_config::AuthEnv::None => Ok(None),
         llm_config::AuthEnv::Single(env) => {
-            let raw = std::env::var(env).map_err(|_| ProviderCredentialError::Missing)?;
+            let raw = session_auth_env(env).ok_or(ProviderCredentialError::Missing)?;
             resolve_auth_env_value(env, &raw)
                 .map_err(ProviderCredentialError::Resolution)
                 .map(Some)
         }
         llm_config::AuthEnv::Multiple(envs) => {
             for env in envs {
-                let Ok(raw) = std::env::var(env) else {
+                let Some(raw) = session_auth_env(env) else {
                     continue;
                 };
-                if raw.is_empty() {
-                    continue;
-                }
                 return resolve_auth_env_value(env, &raw)
                     .map_err(ProviderCredentialError::Resolution)
                     .map(Some);
@@ -378,6 +395,100 @@ mod tests {
         );
         assert!(message.contains("provider/anthropic-api-key"));
         assert!(!message.contains("sk-from-ref"));
+    }
+
+    /// Install a capability profile for the duration of a test and clear it on
+    /// drop, so a panicking assertion cannot leak a profile into a sibling test
+    /// sharing the thread.
+    struct ScopedProfile;
+
+    impl ScopedProfile {
+        fn install(profile: crate::security::SessionProfile) -> Self {
+            crate::stdlib::process::set_session_profile(Some(profile));
+            Self
+        }
+    }
+
+    impl Drop for ScopedProfile {
+        fn drop(&mut self) {
+            crate::stdlib::process::set_session_profile(None);
+        }
+    }
+
+    #[test]
+    fn hermetic_profile_hides_the_launcher_key_from_dispatch() {
+        // The launcher has a key; the session is hermetic. harn's OWN credential
+        // path must not see it, or a "no credentials" eval silently runs against
+        // whatever the operator happened to have exported.
+        let _guard = crate::llm::env_guard();
+        let _key = ScopedEnv::set("ANTHROPIC_API_KEY", "sk-launcher");
+
+        assert_eq!(
+            provider_auth_status("anthropic").credential_status,
+            ProviderCredentialStatus::Ok,
+            "no profile installed: the legacy path still reads the process env"
+        );
+
+        let _profile = ScopedProfile::install(crate::security::SessionProfile::hermetic());
+        assert_eq!(
+            provider_auth_status("anthropic").credential_status,
+            ProviderCredentialStatus::Missing,
+            "hermetic must close the in-process credential path, not just subprocess env"
+        );
+        let message = match resolve_api_key("anthropic").unwrap_err() {
+            VmError::Thrown(VmValue::String(message)) => message.to_string(),
+            other => format!("{other:?}"),
+        };
+        assert!(message.contains("Missing API key"));
+        assert!(!message.contains("sk-launcher"), "error leaked the key");
+    }
+
+    #[test]
+    fn lane_grant_reaches_harns_own_dispatch() {
+        // The complement: a lane granted a provider key must be able to use it
+        // for its own llm_call, not only hand it to subprocesses. The launcher
+        // variable here is deliberately NOT the provider's auth env var, so the
+        // key can only arrive through the grant's `expose_as_env`.
+        use crate::security::{GrantSourceSpec, GrantSpec, SessionProfile, SessionProfileKind};
+
+        let _guard = crate::llm::env_guard();
+        let _absent = ScopedEnv::unset("ANTHROPIC_API_KEY");
+        let _source = ScopedEnv::set("LAUNCHER_ANTHROPIC_SECRET", "sk-granted");
+
+        let lane = SessionProfile::launch(
+            SessionProfileKind::Lane,
+            vec![GrantSpec {
+                name: "anthropic".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "LAUNCHER_ANTHROPIC_SECRET".to_string(),
+                },
+                expose_as_env: Some("ANTHROPIC_API_KEY".to_string()),
+            }],
+            &|name| std::env::var(name).ok(),
+        )
+        .expect("lane launch");
+        let _profile = ScopedProfile::install(lane);
+
+        assert_eq!(
+            provider_auth_status("anthropic").credential_status,
+            ProviderCredentialStatus::Ok
+        );
+        assert_eq!(resolve_api_key("anthropic").unwrap(), "sk-granted");
+    }
+
+    #[test]
+    fn an_empty_auth_variable_is_a_missing_credential() {
+        // An exported-but-empty key is not a credential. The multi-var branch
+        // always skipped empties; the single-var branch now agrees, so a blank
+        // export fails loudly at resolution instead of reaching a provider as an
+        // empty bearer token.
+        let _guard = crate::llm::env_guard();
+        let _blank = ScopedEnv::set("ANTHROPIC_API_KEY", "");
+        assert_eq!(
+            provider_auth_status("anthropic").credential_status,
+            ProviderCredentialStatus::Missing
+        );
+        assert!(resolve_api_key("anthropic").is_err());
     }
 
     #[test]

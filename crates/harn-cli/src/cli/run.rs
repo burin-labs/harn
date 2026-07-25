@@ -2,7 +2,7 @@ use clap::Args;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use super::ProfileArgs;
+use super::{ProfileArgs, SandboxArgs};
 
 #[derive(Debug, Args)]
 pub(crate) struct RunArgs {
@@ -31,18 +31,8 @@ pub(crate) struct RunArgs {
     /// (for example `git.push`) and the resulting receipt records the grant.
     #[arg(long = "approve-risky", value_name = "OPERATION")]
     pub approve_risky: Vec<String>,
-    /// Disable the default worktree filesystem/process sandbox and
-    /// network egress fail-closed guard for this run.
-    #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
-    pub no_sandbox: bool,
-    /// Permit commands spawned by this run to open network sockets while
-    /// retaining the worktree filesystem and process sandbox.
-    #[arg(
-        long = "allow-process-network",
-        action = clap::ArgAction::SetTrue,
-        conflicts_with = "no_sandbox"
-    )]
-    pub allow_process_network: bool,
+    #[command(flatten)]
+    pub sandbox: SandboxArgs,
     /// Interrupt the run after this duration and hard-exit with code 124 if it
     /// does not unwind within Harn's subprocess cleanup grace. Supports
     /// integer durations with ms, s, m, h, d, or w suffixes, for example
@@ -54,61 +44,6 @@ pub(crate) struct RunArgs {
         conflicts_with = "as_job"
     )]
     pub timeout: Option<Duration>,
-    /// Extra read-only filesystem roots. Repeatable; each path is
-    /// readable but never writable.
-    #[arg(
-        long = "read-only-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub read_only_root: Vec<PathBuf>,
-    /// Extra writable filesystem roots. Repeatable; each path becomes
-    /// part of the run's write jail while sandboxing stays enabled.
-    #[arg(
-        long = "write-root",
-        visible_alias = "writable-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub write_root: Vec<PathBuf>,
-    /// Extra subprocess-only read roots. Repeatable; Harn filesystem builtins
-    /// do not gain access to these paths.
-    #[arg(
-        long = "sandbox-read-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub sandbox_read_root: Vec<PathBuf>,
-    /// Extra subprocess-only write roots. Repeatable; Harn filesystem builtins
-    /// do not gain access to these paths.
-    #[arg(
-        long = "sandbox-write-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub sandbox_write_root: Vec<PathBuf>,
-    /// Session credential posture: `hermetic` closes the subprocess
-    /// environment and admits no credentials; `lane` carries the declared
-    /// `--grant` set. Absent, the run inherits the launcher environment
-    /// unchanged (the legacy path). See `--grant`.
-    #[arg(
-        long = "capability-profile",
-        value_enum,
-        value_name = "PROFILE",
-        conflicts_with = "no_sandbox"
-    )]
-    pub capability_profile: Option<crate::commands::run::CapabilityProfileArg>,
-    /// Grant one named credential to this session's subprocesses. Repeatable.
-    ///
-    /// `NAME=SOURCE[,expose=ENV_VAR]`, where `SOURCE` is `env:VAR_NAME` (a
-    /// launcher variable, snapshotted at launch) or `secret://ACCOUNT/KEY` (a
-    /// secret-store pointer). The optional `,expose=ENV_VAR` injects the value
-    /// into spawned commands as `ENV_VAR`. Any `--grant` selects the `lane`
-    /// profile; nothing else from the launcher environment crosses the sandbox
-    /// boundary. For example
-    /// `--grant gh_token=secret://gh/token,expose=GH_TOKEN`.
-    #[arg(long = "grant", value_name = "SPEC", conflicts_with = "no_sandbox")]
-    pub grant: Vec<String>,
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,

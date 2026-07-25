@@ -207,6 +207,33 @@ impl SessionGrant {
         self.expose_as_env.as_deref()
     }
 
+    /// The `(VAR, value)` pair this grant publishes, or `None` when it declared
+    /// no `expose_as_env` target.
+    ///
+    /// This is the single place the source kind is branched on — an
+    /// `EnvSnapshot` is already a value; a `secret_store` pointer is resolved
+    /// here, on use, through the embedder's `resolve_secret` closure. Every
+    /// exposure path goes through this one method, so a consumer never sees the
+    /// source kind and the two paths cannot disagree about what a grant means.
+    fn exposure(
+        &self,
+        resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+    ) -> Option<Result<(String, String), GrantError>> {
+        let var = self.expose_as_env.as_ref()?;
+        let value = match &self.resolved_ref {
+            ResolvedRef::EnvSnapshot(value) => value.clone(),
+            ResolvedRef::SecretStore { account, key } => match resolve_secret(account, key) {
+                Some(value) => value,
+                None => {
+                    return Some(Err(GrantError::MissingSecret {
+                        name: self.name.clone(),
+                    }))
+                }
+            },
+        };
+        Some(Ok((var.clone(), value)))
+    }
+
     /// The non-secret receipt for this grant.
     pub fn receipt(&self) -> GrantReceipt {
         GrantReceipt {
@@ -304,11 +331,8 @@ impl SessionProfile {
     /// `(VAR, value)` pairs for every grant that opted into `expose_as_env`.
     /// Empty for a hermetic profile.
     ///
-    /// This is the single place the source kind is branched on — an
-    /// `EnvSnapshot` is already a value; a `secret_store` pointer is resolved
-    /// now through the embedder's `resolve_secret` closure (backed by the
-    /// `secret_store` facade). Callers receive uniform pairs and never see the
-    /// source kind.
+    /// Callers receive uniform pairs and never see the source kind;
+    /// [`SessionGrant::exposure`] owns that branch.
     ///
     /// # Least privilege
     ///
@@ -320,21 +344,38 @@ impl SessionProfile {
         &self,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Vec<(String, String)>, GrantError> {
-        let mut pairs = Vec::new();
-        for grant in &self.grants {
-            let Some(var) = grant.expose_as_env.as_ref() else {
-                continue;
-            };
-            let value = match &grant.resolved_ref {
-                ResolvedRef::EnvSnapshot(value) => value.clone(),
-                ResolvedRef::SecretStore { account, key } => resolve_secret(account, key)
-                    .ok_or_else(|| GrantError::MissingSecret {
-                        name: grant.name.clone(),
-                    })?,
-            };
-            pairs.push((var.clone(), value));
-        }
-        Ok(pairs)
+        self.grants
+            .iter()
+            .filter_map(|grant| grant.exposure(resolve_secret))
+            .collect()
+    }
+
+    /// The value this profile exposes under a single environment variable, or
+    /// `None` if no grant targets it.
+    ///
+    /// The narrow counterpart of [`env_exposure`](Self::env_exposure), for a
+    /// consumer resolving one variable — harn's own provider-credential lookup.
+    /// It resolves *only* the grant that targets `var`, which matters for a
+    /// `secret_store` grant: probing an unrelated variable must not reach the
+    /// secret store, and one unresolvable grant must not mask an unrelated
+    /// credential. The last matching grant wins, mirroring the overlay order of
+    /// `env_exposure`'s pairs.
+    pub fn env_exposure_for(
+        &self,
+        var: &str,
+        resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+    ) -> Result<Option<String>, GrantError> {
+        let Some(grant) = self
+            .grants
+            .iter()
+            .rfind(|grant| grant.expose_as_env.as_deref() == Some(var))
+        else {
+            return Ok(None);
+        };
+        grant
+            .exposure(resolve_secret)
+            .transpose()
+            .map(|pair| pair.map(|(_, value)| value))
     }
 }
 

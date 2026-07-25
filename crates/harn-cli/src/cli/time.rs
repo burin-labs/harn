@@ -1,5 +1,4 @@
 use clap::{Args, Subcommand};
-use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub(crate) struct TimeArgs {
@@ -32,49 +31,8 @@ pub(crate) struct TimeRunArgs {
     /// invocation only.
     #[arg(long = "no-cache")]
     pub no_cache: bool,
-    /// Disable the default worktree filesystem/process sandbox and
-    /// network egress fail-closed guard for this run.
-    #[arg(long = "no-sandbox", action = clap::ArgAction::SetTrue)]
-    pub no_sandbox: bool,
-    /// Permit commands spawned by this run to open network sockets while
-    /// retaining the worktree filesystem and process sandbox.
-    #[arg(
-        long = "allow-process-network",
-        action = clap::ArgAction::SetTrue,
-        conflicts_with = "no_sandbox"
-    )]
-    pub allow_process_network: bool,
-    /// Extra writable filesystem roots. Repeatable; each path becomes
-    /// part of the run's write jail while sandboxing stays enabled.
-    #[arg(
-        long = "write-root",
-        visible_alias = "writable-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub write_root: Vec<PathBuf>,
-    /// Extra read-only filesystem roots. Repeatable; each path is
-    /// readable but never writable.
-    #[arg(
-        long = "read-only-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub read_only_root: Vec<PathBuf>,
-    /// Extra subprocess-only read roots.
-    #[arg(
-        long = "sandbox-read-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub sandbox_read_root: Vec<PathBuf>,
-    /// Extra subprocess-only write roots.
-    #[arg(
-        long = "sandbox-write-root",
-        value_name = "PATH",
-        conflicts_with = "no_sandbox"
-    )]
-    pub sandbox_write_root: Vec<PathBuf>,
+    #[command(flatten)]
+    pub sandbox: super::SandboxArgs,
     /// Positional arguments passed to the pipeline as the global `argv`
     /// list. Place them after a `--` separator: `harn time run script.harn -- a b c`.
     #[arg(last = true)]

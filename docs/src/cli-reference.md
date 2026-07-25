@@ -53,8 +53,8 @@ harn run --resume .harn/workers/worker_...json
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |
 | `--sandbox-read-root <path>` | Let spawned subprocesses read an extra root without granting Harn filesystem builtins access |
-| `--capability-profile <hermetic\|lane>` | Select the session credential posture. `hermetic` closes the subprocess environment (no credentials cross); `lane` carries the declared `--grant` set. Absent, subprocesses inherit the launcher environment (the legacy path) |
-| `--grant <spec>` | Grant one named credential to this session's subprocesses; repeatable. Selects the `lane` profile. See [Capability profiles and grants](#capability-profiles-and-grants) |
+| `--capability-profile <hermetic\|lane>` | Select the session credential posture. `hermetic` admits no credentials, to this run or its subprocesses; `lane` carries the declared `--grant` set. Absent, the run inherits the launcher environment (the legacy path) |
+| `--grant <spec>` | Grant one named credential to this session; repeatable. Selects the `lane` profile. `provider:PROVIDER` takes the variable name from the provider catalog. See [Capability profiles and grants](#capability-profiles-and-grants) |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |
@@ -82,28 +82,35 @@ records a receipt on the protected operation and never relaxes the generic
 A sandboxed `harn run` confines the child to its workspace by default, which
 means a spawned subprocess inherits none of the launcher's ambient
 credentials — deliberately, so an eval child stays hermetic. An autonomous lane
-has the opposite need: it must hand a subprocess exactly one scoped secret (a
-`GH_TOKEN` to open its PR, a provider key) and nothing else. `--capability-profile`
-and `--grant` are that scoped, receipted path across the sandbox boundary.
+has the opposite need: it must reach exactly one scoped secret (a `GH_TOKEN` to
+open its PR, a provider key for its own model calls) and nothing else.
+`--capability-profile` and `--grant` are that scoped, receipted path.
 
 A run selects one of two postures, or neither:
 
-- **Hermetic** (`--capability-profile hermetic`) — the subprocess environment is
-  built from a fixed allowlist alone (`PATH`, `HOME`, locale, toolchain vars);
-  no credential crosses. Grants are rejected. This is the eval identity, enforced
-  at launch rather than asserted afterward.
+- **Hermetic** (`--capability-profile hermetic`) — the environment is built from
+  a fixed allowlist alone (`PATH`, `HOME`, locale, toolchain vars); no credential
+  is reachable. Grants are rejected. This is the eval identity, enforced at
+  launch rather than asserted afterward.
 - **Lane** (any `--grant`, or `--capability-profile lane`) — the same closed
   environment, plus the declared grants and nothing else.
-- **Neither flag** — the legacy path: subprocesses inherit the launcher
-  environment unchanged. Selecting a profile is opt-in.
+- **Neither flag** — the legacy path: the run inherits the launcher environment
+  unchanged. Selecting a profile is opt-in.
 
-Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR]`:
+A profile governs both halves of the boundary: the environment handed to spawned
+subprocesses, *and* the credential lookup `llm_call` performs inside harn's own
+process. So a hermetic run cannot quietly pick up whichever provider key the
+operator happened to export, and a lane's granted key is usable by the lane's own
+model calls — not just by the commands it spawns.
+
+Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR]`, or the `provider:` shorthand:
 
 | Part | Meaning |
 |---|---|
 | `NAME` | The logical name a tool asks the credential for. |
-| `SOURCE` | `env:VAR_NAME` snapshots a launcher variable at launch (the child never reads the live environment); `secret://ACCOUNT/KEY` is a [secret-store](./hostlib/secret_store.md) pointer, resolved lazily on exposure. |
-| `,expose=ENV_VAR` | Optional. Injects the value into spawned commands as `ENV_VAR`. Without it the grant is carried but not exposed to `process.exec`. |
+| `SOURCE` | `env:VAR_NAME` snapshots a launcher variable at launch (the run never reads the live environment afterward); `secret://ACCOUNT/KEY` is a [secret-store](./hostlib/secret_store.md) pointer, resolved lazily on exposure. |
+| `,expose=ENV_VAR` | Optional. Publishes the value as `ENV_VAR` to spawned commands and to this run's own provider lookup. Without it the grant is carried but not exposed. |
+| `provider:PROVIDER` | Shorthand for a model credential. Takes the variable name from the provider catalog and exposes it under that name. |
 
 ```bash
 # Open a PR from a headless lane: gh reads GH_TOKEN from the granted secret.
@@ -111,12 +118,22 @@ harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN open_pr.harn
 
 # Snapshot a provider key from the launcher env, exposed under the same name.
 harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY lane.harn
+
+# The same grant, with the variable name taken from the provider catalog.
+harn run --grant provider:fireworks lane.harn
 ```
+
+Prefer `provider:PROVIDER` for model credentials. It resolves to the first of
+that provider's catalog-declared auth variables that is set in the launcher
+environment — the same one dispatch would have chosen — so a launch script never
+restates a mapping the catalog already owns, and keeps working when a provider
+adds or renames a variable.
 
 Every declared grant is disclosed on stderr at launch (its name, source kind, and
 whether it is exposed — never the value) and recorded as a non-secret receipt in
 the `--attest` provenance log. `--capability-profile` and `--grant` require the
-sandbox and so conflict with `--no-sandbox`.
+sandbox and so conflict with `--no-sandbox`. Both flags are also accepted by
+[`harn time run`](#harn-time), which shares `harn run`'s confinement surface.
 
 ### `--json` event stream
 
@@ -630,9 +647,14 @@ harn time run main.harn --json
 harn time run main.harn --json --no-cache
 harn time run main.harn --no-sandbox
 harn time run main.harn --write-root /path/to/output
+harn time run main.harn --grant provider:fireworks
 harn time run -e 'log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```
+
+`harn time run` accepts the same confinement and credential flags as
+[`harn run`](#harn-run) — the two share one flag definition, so a run and its
+timed twin are always confined identically.
 
 The output is keyed by seven fixed rows — `parse`, `typecheck`,
 `bytecode_compile`, `run_setup`, `run_main`, `module_compile`, and
