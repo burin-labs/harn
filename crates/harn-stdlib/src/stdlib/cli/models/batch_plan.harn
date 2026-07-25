@@ -2,10 +2,12 @@ import { __batch_artifact_read, __batch_request_rows_read } from "std/cli/models
 import { __run_cancel } from "std/cli/models/batch_cancel"
 import { __run_download } from "std/cli/models/batch_download"
 import { __batch_receipt_lifecycle, __with_batch_lifecycle } from "std/cli/models/batch_lifecycle"
+import { __run_rejoin } from "std/cli/models/batch_rejoin"
 import { __run_status } from "std/cli/models/batch_status"
 import { __run_submit } from "std/cli/models/batch_submit"
 import {
   BatchLiveAdapter,
+  __batch_create_recovery,
   __filter_int,
   __has_string,
   __live_batch_adapter,
@@ -755,6 +757,7 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
     endpoint: endpoint,
     tool_format: safe_string(group["tool_format"], ""),
     batch: batch,
+    create_recovery: __batch_create_recovery(safe_string(group["provider"], ""), wire),
     input_mode: safe_string(batch["input_mode"], ""),
     request_count: len(records),
     request_file: request_path,
@@ -1215,6 +1218,9 @@ fn main(harness: Harness) -> int {
   }
   if mode == "download" {
     return __run_download(harness)
+  }
+  if mode == "rejoin" {
+    return __run_rejoin(harness)
   }
   if mode == "manifest" {
     return __run_manifest(

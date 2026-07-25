@@ -8,6 +8,8 @@
 #[path = "models_dispatch/support.rs"]
 mod support;
 
+#[path = "models_dispatch/batch_execution.rs"]
+mod batch_execution;
 #[path = "models_dispatch/batch_lifecycle_providers.rs"]
 mod batch_lifecycle_providers;
 #[path = "models_dispatch/batch_plan_prepare.rs"]

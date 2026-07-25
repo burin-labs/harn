@@ -1,0 +1,773 @@
+/**
+ * Provider-neutral terminal rejoin for durable model-batch executions.
+ *
+ * Raw provider files are never rewritten. This module verifies their complete
+ * durable lineage, normalizes supported wire rows, and rejoins by manifest id.
+ */
+import {
+  cli_json_envelope,
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+import { ensure_parent_dir, replace_text } from "std/fs"
+
+pub type BatchRejoinRun = {receipt: dict, normalized_rows: list<dict>, errors: list<string>}
+
+type BatchRejoinLoaded = {value: dict, sha256: string, errors: list<string>}
+
+type BatchRejoinParsed = {rows: list<dict>, errors: list<string>}
+
+fn __load_object(harness: Harness, path: string, label: string) -> BatchRejoinLoaded {
+  if path == "" {
+    return {value: {}, sha256: "", errors: [label + " path is required"]}
+  }
+  if !harness.fs.exists(path) {
+    return {value: {}, sha256: "", errors: [label + " not found: " + path]}
+  }
+  const text = harness.fs.read_text(path)
+  const parsed = try {
+    json_parse(text)
+  } catch (failure) {
+    return {
+      value: {},
+      sha256: sha256(text),
+      errors: ["invalid " + label + " JSON: " + failure.message],
+    }
+  }
+  if type_of(parsed) != "dict" {
+    return {value: {}, sha256: sha256(text), errors: [label + " must be a JSON object"]}
+  }
+  return {value: safe_dict(parsed), sha256: sha256(text), errors: []}
+}
+
+fn __expect_kind(value: dict, expected: string, label: string) -> list<string> {
+  const actual = safe_string(value["kind"], "")
+  if actual == expected {
+    return []
+  }
+  return [label + " has unsupported kind: " + actual]
+}
+
+fn __verify_source(
+  harness: Harness,
+  source: dict,
+  expected_path: string,
+  label: string,
+) -> list<string> {
+  let errors = []
+  const path = safe_string(source["path"], "")
+  if path != expected_path {
+    errors = errors.appending(label + " path mismatch")
+  }
+  if path == "" || !harness.fs.exists(path) {
+    return errors.appending(label + " not found: " + path)
+  }
+  const actual_sha256 = sha256(harness.fs.read_text(path))
+  if safe_string(source["sha256"], "") != actual_sha256 {
+    errors = errors.appending(label + " hash mismatch")
+  }
+  return errors
+}
+
+fn __job_ids(receipt: dict) -> list<string> {
+  let ids = []
+  for raw_job in safe_list(receipt["jobs"]) {
+    ids = ids.appending(safe_string(safe_dict(raw_job)["id"], ""))
+  }
+  return ids
+}
+
+fn __same_strings(left: list<string>, right: list<string>) -> bool {
+  if len(left) != len(right) {
+    return false
+  }
+  let index = 0
+  while index < len(left) {
+    if left[index] != right[index] {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+fn __execution_artifact_errors(harness: Harness, execution: dict) -> list<string> {
+  let errors = []
+  for raw_artifact in safe_list(execution["artifacts"]) {
+    const artifact = safe_dict(raw_artifact)
+    const path = safe_string(artifact["path"], "")
+    const role = safe_string(artifact["role"], "artifact")
+    if path == "" || !harness.fs.exists(path) {
+      errors = errors.appending("execution " + role + " not found: " + path)
+      continue
+    }
+    if sha256(harness.fs.read_text(path)) != safe_string(artifact["sha256"], "") {
+      errors = errors.appending("execution " + role + " hash mismatch: " + path)
+    }
+  }
+  return errors
+}
+
+fn __read_line_rows(text: string, path: string) -> BatchRejoinParsed {
+  let rows: list<dict> = []
+  let errors: list<string> = []
+  let line_no = 0
+  for line in text.split("\n") {
+    line_no = line_no + 1
+    const raw = trim(line)
+    if raw == "" {
+      continue
+    }
+    const parsed = try {
+      json_parse(raw)
+    } catch (failure) {
+      errors = errors
+        + [
+        "malformed_result: " + path + ":" + to_string(line_no) + ": " + failure.message,
+      ]
+      continue
+    }
+    if type_of(parsed) != "dict" {
+      errors = errors
+        + ["malformed_result: " + path + ":" + to_string(line_no) + ": expected object"]
+      continue
+    }
+    rows = rows + [safe_dict(parsed)]
+  }
+  return {rows: rows, errors: errors}
+}
+
+fn __rows_from_json(value) -> list<dict> {
+  if type_of(value) == "list" {
+    let rows: list<dict> = []
+    for raw in value {
+      if type_of(raw) == "dict" {
+        rows = rows + [safe_dict(raw)]
+      }
+    }
+    return rows
+  }
+  if type_of(value) != "dict" {
+    return []
+  }
+  const object = safe_dict(value)
+  for key in ["results", "responses", "requests", "data"] {
+    if type_of(object[key]) == "list" {
+      return __rows_from_json(object[key])
+    }
+  }
+  return [object]
+}
+
+fn __parse_result_artifact(harness: Harness, path: string) -> BatchRejoinParsed {
+  if !harness.fs.exists(path) {
+    return {rows: [], errors: ["result_artifact_missing: " + path]}
+  }
+  const text = harness.fs.read_text(path)
+  const trimmed = trim(text)
+  if trimmed == "" {
+    return {rows: [], errors: []}
+  }
+  if starts_with(trimmed, "[") {
+    const parsed = try {
+      json_parse(trimmed)
+    } catch (failure) {
+      return {rows: [], errors: ["malformed_result: " + path + ": " + failure.message]}
+    }
+    return {rows: __rows_from_json(parsed), errors: []}
+  }
+  if starts_with(trimmed, "{") && !contains(trimmed, "\n") {
+    const parsed = try {
+      json_parse(trimmed)
+    } catch (failure) {
+      return {rows: [], errors: ["malformed_result: " + path + ": " + failure.message]}
+    }
+    return {rows: __rows_from_json(parsed), errors: []}
+  }
+  return __read_line_rows(text, path)
+}
+
+fn __first_string(values: list) -> string {
+  for value in values {
+    const text = trim(to_string(value ?? ""))
+    if text != "" && text != "nil" {
+      return text
+    }
+  }
+  return ""
+}
+
+fn __result_id(row: dict) -> string {
+  return __first_string(
+    [
+      row["custom_id"],
+      row["customId"],
+      row["key"],
+      row["request_id"],
+      row["recordId"],
+      safe_dict(row["request"])["custom_id"],
+      safe_dict(row["response"])["custom_id"],
+    ],
+  )
+}
+
+fn __result_status_code(row: dict) -> int {
+  const response = safe_dict(row["response"])
+  return to_int(response["status_code"] ?? response["status"] ?? row["status_code"]) ?? 0
+}
+
+fn __has_error(value) -> bool {
+  if value == nil {
+    return false
+  }
+  if type_of(value) == "string" {
+    return trim(to_string(value)) != ""
+  }
+  if type_of(value) == "dict" {
+    return len(safe_dict(value).keys()) > 0
+  }
+  return true
+}
+
+fn __terminal_state(row: dict) -> string {
+  if __has_error(row["error"]) || __result_status_code(row) >= 400 {
+    return "failed"
+  }
+  const result = safe_dict(row["result"])
+  const result_type = lowercase(safe_string(result["type"], ""))
+  const status = lowercase(safe_string(row["status"], ""))
+  if ["errored", "failed", "error"].contains(result_type)
+    || ["errored", "failed", "error"].contains(
+    status,
+  ) {
+    return "failed"
+  }
+  if result_type == "succeeded"
+    || ["succeeded", "completed", "complete", "success"].contains(status)
+    || type_of(row["response"])
+    == "dict"
+    || type_of(row["modelOutput"]) == "dict"
+    || type_of(result["message"]) == "dict" {
+    return "succeeded"
+  }
+  return "malformed"
+}
+
+fn __normalized_response(row: dict) {
+  const result = safe_dict(row["result"])
+  if row["response"] != nil {
+    return row["response"]
+  }
+  if result["message"] != nil {
+    return result["message"]
+  }
+  if row["modelOutput"] != nil {
+    return row["modelOutput"]
+  }
+  return nil
+}
+
+fn __normalized_error(row: dict, state: string) {
+  const result = safe_dict(row["result"])
+  if row["error"] != nil {
+    return row["error"]
+  }
+  if result["error"] != nil {
+    return result["error"]
+  }
+  if state == "failed" {
+    return {code: "provider_error", status_code: __result_status_code(row)}
+  }
+  if state == "malformed" {
+    return {code: "malformed_result", message: "row has no recognized response or error"}
+  }
+  return nil
+}
+
+fn __normalize_row(row: dict, source: dict, metadata: dict) -> dict {
+  const custom_id = __result_id(row)
+  const state = __terminal_state(row)
+  return {
+    schemaVersion: 1,
+    custom_id: custom_id,
+    state: state,
+    response: __normalized_response(row),
+    error: __normalized_error(row, state),
+    execution_id: safe_string(metadata["execution_id"], ""),
+    group_id: safe_string(metadata["group_id"], ""),
+    job_id: safe_string(source["job_id"], ""),
+    provider_batch_id: safe_string(source["provider_batch_id"], ""),
+    provider: safe_string(metadata["provider"], safe_string(source["provider"], "")),
+    model: safe_string(metadata["model"], ""),
+    endpoint: safe_string(metadata["endpoint"], ""),
+    request: metadata["request"],
+    source_artifact: {
+      label: safe_string(source["label"], ""),
+      path: safe_string(source["path"], ""),
+      sha256: safe_string(source["sha256"], ""),
+    },
+    raw_row_sha256: sha256(json_stringify(row)),
+  }
+}
+
+fn __is_result_label(label: string) -> bool {
+  return ["output", "results", "responses", "error", "errors"].contains(label)
+}
+
+fn __contains_string(values: list<string>, needle: string) -> bool {
+  return values.contains(needle)
+}
+
+fn __unique_append(values: list<string>, value: string) -> list<string> {
+  if value == "" || values.contains(value) {
+    return values
+  }
+  return values + [value]
+}
+
+fn __manifest_index(manifest: dict, execution_id: string) -> dict {
+  let ids: list<string> = []
+  let by_id = {}
+  let errors: list<string> = []
+  for raw_group in safe_list(manifest["groups"]) {
+    const group = safe_dict(raw_group)
+    for raw_request in safe_list(group["requests"]) {
+      const request = safe_dict(raw_request)
+      const custom_id = safe_string(request["custom_id"], "")
+      if custom_id == "" {
+        errors = errors + ["manifest request has empty custom_id"]
+        continue
+      }
+      if ids.contains(custom_id) {
+        errors = errors + ["manifest has duplicate custom_id: " + custom_id]
+        continue
+      }
+      ids = ids + [custom_id]
+      by_id = by_id
+        + {
+        [custom_id]: {
+          execution_id: execution_id,
+          group_id: safe_string(group["id"], ""),
+          provider: safe_string(group["provider"], ""),
+          model: safe_string(group["model"], ""),
+          endpoint: safe_string(group["endpoint"], ""),
+          request: request,
+        },
+      }
+    }
+  }
+  return {ids: ids, by_id: by_id, errors: errors}
+}
+
+fn __quarantine_reasons(base: dict) -> list<string> {
+  let reasons: list<string> = []
+  let has_malformed_error = false
+  let has_lineage_error = false
+  for raw_error in safe_list(base["errors"]) {
+    if starts_with(safe_string(raw_error, ""), "malformed_result:") {
+      has_malformed_error = true
+    } else {
+      has_lineage_error = true
+    }
+  }
+  if (to_int(base["missingCount"]) ?? 0) > 0 {
+    reasons = reasons + ["missing_results"]
+  }
+  if (to_int(base["unexpectedCount"]) ?? 0) > 0 {
+    reasons = reasons + ["unexpected_results"]
+  }
+  if (to_int(base["duplicateCount"]) ?? 0) > 0 {
+    reasons = reasons + ["duplicate_results"]
+  }
+  if (to_int(base["failedCount"]) ?? 0) > 0 {
+    reasons = reasons + ["provider_error_results"]
+  }
+  if (to_int(base["malformedCount"]) ?? 0) > 0 || has_malformed_error {
+    reasons = reasons + ["malformed_results"]
+  }
+  if (to_int(base["rowsWithoutId"]) ?? 0) > 0 {
+    reasons = reasons + ["rows_without_custom_id"]
+  }
+  if (to_int(base["partialJobCount"]) ?? 0) > 0 {
+    reasons = reasons + ["partial_jobs"]
+  }
+  if has_lineage_error {
+    reasons = reasons + ["lineage_or_artifact_errors"]
+  }
+  return reasons
+}
+
+fn __validate_lineage(
+  harness: Harness,
+  execution_path: string,
+  manifest_path: string,
+  download_path: string,
+) -> dict {
+  const execution_loaded = __load_object(harness, execution_path, "batch execution")
+  const manifest_loaded = __load_object(harness, manifest_path, "batch manifest")
+  const download_loaded = __load_object(harness, download_path, "batch download receipt")
+  let errors = execution_loaded.errors + manifest_loaded.errors + download_loaded.errors
+  const execution = execution_loaded.value
+  const manifest = manifest_loaded.value
+  const download = download_loaded.value
+  errors = errors
+    + __expect_kind(execution, "harn.model_batch_execution_receipt", "batch execution")
+    + __expect_kind(
+    manifest,
+    "harn.model_batch_manifest",
+    "batch manifest",
+  )
+    + __expect_kind(download, "harn.model_batch_results_receipt", "batch download receipt")
+  if safe_string(safe_dict(execution["paths"])["manifest"], "") != manifest_path {
+    errors = errors.appending("wrong_execution_manifest")
+  }
+  if safe_string(safe_dict(execution["paths"])["downloadReceipt"], "") != download_path {
+    errors = errors.appending("wrong_execution_download")
+  }
+  const expected_execution_id = "batch-" + substring(manifest_loaded.sha256, 0, 24)
+  if safe_string(execution["executionId"], "") != expected_execution_id {
+    errors = errors.appending("wrong_execution_identity")
+  }
+  errors = errors + __execution_artifact_errors(harness, execution)
+  const status_path = safe_string(safe_dict(download["source"])["path"], "")
+  const status_loaded = __load_object(harness, status_path, "batch status receipt")
+  errors = errors
+    + status_loaded.errors
+    + __expect_kind(
+    status_loaded.value,
+    "harn.model_batch_status_receipt",
+    "batch status receipt",
+  )
+    + __verify_source(harness, safe_dict(download["source"]), status_path, "download status source")
+  const submission_path = safe_string(safe_dict(status_loaded.value["source"])["path"], "")
+  const submission_loaded = __load_object(harness, submission_path, "batch submission receipt")
+  errors = errors
+    + submission_loaded.errors
+    + __expect_kind(
+    submission_loaded.value,
+    "harn.model_batch_submission_receipt",
+    "batch submission receipt",
+  )
+    + __verify_source(
+    harness,
+    safe_dict(status_loaded.value["source"]),
+    submission_path,
+    "status submission source",
+  )
+  const prepare_path = safe_string(safe_dict(submission_loaded.value["source"])["path"], "")
+  const prepare_loaded = __load_object(harness, prepare_path, "batch prepare receipt")
+  errors = errors
+    + prepare_loaded.errors
+    + __expect_kind(
+    prepare_loaded.value,
+    "harn.model_batch_prepare_receipt",
+    "batch prepare receipt",
+  )
+    + __verify_source(
+    harness,
+    safe_dict(submission_loaded.value["source"]),
+    prepare_path,
+    "submission prepare source",
+  )
+  errors = errors
+    + __verify_source(
+    harness,
+    safe_dict(prepare_loaded.value["manifest"]),
+    manifest_path,
+    "prepare manifest source",
+  )
+  const expected_jobs = __job_ids(prepare_loaded.value)
+  if !__same_strings(expected_jobs, safe_list(execution["jobIds"])) {
+    errors = errors.appending("execution_job_identity_changed")
+  }
+  for receipt in [submission_loaded.value, status_loaded.value, download] {
+    if !__same_strings(expected_jobs, __job_ids(safe_dict(receipt))) {
+      errors = errors.appending("job_identity_changed")
+    }
+  }
+  return {
+    execution: execution,
+    manifest: manifest,
+    download: download,
+    errors: errors,
+    execution_sha256: execution_loaded.sha256,
+    manifest_sha256: manifest_loaded.sha256,
+    download_sha256: download_loaded.sha256,
+  }
+}
+
+/**
+ * Verify a durable execution and normalize/rejoin its downloaded provider rows.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn batch_rejoin(
+  harness: Harness,
+  execution_path: string,
+  manifest_path: string,
+  download_path: string,
+  out_dir: string,
+) -> BatchRejoinRun {
+  const lineage = __validate_lineage(harness, execution_path, manifest_path, download_path)
+  let errors: list<string> = safe_list(lineage["errors"])
+  const execution = safe_dict(lineage["execution"])
+  const manifest = safe_dict(lineage["manifest"])
+  const download = safe_dict(lineage["download"])
+  const execution_id = safe_string(execution["executionId"], "")
+  const index = __manifest_index(manifest, execution_id)
+  errors = errors + safe_list(index["errors"])
+  const expected_ids: list<string> = safe_list(index["ids"])
+  if !__same_strings(expected_ids, safe_list(execution["requestIds"])) {
+    errors = errors.appending("execution_request_identity_changed")
+  }
+  const metadata_by_id = safe_dict(index["by_id"])
+  let by_id = {}
+  let unexpected_ids: list<string> = []
+  let duplicate_ids: list<string> = []
+  let failed_ids: list<string> = []
+  let malformed_ids: list<string> = []
+  let rows_without_id = 0
+  let artifact_count = 0
+  let row_count = 0
+  let partial_job_count = 0
+  let raw_artifacts = []
+  for raw_job in safe_list(download["jobs"]) {
+    const job = safe_dict(raw_job)
+    if safe_string(job["status"], "") != "downloaded" {
+      partial_job_count = partial_job_count + 1
+    }
+    for raw_artifact in safe_list(job["artifacts"]) {
+      const artifact = safe_dict(raw_artifact)
+      const label = safe_string(artifact["label"], "")
+      if !__is_result_label(label) {
+        continue
+      }
+      artifact_count = artifact_count + 1
+      const path = safe_string(artifact["path"], "")
+      let artifact_errors = []
+      if !harness.fs.exists(path) {
+        artifact_errors = artifact_errors.appending("result_artifact_missing: " + path)
+      } else if sha256(harness.fs.read_text(path)) != safe_string(artifact["sha256"], "") {
+        artifact_errors = artifact_errors.appending("result_artifact_hash_mismatch: " + path)
+      }
+      errors = errors + artifact_errors
+      const parsed = if len(artifact_errors) == 0 {
+        __parse_result_artifact(harness, path)
+      } else {
+        {rows: [], errors: []}
+      }
+      errors = errors + parsed.errors
+      row_count = row_count + len(parsed.rows)
+      raw_artifacts = raw_artifacts
+        + [
+        {
+          label: label,
+          path: path,
+          sha256: safe_string(artifact["sha256"], ""),
+          job_id: safe_string(job["id"], ""),
+          provider_batch_id: safe_string(job["provider_batch_id"], ""),
+          provider: safe_string(job["provider"], ""),
+          row_count: len(parsed.rows),
+        },
+      ]
+      for row in parsed.rows {
+        const custom_id = __result_id(row)
+        if custom_id == "" {
+          rows_without_id = rows_without_id + 1
+          continue
+        }
+        const source = {
+          label: label,
+          path: path,
+          sha256: safe_string(artifact["sha256"], ""),
+          job_id: safe_string(job["id"], ""),
+          provider_batch_id: safe_string(job["provider_batch_id"], ""),
+          provider: safe_string(job["provider"], ""),
+        }
+        const normalized = __normalize_row(row, source, safe_dict(metadata_by_id[custom_id]))
+        if !expected_ids.contains(custom_id) {
+          unexpected_ids = __unique_append(unexpected_ids, custom_id)
+        }
+        const existing = safe_list(by_id[custom_id])
+        if len(existing) > 0 {
+          duplicate_ids = __unique_append(duplicate_ids, custom_id)
+        }
+        by_id = by_id + {[custom_id]: existing.appending(normalized)}
+        const state = safe_string(normalized["state"], "")
+        if state == "failed" {
+          failed_ids = __unique_append(failed_ids, custom_id)
+        }
+        if state == "malformed" {
+          malformed_ids = __unique_append(malformed_ids, custom_id)
+        }
+      }
+    }
+  }
+  let normalized_rows: list<dict> = []
+  let matched_ids: list<string> = []
+  let missing_ids: list<string> = []
+  for custom_id in expected_ids {
+    const rows = safe_list(by_id[custom_id])
+    if len(rows) == 0 {
+      missing_ids = missing_ids + [custom_id]
+      continue
+    }
+    matched_ids = matched_ids + [custom_id]
+    normalized_rows = normalized_rows + [safe_dict(rows[0])]
+  }
+  const base = {
+    expectedCount: len(expected_ids),
+    artifactCount: artifact_count,
+    rowCount: row_count,
+    matchedCount: len(matched_ids),
+    missingCount: len(missing_ids),
+    unexpectedCount: len(unexpected_ids),
+    duplicateCount: len(duplicate_ids),
+    failedCount: len(failed_ids),
+    malformedCount: len(malformed_ids),
+    rowsWithoutId: rows_without_id,
+    partialJobCount: partial_job_count,
+    errors: errors,
+  }
+  const reasons = __quarantine_reasons(base)
+  const consumable = len(reasons) == 0
+  const status = if consumable {
+    "complete"
+  } else if len(matched_ids) > 0 {
+    "quarantined_partial"
+  } else {
+    "quarantined"
+  }
+  const normalized_path = path_join(out_dir, "normalized.jsonl")
+  let normalized_text = ""
+  for row in normalized_rows {
+    normalized_text = normalized_text + json_stringify(row) + "\n"
+  }
+  const receipt = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_rejoin_receipt",
+    producer: "harn models batch rejoin",
+    execution: {
+      id: execution_id,
+      path: execution_path,
+      sha256: safe_string(lineage["execution_sha256"], ""),
+    },
+    source: {
+      manifest: {path: manifest_path, sha256: safe_string(lineage["manifest_sha256"], "")},
+      download: {path: download_path, sha256: safe_string(lineage["download_sha256"], "")},
+    },
+    status: status,
+    consumable: consumable,
+    expectedCount: len(expected_ids),
+    matchedCount: len(matched_ids),
+    missingCount: len(missing_ids),
+    unexpectedCount: len(unexpected_ids),
+    duplicateCount: len(duplicate_ids),
+    failedCount: len(failed_ids),
+    malformedCount: len(malformed_ids),
+    rowsWithoutId: rows_without_id,
+    partialJobCount: partial_job_count,
+    matchedIds: matched_ids,
+    missingIds: missing_ids,
+    unexpectedIds: unexpected_ids,
+    duplicateIds: duplicate_ids,
+    failedIds: failed_ids,
+    malformedIds: malformed_ids,
+    quarantine: {active: !consumable, reasons: reasons},
+    normalized: {
+      path: normalized_path,
+      sha256: sha256(normalized_text),
+      rowCount: len(normalized_rows),
+    },
+    rawArtifacts: raw_artifacts,
+    errors: errors,
+  }
+  return {receipt: receipt, normalized_rows: normalized_rows, errors: errors}
+}
+
+fn __render_rejoin_human(harness: Harness, receipt: dict) {
+  harness.stdio.println("Batch result rejoin: " + safe_string(receipt["status"], ""))
+  harness.stdio.println("  consumable: " + to_string(safe_bool(receipt["consumable"], false)))
+  harness.stdio.println("  matched: " + safe_int_string(receipt["matchedCount"], "0"))
+  harness.stdio.println("  missing: " + safe_int_string(receipt["missingCount"], "0"))
+  harness.stdio.println("  duplicate: " + safe_int_string(receipt["duplicateCount"], "0"))
+  harness.stdio.println("  unexpected: " + safe_int_string(receipt["unexpectedCount"], "0"))
+  print_list(harness, "quarantine", safe_list(safe_dict(receipt["quarantine"])["reasons"]))
+}
+
+/**
+ * Execute the batch rejoin command.
+ *
+ * @api_stability: internal
+ * @effects: [env.read, fs.read, fs.write, stdio.write]
+ * @errors: [runtime]
+ */
+pub fn __run_rejoin(harness: Harness) -> int {
+  const execution_path = trim(harness.env.get_or("HARN_MODELS_BATCH_EXECUTION", ""))
+  const manifest_path = trim(harness.env.get_or("HARN_MODELS_BATCH_MANIFEST", ""))
+  const download_path = trim(harness.env.get_or("HARN_MODELS_BATCH_DOWNLOAD_RECEIPT", ""))
+  const out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_REJOIN_OUT_DIR", ""))
+  const run = batch_rejoin(harness, execution_path, manifest_path, download_path, out_dir)
+  let receipt = run.receipt
+  if out_dir == "" {
+    receipt = receipt
+      + {
+      status: "quarantined",
+      consumable: false,
+      errors: safe_list(receipt["errors"]) + ["--out-dir is required"],
+      quarantine: {
+        active: true,
+        reasons: safe_list(safe_dict(receipt["quarantine"])["reasons"])
+          + [
+          "lineage_or_artifact_errors",
+        ],
+      },
+    }
+  } else {
+    ensure_parent_dir(path_join(out_dir, "normalized.jsonl"))
+    const normalized = safe_dict(receipt["normalized"])
+    let normalized_text = ""
+    for row in run.normalized_rows {
+      normalized_text = normalized_text + json_stringify(row) + "\n"
+    }
+    replace_text(
+      safe_string(normalized["path"], ""),
+      normalized_text,
+      {create: true, overwrite: true, create_parents: true, durability: "namespace"},
+    )
+    const receipt_text = json_stringify_pretty(receipt) + "\n"
+    replace_text(
+      path_join(out_dir, "receipt.json"),
+      receipt_text,
+      {create: true, overwrite: true, create_parents: true, durability: "namespace"},
+    )
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(
+      json_stringify_pretty(
+        cli_json_envelope(
+          {
+            schema_version: 1,
+            ok: true,
+            data: {
+              receipt: path_join(out_dir, "receipt.json"),
+              status: receipt["status"],
+              consumable: receipt["consumable"],
+              normalized: receipt["normalized"],
+              quarantine: receipt["quarantine"],
+              errors: receipt["errors"],
+            },
+          },
+        ),
+      ),
+    )
+  } else {
+    __render_rejoin_human(harness, receipt)
+  }
+  return 0
+}

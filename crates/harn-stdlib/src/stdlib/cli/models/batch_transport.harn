@@ -7,6 +7,36 @@ import { safe_bool, safe_dict, safe_string } from "std/cli/render"
  */
 pub type BatchLiveAdapter = {submit: bool, status: bool, cancel: bool, download: bool}
 
+pub type BatchCreateRecoveryMode = "deterministic_token" | "reconcile_only"
+
+pub type BatchCreateRecovery = {
+  mode: BatchCreateRecoveryMode,
+  token_field?: string,
+  retry_after_ambiguous_acceptance: bool,
+}
+
+/**
+ * Declare create recovery separately from ordinary transport retry policy.
+ *
+ * Bedrock's create token is deterministic and reusable. Every adapter without
+ * an equivalent documented token must reconcile an ambiguous acceptance and
+ * must not inherit another provider's idempotency behavior.
+ *
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __batch_create_recovery(provider: string, wire: string) -> BatchCreateRecovery {
+  if provider == "bedrock" || wire == "bedrock" {
+    return {
+      mode: "deterministic_token",
+      token_field: "clientRequestToken",
+      retry_after_ambiguous_acceptance: true,
+    }
+  }
+  return {mode: "reconcile_only", retry_after_ambiguous_acceptance: false}
+}
+
 /**
  * Coerce a provider numeric field to an optional integer.
  * @api_stability: internal

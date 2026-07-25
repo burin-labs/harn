@@ -1822,6 +1822,39 @@ artifact that lower-priority eval, judge, corpus-refresh, and distillation jobs
 can hand to provider-specific upload/poll/download adapters without leaking
 provider batch details into Burin or other host products.
 
+## harn models batch execute
+
+Own a complete provider-batch lifecycle in one durable execution directory:
+
+```bash
+harn models batch execute init --requests ./requests.jsonl \
+  --execution-dir ./.harn/batches/eval-001 --provider openai --model gpt-4o-mini
+harn models batch execute advance --execution-dir ./.harn/batches/eval-001 --json
+harn models batch execute inspect --execution-dir ./.harn/batches/eval-001 --json
+harn models batch execute cancel --execution-dir ./.harn/batches/eval-001 --json
+```
+
+`init` copies the request ledger into the execution directory, writes the
+manifest and prepared request files, and creates the authoritative
+`harn.model_batch_execution_receipt`. Each `advance` performs at most one legal
+transition: submit, status, download, or normalized rejoin. Call it again after
+a non-terminal status poll. `inspect` verifies the ledger, manifest, prepared
+files, intermediate receipts, raw results, stable request/job identities, and
+every recorded digest before reporting state.
+
+Execution updates are lock-serialized and compare-and-swap protected. Before a
+provider create, Harn persists a write-ahead operation id and the adapter's
+declared recovery mode. Bedrock-style deterministic create tokens may reuse
+that id; adapters without an equivalent documented token are reconcile-only.
+If a create may have been accepted but no receipt exists, the execution reports
+reconciliation required and `advance` will not create another paid batch.
+
+`--dry-run` follows the same state machine with zero provider calls. Its
+Harn-owned fixture transport produces provider-shaped raw results, so tests and
+consumers do not edit status receipts or synthesize completion outside Harn.
+When the execution reaches `rejoined`, `consumable` is true only if every
+manifest id has exactly one successful terminal row.
+
 ## harn models batch prepare
 
 Prepare provider-native request artifacts from a model batch manifest:
@@ -1939,6 +1972,34 @@ containing artifact paths, handles, hashes, source receipt metadata, and
 normalized download lifecycle counts. Use
 `--max-bytes` to cap each provider file response when working with very large
 batches.
+
+## harn models batch rejoin
+
+Normalize downloaded provider rows and rejoin them by manifest id:
+
+```bash
+harn models batch rejoin \
+  --execution ./.harn/batches/eval-001/execution.json \
+  --manifest ./.harn/batches/eval-001/manifest.json \
+  --download ./.harn/batches/eval-001/results/receipt.json \
+  --out-dir ./.harn/batches/eval-001/rejoin --json
+```
+
+`rejoin` verifies the durable execution plus the complete
+manifest → prepare → submission → status → download chain before consuming
+rows. It also re-hashes prepared request files and downloaded artifacts.
+Provider-native identifiers (`custom_id`, `customId`, `key`, `request_id`,
+`recordId`, and nested ids) and terminal response/error variants normalize into
+manifest-ordered rows with stable execution, group, job, request, and source
+artifact identities.
+
+The raw provider files remain byte-preserved and hash-bound. Duplicate,
+missing, unexpected, id-less, malformed, provider-error, partial-job,
+wrong-manifest, or changed-artifact inputs emit a non-consumable
+`harn.model_batch_rejoin_receipt` with exact counts, ids, and quarantine
+reasons. Downstream consumers should read only `normalized.jsonl` after the
+receipt says `consumable: true`; they should never branch on provider-native
+fields.
 
 ## harn models lora export
 
