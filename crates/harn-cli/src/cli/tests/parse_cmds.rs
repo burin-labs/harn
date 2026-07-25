@@ -769,7 +769,7 @@ fn test_parses_bench_replay_args() {
 
 #[test]
 fn test_profile_env_aliases_apply_to_supported_commands() {
-    let _env = crate::tests::common::env_lock::lock_env().blocking_lock();
+    let _env = crate::tests::common::harn_state_lock::lock_harn_state();
     struct EnvRestore {
         saved: [(&'static str, Option<String>); 3],
     }

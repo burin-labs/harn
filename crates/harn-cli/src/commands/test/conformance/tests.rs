@@ -207,6 +207,33 @@ fn conformance_options() -> ConformanceRunOptions<'static> {
     }
 }
 
+/// Run one conformance case under the process-global harn-state lock.
+///
+/// `execute_conformance_source` points `HARN_STATE_DIR` at a fresh temp dir for
+/// the duration of a case. That variable is process-global, and the temp dir is
+/// deleted the moment the case ends — so without this lock a concurrently
+/// running persona, portal, or orchestrator-harness test resolves its event log
+/// into this case's directory and then fails to open it. Every conformance case
+/// evaluated from a test must go through here rather than calling
+/// `evaluate_conformance_case` directly.
+async fn evaluate_case_serialized(
+    harn_file: &Path,
+    rel_path: &str,
+    options: &ConformanceRunOptions<'_>,
+) -> super::ConformanceCaseEvaluation {
+    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    evaluate_conformance_case(
+        harn_file,
+        &harn_file.with_extension("expected"),
+        &harn_file.with_extension("error"),
+        &harn_file.with_extension("lint"),
+        rel_path,
+        2_000,
+        options,
+    )
+    .await
+}
+
 #[tokio::test]
 async fn expected_output_and_lint_expectations_are_additive() {
     let temp = TempTestDir::new();
@@ -221,16 +248,8 @@ async fn expected_output_and_lint_expectations_are_additive() {
     );
     let harn_file = temp.path().join("conformance/tests/additive.harn");
 
-    let evaluation = evaluate_conformance_case(
-        &harn_file,
-        &harn_file.with_extension("expected"),
-        &harn_file.with_extension("error"),
-        &harn_file.with_extension("lint"),
-        "tests/additive.harn",
-        2_000,
-        &conformance_options(),
-    )
-    .await;
+    let evaluation =
+        evaluate_case_serialized(&harn_file, "tests/additive.harn", &conformance_options()).await;
 
     assert!(evaluation.passed, "{:?}", evaluation.message);
     assert_eq!(evaluation.diagnostic_codes, ["HARN-LNT-066"]);
@@ -256,13 +275,9 @@ async fn expected_error_and_lint_expectations_are_additive() {
     );
     let harn_file = temp.path().join("conformance/tests/additive_error.harn");
 
-    let evaluation = evaluate_conformance_case(
+    let evaluation = evaluate_case_serialized(
         &harn_file,
-        &harn_file.with_extension("expected"),
-        &harn_file.with_extension("error"),
-        &harn_file.with_extension("lint"),
         "tests/additive_error.harn",
-        2_000,
         &conformance_options(),
     )
     .await;
@@ -281,16 +296,8 @@ async fn expected_output_fails_on_unasserted_error_lint() {
     temp.write_content("conformance/tests/unasserted.expected", "");
     let harn_file = temp.path().join("conformance/tests/unasserted.harn");
 
-    let evaluation = evaluate_conformance_case(
-        &harn_file,
-        &harn_file.with_extension("expected"),
-        &harn_file.with_extension("error"),
-        &harn_file.with_extension("lint"),
-        "tests/unasserted.harn",
-        2_000,
-        &conformance_options(),
-    )
-    .await;
+    let evaluation =
+        evaluate_case_serialized(&harn_file, "tests/unasserted.harn", &conformance_options()).await;
 
     assert!(!evaluation.passed);
     assert!(evaluation
@@ -309,16 +316,8 @@ async fn empty_lint_fixture_fails_instead_of_passing_vacuously() {
     temp.write_content("conformance/tests/empty_lint.lint", "\n");
     let harn_file = temp.path().join("conformance/tests/empty_lint.harn");
 
-    let evaluation = evaluate_conformance_case(
-        &harn_file,
-        &harn_file.with_extension("expected"),
-        &harn_file.with_extension("error"),
-        &harn_file.with_extension("lint"),
-        "tests/empty_lint.harn",
-        2_000,
-        &conformance_options(),
-    )
-    .await;
+    let evaluation =
+        evaluate_case_serialized(&harn_file, "tests/empty_lint.harn", &conformance_options()).await;
 
     assert!(!evaluation.passed);
     assert!(evaluation
@@ -371,16 +370,19 @@ async fn conformance_harness_sidecar_error_fails_expected_error_fixture() {
         cli_skill_dirs: &[],
     };
 
-    let evaluation = evaluate_conformance_case(
-        &harn_file,
-        &expected_file,
-        &error_file,
-        &lint_file,
-        "tests/harness_sidecar_error.harn",
-        2_000,
-        &options,
-    )
-    .await;
+    let evaluation = {
+        let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+        evaluate_conformance_case(
+            &harn_file,
+            &expected_file,
+            &error_file,
+            &lint_file,
+            "tests/harness_sidecar_error.harn",
+            2_000,
+            &options,
+        )
+        .await
+    };
 
     assert!(!evaluation.passed);
     let message = evaluation.message.unwrap_or_default();

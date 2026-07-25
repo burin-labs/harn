@@ -576,7 +576,7 @@ mod tests {
 
     use crate::env_guard::ScopedEnvVar;
     use crate::skill_provenance;
-    use crate::tests::common::{cwd_lock::lock_cwd, env_lock::lock_env};
+    use crate::tests::common::{cwd_lock::lock_cwd, harn_state_lock::lock_harn_state};
 
     fn write_skill(root: &Path, sub: &str, name: &str, body: &str) {
         let dir = root.join(sub);
@@ -606,7 +606,7 @@ mod tests {
     fn cli_dirs_produce_registry_entries() {
         // Acquire the env lock: `load_skills` reads HOME and HARN_SKILLS_PATH,
         // which sibling tests mutate while holding this same lock.
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         write_skill(tmp.path(), "deploy", "deploy", "body A");
         let loaded = load_skills(&SkillLoaderInputs {
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn dependency_free_project_still_discovers_project_skills() {
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let _home = set_home(home.path());
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn loader_strips_command_frontmatter_when_provenance_is_not_trusted() {
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     fn loader_attaches_verified_provenance_metadata() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -780,7 +780,7 @@ mod tests {
     #[test]
     fn loader_warns_when_signature_is_invalid() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -817,7 +817,7 @@ mod tests {
     #[test]
     fn manifest_required_signature_omits_unverified_skill_at_startup() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -848,7 +848,7 @@ mod tests {
     #[test]
     fn unsigned_skill_loads_without_executable_hooks() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -888,7 +888,7 @@ mod tests {
     #[test]
     fn user_layer_drops_skill_when_signature_fails() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -928,7 +928,7 @@ mod tests {
     #[test]
     fn user_layer_unsigned_skill_fetches_without_hooks() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -963,7 +963,7 @@ mod tests {
     #[test]
     fn global_require_signed_skills_omits_unsigned_skill() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
         let _require = ScopedEnvVar::set(REQUIRE_SIGNED_SKILLS_ENV, "1");

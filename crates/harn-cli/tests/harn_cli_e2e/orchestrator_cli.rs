@@ -14,7 +14,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use harn_cli::commands::orchestrator::harness::{OrchestratorConfig, OrchestratorHarness};
 use harn_cli::env_guard::ScopedEnvVar;
-use harn_cli::tests::common::{env_lock, harn_state_lock};
+use harn_cli::tests::common::harn_state_lock;
 use harn_vm::event_log::{
     AnyEventLog, ConsumerId, EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic,
 };
@@ -23,7 +23,6 @@ use tempfile::TempDir;
 use test_util::connectors::github_connector_module;
 use test_util::connectors::{provider_declarations, write_first_party_connector_modules};
 use test_util::process::harn_e2e_command;
-use tokio::sync::MutexGuard;
 
 const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
@@ -55,12 +54,12 @@ pub fn on_task(event: TriggerEvent) -> string {{
 // ── In-process harness helpers ───────────────────────────────────────────────
 
 struct EnvGuards {
-    _lock: MutexGuard<'static, ()>,
+    _lock: harn_state_lock::HarnStateGuard,
     _vars: Vec<ScopedEnvVar>,
 }
 
 async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
-    let lock = env_lock::lock_env().lock().await;
+    let lock = harn_state_lock::lock_harn_state_async().await;
     let vars = envs
         .iter()
         .map(|(key, value)| ScopedEnvVar::set(key, value))
@@ -808,14 +807,12 @@ pub fn on_event(event: TriggerEvent) {
         "github_connector.harn",
         github_connector_module(),
     );
-    // Acquire env_lock + harn_state_lock so concurrent tests can't
-    // flip `HARN_EVENT_LOG_BACKEND` or leak `HARN_STATE_DIR`
-    // mid-seed. `OrchestratorRole::build_vm` will also set
-    // `HARN_STATE_DIR` once the harness starts; pin it to this
-    // test's `state_dir` up-front so seed reads and harness reads
-    // resolve to the same SQLite path.
+    // Hold the harn-state lock so concurrent tests can't flip
+    // `HARN_EVENT_LOG_BACKEND` or leak `HARN_STATE_DIR` mid-seed.
+    // `OrchestratorRole::build_vm` will also set `HARN_STATE_DIR` once the
+    // harness starts; pin it to this test's `state_dir` up-front so seed
+    // reads and harness reads resolve to the same SQLite path.
     let _envs = lock_env_with(&[]).await;
-    let _state_lock = harn_state_lock::lock_harn_state_async().await;
     let state_dir = temp.path().join("state");
     fs::create_dir_all(&state_dir).unwrap();
     let _state_dir_var = ScopedEnvVar::set(

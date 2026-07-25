@@ -815,7 +815,7 @@ mod tests {
     use std::fs;
 
     use crate::env_guard::ScopedEnvVar;
-    use crate::tests::common::{cwd_lock::lock_cwd, env_lock::lock_env};
+    use crate::tests::common::{cwd_lock::lock_cwd, harn_state_lock::lock_harn_state};
 
     fn write_skill(path: &Path, body: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -829,7 +829,7 @@ mod tests {
     #[test]
     fn keygen_sign_and_verify_roundtrip() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -858,7 +858,7 @@ mod tests {
     #[test]
     fn verify_rejects_tampered_skill_payload() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -879,7 +879,7 @@ mod tests {
     #[test]
     fn verify_rejects_wrong_key_signature() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -905,7 +905,7 @@ mod tests {
     #[test]
     fn verify_reports_missing_signer() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -925,7 +925,7 @@ mod tests {
     #[test]
     fn verify_honors_allowed_signers() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 
@@ -963,7 +963,7 @@ mod tests {
     #[test]
     fn verify_rejects_missing_endorsement() {
         let _cwd = lock_cwd();
-        let _env = lock_env().blocking_lock();
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let _home = set_home(tmp.path());
 

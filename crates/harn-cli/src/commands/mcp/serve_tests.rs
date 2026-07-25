@@ -14,7 +14,6 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 
 use crate::env_guard::ScopedEnvVar;
-use crate::tests::common::env_lock::lock_env;
 use crate::tests::common::harn_state_lock::lock_harn_state_async;
 
 #[path = "serve_tests/pagination.rs"]
@@ -1346,7 +1345,6 @@ async fn streamable_http_endpoint_supports_sse_get_delete_and_session_headers() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn oauth_metadata_and_challenge_are_served_when_configured() {
-    let _env_lock = lock_env().lock().await;
     // Acquire the harn-state lock BEFORE setting env vars. Rust drops
     // bindings in reverse declaration order, so env vars must be
     // declared *after* the lock to be cleared before another test
@@ -1509,7 +1507,6 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
         .unwrap();
     });
 
-    let _env_lock = lock_env().lock().await;
     // Acquire the harn-state lock BEFORE setting env vars so they
     // are dropped (cleared) before another test can re-enter the
     // lock — see the matching comment in
