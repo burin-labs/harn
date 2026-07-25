@@ -59,6 +59,7 @@ fn default_host_capabilities() -> HostCapabilities {
                 "approved_plan".to_string(),
                 "dry_run".to_string(),
                 "pipeline_input".to_string(),
+                "prompt_content".to_string(),
                 "record_run".to_string(),
                 "set_result".to_string(),
                 "task".to_string(),

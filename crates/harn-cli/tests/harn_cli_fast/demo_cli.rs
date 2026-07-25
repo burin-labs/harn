@@ -272,6 +272,25 @@ fn stdlib_toolkit_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn runtime_prompt_content_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("runtime-prompt-content");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "runtime-prompt-content demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("runtime_prompt_content_receipt")
+            && outcome.stdout.contains("\"block_count\":2")
+            && outcome
+                .stdout
+                .contains("\"image_media_type\":\"image/png\""),
+        "runtime-prompt-content demo should preserve both typed blocks:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn embed_similarity_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("embed-similarity");
     assert_eq!(
@@ -766,6 +785,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "provider-race",
         "routing-policy",
         "stdlib-toolkit",
+        "runtime-prompt-content",
         "embed-similarity",
         "project-metadata",
         "compaction-policy",

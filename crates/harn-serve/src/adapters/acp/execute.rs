@@ -230,6 +230,8 @@ pub(super) async fn execute_chunk(
     };
 
     vm.set_harness(harn_vm::Harness::real());
+    let prompt_content_value =
+        harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.content.to_vec()));
     // Bind the ACP session-prompt ambient globals from the single source of
     // truth the type-checker allowlist also consumes (`harn_parser`), so a
     // global bound here can never be one `harn check` rejects. The exhaustive
@@ -238,9 +240,7 @@ pub(super) async fn execute_chunk(
     for global in AcpAmbientGlobal::ALL {
         let value = match global {
             AcpAmbientGlobal::Prompt => harn_vm::VmValue::String(arcstr::ArcStr::from(prompt.text)),
-            AcpAmbientGlobal::PromptContent => {
-                harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.content.to_vec()))
-            }
+            AcpAmbientGlobal::PromptContent => prompt_content_value.clone(),
             AcpAmbientGlobal::PromptMessages => {
                 harn_vm::json_to_vm_value(&serde_json::Value::Array(prompt.messages.to_vec()))
             }
@@ -259,7 +259,7 @@ pub(super) async fn execute_chunk(
         vm.set_global(global.name(), value);
     }
 
-    builtins::register_acp_builtins(&mut vm, bridge.clone()).await;
+    builtins::register_acp_builtins(&mut vm, bridge.clone(), prompt_content_value).await;
 
     // Share the same cancellation flag the ACP session's `cancellation`
     // already installed on `host_bridge` (see prompt.rs) with the VM's

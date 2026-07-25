@@ -990,6 +990,7 @@ Generic host/runtime helpers that are useful across many hosts:
 |---|---|
 | `runtime_task()` | Return the current runtime task string |
 | `runtime_pipeline_input()` | Return structured pipeline input from the host |
+| `runtime_prompt_content()` | Return the active ACP session prompt as typed, normalized text/image/audio/PDF content blocks |
 | `runtime_dry_run()` | Return whether the current run is dry-run only |
 | `runtime_approved_plan()` | Return the host-approved plan text when available |
 | `process_run(argv, options?)` | Execute a process through argv-mode `process.exec`; prefer this for programmatic commands |
