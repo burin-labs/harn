@@ -661,6 +661,12 @@ mod tests {
 
     #[test]
     fn unknown_frontmatter_fields_surface_as_warnings() {
+        // `load_skills` reads `HARN_REQUIRE_SIGNED_SKILLS`, which
+        // `global_require_signed_skills_omits_unsigned_skill` sets. Without the
+        // lock this test intermittently saw that value, rejected its own
+        // unsigned fixture, and reported zero winners. Every other test in this
+        // module already takes it; this was the straggler.
+        let _env = lock_harn_state();
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("thing");
         fs::create_dir_all(&dir).unwrap();

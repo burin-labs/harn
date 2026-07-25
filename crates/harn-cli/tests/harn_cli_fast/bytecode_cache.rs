@@ -65,12 +65,34 @@ fn run_harn(cache_dir: &Path, script: &Path) -> RunOutcome {
     })
 }
 
-fn cache_entries(dir: &Path) -> Vec<PathBuf> {
-    cache_entries_with_extension(dir, "harnbc")
-}
-
+/// Only used to enrich a failure message: the assertions themselves name the
+/// artifact they expect rather than counting the shared directory.
 fn module_cache_entries(dir: &Path) -> Vec<PathBuf> {
     cache_entries_with_extension(dir, "harnmod")
+}
+
+/// The entry-chunk artifact `source_path` compiles to.
+///
+/// `HARN_CACHE_DIR` is process-global, so while a test holds it pointed at its
+/// own `TempDir`, every other test compiling in parallel writes artifacts there
+/// too. Naming the expected artifact keeps these assertions about what this
+/// test compiled; counting the directory would describe the suite's scheduling.
+fn expected_entry_artifact(cache_dir: &Path, source_path: &Path) -> PathBuf {
+    let source = fs::read_to_string(source_path).expect("read entry source");
+    let key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
+    cache_dir.join(key.filename())
+}
+
+/// The module artifact `source_path` compiles to. See
+/// [`expected_entry_artifact`]. The module key is deliberately
+/// path-independent — identical source and compiler inputs share one
+/// relocatable artifact — so only the text is hashed.
+fn expected_module_artifact(cache_dir: &Path, source_path: &Path) -> PathBuf {
+    let source = fs::read_to_string(source_path).expect("read module source");
+    let key = harn_vm::bytecode_cache::CacheKey::from_module_source(
+        &harn_vm::module_source::ModuleSource::from_text(source),
+    );
+    cache_dir.join(key.module_filename())
 }
 
 fn cache_entries_with_extension(dir: &Path, ext: &str) -> Vec<PathBuf> {
@@ -97,10 +119,9 @@ fn source_edit_invalidates_cache() {
     let first = run_harn(cache.path(), &script);
     assert_eq!(first.exit_code, 0, "first run failed: {}", first.stderr);
     assert!(first.stdout.contains("alpha"), "stdout: {:?}", first.stdout);
-    assert_eq!(
-        cache_entries(cache.path()).len(),
-        1,
-        "expected one cache entry"
+    assert!(
+        expected_entry_artifact(cache.path(), &script).is_file(),
+        "expected this script's cache entry to be written"
     );
 
     fs::write(&script, "__io_println(\"bravo\")\n").unwrap();
@@ -111,12 +132,11 @@ fn source_edit_invalidates_cache() {
         "stdout: {:?}",
         second.stdout
     );
-    // Old + new entry coexist because the cache filename is keyed by
-    // source hash. We just need to confirm the new content shows up.
-    let entries = cache_entries(cache.path());
+    // Old + new entry coexist because the cache filename is keyed by source
+    // hash. Confirm the edited content got its own entry, by name.
     assert!(
-        entries.len() >= 2,
-        "expected ≥2 cache entries, got {entries:?}"
+        expected_entry_artifact(cache.path(), &script).is_file(),
+        "edited script should get its own cache entry"
     );
 }
 
@@ -136,20 +156,26 @@ fn imported_module_is_cached_to_disk() {
     let first = run_harn(cache.path(), &script);
     assert_eq!(first.exit_code, 0, "first run failed: {}", first.stderr);
     assert!(first.stdout.contains("42"), "stdout: {:?}", first.stdout);
-    let module_entries = module_cache_entries(cache.path());
-    assert_eq!(
-        module_entries.len(),
-        1,
-        "imported lib should have produced one cached module artifact, got {module_entries:?}"
+    let lib_artifact = expected_module_artifact(cache.path(), &lib);
+    assert!(
+        lib_artifact.is_file(),
+        "imported lib should have produced its cached module artifact at {}, dir held {:?}",
+        lib_artifact.display(),
+        module_cache_entries(cache.path())
     );
 
     let second = run_harn(cache.path(), &script);
     assert_eq!(second.exit_code, 0, "second run failed: {}", second.stderr);
     assert!(second.stdout.contains("42"));
-    assert_eq!(
-        module_cache_entries(cache.path()).len(),
-        1,
-        "second run should reuse the cached module without writing a new artifact"
+    // The artifact name is the compilation key, so a stable name across runs is
+    // what makes the second run a hit rather than a miss under a new key.
+    // Deliberately not an mtime comparison: mtime granularity is one second on
+    // some filesystems, so "unchanged" would pass without proving anything.
+    // Reuse-instead-of-recompile is covered by `precompile_then_run_skips_compile`.
+    assert!(
+        lib_artifact.is_file(),
+        "second run should resolve the same cache key, expected {}",
+        lib_artifact.display()
     );
 }
 
@@ -234,11 +260,11 @@ fn precompile_then_run_skips_compile() {
         "stdout: {:?}",
         run_result.stdout
     );
-    // Adjacent artifact was the cache source, so the shared cache dir
-    // stays empty.
-    let shared = cache_entries(cache.path());
+    // Adjacent artifact was the cache source, so nothing for THIS script
+    // reaches the shared dir.
+    let shared = expected_entry_artifact(cache.path(), &script);
     assert!(
-        shared.is_empty(),
+        !shared.exists(),
         "expected adjacent artifact to satisfy the loader without populating \
          the shared cache dir; got {shared:?}"
     );
@@ -312,9 +338,12 @@ fn relocated_precompiled_module_uses_adjacent_artifact_and_rebinds_diagnostics()
         "relocated artifact leaked its build-time path {build_lib_display}; stderr: {}",
         run_result.stderr
     );
+    let shared_artifact = expected_module_artifact(cache.path(), &run_lib);
     assert!(
-        module_cache_entries(cache.path()).is_empty(),
-        "relocated adjacent .harnmod should satisfy the import without a shared module-cache write"
+        !shared_artifact.exists(),
+        "relocated adjacent .harnmod should satisfy the import without a shared module-cache \
+         write, but {} was written",
+        shared_artifact.display()
     );
 }
 
@@ -326,7 +355,9 @@ fn disabled_cache_does_not_write_files() {
     fs::write(&script, "__io_println(\"no cache\")\n").unwrap();
 
     let cache_dir = cache.path().to_path_buf();
+    let script_for_run = script.clone();
     let outcome = run_in_harn_runtime(move || async move {
+        let script = script_for_run;
         let _env_guard = harn_state_lock::lock_harn_state_async().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
         harn_vm::reset_thread_local_state();
@@ -359,7 +390,7 @@ fn disabled_cache_does_not_write_files() {
     assert_eq!(outcome.exit_code, 0, "stderr: {}", outcome.stderr);
     assert!(outcome.stdout.contains("no cache"));
     assert!(
-        cache_entries(cache.path()).is_empty(),
-        "cache disabled should leave the dir untouched"
+        !expected_entry_artifact(cache.path(), &script).exists(),
+        "cache disabled should not write this script's entry"
     );
 }
