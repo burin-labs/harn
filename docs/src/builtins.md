@@ -129,7 +129,9 @@ The canonical schema is a plain Harn dict. The validator also accepts compatible
 JSON Schema / OpenAPI Schema Object spellings such as `object`, `array`,
 `integer`, `number`, `boolean`, `oneOf`, `allOf`, `minLength`, `maxLength`,
 `minItems`, `maxItems`, and `additionalProperties`, normalizing them into the
-same internal form.
+same internal form. Runtime constraints are evaluated with a JSON Schema Draft
+2020-12 validator; Harn keeps a small compatibility layer for Harn-only runtime
+types, recursive default application, and path-aware diagnostics.
 
 Schema traversal is bounded before validation runs: canonicalization, JSON
 Schema/OpenAPI export, runtime validation, and JSON-stream schema setup reject

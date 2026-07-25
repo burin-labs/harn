@@ -1,55 +1,14 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-
-use crate::runtime_limits::RuntimeLimits;
-use crate::value::{values_equal, StructLayout, VmValue};
+use crate::value::VmValue;
 
 use super::canonicalize::resolve_canonical_ref_with_path;
+use super::jsonschema_validate;
 use super::limits::SchemaTraversal;
-use super::result::{ValidationIssue, ValidationResult};
+use super::result::ValidationResult;
+use super::schema_bool;
 use super::type_check::{
     actual_value_type, schema_expected_label, schema_is_object_like, schema_type_name,
     value_matches_type,
 };
-use super::{child_path, index_path, schema_bool, schema_i64, schema_number};
-
-// Schema patterns are typically a small, recurring set (e.g. `"^[a-z]+$"`),
-// and recompiling them on every value validated showed up as a hot-path
-// allocation cost. Cap the cache so adversarial schemas can't grow memory
-// unboundedly.
-const PATTERN_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_schema_pattern_cache_entries;
-
-#[derive(Clone)]
-enum PatternEntry {
-    Compiled(Arc<regex::Regex>),
-    Invalid(Arc<String>),
-}
-
-fn pattern_cache() -> &'static Mutex<HashMap<String, PatternEntry>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, PatternEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn cached_pattern(pattern: &str) -> PatternEntry {
-    if let Ok(mut cache) = pattern_cache().lock() {
-        if let Some(entry) = cache.get(pattern) {
-            return entry.clone();
-        }
-        let entry = match regex::Regex::new(pattern) {
-            Ok(re) => PatternEntry::Compiled(Arc::new(re)),
-            Err(error) => PatternEntry::Invalid(Arc::new(error.to_string())),
-        };
-        if cache.len() >= PATTERN_CACHE_LIMIT {
-            cache.clear();
-        }
-        cache.insert(pattern.to_string(), entry.clone());
-        return entry;
-    }
-    match regex::Regex::new(pattern) {
-        Ok(re) => PatternEntry::Compiled(Arc::new(re)),
-        Err(error) => PatternEntry::Invalid(Arc::new(error.to_string())),
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ValidationOptions {
@@ -62,518 +21,19 @@ pub(super) fn validate_schema_value(
     schema: &VmValue,
     options: ValidationOptions,
 ) -> ValidationResult {
-    let root = schema.as_dict().cloned().unwrap_or_default();
-    let schema_dict = schema.as_dict().cloned().unwrap_or_default();
-    let mut context = ValidationContext::new();
-    validate_against_schema(data, &schema_dict, &root, "", options, &mut context)
+    jsonschema_validate::validate_schema_value(data, schema, options)
 }
 
-struct ValidationContext {
+struct ParamValidationContext {
     traversal: SchemaTraversal,
     ref_stack: Vec<String>,
 }
 
-impl ValidationContext {
+impl ParamValidationContext {
     fn new() -> Self {
         Self {
             traversal: SchemaTraversal::new(),
             ref_stack: Vec::new(),
-        }
-    }
-}
-
-fn validate_against_schema(
-    value: &VmValue,
-    schema: &crate::value::DictMap,
-    root_schema: &crate::value::DictMap,
-    path: &str,
-    options: ValidationOptions,
-    context: &mut ValidationContext,
-) -> ValidationResult {
-    if let Err(error) = context.traversal.enter_schema() {
-        return validation_limit_error(value, path, error);
-    }
-    let result = validate_against_schema_inner(value, schema, root_schema, path, options, context);
-    context.traversal.exit_schema();
-    result
-}
-
-fn validate_against_schema_inner(
-    value: &VmValue,
-    schema: &crate::value::DictMap,
-    root_schema: &crate::value::DictMap,
-    path: &str,
-    options: ValidationOptions,
-    context: &mut ValidationContext,
-) -> ValidationResult {
-    if let Some(VmValue::String(pointer)) = schema.get("$ref") {
-        if let Err(error) = context.traversal.expand_ref() {
-            return validation_limit_error(value, path, error);
-        }
-        match resolve_canonical_ref_with_path(root_schema, pointer) {
-            Some((resolved_pointer, resolved)) => {
-                if let Some(index) = context
-                    .ref_stack
-                    .iter()
-                    .position(|entry| entry == &resolved_pointer)
-                {
-                    let mut cycle = context.ref_stack[index..].to_vec();
-                    cycle.push(resolved_pointer);
-                    return validation_limit_error(
-                        value,
-                        path,
-                        format!("cyclic schema reference: {}", cycle.join(" -> ")),
-                    );
-                }
-                context.ref_stack.push(resolved_pointer);
-                let result =
-                    validate_against_schema(value, &resolved, root_schema, path, options, context);
-                context.ref_stack.pop();
-                return result;
-            }
-            None => {
-                return ValidationResult {
-                    value: value.clone(),
-                    errors: vec![ValidationIssue::schema(
-                        path,
-                        format!("unresolved schema reference '{pointer}'"),
-                    )],
-                };
-            }
-        }
-    }
-
-    if matches!(value, VmValue::Nil) && schema_bool(schema, "nullable") {
-        return ValidationResult {
-            value: VmValue::Nil,
-            errors: Vec::new(),
-        };
-    }
-
-    if let Some(const_value) = schema.get("const") {
-        if !values_equal(value, const_value) {
-            return ValidationResult {
-                value: value.clone(),
-                errors: vec![ValidationIssue::schema(
-                    path,
-                    format!(
-                        "expected constant {}, got {}",
-                        const_value.display(),
-                        value.display()
-                    ),
-                )],
-            };
-        }
-    }
-
-    let mut errors = Vec::new();
-    let mut normalized = value.clone();
-
-    if let Some(VmValue::List(branches)) = schema.get("all_of") {
-        for branch in branches.iter() {
-            let Some(branch_dict) = branch.as_dict() else {
-                continue;
-            };
-            let branch_result = validate_against_schema(
-                &normalized,
-                branch_dict,
-                root_schema,
-                path,
-                options,
-                context,
-            );
-            normalized = branch_result.value;
-            errors.extend(branch_result.errors);
-        }
-    }
-
-    if let Some(VmValue::List(union_schemas)) = schema.get("union") {
-        let mut matched = None;
-        for branch in union_schemas.iter() {
-            if let Some(dict) = branch.as_dict() {
-                let branch_result =
-                    validate_against_schema(value, dict, root_schema, path, options, context);
-                if branch_result.errors.is_empty() {
-                    matched = Some(branch_result.value);
-                    break;
-                }
-            }
-        }
-        if let Some(value) = matched {
-            normalized = value;
-        } else {
-            errors.push(ValidationIssue::schema(
-                path,
-                "value did not match any union branch",
-            ));
-        }
-    }
-
-    if let Some(expected_type) = schema_type_name(schema) {
-        if !value_matches_type(value, expected_type, options.numeric_compat) {
-            errors.push(ValidationIssue::schema(
-                path,
-                format!(
-                    "expected type '{}', got '{}'",
-                    expected_type,
-                    actual_value_type(value)
-                ),
-            ));
-            return ValidationResult {
-                value: normalized,
-                errors,
-            };
-        }
-    }
-
-    match &normalized {
-        VmValue::Dict(map) => {
-            let (next_value, next_errors) =
-                validate_object_fields(map, None, schema, root_schema, path, options, context);
-            normalized = next_value;
-            errors.extend(next_errors);
-            validate_enum_membership(&normalized, schema, path, &mut errors);
-        }
-        VmValue::StructInstance(si) => {
-            let layout = &si.layout;
-            let fields = normalized.struct_fields_map().unwrap_or_default();
-            let (next_value, next_errors) = validate_object_fields(
-                &fields,
-                Some(layout),
-                schema,
-                root_schema,
-                path,
-                options,
-                context,
-            );
-            normalized = next_value;
-            errors.extend(next_errors);
-            validate_enum_membership(&normalized, schema, path, &mut errors);
-        }
-        VmValue::List(_) | VmValue::Set(_) => {
-            let items = collection_items(&normalized);
-            if let Some(min_items) = schema_i64(schema, "min_items") {
-                if (items.len() as i64) < min_items {
-                    errors.push(ValidationIssue::schema(
-                        path,
-                        format!("expected at least {min_items} items, got {}", items.len()),
-                    ));
-                }
-            }
-            if let Some(max_items) = schema_i64(schema, "max_items") {
-                if (items.len() as i64) > max_items {
-                    errors.push(ValidationIssue::schema(
-                        path,
-                        format!("expected at most {max_items} items, got {}", items.len()),
-                    ));
-                }
-            }
-            if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
-                let mut normalized_items = Vec::with_capacity(items.len());
-                for (i, item) in items.iter().enumerate() {
-                    let child = validate_against_schema(
-                        item,
-                        item_schema,
-                        root_schema,
-                        &index_path(path, i),
-                        options,
-                        context,
-                    );
-                    if child.errors.is_empty() {
-                        normalized_items.push(child.value);
-                    } else {
-                        errors.extend(child.errors);
-                    }
-                }
-                normalized = match &normalized {
-                    VmValue::Set(_) => VmValue::set(normalized_items),
-                    _ => VmValue::List(std::sync::Arc::new(normalized_items)),
-                };
-            }
-            if schema_bool(schema, "unique_items") && !items_are_unique(&normalized) {
-                errors.push(ValidationIssue::schema(path, "expected items to be unique"));
-            }
-            validate_enum_membership(&normalized, schema, path, &mut errors);
-        }
-        VmValue::String(text) => {
-            let length = text.chars().count() as i64;
-            if let Some(min_length) = schema_i64(schema, "min_length") {
-                if length < min_length {
-                    errors.push(ValidationIssue::schema(
-                        path,
-                        format!("expected length >= {min_length}, got {length}"),
-                    ));
-                }
-            }
-            if let Some(max_length) = schema_i64(schema, "max_length") {
-                if length > max_length {
-                    errors.push(ValidationIssue::schema(
-                        path,
-                        format!("expected length <= {max_length}, got {length}"),
-                    ));
-                }
-            }
-            if let Some(VmValue::String(pattern)) = schema.get("pattern") {
-                match cached_pattern(pattern) {
-                    PatternEntry::Compiled(re) => {
-                        if !re.is_match(text) {
-                            errors.push(ValidationIssue::schema(
-                                path,
-                                format!("value does not match pattern '{pattern}'"),
-                            ));
-                        }
-                    }
-                    PatternEntry::Invalid(error) => errors.push(ValidationIssue::schema(
-                        path,
-                        format!("invalid regex pattern '{pattern}': {error}"),
-                    )),
-                }
-            }
-            if let Some(VmValue::List(enum_values)) = schema.get("enum") {
-                if !enum_values
-                    .iter()
-                    .any(|candidate| values_equal(candidate, &normalized))
-                {
-                    errors.push(ValidationIssue::schema(
-                        path,
-                        format!(
-                            "value must be one of [{}]",
-                            enum_values
-                                .iter()
-                                .map(VmValue::display)
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                    ));
-                }
-            }
-        }
-        VmValue::Int(number) => {
-            validate_numeric_constraints(*number as f64, schema, path, &mut errors);
-            validate_enum_membership(&normalized, schema, path, &mut errors);
-        }
-        VmValue::Float(number) => {
-            validate_numeric_constraints(*number, schema, path, &mut errors);
-            validate_enum_membership(&normalized, schema, path, &mut errors);
-        }
-        VmValue::Bool(_) | VmValue::Nil => {
-            validate_enum_membership(&normalized, schema, path, &mut errors);
-        }
-        _ => {}
-    }
-
-    ValidationResult {
-        value: normalized,
-        errors,
-    }
-}
-
-fn validation_limit_error(value: &VmValue, path: &str, error: String) -> ValidationResult {
-    ValidationResult {
-        value: value.clone(),
-        errors: vec![ValidationIssue::schema(path, error)],
-    }
-}
-
-fn validate_object_fields(
-    fields: &crate::value::DictMap,
-    struct_layout: Option<&StructLayout>,
-    schema: &crate::value::DictMap,
-    root_schema: &crate::value::DictMap,
-    path: &str,
-    options: ValidationOptions,
-    context: &mut ValidationContext,
-) -> (VmValue, Vec<ValidationIssue>) {
-    let mut errors = Vec::new();
-    let mut merged = fields.clone();
-    let mut known_keys = std::collections::BTreeSet::new();
-
-    if let Some(VmValue::List(required_keys)) = schema.get("required") {
-        for key_val in required_keys.iter() {
-            let key = key_val.display();
-            if !fields.contains_key(key.as_str()) {
-                let has_default = schema
-                    .get("properties")
-                    .and_then(VmValue::as_dict)
-                    .and_then(|props| props.get(key.as_str()))
-                    .and_then(VmValue::as_dict)
-                    .is_some_and(|prop_schema| prop_schema.contains_key("default"));
-                if options.apply_defaults && has_default {
-                    continue;
-                }
-                errors.push(ValidationIssue::schema(
-                    path,
-                    format!("missing required key '{key}'"),
-                ));
-            }
-        }
-    }
-
-    if let Some(VmValue::Dict(prop_schemas)) = schema.get("properties") {
-        for (key, prop_schema) in prop_schemas.iter() {
-            known_keys.insert(key.clone());
-            let Some(prop_schema_dict) = prop_schema.as_dict() else {
-                continue;
-            };
-            let child_path = child_path(path, key);
-            match fields.get(key) {
-                Some(prop_value) => {
-                    let child = validate_against_schema(
-                        prop_value,
-                        prop_schema_dict,
-                        root_schema,
-                        &child_path,
-                        options,
-                        context,
-                    );
-                    if child.errors.is_empty() {
-                        merged.insert(key.clone(), child.value);
-                    } else {
-                        errors.extend(child.errors);
-                    }
-                }
-                None if options.apply_defaults => {
-                    if let Some(default_value) = prop_schema_dict.get("default") {
-                        let child = validate_against_schema(
-                            default_value,
-                            prop_schema_dict,
-                            root_schema,
-                            &child_path,
-                            options,
-                            context,
-                        );
-                        if child.errors.is_empty() {
-                            merged.insert(key.clone(), child.value);
-                        } else {
-                            errors.extend(child.errors);
-                        }
-                    }
-                }
-                None => {}
-            }
-        }
-    }
-
-    match schema.get("additional_properties") {
-        Some(VmValue::Bool(false)) => {
-            for key in fields.keys() {
-                if !known_keys.contains(key) {
-                    errors.push(ValidationIssue::schema(
-                        path,
-                        format!("unexpected key '{key}'"),
-                    ));
-                }
-            }
-        }
-        Some(VmValue::Dict(extra_schema)) => {
-            for (key, value) in fields.iter() {
-                if known_keys.contains(key) {
-                    continue;
-                }
-                let child = validate_against_schema(
-                    value,
-                    extra_schema,
-                    root_schema,
-                    &child_path(path, key),
-                    options,
-                    context,
-                );
-                if child.errors.is_empty() {
-                    merged.insert(key.clone(), child.value);
-                } else {
-                    errors.extend(child.errors);
-                }
-            }
-        }
-        _ => {}
-    }
-
-    let normalized = if let Some(layout) = struct_layout {
-        let mut field_names = layout.field_names().to_vec();
-        for key in merged.keys() {
-            if layout.field_index(key).is_none() {
-                field_names.push(key.to_string());
-            }
-        }
-        VmValue::struct_instance_with_layout(layout.struct_name().to_string(), field_names, merged)
-    } else {
-        VmValue::dict(merged)
-    };
-
-    (normalized, errors)
-}
-
-/// Borrow the element slice of a list or set; empty for any other value.
-fn collection_items(value: &VmValue) -> &[VmValue] {
-    match value {
-        VmValue::List(items) => items,
-        VmValue::Set(set) => set.items(),
-        _ => &[],
-    }
-}
-
-fn items_are_unique(value: &VmValue) -> bool {
-    if !matches!(value, VmValue::List(_) | VmValue::Set(_)) {
-        return true;
-    }
-    let items = collection_items(value);
-    for (index, item) in items.iter().enumerate() {
-        if items[index + 1..]
-            .iter()
-            .any(|candidate| values_equal(item, candidate))
-        {
-            return false;
-        }
-    }
-    true
-}
-
-fn validate_numeric_constraints(
-    value: f64,
-    schema: &crate::value::DictMap,
-    path: &str,
-    errors: &mut Vec<ValidationIssue>,
-) {
-    if let Some(min) = schema_number(schema, "min") {
-        if value < min {
-            errors.push(ValidationIssue::schema(
-                path,
-                format!("expected value >= {min}, got {value}"),
-            ));
-        }
-    }
-    if let Some(max) = schema_number(schema, "max") {
-        if value > max {
-            errors.push(ValidationIssue::schema(
-                path,
-                format!("expected value <= {max}, got {value}"),
-            ));
-        }
-    }
-}
-
-fn validate_enum_membership(
-    value: &VmValue,
-    schema: &crate::value::DictMap,
-    path: &str,
-    errors: &mut Vec<ValidationIssue>,
-) {
-    if let Some(VmValue::List(enum_values)) = schema.get("enum") {
-        if !enum_values
-            .iter()
-            .any(|candidate| values_equal(candidate, value))
-        {
-            errors.push(ValidationIssue::schema(
-                path,
-                format!(
-                    "value must be one of [{}]",
-                    enum_values
-                        .iter()
-                        .map(VmValue::display)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            ));
         }
     }
 }
@@ -585,14 +45,13 @@ pub(super) fn first_param_validation_error(
     param_name: &str,
     options: ValidationOptions,
 ) -> Option<String> {
-    let mut context = ValidationContext::new();
     first_param_validation_error_inner(
         value,
         schema,
         root_schema,
         param_name,
         options,
-        &mut context,
+        &mut ParamValidationContext::new(),
     )
 }
 
@@ -602,7 +61,7 @@ fn first_param_validation_error_inner(
     root_schema: &crate::value::DictMap,
     param_name: &str,
     options: ValidationOptions,
-    context: &mut ValidationContext,
+    context: &mut ParamValidationContext,
 ) -> Option<String> {
     if let Err(error) = context.traversal.enter_schema() {
         return Some(format!("parameter '{param_name}': {error}"));
@@ -619,7 +78,7 @@ fn first_param_validation_error_body(
     root_schema: &crate::value::DictMap,
     param_name: &str,
     options: ValidationOptions,
-    context: &mut ValidationContext,
+    context: &mut ParamValidationContext,
 ) -> Option<String> {
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
         if let Err(error) = context.traversal.expand_ref() {
@@ -661,13 +120,11 @@ fn first_param_validation_error_body(
     if matches!(value, VmValue::Nil) && schema_bool(schema, "nullable") {
         return None;
     }
-
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
-        for branch in branches.iter() {
-            let branch_dict = branch.as_dict()?;
+        for branch in branches.iter().filter_map(VmValue::as_dict) {
             if let Some(error) = first_param_validation_error_inner(
                 value,
-                branch_dict,
+                branch,
                 root_schema,
                 param_name,
                 options,
@@ -678,18 +135,19 @@ fn first_param_validation_error_body(
         }
         return None;
     }
-
     if let Some(VmValue::List(branches)) = schema.get("union") {
-        for branch in branches.iter() {
-            let branch_dict = branch.as_dict()?;
+        if branches.iter().filter_map(VmValue::as_dict).any(|branch| {
             first_param_validation_error_inner(
                 value,
-                branch_dict,
+                branch,
                 root_schema,
                 param_name,
                 options,
                 context,
-            )?;
+            )
+            .is_none()
+        }) {
+            return None;
         }
         return Some(format!(
             "parameter '{}' expected {}, got {} ({})",
@@ -713,7 +171,7 @@ fn first_param_validation_error_body(
                     "parameter '{}': expected dict or struct, got {}",
                     param_name,
                     value.type_name()
-                ));
+                ))
             }
         };
         return first_object_param_error(fields, schema, root_schema, param_name, options, context);
@@ -730,25 +188,24 @@ fn first_param_validation_error_body(
             ));
         }
     }
-
-    let result = validate_against_schema(value, schema, root_schema, "root", options, context);
+    let result =
+        jsonschema_validate::validate_schema_fragment(value, schema, root_schema, "root", options);
     if result.errors.is_empty() {
         None
     } else {
-        let joined = result
+        let detail = result
             .errors
             .into_iter()
             .map(|error| {
                 let rendered = error.render();
-                if rendered.starts_with("at root: ") {
-                    rendered.replacen("at root: ", "", 1)
-                } else {
-                    rendered
-                }
+                rendered
+                    .strip_prefix("at root: ")
+                    .unwrap_or(&rendered)
+                    .to_string()
             })
             .collect::<Vec<_>>()
             .join("; ");
-        Some(format!("parameter '{param_name}': {joined}"))
+        Some(format!("parameter '{param_name}': {detail}"))
     }
 }
 
@@ -758,96 +215,54 @@ fn first_object_param_error(
     root_schema: &crate::value::DictMap,
     param_name: &str,
     options: ValidationOptions,
-    context: &mut ValidationContext,
+    context: &mut ParamValidationContext,
 ) -> Option<String> {
     let mut known_keys = std::collections::BTreeSet::new();
-
     if let Some(VmValue::List(required_keys)) = schema.get("required") {
         for key_value in required_keys.iter() {
             let key = key_value.display();
-            if !fields.contains_key(key.as_str()) {
-                let key_initial = key.chars().next();
-                let suggestion = crate::value::closest_match(
-                    &key,
-                    fields
-                        .keys()
-                        .map(|key| key.as_str())
-                        .filter(|candidate| candidate.chars().next() == key_initial),
-                );
-                let expected = schema
-                    .get("properties")
-                    .and_then(VmValue::as_dict)
-                    .and_then(|props| props.get(key.as_str()))
-                    .and_then(VmValue::as_dict)
-                    .map(schema_expected_label)
-                    .unwrap_or_else(|| "value".to_string());
-                let actual_keys: Vec<&str> = fields.keys().map(|key| key.as_str()).collect();
-                let actual_summary = crate::stdlib::shapes::format_available_fields(&actual_keys);
-                if let Some(suggestion) = suggestion {
-                    return Some(format!(
-                        "parameter '{param_name}': missing field '{key}' ({expected}), did you mean '{suggestion}'? — {actual_summary}"
-                    ));
-                }
-                return Some(format!(
-                    "parameter '{param_name}': missing field '{key}' ({expected}) — {actual_summary}"
-                ));
+            if fields.contains_key(key.as_str()) {
+                continue;
             }
+            let key_initial = key.chars().next();
+            let suggestion = crate::value::closest_match(
+                &key,
+                fields
+                    .keys()
+                    .map(|key| key.as_str())
+                    .filter(|candidate| candidate.chars().next() == key_initial),
+            );
+            let expected = schema
+                .get("properties")
+                .and_then(VmValue::as_dict)
+                .and_then(|properties| properties.get(key.as_str()))
+                .and_then(VmValue::as_dict)
+                .map(schema_expected_label)
+                .unwrap_or_else(|| "value".to_string());
+            let actual_keys = fields.keys().map(|key| key.as_str()).collect::<Vec<_>>();
+            let actual_summary = crate::stdlib::shapes::format_available_fields(&actual_keys);
+            return Some(match suggestion {
+                Some(suggestion) => format!(
+                    "parameter '{param_name}': missing field '{key}' ({expected}), did you mean '{suggestion}'? — {actual_summary}"
+                ),
+                None => format!(
+                    "parameter '{param_name}': missing field '{key}' ({expected}) — {actual_summary}"
+                ),
+            });
         }
     }
 
-    if let Some(VmValue::Dict(prop_schemas)) = schema.get("properties") {
-        for (key, prop_schema) in prop_schemas.iter() {
+    if let Some(VmValue::Dict(properties)) = schema.get("properties") {
+        for (key, child_schema) in properties.iter() {
             known_keys.insert(key.clone());
-            let Some(prop_value) = fields.get(key) else {
+            let (Some(child), Some(child_schema)) = (fields.get(key), child_schema.as_dict())
+            else {
                 continue;
             };
-            let Some(prop_schema_dict) = prop_schema.as_dict() else {
-                continue;
-            };
-
-            if schema_is_object_like(prop_schema_dict) {
-                match prop_value {
-                    VmValue::Dict(_) | VmValue::StructInstance(_) => {
-                        let child_param = format!("{param_name}.{key}");
-                        if let Some(error) = first_param_validation_error_inner(
-                            prop_value,
-                            prop_schema_dict,
-                            root_schema,
-                            &child_param,
-                            options,
-                            context,
-                        ) {
-                            return Some(error);
-                        }
-                    }
-                    _ => {
-                        return Some(format!(
-                            "parameter '{}': field '{}' expected dict or struct, got {}",
-                            param_name,
-                            key,
-                            prop_value.type_name()
-                        ));
-                    }
-                }
-                continue;
-            }
-
-            if let Some(expected_type) = schema_type_name(prop_schema_dict) {
-                if !value_matches_type(prop_value, expected_type, options.numeric_compat) {
-                    return Some(format!(
-                        "parameter '{}': field '{}' expected {}, got {}",
-                        param_name,
-                        key,
-                        expected_type,
-                        actual_value_type(prop_value)
-                    ));
-                }
-            }
-
             let child_param = format!("{param_name}.{key}");
             if let Some(error) = first_param_validation_error_inner(
-                prop_value,
-                prop_schema_dict,
+                child,
+                child_schema,
                 root_schema,
                 &child_param,
                 options,
@@ -860,58 +275,14 @@ fn first_object_param_error(
 
     match schema.get("additional_properties") {
         Some(VmValue::Bool(false)) => {
-            for key in fields.keys() {
-                if !known_keys.contains(key) {
-                    return Some(format!(
-                        "parameter '{param_name}': unexpected field '{key}'"
-                    ));
-                }
+            if let Some(key) = fields.keys().find(|key| !known_keys.contains(*key)) {
+                return Some(format!(
+                    "parameter '{param_name}': unexpected field '{key}'"
+                ));
             }
         }
         Some(VmValue::Dict(extra_schema)) => {
-            for (key, value) in fields.iter() {
-                if known_keys.contains(key) {
-                    continue;
-                }
-                if schema_is_object_like(extra_schema) {
-                    match value {
-                        VmValue::Dict(_) | VmValue::StructInstance(_) => {
-                            let child_param = format!("{param_name}.{key}");
-                            if let Some(error) = first_param_validation_error_inner(
-                                value,
-                                extra_schema,
-                                root_schema,
-                                &child_param,
-                                options,
-                                context,
-                            ) {
-                                return Some(error);
-                            }
-                        }
-                        _ => {
-                            return Some(format!(
-                                "parameter '{}': field '{}' expected dict or struct, got {}",
-                                param_name,
-                                key,
-                                value.type_name()
-                            ));
-                        }
-                    }
-                    continue;
-                }
-
-                if let Some(expected_type) = schema_type_name(extra_schema) {
-                    if !value_matches_type(value, expected_type, options.numeric_compat) {
-                        return Some(format!(
-                            "parameter '{}': field '{}' expected {}, got {}",
-                            param_name,
-                            key,
-                            expected_type,
-                            actual_value_type(value)
-                        ));
-                    }
-                }
-
+            for (key, value) in fields.iter().filter(|(key, _)| !known_keys.contains(*key)) {
                 let child_param = format!("{param_name}.{key}");
                 if let Some(error) = first_param_validation_error_inner(
                     value,
@@ -927,6 +298,5 @@ fn first_object_param_error(
         }
         _ => {}
     }
-
     None
 }

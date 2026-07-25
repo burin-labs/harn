@@ -138,12 +138,12 @@ pipeline test(task) {
         kind: "cli_parse_failure",
         stage: "schema",
         code: "schema_mismatch",
-        message: "at root: unexpected key 'extra'",
+        message: "at root: Additional properties are not allowed ('extra' was unexpected)",
         issues: [
           {
             stage: "schema",
             code: "schema.validation",
-            message: "unexpected key 'extra'",
+            message: "Additional properties are not allowed ('extra' was unexpected)",
             path: "root",
           },
         ],

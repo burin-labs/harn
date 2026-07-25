@@ -89,7 +89,7 @@ pipeline test_persona_prompt_compile(_task) {
               enum: ["deterministic-sweeper", "hybrid-classify-then-act", "frontier-judgment-loop"],
             },
             source: {
-              oneOf: [
+              anyOf: [
                 {
                   type: "object",
                   properties: {

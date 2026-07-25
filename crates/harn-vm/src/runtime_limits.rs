@@ -25,8 +25,8 @@ pub struct RuntimeLimits {
     pub max_std_cache_entries: usize,
     /// Maximum compiled regex entries kept per VM thread.
     pub max_regex_cache_entries: usize,
-    /// Maximum compiled JSON-schema `pattern` regexes kept process-wide.
-    pub max_schema_pattern_cache_entries: usize,
+    /// Maximum compiled JSON Schema validators kept process-wide.
+    pub max_schema_validator_cache_entries: usize,
     /// Maximum canonical parameter schemas kept per VM thread.
     pub max_schema_guard_cache_entries: usize,
     /// Default queue depth for memory/file/sqlite event-log subscribers.
@@ -69,7 +69,7 @@ impl RuntimeLimits {
         max_json_parse_cache_entries: 128,
         max_std_cache_entries: 256,
         max_regex_cache_entries: 128,
-        max_schema_pattern_cache_entries: 256,
+        max_schema_validator_cache_entries: 256,
         max_schema_guard_cache_entries: 256,
         default_event_log_queue_depth: 128,
         max_agent_sessions: 128,
@@ -95,7 +95,7 @@ impl RuntimeLimits {
             "max_json_parse_cache_entries" => self.max_json_parse_cache_entries,
             "max_std_cache_entries" => self.max_std_cache_entries,
             "max_regex_cache_entries" => self.max_regex_cache_entries,
-            "max_schema_pattern_cache_entries" => self.max_schema_pattern_cache_entries,
+            "max_schema_validator_cache_entries" => self.max_schema_validator_cache_entries,
             "max_schema_guard_cache_entries" => self.max_schema_guard_cache_entries,
             "default_event_log_queue_depth" => self.default_event_log_queue_depth,
             "max_agent_sessions" => self.max_agent_sessions,
@@ -207,10 +207,10 @@ pub const RUNTIME_LIMIT_DESCRIPTIONS: &[RuntimeLimitDescription] = &[
         protects: "bounds per-thread memory held by compiled stdlib regex patterns",
     },
     RuntimeLimitDescription {
-        name: "max_schema_pattern_cache_entries",
+        name: "max_schema_validator_cache_entries",
         user_visible: false,
         host_configurable: false,
-        protects: "bounds process-wide memory held by compiled JSON-schema pattern regexes",
+        protects: "bounds process-wide memory held by compiled JSON Schema validators",
     },
     RuntimeLimitDescription {
         name: "max_schema_guard_cache_entries",
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(limits.max_json_parse_cache_entries, 128);
         assert_eq!(limits.max_std_cache_entries, 256);
         assert_eq!(limits.max_regex_cache_entries, 128);
-        assert_eq!(limits.max_schema_pattern_cache_entries, 256);
+        assert_eq!(limits.max_schema_validator_cache_entries, 256);
         assert_eq!(limits.max_schema_guard_cache_entries, 256);
         assert_eq!(limits.default_event_log_queue_depth, 128);
         assert_eq!(limits.max_agent_sessions, 128);
@@ -340,7 +340,7 @@ mod tests {
                 "max_json_parse_cache_entries",
                 "max_std_cache_entries",
                 "max_regex_cache_entries",
-                "max_schema_pattern_cache_entries",
+                "max_schema_validator_cache_entries",
                 "max_schema_guard_cache_entries",
                 "default_event_log_queue_depth",
                 "max_agent_sessions",

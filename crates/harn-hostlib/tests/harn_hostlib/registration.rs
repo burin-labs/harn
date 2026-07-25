@@ -983,7 +983,7 @@ pipeline default(task) {
         .map(VmValue::display)
         .unwrap_or_default();
     assert!(
-        message.contains("argv[0]") && message.contains("expected type 'string'"),
+        message.contains("argv[0]") && message.contains("is not of type \"string\""),
         "unexpected validation message: {message}"
     );
 }

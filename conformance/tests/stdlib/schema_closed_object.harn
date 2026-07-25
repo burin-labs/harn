@@ -13,7 +13,12 @@ pipeline test(task) {
   __io_println(!validator.is({name: "Ada", extra: true}))
   const bad_report = validator.report({name: "Ada", extra: true})
   __io_println(!bad_report.ok)
-  __io_println(contains(join(bad_report.errors, "\n"), "unexpected key 'extra'"))
+  __io_println(
+    contains(
+      join(bad_report.errors, "\n"),
+      "Additional properties are not allowed ('extra' was unexpected)",
+    ),
+  )
   __io_println(validator.expect({name: "Ada"}).role)
   __io_println(validator.json_schema().additionalProperties)
   const alias_schema = schema_strict_object(

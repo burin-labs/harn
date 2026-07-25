@@ -47,7 +47,7 @@ pipeline default() {
   __io_println(coord_receipt_report(extended_receipt).ok)
   const missing = coord_message_report({schema: "harn.coordination.message.v1", id: "missing"})
   __io_println(!missing.ok)
-  __io_println(contains(join(missing.errors, "\n"), "missing required key 'scope'"))
+  __io_println(contains(join(missing.errors, "\n"), "\"scope\" is a required property"))
   const request = coord_request(
     "session",
     "schema",

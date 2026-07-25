@@ -644,7 +644,11 @@ fn canonical_to_json_schema_with(
                     }
                 }
             }
-            out.insert("oneOf".to_string(), serde_json::Value::Array(branches));
+            // Canonical Harn unions have inclusive "matches any branch"
+            // semantics, including when the input used JSON Schema's `oneOf`
+            // spelling. Export them as `anyOf` so overlapping branches remain
+            // valid instead of acquiring an exclusivity constraint.
+            out.insert("anyOf".to_string(), serde_json::Value::Array(branches));
         }
         if let Some(VmValue::List(all_of)) = schema_dict.get("all_of") {
             out.insert(

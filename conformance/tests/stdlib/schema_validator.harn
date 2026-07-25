@@ -19,7 +19,7 @@ pipeline test(task) {
   const bad_report = validator.report({name: "A"})
   __io_println(!bad_report.ok)
   __io_println(len(bad_report.issues))
-  __io_println(contains(join(validator.errors({name: "A"}), "\n"), "expected length >= 2"))
+  __io_println(contains(join(validator.errors({name: "A"}), "\n"), "is shorter than 2 characters"))
   __io_println(json_stringify(validator.issues({name: "A"})).contains("\"path\":\"name\""))
   __io_println(validator.json_schema().type)
   __io_println(validator.openapi_schema().type)
