@@ -228,7 +228,49 @@ preflight and export surfaces also fail closed unless declared
 `behavior_class` / `behavior_classes` metadata covers valid tool calls,
 parallel tool calls, no-tool answers, unavailable-tool repair, and multi-turn
 continuation, so adapter datasets cannot silently collapse to overcalling-only
-positive examples. The
+positive examples. Preflight alone offers
+`--behavior-strata-policy legacy-unclassified` for auditing a corpus where no
+trainable record has behavior metadata. It reports `legacy_unclassified`,
+keeps all five classes missing, and lists the record ids to review; partial
+coverage remains `incomplete`, and export remains strict.
+
+For the v0.10.18 to v0.10.19 upgrade, audit an existing corpus without
+manufacturing coverage:
+
+```bash
+CORPUS=./lora-corpus/burin-tool-calling-corpus.jsonl
+REPORT=./lora-corpus/v0.10.19-behavior-audit.json
+harn models lora preflight --base local-gemma4-e4b --provider vllm \
+  --corpus "$CORPUS" --behavior-strata-policy legacy-unclassified \
+  --check --json > "$REPORT"
+jq -r '.data.stats.behavior_strata.unclassified_record_ids[]' "$REPORT"
+```
+
+Review each reported source record, then tag only behavior it genuinely
+demonstrates. The accepted canonical classes are `valid_tool_call`,
+`parallel_tool_call`, `no_tool_answer`, `unavailable_tool_repair`, and
+`multi_turn_continuation`; one record may use `behavior_classes` for multiple
+real classes.
+
+```bash
+jq -c --arg id 'REAL_RECORD_ID' \
+  'select((.id // "") == $id)' "$CORPUS"
+cp "$CORPUS" ./lora-corpus/burin-tool-calling-corpus.v0.10.19.jsonl
+${EDITOR:-vi} ./lora-corpus/burin-tool-calling-corpus.v0.10.19.jsonl
+```
+
+Return to strict mode and prove the trainer-emitted dataset covers every
+class:
+
+```bash
+TAGGED=./lora-corpus/burin-tool-calling-corpus.v0.10.19.jsonl
+harn models lora preflight --base local-gemma4-e4b --provider vllm \
+  --corpus "$TAGGED" --behavior-strata-policy strict --check --json
+harn models lora export --base local-gemma4-e4b --provider vllm \
+  --tool-format native --corpus "$TAGGED" --check --json
+```
+
+The migration policy never infers a class or changes export behavior. The
 default tool-catalog policy is `full_schema`; fixed-catalog compression
 experiments must opt into `compressed_names` or `fixed_catalog_internalized` and
 record `--tool-catalog-id` or `--tool-catalog-hash`, which becomes part of the

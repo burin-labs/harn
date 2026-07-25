@@ -6,9 +6,12 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::cli::ModelsLoraPreflightArgs;
+use crate::cli::{ModelsLoraBehaviorStrataPolicy, ModelsLoraPreflightArgs};
 
-use super::behavior::{behavior_strata_report, record_behavior_classes, BehaviorStrataReport};
+use super::behavior::{
+    behavior_strata_report, record_behavior_classes, BehaviorStrataPolicy, BehaviorStrataReport,
+    BehaviorStrataStatus,
+};
 use super::export::{
     available_tool_names, parse_json_tool_body, record_id, record_messages, resolve_corpus_path,
     source_tool_format, ExportRegexes,
@@ -153,6 +156,12 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
         raw_records,
         max_seq_length,
         args.hard_token_limit,
+        match args.behavior_strata_policy {
+            ModelsLoraBehaviorStrataPolicy::Strict => BehaviorStrataPolicy::Strict,
+            ModelsLoraBehaviorStrataPolicy::LegacyUnclassified => {
+                BehaviorStrataPolicy::LegacyUnclassified
+            }
+        },
     );
     let breakdown = preflight_breakdown(&examples);
     let problem_examples = problem_examples(&examples);
@@ -226,7 +235,9 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
             stats.records_with_unrecognized_tools
         ));
     }
-    if !stats.behavior_strata.missing_required.is_empty() {
+    if !stats.behavior_strata.missing_required.is_empty()
+        && stats.behavior_strata.status != BehaviorStrataStatus::LegacyUnclassified
+    {
         errors.push(format!(
             "missing required behavior strata: {}",
             stats.behavior_strata.missing_required.join(", ")
@@ -250,6 +261,12 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
     }
     if let Some(correction) = &decision.correction {
         warnings.push(correction.clone());
+    }
+    if stats.behavior_strata.status == BehaviorStrataStatus::LegacyUnclassified {
+        warnings.push(
+            "WARNING: legacy corpus has no declared behavior-strata metadata; coverage is unverified and all required classes remain missing. Review and tag the reported unclassified record ids before export or training."
+                .to_string(),
+        );
     }
 
     Ok(LoraPreflightReport {
@@ -454,6 +471,7 @@ fn preflight_stats(
     raw_records: u64,
     max_seq_length: u64,
     hard_token_limit: u64,
+    behavior_strata_policy: BehaviorStrataPolicy,
 ) -> PreflightStats {
     let trainable_records = examples.len() as u64;
     let fit_records = examples
@@ -483,8 +501,17 @@ fn preflight_stats(
             *source_behavior_counts.entry(class.clone()).or_insert(0) += 1;
         }
     }
-    let behavior_strata =
-        behavior_strata_report(source_behavior_counts.clone(), source_behavior_counts);
+    let unclassified_record_ids = examples
+        .iter()
+        .filter(|example| example.behavior_classes.is_empty())
+        .map(|example| example.record_id.clone())
+        .collect();
+    let behavior_strata = behavior_strata_report(
+        source_behavior_counts.clone(),
+        source_behavior_counts,
+        behavior_strata_policy,
+        unclassified_record_ids,
+    );
     PreflightStats {
         raw_records,
         trainable_records,

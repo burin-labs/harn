@@ -204,6 +204,7 @@ fn models_lora_preflight_human_text_reports_readiness() {
         "fit: 5/5",
         "tool calls: json=5 text=0 unknown=0 malformed_json=0",
         "behavior strata: source=",
+        "behavior strata policy: strict status=covered",
         "\"parallel_tool_call\":1",
         "declared tool formats:",
         "languages:",

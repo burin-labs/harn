@@ -734,12 +734,25 @@ pub(crate) struct ModelsLoraPreflightArgs {
     /// Require the last assistant message in each trainable record to contain this marker.
     #[arg(long = "done-marker")]
     pub done_marker: Option<String>,
+    /// Behavior-strata enforcement policy. Legacy mode only acknowledges a corpus where no trainable record declares behavior metadata.
+    #[arg(
+        long = "behavior-strata-policy",
+        value_enum,
+        default_value_t = ModelsLoraBehaviorStrataPolicy::Strict
+    )]
+    pub behavior_strata_policy: ModelsLoraBehaviorStrataPolicy,
     /// Exit non-zero when readiness checks fail.
     #[arg(long)]
     pub check: bool,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ModelsLoraBehaviorStrataPolicy {
+    Strict,
+    LegacyUnclassified,
 }
 
 #[derive(Debug, Args)]

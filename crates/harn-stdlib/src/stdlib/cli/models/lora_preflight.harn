@@ -116,6 +116,20 @@ fn __render_human(harness: Harness, report: dict) {
       + json_stringify(safe_dict(behavior_strata["emitted"])),
   )
   harness.stdio.println(
+    "  behavior strata policy: "
+      + safe_string(behavior_strata["policy"], "strict")
+      + " status="
+      + safe_string(behavior_strata["status"], "incomplete"),
+  )
+  const missing_behavior_classes = safe_list(behavior_strata["missing_required"])
+  if missing_behavior_classes.count > 0 {
+    harness.stdio.println("  missing behavior strata: " + json_stringify(missing_behavior_classes))
+  }
+  const unclassified_record_ids = safe_list(behavior_strata["unclassified_record_ids"])
+  if unclassified_record_ids.count > 0 {
+    print_list(harness, "unclassified record ids", unclassified_record_ids)
+  }
+  harness.stdio.println(
     "  declared tool formats: "
       + json_stringify(safe_dict(breakdown["declared_tool_formats"])),
   )
@@ -157,7 +171,9 @@ fn __render_human(harness: Harness, report: dict) {
   }
   print_list(harness, "warnings", warnings)
   print_list(harness, "errors", errors)
-  const result = if safe_bool(report["ok"], false) {
+  const result = if safe_string(behavior_strata["status"], "") == "legacy_unclassified" {
+    "MIGRATION REVIEW"
+  } else if safe_bool(report["ok"], false) {
     "PASS"
   } else {
     "FAIL"

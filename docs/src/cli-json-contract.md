@@ -106,7 +106,7 @@ versions.
 | `harn models lora export --json` | Trainer dataset export report with contract id, tool-catalog contract, stats, and promotion evidence contract |
 | `harn models lora manifest --json` | LoRA training-run manifest with route, data, artifact, tool-catalog contract, structured serving requirements, and promotion evidence contracts |
 | `harn models lora train --json` | LoRA trainer receipt with backend argv/status, `backend.argv_required` when argv is omitted, input hashes, route/tool-catalog metadata, `dataset_audit`, and post-training commands |
-| `harn models lora preflight --json` | Corpus readiness report before LoRA training |
+| `harn models lora preflight --json` | Corpus readiness report before LoRA training, including typed behavior-strata policy/status/counts, missing classes, and unclassified record ids |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
 | `harn version --json`          | CLI build metadata (`name`, `version`, `description`, optional `source_revision`)    |
