@@ -5,6 +5,15 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
 
+# Every case below decides for itself whether a per-worktree target dir is
+# configured, so neither worktree-path variable may reach a fixture from the
+# ambient environment. Both are unset in CI and exported in exactly the
+# developer and agent shells this suite exists to protect, which is how a case
+# that assumes "no per-worktree target dir" can pass in CI and fail locally.
+# Cases that want one set it explicitly.
+export HARN_DEV_TARGET_WORKTREE_PATH=
+export CODEX_WORKTREE_PATH=
+
 make_fixture_repo() {
   local name="$1"
   local repo="$tmp_root/$name"
@@ -53,7 +62,7 @@ run_setup() {
     HARN_DEV_SETUP_PROFILE="$profile" \
     HARN_DEV_SETUP_FORCE=1 \
     HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-$profile" \
-    HARN_DEV_TARGET_WORKTREE_PATH="$repo" \
+    HARN_DEV_TARGET_WORKTREE_PATH="${SETUP_TEST_WORKTREE_PATH:-$repo}" \
     DEV_SETUP_TEST_CARGO_RECORD="$cargo_record" \
     "$repo/scripts/dev_setup.sh" > "$output" 2>&1
 }
@@ -239,6 +248,33 @@ if [[ -s "$invalid_cargo" ]]; then
 fi
 if ! grep -Fq "HARN_DEV_SETUP_PROFILE must be 'full' or 'rust'" "$tmp_root/invalid-output.txt"; then
   echo "invalid setup profile did not explain the accepted values" >&2
+  exit 1
+fi
+
+# A worktree path naming some other checkout must not decide this checkout's
+# target dir: an agent session exporting its primary checkout path, or a value
+# inherited from a parent shell, would otherwise hand two worktrees the same
+# mutable target dir.
+foreign_repo=$(make_fixture_repo foreign)
+mismatch_repo=$(make_fixture_repo mismatch)
+mismatch_cargo="$tmp_root/mismatch-cargo.txt"
+SETUP_TEST_WORKTREE_PATH="$foreign_repo" \
+  run_setup "$mismatch_repo" rust "$tmp_root/mismatch-output.txt" "$mismatch_cargo"
+
+mismatch_storage_root="$tmp_root/cache-rust/harn/dev-setup"
+foreign_target_dir="$mismatch_storage_root/harn-target/$(basename "$tmp_root")-foreign"
+mismatch_target_dir="$mismatch_storage_root/harn-target/$(basename "$tmp_root")-mismatch"
+
+if grep -Fq "target-dir = \"$foreign_target_dir\"" "$mismatch_repo/.cargo/config.toml"; then
+  echo "setup adopted a target dir belonging to another checkout" >&2
+  exit 1
+fi
+if ! grep -Fxq "target-dir = \"$mismatch_target_dir\" # harn-dev-setup-managed" "$mismatch_repo/.cargo/config.toml"; then
+  echo "setup did not fall back to this checkout's own target directory" >&2
+  exit 1
+fi
+if ! grep -Fq "does not name this checkout" "$tmp_root/mismatch-output.txt"; then
+  echo "setup did not warn that the configured worktree path was ignored" >&2
   exit 1
 fi
 

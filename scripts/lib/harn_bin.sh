@@ -129,6 +129,27 @@ harn_run_cargo_probe_with_deadline() (
   cat "$state_dir/stdout"
 )
 
+# True when this checkout has never been through `make setup`. Such a worktree
+# has no shared target dir and no compiler wrapper, so every build starts cold.
+harn_worktree_unconfigured() {
+  [[ ! -f "$(harn_repo_root)/.cargo/config.toml" ]]
+}
+
+# What to do about a probe that ran out of time. A cold build of the whole
+# workspace does not fit in the default deadline, so in a fresh worktree the
+# deadline is reached for a legitimate reason and the bare timeout reads like a
+# hang. Name the likely cause and the two ways out.
+harn_print_probe_timeout_hints() {
+  if harn_worktree_unconfigured; then
+    echo "hint: $(harn_repo_root) has no .cargo/config.toml, so this build had no" >&2
+    echo "hint: shared target dir and no compiler wrapper. Run 'make setup' here once." >&2
+  fi
+  echo "hint: to reuse a binary you already built:" >&2
+  echo "hint:   HARN_BIN=<path-to-harn> HARN_BIN_NO_BUILD=1 <command>" >&2
+  echo "hint: to allow a longer cold build:" >&2
+  echo "hint:   HARN_BIN_CARGO_TIMEOUT_SECONDS=3600 <command>" >&2
+}
+
 harn_compiler_wrapper_configured() {
   if [[ -n "${RUSTC_WRAPPER:-}" || -n "${RUSTC_WORKSPACE_WRAPPER:-}" || \
         -n "${CARGO_BUILD_RUSTC_WRAPPER:-}" || -n "${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:-}" ]]; then
@@ -167,9 +188,15 @@ harn_resolve_binary() {
   fi
 
   harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
+  if harn_worktree_unconfigured; then
+    echo "warning: $(harn_repo_root) has no .cargo/config.toml; 'make setup' has not run here, so this build starts cold" >&2
+  fi
   bin="$(harn_run_cargo_probe_with_deadline)" || status=$?
   if [[ "$status" -ne 0 ]]; then
     if [[ "$status" -ne 124 ]] || ! harn_compiler_wrapper_configured; then
+      if [[ "$status" -eq 124 ]]; then
+        harn_print_probe_timeout_hints
+      fi
       return "$status"
     fi
     echo "warning: retrying Cargo harn binary probe with the compiler wrapper disabled" >&2
@@ -183,6 +210,9 @@ harn_resolve_binary() {
       harn_run_cargo_probe_with_deadline
     )" || status=$?
     if [[ "$status" -ne 0 ]]; then
+      if [[ "$status" -eq 124 ]]; then
+        harn_print_probe_timeout_hints
+      fi
       return "$status"
     fi
   fi
