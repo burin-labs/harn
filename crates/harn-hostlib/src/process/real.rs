@@ -299,7 +299,10 @@ fn map_spawn_error(error: io::Error) -> ProcessError {
     if let Some(violation) = process_sandbox::process_spawn_error(&error) {
         return ProcessError::SandboxSpawn(format!("{violation:?}"));
     }
-    ProcessError::Spawn(error.to_string())
+    ProcessError::SpawnIo {
+        kind: harn_vm::value::io_error_kind_str(&error),
+        message: error.to_string(),
+    }
 }
 
 /// Replace the current Unix process through the same prepared-command path as

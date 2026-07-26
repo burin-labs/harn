@@ -6,6 +6,36 @@
 
 use super::*;
 
+#[test]
+fn process_error_prefix_preserves_structured_io_fields() {
+    let mut fields = crate::value::DictMap::new();
+    fields.put_str("error", "io_error");
+    fields.put_str("kind", "not_found");
+    fields.put_str("category", "environment");
+    fields.put_str("message", "process spawn failed: missing");
+
+    let error = prefix_process_error(VmError::Thrown(VmValue::dict(fields)), "exec");
+    let VmError::Thrown(VmValue::Dict(fields)) = error else {
+        panic!("expected structured thrown I/O error");
+    };
+    assert_eq!(
+        fields.get("error").map(VmValue::display).as_deref(),
+        Some("io_error")
+    );
+    assert_eq!(
+        fields.get("kind").map(VmValue::display).as_deref(),
+        Some("not_found")
+    );
+    assert_eq!(
+        fields.get("category").map(VmValue::display).as_deref(),
+        Some("environment")
+    );
+    assert_eq!(
+        fields.get("message").map(VmValue::display).as_deref(),
+        Some("exec failed: process spawn failed: missing")
+    );
+}
+
 struct RuntimePathsEnvGuard {
     state: Option<String>,
     run: Option<String>,

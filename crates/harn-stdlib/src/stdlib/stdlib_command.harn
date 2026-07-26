@@ -220,7 +220,7 @@ fn __command_normalize_result(result) -> CommandResult {
  * command_run runs an argv-first hostlib command and returns a normalized result.
  *
  * @effects: [process]
- * @errors: []
+ * @errors: [process_spawn]
  */
 pub fn command_run(spec, options = nil) -> CommandResult {
   const _ = hostlib_enable("tools:deterministic")

@@ -44,7 +44,7 @@ use std::process::{Command, Output, Stdio};
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{environment_io_error_thrown, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use paths::{
@@ -1645,9 +1645,7 @@ fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {
-    VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
-        format!("process spawn failed: {error}"),
-    )))
+    environment_io_error_thrown(&error, format!("process spawn failed: {error}"))
 }
 
 pub(crate) fn warn_once(key: &str, message: &str) {

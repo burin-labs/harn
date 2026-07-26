@@ -1296,6 +1296,12 @@ compact recovery context:
 | `command_result_ok(stdout?, extra?)` | Build a normalized success result for tests and harness adapters |
 | `command_result_fail(exit_code?, stderr?, extra?)` | Build a normalized failure result for tests and harness adapters |
 
+If the OS cannot start the requested program, `command_run` throws
+`{error: "io_error", kind, message, category: "environment", operation:
+"process_spawn"}`. A missing executable has `kind: "not_found"` in both
+sandboxed and unsandboxed execution. Other spawn failures and ordinary nonzero
+exit results remain distinct.
+
 `CommandResult` names the common normalized result fields,
 `CommandOutputMatch` names the matched range and latest command state, and
 `CommandStepReceipt` names the portable command-step fields used by durable

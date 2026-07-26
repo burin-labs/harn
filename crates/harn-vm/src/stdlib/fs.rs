@@ -8,6 +8,8 @@ use std::{cell::RefCell, thread_local};
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::testbench::overlay_fs::helpers as overlay;
+#[cfg(test)]
+use crate::value::io_error_kind_str;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -112,45 +114,6 @@ fn result_err(value: VmValue) -> VmValue {
     VmValue::enum_variant("Result", "Err", vec![value])
 }
 
-/// Canonical, stable string key for an `io::ErrorKind`.
-///
-/// These keys are a contract that `.harn` consumers branch on — e.g.
-/// `atomic-write` detecting a full disk (`"storage_full"`) or an exhausted
-/// quota (`"quota_exceeded"`) instead of substring-matching English prose in
-/// the accompanying `message`. Never rename an existing key.
-///
-/// `std::io::ErrorKind` is `#[non_exhaustive]`, so the compiler *requires* the
-/// `_ => "other"` arm; unlike the `ErrorCategory` mapping (which we own and
-/// match exhaustively), a new std variant cannot be compiler-forced here. The
-/// named arms cover the kinds Harn's fs surface can realistically surface.
-fn io_error_kind_str(error: &std::io::Error) -> &'static str {
-    use std::io::ErrorKind;
-    match error.kind() {
-        ErrorKind::NotFound => "not_found",
-        ErrorKind::PermissionDenied => "permission_denied",
-        ErrorKind::AlreadyExists => "already_exists",
-        ErrorKind::StorageFull => "storage_full",
-        ErrorKind::QuotaExceeded => "quota_exceeded",
-        ErrorKind::FileTooLarge => "file_too_large",
-        ErrorKind::ReadOnlyFilesystem => "read_only_filesystem",
-        ErrorKind::NotADirectory => "not_a_directory",
-        ErrorKind::IsADirectory => "is_a_directory",
-        ErrorKind::DirectoryNotEmpty => "directory_not_empty",
-        ErrorKind::CrossesDevices => "crosses_devices",
-        ErrorKind::TooManyLinks => "too_many_links",
-        ErrorKind::InvalidInput => "invalid_input",
-        ErrorKind::InvalidData => "invalid_data",
-        ErrorKind::TimedOut => "timed_out",
-        ErrorKind::Interrupted => "interrupted",
-        ErrorKind::UnexpectedEof => "unexpected_eof",
-        ErrorKind::WouldBlock => "would_block",
-        ErrorKind::OutOfMemory => "out_of_memory",
-        ErrorKind::ResourceBusy => "resource_busy",
-        ErrorKind::ExecutableFileBusy => "executable_file_busy",
-        _ => "other",
-    }
-}
-
 /// Build the structured value thrown when an fs builtin wraps an `io::Error`:
 /// `{error: "io_error", kind: <canonical kind>, message}`. The typed `kind`
 /// lets `.harn` consumers branch on conditions (ENOSPC, permission, not-found)
@@ -165,7 +128,7 @@ fn io_error_value_with_kind(kind: &'static str, message: impl AsRef<str>) -> VmV
 }
 
 fn io_error_value(message: impl AsRef<str>, error: &std::io::Error) -> VmValue {
-    io_error_value_with_kind(io_error_kind_str(error), message)
+    crate::value::io_error_value(error, message, None)
 }
 
 fn sandbox_read_error_value(
@@ -190,7 +153,7 @@ fn unknown_prompt_asset_error_value(path: &str) -> VmValue {
 /// [`VmError::Thrown`] wrapping [`io_error_value`] — the fs builtins' single
 /// io-error lowering seam.
 fn io_error_thrown(message: impl AsRef<str>, error: &std::io::Error) -> VmError {
-    VmError::Thrown(io_error_value(message, error))
+    crate::value::io_error_thrown(error, message, None)
 }
 
 fn bool_option(opts: &crate::value::DictMap, key: &str) -> Option<bool> {
