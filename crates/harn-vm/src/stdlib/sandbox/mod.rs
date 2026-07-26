@@ -112,10 +112,10 @@ pub struct ProcessCommandConfig {
     pub stdin_null: bool,
     /// When `true`, the child starts from an EMPTY environment and receives only
     /// the pairs in [`ProcessCommandConfig::env`] — the closed-by-construction
-    /// path a session profile takes (`security::resolve_env` has already composed
-    /// the allowlist + grants into `env`). When `false` (the default, legacy
-    /// no-profile path), the child inherits the parent environment and `env` is
-    /// overlaid on top.
+    /// path an active session environment takes (`security::resolve_env` has
+    /// already composed the policy snapshot and grants into `env`). When
+    /// `false` (outside a session), the child inherits the parent environment
+    /// and `env` is overlaid on top.
     pub closed_env: bool,
 }
 
@@ -1283,9 +1283,9 @@ pub fn push_process_sandbox_scope(
     Ok(ProcessSandboxScopeGuard { pushed: true })
 }
 
-/// Close a freshly built command's environment under an active session profile.
+/// Close a freshly built command's environment under an active session policy.
 ///
-/// This is the choke point that makes the hermetic contract structural: every
+/// This is the choke point that makes the environment contract structural: every
 /// spawn seam in the VM and `harn-hostlib` reaches a child through the three
 /// funnel fns below, so a new seam cannot silently opt out. Callers still layer
 /// their own `env` / `env_remove` on top afterward. Sandbox confinement sets no
@@ -1635,11 +1635,11 @@ fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
     if let Some(cwd) = config.cwd.as_ref() {
         command.current_dir(cwd);
     }
-    // A profile-governed session builds a closed environment: clear the
+    // A policy-governed session builds a closed environment: clear the
     // inherited parent env first so the child sees ONLY what the resolver
     // admitted (allowlist + grants), already materialized in `config.env`.
-    // The default no-profile path leaves the inherited env in place and overlays
-    // `config.env` on top, preserving legacy behavior.
+    // Outside a session, leave the inherited env in place and overlay
+    // `config.env` on top.
     if config.closed_env {
         command.env_clear();
     }
@@ -1759,7 +1759,7 @@ fn toolchain_cache_gap_named_in_denial(
 ) -> Option<(String, PathBuf)> {
     let detail = detail.to_ascii_lowercase();
     let jail = coverage_jail_roots(policy);
-    for name in crate::security::hermetic_env::TOOLCHAIN_CACHE_ENV_VARS {
+    for name in crate::security::environment_policy::TOOLCHAIN_CACHE_ENV_VARS {
         let Some(value) = std::env::var(name)
             .ok()
             .filter(|value| !value.trim().is_empty())

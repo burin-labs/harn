@@ -66,13 +66,13 @@ fn test_parses_explicit_risky_operation_grants() {
 }
 
 #[test]
-fn test_parses_capability_profile_and_grants() {
-    use crate::commands::run::CapabilityProfileArg;
+fn test_parses_environment_policy_and_grants() {
+    use crate::commands::run::EnvironmentPolicyArg;
     let cli = Cli::parse_from([
         "harn",
         "run",
-        "--capability-profile",
-        "lane",
+        "--environment-policy",
+        "granted",
         "--grant",
         "gh_token=secret://gh/token,expose=GH_TOKEN",
         "--grant",
@@ -83,8 +83,8 @@ fn test_parses_capability_profile_and_grants() {
         panic!("expected run command");
     };
     assert_eq!(
-        args.sandbox.capability_profile,
-        Some(CapabilityProfileArg::Lane)
+        args.sandbox.environment_policy,
+        Some(EnvironmentPolicyArg::Granted)
     );
     assert_eq!(
         args.sandbox.grant,
@@ -96,28 +96,37 @@ fn test_parses_capability_profile_and_grants() {
 }
 
 #[test]
-fn test_capability_flags_conflict_with_no_sandbox() {
-    let err = Cli::try_parse_from([
+fn test_environment_policy_is_independent_of_no_sandbox() {
+    let cli = Cli::parse_from([
         "harn",
         "run",
         "--no-sandbox",
         "--grant",
         "t=env:X",
         "main.harn",
-    ])
-    .unwrap_err();
-    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.sandbox.no_sandbox);
+    assert_eq!(args.sandbox.grant, vec!["t=env:X"]);
 
-    let err = Cli::try_parse_from([
+    let cli = Cli::parse_from([
         "harn",
         "run",
         "--no-sandbox",
-        "--capability-profile",
-        "hermetic",
+        "--environment-policy",
+        "isolated",
         "main.harn",
-    ])
-    .unwrap_err();
-    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.sandbox.no_sandbox);
+    assert_eq!(
+        args.sandbox.environment_policy,
+        Some(crate::commands::run::EnvironmentPolicyArg::Isolated)
+    );
 }
 
 #[test]
@@ -283,7 +292,7 @@ fn test_time_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
 
 #[test]
 fn test_time_run_shares_the_run_confinement_surface() {
-    use crate::commands::run::CapabilityProfileArg;
+    use crate::commands::run::EnvironmentPolicyArg;
 
     // `harn run` and `harn time run` launch the same script under the same
     // runtime, so a confinement flag accepted by one must be accepted by the
@@ -291,8 +300,8 @@ fn test_time_run_shares_the_run_confinement_surface() {
     // run` silently lacked the capability flags; both now flatten one
     // `SandboxArgs`, and this pins that they stay in step.
     let flags = [
-        "--capability-profile",
-        "lane",
+        "--environment-policy",
+        "granted",
         "--grant",
         "gh_token=secret://gh/token,expose=GH_TOKEN",
         "--write-root",
@@ -320,8 +329,11 @@ fn test_time_run_shares_the_run_confinement_surface() {
         args.sandbox
     };
 
-    assert_eq!(timed.capability_profile, Some(CapabilityProfileArg::Lane));
-    assert_eq!(timed.capability_profile, run.capability_profile);
+    assert_eq!(
+        timed.environment_policy,
+        Some(EnvironmentPolicyArg::Granted)
+    );
+    assert_eq!(timed.environment_policy, run.environment_policy);
     assert_eq!(timed.grant, run.grant);
     assert_eq!(timed.write_root, run.write_root);
     assert_eq!(timed.allow_process_network, run.allow_process_network);

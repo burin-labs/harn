@@ -115,10 +115,10 @@ pub(super) struct VmSetup<'a> {
     pub cwd: &'a Path,
     pub project_root: Option<&'a Path>,
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
-    /// The session's capability profile, resolved at `session/new`. When
+    /// The session's environment policy, resolved at `session/new`. When
     /// present, its allowlist + grants govern this turn's subprocess
     /// environments; when `None`, subprocesses inherit the server env (legacy).
-    pub session_profile: Option<harn_vm::security::SessionProfile>,
+    pub session_environment: harn_vm::security::SessionEnvironment,
 }
 
 fn pipeline_name_for(source_path: Option<&Path>) -> String {
@@ -328,20 +328,16 @@ pub(super) async fn execute_chunk(
             .source_path
             .and_then(|p| p.parent())
             .map(|p| p.to_string_lossy().into_owned()),
-        // Non-secret receipts for the session's grants (empty for a hermetic or
-        // no-profile run) travel on the propagated execution record.
-        grants: setup
-            .session_profile
-            .as_ref()
-            .map(harn_vm::security::SessionProfile::receipts)
-            .unwrap_or_default(),
+        environment_policy: setup.session_environment.kind(),
+        // Non-secret receipts for the session's grants travel on the propagated
+        // execution record.
+        grants: setup.session_environment.receipts(),
         ..Default::default()
     };
     harn_vm::stdlib::process::set_thread_execution_context(Some(execution));
-    // Install the session's capability profile so this turn's subprocesses build
-    // their environment through the closed allowlist + grants resolver. `None`
-    // leaves the legacy inherit-the-server-env behavior untouched.
-    harn_vm::stdlib::process::set_session_profile(setup.session_profile.clone());
+    // Install the session's environment policy so this turn's subprocesses build
+    // their environment through the selected policy and grants resolver.
+    harn_vm::stdlib::process::set_session_environment(Some(setup.session_environment.clone()));
     // Module preparation is lazy: imports are resolved while the chunk runs, so
     // this work lands inside `execute_ms` rather than in `vm_setup_ms`. Without
     // this attribution a pipeline whose import tree dominates the turn is
@@ -370,7 +366,7 @@ pub(super) async fn execute_chunk(
             "modules_compiled": modules.modules_compiled,
         })),
     );
-    harn_vm::stdlib::process::set_session_profile(None);
+    harn_vm::stdlib::process::set_session_environment(None);
     harn_vm::stdlib::process::set_thread_execution_context(None);
     result
 }
@@ -532,7 +528,7 @@ mod tests {
                 cwd: cwd.path(),
                 project_root: None,
                 runtime_configurator: Arc::new(super::super::NoopAcpRuntimeConfigurator),
-                session_profile: None,
+                session_environment: harn_vm::security::SessionEnvironment::inherited(),
             },
         )
         .await

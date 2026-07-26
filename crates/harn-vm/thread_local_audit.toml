@@ -601,7 +601,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/stdlib/process.rs"
-statics = ["VM_SOURCE_DIR", "VM_EXECUTION_CONTEXT", "SESSION_PROFILE_CONTEXT"]
+statics = ["VM_SOURCE_DIR", "VM_EXECUTION_CONTEXT", "SESSION_ENVIRONMENT_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

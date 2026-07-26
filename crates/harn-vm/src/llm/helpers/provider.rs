@@ -101,13 +101,13 @@ fn current_session_pinned_model() -> Option<String> {
 fn env_selected_model_for_tier() -> Option<(String, String)> {
     use crate::llm_config;
 
-    let selected_model = crate::test_env::env_var_seamed("HARN_LLM_MODEL")
-        .or_else(|| crate::test_env::env_var_seamed("LOCAL_LLM_MODEL"))?;
+    let selected_model = crate::stdlib::process::session_env_value("HARN_LLM_MODEL")
+        .or_else(|| crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL"))?;
 
-    let selected_provider = crate::test_env::env_var_seamed("HARN_LLM_PROVIDER")
+    let selected_provider = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER")
         .filter(|provider| !provider.is_empty())
         .or_else(|| {
-            if crate::test_env::env_var_seamed("LOCAL_LLM_BASE_URL").is_some() {
+            if crate::stdlib::process::session_env_value("LOCAL_LLM_BASE_URL").is_some() {
                 Some("local".to_string())
             } else {
                 None
@@ -129,16 +129,16 @@ fn preferred_provider_order(preferred_provider: Option<&str>) -> Vec<String> {
     if let Some(provider) = preferred_provider {
         push_unique(&mut providers, provider.to_string());
     }
-    if let Some(provider) = crate::test_env::env_var_seamed("HARN_LLM_PROVIDER") {
+    if let Some(provider) = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER") {
         push_unique(&mut providers, provider);
     }
-    if crate::test_env::env_var_seamed("LOCAL_LLM_BASE_URL").is_some() {
+    if crate::stdlib::process::session_env_value("LOCAL_LLM_BASE_URL").is_some() {
         push_unique(&mut providers, "local");
     }
-    if let Some(model) = crate::test_env::env_var_seamed("HARN_LLM_MODEL") {
+    if let Some(model) = crate::stdlib::process::session_env_value("HARN_LLM_MODEL") {
         push_unique(&mut providers, llm_config::infer_provider(&model));
     }
-    if let Some(model) = crate::test_env::env_var_seamed("LOCAL_LLM_MODEL") {
+    if let Some(model) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
         push_unique(&mut providers, llm_config::infer_provider(&model));
     }
     for provider in [
@@ -245,7 +245,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
     if let Some(pinned) = current_session_pinned_model() {
         return infer_provider_from_model_selector(&pinned, true);
     }
-    if let Some(p) = crate::test_env::env_var_seamed("HARN_LLM_PROVIDER") {
+    if let Some(p) = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER") {
         return p;
     }
     // When an explicit `model:` option is set, prefer a catalog-known
@@ -277,10 +277,10 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
     // First-class local OpenAI-compatible server support: only kicks in
     // when the model isn't catalog-known, so unknown ids still route to
     // the local server.
-    if crate::test_env::env_var_seamed("LOCAL_LLM_BASE_URL").is_some()
+    if crate::stdlib::process::session_env_value("LOCAL_LLM_BASE_URL").is_some()
         && (explicit_model.is_some()
-            || crate::test_env::env_var_seamed("HARN_LLM_MODEL").is_some()
-            || crate::test_env::env_var_seamed("LOCAL_LLM_MODEL").is_some())
+            || crate::stdlib::process::session_env_value("HARN_LLM_MODEL").is_some()
+            || crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL").is_some())
     {
         return "local".to_string();
     }
@@ -296,7 +296,7 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
             return provider;
         }
     }
-    if let Some(m) = crate::test_env::env_var_seamed("HARN_LLM_MODEL") {
+    if let Some(m) = crate::stdlib::process::session_env_value("HARN_LLM_MODEL") {
         return infer_provider_from_model_selector(&m, true);
     }
     // Default to anthropic, but fall back to keyless providers when its
@@ -343,9 +343,9 @@ pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider
             return resolved;
         }
     }
-    if let Some(raw) = crate::test_env::env_var_seamed("HARN_LLM_MODEL") {
+    if let Some(raw) = crate::stdlib::process::session_env_value("HARN_LLM_MODEL") {
         let (resolved, resolved_provider) = llm_config::resolve_model(&raw);
-        let env_provider = crate::test_env::env_var_seamed("HARN_LLM_PROVIDER");
+        let env_provider = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER");
         if resolved_provider.as_deref() == Some(provider)
             || (resolved_provider.is_none() && env_provider.as_deref() == Some(provider))
         {
@@ -353,7 +353,7 @@ pub(crate) fn vm_resolve_model(options: &Option<crate::value::DictMap>, provider
         }
     }
     if provider == "local" {
-        if let Some(raw) = crate::test_env::env_var_seamed("LOCAL_LLM_MODEL") {
+        if let Some(raw) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
             let (resolved, _) = llm_config::resolve_model(&raw);
             return resolved;
         }

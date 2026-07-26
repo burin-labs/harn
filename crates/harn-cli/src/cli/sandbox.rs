@@ -6,7 +6,7 @@
 //! surface must therefore be identical, and the way to guarantee that is for
 //! there to be one declaration of it. Before this struct existed the two
 //! commands each hand-declared the six sandbox flags, and `harn time run`
-//! silently lacked the capability-profile flags that `harn run` had gained —
+//! silently lacked the environment-policy flags that `harn run` had gained —
 //! the predictable outcome of a duplicated surface, not an oversight anyone
 //! could have caught by reading either file alone.
 //!
@@ -64,28 +64,21 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub sandbox_write_root: Vec<PathBuf>,
-    /// Session credential posture: `hermetic` admits no credentials at all;
-    /// `lane` carries the declared `--grant` set. Absent, the run inherits the
-    /// launcher environment unchanged (the legacy path). See `--grant`.
-    #[arg(
-        long = "capability-profile",
-        value_enum,
-        value_name = "PROFILE",
-        conflicts_with = "no_sandbox"
-    )]
-    pub capability_profile: Option<crate::commands::run::CapabilityProfileArg>,
+    /// Session environment: `inherited` snapshots the launcher (default),
+    /// `isolated` admits runtime essentials only, and `granted` adds the
+    /// declared `--grant` set. This is independent of the filesystem sandbox.
+    #[arg(long = "environment-policy", value_enum, value_name = "POLICY")]
+    pub environment_policy: Option<crate::commands::run::EnvironmentPolicyArg>,
     /// Grant one named credential to this session. Repeatable.
     ///
     /// `NAME=SOURCE[,expose=ENV_VAR]`, where `SOURCE` is `env:VAR_NAME` (a
     /// launcher variable, snapshotted at launch) or `secret://ACCOUNT/KEY` (a
     /// secret-store pointer). The optional `,expose=ENV_VAR` publishes the
     /// value as `ENV_VAR` to spawned commands and to this run's own model
-    /// calls. `provider:PROVIDER` is a shorthand that takes the credential
-    /// variable from the provider catalog. Any `--grant` selects the `lane`
-    /// profile; nothing else from the launcher environment crosses the
-    /// boundary. For example
-    /// `--grant gh_token=secret://gh/token,expose=GH_TOKEN` or
-    /// `--grant provider:fireworks`.
-    #[arg(long = "grant", value_name = "SPEC", conflicts_with = "no_sandbox")]
+    /// calls. Any `--grant` selects the `granted` policy unless the policy is
+    /// explicit. Nothing else from the launcher environment crosses the
+    /// boundary. For example:
+    /// `--grant gh_token=secret://gh/token,expose=GH_TOKEN`.
+    #[arg(long = "grant", value_name = "SPEC")]
     pub grant: Vec<String>,
 }

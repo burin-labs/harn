@@ -28,16 +28,7 @@ fn empty_workspace_roots_default_to_execution_root_for_fs_paths() {
     crate::stdlib::process::set_thread_execution_context(Some(
         crate::orchestration::RunExecutionRecord {
             cwd: Some(dir.path().to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: None,
-            env: Default::default(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
+            ..Default::default()
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -74,15 +65,7 @@ fn empty_workspace_roots_prefer_execution_project_root_over_env_and_execution_ro
         crate::orchestration::RunExecutionRecord {
             cwd: Some(execution_cwd.path().to_string_lossy().into_owned()),
             project_root: Some(project.path().to_string_lossy().into_owned()),
-            source_dir: None,
-            env: Default::default(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
+            ..Default::default()
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -143,16 +126,7 @@ fn empty_workspace_roots_prefer_project_root_env_over_execution_root() {
     crate::stdlib::process::set_thread_execution_context(Some(
         crate::orchestration::RunExecutionRecord {
             cwd: Some(execution_cwd.path().to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: None,
-            env: Default::default(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
+            ..Default::default()
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -1442,7 +1416,7 @@ fn sandbox_denial_classifies_default_toolchain_cache_as_environment() {
     let detail = format!("mkdir {}/00: operation not permitted", cache.display());
 
     // Clear any real cache env vars so the env-var classifier does not fire first.
-    let saved: Vec<_> = crate::security::hermetic_env::TOOLCHAIN_CACHE_ENV_VARS
+    let saved: Vec<_> = crate::security::environment_policy::TOOLCHAIN_CACHE_ENV_VARS
         .iter()
         .map(|name| (*name, std::env::var_os(name)))
         .collect();

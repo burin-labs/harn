@@ -460,8 +460,9 @@ fn parse_bedrock_converse_response(
 }
 
 fn bedrock_base_url(region: &str) -> String {
-    std::env::var("BEDROCK_BASE_URL")
+    crate::stdlib::process::session_env_var("BEDROCK_BASE_URL")
         .ok()
+        .flatten()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| format!("https://bedrock-runtime.{region}.amazonaws.com"))
 }
@@ -480,15 +481,18 @@ fn resolve_region(override_region: Option<&str>) -> Result<String, VmError> {
         }
     }
     for env_name in ["AWS_REGION", "AWS_DEFAULT_REGION", "BEDROCK_REGION"] {
-        if let Ok(region) = std::env::var(env_name) {
+        if let Some(region) = crate::stdlib::process::session_env_var(env_name)? {
             if !region.trim().is_empty() {
                 return Ok(region);
             }
         }
     }
-    let profile = std::env::var("AWS_PROFILE").unwrap_or_else(|_| "default".to_string());
-    if let Some(region) = read_aws_profile_value("config", &profile, "region") {
-        return Ok(region);
+    if implicit_discovery_allowed() {
+        let profile = crate::stdlib::process::session_env_var("AWS_PROFILE")?
+            .unwrap_or_else(|| "default".to_string());
+        if let Some(region) = read_aws_profile_value("config", &profile, "region") {
+            return Ok(region);
+        }
     }
     Err(vm_err(
         "AWS region is not configured; set AWS_REGION, AWS_DEFAULT_REGION, or BEDROCK_REGION",
@@ -502,11 +506,14 @@ pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result
             return Ok(trimmed.to_string());
         }
     }
-    if let Ok(region) = std::env::var("BEDROCK_REGION") {
+    if let Some(region) = crate::stdlib::process::session_env_var("BEDROCK_REGION")? {
         let trimmed = region.trim();
         if !trimmed.is_empty() {
             return Ok(trimmed.to_string());
         }
+    }
+    if !implicit_discovery_allowed() {
+        return resolve_region(None);
     }
     aws_config::default_provider::region::DefaultRegionChain::builder()
         .build()
@@ -521,6 +528,26 @@ pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result
 }
 
 pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentials, VmError> {
+    if !implicit_discovery_allowed() {
+        let access_key_id =
+            crate::stdlib::process::session_env_var("AWS_ACCESS_KEY_ID")?.ok_or_else(|| {
+                vm_err(
+                    "AWS credentials are not granted to this session; grant AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY or use the inherited environment policy",
+                )
+            })?;
+        let secret_access_key =
+            crate::stdlib::process::session_env_var("AWS_SECRET_ACCESS_KEY")?.ok_or_else(|| {
+                vm_err(
+                    "AWS credentials are not granted to this session; grant AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY or use the inherited environment policy",
+                )
+            })?;
+        let session_token = crate::stdlib::process::session_env_var("AWS_SESSION_TOKEN")?;
+        return Ok(AwsCredentials {
+            access_key_id,
+            secret_access_key,
+            session_token,
+        });
+    }
     let provider = DefaultCredentialsChain::builder()
         .region(Region::new(region.to_string()))
         .build()
@@ -535,6 +562,11 @@ pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentia
         secret_access_key: credentials.secret_access_key().to_string(),
         session_token: credentials.session_token().map(str::to_string),
     })
+}
+
+fn implicit_discovery_allowed() -> bool {
+    crate::stdlib::process::current_session_environment()
+        .is_none_or(|environment| environment.allows_implicit_discovery())
 }
 
 fn read_aws_profile_value(file_kind: &str, profile: &str, key: &str) -> Option<String> {

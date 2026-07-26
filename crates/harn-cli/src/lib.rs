@@ -2562,14 +2562,7 @@ async fn execute_with_skill_dirs_and_optional_harness(
                         .as_ref()
                         .map(|root| root.to_string_lossy().into_owned()),
                     source_dir: Some(source_dir),
-                    env: std::collections::BTreeMap::new(),
-                    adapter: None,
-                    repo_path: None,
-                    worktree_path: None,
-                    branch: None,
-                    base_ref: None,
-                    cleanup: None,
-                    grants: Vec::new(),
+                    ..Default::default()
                 },
             ));
             if let Some(ref root) = project_root {

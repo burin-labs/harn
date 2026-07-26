@@ -239,7 +239,9 @@ pub(crate) fn extract_llm_options(
         .and_then(|o| o.get("stream"))
         .map(|v| v.is_truthy())
         .unwrap_or_else(|| {
-            std::env::var("HARN_LLM_STREAM")
+            crate::stdlib::process::session_env_var("HARN_LLM_STREAM")
+                .ok()
+                .flatten()
                 .map(|v| v != "0" && v.to_lowercase() != "false")
                 .unwrap_or(true)
         });

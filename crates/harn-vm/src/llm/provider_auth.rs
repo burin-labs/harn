@@ -206,14 +206,13 @@ enum ProviderCredentialError {
     Resolution(VmError),
 }
 
-/// Read one credential-bearing variable through the session's capability
-/// profile rather than the raw process environment.
+/// Read one credential-bearing variable through the session environment rather
+/// than the raw process environment.
 ///
-/// Under a hermetic profile no credential resolves — that is what makes an eval
+/// Under an isolated policy no credential resolves — that is what makes an eval
 /// run reproducible instead of quietly picking up the launcher's key. Under a
-/// lane, a granted variable resolves to the granted value, so harn's own
-/// `llm_call` can use a credential the session was given. With no profile
-/// installed this is `std::env::var(name).ok()`, unchanged (harn#4992).
+/// granted policy, a declared variable resolves to the granted value, so harn's
+/// own `llm_call` can use it.
 ///
 /// A grant-resolution failure (an unresolvable `secret_store` pointer) is a
 /// missing credential from this path's point of view; `resolve_api_key` renders
@@ -397,27 +396,27 @@ mod tests {
         assert!(!message.contains("sk-from-ref"));
     }
 
-    /// Install a capability profile for the duration of a test and clear it on
+    /// Install a environment policy for the duration of a test and clear it on
     /// drop, so a panicking assertion cannot leak a profile into a sibling test
     /// sharing the thread.
-    struct ScopedProfile;
+    struct ScopedEnvironment;
 
-    impl ScopedProfile {
-        fn install(profile: crate::security::SessionProfile) -> Self {
-            crate::stdlib::process::set_session_profile(Some(profile));
+    impl ScopedEnvironment {
+        fn install(environment: crate::security::SessionEnvironment) -> Self {
+            crate::stdlib::process::set_session_environment(Some(environment));
             Self
         }
     }
 
-    impl Drop for ScopedProfile {
+    impl Drop for ScopedEnvironment {
         fn drop(&mut self) {
-            crate::stdlib::process::set_session_profile(None);
+            crate::stdlib::process::set_session_environment(None);
         }
     }
 
     #[test]
-    fn hermetic_profile_hides_the_launcher_key_from_dispatch() {
-        // The launcher has a key; the session is hermetic. harn's OWN credential
+    fn isolated_policy_hides_the_launcher_key_from_dispatch() {
+        // The launcher has a key; the session is isolated. Harn's own credential
         // path must not see it, or a "no credentials" eval silently runs against
         // whatever the operator happened to have exported.
         let _guard = crate::llm::env_guard();
@@ -426,14 +425,15 @@ mod tests {
         assert_eq!(
             provider_auth_status("anthropic").credential_status,
             ProviderCredentialStatus::Ok,
-            "no profile installed: the legacy path still reads the process env"
+            "outside a session, bootstrap reads still use the process env"
         );
 
-        let _profile = ScopedProfile::install(crate::security::SessionProfile::hermetic());
+        let _environment =
+            ScopedEnvironment::install(crate::security::SessionEnvironment::isolated());
         assert_eq!(
             provider_auth_status("anthropic").credential_status,
             ProviderCredentialStatus::Missing,
-            "hermetic must close the in-process credential path, not just subprocess env"
+            "isolated must close the in-process credential path, not just subprocess env"
         );
         let message = match resolve_api_key("anthropic").unwrap_err() {
             VmError::Thrown(VmValue::String(message)) => message.to_string(),
@@ -445,18 +445,20 @@ mod tests {
 
     #[test]
     fn lane_grant_reaches_harns_own_dispatch() {
-        // The complement: a lane granted a provider key must be able to use it
+        // A granted policy must make its provider key usable
         // for its own llm_call, not only hand it to subprocesses. The launcher
         // variable here is deliberately NOT the provider's auth env var, so the
         // key can only arrive through the grant's `expose_as_env`.
-        use crate::security::{GrantSourceSpec, GrantSpec, SessionProfile, SessionProfileKind};
+        use crate::security::{
+            EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment,
+        };
 
         let _guard = crate::llm::env_guard();
         let _absent = ScopedEnv::unset("ANTHROPIC_API_KEY");
         let _source = ScopedEnv::set("LAUNCHER_ANTHROPIC_SECRET", "sk-granted");
 
-        let lane = SessionProfile::launch(
-            SessionProfileKind::Lane,
+        let granted = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
             vec![GrantSpec {
                 name: "anthropic".to_string(),
                 source: GrantSourceSpec::Env {
@@ -466,8 +468,8 @@ mod tests {
             }],
             &|name| std::env::var(name).ok(),
         )
-        .expect("lane launch");
-        let _profile = ScopedProfile::install(lane);
+        .expect("granted policy launch");
+        let _environment = ScopedEnvironment::install(granted);
 
         assert_eq!(
             provider_auth_status("anthropic").credential_status,

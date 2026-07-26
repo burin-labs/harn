@@ -34,8 +34,11 @@ fn execution_record(profile: &WorkerExecutionProfile) -> crate::orchestration::R
         base_ref: None,
         cleanup: None,
         // Grant receipts are recorded on the session-level execution record, not
-        // a fan-out worker's; the worker inherits the live profile via the
-        // ambient session-profile scope.
+        // a fan-out worker's. The worker inherits the active policy through the
+        // ambient session environment.
+        environment_policy: crate::stdlib::process::current_session_environment()
+            .map(|environment| environment.kind())
+            .unwrap_or_default(),
         grants: Vec::new(),
     };
     if let Some(worktree) = &profile.worktree {

@@ -14,7 +14,7 @@
 #![recursion_limit = "256"]
 
 // Shared helpers (still at `tests/support/mod.rs`, one level up), reached by
-// the process-options and session-profile submodules via `crate::support`.
+// the process-options and session-environment submodules via `crate::support`.
 #[path = "../support/mod.rs"]
 mod support;
 
@@ -48,7 +48,7 @@ mod redaction_fixtures;
 mod run_view_fixtures;
 mod runtime_introspection;
 mod sandbox_hardened;
-mod session_profile_env_leak;
+mod session_environment_leak;
 mod skill_activation_evidence_conformance;
 mod thread_local_audit;
 mod tool_call_cancellation;

@@ -13,7 +13,7 @@ struct PolicyGuard;
 
 impl Drop for PolicyGuard {
     fn drop(&mut self) {
-        crate::stdlib::process::set_session_profile(None);
+        crate::stdlib::process::set_session_environment(None);
         pop_execution_policy();
     }
 }
@@ -33,7 +33,9 @@ fn enter_policy(workspace: &Path) -> PolicyGuard {
         },
         ..CapabilityPolicy::default()
     });
-    crate::stdlib::process::set_session_profile(Some(crate::security::SessionProfile::hermetic()));
+    crate::stdlib::process::set_session_environment(Some(
+        crate::security::SessionEnvironment::isolated(),
+    ));
     PolicyGuard
 }
 
@@ -109,12 +111,12 @@ fn spawned_process_observes_workspace_toolchain_environment() {
 
 #[test]
 fn explicit_session_env_grant_wins_over_workspace_default() {
-    use crate::security::{GrantSourceSpec, GrantSpec, SessionProfile, SessionProfileKind};
+    use crate::security::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment};
 
     let workspace = tempfile::tempdir().unwrap();
     let _policy = enter_policy(workspace.path());
-    let profile = SessionProfile::launch(
-        SessionProfileKind::Lane,
+    let profile = SessionEnvironment::launch(
+        EnvironmentPolicyKind::Granted,
         vec![GrantSpec {
             name: "explicit-home".to_string(),
             source: GrantSourceSpec::Env {
@@ -125,7 +127,7 @@ fn explicit_session_env_grant_wins_over_workspace_default() {
         &|name| (name == "EXPLICIT_HOME").then(|| "/caller/home".to_string()),
     )
     .unwrap();
-    crate::stdlib::process::set_session_profile(Some(profile));
+    crate::stdlib::process::set_session_environment(Some(profile));
 
     let env = find_program("env").expect("env executable");
     let output = run(&env, &[], workspace.path());

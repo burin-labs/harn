@@ -68,8 +68,9 @@ pub(crate) async fn vm_stream_llm(
     })?;
 
     let idle_timeout_secs = opts.idle_timeout.unwrap_or_else(|| {
-        std::env::var("HARN_LLM_IDLE_TIMEOUT")
+        crate::stdlib::process::session_env_var("HARN_LLM_IDLE_TIMEOUT")
             .ok()
+            .flatten()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(30)
     });
@@ -82,10 +83,12 @@ pub(crate) async fn vm_stream_llm(
     // token a more generous budget; subsequent inter-token gaps use the normal
     // idle timeout. Still bounded by the overall deadline below. Configurable via
     // HARN_LLM_FIRST_TOKEN_TIMEOUT; defaults to 4x the idle timeout, min 120s.
-    let first_token_timeout_secs = std::env::var("HARN_LLM_FIRST_TOKEN_TIMEOUT")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or_else(|| idle_timeout_secs.saturating_mul(4).max(120));
+    let first_token_timeout_secs =
+        crate::stdlib::process::session_env_var("HARN_LLM_FIRST_TOKEN_TIMEOUT")
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or_else(|| idle_timeout_secs.saturating_mul(4).max(120));
     let first_token_dur = std::time::Duration::from_secs(first_token_timeout_secs);
     let mut got_first_token = false;
 

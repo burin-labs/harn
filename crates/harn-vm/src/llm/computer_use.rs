@@ -111,7 +111,9 @@ pub(crate) fn openai_computer_tool(
 /// action lowering is wired.
 fn native_computer_projection_enabled() -> bool {
     matches!(
-        std::env::var("BURIN_COMPUTER_USE_NATIVE")
+        crate::stdlib::process::session_env_var("BURIN_COMPUTER_USE_NATIVE")
+            .ok()
+            .flatten()
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase()

@@ -79,6 +79,7 @@ fn resolve_source_relative_path_blocks_obvious_escape() {
         branch: None,
         base_ref: None,
         cleanup: None,
+        environment_policy: Default::default(),
         grants: Vec::new(),
     }));
     // A long string of `..` should escape the temp-root and trip
@@ -126,6 +127,7 @@ fn resolve_source_relative_path_prefers_execution_cwd_over_source_dir() {
         branch: None,
         base_ref: None,
         cleanup: None,
+        environment_policy: Default::default(),
         grants: Vec::new(),
     }));
     let resolved = resolve_source_relative_path("templates/prompt.txt");
@@ -154,6 +156,7 @@ fn resolve_source_asset_path_prefers_execution_source_dir_over_cwd() {
         branch: None,
         base_ref: None,
         cleanup: None,
+        environment_policy: Default::default(),
         grants: Vec::new(),
     }));
     let resolved = resolve_source_asset_path("templates/prompt.txt");

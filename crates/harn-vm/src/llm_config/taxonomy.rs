@@ -71,7 +71,7 @@ pub fn default_provider() -> String {
 }
 
 fn default_provider_with_config(config: &ProvidersConfig) -> String {
-    crate::test_env::env_var_seamed("HARN_DEFAULT_PROVIDER")
+    crate::stdlib::process::session_env_value("HARN_DEFAULT_PROVIDER")
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("auto"))
         .or_else(|| {

@@ -18,7 +18,7 @@ use crate::skill_loader::{
     SkillLoaderInputs,
 };
 
-pub(crate) mod capability;
+pub(crate) mod environment;
 mod eval_source;
 mod explain_cost;
 pub mod harnpack;
@@ -29,7 +29,7 @@ mod llm_mock;
 mod manifest_runtime;
 pub(crate) mod sandbox;
 
-pub(crate) use self::capability::{CapabilityProfileArg, CapabilityProfileConfig};
+pub(crate) use self::environment::{EnvironmentPolicyArg, EnvironmentPolicyConfig};
 use self::eval_source::create_eval_temp_file;
 pub(crate) use self::eval_source::prepare_eval_temp_file;
 #[cfg(test)]
@@ -1153,22 +1153,19 @@ async fn execute_run_inner_scoped(
         .unwrap_or_else(|| default_run_workspace_root(project_root.as_deref(), source_parent));
     let _sandbox_scope = install_run_sandbox_scope(&sandbox, &sandbox_root, &mut stderr);
 
-    // Launch the session's capability profile (if declared) so this run's
+    // Launch the session's environment policy so this run's
     // subprocesses build their environment through the closed allowlist +
     // grants resolver (harn#4992). A launch failure — a missing launcher
-    // variable, or a grant on a hermetic profile — fails the run loudly rather
+    // variable, or a grant on an isolated policy — fails the run loudly rather
     // than silently dropping the credential. Held for the run's duration; on
-    // drop the ambient profile is cleared.
-    let mut grant_receipts: Vec<harn_vm::security::GrantReceipt> = Vec::new();
-    let _capability_scope = match sandbox.capability.as_ref() {
-        None => None,
-        Some(config) => match capability::launch_scope(config, &mut stderr) {
-            Ok((scope, receipts)) => {
-                grant_receipts = receipts;
-                Some(scope)
-            }
+    // drop the ambient environment policy is cleared.
+    let (_environment_scope, environment_policy, grant_receipts) =
+        match environment::launch_scope(&sandbox.environment, &mut stderr) {
+            Ok(launched) => launched,
             Err(error) => {
+                stderr.push_str(&format!("error: {error}\n"));
                 time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
+                let code = error.code();
                 return finalize_run_error(
                     stdout,
                     stderr,
@@ -1181,12 +1178,11 @@ async fn execute_run_inner_scoped(
                     timing.as_deref(),
                     0,
                     cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-                    "capability_profile",
-                    error,
+                    code,
+                    error.to_string(),
                 );
             }
-        },
-    };
+        };
 
     let attestation_started_at_ms = now_ms();
     let attestation_log = if attestation.is_some() {
@@ -1203,9 +1199,9 @@ async fn execute_run_inner_scoped(
                 "argv": &script_argv,
                 "project_root": store_base.display().to_string(),
                 "sandbox": run_sandbox_attestation(&sandbox),
-                // Non-secret grant receipts (empty for a hermetic or no-profile
-                // run); never the granted value.
-                "capability_grants": &grant_receipts,
+                "environment_policy": environment_policy.as_str(),
+                // Non-secret grant receipts; never the granted value.
+                "environment_grants": &grant_receipts,
             }),
         )
         .await;

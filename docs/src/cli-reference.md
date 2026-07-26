@@ -25,7 +25,7 @@ harn run --read-only-root /path/to/other-repo main.harn
 harn run --sandbox-write-root /path/to/tool-cache main.harn
 harn run --sandbox-read-root /path/to/sdk main.harn
 harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN open_pr.harn
-harn run --capability-profile hermetic eval_child.harn
+harn run --environment-policy isolated eval_child.harn
 harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
 harn run --attest <file.harn>
@@ -53,8 +53,8 @@ harn run --resume .harn/workers/worker_...json
 | `--read-only-root <path>` | Read from an extra filesystem root while keeping sandboxing enabled |
 | `--sandbox-write-root <path>` | Let spawned subprocesses write an extra root without granting Harn filesystem builtins access |
 | `--sandbox-read-root <path>` | Let spawned subprocesses read an extra root without granting Harn filesystem builtins access |
-| `--capability-profile <hermetic\|lane>` | Select the session credential posture. `hermetic` admits no credentials, to this run or its subprocesses; `lane` carries the declared `--grant` set. Absent, the run inherits the launcher environment (the legacy path) |
-| `--grant <spec>` | Grant one named credential to this session; repeatable. Selects the `lane` profile. `provider:PROVIDER` takes the variable name from the provider catalog. See [Capability profiles and grants](#capability-profiles-and-grants) |
+| `--environment-policy <inherited\|isolated\|granted>` | Choose which launch-time environment values this session and its subprocesses may read. Default: `inherited`. |
+| `--grant <spec>` | Grant one named value to this session; repeatable. Selects `granted` when the policy is omitted. See [Environment policies and grants](#environment-policies-and-grants). |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |
@@ -77,62 +77,94 @@ harn run --resume .harn/workers/worker_...json
 records a receipt on the protected operation and never relaxes the generic
 `process.exec` safety floor or configured command-policy rules.
 
-### Capability profiles and grants
+### Environment policies and grants
 
-A sandboxed `harn run` confines the child to its workspace by default, which
-means a spawned subprocess inherits none of the launcher's ambient
-credentials — deliberately, so an eval child stays hermetic. An autonomous lane
-has the opposite need: it must reach exactly one scoped secret (a `GH_TOKEN` to
-open its PR, a provider key for its own model calls) and nothing else.
-`--capability-profile` and `--grant` are that scoped, receipted path.
+Every launched Harn session has one environment policy:
 
-A run selects one of two postures, or neither:
+- **Inherited** (the default) captures the launcher's environment once when the
+  session starts. Later changes to the launcher process do not change the
+  session.
+- **Isolated** admits only the small set of operating-system and toolchain
+  values needed to run commands, such as `PATH`, temporary-directory settings,
+  locale, and compiler locations. It rejects grants.
+- **Granted** starts with the same runtime essentials as `isolated`, then adds
+  only the declared grants.
 
-- **Hermetic** (`--capability-profile hermetic`) — the environment is built from
-  a fixed allowlist alone (`PATH`, `HOME`, locale, toolchain vars); no credential
-  is reachable. Grants are rejected. This is the eval identity, enforced at
-  launch rather than asserted afterward.
-- **Lane** (any `--grant`, or `--capability-profile lane`) — the same closed
-  environment, plus the declared grants and nothing else.
-- **Neither flag** — the legacy path: the run inherits the launcher environment
-  unchanged. Selecting a profile is opt-in.
+The policy applies consistently to `harness.env`, Harn's provider credentials,
+provider base URLs and regions, Azure/Vertex/Bedrock configuration, and spawned
+commands. In `isolated` and `granted`, platform SDKs cannot silently fall back
+to home-directory profiles, metadata services, or application-default
+credentials. Supply the required values as grants or choose `inherited`.
 
-A profile governs both halves of the boundary: the environment handed to spawned
-subprocesses, *and* the credential lookup `llm_call` performs inside harn's own
-process. So a hermetic run cannot quietly pick up whichever provider key the
-operator happened to export, and a lane's granted key is usable by the lane's own
-model calls — not just by the commands it spawns.
+The environment policy is separate from the filesystem/process sandbox and
+from approval policy. `--no-sandbox` does not disable the environment policy,
+and an environment grant does not grant file, network, or tool access.
 
-Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR]`, or the `provider:` shorthand:
+Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR]`:
 
 | Part | Meaning |
 |---|---|
-| `NAME` | The logical name a tool asks the credential for. |
-| `SOURCE` | `env:VAR_NAME` snapshots a launcher variable at launch (the run never reads the live environment afterward); `secret://ACCOUNT/KEY` is a [secret-store](./hostlib/secret_store.md) pointer, resolved lazily on exposure. |
-| `,expose=ENV_VAR` | Optional. Publishes the value as `ENV_VAR` to spawned commands and to this run's own provider lookup. Without it the grant is carried but not exposed. |
-| `provider:PROVIDER` | Shorthand for a model credential. Takes the variable name from the provider catalog and exposes it under that name. |
+| `NAME` | A unique, non-secret name used in receipts and diagnostics. |
+| `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
+| `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name to the whole session: `harness.env`, provider configuration, and spawned commands. |
 
 ```bash
-# Open a PR from a headless lane: gh reads GH_TOKEN from the granted secret.
+# Let gh read one vault-backed token without exposing the launcher's other values.
 harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN open_pr.harn
 
 # Snapshot a provider key from the launcher env, exposed under the same name.
-harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY lane.harn
-
-# The same grant, with the variable name taken from the provider catalog.
-harn run --grant provider:fireworks lane.harn
+harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 ```
 
-Prefer `provider:PROVIDER` for model credentials. It resolves to the first of
-that provider's catalog-declared auth variables that is set in the launcher
-environment — the same one dispatch would have chosen — so a launch script never
-restates a mapping the catalog already owns, and keeps working when a provider
-adds or renames a variable.
+Duplicate grant names and duplicate `expose` targets are launch errors. A child
+session inherits its parent's resolved environment by default. It may narrow
+that authority (for example, `inherited` to `isolated`, or a smaller subset of
+`granted` grants), but it cannot widen it or reread the ambient host
+environment. Ceiling violations return the stable
+`environment_policy.child_exceeds_parent` code with the parent and requested
+policies.
 
-Every declared grant is disclosed on stderr at launch (its name, source kind, and
-whether it is exposed — never the value) and recorded as a non-secret receipt in
-the `--attest` provenance log. `--capability-profile` and `--grant` require the
-sandbox and so conflict with `--no-sandbox`. Both flags are also accepted by
+Here “reproducible” has a precise scope: every prompt, worker, and subprocess
+in one launched session uses the same environment snapshot, independent of
+later launcher mutations. The launcher/host establishes that snapshot, and
+Harn enforces it. This does not claim that two machines have identical
+environments. Use `isolated` or explicit grants when a test or replay must not
+depend on the operator's shell. A live `secret://` source may intentionally
+change after rotation or revocation; its receipt stays stable, but its value is
+not frozen.
+
+An `.env` file is not a second policy channel. A launcher may load it before
+starting Harn; then its values are ordinary launcher environment values and
+follow the selected policy. A vault or keyring remains the source behind a
+`secret://` grant. Filesystem access to service-account files or other
+credential files is governed separately by the sandbox.
+
+Process-bootstrap and host-ceiling settings that Harn must read before or above
+any session—such as the path to a provider catalog overlay, server
+observability controls, global rate limits, and the host's
+`HARN_LLM_CALLS_DISABLED` kill switch—belong to the launcher process and may
+require a restart to change. A child policy cannot hide or override them. They
+are not session values.
+
+Terminology:
+
+- **Launcher**: the process that starts a Harn session, such as the `harn` CLI
+  or an ACP host.
+- **Session**: one conversation/execution context and its delegated lineage.
+  ACP defines the session lifecycle; `environmentPolicy` is a Harn extension.
+- **Worker**: delegated work inside that lineage. It receives no more
+  environment authority than its parent.
+- **Subprocess**: an operating-system command started by the session. It sees
+  the same resolved session environment plus explicit per-call overrides.
+- **Grant**: a named, receipted source-to-environment mapping. Grants are
+  session-wide today.
+- **Sandbox**: the separate file/process/network boundary.
+- **Approval**: permission for a risky operation; it does not add environment
+  values.
+
+Every declared grant is disclosed on stderr at launch (its name, source kind,
+and exact environment target, if any—never the value) and recorded as a
+non-secret receipt in the `--attest` provenance log. Both flags are also accepted by
 [`harn time run`](#harn-time), which shares `harn run`'s confinement surface.
 
 ### `--json` event stream
@@ -647,7 +679,7 @@ harn time run main.harn --json
 harn time run main.harn --json --no-cache
 harn time run main.harn --no-sandbox
 harn time run main.harn --write-root /path/to/output
-harn time run main.harn --grant provider:fireworks
+harn time run main.harn --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY
 harn time run -e 'log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```

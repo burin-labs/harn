@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use harn_vm::orchestration::RunExecutionRecord;
-use harn_vm::security::session_grants::SessionProfile;
+use harn_vm::security::session_environment::SessionEnvironment;
 use harn_vm::value::VmError;
 
 /// Path to the process helper binary.
@@ -79,11 +79,11 @@ pub fn helper_command(args: &[&str]) -> String {
 }
 
 pub fn run(source: &str) -> Result<String, String> {
-    run_with_profile(source, None)
+    run_with_environment(source, None)
 }
 
-pub fn run_hermetic(source: &str) -> Result<String, String> {
-    run_with_profile(source, Some(SessionProfile::hermetic()))
+pub fn run_isolated(source: &str) -> Result<String, String> {
+    run_with_environment(source, Some(SessionEnvironment::isolated()))
 }
 
 pub fn logged(source: &str) -> Result<Vec<String>, String> {
@@ -97,8 +97,8 @@ pub fn logged_with_execution_context(
     run_with_execution_context(source, context).map(log_lines)
 }
 
-pub fn logged_hermetic(source: &str) -> Result<Vec<String>, String> {
-    run_hermetic(source).map(log_lines)
+pub fn logged_isolated(source: &str) -> Result<Vec<String>, String> {
+    run_isolated(source).map(log_lines)
 }
 
 pub fn log_lines(output: String) -> Vec<String> {
@@ -109,17 +109,20 @@ pub fn log_lines(output: String) -> Vec<String> {
         .collect()
 }
 
-fn run_with_profile(source: &str, profile: Option<SessionProfile>) -> Result<String, String> {
-    run_with_profile_and_context(source, profile, None)
+fn run_with_environment(
+    source: &str,
+    environment: Option<SessionEnvironment>,
+) -> Result<String, String> {
+    run_with_environment_and_context(source, environment, None)
 }
 
 fn run_with_execution_context(source: &str, context: RunExecutionRecord) -> Result<String, String> {
-    run_with_profile_and_context(source, None, Some(context))
+    run_with_environment_and_context(source, None, Some(context))
 }
 
-fn run_with_profile_and_context(
+fn run_with_environment_and_context(
     source: &str,
-    profile: Option<SessionProfile>,
+    environment: Option<SessionEnvironment>,
     context: Option<RunExecutionRecord>,
 ) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
@@ -132,7 +135,7 @@ fn run_with_profile_and_context(
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
-                harn_vm::stdlib::process::set_session_profile(profile);
+                harn_vm::stdlib::process::set_session_environment(environment);
                 harn_vm::stdlib::process::set_thread_execution_context(context);
                 let mut vm = harn_vm::Vm::new();
                 harn_vm::register_vm_stdlib(&mut vm);
@@ -140,7 +143,7 @@ fn run_with_profile_and_context(
                     .execute(&chunk)
                     .await
                     .map_err(|error: VmError| format!("{error:?}"));
-                harn_vm::stdlib::process::set_session_profile(None);
+                harn_vm::stdlib::process::set_session_environment(None);
                 harn_vm::stdlib::process::set_thread_execution_context(None);
                 result.map(|_| vm.output().to_string())
             })

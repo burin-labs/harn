@@ -33,18 +33,13 @@ These flags populate `process_sandbox.write_roots` and `.read_roots`;
 Harn filesystem builtins do not gain access to the path.
 
 The filesystem grants above widen *where* a subprocess reaches; the
-credential boundary is separate. By default a sandboxed subprocess still
-inherits the launcher's environment, so an ambient `GH_TOKEN` or provider
-key crosses in unbidden. `--capability-profile` closes that env and
-`--grant` reopens it for exactly one named, receipted credential — the
-scoped path a headless lane uses to open its PR without leaking every
-other secret. The profile governs harn's own credential lookup as well as
-the environment handed to subprocesses, so a hermetic run does not fall
-back to an exported provider key for its own `llm_call`, and a lane's
-granted key is usable by that call. See
-[Capability profiles and grants](./cli-reference.md#capability-profiles-and-grants)
-for the flag grammar; like the filesystem grants, both require the
-sandbox and are rejected with `--no-sandbox`.
+environment boundary is separate. Every session has an environment policy:
+`inherited` snapshots the launcher environment, `isolated` admits runtime
+essentials only, and `granted` adds declared `--grant` mappings. The same
+resolved values govern `harness.env`, providers, and subprocesses. See
+[Environment policies and grants](./cli-reference.md#environment-policies-and-grants).
+Environment policy remains active with `--no-sandbox`; neither boundary
+implicitly widens the other.
 
 The process-network opt-in is deliberately broader than Harn's egress
 allowlist. `HARN_EGRESS_ALLOW` and `egress_policy(...)` constrain HTTP,

@@ -691,6 +691,33 @@ The ACP server supports these JSON-RPC methods:
 | `workflow/pause` | Mark a workflow paused and enqueue a control message |
 | `workflow/resume` | Mark a workflow resumed and enqueue a control message |
 
+ACP sessions are conversation/execution contexts. Harn extends `session/new`
+and `session/fork` with an optional `environmentPolicy`; this field is not part
+of the base ACP specification. Omission means `inherited`.
+
+```json
+{
+  "cwd": "/workspace",
+  "environmentPolicy": {
+    "kind": "granted",
+    "grants": [
+      {
+        "name": "provider_key",
+        "source": {"env": {"var": "OPENAI_API_KEY"}},
+        "expose_as_env": "OPENAI_API_KEY"
+      }
+    ]
+  }
+}
+```
+
+The environment is resolved once at `session/new`. A fork inherits that
+resolved environment unless it requests a narrower policy. A child cannot
+widen its parent; violations return structured JSON-RPC `error.data` with a
+stable code, `parentPolicy`, and `requestedPolicy`. See
+[Environment policies and grants](./cli-reference.md#environment-policies-and-grants)
+for scope and terminology.
+
 `workflow/*` methods also accept the `harn.workflow.*` aliases. They expect
 `workflowId`, plus `name` where applicable, optional `payload`, and
 `timeoutMs` for `workflow/update`. These methods resolve workflow state against

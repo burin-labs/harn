@@ -1,53 +1,25 @@
-//! The child-process environment allowlist and the single profile-aware env
+//! The child-process environment allowlist and the single policy-aware env
 //! resolver.
 //!
 //! # Why an allowlist, not a scrub
 //!
-//! A [`SessionProfile`] that carries no grants is *hermetic*: no credential may
-//! cross into a spawned child. The safe way to build that child's environment is
-//! **closed by construction** — start from nothing and admit only the variables
-//! on a typed allowlist — rather than inheriting the parent environment and
-//! trying to *subtract* everything secret. A subtractive scrub is open by
-//! default: every new provider prefix or vendor token that nobody added to the
-//! denylist leaks, silently. The allowlist inverts the failure mode: a variable
-//! a toolchain needs but that is not yet listed makes the build **fail loudly**,
-//! and the fix is to add it here (with a one-line receipt for why), never to
-//! reopen the door with a denylist.
+//! `isolated` and `granted` start empty and admit only names from
+//! [`ENV_ALLOWLIST`] plus explicit grant targets. This is safer and simpler
+//! than inheriting everything and trying to maintain a secret denylist.
 //!
-//! # One resolver, two profiles
+//! # One resolver
 //!
-//! [`resolve_env`] is the *single* code path that builds a child environment for
-//! either profile. There is deliberately no hermetic-vs-lane branch:
+//! [`resolve_env`] materializes the environment snapshot for subprocesses.
+//! [`lookup_env`] answers the same policy question for in-process consumers
+//! such as `harness.env` and model providers:
 //!
 //! ```text
-//!   child_env = allowlist(parent_env) + profile.env_exposure()
+//! inherited = launcher_snapshot
+//! isolated  = allowlist(launcher_snapshot)
+//! granted   = allowlist(launcher_snapshot) + grants
 //! ```
 //!
-//! A hermetic profile has no grants, so `env_exposure()` is empty and the child
-//! sees the allowlist alone. A lane profile adds exactly its granted
-//! `(VAR, value)` pairs on top. `grants: []` is therefore *literally* the
-//! hermetic definition — the same resolver, exercised with an empty grant set —
-//! not a separately maintained path that could drift from the lane path.
-//!
-//! "Single code path" here means the two profiles do not branch — it is not by
-//! itself a guarantee that every spawn seam calls this. That coverage is what
-//! [`crate::stdlib::process::session_env`] owns: it is the one adapter from a
-//! live profile to an environment, and any new `Command` builder must route
-//! through it or it silently reopens the boundary. `harn-vm`'s
-//! `session_profile_env_leak` test pins each seam against that regression.
-//!
-//! # The same environment in-process
-//!
-//! A child process is not the only thing that reads a credential. harn's own
-//! `llm_call` resolves a provider key from the process environment, so a
-//! profile that closed the *subprocess* boundary while harn itself still read
-//! the launcher's `ANTHROPIC_API_KEY` would be hermetic in name only — and a
-//! lane that granted `FIREWORKS_API_KEY` to its children could not use that key
-//! for its own model calls. [`lookup_env`] answers the same question
-//! [`resolve_env`] answers, for one variable, so the in-process credential path
-//! and the subprocess path cannot disagree: `resolve_env` is *defined* as
-//! `lookup_env` over the admitted key set, so there is one rule, not two
-//! implementations that must be kept in step (harn#4992).
+//! Every spawn seam routes through [`crate::stdlib::process::session_env`].
 //!
 //! # Single owner
 //!
@@ -59,7 +31,9 @@
 
 use std::collections::BTreeMap;
 
-use super::session_grants::{GrantError, SessionProfile};
+use super::session_environment::{
+    EnvironmentPolicyError, EnvironmentPolicyKind, SessionEnvironment,
+};
 
 /// POSIX/shell/locale essentials any build or test process needs to run at all.
 /// These are workspace/user facts, never credentials.
@@ -98,7 +72,7 @@ const BASE_ENV_ALLOWLIST: &[&str] = &[
 
 /// Toolchain variables, grouped by ecosystem. Each is a build/tooling fact
 /// (install root, cache dir, module path) — never a credential. Add here, with
-/// a receipt, when a toolchain fails a hermetic run for want of one; never
+/// a receipt, when a toolchain fails an isolated run for want of one; never
 /// regress to a denylist. Grouped by ecosystem (not globally sorted) so a
 /// reviewer reads a toolchain's vars as a unit.
 const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
@@ -193,7 +167,7 @@ pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
 ];
 
 /// The complete set of environment variable names admitted into a
-/// profile-governed child process. The single owner; see the module docs.
+/// policy-governed child process. The single owner; see the module docs.
 pub const ENV_ALLOWLIST: &[&str] = &const_concat();
 
 /// Concatenate the base and toolchain lists at compile time so [`ENV_ALLOWLIST`]
@@ -215,42 +189,45 @@ const fn const_concat() -> [&'static str; BASE_ENV_ALLOWLIST.len() + TOOLCHAIN_E
     out
 }
 
-/// Build the environment for a profile-governed child process, closed by
+/// Build the environment for a policy-governed child process, closed by
 /// construction: the allowlisted subset of the parent environment plus the
-/// profile's granted exposure. The one resolver both profiles flow through — a
-/// hermetic profile contributes an empty exposure and so yields the allowlist
+/// environment's granted exposure. The one resolver both policies flow through —
+/// an isolated policy contributes an empty exposure and so yields the allowlist
 /// alone.
 ///
 /// `env_lookup` reads the launcher/parent environment (production passes
 /// `|name| std::env::var(name).ok()`); `resolve_secret` materializes a
 /// `secret_store` grant on exposure (production passes the crate's secret chain).
 pub fn resolve_env(
-    profile: &SessionProfile,
-    env_lookup: &dyn Fn(&str) -> Option<String>,
+    environment: &SessionEnvironment,
+    _env_lookup: &dyn Fn(&str) -> Option<String>,
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
-) -> Result<BTreeMap<String, String>, GrantError> {
+) -> Result<BTreeMap<String, String>, EnvironmentPolicyError> {
+    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) {
+        return Ok(environment.launcher_snapshot().clone());
+    }
     let mut env = BTreeMap::new();
     for name in ENV_ALLOWLIST {
-        if let Some(value) = env_lookup(name) {
-            env.insert((*name).to_string(), value);
+        if let Some(value) = environment.launcher_value(name) {
+            env.insert((*name).to_string(), value.to_string());
         }
     }
-    // Grants overlay the allowlist. A hermetic profile has none, so this is a
-    // no-op there; the empty-grants case IS the hermetic environment.
-    for (var, value) in profile.env_exposure(resolve_secret)? {
+    // Grants overlay the allowlist. An isolated policy has none, so this is a
+    // no-op there; the empty-grants case IS the isolated environment.
+    for (var, value) in environment.env_exposure(resolve_secret)? {
         env.insert(var, value);
     }
     Ok(env)
 }
 
-/// The profile-governed value of a single environment variable — the same
+/// The policy-governed value of a single environment variable — the same
 /// answer [`resolve_env`] would put in the map under `name`, without building
 /// the map.
 ///
 /// Grants win over the allowlist (matching `resolve_env`'s overlay order), so a
-/// lane that grants `FIREWORKS_API_KEY` sees the granted value here even though
+/// granted policy that grants `FIREWORKS_API_KEY` sees the granted value here even though
 /// the allowlist would never admit a credential. A name that is neither granted
-/// nor allowlisted resolves to `None` — which is exactly what makes a hermetic
+/// nor allowlisted resolves to `None` — which is exactly what makes an isolated
 /// session credential-free *in-process*, not merely for its children.
 ///
 /// This exists so the in-process credential path (`llm_call`'s provider key
@@ -258,19 +235,21 @@ pub fn resolve_env(
 /// `std::env`. The equivalence with `resolve_env` is pinned by a test in this
 /// module rather than left to the reader.
 pub fn lookup_env(
-    profile: &SessionProfile,
+    environment: &SessionEnvironment,
     name: &str,
-    env_lookup: &dyn Fn(&str) -> Option<String>,
+    _env_lookup: &dyn Fn(&str) -> Option<String>,
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
-) -> Result<Option<String>, GrantError> {
+) -> Result<Option<String>, EnvironmentPolicyError> {
     // Only the grant targeting `name` is resolved: probing an unrelated
     // variable must not reach the secret store, and one unresolvable grant must
     // not mask an unrelated credential.
-    if let Some(value) = profile.env_exposure_for(name, resolve_secret)? {
+    if let Some(value) = environment.env_exposure_for(name, resolve_secret)? {
         return Ok(Some(value));
     }
-    if ENV_ALLOWLIST.contains(&name) {
-        return Ok(env_lookup(name));
+    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited)
+        || ENV_ALLOWLIST.contains(&name)
+    {
+        return Ok(environment.launcher_value(name).map(str::to_string));
     }
     Ok(None)
 }
@@ -278,7 +257,7 @@ pub fn lookup_env(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::session_grants::{GrantSourceSpec, GrantSpec, SessionProfileKind};
+    use crate::security::session_environment::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec};
 
     #[test]
     fn toolchain_path_env_vars_are_a_subset_of_the_allowlist() {
@@ -370,7 +349,7 @@ mod tests {
             }
         }
         // Base essentials present: without these a child cannot resolve tools or
-        // its home/temp, so a hermetic build would fail for a trivial reason.
+        // its home/temp, so an isolated build would fail for a trivial reason.
         for required in ["PATH", "HOME", "TMPDIR", "LANG"] {
             assert!(
                 ENV_ALLOWLIST.contains(&required),
@@ -395,10 +374,10 @@ mod tests {
     }
 
     #[test]
-    fn hermetic_env_is_the_allowlist_alone() {
-        // A parent env carrying both allowlisted vars and a secret. The hermetic
+    fn isolated_environment_is_the_allowlist_alone() {
+        // A parent env carrying both allowlisted vars and a secret. The isolated
         // child sees the allowlisted vars and NOT the secret — and no grant path
-        // exists to add one (hermetic forbids grants at launch).
+        // exists to add one (isolated forbids grants at launch).
         let parent = env_from(&[
             ("PATH", "/usr/bin"),
             ("HOME", "/home/agent"),
@@ -406,24 +385,35 @@ mod tests {
             ("SOME_UNLISTED_VAR", "whatever"),
         ]);
         let never_secret = |_: &str, _: &str| None;
-        let profile = SessionProfile::hermetic();
-        let env = resolve_env(&profile, &parent, &never_secret).unwrap();
+        let environment = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Isolated,
+            Vec::new(),
+            BTreeMap::from([
+                ("PATH".to_string(), "/usr/bin".to_string()),
+                ("HOME".to_string(), "/home/agent".to_string()),
+                ("ANTHROPIC_API_KEY".to_string(), "sk-secret".to_string()),
+                ("SOME_UNLISTED_VAR".to_string(), "whatever".to_string()),
+            ]),
+            &parent,
+        )
+        .unwrap();
+        let env = resolve_env(&environment, &parent, &never_secret).unwrap();
 
         assert_eq!(env.get("PATH").map(String::as_str), Some("/usr/bin"));
         assert_eq!(env.get("HOME").map(String::as_str), Some("/home/agent"));
         assert!(
             !env.contains_key("ANTHROPIC_API_KEY"),
-            "hermetic env must not inherit a secret from the parent"
+            "isolated env must not inherit a secret from the parent"
         );
         assert!(
             !env.contains_key("SOME_UNLISTED_VAR"),
-            "hermetic env must not inherit an unlisted var"
+            "isolated env must not inherit an unlisted var"
         );
     }
 
     #[test]
-    fn lane_env_is_allowlist_plus_grants_via_the_same_resolver() {
-        // The lane env is the hermetic env (allowlist) plus exactly the granted
+    fn granted_env_is_allowlist_plus_grants_via_the_same_resolver() {
+        // The granted env is the isolated env (allowlist) plus exactly the granted
         // pairs. Same resolver, non-empty grant set.
         let parent = env_from(&[("PATH", "/usr/bin"), ("FIREWORKS_API_KEY", "fw-secret")]);
         let specs = vec![
@@ -443,11 +433,12 @@ mod tests {
                 expose_as_env: Some("GH_TOKEN".to_string()),
             },
         ];
-        let profile = SessionProfile::launch(SessionProfileKind::Lane, specs, &parent).unwrap();
+        let environment =
+            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap();
         let resolve_secret = |account: &str, key: &str| {
             (account == "gh" && key == "token").then(|| "ghp".to_string())
         };
-        let env = resolve_env(&profile, &parent, &resolve_secret).unwrap();
+        let env = resolve_env(&environment, &parent, &resolve_secret).unwrap();
 
         // Allowlist base still present.
         assert_eq!(env.get("PATH").map(String::as_str), Some("/usr/bin"));
@@ -463,8 +454,8 @@ mod tests {
     #[test]
     fn single_name_lookup_agrees_with_the_full_resolver() {
         // `lookup_env` is the in-process credential path and `resolve_env` is
-        // the subprocess path; if they ever disagree, a hermetic session leaks
-        // in-process or a lane's own llm_call cannot see its granted key. Pin
+        // the subprocess path; if they ever disagree, an isolated session leaks
+        // in-process or a granted policy's own llm_call cannot see its granted key. Pin
         // the equivalence over every interesting class of name at once: an
         // allowlisted var, a granted var, a granted var that shadows an
         // allowlisted one, and an unlisted/ungranted var.
@@ -512,17 +503,17 @@ mod tests {
             "HOME",
         ];
 
-        for profile in [
-            SessionProfile::hermetic(),
-            SessionProfile::launch(SessionProfileKind::Lane, specs, &parent).unwrap(),
+        for environment in [
+            SessionEnvironment::isolated(),
+            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap(),
         ] {
-            let map = resolve_env(&profile, &parent, &resolve_secret).unwrap();
+            let map = resolve_env(&environment, &parent, &resolve_secret).unwrap();
             for name in probes {
                 assert_eq!(
-                    lookup_env(&profile, name, &parent, &resolve_secret).unwrap(),
+                    lookup_env(&environment, name, &parent, &resolve_secret).unwrap(),
                     map.get(name).cloned(),
                     "lookup_env disagreed with resolve_env for {name} under {:?}",
-                    profile.kind()
+                    environment.kind()
                 );
             }
         }
@@ -552,54 +543,64 @@ mod tests {
                 expose_as_env: Some("OTHER_TOKEN".to_string()),
             },
         ];
-        let profile = SessionProfile::launch(SessionProfileKind::Lane, specs, &parent).unwrap();
+        let environment =
+            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap();
         let explode = |_: &str, _: &str| -> Option<String> {
             panic!("an unrelated grant's secret must not be resolved")
         };
 
         // The env-snapshot grant resolves without consulting the store at all.
         assert_eq!(
-            lookup_env(&profile, "FIREWORKS_API_KEY", &parent, &explode).unwrap(),
+            lookup_env(&environment, "FIREWORKS_API_KEY", &parent, &explode).unwrap(),
             Some("fw-secret".to_string())
         );
         // ...as does an ungranted, unlisted name.
         assert_eq!(
-            lookup_env(&profile, "UNRELATED_VAR", &parent, &explode).unwrap(),
+            lookup_env(&environment, "UNRELATED_VAR", &parent, &explode).unwrap(),
             None
         );
 
         // The broken grant still fails loudly when it is the one being asked
-        // for — the failure is scoped to it, not spread across the profile.
+        // for — the failure is scoped to it, not spread across the environment.
         let missing = |_: &str, _: &str| -> Option<String> { None };
         assert_eq!(
-            lookup_env(&profile, "OTHER_TOKEN", &parent, &missing),
-            Err(GrantError::MissingSecret {
+            lookup_env(&environment, "OTHER_TOKEN", &parent, &missing),
+            Err(EnvironmentPolicyError::MissingSecret {
                 name: "broken".to_string()
             })
         );
         assert_eq!(
-            lookup_env(&profile, "FIREWORKS_API_KEY", &parent, &missing).unwrap(),
+            lookup_env(&environment, "FIREWORKS_API_KEY", &parent, &missing).unwrap(),
             Some("fw-secret".to_string()),
             "one unresolvable grant must not mask a healthy one"
         );
     }
 
     #[test]
-    fn hermetic_hides_a_launcher_credential_from_the_in_process_reader() {
-        // The load-bearing property for evals: under a hermetic profile, harn's
+    fn isolated_hides_a_launcher_credential_from_the_in_process_reader() {
+        // The load-bearing property for evals: under an isolated policy, harn's
         // OWN credential read sees nothing, even though the launcher env has a
         // key sitting right there.
         let parent = env_from(&[("PATH", "/usr/bin"), ("ANTHROPIC_API_KEY", "sk-launcher")]);
         let never_secret = |_: &str, _: &str| None;
-        let hermetic = SessionProfile::hermetic();
+        let isolated = SessionEnvironment::launch_from_snapshot(
+            EnvironmentPolicyKind::Isolated,
+            Vec::new(),
+            BTreeMap::from([
+                ("PATH".to_string(), "/usr/bin".to_string()),
+                ("ANTHROPIC_API_KEY".to_string(), "sk-launcher".to_string()),
+            ]),
+            &parent,
+        )
+        .unwrap();
         assert_eq!(
-            lookup_env(&hermetic, "ANTHROPIC_API_KEY", &parent, &never_secret).unwrap(),
+            lookup_env(&isolated, "ANTHROPIC_API_KEY", &parent, &never_secret).unwrap(),
             None
         );
-        // ...while an ordinary allowlisted var still resolves, so a hermetic run
+        // ...while an ordinary allowlisted var still resolves, so an isolated run
         // is credential-free rather than environment-free.
         assert_eq!(
-            lookup_env(&hermetic, "PATH", &parent, &never_secret).unwrap(),
+            lookup_env(&isolated, "PATH", &parent, &never_secret).unwrap(),
             Some("/usr/bin".to_string())
         );
     }
@@ -607,7 +608,7 @@ mod tests {
     #[test]
     fn a_grant_may_re_expose_an_allowlisted_name_and_wins() {
         // If a grant targets a name that is also on the allowlist, the grant
-        // value wins (the resolver overlays grants last). This lets a lane
+        // value wins (the resolver overlays grants last). This lets a granted policy
         // deliberately override an inherited toolchain var.
         let parent = env_from(&[("RUST_LOG", "from_parent")]);
         let specs = vec![GrantSpec {
@@ -617,9 +618,10 @@ mod tests {
             },
             expose_as_env: Some("RUST_LOG".to_string()),
         }];
-        let profile = SessionProfile::launch(SessionProfileKind::Lane, specs, &parent).unwrap();
+        let environment =
+            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap();
         let never_secret = |_: &str, _: &str| None;
-        let env = resolve_env(&profile, &parent, &never_secret).unwrap();
+        let env = resolve_env(&environment, &parent, &never_secret).unwrap();
         // Same value here, but it flows through the grant, not the allowlist
         // pull — proving the overlay order without a second source of truth.
         assert_eq!(env.get("RUST_LOG").map(String::as_str), Some("from_parent"));

@@ -461,21 +461,21 @@ pub fn model_is_served(model: &str, served_models: &[String]) -> bool {
 
 pub fn configured_model_for_provider(provider: &str) -> Option<String> {
     if provider == "mlx" {
-        if let Ok(model) = std::env::var("MLX_MODEL_ID") {
+        if let Ok(Some(model)) = crate::stdlib::process::session_env_var("MLX_MODEL_ID") {
             if !model.trim().is_empty() {
                 return Some(model);
             }
         }
     }
     if provider == "local" {
-        if let Some(model) = crate::test_env::env_var_seamed("LOCAL_LLM_MODEL") {
+        if let Some(model) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
             if !model.trim().is_empty() {
                 return Some(model);
             }
         }
     }
-    let harn_provider = crate::test_env::env_var_seamed("HARN_LLM_PROVIDER");
-    let model = crate::test_env::env_var_seamed("HARN_LLM_MODEL")
+    let harn_provider = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER");
+    let model = crate::stdlib::process::session_env_value("HARN_LLM_MODEL")
         .filter(|model| !model.trim().is_empty())?;
     let (_, resolved_provider) = llm_config::resolve_model(&model);
     if resolved_provider.as_deref() == Some(provider)

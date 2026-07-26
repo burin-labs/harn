@@ -1181,6 +1181,7 @@ mod approval_policy_tests {
                 branch: None,
                 base_ref: None,
                 cleanup: None,
+                environment_policy: Default::default(),
                 grants: Vec::new(),
             },
         ));
@@ -1233,6 +1234,7 @@ mod approval_policy_tests {
                 branch: None,
                 base_ref: None,
                 cleanup: None,
+                environment_policy: Default::default(),
                 grants: Vec::new(),
             },
         ));

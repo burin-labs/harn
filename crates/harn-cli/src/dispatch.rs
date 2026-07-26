@@ -352,7 +352,10 @@ mod tests {
             outcome.stderr
         );
         assert_eq!(outcome.stdout, "[\"foo\",\"bar\"]\n");
-        assert!(outcome.stderr.is_empty(), "stderr was: {}", outcome.stderr);
+        assert_eq!(
+            outcome.stderr,
+            "environment policy: inherited — applies to this session and its subprocesses\n"
+        );
     }
 
     #[tokio::test]
@@ -360,5 +363,9 @@ mod tests {
         let outcome = run_embedded_script("echo", vec![], false).await;
         assert_eq!(outcome.exit_code, 0, "stderr={}", outcome.stderr);
         assert_eq!(outcome.stdout, "[]\n");
+        assert_eq!(
+            outcome.stderr,
+            "environment policy: inherited — applies to this session and its subprocesses\n"
+        );
     }
 }

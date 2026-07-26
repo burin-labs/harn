@@ -598,8 +598,9 @@ impl Default for LlmCallOptions {
 /// `reqwest::RequestBuilder::timeout`, which covers both the non-streaming
 /// response read and the streamed body.
 fn resolve_timeout(explicit: Option<u64>, model: &str) -> u64 {
-    let env = std::env::var("HARN_LLM_TIMEOUT")
+    let env = crate::stdlib::process::session_env_var("HARN_LLM_TIMEOUT")
         .ok()
+        .flatten()
         .and_then(|v| v.parse::<u64>().ok());
     resolve_timeout_from(explicit, env, catalog_stream_timeout_secs(model))
 }
@@ -935,8 +936,8 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
 #[cfg(test)]
 mod tests {
     use super::{
-        base_opts, catalog_stream_timeout_secs, resolve_timeout_from, LlmRequestPayload,
-        ThinkingConfig,
+        base_opts, catalog_stream_timeout_secs, resolve_timeout, resolve_timeout_from,
+        LlmRequestPayload, ThinkingConfig,
     };
 
     fn assert_send<T: Send>() {}
@@ -1074,6 +1075,37 @@ mod tests {
             resolved, 1800,
             "resolved deadline must never fall back to the old 30-minute stream budget"
         );
+    }
+
+    #[test]
+    fn timeout_env_follows_the_session_environment_policy() {
+        use crate::security::{
+            EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment,
+        };
+
+        let _env = ScopedTimeoutEnv::set("150");
+        crate::stdlib::process::set_session_environment(Some(SessionEnvironment::isolated()));
+        assert_eq!(
+            resolve_timeout(None, "model-that-does-not-exist-xyz"),
+            120,
+            "isolated sessions must not read the launcher's timeout"
+        );
+
+        let granted = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: "request_timeout".to_string(),
+                source: GrantSourceSpec::Env {
+                    var: "HARN_LLM_TIMEOUT".to_string(),
+                },
+                expose_as_env: Some("HARN_LLM_TIMEOUT".to_string()),
+            }],
+            &|name| std::env::var(name).ok(),
+        )
+        .unwrap();
+        crate::stdlib::process::set_session_environment(Some(granted));
+        assert_eq!(resolve_timeout(None, "model-that-does-not-exist-xyz"), 150);
+        crate::stdlib::process::set_session_environment(None);
     }
 
     #[test]

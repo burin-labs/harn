@@ -1315,16 +1315,8 @@ mod tests {
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
                 cwd: Some(dir.path().to_string_lossy().into_owned()),
-                project_root: None,
                 source_dir: Some(dir.path().join("src").to_string_lossy().into_owned()),
-                env: std::collections::BTreeMap::new(),
-                adapter: None,
-                repo_path: None,
-                worktree_path: None,
-                branch: None,
-                base_ref: None,
-                cleanup: None,
-                grants: Vec::new(),
+                ..Default::default()
             },
         ));
 
@@ -1345,15 +1337,7 @@ mod tests {
                 crate::orchestration::RunExecutionRecord {
                     cwd: Some(cwd.path().to_string_lossy().into_owned()),
                     project_root: Some(project.path().to_string_lossy().into_owned()),
-                    source_dir: None,
-                    env: std::collections::BTreeMap::new(),
-                    adapter: None,
-                    repo_path: None,
-                    worktree_path: None,
-                    branch: None,
-                    base_ref: None,
-                    cleanup: None,
-                    grants: Vec::new(),
+                    ..Default::default()
                 },
             ));
 

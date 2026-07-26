@@ -434,7 +434,7 @@ fn apply_model_role_env_var(
     option_name: &str,
     params: &mut BTreeMap<String, toml::Value>,
 ) {
-    let Ok(value) = std::env::var(env_name) else {
+    let Ok(Some(value)) = crate::stdlib::process::session_env_var(env_name) else {
         return;
     };
     let trimmed = value.trim();
@@ -784,8 +784,9 @@ pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef
 }
 
 pub fn qc_default_model(provider: &str) -> Option<String> {
-    std::env::var("BURIN_QC_MODEL")
+    crate::stdlib::process::session_env_var("BURIN_QC_MODEL")
         .ok()
+        .flatten()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
             effective_config()
@@ -800,11 +801,13 @@ pub fn default_model_for_provider(provider: &str) -> String {
         return "default".to_string();
     }
     match provider {
-        "local" => crate::test_env::env_var_seamed("LOCAL_LLM_MODEL")
-            .or_else(|| crate::test_env::env_var_seamed("HARN_LLM_MODEL"))
+        "local" => crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL")
+            .or_else(|| crate::stdlib::process::session_env_value("HARN_LLM_MODEL"))
             .unwrap_or_else(|| "gemma-4-26b-a4b-it".to_string()),
-        "mlx" => std::env::var("MLX_MODEL_ID")
-            .unwrap_or_else(|_| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
+        "mlx" => crate::stdlib::process::session_env_var("MLX_MODEL_ID")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
         "openai" => "gpt-4o-mini".to_string(),
         "ollama" => "llama3.2".to_string(),
         "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
