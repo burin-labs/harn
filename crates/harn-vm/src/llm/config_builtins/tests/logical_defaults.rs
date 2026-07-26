@@ -1,4 +1,8 @@
-use super::*;
+//! Logical-model defaults resolved through an alias.
+
+use super::super::selection_builtins::llm_model_defaults_builtin;
+use crate::llm_config;
+use crate::value::VmValue;
 
 #[test]
 fn model_defaults_builtin_resolves_logical_defaults_from_alias() {
