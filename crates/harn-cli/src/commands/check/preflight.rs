@@ -12,6 +12,8 @@ use super::mock_host::collect_mock_host_capabilities;
 use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
 
+mod llm_composition;
+
 pub(crate) struct PreflightDiagnostic {
     pub(crate) code: Code,
     pub(crate) path: String,
@@ -19,16 +21,11 @@ pub(crate) struct PreflightDiagnostic {
     pub(crate) span: harn_lexer::Span,
     pub(crate) message: String,
     pub(crate) help: Option<String>,
-    /// Optional `"capability.operation"` tag used for per-capability
-    /// suppression via `[check].preflight_allow`. `None` means this
-    /// diagnostic is not scoped to a single host capability.
+    /// Optional `"capability.operation"` tag for `[check].preflight_allow`.
     pub(crate) tags: Option<String>,
 }
 
-/// Returns `true` when `tag` matches any entry in `allow`. Entries may
-/// be exact (`project.scan`), capability wildcards (`project.*` or
-/// just `project`), or a literal `*` to suppress every preflight
-/// diagnostic that carries a tag.
+/// Returns whether `tag` matches an exact, capability-wide, or global allow entry.
 pub(crate) fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bool {
     let Some(tag) = tag else { return false };
     let (cap, _) = tag.split_once('.').unwrap_or((tag.as_str(), ""));
@@ -77,6 +74,12 @@ pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
     scan_selective_import_visibility(&canonical, source, module_graph, &mut diagnostics);
     scan_re_export_conflicts(&canonical, source, program, module_graph, &mut diagnostics);
     scan_static_tool_surface_preflight(&canonical, source, program, config, &mut diagnostics);
+    llm_composition::scan_llm_tool_format_composition_preflight(
+        &canonical,
+        source,
+        program,
+        &mut diagnostics,
+    );
     scan_effect_inheritance_preflight(&canonical, source, program, &mut diagnostics);
     diagnostics
 }
@@ -162,9 +165,6 @@ fn scan_effect_inheritance_in_decl(
     }
 }
 
-/// Splice the parent body's source text together, omitting the spans of
-/// `spawn_agent(...)` calls so the parent's effect surface excludes the
-/// child handler bodies. Calls outside spawn_agent contribute normally.
 fn source_excluding_spawn_agents(source: &str, body: &[SNode]) -> String {
     let mut spawn_spans: Vec<harn_lexer::Span> = Vec::new();
     for node in body {

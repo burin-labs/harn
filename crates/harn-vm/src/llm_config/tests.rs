@@ -1753,9 +1753,8 @@ fn embedded_catalog_dedicated_models_are_not_targeted_by_tier_aliases() {
 
 #[test]
 fn embedded_catalog_tier_aliases_resolve_to_active_models() {
-    // The three canonical tier aliases (frontier / mid / small) MUST
-    // resolve to non-deprecated catalog entries; a default that
-    // routes the loop into a sunsetted model is a release blocker.
+    // Canonical tiers must resolve to active catalog entries; routing the
+    // loop into a sunsetted model is a release blocker.
     for alias in ["frontier", "mid", "small"] {
         let (model, _provider) = resolve_tier_model(alias, None)
             .unwrap_or_else(|| panic!("tier alias `{alias}` must resolve"));
@@ -1772,8 +1771,7 @@ fn embedded_catalog_tier_aliases_resolve_to_active_models() {
 
 #[test]
 fn gpt_5_5_fast_serving_tier_rides_service_tier() {
-    // Fast mode is provider-agnostic: OpenAI exposes it through the
-    // `service_tier` knob rather than Anthropic's `speed`.
+    // OpenAI exposes provider-agnostic fast mode through `service_tier`.
     let entry = model_catalog_entry("gpt-5.5").expect("gpt-5.5 catalog entry");
     let fast = entry
         .serving_tiers
@@ -1784,6 +1782,8 @@ fn gpt_5_5_fast_serving_tier_rides_service_tier() {
     assert_eq!(request.param, "service_tier");
     assert_eq!(fast.status.as_deref(), Some("ga"));
 }
+
+mod tool_protocol;
 
 #[test]
 fn gpt_5_6_family_catalog_preserves_role_and_cache_write_economics() {
