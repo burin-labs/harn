@@ -23,8 +23,8 @@ impl HarnLsp {
         let source = {
             let docs = self.documents.lock().unwrap();
             match docs.get(uri) {
-                Some(s) => s.source.clone(),
-                None => return Ok(None),
+                Some(s) if s.kind.is_harn() => s.source.clone(),
+                _ => return Ok(None),
             }
         };
 
@@ -39,8 +39,8 @@ impl HarnLsp {
         let source = {
             let docs = self.documents.lock().unwrap();
             match docs.get(uri) {
-                Some(s) => s.source.clone(),
-                None => return Ok(None),
+                Some(s) if s.kind.is_harn() => s.source.clone(),
+                _ => return Ok(None),
             }
         };
 
@@ -59,8 +59,8 @@ impl HarnLsp {
         let source = {
             let docs = self.documents.lock().unwrap();
             match docs.get(uri) {
-                Some(s) => s.source.clone(),
-                None => return Ok(None),
+                Some(s) if s.kind.is_harn() => s.source.clone(),
+                _ => return Ok(None),
             }
         };
 

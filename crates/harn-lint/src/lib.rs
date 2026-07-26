@@ -22,6 +22,7 @@ pub mod native;
 mod native_rule;
 mod rule;
 mod rules;
+mod template_span;
 
 #[cfg(test)]
 mod tests;
@@ -51,12 +52,12 @@ pub fn lint_prompt_template(
 ) -> Vec<LintDiagnostic> {
     let constructs = match harn_vm::stdlib::template::lint::parse(source) {
         Ok(constructs) => constructs,
-        Err(message) => {
+        Err(error) => {
             return vec![LintDiagnostic {
                 code: Code::LintTemplateParse,
                 rule: "template-parse".into(),
-                message: format!("template did not parse: {message}"),
-                span: harn_lexer::Span::dummy(),
+                message: format!("template did not parse: {}", error.message),
+                span: template_span::directive_span(source, error.line, error.col),
                 severity: LintSeverity::Error,
                 suggestion: None,
                 fix: None,

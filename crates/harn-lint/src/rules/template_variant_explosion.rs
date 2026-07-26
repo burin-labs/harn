@@ -9,7 +9,6 @@
 //! Threshold defaults to `3` and is configurable via
 //! `[lint] template_variant_branch_threshold` in `harn.toml`.
 
-use harn_lexer::Span;
 use harn_parser::DiagnosticCode as Code;
 use harn_vm::stdlib::template::lint::{ConditionShape, LintConstruct};
 
@@ -45,7 +44,7 @@ pub(crate) fn check(
         return Vec::new();
     }
     let (line, col) = capability_branches.first().copied().unwrap_or((1, 1));
-    let span = anchor_span(source, line, col);
+    let span = crate::template_span::directive_span(source, line, col);
     let count = capability_branches.len();
     let message = format!(
         "this template has {count} capability-aware branches but the configured \
@@ -70,28 +69,6 @@ pub(crate) fn check(
         ),
         fix: None,
     }]
-}
-
-fn anchor_span(source: &str, line: usize, col: usize) -> Span {
-    if line == 0 {
-        return Span::dummy();
-    }
-    let mut offset = 0usize;
-    for (current_line, src_line) in source.split_inclusive('\n').enumerate() {
-        if current_line + 1 == line {
-            let start = offset;
-            let end = offset + src_line.trim_end_matches('\n').len();
-            return Span {
-                start,
-                end,
-                line,
-                column: col.max(1),
-                end_line: line,
-            };
-        }
-        offset += src_line.len();
-    }
-    Span::dummy()
 }
 
 #[cfg(test)]

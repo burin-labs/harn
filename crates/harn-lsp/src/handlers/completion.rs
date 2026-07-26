@@ -29,6 +29,9 @@ impl HarnLsp {
             None => return Ok(None),
         };
 
+        if !state.kind.is_harn() {
+            return Ok(None);
+        }
         let source = state.source.clone();
         let symbols = state.symbols.clone();
         let ast = state.cached_ast.clone();

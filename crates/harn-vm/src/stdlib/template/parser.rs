@@ -2,34 +2,59 @@ use super::ast::{Expr, IfBranch, Node};
 use super::error::TemplateError;
 use super::expr_parser::parse_expr;
 use super::lexer::{tokenize, Token};
+use super::outline::{OutlineBlock, OutlineBlockKind};
 use super::sections;
 use crate::runtime_limits::RuntimeLimits;
 
 const TEMPLATE_AST_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_ast_depth;
 
 pub(super) fn parse(src: &str) -> Result<Vec<Node>, TemplateError> {
+    Ok(parse_all(src)?.0)
+}
+
+/// Parse `src` for its block geometry alone. Shares the parser with
+/// [`parse`] so an editor can never be shown a block structure the
+/// engine wouldn't render.
+pub(super) fn parse_outline(src: &str) -> Result<Vec<OutlineBlock>, TemplateError> {
+    Ok(parse_all(src)?.1)
+}
+
+fn parse_all(src: &str) -> Result<(Vec<Node>, Vec<OutlineBlock>), TemplateError> {
     let tokens = tokenize(src)?;
     let mut p = Parser {
         tokens: &tokens,
         pos: 0,
         depth: 0,
+        outline: Vec::new(),
     };
     let nodes = p.parse_block(&[])?;
-    if p.pos < tokens.len() {
-        // Unclosed block — shouldn't reach here; parse_block returns on EOF.
-    }
-    Ok(nodes)
+    p.outline.sort_by_key(|block| (block.start, block.end));
+    Ok((nodes, p.outline))
+}
+
+/// The `{{ .. }}` directive a block construct opens with: enough to
+/// report an error against it and to anchor its outline range.
+#[derive(Clone, Copy)]
+struct DirectiveSite {
+    line: usize,
+    col: usize,
+    start: usize,
 }
 
 struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
     depth: usize,
+    outline: Vec<OutlineBlock>,
 }
 
 impl<'a> Parser<'a> {
     fn peek(&self) -> Option<&'a Token> {
         self.tokens.get(self.pos)
+    }
+
+    fn push_block(&mut self, kind: OutlineBlockKind, start: usize, end: usize) {
+        self.outline.push(OutlineBlock { kind, start, end });
     }
 
     fn parse_block(&mut self, stops: &[&str]) -> Result<Vec<Node>, TemplateError> {
@@ -68,14 +93,34 @@ impl<'a> Parser<'a> {
                     }
                     self.pos += 1;
                 }
-                Token::Raw(content) => {
+                Token::Raw {
+                    content,
+                    start,
+                    end,
+                } => {
                     if !content.is_empty() {
                         out.push(Node::Text(content.clone()));
                     }
+                    self.push_block(OutlineBlockKind::Raw, *start, *end);
                     self.pos += 1;
                 }
-                Token::Directive { body, line, col } => {
-                    let (line, col) = (*line, *col);
+                Token::Comment { start, end } => {
+                    self.push_block(OutlineBlockKind::Comment, *start, *end);
+                    self.pos += 1;
+                }
+                Token::Directive {
+                    body,
+                    line,
+                    col,
+                    start,
+                    ..
+                } => {
+                    let site = DirectiveSite {
+                        line: *line,
+                        col: *col,
+                        start: *start,
+                    };
+                    let (line, col) = (site.line, site.col);
                     let body = body.clone();
                     let first_word = first_word(&body);
                     if stops.contains(&first_word) {
@@ -103,16 +148,16 @@ impl<'a> Parser<'a> {
                     if first_word == "if" {
                         let cond_src = body[2..].trim();
                         let cond = parse_expr(cond_src, line, col)?;
-                        let node = self.parse_if(cond, line, col)?;
+                        let node = self.parse_if(cond, site)?;
                         out.push(node);
                     } else if first_word == "for" {
-                        let node = self.parse_for(body[3..].trim(), line, col)?;
+                        let node = self.parse_for(body[3..].trim(), site)?;
                         out.push(node);
                     } else if first_word == "include" {
                         let node = parse_include(body[7..].trim(), line, col)?;
                         out.push(node);
                     } else if first_word == "section" {
-                        let node = self.parse_section(body[7..].trim(), line, col)?;
+                        let node = self.parse_section(body[7..].trim(), site)?;
                         out.push(node);
                     } else if is_bare_ident(&body) {
                         out.push(Node::LegacyBareInterp { ident: body });
@@ -133,17 +178,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_if(
-        &mut self,
-        first_cond: Expr,
-        line: usize,
-        col: usize,
-    ) -> Result<Node, TemplateError> {
+    fn parse_if(&mut self, first_cond: Expr, site: DirectiveSite) -> Result<Node, TemplateError> {
+        let DirectiveSite { line, col, .. } = site;
         let mut branches = Vec::new();
         let mut else_branch = None;
         let mut cur_cond = first_cond;
         let mut cur_line = line;
         let mut cur_col = col;
+        // Every branch in the chain closes at the same `{{ end }}`, so
+        // the outline ranges are backfilled once we reach it.
+        let mut branch_starts = vec![(OutlineBlockKind::If, site.start)];
+        let chain_end;
         loop {
             let body = self.parse_block(&["end", "else", "elif"])?;
             branches.push(IfBranch {
@@ -158,16 +203,23 @@ impl<'a> Parser<'a> {
                     body: tbody,
                     line: tline,
                     col: tcol,
+                    start: tstart,
+                    end: tend,
                 }) => {
                     let fw = first_word(&tbody);
                     self.pos += 1;
                     match fw {
-                        "end" => break,
+                        "end" => {
+                            chain_end = tend;
+                            break;
+                        }
                         "else" => {
+                            branch_starts.push((OutlineBlockKind::Else, tstart));
                             let eb = self.parse_block(&["end"])?;
                             else_branch = Some(eb);
                             match self.peek() {
-                                Some(Token::Directive { body, .. }) if body == "end" => {
+                                Some(Token::Directive { body, end, .. }) if body == "end" => {
+                                    chain_end = *end;
                                     self.pos += 1;
                                 }
                                 _ => {
@@ -182,6 +234,7 @@ impl<'a> Parser<'a> {
                         }
                         "elif" => {
                             let cond = parse_expr(tbody[4..].trim(), tline, tcol)?;
+                            branch_starts.push((OutlineBlockKind::Elif, tstart));
                             cur_cond = cond;
                             cur_line = tline;
                             cur_col = tcol;
@@ -199,6 +252,9 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        for (kind, start) in branch_starts {
+            self.push_block(kind, start, chain_end);
+        }
         Ok(Node::If {
             branches,
             else_branch,
@@ -207,7 +263,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_for(&mut self, spec: &str, line: usize, col: usize) -> Result<Node, TemplateError> {
+    fn parse_for(&mut self, spec: &str, site: DirectiveSite) -> Result<Node, TemplateError> {
+        let DirectiveSite { line, col, .. } = site;
         let (head, iter_src) = match split_once_keyword(spec, " in ") {
             Some(p) => p,
             None => return Err(TemplateError::new(line, col, "expected `in` in for-loop")),
@@ -229,17 +286,24 @@ impl<'a> Parser<'a> {
         };
         let iter = parse_expr(iter_src, line, col)?;
         let body = self.parse_block(&["end", "else"])?;
-        let (empty, _) = match self.peek().cloned() {
-            Some(Token::Directive { body: tbody, .. }) => {
+        let empty = match self.peek().cloned() {
+            Some(Token::Directive {
+                body: tbody,
+                start: tstart,
+                end: tend,
+                ..
+            }) => {
                 let fw = first_word(&tbody);
                 self.pos += 1;
                 if fw == "end" {
-                    (None, ())
+                    self.push_block(OutlineBlockKind::For, site.start, tend);
+                    None
                 } else if fw == "else" {
                     let empty_body = self.parse_block(&["end"])?;
-                    match self.peek() {
-                        Some(Token::Directive { body, .. }) if body == "end" => {
+                    let loop_end = match self.peek() {
+                        Some(Token::Directive { body, end, .. }) if body == "end" => {
                             self.pos += 1;
+                            *end
                         }
                         _ => {
                             return Err(TemplateError::new(
@@ -248,8 +312,10 @@ impl<'a> Parser<'a> {
                                 "`{{ else }}` missing matching `{{ end }}`",
                             ));
                         }
-                    }
-                    (Some(empty_body), ())
+                    };
+                    self.push_block(OutlineBlockKind::For, site.start, loop_end);
+                    self.push_block(OutlineBlockKind::Else, tstart, loop_end);
+                    Some(empty_body)
                 } else {
                     unreachable!()
                 }
@@ -273,12 +339,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_section(
-        &mut self,
-        spec: &str,
-        line: usize,
-        col: usize,
-    ) -> Result<Node, TemplateError> {
+    fn parse_section(&mut self, spec: &str, site: DirectiveSite) -> Result<Node, TemplateError> {
+        let DirectiveSite { line, col, .. } = site;
         let (name, rest) = parse_section_name(spec, line, col)?;
         if !sections::is_builtin_section(&name) {
             return Err(TemplateError::new(
@@ -294,6 +356,8 @@ impl<'a> Parser<'a> {
                 body: end,
                 line: end_line,
                 col: end_col,
+                end: end_offset,
+                ..
             }) if first_word(&end) == "endsection" => {
                 self.pos += 1;
                 if let Some(end_name) = parse_optional_endsection_name(&end, end_line, end_col)? {
@@ -305,6 +369,7 @@ impl<'a> Parser<'a> {
                         ));
                     }
                 }
+                self.push_block(OutlineBlockKind::Section, site.start, end_offset);
             }
             _ => {
                 return Err(TemplateError::new(

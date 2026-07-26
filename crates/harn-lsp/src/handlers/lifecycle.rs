@@ -114,22 +114,27 @@ impl HarnLsp {
     }
 
     pub(super) async fn handle_initialized(&self, _params: InitializedParams) {
-        // Register a workspace file watcher for `.harn` sources so external
-        // changes (git checkout, another editor, a codegen step) re-validate
-        // the open documents that may depend on them. Only attempted when the
-        // client advertised dynamic-registration support during `initialize`.
+        // Register a workspace file watcher for the sources we serve so
+        // external changes (git checkout, another editor, a codegen step)
+        // re-validate the open documents that may depend on them. A
+        // `.harn.prompt` matches the `**/*.prompt` glob too. Only
+        // attempted when the client advertised dynamic-registration
+        // support during `initialize`.
         if self
             .watched_files_dynamic_registration
             .load(std::sync::atomic::Ordering::Relaxed)
         {
             let options = DidChangeWatchedFilesRegistrationOptions {
-                watchers: vec![FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.harn".to_string()),
-                    kind: None,
-                }],
+                watchers: ["**/*.harn", "**/*.prompt"]
+                    .into_iter()
+                    .map(|glob| FileSystemWatcher {
+                        glob_pattern: GlobPattern::String(glob.to_string()),
+                        kind: None,
+                    })
+                    .collect(),
             };
             let registration = Registration {
-                id: "harn-watch-harn-files".to_string(),
+                id: "harn-watch-source-files".to_string(),
                 method: "workspace/didChangeWatchedFiles".to_string(),
                 register_options: serde_json::to_value(options).ok(),
             };
@@ -177,7 +182,7 @@ impl HarnLsp {
                 let mut docs = self.documents.lock().unwrap();
                 let entry = docs
                     .entry(uri.clone())
-                    .or_insert_with(|| DocumentState::new(String::new()));
+                    .or_insert_with(|| DocumentState::placeholder(&uri));
                 entry.update_source(source);
             }
 
