@@ -1,0 +1,24 @@
+// Line prefixes and bracket shapes that local chat templates put in front of a
+// bare call.
+//
+// Gemma is RL-trained to emit `tool_code: fn(args)`; other local templates emit
+// `call:name{...}` instead of `name({...})`, or prefix the line with a language
+// tag. Each of these is a wrapper the model cannot help emitting, so the parser
+// strips the ones on its allowlist and parses the call underneath. The name is
+// still checked against the registry — this relaxes the framing, not the gate.
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main() {
+  probe("gemma tool_code prefix", "tool_code: run({ command: \"ls\" })", sample_registry())
+  probe(
+    "qwen call colon brace marker",
+    "call:run{ command: \"git status --short\" }",
+    sample_registry(),
+  )
+  probe("tool_call prefix", "tool_call: run({ command: \"ls\" })", sample_registry())
+  probe("tool_output prefix", "tool_output: run({ command: \"ls\" })", sample_registry())
+  probe("python prefix", "python: run({ command: \"ls\" })", sample_registry())
+  probe("javascript prefix", "javascript: run({ command: \"ls\" })", sample_registry())
+  probe("shell prefix", "shell: run({ command: \"ls\" })", sample_registry())
+  probe("bash prefix", "bash: run({ command: \"ls\" })", sample_registry())
+}

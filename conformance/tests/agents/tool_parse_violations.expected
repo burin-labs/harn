@@ -1,0 +1,45 @@
+# unknown top level tag
+  calls=1 errors=0 violations=2 stray=1
+  call edit {"action":"create","content":"x","path":"a.rs"}
+  vio "Unknown top-level tag \"<notes>\". Use <tool_call>, <assistant_prose>, <user_response>, or <done> — no other tags are accepted at the top level."
+  vio "Stray text outside response tags: \"</notes><tool_call>\". Wrap all prose in <assistant_prose>...</assistant_prose> or <user_response>...</user_response>, and every tool call in <tool_call>...</tool_call>."
+  prose="my thoughts"
+  answer=null
+  done=null
+# unclosed user_response followed by another block
+  calls=0 errors=0 violations=1 stray=0
+  vio "Unclosed <user_response> block. Close it with </user_response> or remove it; only <tool_call>, <assistant_prose>, <user_response>, and <done> are accepted."
+  prose="Visible answer without a close tag."
+  answer=null
+  done="##DONE##"
+# empty done block
+  calls=1 errors=0 violations=1 stray=0
+  call edit {"action":"create","content":"x","path":"a.rs"}
+  vio "<done> block is empty. Emit the configured done sentinel (default `##DONE##`) inside the block."
+  prose=""
+  answer=null
+  done=null
+# truncated unclosed tool_call
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL TRUNCATED: `<tool_call>` opening `edit(...)` was never closed — the response appears to have been cut off mid-call (likely the model hit its max output token limit). Re-emit the complete `<tool_call>edit({ ... })</tool_call>` block; for very large arguments, split the work into smaller calls."
+  prose="Now I'll create the error module."
+  answer=null
+  done=null
+# closed tool_call is not truncated
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"x","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# unclosed wrapper, complete heredoc call
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"import Foundation\n\nstruct App {\n    static func main() {\n        print(\"hello\")\n    }\n}","path":"src/main.swift"}
+  prose=""
+  answer=null
+  done=null
+# unclosed wrapper, truncated heredoc
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL TRUNCATED: `<tool_call>` opening `edit(...)` was never closed — the response appears to have been cut off mid-call (likely the model hit its max output token limit). Re-emit the complete `<tool_call>edit({ ... })</tool_call>` block; for very large arguments, split the work into smaller calls."
+  prose=""
+  answer=null
+  done=null

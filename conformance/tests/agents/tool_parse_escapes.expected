@@ -1,0 +1,108 @@
+# surrogate pair escape
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"hi 😀 there"}
+  prose=""
+  answer=null
+  done=null
+# brace form non-bmp escape
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"hi 😀 there"}
+  prose=""
+  answer=null
+  done=null
+# lone high surrogate
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `run(...)` — invalid \\u escape in string literal. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: { command: \"x \\uD83D y\" })"
+  prose=""
+  answer=null
+  done=null
+# unknown escape, quoted channel
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"p = '\\d+\\w*'","path":"re.py"}
+  prose=""
+  answer=null
+  done=null
+# unknown escape, template channel
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"p = '\\d+\\w*'","path":"re.py"}
+  prose=""
+  answer=null
+  done=null
+# unknown escape, heredoc channel
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"p = '\\d+\\w*'","path":"re.py"}
+  prose=""
+  answer=null
+  done=null
+# known escapes in a quoted string
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"a\nb\tc\\d\"e"}
+  prose=""
+  answer=null
+  done=null
+# perl hex brace regex
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"m/\\x{1F600}/"}
+  prose=""
+  answer=null
+  done=null
+# backslash x then non-hex
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"C:\\xtra\\data"}
+  prose=""
+  answer=null
+  done=null
+# trailing backslash x
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ends with \\x"}
+  prose=""
+  answer=null
+  done=null
+# short unicode escape
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"bad \\uAB stop"}
+  prose=""
+  answer=null
+  done=null
+# unicode escape with a non-hex digit
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"bad \\uABCG end"}
+  prose=""
+  answer=null
+  done=null
+# windows path after backslash u
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"path C:\\users\\me"}
+  prose=""
+  answer=null
+  done=null
+# malformed escape, template channel
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"m/\\x{1F600}/"}
+  prose=""
+  answer=null
+  done=null
+# malformed escape, heredoc channel
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"m/\\x{1F600}/"}
+  prose=""
+  answer=null
+  done=null
+# well formed hex escapes
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"AB"}
+  prose=""
+  answer=null
+  done=null
+# literal multibyte scalar in source
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"snow ☃ done"}
+  prose=""
+  answer=null
+  done=null
+# brace form non-bmp escape again
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"emoji 😀 done"}
+  prose=""
+  answer=null
+  done=null

@@ -1,0 +1,227 @@
+// Fence spellings that are not ```tool, and the envelopes models use instead.
+//
+// Under the JSON protocol a model reaches for ```json, ```tool_code,
+// ```function_call, a tilde fence, or no fence at all. Each of those is
+// accepted — the object is unambiguous — but carries a protocol_violation
+// naming the opener it saw, so the drift is visible in telemetry without
+// costing the turn. Legacy `<tool_call>` tagged markup under the JSON protocol
+// is the one shape that is recognized and NOT executed: it belongs to the other
+// grammar, so it earns a violation and zero calls.
+//
+// The chat-template envelopes are the second family: `<tool_calls>` with
+// `<tool>` markers, `<tool_code>`, and the nested-XML spelling where each
+// argument is its own tag. They are accepted with a chat-template violation and
+// fail loudly — never partially — when an envelope is truncated or ambiguous.
+import { probe_json } from "_tool_parse_probe"
+
+pipeline main() {
+  probe_json(
+    "json fence accepts with a violation",
+    """```json
+{"name": "a", "args": {}}
+```""",
+  )
+  probe_json(
+    "tool_code fence drift",
+    """```tool_code
+{"name": "a", "args": {"k": 1}}
+```""",
+  )
+  probe_json(
+    "tool-with-language fence drift",
+    """```tool python
+{"name": "a", "args": {"k": 1}}
+```""",
+  )
+  probe_json(
+    "function_call fence drift",
+    """```function_call
+{"name": "a", "args": {"k": 1}}
+```""",
+  )
+  probe_json(
+    "tilde tool fence drift",
+    """~~~tool
+{"name": "a", "args": {"k": 1}}
+~~~""",
+  )
+  probe_json(
+    "invalid body in a drifted fence",
+    """```tool_code
+not json
+```""",
+  )
+  probe_json("bare json object", "{\"name\": \"a\", \"args\": {\"k\": 1}}")
+  probe_json(
+    "legacy tagged markup under the json protocol",
+    """<tool_call>
+a({})
+</tool_call>""",
+  )
+  probe_json(
+    "prose before a canonical tool fence",
+    """Here is the call:
+```tool
+{"name": "a", "args": {"k": 1}}
+```""",
+  )
+  // The Qwen chat template: one `<tool>` marker introducing consecutive
+  // objects, arguments left inline beside `name` instead of nested under `args`.
+  probe_json(
+    "chat template envelope with inline argument calls",
+    """<tool_calls>
+<tool>
+{"name":"look","file":"src/writer.zig"}
+{"name":"look","file":"src/parser.zig"}
+</tool_calls>""",
+  )
+  probe_json(
+    "chat template envelope with per-call close markers",
+    "<tool_calls><tool>{\"name\":\"a\",\"args\":{\"k\":1}}</tool><tool>{\"tool\":\"b\",\"arguments\":{\"v\":2}}</tool></tool_calls>",
+  )
+  probe_json(
+    "malformed chat template envelope dispatches nothing",
+    "<tool_calls>\n<tool>\n{\"name\":\"look\",\"file\":\"src/writer.zig\"",
+  )
+  probe_json(
+    "truncated second marker drops the first call too",
+    "<tool_calls><tool>{\"name\":\"look\",\"file\":\"src/lib.rs\"}<tool></tool_calls>",
+  )
+  probe_json("unmatched tool close marker", "<tool_calls></tool></tool_calls>")
+  probe_json(
+    "envelope without a tool marker",
+    "<tool_calls>{\"name\":\"look\",\"file\":\"src/writer.zig\"}</tool_calls>",
+  )
+  // `<tool_code>` wrapping JSON, with and without a close tag.
+  probe_json(
+    "tool_code tag with inline json args",
+    """<tool_code>
+{ "name": "look", "file": "src/writer.zig", "intent": "read" }""",
+  )
+  probe_json(
+    "tool_code tag with multiple json objects",
+    """<tool_code>
+{"name":"a","args":{"k":1}}
+{"name":"b","args":{"v":2}}
+</tool_code>""",
+  )
+  probe_json(
+    "bare tool_call tag wrapping json",
+    """<tool_call>
+{"name":"look","args":{"file":"a.rs"}}
+</tool_call>""",
+  )
+  probe_json(
+    "envelope with a garbage body",
+    """<tool_code>
+lol this is not json at all
+</tool_code>""",
+  )
+  // The nested-XML spelling: each argument is its own tag inside a call tag.
+  probe_json(
+    "xml envelope, three calls, no close",
+    """<tool_calls>
+<look>
+<file>
+src/writer.zig
+</file>
+</look>
+<look>
+<file>
+src/parser.zig
+</file>
+</look>
+<look>
+<file>
+src/root.zig
+</file>
+</look>""",
+  )
+  probe_json(
+    "xml envelope, one call with two args",
+    """<tool_calls>
+<look>
+<file>
+src/writer.zig
+</file>
+<intent>
+read
+</intent>
+</look>""",
+  )
+  probe_json(
+    "xml envelope, multiline arg value kept verbatim",
+    """<tool_calls>
+<write>
+<content>
+line one
+line two
+</content>
+</write>
+</tool_calls>""",
+  )
+  probe_json(
+    "truncated inner xml tag dispatches nothing",
+    """<tool_calls>
+<look>
+<file>
+src/writer.zig""",
+  )
+  // A repeated argument tag makes the call ambiguous: fail loud rather than
+  // take the last write and dispatch a guessed value.
+  probe_json(
+    "duplicate xml argument tag is ambiguous",
+    """<tool_calls>
+<look>
+<file>
+a.rs
+</file>
+<file>
+b.rs
+</file>
+</look>
+</tool_calls>""",
+  )
+  // A literal envelope-close string inside a JSON or XML VALUE is content: the
+  // close is recognized only at a structural boundary.
+  probe_json(
+    "literal tool_code close inside a json string",
+    """<tool_code>
+{ "name": "write", "args": { "content": "</tool_code>" } }
+</tool_code>""",
+  )
+  probe_json(
+    "literal envelope close inside a tool-marker json string",
+    """<tool_calls>
+<tool>
+{ "name": "write", "content": "</tool_calls>" }
+</tool_calls>""",
+  )
+  probe_json(
+    "literal envelope close inside an xml arg value",
+    """<tool_calls>
+<write>
+<content>
+</tool_calls>
+</content>
+</write>
+</tool_calls>""",
+  )
+  // Prose on either side of an envelope survives as prose.
+  probe_json(
+    "prose before an envelope",
+    """I will read the writer next.
+<tool_calls>
+<tool>
+{"name":"look","file":"src/writer.zig"}
+</tool_calls>""",
+  )
+  probe_json(
+    "prose after an envelope close",
+    """<tool_calls>
+<tool>
+{"name":"look","file":"a.rs"}
+</tool_calls>
+Done reading.""",
+  )
+}

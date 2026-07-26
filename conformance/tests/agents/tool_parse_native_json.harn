@@ -1,0 +1,118 @@
+// The native-JSON fallback: a provider's own tool-call wire shape arriving in
+// the text channel.
+//
+// When a provider's native tool channel collapses into `content`, what lands is
+// whatever that provider serializes — an OpenAI `[{"id":..,"function":{..}}]`
+// array, a flat JSON-RPC/MCP `{"name":..,"arguments":{..}}` envelope, the
+// gpt-oss `{"tool":..}` spelling, or a `parameters` slot instead of `arguments`.
+// Each of these is a real call the model made; dropping it reads to the loop as
+// a stall, so the fallback accepts all of them and resolves the name against
+// the registry.
+//
+// Detection has to stay shape-based rather than needle-based: an earlier
+// version matched three literal substrings, so a pretty-printed array with a
+// space after `[{` and a non-OpenAI id matched none of them and the call
+// vanished with no feedback at all.
+import { native_registry, probe } from "_tool_parse_probe"
+
+pipeline main() {
+  probe(
+    "openai array with string-encoded arguments",
+    """I'll create the test file now.
+
+[{"id":"call_001","type":"function","function":{"name":"edit","arguments":"{\"action\":\"create\",\"path\":\"test.go\",\"content\":\"package main\"}"}}]""",
+    native_registry(),
+  )
+  // Pretty-printed, non-`call_`-prefixed id: whitespace- and id-agnostic.
+  probe(
+    "pretty printed array with a non-call id",
+    "[{ \"id\": \"0\", \"function\": { \"name\": \"read\", \"arguments\": \"{\\\"path\\\":\\\"main.go\\\"}\" } }]",
+    native_registry(),
+  )
+  // Flat JSON-RPC / MCP envelope: name and args at the top level.
+  probe(
+    "flat jsonrpc envelope",
+    "[{\"name\":\"read\",\"arguments\":{\"path\":\"main.go\"}}]",
+    native_registry(),
+  )
+  // gpt-oss emits `tool` instead of `name` after a reasoning preamble.
+  probe(
+    "gpt-oss tool-key dialect after a preamble",
+    """We should inspect the model first.
+
+{"tool":"read","arguments":{"path":"BatteryInfo.swift"}}""",
+    native_registry(),
+  )
+  // Flat envelope whose `arguments` is a JSON STRING, the OpenAI wire form that
+  // local llama.cpp/vLLM/Ollama mimic templates emit.
+  probe(
+    "flat envelope with string-encoded arguments",
+    "{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}",
+    native_registry(),
+  )
+  // The args slot is sometimes named `parameters`, and arrives unwrapped.
+  probe(
+    "flat envelope with a parameters slot",
+    "{\"name\":\"read\",\"parameters\":{\"path\":\"lib.rs\"}}",
+    native_registry(),
+  )
+  // Object arguments rather than a JSON string.
+  probe(
+    "array entry with object arguments",
+    "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":{\"path\":\"main.go\"}}}]",
+    native_registry(),
+  )
+  probe(
+    "two calls in one array",
+    "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":\"{\\\"action\\\":\\\"create\\\",\\\"path\\\":\\\"a.go\\\",\\\"content\\\":\\\"pkg a\\\"}\"}},{\"id\":\"call_002\",\"type\":\"function\",\"function\":{\"name\":\"run\",\"arguments\":\"{\\\"command\\\":\\\"go test\\\"}\"}}]",
+    native_registry(),
+  )
+  probe(
+    "prose before the array",
+    """Let me read the file first to understand the structure.
+
+Now I'll create the test:
+
+[{"id":"call_0v95900000000000000002","function":{"name":"edit","arguments":"{\"action\":\"replace_body\",\"path\":\"test.go\",\"function_name\":\"TestMain\",\"new_body\":\"t.Fatal(\\\"fail\\\")\"}"}}]""",
+    native_registry(),
+  )
+  // Non-ASCII trailing prose after the array's structural end. The salvage path
+  // used to byte-scan backwards with no char-boundary guard and PANIC on any
+  // multi-byte char in the tail, aborting the turn before reaching the `]`.
+  probe(
+    "non-ascii trailing content after the array",
+    "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":\"{\\\"action\\\":\\\"create\\\",\\\"path\\\":\\\"café.go\\\",\\\"content\\\":\\\"pkg\\\"}\"}}] done ✅ — déjà vu 完了",
+    native_registry(),
+  )
+  // Negative: incidental prose JSON with a `name` key but no args object is a
+  // package.json snippet, not a call.
+  probe(
+    "prose json with a bare name key is not a call",
+    "Here is the config: {\"name\":\"my-pkg\",\"version\":\"1.0.0\"}",
+    native_registry(),
+  )
+  probe(
+    "plain prose has no native json",
+    "Just some prose without any tool calls.",
+    native_registry(),
+  )
+  // Unknown names in the native lane get the same diagnostics as the bare lane.
+  probe(
+    "unknown tool in the native lane",
+    "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"unknown_tool\",\"arguments\":\"{}\"}}]",
+    native_registry(),
+  )
+  probe(
+    "malformed arguments string",
+    "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":\"not valid json {\"}}]",
+    native_registry(),
+  )
+  // Text format wins when both a bare call and a native array are present.
+  probe(
+    "text format takes priority over native json",
+    """edit({ action: "create", path: "a.go", content: "pkg a" })
+
+[{"id":"call_001","type":"function","function":{"name":"run","arguments":"{\"command\":\"go test\"}"}}]""",
+    native_registry(),
+  )
+}
