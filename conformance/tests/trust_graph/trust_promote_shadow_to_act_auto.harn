@@ -3,7 +3,7 @@ import "std/triggers"
 fn gated_handler(event: TriggerEvent) -> dict {
   const context = handler_context()
   const file_path = path_join(
-    ".harn",
+    harness.fs.temp_dir(),
     "trust_graph_shadow_" + (context?.agent ?? "unknown") + ".txt",
   )
   harness.fs.write_text(file_path, "approved:" + event.kind)
@@ -16,8 +16,7 @@ pipeline test(task) {
     harness.random.gen_range(100000, 999999),
   )
   const agent_id = "shadow-bot-" + unique
-  const file_path = path_join(".harn", "trust_graph_shadow_" + agent_id + ".txt")
-  harness.fs.mkdir(".harn")
+  const file_path = path_join(harness.fs.temp_dir(), "trust_graph_shadow_" + agent_id + ".txt")
   const handle: TriggerHandle = trigger_register(
     {
       id: agent_id,

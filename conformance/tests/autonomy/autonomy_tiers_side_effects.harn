@@ -3,7 +3,10 @@ import "std/triggers"
 
 fn tier_handler(event: TriggerEvent) -> dict {
   const context = handler_context()
-  const file_path = path_join(".harn", "autonomy_tier_" + event.headers?.x_delivery + ".txt")
+  const file_path = path_join(
+    harness.fs.temp_dir(),
+    "autonomy_tier_" + event.headers?.x_delivery + ".txt",
+  )
   harness.fs.write_text(file_path, "tier:" + context?.autonomy_tier)
   return {
     tier: context?.autonomy_tier,
@@ -42,7 +45,6 @@ fn fire_tier(handle: TriggerHandle, unique: string) -> DispatchHandle {
 
 pipeline test(task) {
   clear_host_mocks()
-  harness.fs.mkdir(".harn")
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
@@ -89,7 +91,7 @@ pipeline test(task) {
   __io_println(auto.status == "dispatched" && auto.result?.tier == "act_auto")
   __io_println(auto.result?.file_exists && len(auto_records) == 0)
   const scoped_agent = "autonomy-scoped-" + unique
-  const scoped_path = path_join(".harn", "autonomy_tier_scoped_" + unique + ".txt")
+  const scoped_path = path_join(harness.fs.temp_dir(), "autonomy_tier_scoped_" + unique + ".txt")
   with_autonomy_policy(
     {agent_id: scoped_agent, autonomy_tier: "act_auto", action_tiers: {"fs.write": "shadow"}},
     fn() { harness.fs.write_text(scoped_path, "scoped") },
