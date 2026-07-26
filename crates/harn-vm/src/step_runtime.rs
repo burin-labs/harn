@@ -656,9 +656,12 @@ fn stage_policy_for_active_step(step_name: &str) -> Option<CapabilityPolicy> {
 }
 
 fn stage_decl_to_policy(stage: &StageDecl) -> CapabilityPolicy {
+    // A stage declares tools and a side-effect ceiling; it says nothing about
+    // filesystem confinement. Overlay, not a complete policy — see
+    // `CapabilityPolicy::neutral`.
     let mut policy = CapabilityPolicy {
         side_effect_level: stage.side_effect_level.clone(),
-        ..CapabilityPolicy::default()
+        ..CapabilityPolicy::neutral()
     };
     if let Some(tools) = &stage.allowed_tools {
         policy.restrict_tools(tools.clone());
@@ -1307,6 +1310,58 @@ mod tests {
         );
         assert_eq!(policy.workspace_roots, vec!["/workspace".to_string()]);
         assert_eq!(policy.side_effect_level.as_deref(), Some("workspace_read"));
+
+        prune_below_frame(0);
+        pop_execution_policy();
+        assert!(current_execution_policy().is_none());
+    }
+
+    #[test]
+    fn stage_policy_does_not_confine_a_run_that_chose_no_confinement() {
+        fresh_state();
+        let mut meta: crate::value::DictMap = crate::value::DictMap::new();
+        meta.put_str("name", "survey");
+        register_step_from_dict(vec![
+            VmValue::String(arcstr::ArcStr::from("survey_step")),
+            VmValue::dict(meta),
+        ])
+        .expect("step registration");
+
+        let mut stage_dict: crate::value::DictMap = crate::value::DictMap::new();
+        stage_dict.put_str("name", "survey");
+        stage_dict.insert(
+            crate::value::intern_key("allowed_tools"),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                arcstr::ArcStr::from("read"),
+            )])),
+        );
+        let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
+        persona_meta.put_str("name", "ambient");
+        persona_meta.insert(
+            crate::value::intern_key("stages"),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
+                std::sync::Arc::new(stage_dict),
+            )])),
+        );
+        register_persona_from_dict(vec![
+            VmValue::String(arcstr::ArcStr::from("ambient_persona")),
+            VmValue::dict(persona_meta),
+        ])
+        .expect("persona registration");
+
+        // No parent policy: the run is deliberately unsandboxed. A stage
+        // declares tools, not filesystem scope, so entering it must not
+        // conjure workspace-root enforcement out of the stage declaration.
+        assert!(current_execution_policy().is_none());
+        assert!(maybe_push_active_persona("ambient_persona", 1));
+        assert!(maybe_push_active_step("survey_step", 2, &[]));
+        let policy = current_execution_policy().expect("stage policy active");
+        assert_eq!(policy.tools, vec!["read".to_string()]);
+        assert_eq!(
+            policy.sandbox_profile,
+            crate::orchestration::SandboxProfile::Unrestricted
+        );
+        assert!(policy.workspace_roots.is_empty());
 
         prune_below_frame(0);
         pop_execution_policy();

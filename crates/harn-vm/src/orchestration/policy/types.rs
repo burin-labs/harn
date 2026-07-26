@@ -388,6 +388,30 @@ fn is_false(value: &bool) -> bool {
 }
 
 impl CapabilityPolicy {
+    /// The identity element under [`CapabilityPolicy::intersect`]: a policy
+    /// that expresses no opinion on any axis.
+    ///
+    /// Use this — not [`Default::default`] — to build an *overlay*: a policy
+    /// that constrains some axes (tools, capabilities, side-effect level) and
+    /// deliberately says nothing about the rest. `Default` is the confinement
+    /// decision for a run that has none of its own, so it carries
+    /// [`SandboxProfile::Worktree`]. An overlay built on `Default` inherits
+    /// that profile and asserts filesystem confinement its author never
+    /// intended. Merged into a parent the mistake is invisible, because
+    /// `intersect` keeps the strictest profile and the parent's is already at
+    /// least as strict; with no parent the overlay is pushed verbatim and a
+    /// deliberately unsandboxed run silently becomes sandboxed.
+    ///
+    /// `Unrestricted` is the identity for the profile axis specifically:
+    /// `strictest_sandbox_profile` ranks it lowest, so intersecting an overlay
+    /// against any real parent yields the parent's profile unchanged.
+    pub fn neutral() -> Self {
+        Self {
+            sandbox_profile: SandboxProfile::Unrestricted,
+            ..Self::default()
+        }
+    }
+
     pub fn is_unbounded(&self) -> bool {
         self == &Self::default()
     }
@@ -1275,7 +1299,46 @@ pub struct EscalationPolicy {
 
 #[cfg(test)]
 mod tests {
-    use super::{intersect_roots, ModelPolicy, RequiredSuccessfulTool};
+    use super::{
+        intersect_roots, CapabilityPolicy, ModelPolicy, RequiredSuccessfulTool, SandboxProfile,
+    };
+
+    #[test]
+    fn a_neutral_policy_leaves_the_parent_confinement_untouched() {
+        for parent_profile in [
+            SandboxProfile::Unrestricted,
+            SandboxProfile::Worktree,
+            SandboxProfile::Wasi,
+            SandboxProfile::OsHardened,
+        ] {
+            let parent = CapabilityPolicy {
+                sandbox_profile: parent_profile,
+                ..CapabilityPolicy::default()
+            };
+            let merged = parent
+                .intersect(&CapabilityPolicy::neutral())
+                .expect("a neutral overlay always fits its parent");
+            assert_eq!(
+                merged.sandbox_profile, parent_profile,
+                "neutral overlay must be the identity for {parent_profile:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_neutral_policy_asserts_no_confinement_of_its_own() {
+        // The whole point of `neutral()`: pushed with no parent to intersect
+        // against, it must not invent confinement the run never asked for.
+        assert_eq!(
+            CapabilityPolicy::neutral().sandbox_profile,
+            SandboxProfile::Unrestricted
+        );
+        // `default()` stays fail-closed for policies that *are* the decision.
+        assert_eq!(
+            CapabilityPolicy::default().sandbox_profile,
+            SandboxProfile::Worktree
+        );
+    }
 
     #[test]
     fn model_policy_round_trips_required_successful_tool_or_groups() {

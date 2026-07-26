@@ -2,7 +2,7 @@ import "std/triggers"
 
 fn replay_marker_path(event: TriggerEvent) -> string {
   return path_join(
-    ".harn",
+    harness.fs.temp_dir(),
     "harn-trigger-replay-event-log-" + to_string(event.headers?.x_delivery ?? "unknown")
       + ".marker",
   )
@@ -18,7 +18,6 @@ fn flaky_handler(event: TriggerEvent) -> dict {
 }
 
 pipeline test(task) {
-  harness.fs.mkdir(".harn")
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
@@ -66,7 +65,10 @@ pipeline test(task) {
   const live = bindings_after.find({ binding -> binding.id == handle.id })
   __io_println(live?.metrics?.dlq == 1)
   __io_println(live?.metrics?.dispatched == 1)
-  const marker_path = path_join(".harn", "harn-trigger-replay-event-log-" + delivery + ".marker")
+  const marker_path = path_join(
+    harness.fs.temp_dir(),
+    "harn-trigger-replay-event-log-" + delivery + ".marker",
+  )
   if harness.fs.exists(marker_path) {
     harness.fs.delete(marker_path)
   }
