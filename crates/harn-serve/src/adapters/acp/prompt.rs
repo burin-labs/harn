@@ -54,11 +54,11 @@ impl AcpServer {
             self.send_prompt_error(id, &message);
             return;
         }
-        let (cwd, project_root, capability_profile) = match self.sessions.get(&session_id) {
+        let (cwd, project_root, environment_policy) = match self.sessions.get(&session_id) {
             Some(session) => (
                 session.cwd.clone(),
                 session.project_root.clone(),
-                session.capability_profile.clone(),
+                session.environment_policy.clone(),
             ),
             None => {
                 self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
@@ -278,7 +278,7 @@ impl AcpServer {
                 cwd: &cwd,
                 project_root: Some(&project_root),
                 runtime_configurator: self.runtime_configurator.clone(),
-                session_profile: capability_profile.clone(),
+                session_environment: environment_policy.clone(),
             },
         )
         .await;

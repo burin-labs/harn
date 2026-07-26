@@ -108,6 +108,7 @@ fn run_with_bridge_in_parent_workspace(
                         branch: None,
                         base_ref: None,
                         cleanup: None,
+                        environment_policy: Default::default(),
                         grants: Vec::new(),
                     },
                 ));

@@ -54,8 +54,11 @@ pub(crate) fn parse_structural_experiment_option(
                 other.type_name()
             ),
         )))),
-        None => match std::env::var(STRUCTURAL_EXPERIMENT_ENV) {
-            Ok(spec) if !spec.trim().is_empty() => parse_structural_experiment_spec(spec.trim()),
+        None => match crate::stdlib::process::session_env_var(STRUCTURAL_EXPERIMENT_ENV)
+            .ok()
+            .flatten()
+        {
+            Some(spec) if !spec.trim().is_empty() => parse_structural_experiment_spec(spec.trim()),
             _ => Ok(None),
         },
     }

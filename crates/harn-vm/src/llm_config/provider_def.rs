@@ -345,7 +345,10 @@ impl AuthEnv {
 /// public catalog DTO reaches a transport consumer.
 pub fn resolve_base_url(pdef: &ProviderDef) -> String {
     if let Some(env_name) = &pdef.base_url_env {
-        if let Ok(val) = std::env::var(env_name) {
+        if let Some(val) = crate::stdlib::process::session_env_var(env_name)
+            .ok()
+            .flatten()
+        {
             // Strip surrounding quotes that some .env parsers leave intact.
             let trimmed = val.trim().trim_matches('"').trim_matches('\'');
             if !trimmed.is_empty() {
@@ -354,7 +357,10 @@ pub fn resolve_base_url(pdef: &ProviderDef) -> String {
         }
     }
     if let Some(env_name) = &pdef.region_env {
-        if let Ok(val) = std::env::var(env_name) {
+        if let Some(val) = crate::stdlib::process::session_env_var(env_name)
+            .ok()
+            .flatten()
+        {
             let region = val.trim().trim_matches('"').trim_matches('\'');
             if !region.is_empty() {
                 let endpoint = pdef

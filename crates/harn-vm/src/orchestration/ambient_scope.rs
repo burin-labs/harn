@@ -60,7 +60,7 @@ use crate::llm_config::{
 use crate::run_events::{swap_run_event_sink, RunEventSink};
 use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextOverlay};
 use crate::stdlib::process::{
-    swap_session_profile, swap_source_dir, swap_thread_execution_context,
+    swap_session_environment, swap_source_dir, swap_thread_execution_context,
 };
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 
@@ -107,12 +107,12 @@ pub(crate) struct AmbientExecutionScope {
     /// The current mutation session (audit/run_id/approval/secret-scope). Same
     /// shape as `execution_context`: one `Option` held across the loop's awaits.
     mutation_session: Option<MutationSessionRecord>,
-    /// The capability profile (hermetic / grant-carrying lane) the session
+    /// The resolved environment policy for the session
     /// launched under. Same single-slot shape as `execution_context`: a worker
     /// installs it once and reads it across the loop's awaits when spawning a
-    /// subprocess, so each fan-out child must hold its own copy. `None` is the
-    /// legacy no-profile path.
-    session_profile: Option<crate::security::SessionProfile>,
+    /// subprocess, so each fan-out child must hold its own copy. `None` means
+    /// execution is outside a launched session.
+    session_environment: Option<crate::security::SessionEnvironment>,
     /// Host capability bridge installed for the current agent loop. Fan-out
     /// workers inherit the parent's bridge so `host_call` remains routed to the
     /// session host even when their workspace differs from the process cwd.
@@ -205,7 +205,7 @@ impl AmbientExecutionScope {
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
-            session_profile: clone_via_swap(swap_session_profile),
+            session_environment: clone_via_swap(swap_session_environment),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
@@ -268,7 +268,7 @@ impl AmbientExecutionScope {
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
-            session_profile: clone_via_swap(swap_session_profile),
+            session_environment: clone_via_swap(swap_session_environment),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
@@ -324,7 +324,7 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.execution_context, swap_thread_execution_context);
         swap_slot(&mut self.source_dir, swap_source_dir);
         swap_slot(&mut self.mutation_session, swap_mutation_session);
-        swap_slot(&mut self.session_profile, swap_session_profile);
+        swap_slot(&mut self.session_environment, swap_session_environment);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
         swap_slot(&mut self.provider_overrides, swap_provider_overrides);
         swap_slot(
@@ -453,9 +453,9 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     ("VM_SOURCE_DIR", AmbientScoping::Captured),
     // F2: audit/run_id/approval/secret-scope.
     ("CURRENT_MUTATION_SESSION", AmbientScoping::Captured),
-    // Session capability profile (hermetic/lane grants): read at subprocess
+    // Session environment policy (isolated/granted grants): read at subprocess
     // spawn across a worker's awaits, so each fan-out child holds its own copy.
-    ("SESSION_PROFILE_CONTEXT", AmbientScoping::Captured),
+    ("SESSION_ENVIRONMENT_CONTEXT", AmbientScoping::Captured),
     // Host capability bridge: fan-out workers need the same host_call routing
     // as the parent agent loop, even when process cwd differs from project root.
     ("CURRENT_HOST_BRIDGE", AmbientScoping::Captured),
@@ -1252,19 +1252,21 @@ mod tests {
         assert!(crate::orchestration::current_mutation_session().is_none());
     }
 
-    /// Session-profile isolation: two cooperatively-scheduled tasks install
-    /// DISTINCT capability profiles (a hermetic one and a grant-carrying lane)
-    /// and yield twice so the sibling runs in between. Each must read back ONLY
-    /// its own profile; without per-task scoping the second-polled task's profile
-    /// would overwrite the thread-local and the first would resume building its
+    /// Session-environment isolation: two cooperatively-scheduled tasks install
+    /// distinct policies and yield twice so the sibling runs in between. Each
+    /// must read back only its own environment; without per-task scoping, the
+    /// second-polled task would overwrite the thread-local and the first would
+    /// resume building its
     /// subprocess environment under the SIBLING's grants — a credential
     /// cross-wire. Mirrors the F1/F2 execution-context/mutation-session guards.
     #[tokio::test]
-    async fn scoped_tasks_do_not_cross_wire_session_profile() {
-        use crate::security::{GrantSourceSpec, GrantSpec, SessionProfile, SessionProfileKind};
-        use crate::stdlib::process::{current_session_profile, set_session_profile};
+    async fn scoped_tasks_do_not_cross_wire_session_environment() {
+        use crate::security::{
+            EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment,
+        };
+        use crate::stdlib::process::{current_session_environment, set_session_environment};
 
-        let lane_specs = vec![GrantSpec {
+        let grant_specs = vec![GrantSpec {
             name: "gh".to_string(),
             source: GrantSourceSpec::SecretStore {
                 account: "gh".to_string(),
@@ -1272,7 +1274,9 @@ mod tests {
             },
             expose_as_env: Some("GH_TOKEN".to_string()),
         }];
-        let lane = SessionProfile::launch(SessionProfileKind::Lane, lane_specs, &|_| None).unwrap();
+        let granted =
+            SessionEnvironment::launch(EnvironmentPolicyKind::Granted, grant_specs, &|_| None)
+                .unwrap();
 
         let local = tokio::task::LocalSet::new();
         local
@@ -1280,30 +1284,33 @@ mod tests {
                 let alpha = tokio::task::spawn_local(scope_ambient(
                     AmbientExecutionScope::default(),
                     async {
-                        set_session_profile(Some(SessionProfile::hermetic()));
+                        set_session_environment(Some(SessionEnvironment::isolated()));
                         tokio::task::yield_now().await;
                         tokio::task::yield_now().await;
-                        current_session_profile().map(|p| (p.kind(), p.grants().len()))
+                        current_session_environment().map(|p| (p.kind(), p.grants().len()))
                     },
                 ));
                 let beta = tokio::task::spawn_local(scope_ambient(
                     AmbientExecutionScope::default(),
                     async move {
-                        set_session_profile(Some(lane));
+                        set_session_environment(Some(granted));
                         tokio::task::yield_now().await;
                         tokio::task::yield_now().await;
-                        current_session_profile().map(|p| (p.kind(), p.grants().len()))
+                        current_session_environment().map(|p| (p.kind(), p.grants().len()))
                     },
                 ));
                 assert_eq!(
                     alpha.await.unwrap(),
-                    Some((SessionProfileKind::Hermetic, 0))
+                    Some((EnvironmentPolicyKind::Isolated, 0))
                 );
-                assert_eq!(beta.await.unwrap(), Some((SessionProfileKind::Lane, 1)));
+                assert_eq!(
+                    beta.await.unwrap(),
+                    Some((EnvironmentPolicyKind::Granted, 1))
+                );
             })
             .await;
         // The outer thread is left clean — neither task's profile leaked out.
-        assert!(crate::stdlib::process::current_session_profile().is_none());
+        assert!(crate::stdlib::process::current_session_environment().is_none());
     }
 
     /// F3 drift guard. Walk the crate source, discover every ambient-shape
@@ -1440,7 +1447,7 @@ mod tests {
             "VM_EXECUTION_CONTEXT",
             "VM_SOURCE_DIR",
             "CURRENT_MUTATION_SESSION",
-            "SESSION_PROFILE_CONTEXT",
+            "SESSION_ENVIRONMENT_CONTEXT",
             "CURRENT_HOST_BRIDGE",
             "CURRENT_SESSION_STACK",
             "LLM_CONFIG_OVERRIDES_CONTEXT",

@@ -8,10 +8,10 @@ use super::{
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
-// `-D warnings`. Mirrors the local `use super::CapabilityProfileArg;` already
+// `-D warnings`. Mirrors the local `use super::EnvironmentPolicyArg;` already
 // inside one of those tests.
 #[cfg(unix)]
-use super::CapabilityProfileConfig;
+use super::EnvironmentPolicyConfig;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -603,19 +603,19 @@ pipeline main() {{
     harn_vm::reset_thread_local_state();
 }
 
-/// A `--grant NAME=env:SRC,expose=CHILD` lane profile must inject the
+/// A `--grant NAME=env:SRC,expose=CHILD` granted policy must inject the
 /// snapshotted value into a spawned subprocess's environment — the launcher
 /// surface that lets a headless `harn run` open its PR (`GH_TOKEN`) or reach a
 /// provider key. The parent process holds `SRC` but not `CHILD`, so the child
 /// seeing `CHILD` proves the grant injected it rather than ambient inheritance.
 #[cfg(unix)]
 #[tokio::test]
-async fn execute_run_lane_grant_injects_into_subprocess_env() {
+async fn execute_run_granted_policy_injects_into_subprocess_env() {
     harn_vm::reset_thread_local_state();
     let src = "HARN_TEST_LANE_GRANT_SRC";
     // SAFETY: this test process mutates its own env; the vars are unique to it
     // and removed before returning.
-    std::env::set_var(src, "lane-secret-value");
+    std::env::set_var(src, "granted-secret-value");
     std::env::remove_var("HARN_TEST_CHILD_VAR");
 
     let temp = tempfile::TempDir::new().expect("temp dir");
@@ -642,12 +642,11 @@ pipeline main() {
     )
     .expect("write script");
 
-    let config = CapabilityProfileConfig::from_flags(
+    let config = EnvironmentPolicyConfig::from_flags(
         None,
-        &[format!("lane_src=env:{src},expose=HARN_TEST_CHILD_VAR")],
+        &[format!("grant_source=env:{src},expose=HARN_TEST_CHILD_VAR")],
     )
-    .expect("valid grant")
-    .expect("grants select a lane profile");
+    .expect("valid grant");
 
     let outcome = execute_run_with_harnpack_and_sandbox_options(
         &script.to_string_lossy(),
@@ -658,7 +657,7 @@ pipeline main() {
         CliLlmMockMode::Off,
         None,
         RunProfileOptions::default(),
-        RunSandboxOptions::default().with_capability_profile(Some(config)),
+        RunSandboxOptions::default().with_environment_policy(config),
         HarnpackRunOptions::default(),
     )
     .await;
@@ -666,25 +665,25 @@ pipeline main() {
     std::env::remove_var(src);
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "lane-secret-value");
+    assert_eq!(outcome.stdout.trim(), "granted-secret-value");
     assert!(
-        outcome.stderr.contains("capability profile: lane"),
-        "the lane grant must be disclosed; stderr:\n{}",
+        outcome.stderr.contains("environment policy: granted"),
+        "the grant must be disclosed; stderr:\n{}",
         outcome.stderr
     );
     harn_vm::reset_thread_local_state();
 }
 
-/// The counterpart to the injection test: a hermetic profile closes the child
+/// The counterpart to the injection test: an isolated policy closes the child
 /// environment, so a secret-shaped variable set in the launcher must NOT reach
-/// a subprocess. Proves `--capability-profile hermetic` is the strict-empty
+/// a subprocess. Proves `--environment-policy isolated` is the strict-empty
 /// posture, not just a label.
 #[cfg(unix)]
 #[tokio::test]
-async fn execute_run_hermetic_profile_closes_subprocess_env() {
-    use super::CapabilityProfileArg;
+async fn execute_run_isolated_policy_closes_subprocess_env() {
+    use super::EnvironmentPolicyArg;
     harn_vm::reset_thread_local_state();
-    let secret = "HARN_TEST_HERMETIC_SECRET";
+    let secret = "HARN_TEST_ISOLATED_SECRET";
     // SAFETY: unique to this test; removed before returning.
     std::env::set_var(secret, "must-not-cross");
 
@@ -700,7 +699,7 @@ import { command_run } from "std/command"
 
 pipeline main() {
   const result = command_run(
-    {argv: ["sh", "-c", "printf %s \"$HARN_TEST_HERMETIC_SECRET\""]},
+    {argv: ["sh", "-c", "printf %s \"$HARN_TEST_ISOLATED_SECRET\""]},
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
   )
   __io_println(result.stdout == "" ? "CLOSED" : "LEAKED")
@@ -709,9 +708,8 @@ pipeline main() {
     )
     .expect("write script");
 
-    let config = CapabilityProfileConfig::from_flags(Some(CapabilityProfileArg::Hermetic), &[])
-        .expect("valid posture")
-        .expect("explicit hermetic is a posture");
+    let config = EnvironmentPolicyConfig::from_flags(Some(EnvironmentPolicyArg::Isolated), &[])
+        .expect("valid posture");
 
     let outcome = execute_run_with_harnpack_and_sandbox_options(
         &script.to_string_lossy(),
@@ -722,7 +720,7 @@ pipeline main() {
         CliLlmMockMode::Off,
         None,
         RunProfileOptions::default(),
-        RunSandboxOptions::default().with_capability_profile(Some(config)),
+        RunSandboxOptions::default().with_environment_policy(config),
         HarnpackRunOptions::default(),
     )
     .await;
@@ -732,8 +730,8 @@ pipeline main() {
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "CLOSED");
     assert!(
-        outcome.stderr.contains("capability profile: hermetic"),
-        "the hermetic posture must be disclosed; stderr:\n{}",
+        outcome.stderr.contains("environment policy: isolated"),
+        "the isolated policy must be disclosed; stderr:\n{}",
         outcome.stderr
     );
     harn_vm::reset_thread_local_state();

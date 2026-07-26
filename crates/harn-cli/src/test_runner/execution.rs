@@ -151,6 +151,7 @@ pub(super) async fn execute_case(
                     branch: None,
                     base_ref: None,
                     cleanup: None,
+                    environment_policy: Default::default(),
                     grants: Vec::new(),
                 },
             ));

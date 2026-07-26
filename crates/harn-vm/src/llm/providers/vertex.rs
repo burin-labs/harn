@@ -103,12 +103,14 @@ impl VertexProvider {
     }
 
     pub(crate) fn endpoint_url(request: &LlmRequestPayload) -> Result<String, VmError> {
-        let project = std::env::var("VERTEX_AI_PROJECT")
-            .or_else(|_| std::env::var("GOOGLE_CLOUD_PROJECT"))
-            .or_else(|_| service_account_project())
+        let project = crate::stdlib::process::session_env_var("VERTEX_AI_PROJECT")?
+            .or(crate::stdlib::process::session_env_var(
+                "GOOGLE_CLOUD_PROJECT",
+            )?)
+            .map(Ok)
+            .unwrap_or_else(service_account_project)
             .map_err(|_| vm_err("Vertex AI project is not configured; set VERTEX_AI_PROJECT"))?;
-        let location = std::env::var("VERTEX_AI_LOCATION")
-            .ok()
+        let location = crate::stdlib::process::session_env_var("VERTEX_AI_LOCATION")?
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "us-central1".to_string());
         let pdef = crate::llm_config::provider_config("vertex");
@@ -133,7 +135,7 @@ impl VertexProvider {
 
     async fn bearer_token(api_key: &str) -> Result<String, VmError> {
         for env_name in ["VERTEX_AI_ACCESS_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN"] {
-            if let Ok(token) = std::env::var(env_name) {
+            if let Some(token) = crate::stdlib::process::session_env_var(env_name)? {
                 if !token.trim().is_empty() {
                     return Ok(token);
                 }
@@ -142,8 +144,8 @@ impl VertexProvider {
         if !api_key.trim().is_empty() && !api_key.trim().starts_with('/') {
             return Ok(api_key.to_string());
         }
-        let key_path = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
-            .ok()
+        let key_path =
+            crate::stdlib::process::session_env_var("GOOGLE_APPLICATION_CREDENTIALS")?
             .filter(|value| !value.trim().is_empty())
             .or_else(|| (!api_key.trim().is_empty()).then(|| api_key.to_string()))
             .ok_or_else(|| {
@@ -207,8 +209,8 @@ impl LlmProviderChat for VertexProvider {
 }
 
 fn service_account_project() -> Result<String, VmError> {
-    let path = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
-        .map_err(|_| vm_err("GOOGLE_APPLICATION_CREDENTIALS is not set"))?;
+    let path = crate::stdlib::process::session_env_var("GOOGLE_APPLICATION_CREDENTIALS")?
+        .ok_or_else(|| vm_err("GOOGLE_APPLICATION_CREDENTIALS is not set"))?;
     let key = read_service_account_key(&path)?;
     key.project_id
         .filter(|project| !project.trim().is_empty())

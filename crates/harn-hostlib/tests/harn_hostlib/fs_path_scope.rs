@@ -9,7 +9,6 @@
 //! VM-side. In-root paths must still succeed, and relative paths must be
 //! resolved before the check so the two surfaces agree.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -74,14 +73,7 @@ impl ExecutionRootGuard {
             cwd: Some(root.clone()),
             project_root: Some(root.clone()),
             source_dir: Some(root),
-            env: BTreeMap::new(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
+            ..Default::default()
         }));
         ExecutionRootGuard
     }

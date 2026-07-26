@@ -166,6 +166,7 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       write_source(root, "crates/app/target/debug/generated.rs", 1)
       write_source(root, "crates/app/.target/debug/generated.rs", 1)
       write_source(root, ".harn-runs/performance/home/registry/generated.rs", 1)
+      write_source(root, ".harn-toolchain-cache/cargo-target/debug/generated.rs", 1)
       write_source(root, ".target-4688/debug/build/pkg/out/generated.rs", 1)
       write_source(root, "target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
       write_source(root, "target-source/src/lib.rs", 1)

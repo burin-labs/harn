@@ -6,7 +6,14 @@ const BASELINE_DIR = "scripts/source-file-length-baseline"
 
 const BASELINE_SUFFIX = ".lines"
 
-const SKIP_DIR_NAMES = [".burin", ".git", ".harn", ".harn-runs", "node_modules"]
+const SKIP_DIR_NAMES = [
+  ".burin",
+  ".git",
+  ".harn",
+  ".harn-runs",
+  ".harn-toolchain-cache",
+  "node_modules",
+]
 
 const CARGO_TARGET_DIR_NAMES = [".target", "target"]
 

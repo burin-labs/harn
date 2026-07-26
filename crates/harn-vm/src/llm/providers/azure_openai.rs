@@ -44,8 +44,7 @@ impl AzureOpenAiProvider {
                 "Azure OpenAI endpoint is not configured; set AZURE_OPENAI_ENDPOINT",
             ));
         }
-        let deployment = std::env::var("AZURE_OPENAI_DEPLOYMENT")
-            .ok()
+        let deployment = crate::stdlib::process::session_env_var("AZURE_OPENAI_DEPLOYMENT")?
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| request.model.clone());
         if deployment.trim().is_empty() {
@@ -53,8 +52,7 @@ impl AzureOpenAiProvider {
                 "Azure OpenAI deployment is not configured; set model or AZURE_OPENAI_DEPLOYMENT",
             ));
         }
-        let api_version = std::env::var("AZURE_OPENAI_API_VERSION")
-            .ok()
+        let api_version = crate::stdlib::process::session_env_var("AZURE_OPENAI_API_VERSION")?
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_API_VERSION.to_string());
         Ok(format!(
@@ -64,13 +62,13 @@ impl AzureOpenAiProvider {
     }
 
     pub(crate) fn resolve_auth(api_key: &str) -> Result<AzureAuth, VmError> {
-        if let Ok(key) = std::env::var("AZURE_OPENAI_API_KEY") {
+        if let Some(key) = crate::stdlib::process::session_env_var("AZURE_OPENAI_API_KEY")? {
             if !key.trim().is_empty() {
                 return Ok(AzureAuth::ApiKey(key));
             }
         }
         for env_name in ["AZURE_OPENAI_AD_TOKEN", "AZURE_OPENAI_BEARER_TOKEN"] {
-            if let Ok(token) = std::env::var(env_name) {
+            if let Some(token) = crate::stdlib::process::session_env_var(env_name)? {
                 if !token.trim().is_empty() {
                     return Ok(AzureAuth::Bearer(token));
                 }

@@ -67,16 +67,7 @@ fn empty_workspace_roots_default_to_execution_root_for_process_cwd() {
     crate::stdlib::process::set_thread_execution_context(Some(
         crate::orchestration::RunExecutionRecord {
             cwd: Some(dir.path().to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: None,
-            env: Default::default(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
+            ..Default::default()
         },
     ));
     push_execution_policy(CapabilityPolicy {
@@ -103,16 +94,7 @@ fn scoped_process_sandbox_roots_concretize_empty_policy_for_command_cwd() {
     crate::stdlib::process::set_thread_execution_context(Some(
         crate::orchestration::RunExecutionRecord {
             cwd: Some(execution_root.path().to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: None,
-            env: Default::default(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
+            ..Default::default()
         },
     ));
     push_execution_policy(CapabilityPolicy {

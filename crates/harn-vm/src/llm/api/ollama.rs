@@ -177,7 +177,12 @@ pub(crate) fn ollama_unload_grace_duration_from_env() -> Duration {
     Duration::from_millis(
         OLLAMA_UNLOAD_GRACE_MS_ENV_KEYS
             .iter()
-            .find_map(|key| std::env::var(key).ok().and_then(|raw| parse_grace_ms(&raw)))
+            .find_map(|key| {
+                crate::stdlib::process::session_env_var(key)
+                    .ok()
+                    .flatten()
+                    .and_then(|raw| parse_grace_ms(&raw))
+            })
             .unwrap_or(OLLAMA_DEFAULT_UNLOAD_GRACE_MS),
     )
 }
@@ -238,8 +243,9 @@ fn resolve_ollama_base_url(base_url: Option<&str>) -> String {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| {
-            std::env::var(OLLAMA_HOST_ENV)
+            crate::stdlib::process::session_env_var(OLLAMA_HOST_ENV)
                 .ok()
+                .flatten()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
         })
@@ -247,9 +253,12 @@ fn resolve_ollama_base_url(base_url: Option<&str>) -> String {
 }
 
 fn num_ctx_from_env() -> Option<u64> {
-    OLLAMA_NUM_CTX_ENV_KEYS
-        .iter()
-        .find_map(|key| std::env::var(key).ok().and_then(|raw| parse_num_ctx(&raw)))
+    OLLAMA_NUM_CTX_ENV_KEYS.iter().find_map(|key| {
+        crate::stdlib::process::session_env_var(key)
+            .ok()
+            .flatten()
+            .and_then(|raw| parse_num_ctx(&raw))
+    })
 }
 
 fn num_ctx_from_model_catalog(model: Option<&str>) -> Option<u64> {
@@ -266,8 +275,9 @@ fn num_ctx_from_model_catalog(model: Option<&str>) -> Option<u64> {
 
 fn keep_alive_from_env() -> Option<Value> {
     OLLAMA_KEEP_ALIVE_ENV_KEYS.iter().find_map(|key| {
-        std::env::var(key)
+        crate::stdlib::process::session_env_var(key)
             .ok()
+            .flatten()
             .and_then(|raw| parse_keep_alive_str(&raw))
     })
 }

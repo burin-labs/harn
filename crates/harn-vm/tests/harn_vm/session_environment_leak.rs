@@ -1,27 +1,39 @@
-//! Does a hermetic session profile actually close every child environment?
+//! Does an isolated session environment actually close every child environment?
 //!
-//! `security::hermetic_env` documents `resolve_env` as "the *single* code path
-//! that builds a child environment", and the hermetic profile's contract is
+//! `security::environment_policy` documents `resolve_env` as "the *single* code path
+//! that builds a child environment", and the isolated policy's contract is
 //! that no credential crosses into a spawned child. That contract is only as
 //! strong as its weakest spawn seam, so this probes each process builtin
 //! directly with a secret-shaped variable set in the parent environment.
 //!
-//! Every probe spawns the hermetic `harn-test-echo-env` helper binary directly,
+//! Every probe spawns the `harn-test-echo-env` helper binary directly,
 //! so the same resolver and sandbox-funnel coverage runs on every target.
 
 use crate::support;
 
-use harn_vm::security::session_grants::SessionProfile;
+use harn_vm::security::session_environment::SessionEnvironment;
 
 const SECRET: &str = "HARN_PROBE_FAKE_API_KEY";
 const SECRET_VALUE: &str = "sk-probe-must-not-cross";
+
+#[test]
+fn harness_env_uses_the_same_isolated_environment() {
+    let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
+    let out = support::logged_isolated(&format!(
+        r#"fn main(harness: Harness) {{
+  log(harness.env.get("{SECRET}") == nil ? "CLOSED" : "LEAKED")
+}}"#,
+    ))
+    .expect("harness.env result");
+    assert_eq!(out, vec!["CLOSED".to_string()]);
+}
 
 /// Baseline: the governed seam (`exec`, via `process_command_config`) must not
 /// leak. If this fails the probe itself is wrong, not the runtime.
 #[test]
 fn exec_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
-    let out = support::logged_hermetic(&format!(
+    let out = support::logged_isolated(&format!(
         r#"const r = exec({}, "{}")
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
         support::harn_quote(&support::process_helper()),
@@ -34,7 +46,7 @@ log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
 #[test]
 fn exec_opts_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
-    let out = support::logged_hermetic(&format!(
+    let out = support::logged_isolated(&format!(
         r#"const r = exec_opts([{}, "{}"], {{}})
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
         support::harn_quote(&support::process_helper()),
@@ -47,7 +59,7 @@ log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
 #[test]
 fn spawn_captured_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
-    let out = support::logged_hermetic(&format!(
+    let out = support::logged_isolated(&format!(
         r#"const r = spawn_captured({{ cmd: {}, args: ["{}"] }})
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
         support::harn_quote(&support::process_helper()),
@@ -62,7 +74,7 @@ log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
 #[test]
 fn host_process_exec_does_not_leak_the_secret() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
-    let out = support::logged_hermetic(&format!(
+    let out = support::logged_isolated(&format!(
         r#"const r = host_call("process.exec", {{ mode: "argv", argv: [{}, "{}"] }})
 log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
         support::harn_quote(&support::process_helper()),
@@ -85,14 +97,14 @@ log(r.stdout == "" ? "CLOSED" : "LEAKED:" + r.stdout)"#,
 fn std_command_for_returns_a_closed_command() {
     let _secret = support::EnvironmentGuard::set(SECRET, SECRET_VALUE);
     harn_vm::reset_thread_local_state();
-    harn_vm::stdlib::process::set_session_profile(Some(SessionProfile::hermetic()));
+    harn_vm::stdlib::process::set_session_environment(Some(SessionEnvironment::isolated()));
     let mut command = harn_vm::process_sandbox::std_command_for(
         &support::process_helper(),
         &[SECRET.to_string()],
     )
     .expect("build command");
     let out = command.output().expect("spawn");
-    harn_vm::stdlib::process::set_session_profile(None);
+    harn_vm::stdlib::process::set_session_environment(None);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         "",

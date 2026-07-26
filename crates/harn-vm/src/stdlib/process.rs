@@ -16,15 +16,11 @@ const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
-    /// The capability profile the current session launched under (hermetic or a
-    /// grant-carrying lane). `None` is the legacy, no-profile path: a plain CLI
-    /// or test invocation that never opted into the profile model, whose child
-    /// processes inherit the parent environment unchanged. `Some(profile)`
-    /// switches subprocess env construction to the closed-by-construction
-    /// resolver (`security::resolve_env`). Held across a worker's `.await`s and
+    /// The resolved environment for the current launched session. `None` means
+    /// this thread is outside a session boundary. Held across a worker's `.await`s and
     /// so swapped per-task by the ambient scope; its `_CONTEXT` suffix enrolls it
     /// in the ambient-thread-local drift guard.
-    static SESSION_PROFILE_CONTEXT: RefCell<Option<crate::security::SessionProfile>> =
+    static SESSION_ENVIRONMENT_CONTEXT: RefCell<Option<crate::security::SessionEnvironment>> =
         const { RefCell::new(None) };
 }
 
@@ -56,28 +52,28 @@ pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
     VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
 }
 
-/// Install (or clear) the capability profile the current session runs under.
-/// Called at the session launch boundary once the ACP config's declared profile
-/// and grants have been resolved into a [`crate::security::SessionProfile`].
-pub fn set_session_profile(profile: Option<crate::security::SessionProfile>) {
-    SESSION_PROFILE_CONTEXT.with(|current| *current.borrow_mut() = profile);
+/// Install (or clear) the environment policy the current session runs under.
+/// Called at the session launch boundary once the declared policy
+/// and grants have been resolved into a [`crate::security::SessionEnvironment`].
+pub fn set_session_environment(environment: Option<crate::security::SessionEnvironment>) {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| *current.borrow_mut() = environment);
 }
 
-/// The capability profile governing subprocess env construction for the current
-/// task, or `None` on the legacy no-profile path.
-pub(crate) fn current_session_profile() -> Option<crate::security::SessionProfile> {
-    SESSION_PROFILE_CONTEXT.with(|current| current.borrow().clone())
+/// The environment policy governing subprocess env construction for the current
+/// task, or `None` on the legacy non-session path.
+pub(crate) fn current_session_environment() -> Option<crate::security::SessionEnvironment> {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
 }
 
-/// Per-task ambient-scope swap of the session profile. Same rationale as
+/// Per-task ambient-scope swap of the session environment. Same rationale as
 /// [`swap_thread_execution_context`]: a fan-out worker holds its session's
-/// profile across `.await`s, so it must keep its own copy rather than read a
+/// environment across `.await`s, so it must keep its own copy rather than read a
 /// cooperatively-scheduled sibling's. `pub(crate)` — only the ambient combinator
-/// moves whole profiles; launch code uses [`set_session_profile`].
-pub(crate) fn swap_session_profile(
-    next: Option<crate::security::SessionProfile>,
-) -> Option<crate::security::SessionProfile> {
-    SESSION_PROFILE_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
+/// moves whole environments; launch code uses [`set_session_environment`].
+pub(crate) fn swap_session_environment(
+    next: Option<crate::security::SessionEnvironment>,
+) -> Option<crate::security::SessionEnvironment> {
+    SESSION_ENVIRONMENT_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
 }
 
 /// Per-task ambient-scope swap of the thread execution context. See
@@ -185,7 +181,7 @@ fn env_override(name: &str) -> Option<String> {
 pub(crate) fn read_env_value(name: &str) -> Option<String> {
     env_override(name)
         .or_else(|| current_execution_context().and_then(|context| context.env.get(name).cloned()))
-        .or_else(|| std::env::var(name).ok())
+        .or_else(|| session_env_var(name).ok().flatten())
 }
 
 pub fn runtime_root_base() -> PathBuf {
@@ -609,7 +605,7 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         cwd: cwd.as_deref(),
         env: &env_overrides,
         // `spawn_captured` layers `env` over the ambient environment rather
-        // than replacing it. Under a session profile that ambient base is the
+        // than replacing it. Under a session environment that ambient base is the
         // resolver's allowlist + grants, not the raw parent env.
         env_clear: false,
         stdin: stdin_bytes,
@@ -667,7 +663,7 @@ struct CapturedRun {
 
 /// Shared synchronous spawn-and-capture core used by `spawn_captured` and the
 /// `exec_opts`/`exec_at_opts` convenience builtins. Honors cwd, an env
-/// overlay (merge or replace via `env_clear`), the live session profile's
+/// overlay (merge or replace via `env_clear`), the live session environment's
 /// closed environment, optional stdin, and an optional wall-clock timeout
 /// (after which the child is killed and `timed_out` is set).
 ///
@@ -686,17 +682,17 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     // A `replace` request (`env_clear`) is already closed — only the caller's
     // keys survive — so it needs no further narrowing. A `merge` request would
     // otherwise inherit the parent environment wholesale, which under a session
-    // profile means credentials crossing into the child. Route it through the
+    // environment means credentials crossing into the child. Route it through the
     // same resolver `process_command_config` uses so both seams close together.
-    let profile_env = if spec.env_clear {
+    let resolved_environment = if spec.env_clear {
         None
     } else {
         session_closed_env(spec.env.iter().cloned())?
     };
-    if spec.env_clear || profile_env.is_some() {
+    if spec.env_clear || resolved_environment.is_some() {
         command.env_clear();
     }
-    for (key, value) in profile_env.as_deref().unwrap_or(spec.env) {
+    for (key, value) in resolved_environment.as_deref().unwrap_or(spec.env) {
         command.env(key, value);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -795,7 +791,7 @@ struct ExecOptions {
 /// `env_mode` mirrors the `process.exec` host op (and the env-clear footgun
 /// fix): the default is `"merge"` (overlay `env` keys on the ambient
 /// environment, keeping PATH/HOME/etc.); `"replace"` clears that environment
-/// first so only the provided keys remain. Under a session profile the ambient
+/// first so only the provided keys remain. Under a session environment the ambient
 /// base a `"merge"` sees is the resolver's allowlist + grants, not the raw
 /// parent env — see [`session_closed_env`].
 fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, VmError> {
@@ -1063,7 +1059,7 @@ fn process_command_config(
     }
     // `iter().cloned()`, not `drain(..)`: `Drain`'s destructor removes the
     // range even when the iterator is never consumed, so draining here would
-    // silently empty `config.env` on the no-profile path.
+    // silently empty `config.env` on the non-session path.
     if let Some(env) = session_closed_env(config.env.iter().cloned())? {
         config.env = env;
         config.closed_env = true;
@@ -1071,16 +1067,16 @@ fn process_command_config(
     Ok(config)
 }
 
-/// The single place a live session profile becomes a child environment.
+/// The single place a live session environment becomes a child environment.
 ///
-/// Returns `None` when no profile governs this session — the legacy path, where
+/// Returns `None` when no session environment governs this session — the legacy path, where
 /// children inherit the parent environment and `overlay` is layered on top.
-/// Returns `Some(env)` when a profile is active: `resolve_env` composes the
-/// allowlisted subset of the parent env plus the profile's granted exposure,
+/// Returns `Some(env)` when a session environment is active: `resolve_env` composes the
+/// allowlisted subset of the parent env plus the policy's granted exposure,
 /// and `overlay` (worktree paths, `HARN_REPLAY`, caller-supplied `env`, ...)
 /// wins over that base. The caller must hand the result to the child with the
 /// inherited environment CLEARED — a closed env is only closed if nothing
-/// leaks in behind it. A hermetic profile contributes no grants, so its child
+/// leaks in behind it. An isolated policy contributes no grants, so its child
 /// sees the allowlist alone.
 ///
 /// Every spawn seam must route through here. `resolve_env` is documented as the
@@ -1097,20 +1093,26 @@ pub(crate) fn session_closed_env(
 }
 
 /// The current session's whole effective environment, or `None` on the legacy
-/// no-profile path. The base [`session_closed_env`] layers a caller overlay onto.
+/// non-session path. The base [`session_closed_env`] layers a caller overlay onto.
 pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError> {
-    let Some(profile) = current_session_profile() else {
+    let Some(environment) = current_session_environment() else {
         return Ok(None);
     };
     let workspace_defaults = workspace_env_defaults();
     let mut env = crate::security::resolve_env(
-        &profile,
+        &environment,
         &session_env_lookup(&workspace_defaults),
         &resolve_grant_secret,
     )
     .map_err(grant_env_error)?;
     for (key, value) in workspace_defaults {
-        env.entry(key).or_insert(value);
+        if !environment
+            .grants()
+            .iter()
+            .any(|grant| grant.exposed_env_var() == Some(key.as_str()))
+        {
+            env.insert(key, value);
+        }
     }
     Ok(Some(env))
 }
@@ -1119,43 +1121,61 @@ pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError>
 ///
 /// This is the in-process counterpart of [`session_closed_env`], and it is the
 /// read every *credential* consumer inside harn's own process must use. Reading
-/// `std::env::var` for a provider key instead would make a hermetic session
-/// hermetic only for its children while harn itself still saw the launcher's
-/// key, and would leave a lane unable to use the very credential it was granted
+/// `std::env::var` for a provider key instead would make an isolated session
+/// isolated only for its children while harn itself still saw the launcher's
+/// key, and would leave a granted policy unable to use the very credential it was granted
 /// (harn#4992). `security::lookup_env` gives the same answer `resolve_env` puts
 /// in the map, so the in-process and subprocess views cannot drift.
 ///
-/// With no profile installed this is exactly `std::env::var(name).ok()` — the
+/// With no session environment installed this is exactly `std::env::var(name).ok()` — the
 /// legacy path, unchanged. Folding that fallback in here rather than at each
 /// call site means a caller cannot accidentally keep reading the raw
 /// environment when a profile *is* active.
 pub(crate) fn session_env_var(name: &str) -> Result<Option<String>, VmError> {
-    let Some(profile) = current_session_profile() else {
+    let Some(environment) = current_session_environment() else {
         return Ok(std::env::var(name).ok());
     };
     let workspace_defaults = workspace_env_defaults();
+    let is_grant_target = environment
+        .grants()
+        .iter()
+        .any(|grant| grant.exposed_env_var() == Some(name));
+    if !is_grant_target {
+        if let Some(value) = workspace_defaults.get(name) {
+            return Ok(Some(value.clone()));
+        }
+    }
     let resolved = crate::security::lookup_env(
-        &profile,
+        &environment,
         name,
         &session_env_lookup(&workspace_defaults),
         &resolve_grant_secret,
     )
     .map_err(grant_env_error)?;
-    // Workspace defaults sit under the resolved value exactly as they do in
-    // `session_env`, so a var the sandbox preset supplies stays visible.
-    Ok(resolved.or_else(|| workspace_defaults.get(name).cloned()))
+    Ok(resolved)
+}
+
+/// Best-effort adapter for configuration paths whose existing API is
+/// infallible. Execution paths that can surface a policy error should call
+/// [`session_env_var`] directly.
+pub(crate) fn session_env_value(name: &str) -> Option<String> {
+    if current_session_environment().is_none() {
+        return crate::test_env::env_var_seamed(name);
+    }
+    session_env_var(name).ok().flatten()
 }
 
 /// Sandbox-preset environment defaults for the active workspace. These are
 /// process-shaping facts set by the run's own policy, never launcher
-/// credentials, so they sit beneath the profile-resolved environment.
+/// credentials. They override the launch snapshot, while an explicit grant
+/// targeting the same name remains the highest-precedence value.
 fn workspace_env_defaults() -> BTreeMap<String, String> {
     crate::process_sandbox::active_workspace_process_env()
         .into_iter()
         .collect()
 }
 
-/// The parent-environment reader both profile paths resolve against: the
+/// The session-environment reader resolve against: the
 /// workspace preset first, then the real process environment.
 fn session_env_lookup(
     workspace_defaults: &BTreeMap<String, String>,
@@ -1168,7 +1188,7 @@ fn session_env_lookup(
     }
 }
 
-fn grant_env_error(error: crate::security::GrantError) -> VmError {
+fn grant_env_error(error: crate::security::EnvironmentPolicyError) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "session grant env resolution failed: {error}"
     ))))
@@ -1176,7 +1196,7 @@ fn grant_env_error(error: crate::security::GrantError) -> VmError {
 
 /// Resolve a `secret_store` grant pointer to its value through the crate's
 /// configured secret chain. Env-snapshot grants never reach this — their value
-/// was captured at launch — so this only runs for a lane that exposes a
+/// was captured at launch — so this only runs for a granted policy that exposes a
 /// `secret_store` grant to the process env. Any resolution failure yields `None`,
 /// which surfaces as a loud `MissingSecret` at the spawn boundary rather than a
 /// silently-empty credential.

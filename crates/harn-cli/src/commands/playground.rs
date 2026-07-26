@@ -232,6 +232,7 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
                     branch: None,
                     base_ref: None,
                     cleanup: None,
+                    environment_policy: Default::default(),
                     grants: Vec::new(),
                 },
             ));

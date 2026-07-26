@@ -591,8 +591,7 @@ pub(crate) async fn observed_llm_call(
     let mut effective_tool_format = tool_format
         .map(str::to_string)
         .or_else(|| {
-            std::env::var("HARN_AGENT_TOOL_FORMAT")
-                .ok()
+            crate::stdlib::process::session_env_value("HARN_AGENT_TOOL_FORMAT")
                 .filter(|value| !value.trim().is_empty())
         })
         .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));

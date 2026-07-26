@@ -92,8 +92,9 @@ pub fn reset_snapshot() {
 /// `"harn"` CLI default. Trims whitespace so a sloppily-set env var
 /// doesn't surface as `" editor "`.
 pub fn harness_identifier() -> String {
-    std::env::var(HARN_HARNESS_ENV)
+    crate::stdlib::process::session_env_var(HARN_HARNESS_ENV)
         .ok()
+        .flatten()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_HARNESS.to_string())
