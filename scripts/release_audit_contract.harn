@@ -403,11 +403,13 @@ pub fn release_audit_receipt_plan(
   }
   const receipt = report.value
   const expected = lowercase(trim(expected_head_sha))
-  if receipt.source.sha != expected || receipt.source.remote_sha_after != expected
-    || receipt
-    .local_source.head_sha
-    != expected
-    || receipt.warm.head_sha != expected {
+  // The certifier owns whether remote base movement invalidates a run. For an
+  // explicit pin, remote_sha_after may advance while every proof stays bound
+  // to the requested source SHA.
+  if receipt.source.sha != expected || receipt.local_source.head_sha != expected
+    || receipt.warm
+    .head_sha
+    != expected {
     return release_audit_full_plan(contract, "head_sha_mismatch", expected)
   }
   if receipt.warm.binary_sha256 != lowercase(trim(observed_warm_binary_sha256)) {
