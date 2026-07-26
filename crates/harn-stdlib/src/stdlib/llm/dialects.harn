@@ -1,0 +1,362 @@
+/**
+ * std/llm/dialects — the tool-call dialect table, as DATA.
+ *
+ * Import with: import { TAGGED_DIALECT, PROVIDER_MARKERS, NAME_ALIASES }
+ *   from "std/llm/dialects"
+ *
+ * WHY THIS MODULE EXISTS. "Which tag, marker, or spelling means a tool call"
+ * is not a parsing question, it is a vocabulary question, and the answer
+ * changes every time a provider ships a new chat template. Kept as Rust
+ * constants it was scattered across a dozen files — the tag aliases in the
+ * tagged scanner, the fence info-strings in the fenced-JSON chunker, the
+ * name aliases in three separate JSON extractors, the semantic aliases in a
+ * thousand-line compat module — so adding a dialect meant editing code in
+ * several places and rebuilding, and no single place answered "what does Harn
+ * currently recognize?".
+ *
+ * Everything here is inert data. There is no scanning, no matching, and no
+ * policy in this file; it is read by `std/llm/tool_parse` (which owns the
+ * composition) and handed to the Rust structural scanner (which owns
+ * delimiting, and needs the vocabulary only to know where a unit ends). That
+ * split is what keeps Rust proportional to BYTES and Harn proportional to
+ * CANDIDATES.
+ *
+ * ADDING A DIALECT is an edit to this file and nothing else. If a change here
+ * requires a matching change in Rust, the cut line has been violated — the
+ * Rust side must consume these lists, never restate them.
+ */
+/**
+ * A response tag and every spelling models emit for it.
+ *
+ * `canonical` is the name the rest of the runtime uses; `spellings` are the
+ * forms accepted on the wire. The tagless-underscore variants are not
+ * theoretical: chat templates strip underscores often enough that rejecting
+ * `<toolcall>` loses real calls.
+ */
+pub type TagDialect = {canonical: string, spellings: list<string>}
+
+/** A chat-template markup opener and the close tag it pairs with. */
+pub type MarkupDialect = {
+  opener: string,
+  close: string,
+  /** Human-facing label used in parse feedback, e.g. "`<function=...>`". */
+  label: string,
+}
+
+// ── The tagged text protocol ────────────────────────────────────────────────
+/**
+ * Top-level response blocks. A response is a sequence of these and nothing
+ * else; anything outside them is stray text, which is a violation or salvage
+ * decision `std/llm/tool_parse` owns.
+ */
+pub const TAGGED_DIALECT: list<TagDialect> = [
+  {canonical: "tool_call", spellings: ["tool_call", "toolcall"]},
+  {canonical: "assistant_prose", spellings: ["assistant_prose", "assistantprose"]},
+  {canonical: "user_response", spellings: ["user_response", "userresponse"]},
+  {canonical: "done", spellings: ["done"]},
+]
+
+/**
+ * Tags a weak model wraps around NARRATION *inside* a `<tool_call>` block
+ * while it is only thinking out loud.
+ *
+ * Deliberately tiny and allowlisted. A narration tag is special precisely
+ * because it is NOT an attempted invocation, so this list must never widen to
+ * cover unknown tags that look like calls — `<frobnicate>{...}</frobnicate>`
+ * has to stay a rejected unknown tool, not become silent prose.
+ */
+pub const NARRATION_TAGS: list<string> = [
+  "assistant_prose",
+  "assistantprose",
+  "thinking",
+  "reasoning",
+]
+
+/**
+ * Wrapper tags that carry no content of their own. Some chat templates emit
+ * these around `<invoke ...>` markup; swallowing them silently avoids raising
+ * two "unknown top-level tag" violations around an otherwise-recovered call.
+ */
+pub const CONTENTLESS_WRAPPER_TAGS: list<string> = ["function_calls"]
+
+/** Chat-template function markup emitted as plain assistant text. */
+pub const MARKUP_DIALECTS: list<MarkupDialect> = [
+  {opener: "<function=", close: "</function>", label: "`<function=...>`"},
+  {opener: "<invoke name=", close: "</invoke>", label: "`<invoke name=...>`"},
+]
+
+/**
+ * Line-leading labels models prepend to a bare call. `tool_code:` is Gemma's
+ * native spelling; the language tags are what a model adds when it thinks the
+ * runtime wants a code block.
+ *
+ * Stripping is safe only at a line-leading position — see `std/llm/tool_parse`
+ * for the near-miss diagnostic that fires when an UNLISTED label prefixes a
+ * known tool, which is how a new entry for this list gets discovered.
+ */
+pub const BARE_CALL_LINE_PREFIXES: list<string> = [
+  "tool_code:",
+  "tool_call:",
+  "tool_output:",
+  "call:",
+  "tool:",
+  "use:",
+  "python:",
+  "javascript:",
+  "typescript:",
+  "shell:",
+  "bash:",
+]
+
+/**
+ * Pseudo-tools the agent runtime handles itself. They are callable but never
+ * appear in a user-declared registry, so name resolution has to add them.
+ */
+pub const IMPLICIT_TOOL_NAMES: list<string> = ["ledger", "load_skill"]
+
+// ── Provider markers ────────────────────────────────────────────────────────
+/**
+ * Mistral's chat template renders calls as `[TOOL_CALLS]name[ARGS]{...}`, or
+ * as `[TOOL_CALLS]` followed by a JSON array/object payload.
+ */
+pub const MISTRAL_CALL_MARKER: string = "[TOOL_CALLS]"
+
+pub const MISTRAL_ARGS_MARKER: string = "[ARGS]"
+
+/**
+ * DeepSeek's DSML markup. The delimiters are FULLWIDTH vertical bars
+ * (U+FF5C), not ASCII `|` — a detail worth stating because the two are
+ * visually identical in most fonts and an ASCII spelling silently matches
+ * nothing.
+ */
+pub const DSML_MARKER: string = "<｜DSML｜"
+
+/**
+ * OpenAI Harmony frame tokens that leak into the visible text channel on some
+ * gpt-oss routes.
+ *
+ * `header` markers introduce a role/channel header whose tail runs to the next
+ * frame, newline, or wrapper open; `standalone` markers consume only
+ * themselves. Keeping them apart is what stops a later literal `<|message|>`
+ * in prose or in a tool argument from skipping intervening `<tool_call>`
+ * blocks.
+ */
+pub const HARMONY_HEADER_MARKERS: list<string> = ["start", "channel", "constrain"]
+
+pub const HARMONY_STANDALONE_MARKERS: list<string> = ["message", "end", "call"]
+
+pub const HARMONY_FRAME_PREFIX: string = "<|"
+
+pub const HARMONY_FRAME_SUFFIX: string = "|>"
+
+pub const HARMONY_MESSAGE_MARKER: string = "<|message|>"
+
+pub const HARMONY_TOOL_CALL_HEADER_PREFIX: string = "tool_call to="
+
+/** Harn wrapper opens that a Harmony frame token corrupted mid-tag. */
+pub const HARMONY_CORRUPTED_OPENERS: list<string> = [
+  "<tool_call<|",
+  "</tool_call<|",
+  "<assistant<|",
+]
+
+/**
+ * One bracket short of the `[[CALL]]` reserved-token wire opener. A model
+ * that truncates its opener this way is not writing prose — the stub is
+ * normalized to a canonical tool-call opener so the recover-or-truncated
+ * ladder runs instead of the text landing in assistant prose (harn#4486).
+ */
+pub const RESERVED_MALFORMED_CALL_OPENER: string = "[[CALL]"
+
+// ── Fenced-JSON protocol ────────────────────────────────────────────────────
+pub const BACKTICK_FENCE: string = "```"
+
+pub const TILDE_FENCE: string = "~~~"
+
+/** The exact info string that opens a tool block canonically. */
+pub const FENCE_OPEN_INFO: string = "tool"
+
+/**
+ * Info strings that open a tool block WITH a protocol warning. Recognizable
+ * drift is accepted so the turn progresses; telemetry still sees it.
+ */
+pub const FENCE_DRIFT_INFOS: list<string> = ["json", "tool_code", "tool_call", "function_call"]
+
+/**
+ * Separators that may follow a bare `tool` info string and still open a tool
+ * block (`tool python`, `tool_code`, `tool-call`).
+ */
+pub const FENCE_INFO_SUFFIX_SEPARATORS: list<string> = [" ", "\t", "_", "-"]
+
+/** Chat-template envelopes that wrap tool calls when a model drops the fence. */
+pub const ENVELOPE_OPENERS: list<TagDialect> = [
+  {canonical: "tool_calls", spellings: ["tool_calls"]},
+  {canonical: "tool_code", spellings: ["tool_code"]},
+  {canonical: "tool_call", spellings: ["tool_call"]},
+]
+
+/** Tag names that are structural markers, never the name of a tool. */
+pub const STRUCTURAL_MARKER_TAGS: list<string> = ["tool", "tool_call", "tool_calls", "tool_code"]
+
+// ── JSON envelope key aliases ───────────────────────────────────────────────
+/**
+ * Keys that carry the tool NAME, in precedence order. Canonical wins when
+ * several are present.
+ */
+pub const NAME_ALIASES: list<string> = ["name", "tool_name", "tool"]
+
+/** Keys that carry the ARGUMENTS object, in precedence order. */
+pub const ARGUMENT_ALIASES: list<string> = ["args", "arguments", "parameters"]
+
+// ── Name normalization (the compat vocabulary) ──────────────────────────────
+/**
+ * Provider protocol tokens appended to a function name, e.g.
+ * `run<|channel|>commentary`. Everything from the marker onward is residue.
+ */
+pub const NAME_CHANNEL_MARKERS: list<string> = [
+  "<|channel|>",
+  "<|message|>",
+  "<|recipient|>",
+  "<|end|>",
+]
+
+/**
+ * Namespace prefixes cheap hosts prepend to otherwise-bare names
+ * (`tool.look`, `functions.search`). Stripped ONLY for names that are not
+ * generic wrappers, so `tool.call` / `tool.exec` / `function.call` keep their
+ * unwrapping path instead of collapsing to `call` / `exec`.
+ */
+pub const NAME_NAMESPACE_PREFIXES: list<string> = ["tool.", "tools.", "functions.", "function."]
+
+/** Wrapper names whose ARGUMENTS carry the real `{name, args}` call. */
+pub const GENERIC_WRAPPER_NAMES: list<string> = [
+  "tool",
+  "tool.call",
+  "tool.exec",
+  "tool_call",
+  "function",
+  "function.call",
+  "call",
+]
+
+/**
+ * File-explorer namespaces borrowed from other harnesses (Codex
+ * `repo_browser.*` and its obvious siblings).
+ */
+pub const BROWSER_NAMESPACE_PREFIXES: list<string> = [
+  "repo_browser.",
+  "repository_browser.",
+  "workspace_browser.",
+  "file_browser.",
+]
+
+/**
+ * Browser verbs that map onto a canonical Harn tool. A verb NOT listed here
+ * keeps its prefix-stripped bare name deliberately: rewriting an unknown verb
+ * to a tool that may not be registered just trips the ceiling again, and the
+ * denial feedback guides the model better than a wrong rename.
+ */
+pub const BROWSER_VERB_ALIASES: dict<string, string> = {
+  open_file: "look",
+  view_file: "look",
+  cat_file: "look",
+  read_file: "look",
+  print_tree: "look",
+  list_tree: "look",
+  list_dir: "look",
+  list_directory: "look",
+  ls: "look",
+  search: "search",
+  find: "search",
+  grep: "search",
+}
+
+/** Shell/exec synonyms that mean `run`. */
+pub const SHELL_ALIAS_NAMES: list<string> = [
+  "container.exec",
+  "container_exec",
+  "exec",
+  "sh",
+  "shell",
+  "bash",
+]
+
+/**
+ * Argument keys that carry a command, in precedence order. Remapped onto
+ * `command`/`argv` so a renamed call does not then fail arg validation.
+ */
+pub const COMMAND_ARG_ALIASES: list<string> = ["command", "script", "cmd"]
+
+/**
+ * Shell binaries and their inline-script flags. An argv of exactly
+ * `[binary, flag, script]` is really a command STRING, not an argv vector.
+ */
+pub const SHELL_ARGV_BINARIES: list<string> = ["bash", "sh", "/bin/bash", "/bin/sh"]
+
+pub const SHELL_ARGV_SCRIPT_FLAGS: list<string> = ["-lc", "-c", "lc", "c"]
+
+/**
+ * Verbs that exist ONLY as `edit({ action: <verb> })` enum values, never as
+ * advertised standalone tool names — so folding a top-level call of one into
+ * `edit` cannot shadow a real tool.
+ *
+ * `replace_symbol` and `remove_symbol` are deliberately ABSENT: `replace_symbol`
+ * is hard-kept in Harn's default agent tool surface, so a top-level call is
+ * legitimate and rewriting it would shadow a real tool and lose the
+ * symbol-level semantics. `write_file` / `delete_file` / `patch_file` are
+ * absent too — they are semantically lossy against `edit`, which has no
+ * raw-write or whole-file-create action, so a silent rename would just fail
+ * arg validation one step later.
+ */
+pub const EDIT_ACTION_VERBS: list<string> = [
+  "create",
+  "replace_range",
+  "replace_body",
+  "insert_after",
+  "insert_function",
+  "delete_range",
+  "exact_patch",
+  "add_import",
+]
+
+/** `intent` values that identify a tool when a wrapper name carried none. */
+pub const INTENT_TOOL_ALIASES: dict<string, string> = {
+  read: "look",
+  open: "look",
+  look: "look",
+  view: "look",
+  list: "look",
+  ls: "look",
+  search: "search",
+  grep: "search",
+  find: "search",
+}
+
+/** Argument keys whose mere presence implies a `run` call. */
+pub const COMMAND_SHAPE_KEYS: list<string> = ["command", "commands", "cmd"]
+
+// ── HTML character references ───────────────────────────────────────────────
+/**
+ * References a text-format model emits when it escapes its own markup
+ * delimiters inside a JSON string argument, shipping `if (a &lt;= b)` or
+ * `xs.map(x =&gt; x)` as file content. Left encoded, that source cannot
+ * compile.
+ *
+ * Kept to the operators a model escapes to protect markup framing plus the
+ * two quote forms. An unlisted reference is emitted verbatim rather than
+ * guessed at, and decoding runs EXACTLY ONCE per value — a second pass is not
+ * idempotent for double-escaped input (`&amp;lt;` must decode to `&lt;`, the
+ * intended literal, not collapse to `<`).
+ */
+pub const HTML_ENTITIES: dict<string, string> = {
+  "amp;": "&",
+  "lt;": "<",
+  "gt;": ">",
+  "quot;": "\"",
+  "apos;": "'",
+  "#39;": "'",
+  "#34;": "\"",
+}
+
+/** The default completion sentinel a `<done>` block is expected to carry. */
+pub const DEFAULT_DONE_SENTINEL: string = "##DONE##"
