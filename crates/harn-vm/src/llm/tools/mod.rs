@@ -38,6 +38,7 @@ pub(crate) use parse::NativeToolNameTextCall;
 pub(crate) use parse::StreamingToolCallDetector;
 pub(crate) use parse::TextToolFormat;
 pub(crate) use parse::TextToolParseResult;
+pub(crate) use parse::PARSE_HOST_PRIMITIVE_BUILTINS;
 #[cfg(test)]
 pub(crate) use parse::{parse_bare_calls_in_body, parse_native_json_tool_calls};
 pub(crate) use protocol::{

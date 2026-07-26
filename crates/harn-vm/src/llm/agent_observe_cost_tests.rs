@@ -62,7 +62,7 @@ fn response_event_and_returned_usage_share_priced_cost() {
             result,
             None,
             None,
-            &crate::llm::api::test_text_projection(&result, None),
+            &crate::llm::api::test_text_projection(result, None),
         );
         let result_dict = vm_result.as_dict().expect("result dict");
         let Some(VmValue::Dict(usage)) = result_dict.get("usage") else {

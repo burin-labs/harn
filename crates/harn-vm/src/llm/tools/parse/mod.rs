@@ -9,8 +9,10 @@ mod adaptive;
 mod bare;
 mod fenced_json;
 mod harmony;
+mod host_primitives;
 mod native_json;
 mod reserved;
+mod scan;
 mod streaming;
 mod syntax;
 mod tagged;
@@ -18,6 +20,7 @@ mod tagged;
 #[cfg(test)]
 pub(crate) use bare::parse_bare_calls_in_body;
 pub(crate) use fenced_json::parse_fenced_json_tool_calls;
+pub(crate) use host_primitives::PARSE_HOST_PRIMITIVE_BUILTINS;
 #[cfg(test)]
 pub(crate) use native_json::parse_native_json_tool_calls;
 pub(crate) use streaming::StreamingToolCallDetector;

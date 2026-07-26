@@ -829,6 +829,7 @@ async fn llm_stream_builtin_wrap(
 pub fn register_llm_builtins(vm: &mut Vm) {
     agent_config::register_agent_control_primitives(vm);
     register_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS);
+    register_builtin_defs(vm, tools::PARSE_HOST_PRIMITIVE_BUILTINS);
     agent_config::register_agent_loop(vm);
     agent_session_host::register_agent_session_host_primitives(vm);
 
