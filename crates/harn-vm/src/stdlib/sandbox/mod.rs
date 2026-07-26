@@ -61,6 +61,8 @@ mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod paths;
+pub(crate) mod process_cwd;
+use process_cwd::enforce_process_cwd_for_policy;
 mod policy;
 mod replace;
 #[cfg(target_os = "windows")]
@@ -1281,26 +1283,6 @@ pub fn push_process_sandbox_scope(
     Ok(ProcessSandboxScopeGuard { pushed: true })
 }
 
-fn enforce_process_cwd_for_policy(path: &Path, policy: &CapabilityPolicy) -> Result<(), VmError> {
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
-        return Ok(());
-    }
-    let candidate = normalize_for_policy(path);
-    let roots = normalized_workspace_roots(policy);
-    if roots.iter().any(|root| path_is_within(&candidate, root)) {
-        return Ok(());
-    }
-    Err(sandbox_rejection(format!(
-        "sandbox violation: process cwd '{}' is outside workspace_roots [{}]",
-        candidate.display(),
-        roots
-            .iter()
-            .map(|root| root.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )))
-}
-
 /// Close a freshly built command's environment under an active session profile.
 ///
 /// This is the choke point that makes the hermetic contract structural: every
@@ -2214,12 +2196,6 @@ pub(crate) fn package_manager_config_read_roots_for_home(home: &Path) -> Vec<Pat
     roots
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "openbsd",
-    target_os = "windows"
-))]
 fn normalized_process_roots(roots: &[String]) -> Vec<PathBuf> {
     roots
         .iter()

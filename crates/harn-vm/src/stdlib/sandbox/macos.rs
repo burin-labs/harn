@@ -199,10 +199,18 @@ fn render_profile_with_extra_read_roots(
     let read_only_roots = process_sandbox_readonly_roots(policy);
     let policy_read_roots = process_sandbox_policy_read_roots(policy);
     let policy_write_roots = process_sandbox_policy_write_roots(policy);
+    // `signal` is its own SBPL operation, so `(deny default)` blocks it even
+    // with `(allow process*)`. A script that backgrounds a helper and kills it
+    // from a `trap` would silently fail to reap it, and the orphan keeps the
+    // parent's stdout pipe open — the caller then hangs on a read that never
+    // returns EOF, which reads as "the sandbox made my program hang" rather
+    // than as a denial. Signalling is scoped to the sandbox the process is
+    // already in, so this grants reach over its own children, not the host.
     let mut profile = String::from(
         "(version 1)\n\
          (deny default)\n\
          (allow process*)\n\
+         (allow signal (target same-sandbox))\n\
          (allow sysctl-read)\n\
          (allow mach-lookup)\n\
          (allow file-read-metadata)\n\
@@ -264,7 +272,7 @@ fn render_profile_with_extra_read_roots(
             ));
         }
         profile.push_str(")\n");
-        for root in roots {
+        for root in &roots {
             profile.push_str(&format!(
                 "(allow file-write* (subpath \"{}\"))\n",
                 sandbox_profile_escape(&root.display().to_string())
@@ -304,6 +312,33 @@ fn render_profile_with_extra_read_roots(
                 ));
             }
         }
+        // A read-only root that *contains* an explicitly granted write root is
+        // the mirror of the nesting handled above, and last-match-wins would
+        // otherwise let the broad deny revoke the narrow grant. A policy that
+        // says "read anywhere, write here" is coherent and common — it is the
+        // only way to scope Harn's own file builtins without also deciding
+        // where a subprocess may write — so re-assert the specific grant after
+        // the broad deny. Grants disjoint from every read-only root re-emit an
+        // allow they already had, which is a no-op.
+        for root in granted_write_roots(&roots, &policy_write_roots, policy)
+            .iter()
+            .filter(|root| {
+                read_only_roots
+                    .iter()
+                    .any(|read_only| root.starts_with(read_only))
+            })
+        {
+            profile.push_str(&format!(
+                "(allow file-write* (subpath \"{}\"))\n",
+                sandbox_profile_escape(&root.display().to_string())
+            ));
+        }
+        // Standard process I/O devices are not workspace filesystem mutations
+        // (see `check_fs_path_scope`, which exempts them on the Harn side).
+        // They are emitted at the top of the profile too; a broad read-only
+        // root would otherwise deny `/dev/null` and break any child that opens
+        // it, which is a confusing way to learn a read root was too wide.
+        profile.push_str(standard_device_profile_rules());
     }
     if policy_allows_network(policy) {
         profile.push_str("(allow network*)\n");
@@ -345,6 +380,28 @@ fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
     roots.sort_unstable();
     roots.dedup();
     roots
+}
+
+/// Every path this profile has explicitly granted write access to.
+///
+/// Used to re-assert those grants after a broader read-only deny. Preset roots
+/// are included because a policy that opts into `UserTemp` and then declares a
+/// wide read-only root still means for the temp dir to be writable.
+fn granted_write_roots(
+    workspace_roots: &[std::path::PathBuf],
+    policy_write_roots: &[std::path::PathBuf],
+    policy: &CapabilityPolicy,
+) -> Vec<std::path::PathBuf> {
+    let mut granted = workspace_roots.to_vec();
+    granted.extend(policy_write_roots.iter().cloned());
+    granted.extend(
+        preset_write_roots(policy)
+            .into_iter()
+            .map(std::path::PathBuf::from),
+    );
+    granted.sort();
+    granted.dedup();
+    granted
 }
 
 fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {

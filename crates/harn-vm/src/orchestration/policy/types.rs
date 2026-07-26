@@ -4,6 +4,7 @@
 //! helper, `enforce_tool_arg_constraints`, that operates on it).
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -883,18 +884,45 @@ fn encode_restricted_capabilities(
     capabilities
 }
 
+/// Clamp `requested` filesystem roots to what `host` already allows.
+///
+/// Roots name directory trees, so containment — not string equality — decides
+/// whether a request stays inside the ceiling. A request nested under a host
+/// root is a narrowing and survives as itself; a request that contains a host
+/// root is a widening and is clamped to the host root. Comparing the strings
+/// instead would drop both, and an empty root list means "fall back to the
+/// execution root", so the narrowing a caller asked for would silently come
+/// back *wider* than either side intended.
 fn intersect_roots(host: &[String], requested: &[String]) -> Vec<String> {
     if host.is_empty() {
-        requested.to_vec()
-    } else if requested.is_empty() {
-        host.to_vec()
-    } else {
-        requested
-            .iter()
-            .filter(|root| host.contains(*root))
-            .cloned()
-            .collect()
+        return requested.to_vec();
     }
+    if requested.is_empty() {
+        return host.to_vec();
+    }
+    let mut roots: Vec<String> = Vec::new();
+    for root in requested {
+        if host.iter().any(|allowed| root_is_within(root, allowed)) {
+            roots.push(root.clone());
+        } else {
+            roots.extend(
+                host.iter()
+                    .filter(|allowed| root_is_within(allowed, root))
+                    .cloned(),
+            );
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+/// Whether `candidate` names the same tree as `root` or one nested inside it.
+///
+/// Compared component-wise so a sibling whose name merely starts with the
+/// root's (`/repo-backup` against `/repo`) is not mistaken for a child.
+fn root_is_within(candidate: &str, root: &str) -> bool {
+    Path::new(candidate).starts_with(Path::new(root))
 }
 
 fn sandbox_profile_strictness(profile: SandboxProfile) -> u8 {
@@ -1247,7 +1275,7 @@ pub struct EscalationPolicy {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelPolicy, RequiredSuccessfulTool};
+    use super::{intersect_roots, ModelPolicy, RequiredSuccessfulTool};
 
     #[test]
     fn model_policy_round_trips_required_successful_tool_or_groups() {
@@ -1267,6 +1295,36 @@ mod tests {
         assert_eq!(
             serialized.get("require_successful_tools"),
             value.get("require_successful_tools")
+        );
+    }
+
+    #[test]
+    fn a_narrower_requested_root_survives_intersection() {
+        let roots = intersect_roots(
+            &["/repo".to_string()],
+            &["/repo/crates/harn-vm".to_string()],
+        );
+        assert_eq!(roots, vec!["/repo/crates/harn-vm".to_string()]);
+    }
+
+    #[test]
+    fn a_wider_requested_root_is_clamped_to_the_host_root() {
+        let roots = intersect_roots(&["/repo/crates".to_string()], &["/repo".to_string()]);
+        assert_eq!(roots, vec!["/repo/crates".to_string()]);
+    }
+
+    #[test]
+    fn a_disjoint_requested_root_is_dropped() {
+        let roots = intersect_roots(&["/repo".to_string()], &["/elsewhere".to_string()]);
+        assert!(roots.is_empty(), "{roots:?}");
+    }
+
+    #[test]
+    fn a_sibling_sharing_a_name_prefix_is_not_treated_as_nested() {
+        let roots = intersect_roots(&["/repo".to_string()], &["/repo-backup".to_string()]);
+        assert!(
+            roots.is_empty(),
+            "/repo-backup is beside /repo, not inside it: {roots:?}"
         );
     }
 }
