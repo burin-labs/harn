@@ -84,6 +84,7 @@ public enum HarnProtocolConstants {
         "worker_update",
     ]
     public static let harnAgentEventKinds: [String] = [
+        "boundary_failure",
         "budget_circuit_breaker",
         "budget_exhausted",
         "composition_child_call",

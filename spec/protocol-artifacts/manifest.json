@@ -211,6 +211,7 @@
       "harn.mcp.import_token"
     ],
     "harnAgentEventKinds": [
+      "boundary_failure",
       "budget_circuit_breaker",
       "budget_exhausted",
       "composition_child_call",

@@ -1,0 +1,245 @@
+// Tests for scripts/check_loud_boundaries.harn — every failure mode the gate
+// exists to catch, driven on synthetic inputs so nothing touches the tree.
+//
+// A drift gate that cannot fail is worse than no gate: it converts "nobody has
+// broken this" into "nobody has checked". These pin that each rule actually
+// fires.
+import "../check_loud_boundaries.harn"
+
+const FUNNEL = [
+  "impl BoundaryId {",
+  "    pub const ALL: [Self; 2] = [Self::Alpha, Self::Beta];",
+  "    pub fn as_str(self) -> &'static str {",
+  "        match self {",
+  "            Self::Alpha => \"alpha\",",
+  "            Self::Beta => \"beta\",",
+  "        }",
+  "    }",
+  "}",
+  "",
+]
+  .join("\n")
+
+fn wires() -> dict<string, string> {
+  return {Alpha: "alpha", Beta: "beta"}
+}
+
+fn entry(id: string, anchor: string, test_path: string) -> dict {
+  return {id: id, anchors: [anchor], test: test_path}
+}
+
+fn present(paths: list<string>) -> dict<string, bool> {
+  let out: dict<string, bool> = {}
+  for path in paths {
+    out[path] = true
+  }
+  return out
+}
+
+/** Registry, sites, and files that all agree — the passing baseline. */
+fn healthy() -> dict {
+  return {
+    registry: {
+      boundary: [entry("alpha", "a.rs", "a_tests.rs"), entry("beta", "b.harn", "b_tests.rs")],
+    },
+    sites: [{path: "a.rs", id: "alpha"}, {path: "b.harn", id: "beta"}],
+    existing: present(["a.rs", "b.harn", "a_tests.rs", "b_tests.rs"]),
+    contents: {"a_tests.rs": "covers alpha", "b_tests.rs": "covers beta"},
+  }
+}
+
+fn kinds(findings: list) -> list<string> {
+  let out: list<string> = []
+  for finding in findings {
+    out = out.appending(finding.kind)
+  }
+  return out.sorted()
+}
+
+@test
+pipeline test_wire_strings_read_the_as_str_arms(task) {
+  const parsed = boundary_wire_strings(FUNNEL)
+  assert_eq(parsed["Alpha"], "alpha")
+  assert_eq(parsed["Beta"], "beta")
+  assert_eq(parsed.keys().count, 2)
+}
+
+@test
+pipeline test_wire_strings_ignore_a_different_impl_block(task) {
+  // `BoundaryFailureKind` has an `as_str` too; only the BoundaryId one counts.
+  const source = [
+    "impl BoundaryFailureKind {",
+    "    pub fn as_str(self) -> &'static str {",
+    "        match self {",
+    "            Self::Dropped => \"dropped\",",
+    "        }",
+    "    }",
+    "}",
+    "",
+  ]
+    .join("\n")
+    + FUNNEL
+  const parsed = boundary_wire_strings(source)
+  assert_eq(parsed["Dropped"], nil)
+  assert_eq(parsed["Alpha"], "alpha")
+}
+
+@test
+pipeline test_healthy_registry_produces_no_findings(task) {
+  const h = healthy()
+  assert_eq(evaluate(h.registry, wires(), h.sites, h.existing, h.contents).count, 0)
+}
+
+@test
+pipeline test_enum_variant_with_no_registry_entry_fails(task) {
+  const h = healthy()
+  const registry = {boundary: [entry("alpha", "a.rs", "a_tests.rs")]}
+  const findings = evaluate(registry, wires(), h.sites, h.existing, h.contents)
+  assert(kinds(findings).contains("unregistered_boundary"), "a new BoundaryId must be registered")
+}
+
+@test
+pipeline test_registry_entry_with_no_enum_variant_fails(task) {
+  const h = healthy()
+  const registry = {boundary: h.registry.boundary + [entry("gamma", "c.rs", "c_tests.rs")]}
+  const findings = evaluate(registry, wires(), h.sites, h.existing, h.contents)
+  assert(kinds(findings).contains("orphan_entry"), "an id with no variant is dead weight")
+}
+
+@test
+pipeline test_missing_anchor_file_fails(task) {
+  const h = healthy()
+  const findings = evaluate(
+    h.registry,
+    wires(),
+    h.sites,
+    present(["b.harn", "a_tests.rs", "b_tests.rs"]),
+    h.contents,
+  )
+  assert(kinds(findings).contains("missing_anchor"), "a renamed anchor must fail")
+}
+
+/** The stale half: reporting was deleted and the entry outlived it. */
+@test
+pipeline test_entry_with_no_live_construction_site_fails(task) {
+  const h = healthy()
+  const findings = evaluate(
+    h.registry,
+    wires(),
+    [{path: "a.rs", id: "alpha"}],
+    h.existing,
+    h.contents,
+  )
+  assert(kinds(findings).contains("stale_entry"), "a boundary that stopped reporting must fail")
+}
+
+/** The case the gate exists for: a drop path in a file nobody registered. */
+@test
+pipeline test_construction_site_outside_the_anchors_fails(task) {
+  const h = healthy()
+  const sites = h.sites + [{path: "sneaky.rs", id: "alpha"}]
+  const findings = evaluate(h.registry, wires(), sites, h.existing, h.contents)
+  assert(
+    kinds(findings).contains("unregistered_site"),
+    "a new file reporting a registered boundary must be added to its anchors",
+  )
+}
+
+@test
+pipeline test_site_naming_an_unknown_boundary_fails(task) {
+  const h = healthy()
+  const sites = h.sites + [{path: "b.harn", id: "invented"}]
+  const findings = evaluate(h.registry, wires(), sites, h.existing, h.contents)
+  assert(kinds(findings).contains("unknown_boundary"), "a Harn typo in the id must fail")
+}
+
+@test
+pipeline test_missing_test_file_fails(task) {
+  const h = healthy()
+  const findings = evaluate(
+    h.registry,
+    wires(),
+    h.sites,
+    present(["a.rs", "b.harn", "b_tests.rs"]),
+    h.contents,
+  )
+  assert(kinds(findings).contains("missing_test"), "a boundary without its test must fail")
+}
+
+/** A test file that never names its boundary is not evidence of anything. */
+@test
+pipeline test_test_file_that_never_mentions_the_boundary_fails(task) {
+  const h = healthy()
+  const findings = evaluate(
+    h.registry,
+    wires(),
+    h.sites,
+    h.existing,
+    {"a_tests.rs": "unrelated", "b_tests.rs": "covers beta"},
+  )
+  assert(kinds(findings).contains("inert_test"), "an inert test must fail")
+}
+
+@test
+pipeline test_duplicate_registry_ids_fail(task) {
+  const h = healthy()
+  const registry = {boundary: h.registry.boundary + [entry("alpha", "a.rs", "a_tests.rs")]}
+  const findings = evaluate(registry, wires(), h.sites, h.existing, h.contents)
+  assert(kinds(findings).contains("duplicate_entry"), "a duplicated id must fail")
+}
+
+@test
+pipeline test_audited_boundary_that_lost_its_event_fails(task) {
+  const registry = {
+    boundary: [],
+    audited: [{id: "legacy", anchors: ["legacy.rs"], marker: "budget_exhausted"}],
+  }
+  const findings = evaluate(
+    registry,
+    {},
+    [],
+    present(["legacy.rs"]),
+    {"legacy.rs": "no event here"},
+  )
+  assert(
+    kinds(findings).contains("audited_event_gone"),
+    "an already-loud boundary going quiet must fail the audit trail",
+  )
+}
+
+@test
+pipeline test_test_modules_are_exempt_construction_sites(task) {
+  assert(is_exempt_site("crates/harn-vm/src/boundary.rs"), "the funnel itself")
+  assert(is_exempt_site("crates/harn-vm/src/boundary/tests.rs"), "a tests.rs submodule")
+  assert(
+    is_exempt_site("crates/harn-vm/src/llm/api/response_boundary_tests.rs"),
+    "a _tests.rs file",
+  )
+  assert(is_exempt_site("crates/harn-vm/tests/support/thing.rs"), "anything under tests/")
+  assert(!is_exempt_site("crates/harn-vm/src/visible_text.rs"), "a real source file is not exempt")
+}
+
+@test
+pipeline test_rust_sites_map_variants_back_to_wire_ids(task) {
+  const grep = [
+    "a.rs:12:    BoundaryFailure::new(BoundaryId::Alpha, kind, detail)",
+    "b.rs:3:use crate::boundary::BoundaryId::Beta;",
+    "c.rs:9:    // BoundaryId::Unknown is not in the enum",
+  ]
+    .join("\n")
+  const sites = rust_sites(grep, wires())
+  assert_eq(sites.count, 2)
+  assert_eq(sites[0].path, "a.rs")
+  assert_eq(sites[0].id, "alpha")
+  assert_eq(sites[1].id, "beta")
+}
+
+@test
+pipeline test_harn_sites_read_the_boundary_field(task) {
+  const grep = ["x.harn:44:        boundary: \"chat_turn_cap\",", "y.harn:7:  const boundary = 1"]
+    .join("\n")
+  const sites = harn_sites(grep)
+  assert_eq(sites.count, 1)
+  assert_eq(sites[0].path, "x.harn")
+  assert_eq(sites[0].id, "chat_turn_cap")
+}

@@ -177,6 +177,7 @@ export const HARN_PROMPT_RESULT_EXTENSION_FIELDS = [
 export type HarnPromptResultExtensionField = (typeof HARN_PROMPT_RESULT_EXTENSION_FIELDS)[number]
 
 export const HARN_AGENT_EVENT_KINDS = [
+  "boundary_failure",
   "budget_circuit_breaker",
   "budget_exhausted",
   "composition_child_call",

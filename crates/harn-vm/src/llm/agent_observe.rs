@@ -403,6 +403,8 @@ pub(super) fn is_overloaded_llm_error(err: &VmError) -> bool {
 /// because it is not a thrown error.
 mod detector;
 mod provider_errors;
+#[cfg(test)]
+mod provider_errors_boundary_tests;
 mod transcript_observability;
 
 use detector::*;

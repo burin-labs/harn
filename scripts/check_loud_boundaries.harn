@@ -1,0 +1,490 @@
+// Loud-boundary drift gate (harn#5142).
+//
+// Keeps three surfaces in exact agreement:
+//   1. the `BoundaryId` enum in crates/harn-vm/src/boundary.rs,
+//   2. the `[[boundary]]` entries in scripts/loud_boundaries.toml,
+//   3. the construction sites actually present in the tree.
+//
+// The invariant this defends is not "the parser handles <tool>" — it is that a
+// boundary which can drop model output cannot do so without saying so. The type
+// system covers the half where a `BoundaryFailure` is built and then lost (see
+// `#[must_use]` plus the `Drop` backstop). This gate covers the other half: a
+// drop path appearing in a file nobody registered, or a registered boundary
+// whose reporting was quietly deleted.
+//
+// Source-tier: reads committed files only, so it is trustworthy the instant you
+// save a file. See scripts/generated_artifacts.toml [preflight.dispatch].
+const REGISTRY_PATH = "scripts/loud_boundaries.toml"
+
+const FUNNEL_PATH = "crates/harn-vm/src/boundary.rs"
+
+// Harn boundaries name themselves with a `boundary: "<id>"` field on the
+// `boundary_failure` payload, so the field itself is the searchable site.
+const HARN_SITE_MARKER = "boundary: \""
+
+/** A construction site: one file that names one boundary. */
+pub type BoundarySite = {path: string, id: string}
+
+/** One reason the gate failed, with the path that caused it. */
+pub type BoundaryFinding = {kind: string, id: string, path: string, message: string}
+
+fn repo_root() -> string {
+  return path_normalize(path_join(source_dir(), ".."))
+}
+
+/**
+ * Extract the `Self::Variant => "wire"` pairs from the `as_str` body of the
+ * `impl BoundaryId` block, as a `{variant: wire}` dict.
+ *
+ * Reading `as_str` rather than the enum declaration checks both halves at once:
+ * a variant with no arm fails to compile, and a variant renamed without its
+ * wire string shows up here as an id the registry does not know.
+ */
+pub fn boundary_wire_strings(funnel_source: string) -> dict<string, string> {
+  let out: dict<string, string> = {}
+  const impl_marker = "impl BoundaryId {"
+  const impl_start = funnel_source.index_of(impl_marker)
+  if impl_start < 0 {
+    return out
+  }
+  const rest = funnel_source[impl_start:]
+  // The impl block ends at the first `}` in column zero.
+  const end = rest.index_of("\n}\n")
+  const body = if end < 0 {
+    rest
+  } else {
+    rest[:end]
+  }
+  for raw in body.lines() {
+    const line = raw.trim()
+    if !line.starts_with("Self::") || !line.contains("=>") {
+      continue
+    }
+    const halves = line.split("=>")
+    if halves.count != 2 {
+      continue
+    }
+    const variant = halves[0].trim()[len("Self::"):].trim()
+    let wire = halves[1].trim()
+    if wire.ends_with(",") {
+      wire = wire[:len(wire) - 1].trim()
+    }
+    if !wire.starts_with("\"") || !wire.ends_with("\"") || len(wire) < 2 {
+      continue
+    }
+    out[variant] = wire[1:len(wire) - 1]
+  }
+  return out
+}
+
+/**
+ * True when a path is exempt from the "every construction site must be
+ * registered" rule: the funnel's own definition, and test modules (which
+ * legitimately construct failures for every boundary they assert on).
+ */
+pub fn is_exempt_site(path: string) -> bool {
+  const normalized = replace(path, "\\", "/")
+  return normalized == FUNNEL_PATH
+    || normalized.contains("/tests/")
+    || normalized.ends_with("/tests.rs")
+    || normalized.ends_with("_tests.rs")
+    || normalized.ends_with("_test.rs")
+}
+
+/**
+ * Parse `git grep -n` output into construction sites.
+ *
+ * Rust sites are `BoundaryId::Variant` mentions; the variant is mapped back to
+ * its wire id through `wire_strings` so a rename cannot slip past by keeping the
+ * old registry entry.
+ */
+pub fn rust_sites(grep_output: string, wire_strings: dict<string, string>) -> list<BoundarySite> {
+  let sites: list<BoundarySite> = []
+  for raw in grep_output.lines() {
+    const line = raw.trim()
+    const colon = line.index_of(":")
+    if colon < 0 {
+      continue
+    }
+    const path = line[:colon]
+    const body = line[colon + 1:]
+    for variant in wire_strings.keys() {
+      // The trailing delimiter keeps `BoundaryId::Chat` from matching a line
+      // that only mentions `BoundaryId::ChatTurnCap`.
+      if body.contains("BoundaryId::" + variant + ",")
+        || body.contains(
+        "BoundaryId::" + variant + ")",
+      )
+        || body.contains("BoundaryId::" + variant + ";")
+        || body.contains(
+        "BoundaryId::" + variant + " ",
+      )
+        || body.ends_with("BoundaryId::" + variant) {
+        sites = sites.appending({path: path, id: to_string(wire_strings[variant] ?? "")})
+      }
+    }
+  }
+  return sites.unique()
+}
+
+/**
+ * Parse `git grep -n` output for `.harn` boundary emissions into sites.
+ *
+ * A Harn boundary names itself with a `boundary: "<id>"` field next to the
+ * `"boundary_failure"` event type, so the id is read straight off the payload.
+ */
+pub fn harn_sites(grep_output: string) -> list<BoundarySite> {
+  let sites: list<BoundarySite> = []
+  const token = HARN_SITE_MARKER
+  for raw in grep_output.lines() {
+    const line = raw.trim()
+    const colon = line.index_of(":")
+    if colon < 0 || !line.contains(token) {
+      continue
+    }
+    const path = line[:colon]
+    const after = line[line.index_of(token) + len(token):]
+    const close = after.index_of("\"")
+    if close <= 0 {
+      continue
+    }
+    sites = sites.appending({path: path, id: after[:close]})
+  }
+  return sites.unique()
+}
+
+fn sites_for(sites: list<BoundarySite>, id: string) -> list<string> {
+  let paths: list<string> = []
+  for site in sites {
+    if site.id == id {
+      paths = paths.appending(site.path)
+    }
+  }
+  return paths.unique().sorted()
+}
+
+/** Build the `{id: true}` set of registered ids, flagging blank and duplicate ids. */
+fn registered_ids(entries: list, findings_out: list) -> dict {
+  let findings = findings_out
+  let registered: dict<string, bool> = {}
+  for entry in entries {
+    const id = to_string(entry?.id ?? "")
+    if id == "" {
+      findings = findings.appending(
+        {
+          kind: "invalid_entry",
+          id: "",
+          path: REGISTRY_PATH,
+          message: "a [[boundary]] entry has no `id`",
+        },
+      )
+    } else if registered[id] != nil {
+      findings = findings.appending(
+        {kind: "duplicate_entry", id: id, path: REGISTRY_PATH, message: "registered twice"},
+      )
+    } else {
+      registered[id] = true
+    }
+  }
+  return {registered: registered, findings: findings}
+}
+
+/**
+ * Rule 1: the `BoundaryId` enum and the registry must be in exact 1:1
+ * correspondence. A variant with no entry is a boundary nobody documented; an
+ * entry with no variant is dead weight that makes the enumeration look
+ * complete when it is not.
+ */
+fn enum_correspondence_findings(
+  wire_strings: dict<string, string>,
+  registered: dict<string, bool>,
+) -> list<BoundaryFinding> {
+  let findings: list<BoundaryFinding> = []
+  let enum_ids: dict<string, bool> = {}
+  for variant in wire_strings.keys() {
+    const id = to_string(wire_strings[variant] ?? "")
+    enum_ids[id] = true
+    if registered[id] == nil {
+      findings = findings.appending(
+        {
+          kind: "unregistered_boundary",
+          id: id,
+          path: FUNNEL_PATH,
+          message: "BoundaryId::${variant} has no [[boundary]] entry",
+        },
+      )
+    }
+  }
+  for id in registered.keys() {
+    if enum_ids[id] == nil {
+      findings = findings.appending(
+        {
+          kind: "orphan_entry",
+          id: id,
+          path: REGISTRY_PATH,
+          message: "no BoundaryId variant maps to this id",
+        },
+      )
+    }
+  }
+  return findings
+}
+
+/** Rules 2-3 for one entry: anchors exist, still report, and are the only files that do. */
+fn entry_anchor_findings(
+  id: string,
+  anchors: list,
+  sites: list<BoundarySite>,
+  existing_paths: dict<string, bool>,
+) -> list<BoundaryFinding> {
+  let findings: list<BoundaryFinding> = []
+  if anchors.count == 0 {
+    findings = findings.appending(
+      {kind: "no_anchor", id: id, path: REGISTRY_PATH, message: "entry declares no `anchors`"},
+    )
+  }
+  let anchor_set: dict<string, bool> = {}
+  for anchor in anchors {
+    const path = to_string(anchor)
+    anchor_set[path] = true
+    if existing_paths[path] == nil {
+      findings = findings.appending(
+        {kind: "missing_anchor", id: id, path: path, message: "anchor file does not exist"},
+      )
+    }
+  }
+  const live = sites_for(sites, id)
+  if live.count == 0 {
+    findings = findings.appending(
+      {
+        kind: "stale_entry",
+        id: id,
+        path: REGISTRY_PATH,
+        message: "no file constructs this boundary any more",
+      },
+    )
+  }
+  for path in live {
+    if anchor_set[path] == nil {
+      findings = findings.appending(
+        {
+          kind: "unregistered_site",
+          id: id,
+          path: path,
+          message: "constructs `${id}` but is not one of its registered anchors",
+        },
+      )
+    }
+  }
+  return findings
+}
+
+/** Rule 5: the boundary's test exists and actually names the boundary. */
+fn entry_test_findings(
+  id: string,
+  test_path: string,
+  existing_paths: dict<string, bool>,
+  contents: dict<string, string>,
+) -> list<BoundaryFinding> {
+  if test_path == "" {
+    return [{kind: "no_test", id: id, path: REGISTRY_PATH, message: "entry declares no `test`"}]
+  }
+  if existing_paths[test_path] == nil {
+    return [{kind: "missing_test", id: id, path: test_path, message: "test file does not exist"}]
+  }
+  if !to_string(contents[test_path] ?? "").contains(id) {
+    return [
+      {kind: "inert_test", id: id, path: test_path, message: "test file never mentions `${id}`"},
+    ]
+  }
+  return []
+}
+
+/**
+ * Already-loud boundaries carry their own typed event instead of a
+ * `BoundaryFailure`. The audit trail is only worth keeping if it still
+ * describes the tree, so the anchor and its event marker must both survive.
+ */
+fn audited_findings(
+  audited: list,
+  existing_paths: dict<string, bool>,
+  contents: dict<string, string>,
+) -> list<BoundaryFinding> {
+  let findings: list<BoundaryFinding> = []
+  for entry in audited {
+    const id = to_string(entry?.id ?? "")
+    const marker = to_string(entry?.marker ?? "")
+    for anchor in entry?.anchors ?? [] {
+      const path = to_string(anchor)
+      if existing_paths[path] == nil {
+        findings = findings.appending(
+          {
+            kind: "missing_audited_anchor",
+            id: id,
+            path: path,
+            message: "audited anchor file does not exist",
+          },
+        )
+      } else if marker != "" && !to_string(contents[path] ?? "").contains(marker) {
+        findings = findings.appending(
+          {
+            kind: "audited_event_gone",
+            id: id,
+            path: path,
+            message: "no longer contains `${marker}` — the boundary may have gone silent",
+          },
+        )
+      }
+    }
+  }
+  return findings
+}
+
+/**
+ * The whole rule set, as a pure function over already-gathered inputs so the
+ * unit tests can drive every failure mode without a repository.
+ *
+ * `existing_paths` is the set of paths that exist on disk; `contents` maps a
+ * path to its text for the marker checks.
+ */
+pub fn evaluate(
+  registry: dict,
+  wire_strings: dict<string, string>,
+  sites: list<BoundarySite>,
+  existing_paths: dict<string, bool>,
+  contents: dict<string, string>,
+) -> list<BoundaryFinding> {
+  const entries = registry?.boundary ?? []
+  const seen = registered_ids(entries, [])
+  let findings = seen.findings + enum_correspondence_findings(wire_strings, seen.registered)
+  for entry in entries {
+    const id = to_string(entry?.id ?? "")
+    if id == "" {
+      continue
+    }
+    findings = findings
+      + entry_anchor_findings(id, entry?.anchors ?? [], sites, existing_paths)
+      + entry_test_findings(
+      id,
+      to_string(entry?.test ?? ""),
+      existing_paths,
+      contents,
+    )
+  }
+  // Rule 4: a site naming an id nobody registered — usually a typo in a `.harn`
+  // payload, which would otherwise report into the void.
+  for site in sites {
+    if seen.registered[site.id] == nil {
+      findings = findings.appending(
+        {
+          kind: "unknown_boundary",
+          id: site.id,
+          path: site.path,
+          message: "reports boundary `${site.id}`, which is not in the registry",
+        },
+      )
+    }
+  }
+  return findings + audited_findings(registry?.audited ?? [], existing_paths, contents)
+}
+
+fn git_grep(root: string, pattern: string, globs: list<string>) -> string? {
+  // `--untracked` is load-bearing, not a convenience. Without it the gate reads
+  // only committed files, so the exact case it exists for — a brand-new file
+  // that starts reporting a boundary nobody registered — would pass locally and
+  // only fail once CI saw the commit.
+  let args = ["-C", root, "grep", "-I", "-n", "-F", "--untracked", "-e", pattern, "--"]
+  for glob in globs {
+    args = args.appending(glob)
+  }
+  const result = harness.process.spawn_captured({cmd: "git", args: args})
+  // 1 means "no matches", which is a legitimate (if alarming) answer.
+  if result.exit_code != 0 && result.exit_code != 1 {
+    return nil
+  }
+  return result.stdout
+}
+
+/** Every repo-relative path an entry names, so `main` can stat and read them once. */
+fn referenced_paths(entries: list) -> list<string> {
+  let paths: list<string> = []
+  for entry in entries {
+    for anchor in entry?.anchors ?? [] {
+      paths = paths.appending(to_string(anchor))
+    }
+    const test_path = to_string(entry?.test ?? "")
+    if test_path != "" {
+      paths = paths.appending(test_path)
+    }
+  }
+  return paths.unique()
+}
+
+pipeline main(task) {
+  const root = repo_root()
+  if !harness.fs.exists(path_join(root, REGISTRY_PATH)) {
+    __io_eprintln("::error::missing ${REGISTRY_PATH}")
+    return 1
+  }
+  const registry = try {
+    toml_parse(harness.fs.read_text(path_join(root, REGISTRY_PATH)))
+  } catch (err) {
+    __io_eprintln("::error::failed to parse ${REGISTRY_PATH}: ${err}")
+    return 1
+  }
+  if !harness.fs.exists(path_join(root, FUNNEL_PATH)) {
+    __io_eprintln("::error::missing the funnel definition ${FUNNEL_PATH}")
+    return 1
+  }
+  const wire_strings = boundary_wire_strings(harness.fs.read_text(path_join(root, FUNNEL_PATH)))
+  if wire_strings.keys().count == 0 {
+    __io_eprintln(
+      "::error::could not read any `Self::Variant => \"wire\"` arms from ${FUNNEL_PATH}; the gate would pass vacuously",
+    )
+    return 1
+  }
+  const rust_grep = git_grep(root, "BoundaryId::", ["crates/*.rs"])
+  const harn_grep = git_grep(root, HARN_SITE_MARKER, ["crates/*.harn"])
+  if rust_grep == nil || harn_grep == nil {
+    __io_eprintln("::error::git grep failed; cannot scan for boundary construction sites")
+    return 1
+  }
+  let sites: list<BoundarySite> = []
+  for site in rust_sites(rust_grep, wire_strings) {
+    if !is_exempt_site(site.path) {
+      sites = sites.appending(site)
+    }
+  }
+  for site in harn_sites(harn_grep) {
+    sites = sites.appending(site)
+  }
+  let existing: dict<string, bool> = {}
+  let contents: dict<string, string> = {}
+  let wanted = referenced_paths(registry?.boundary ?? [])
+  for path in referenced_paths(registry?.audited ?? []) {
+    wanted = wanted.appending(path)
+  }
+  for path in wanted.unique() {
+    if harness.fs.exists(path_join(root, path)) {
+      existing[path] = true
+      contents[path] = harness.fs.read_text(path_join(root, path))
+    }
+  }
+  const findings = evaluate(registry, wire_strings, sites.unique(), existing, contents)
+  if findings.count == 0 {
+    const count = (registry?.boundary ?? []).count
+    const audited = (registry?.audited ?? []).count
+    __io_println(
+      "loud-boundary registry OK (${to_string(count)} funnelled boundary(ies), ${to_string(audited)} audited)",
+    )
+    return 0
+  }
+  __io_eprintln("::error::loud-boundary registry failed (${to_string(findings.count)} finding(s)):")
+  for finding in findings {
+    __io_eprintln("  [${finding.kind}] ${finding.id} @ ${finding.path}: ${finding.message}")
+  }
+  __io_eprintln(
+    "hint: a boundary that can drop model output must report through crate::boundary::BoundaryFailure and be listed in ${REGISTRY_PATH}. See the header of that file for the checklist.",
+  )
+  return 1
+}
