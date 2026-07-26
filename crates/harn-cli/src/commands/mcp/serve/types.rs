@@ -120,12 +120,20 @@ impl LogWatcherReadiness {
 
     /// True once the spawner has published its count and that many watchers
     /// have settled.
+    ///
+    /// Read only by the test-only waiter and the tests below — production
+    /// never blocks on readiness — so it is dead code in a release build, like
+    /// the `log_watchers_ready` field it reads.
+    #[allow(dead_code)]
     pub(super) fn settled(&self) -> bool {
         use std::sync::atomic::Ordering;
         self.published.load(Ordering::SeqCst)
             && self.settled.load(Ordering::SeqCst) >= self.expected.load(Ordering::SeqCst)
     }
 
+    /// A future that resolves the next time any counter moves. Same test-only
+    /// audience as [`Self::settled`].
+    #[allow(dead_code)]
     pub(super) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
         self.notify.notified()
     }
