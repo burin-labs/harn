@@ -149,7 +149,8 @@ pub(crate) fn agent_loop_result_from_llm(
 }
 
 /// Assemble the user-facing result dict for `llm_call` from a raw `LlmResult`.
-pub(crate) fn build_llm_call_result(
+pub(crate) async fn build_llm_call_result(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     result: &super::api::LlmResult,
     opts: &super::api::LlmCallOptions,
 ) -> VmValue {
@@ -218,8 +219,14 @@ pub(crate) fn build_llm_call_result(
         Some("active"),
     );
 
+    // One text-channel projection per provider result, produced here because
+    // this is the innermost point that still has an `AsyncBuiltinCtx`. The
+    // structured-output extractor and the result assembly both read it.
+    let projection = super::api::build_llm_text_projection(ctx, result, opts.tools.as_ref()).await;
+
     if expects_structured_output(opts) {
-        let parsed = structured_output_candidates(result, opts.tools.as_ref())
+        let parsed = structured_output_candidates(ctx, result, &projection, opts.tools.as_ref())
+            .await
             .into_iter()
             .find_map(|candidate| {
                 let json_str = extract_json(&candidate);
@@ -227,14 +234,16 @@ pub(crate) fn build_llm_call_result(
                     .ok()
                     .map(|jv| json_to_vm_value(&jv))
             });
-        return vm_build_llm_result(result, parsed, Some(transcript), opts.tools.as_ref());
+        return vm_build_llm_result(result, parsed, Some(transcript), &projection);
     }
 
-    vm_build_llm_result(result, None, Some(transcript), opts.tools.as_ref())
+    vm_build_llm_result(result, None, Some(transcript), &projection)
 }
 
-fn structured_output_candidates(
+async fn structured_output_candidates(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     result: &super::api::LlmResult,
+    projection: &super::api::LlmTextProjection,
     tools: Option<&crate::value::VmValue>,
 ) -> Vec<String> {
     let mut candidates = Vec::new();
@@ -259,9 +268,20 @@ fn structured_output_candidates(
         }
     }
 
+    // The first candidate is `result.text`, whose parse the projection already
+    // owns; every other candidate is a derived string that has to be parsed on
+    // its own.
+    if let Some(parse) = projection.parsed.as_ref() {
+        if !parse.prose.is_empty() {
+            push_structured_output_candidate(&mut candidates, parse.prose.trim().to_string());
+        }
+    }
     let derived = candidates.clone();
     for candidate in derived {
-        let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(&candidate, tools);
+        if candidate == result.text.trim() {
+            continue;
+        }
+        let parsed = super::api::parse_candidate_text_tools(ctx, &candidate, tools).await;
         if !parsed.prose.is_empty() {
             push_structured_output_candidate(&mut candidates, parsed.prose.trim().to_string());
         }
@@ -451,7 +471,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::Hos
             )
             .await?;
 
-            Ok(build_llm_call_result(&result, &opts))
+            Ok(build_llm_call_result(Some(&ctx), &result, &opts).await)
         }
     });
 }
@@ -559,7 +579,15 @@ mod tests {
             telemetry: crate::llm::api::ProviderTelemetry::default(),
         };
 
-        let candidates = structured_output_candidates(&result, None);
+        let projection = futures::executor::block_on(crate::llm::api::build_llm_text_projection(
+            None, &result, None,
+        ));
+        let candidates = futures::executor::block_on(structured_output_candidates(
+            None,
+            &result,
+            &projection,
+            None,
+        ));
 
         assert!(candidates
             .iter()
