@@ -18,6 +18,11 @@ pipeline default() {
     {mode: "argv", argv: argv, sandbox_profile: "unrestricted"},
   )
   __io_println(unrestricted?.success)
+  const workspace_paths = host_call(
+    "process.exec",
+    {mode: "argv", argv: argv, sandbox_profile: "workspace_paths"},
+  )
+  __io_println(workspace_paths?.success)
   const bad = try {
     host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "wide_open"})
     nil

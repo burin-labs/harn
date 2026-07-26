@@ -1,0 +1,52 @@
+/**
+ * The `workspace_paths` profile enforces Harn's own path scope while
+ * leaving spawned subprocesses unconfined (#5541).
+ *
+ * A sandbox profile answers two independent questions — whether the
+ * `harness.fs.*` builtins scope paths against `workspace_roots`, and
+ * whether an OS mechanism confines subprocesses. Every other profile
+ * answers both the same way; this one is the rung that separates them,
+ * for trusted callers that want their own writes confined but must shell
+ * out freely.
+ */
+pipeline default() {
+  const base = path_join(
+    harness.fs.temp_dir(),
+    "harn_workspace_paths_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  const root = path_join(base, "workspace")
+  harness.fs.mkdir(root)
+  const in_path = path_join(root, "in.txt")
+  const out_path = path_join(base, "outside.txt")
+  const argv = if platform() == "windows" {
+    ["cmd", "/C", "echo|set /p=ok"]
+  } else {
+    ["printf", "ok"]
+  }
+  with_execution_policy(
+    {sandbox_profile: "workspace_paths", workspace_roots: [root]},
+    { ->
+      __io_println(sandbox_active_profile())
+      // Path axis: enforced, exactly as under `worktree`.
+      harness.fs.write_text(in_path, "ok\n")
+      const write_err = try {
+        harness.fs.write_text(out_path, "nope\n")
+        nil
+      } catch (e) {
+        e
+      }
+      __io_println(write_err != nil)
+      // Process axis: not applied — the child runs. Launched from `root`
+      // so the cwd check has a root to accept regardless of where the
+      // conformance runner itself was started.
+      const result = host_call("process.exec", {mode: "argv", argv: argv, cwd: root})
+      __io_println(result?.success)
+      __io_println(result?.stdout)
+    },
+  )
+  // The in-root write landed; the rejected out-of-root write never did.
+  __io_println(harness.fs.read_text(in_path) == "ok\n")
+  __io_println(harness.fs.exists(out_path))
+}
+// Path scope is enforced under this profile.
+// Subprocesses are left unconfined, so the child still runs.

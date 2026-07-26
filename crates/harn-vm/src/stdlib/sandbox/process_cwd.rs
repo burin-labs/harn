@@ -11,7 +11,7 @@ use super::{
     normalize_for_policy, normalized_process_roots, normalized_workspace_roots, path_is_within,
     sandbox_rejection,
 };
-use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+use crate::orchestration::CapabilityPolicy;
 use crate::value::VmError;
 
 /// The directories a subprocess may be launched from.
@@ -42,7 +42,7 @@ pub(super) fn enforce_process_cwd_for_policy(
     path: &Path,
     policy: &CapabilityPolicy,
 ) -> Result<(), VmError> {
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+    if !policy.sandbox_profile.enforces_path_scope() {
         return Ok(());
     }
     let candidate = normalize_for_policy(path);

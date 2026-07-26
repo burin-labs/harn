@@ -129,13 +129,22 @@ imports for filesystem, process, network, clock, random, LLM, or async
 effects, so attempted side effects fail inside the component boundary.
 
 Process execution is wrapped in an OS sandbox selected by the active
-`CapabilityPolicy.sandbox_profile`. The default profile is `worktree`:
-workspace-root path enforcement plus best-effort OS confinement, with
+`CapabilityPolicy.sandbox_profile`. A profile decides two independent
+things: whether Harn's own in-process path checks apply (the
+`harness.fs.*` builtins scoping against `workspace_roots`, and the
+launch-cwd check), and whether a platform mechanism confines spawned
+subprocesses. The ladder, weakest first, is `unrestricted <
+workspace_paths < worktree < wasi < os_hardened`.
+
+The default profile is `worktree`: workspace-root path enforcement plus
+best-effort OS confinement, with
 `HARN_HANDLER_SANDBOX={off,warn,enforce}` controlling what happens when
 the platform mechanism is unavailable. Pipelines opt into
 `sandbox_profile: "os_hardened"` to make the OS confinement required —
 spawns return `tool_rejected` if the platform mechanism is missing,
-regardless of `HARN_HANDLER_SANDBOX`. The Tesseract subprocess used by
+regardless of `HARN_HANDLER_SANDBOX`. `workspace_paths` enforces paths
+while leaving subprocesses unconfined, for trusted callers that must
+shell out freely; it is not containment for foreign code. The Tesseract subprocess used by
 `vision_ocr(...)` is launched through the same sandbox entrypoint. The
 per-platform mechanisms are:
 

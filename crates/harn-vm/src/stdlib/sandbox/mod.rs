@@ -390,7 +390,7 @@ impl SandboxViolation {
 /// Check whether `path` is inside the active policy's workspace roots.
 ///
 /// Returns `Ok(())` when no execution policy is active, when the active
-/// profile is [`SandboxProfile::Unrestricted`], when the normalized path
+/// profile does not enforce path scope, when the normalized path
 /// falls within a writable workspace root, or — for [`FsAccess::Read`]
 /// only — when it falls within a read-only root. A write/delete that
 /// resolves under a read-only root is rejected with `read_only` set, as
@@ -405,7 +405,7 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return Ok(());
     };
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+    if !policy.sandbox_profile.enforces_path_scope() {
         return Ok(());
     }
     // Standard process I/O device files are not workspace filesystem
@@ -521,7 +521,7 @@ fn scoped_mutation_target(
     let Some(policy) = crate::orchestration::current_execution_policy() else {
         return Ok(None);
     };
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+    if !policy.sandbox_profile.enforces_path_scope() {
         return Ok(None);
     }
     if is_standard_io_device_for_access(&normalize_io_device_path(path), access) {
@@ -1227,7 +1227,7 @@ pub fn push_process_sandbox_scope(
     let Some(mut policy) = crate::orchestration::current_execution_policy() else {
         return Ok(ProcessSandboxScopeGuard { pushed: false });
     };
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+    if !policy.sandbox_profile.enforces_path_scope() {
         return Ok(ProcessSandboxScopeGuard { pushed: false });
     }
 
@@ -1531,7 +1531,10 @@ fn build_tokio_command<B: SandboxBackend + ?Sized>(
 
 pub fn process_violation_error(output: &std::process::Output) -> Option<VmError> {
     let policy = crate::orchestration::current_execution_policy()?;
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+    // Only a profile that actually confined the process may attribute the
+    // child's failure to the OS sandbox. Under a profile that spawned it
+    // unconfined, a permission error came from the child's own work.
+    if !policy.sandbox_profile.confines_processes() {
         return None;
     }
     if effective_fallback(policy.sandbox_profile) == SandboxFallback::Off
@@ -1571,7 +1574,7 @@ pub fn process_violation_error(output: &std::process::Output) -> Option<VmError>
 
 pub fn process_spawn_error(error: &std::io::Error) -> Option<VmError> {
     let policy = crate::orchestration::current_execution_policy()?;
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+    if !policy.sandbox_profile.confines_processes() {
         return None;
     }
     if effective_fallback(policy.sandbox_profile) == SandboxFallback::Off
@@ -1610,25 +1613,17 @@ fn sandbox_signal_status(_output: &std::process::Output) -> bool {
 }
 
 /// Returns the active capability policy and the resolved sandbox
-/// profile, or `None` if confinement should be skipped entirely. The
-/// `Unrestricted` profile and the `HARN_HANDLER_SANDBOX=off` escape
-/// hatch both produce `None`. The `Wasi` profile also produces `None`
-/// on the host spawn path — testbench mode intercepts subprocesses
-/// before they reach this layer, so the host-spawn fallback should be
-/// a normal direct exec.
+/// profile, or `None` if process confinement should be skipped entirely.
+///
+/// Profiles that do not confine processes produce `None`, as does the
+/// `HARN_HANDLER_SANDBOX=off` escape hatch.
 pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfile)> {
     let policy = crate::orchestration::current_execution_policy()?;
     let profile = policy.sandbox_profile;
-    match profile {
-        SandboxProfile::Unrestricted | SandboxProfile::Wasi => None,
-        SandboxProfile::Worktree | SandboxProfile::OsHardened => {
-            if effective_fallback(profile) == SandboxFallback::Off {
-                None
-            } else {
-                Some((policy, profile))
-            }
-        }
+    if !profile.confines_processes() || effective_fallback(profile) == SandboxFallback::Off {
+        return None;
     }
+    Some((policy, profile))
 }
 
 fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {

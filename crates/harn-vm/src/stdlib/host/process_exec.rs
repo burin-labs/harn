@@ -505,8 +505,13 @@ fn split_argv(mut argv: Vec<String>) -> Result<(String, Vec<String>), VmError> {
 /// orchestration policy.
 pub(crate) fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmError> {
     let profile = crate::orchestration::SandboxProfile::parse(value).ok_or_else(|| {
+        let expected = crate::orchestration::SandboxProfile::all()
+            .iter()
+            .map(|profile| format!("{:?}", profile.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "host_call process.exec: unknown sandbox_profile {value:?}; expected one of \"unrestricted\", \"worktree\", \"os_hardened\", \"wasi\""
+            "host_call process.exec: unknown sandbox_profile {value:?}; expected one of {expected}"
         ))))
     })?;
     let mut policy = crate::orchestration::current_execution_policy().unwrap_or_default();
