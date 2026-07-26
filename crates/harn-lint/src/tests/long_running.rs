@@ -1,11 +1,11 @@
 use super::*;
 
 #[test]
-fn long_running_flag_without_cleanup_warns() {
+fn background_flag_without_cleanup_warns() {
     let diags = lint_source(
         r#"
 pipeline main() {
-  const handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {background: true})
   __io_println(handle.handle_id)
 }
 "#,
@@ -18,11 +18,11 @@ pipeline main() {
 }
 
 #[test]
-fn long_running_flag_with_defer_cleanup_is_ok() {
+fn background_flag_with_defer_cleanup_is_ok() {
     let diags = lint_source(
         r#"
 pipeline main() {
-  const handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {background: true})
   defer {
     host_tool_call("cancel_handle", {handle_id: handle.handle_id})
   }
@@ -37,11 +37,11 @@ pipeline main() {
 }
 
 #[test]
-fn host_tool_long_running_flag_without_cleanup_warns() {
+fn host_tool_background_flag_without_cleanup_warns() {
     let diags = lint_source(
         r#"
 pipeline main() {
-  host_tool_call("run_command", {argv: ["sleep", "10"], long_running: true})
+  host_tool_call("run_command", {argv: ["sleep", "10"], background: true})
 }
 "#,
     );

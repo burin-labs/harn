@@ -70,7 +70,7 @@ pub(crate) fn reset_fs_state() {
 struct WalkDirOptions {
     max_depth: Option<usize>,
     follow_symlinks: bool,
-    long_running: bool,
+    background: bool,
 }
 
 #[derive(Clone)]
@@ -84,7 +84,7 @@ struct WalkDirEntry {
 #[derive(Clone)]
 struct GlobOptions {
     base: String,
-    long_running: bool,
+    background: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -236,24 +236,36 @@ fn string_list_option(opts: &crate::value::DictMap, key: &str) -> Vec<String> {
     }
 }
 
-fn parse_walk_dir_options(args: &[VmValue]) -> WalkDirOptions {
+fn reject_retired_long_running_option(
+    opts: &crate::value::DictMap,
+    builtin: &str,
+) -> Result<(), VmError> {
+    const RETIRED_ASYNC_OPTION: &str = concat!("long", "_running");
+    if opts.contains_key(RETIRED_ASYNC_OPTION) {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: unknown option(s): long_running"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_walk_dir_options(args: &[VmValue]) -> Result<WalkDirOptions, VmError> {
     let mut options = WalkDirOptions {
         max_depth: None,
         follow_symlinks: false,
-        long_running: false,
+        background: false,
     };
     if let Some(VmValue::Dict(opts)) = args.get(1) {
+        reject_retired_long_running_option(opts, "walk_dir")?;
         if let Some(v) = opts.get("max_depth").and_then(|v| v.as_int()) {
             if v >= 0 {
                 options.max_depth = Some(v as usize);
             }
         }
         options.follow_symlinks = bool_option(opts, "follow_symlinks").unwrap_or(false);
-        options.long_running = bool_option(opts, "long_running")
-            .or_else(|| bool_option(opts, "background"))
-            .unwrap_or(false);
+        options.background = bool_option(opts, "background").unwrap_or(false);
     }
-    options
+    Ok(options)
 }
 
 fn walk_dir_entries(
@@ -306,17 +318,16 @@ fn walk_entries_to_json(entries: Vec<WalkDirEntry>) -> serde_json::Value {
     )
 }
 
-fn parse_glob_options(args: &[VmValue]) -> GlobOptions {
+fn parse_glob_options(args: &[VmValue]) -> Result<GlobOptions, VmError> {
     let mut options = GlobOptions {
         base: ".".to_string(),
-        long_running: false,
+        background: false,
     };
     match args.get(1) {
         Some(VmValue::Dict(opts)) => {
+            reject_retired_long_running_option(opts, "glob")?;
             options.base = string_option(opts, "base").unwrap_or_else(|| ".".to_string());
-            options.long_running = bool_option(opts, "long_running")
-                .or_else(|| bool_option(opts, "background"))
-                .unwrap_or(false);
+            options.background = bool_option(opts, "background").unwrap_or(false);
         }
         Some(value) => {
             let base = value.display();
@@ -324,14 +335,13 @@ fn parse_glob_options(args: &[VmValue]) -> GlobOptions {
                 options.base = base;
             }
             if let Some(VmValue::Dict(opts)) = args.get(2) {
-                options.long_running = bool_option(opts, "long_running")
-                    .or_else(|| bool_option(opts, "background"))
-                    .unwrap_or(false);
+                reject_retired_long_running_option(opts, "glob")?;
+                options.background = bool_option(opts, "background").unwrap_or(false);
             }
         }
         None => {}
     }
-    options
+    Ok(options)
 }
 
 fn parse_append_locked_options(args: &[VmValue]) -> AppendLockBuiltinOptions {
@@ -1296,8 +1306,8 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
-    let options = parse_walk_dir_options(args);
-    if options.long_running {
+    let options = parse_walk_dir_options(args)?;
+    if options.background {
         let session_id = crate::llm::current_agent_session_id().unwrap_or_default();
         let descriptor = format!("walk_dir {}", resolved.display());
         let handle = crate::stdlib::long_running::spawn_json_operation(
@@ -1334,10 +1344,10 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
             "glob: pattern is required",
         ))));
     }
-    let options = parse_glob_options(args);
+    let options = parse_glob_options(args)?;
     let base = resolve_fs_path(&options.base);
     crate::stdlib::sandbox::enforce_fs_path("glob", &base, crate::stdlib::sandbox::FsAccess::Read)?;
-    if options.long_running {
+    if options.background {
         let session_id = crate::llm::current_agent_session_id().unwrap_or_default();
         let descriptor = format!("glob {} in {}", pattern, base.display());
         let handle = crate::stdlib::long_running::spawn_json_operation(

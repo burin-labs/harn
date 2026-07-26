@@ -11,7 +11,7 @@ const SKIP_SEGMENTS = [
   "/target/",
 ]
 
-const SCANNED_SUFFIXES = [".harn", ".md", ".prompt", ".rs", ".ts", ".tsx"]
+const SCANNED_SUFFIXES = [".harn", ".json", ".md", ".prompt", ".rs", ".ts", ".tsx"]
 
 fn repo_root() -> string {
   return path_normalize(path_join(source_dir(), ".."))
@@ -81,8 +81,11 @@ fn git_candidate_files(root: string) -> list<string>? {
     "let\\\\s",
     "-e",
     "tool_registry",
+    "-e",
+    "long_running",
     "--",
     "*.harn",
+    "*.json",
     "*.md",
     "*.prompt",
     "*.rs",
@@ -144,6 +147,30 @@ pub fn line_has_stale_var_tool_registry_example(line: string) -> bool {
     > 0
 }
 
+pub fn line_has_retired_long_running_option(path: string, line: string) -> bool {
+  const ignored = path == "scripts/check_harn_syntax_sensitive_scans.harn"
+    || path.starts_with(
+    "changelog/archive/",
+  )
+    || line.contains("retired-option-rejection")
+  if !line.contains("long_running") || ignored {
+    return false
+  }
+  const bare = len(regex_captures(r"(^|[^A-Za-z0-9_])long_running\s*:", line)) > 0
+    && !line.contains(
+    "long_running::",
+  )
+  const quoted_key = len(regex_captures(r#"["']long_running["']\s*:"#, line))
+    > 0
+  const parser_key = (line.contains("\"long_running\"") || line.contains("'long_running'"))
+    && (line
+    .contains("optional_")
+    || line.contains(".get(")
+    || line.contains("contains_key("))
+  const documented_key = path.ends_with(".md") && line.contains("`long_running")
+  return bare || quoted_key || parser_key || documented_key
+}
+
 pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
   let findings = []
   const lines = text.split("\n")
@@ -168,6 +195,16 @@ pub fn harn_syntax_sensitive_scan_text(path: string, text: string) -> list {
           line_no,
           "stale-var-tool-registry-example",
           "Harn examples should not teach removed `var`; use `let` for mutable tool registries or `const` for immutable values.",
+        ),
+      )
+    }
+    if line_has_retired_long_running_option(path, line) {
+      findings = findings.appending(
+        line_finding(
+          path,
+          line_no,
+          "retired-long-running-option",
+          "The public async option is `background`; the retired alias is rejected.",
         ),
       )
     }
@@ -197,12 +234,12 @@ pub fn check_harn_syntax_sensitive_scans(root: string = "") -> dict {
 
 fn render_report(report: dict) -> string {
   if report.violation_count == 0 {
-    return "harn syntax-sensitive scan check passed: no let-only Harn binding regexes or stale var tool_registry examples found."
+    return "harn syntax-sensitive scan check passed: no stale Harn binding regexes, removed syntax examples, or retired async options found."
   }
   let lines = [
     "harn syntax-sensitive scan check failed: " + to_string(report.violation_count) + " finding(s)",
     "",
-    "Use parser/codemod facts where possible. If text scanning is unavoidable, accept both current and recently migrated Harn keyword spellings or document an explicit non-Harn target.",
+    "Use parser/codemod facts where possible. Keep examples and public option keys on the current canonical spelling.",
   ]
   for finding in report.findings {
     lines = lines.appending(

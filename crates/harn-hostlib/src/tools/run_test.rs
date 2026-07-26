@@ -50,7 +50,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .unwrap_or_else(|| PathBuf::from("."));
     let filter = optional_string(NAME, &map, "filter")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
-    let long_running = optional_bool(NAME, &map, "long_running")?.unwrap_or(false);
+    let background = optional_bool(NAME, &map, "background")?.unwrap_or(false);
 
     let plan = if let Some(argv) = optional_string_list(NAME, &map, "argv")? {
         TestPlan::Explicit(argv)
@@ -73,7 +73,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .flatten();
     let (program, args_tail) = parse_argv_program(NAME, argv.clone())?;
 
-    if long_running {
+    if background {
         let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
         let info = super::long_running::spawn_long_running_with_options(
             NAME,

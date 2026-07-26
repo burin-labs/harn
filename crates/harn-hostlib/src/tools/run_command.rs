@@ -12,8 +12,7 @@
 //!   it.
 //! - There is no implicit cap of 300s on `timeout_ms`; the caller decides.
 //!   Sandboxing limits the blast radius regardless.
-//! - `background: true` (or legacy `long_running: true`) spawns without waiting
-//!   and returns a handle dict
+//! - `background: true` spawns without waiting and returns a handle dict
 //!   immediately. The result arrives via `agent_inject_feedback` when the
 //!   process exits. See `tools/long_running.rs`.
 
@@ -103,7 +102,6 @@ fn dict_string(map: &harn_vm::value::DictMap, key: &str) -> Option<String> {
 
 pub(crate) fn request_is_background(map: &harn_vm::value::DictMap) -> bool {
     matches!(map.get("background"), Some(VmValue::Bool(true)))
-        || matches!(map.get("long_running"), Some(VmValue::Bool(true)))
         || map
             .get("background_after_ms")
             .is_some_and(|value| !matches!(value, VmValue::Nil))
@@ -121,9 +119,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let capture = parse_capture(&map)?;
     let sandbox_scope = parse_sandbox_scope(&map)?;
     let env_mode = optional_env_mode(NAME, &map, !env.is_empty())?;
-    let background = optional_bool(NAME, &map, "background")?
-        .or(optional_bool(NAME, &map, "long_running")?)
-        .unwrap_or(false);
+    let background = optional_bool(NAME, &map, "background")?.unwrap_or(false);
     let background_after_ms = optional_u64(NAME, &map, "background_after_ms")?;
     let progress_interval_ms = optional_u64(NAME, &map, "progress_interval_ms")?;
     let progress_max_interval_ms = optional_u64(NAME, &map, "progress_max_interval_ms")?;
@@ -549,11 +545,12 @@ mod tests {
 
     #[test]
     fn background_detection_matches_public_request_modes() {
-        for key in ["background", "long_running"] {
-            let mut request = harn_vm::value::DictMap::new();
-            request.insert(harn_vm::value::intern_key(key), VmValue::Bool(true));
-            assert!(request_is_background(&request));
-        }
+        let mut request = harn_vm::value::DictMap::new();
+        request.insert(
+            harn_vm::value::intern_key("background"),
+            VmValue::Bool(true),
+        );
+        assert!(request_is_background(&request));
         let mut delayed = harn_vm::value::DictMap::new();
         delayed.insert(
             harn_vm::value::intern_key("background_after_ms"),

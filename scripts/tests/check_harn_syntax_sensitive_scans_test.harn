@@ -46,19 +46,49 @@ pipeline test_line_detectors(task) {
   assert_eq(line_has_stale_var_tool_registry_example(stale_registry), true)
   assert_eq(line_has_stale_var_tool_registry_example("let reg = tool_registry()"), false)
   assert_eq(line_has_stale_var_tool_registry_example("var count = 0"), false)
+  const retired = "long" + "_running"
+  assert_eq(
+    line_has_retired_long_running_option("docs/example.md", "`" + retired + ": true`"),
+    true,
+  )
+  assert_eq(
+    line_has_retired_long_running_option(
+      "tests/rejection.rs",
+      "\"" + retired + "\" // retired-option-rejection",
+    ),
+    false,
+  )
+  assert_eq(
+    line_has_retired_long_running_option("changelog/archive/old.md", "`" + retired + ": true`"),
+    false,
+  )
+  assert_eq(
+    line_has_retired_long_running_option(
+      "src/internal.rs",
+      "crate::stdlib::" + retired + "::spawn_operation()",
+    ),
+    false,
+  )
 }
 
 @test
-pipeline test_scan_text_reports_both_issue_classes(task) {
+pipeline test_scan_text_reports_all_issue_classes(task) {
+  const retired = "long" + "_running"
   const findings = harn_syntax_sensitive_scan_text(
     "scripts/example.harn",
-    "const pattern = \"let\\\\s+_EVIDENCE_\"\n * " + "var " + "reg = tool_registry()\n",
+    "const pattern = \"let\\\\s+_EVIDENCE_\"\n * "
+      + "var "
+      + "reg = tool_registry()\nconst opts = {"
+      + retired
+      + ": true}\n",
   )
-  assert_eq(findings.count, 2)
+  assert_eq(findings.count, 3)
   assert_eq(findings[0].line, 1)
   assert_eq(findings[0].kind, "let-only-harn-binding-regex")
   assert_eq(findings[1].line, 2)
   assert_eq(findings[1].kind, "stale-var-tool-registry-example")
+  assert_eq(findings[2].line, 3)
+  assert_eq(findings[2].kind, "retired-long-running-option")
 }
 
 @test
@@ -68,6 +98,8 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(task) {
       write_text(root, "scripts/bad.harn", "const pattern = \"let\\\\s+name\"\n")
       write_text(root, "docs/bad.md", "```harn\n" + "var " + "reg = tool_registry()\n```\n")
       write_text(root, "docs/good.md", "```harn\nlet reg = tool_registry()\n```\n")
+      const retired = "long" + "_running"
+      write_text(root, "schemas/bad.json", "{\"" + retired + "\":true}\n")
       write_text(root, "docs/dist/generated.md", "var " + "reg = tool_registry()\n")
       write_text(
         root,
@@ -78,14 +110,15 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(task) {
       const files = harn_syntax_sensitive_files(root)
       assert_eq(files.contains("scripts/bad.harn"), true)
       assert_eq(files.contains("docs/bad.md"), true)
+      assert_eq(files.contains("schemas/bad.json"), true)
       assert_eq(files.contains("docs/dist/generated.md"), false)
       assert_eq(files.contains("harn-docs-snippets-AbCd/35_concurrency_8.harn"), false)
       assert_eq(files.contains("target/generated.harn"), false)
       const report = check_harn_syntax_sensitive_scans(root)
-      assert_eq(report.violation_count, 2)
+      assert_eq(report.violation_count, 3)
       assert_eq(
         report.findings.map({ row -> row.path }).to_list().sorted(),
-        ["docs/bad.md", "scripts/bad.harn"],
+        ["docs/bad.md", "schemas/bad.json", "scripts/bad.harn"],
       )
     },
   )

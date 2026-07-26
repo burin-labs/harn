@@ -212,7 +212,7 @@ pub fn search_evidence_background(
   options: EvidenceOptions = {},
 ) -> EvidenceSearchHandle {
   return schema_expect(
-    harness.fs.find_evidence(roots, patterns, options + {long_running: true}),
+    harness.fs.find_evidence(roots, patterns, options + {background: true}),
     schema_of(EvidenceSearchHandle),
   )
 }
@@ -701,10 +701,7 @@ pub fn touch(path: string) {
  * @errors: []
  */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
-  const matches = harness.fs.glob(
-    pattern,
-    {base: root, long_running: options?.long_running ?? false},
-  )
+  const matches = harness.fs.glob(pattern, {base: root, background: options?.background ?? false})
   if options?.relative ?? false {
     return matches.map({ path -> relative_path(root, path) }).to_list()
   }
