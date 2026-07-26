@@ -69,26 +69,14 @@ impl SandboxBackend for Backend {
         super::apply_process_config(&mut command, config);
         let output = crate::op_interrupt::capture_output_interruptible(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
-        match sandbox_exec_spawn_error(&output) {
-            Some(error) => Err(error),
+        match crate::process_sandbox::wrapped_spawn_io_error(
+            output.status.code().unwrap_or(-1),
+            &output.stderr,
+        ) {
+            Some(error) => Err(spawn_error(error)),
             None => Ok(output),
         }
     }
-}
-
-fn sandbox_exec_spawn_error(output: &Output) -> Option<VmError> {
-    const EX_OSERR: i32 = 71;
-    const PREFIX: &str = "sandbox-exec: execvp() of '";
-    const SUFFIX: &str = "' failed: No such file or directory\n";
-
-    let stderr = std::str::from_utf8(&output.stderr).ok()?;
-    if output.status.code() == Some(EX_OSERR)
-        && stderr.starts_with(PREFIX)
-        && stderr.ends_with(SUFFIX)
-    {
-        return Some(spawn_error(std::io::Error::from_raw_os_error(libc::ENOENT)));
-    }
-    None
 }
 
 fn wrap_with_sandbox_exec(

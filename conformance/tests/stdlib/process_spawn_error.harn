@@ -1,0 +1,30 @@
+import { command_run } from "std/command"
+
+fn nonzero_command() -> list<string> {
+  if platform() == "windows" {
+    return ["cmd", "/C", "exit", "71"]
+  }
+  return ["sh", "-c", "exit 71"]
+}
+
+pipeline default() {
+  const direct = try {
+    exec("harn-command-that-does-not-exist-5662")
+  } catch (error) {
+    error
+  }
+  __io_println(direct.error)
+  __io_println(direct.kind)
+  __io_println(direct.category)
+  const command = try {
+    command_run(["harn-command-that-does-not-exist-5662"])
+  } catch (error) {
+    error
+  }
+  __io_println(command.error)
+  __io_println(command.kind)
+  __io_println(command.category)
+  const nonzero = command_run(nonzero_command())
+  __io_println(nonzero.exit_code)
+  __io_println(nonzero.success)
+}

@@ -1228,6 +1228,18 @@ fn prefix_process_error(error: VmError, prefix: &str) -> VmError {
         VmError::Thrown(VmValue::String(message)) => VmError::Thrown(VmValue::String(
             arcstr::ArcStr::from(format!("{prefix} failed: {message}")),
         )),
+        VmError::Thrown(VmValue::Dict(fields))
+            if matches!(
+                fields.get("error"),
+                Some(VmValue::String(family)) if family.as_str() == "io_error"
+            ) =>
+        {
+            let mut prefixed = (*fields).clone();
+            if let Some(VmValue::String(message)) = fields.get("message") {
+                prefixed.put_str("message", format!("{prefix} failed: {message}"));
+            }
+            VmError::Thrown(VmValue::dict(prefixed))
+        }
         other => other,
     }
 }

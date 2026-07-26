@@ -284,6 +284,14 @@ pub enum ProcessError {
     /// Generic spawn failure (typically io::Error from `Command::spawn`).
     #[error("spawn failed: {0}")]
     Spawn(String),
+    /// OS spawn failure with its stable `io::ErrorKind` spelling preserved.
+    #[error("spawn failed: {message}")]
+    SpawnIo {
+        /// Canonical Harn I/O kind such as `not_found`.
+        kind: &'static str,
+        /// Human-readable OS error.
+        message: String,
+    },
     /// A never-approvable UNIVERSAL catastrophic command (machine/disk/data
     /// destruction) was rejected by the floor BEFORE spawning. Enforced
     /// unconditionally at [`spawn_process`] — no `command_policy` required —

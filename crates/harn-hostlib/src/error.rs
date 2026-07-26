@@ -55,6 +55,18 @@ pub enum HostlibError {
         message: String,
     },
 
+    /// The OS could not start a requested process. `kind` is the canonical
+    /// `io::ErrorKind` spelling retained for script-side classification.
+    #[error("hostlib: {builtin}: process spawn failed: {message}")]
+    ProcessSpawn {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// Stable kind such as `not_found` or `permission_denied`.
+        kind: &'static str,
+        /// Human-readable OS error.
+        message: String,
+    },
+
     /// A path the builtin resolved fell outside the session's workspace
     /// roots under a restricted sandbox profile. The mirror of the
     /// `harness.fs.*` `tool_rejected` rejection — both surfaces reject an
@@ -107,6 +119,7 @@ impl HostlibError {
             | HostlibError::MissingParameter { builtin, .. }
             | HostlibError::InvalidParameter { builtin, .. }
             | HostlibError::Backend { builtin, .. }
+            | HostlibError::ProcessSpawn { builtin, .. }
             | HostlibError::SandboxViolation { builtin, .. }
             | HostlibError::SandboxUnsupported { builtin, .. }
             | HostlibError::CatastrophicFloor { builtin, .. } => builtin,
@@ -119,11 +132,12 @@ impl From<HostlibError> for VmError {
         // Surface as a `Thrown` dict so Harn `try`/`catch` can pattern-match
         // on `kind`, `builtin`, and `message`. This matches how the existing
         // `host_call` error path shapes its exceptions.
-        let kind = match err {
+        let kind = match &err {
             HostlibError::Unimplemented { .. } => "unimplemented",
             HostlibError::MissingParameter { .. } => "missing_parameter",
             HostlibError::InvalidParameter { .. } => "invalid_parameter",
             HostlibError::Backend { .. } => "backend_error",
+            HostlibError::ProcessSpawn { kind, .. } => *kind,
             HostlibError::SandboxViolation { .. } => "tool_rejected",
             HostlibError::SandboxUnsupported { .. } => "sandbox_unsupported",
             HostlibError::CatastrophicFloor { .. } => "catastrophic_floor",
@@ -139,12 +153,18 @@ impl From<HostlibError> for VmError {
             _ => None,
         };
         let builtin = err.builtin();
+        let is_process_spawn = matches!(&err, HostlibError::ProcessSpawn { .. });
         let message = err.to_string();
 
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.put_str("kind", kind);
         dict.put_str("builtin", builtin);
         dict.put_str("message", message);
+        if is_process_spawn {
+            dict.put_str("error", "io_error");
+            dict.put_str("operation", "process_spawn");
+            dict.put_str("category", "environment");
+        }
         if let Some(path) = path {
             dict.put_str("path", path);
         }
@@ -152,5 +172,31 @@ impl From<HostlibError> for VmError {
             dict.put_str("profile", profile);
         }
         VmError::Thrown(VmValue::dict(dict))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_spawn_error_lowers_to_typed_io_value() {
+        let error = HostlibError::ProcessSpawn {
+            builtin: "hostlib_tools_run_command",
+            kind: "not_found",
+            message: "No such file or directory".to_string(),
+        };
+        let VmError::Thrown(VmValue::Dict(fields)) = VmError::from(error) else {
+            panic!("expected a structured thrown value");
+        };
+        let field = |name| fields.get(name).map(VmValue::display);
+        assert_eq!(field("error").as_deref(), Some("io_error"));
+        assert_eq!(field("kind").as_deref(), Some("not_found"));
+        assert_eq!(field("operation").as_deref(), Some("process_spawn"));
+        assert_eq!(field("category").as_deref(), Some("environment"));
+        assert_eq!(
+            field("builtin").as_deref(),
+            Some("hostlib_tools_run_command")
+        );
     }
 }

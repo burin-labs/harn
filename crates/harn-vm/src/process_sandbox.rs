@@ -24,3 +24,55 @@ pub use crate::stdlib::sandbox::{
     std_command_for, tokio_command_for, FsAccess, ProcessCommandConfig, ProcessSandboxScope,
     ProcessSandboxScopeGuard, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV,
 };
+
+/// Recognize an OS-sandbox wrapper that started but could not exec the
+/// requested program. Inline-confinement backends return `None`; macOS uses
+/// this after `sandbox-exec` exits so callers do not mistake its status for the
+/// requested program's exit status.
+pub fn wrapped_spawn_io_error(exit_code: i32, stderr: &[u8]) -> Option<std::io::Error> {
+    crate::stdlib::sandbox::active_sandbox_policy()?;
+    if !active_backend_available() {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    return macos_wrapped_spawn_io_error(exit_code, stderr);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (exit_code, stderr);
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_wrapped_spawn_io_error(exit_code: i32, stderr: &[u8]) -> Option<std::io::Error> {
+    const EX_OSERR: i32 = 71;
+    const PREFIX: &str = "sandbox-exec: execvp() of '";
+    const SUFFIX: &str = "' failed: No such file or directory\n";
+
+    let stderr = std::str::from_utf8(stderr).ok()?;
+    if exit_code == EX_OSERR && stderr.starts_with(PREFIX) && stderr.ends_with(SUFFIX) {
+        return Some(std::io::Error::from_raw_os_error(libc::ENOENT));
+    }
+    None
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::macos_wrapped_spawn_io_error;
+
+    #[test]
+    fn wrapper_missing_program_is_typed_not_found() {
+        let error = macos_wrapped_spawn_io_error(
+            71,
+            b"sandbox-exec: execvp() of 'missing-command' failed: No such file or directory\n",
+        )
+        .expect("sandbox wrapper failure");
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn genuine_exit_71_is_not_a_wrapper_failure() {
+        assert!(macos_wrapped_spawn_io_error(71, b"").is_none());
+        assert!(macos_wrapped_spawn_io_error(71, b"application failed\n").is_none());
+    }
+}

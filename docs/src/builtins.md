@@ -713,6 +713,12 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `runtime_paths()` | none | `{execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}` | Resolved runtime path model. `state_root` / `run_root` / `worktree_root` honor `HARN_STATE_DIR` / `HARN_RUN_DIR` / `HARN_WORKTREE_DIR`, so ask here instead of writing `.harn` by hand |
 | `date_iso()` | none | string | Current UTC time in ISO 8601 format (e.g., `"2026-03-29T14:30:00.123Z"`) |
 
+When the OS cannot start an argv-style process, `exec` and its options variants
+throw `{error: "io_error", kind, message, category: "environment"}`. `kind`
+uses stable values such as `not_found` and `permission_denied`; branch on it
+instead of matching platform-specific prose. A process that starts and exits
+nonzero still returns its ordinary result record.
+
 For interactive terminal presentation, import `std/tui`. It provides
 `page({title?, body, format?, no_pager?, footer?})`, `terminal_width()`,
 `rule()`, and `clear()` on top of the TTY-aware stdout primitives.

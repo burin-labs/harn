@@ -280,6 +280,19 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
             signal = Some("SIGTERM".to_string());
         }
     }
+    if command_status == CommandStatus::Completed {
+        if let Some(error) =
+            harn_vm::process_sandbox::wrapped_spawn_io_error(exit_code, &stderr_bytes)
+        {
+            return Err(process_error_to_hostlib(
+                req.builtin,
+                ProcessError::SpawnIo {
+                    kind: harn_vm::value::io_error_kind_str(&error),
+                    message: error.to_string(),
+                },
+            ));
+        }
+    }
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let (stdout, stderr) = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
@@ -503,6 +516,11 @@ pub(crate) fn process_error_to_hostlib(builtin: &'static str, err: ProcessError)
         ProcessError::Spawn(message) => HostlibError::Backend {
             builtin,
             message: format!("spawn failed: {message}"),
+        },
+        ProcessError::SpawnIo { kind, message } => HostlibError::ProcessSpawn {
+            builtin,
+            kind,
+            message,
         },
         ProcessError::CatastrophicFloor(message) => {
             HostlibError::CatastrophicFloor { builtin, message }

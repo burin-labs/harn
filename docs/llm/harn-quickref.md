@@ -321,6 +321,11 @@ const fallback = command_try(
 )
 ```
 
+`command_run` throws a structured process-spawn I/O error when the OS cannot
+start the program. Check `error.kind == "not_found"` for an optional executable;
+do not treat other kinds, policy errors, timeouts, or nonzero exit results as
+absence.
+
 - `shell_command_from_argv(argv)` renders argv as safe shell text and unwraps
   `["bash", "-lc", "cmd"]`-style shell wrappers to the script payload.
 - `shell_command_from_value(value)` accepts string, argv-list, or dict-shaped
