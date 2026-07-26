@@ -265,6 +265,28 @@ run_security_audit() {
 }
 
 run_rust_audit() {
+  # Regenerate the CLI AOT payload before anything consumes it.
+  #
+  # crates/harn-cli/generated/ is gitignored build input, not a committed
+  # artifact, so there is no drift to detect here — only staleness. A payload
+  # left over from an earlier commit still parses, so build.rs embeds it and
+  # sets CLI_AOT_PAYLOAD_PRESENT while it carries no bytecode for scripts
+  # registered since. `make test` then fails deep inside this lane on
+  # every_cli_script_has_non_empty_bytecode_when_aot_enabled.
+  #
+  # `make check-cli-aot` does catch that, but it lives in the generated-audit
+  # lane, which release_audit_contract.json marks proof: residual — and the
+  # --source-only plan runs only the merge_group lanes. So this lane consumed
+  # a payload nothing in the plan had verified. Regenerating makes the lane
+  # guarantee its own input instead of inheriting it from whatever the
+  # checkout last built. CI never hit this because CI checkouts are clean;
+  # any long-lived checkout goes stale about once per commit that touches the
+  # script registry.
+  #
+  # Deliberately not `rm -rf` the payload: that flips CLI_AOT_PAYLOAD_PRESENT
+  # to false, the test returns early, and the lane silently stops covering the
+  # AOT path — a worse outcome than the loud failure it replaces.
+  time_phase "regenerate CLI AOT payload" make gen-cli-aot
   time_phase "cargo fmt --check" make fmt-check
   time_phase "cargo clippy --workspace --all-targets" \
     env RUN_PROMPT_PROSE_RATCHET=true ./scripts/ci/run_rust_lint_lane.sh
