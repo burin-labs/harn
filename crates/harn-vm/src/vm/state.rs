@@ -479,6 +479,11 @@ pub struct Vm {
     /// retrieval. Entries share the bytes owned by
     /// [`crate::module_source`] rather than copying them.
     pub(crate) source_cache: Arc<BTreeMap<std::path::PathBuf, Arc<str>>>,
+    /// This spawn's import-graph link table, when the entry-chunk cache proved
+    /// one current. Lets module loading name a module's artifact from a recorded
+    /// digest instead of reading the file to recompute the same digest. `None`
+    /// means every module takes the ordinary read-and-hash path.
+    pub(crate) graph_link_table: Option<Arc<crate::context_manifest::GraphLinkTable>>,
     /// Source file path for error reporting.
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
@@ -543,6 +548,9 @@ pub struct VmBaseline {
     globals: Arc<crate::value::DictMap>,
     denied_builtins: Arc<HashSet<String>>,
     prepared_module_cache: crate::PreparedModuleCache,
+    /// Carried so a VM rebuilt from this baseline keeps resolving modules
+    /// through the same link table the original spawn was handed.
+    graph_link_table: Option<Arc<crate::context_manifest::GraphLinkTable>>,
     runtime_limits: RuntimeLimits,
 }
 
@@ -561,6 +569,7 @@ impl VmBaseline {
             globals: Arc::clone(&vm.globals),
             denied_builtins: Arc::clone(&vm.denied_builtins),
             prepared_module_cache: vm.prepared_module_cache.clone(),
+            graph_link_table: vm.graph_link_table.clone(),
             runtime_limits: vm.runtime_limits,
         }
     }
@@ -621,6 +630,7 @@ impl VmBaseline {
             module_phase_recorder: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(source_cache),
+            graph_link_table: self.graph_link_table.clone(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
@@ -876,6 +886,7 @@ impl Vm {
             module_phase_recorder: None,
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
+            graph_link_table: None,
             source_file: None,
             source_text: None,
             coverage: crate::coverage::for_primary(None),
@@ -907,6 +918,20 @@ impl Vm {
     /// Fresh runtime module state is still instantiated for every VM.
     pub fn set_prepared_module_cache(&mut self, cache: crate::PreparedModuleCache) {
         self.prepared_module_cache = cache;
+    }
+
+    /// Hand this VM the link table for the import graph it is about to run.
+    ///
+    /// Only an entry-chunk cache hit can supply one, because only that path holds
+    /// a manifest proving the recorded digests still describe the files on disk.
+    /// A table never changes what a module resolves to: one the table does not
+    /// name, or whose artifact is no longer on disk, is read and compiled as
+    /// usual.
+    pub fn set_graph_link_table(
+        &mut self,
+        link_table: Option<Arc<crate::context_manifest::GraphLinkTable>>,
+    ) {
+        self.graph_link_table = link_table;
     }
 
     /// Return the effective runtime limit profile for this VM.
@@ -1054,6 +1079,7 @@ impl Vm {
             module_phase_recorder: self.module_phase_recorder.clone(),
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),
+            graph_link_table: self.graph_link_table.clone(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),

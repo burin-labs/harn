@@ -18,6 +18,11 @@
 //! the full walk, which recomputes the key from scratch — so a manifest can
 //! only ever save work, never decide a hit on its own.
 //!
+//! A manifest that re-checks clean is also the graph's link table. It records
+//! each file's digest, which is the only part of that file's module artifact key
+//! that depends on the file — so [`GraphLinkTable`] hands module loading the
+//! identities it would otherwise re-read 5.7 MB of source to rederive.
+//!
 //! Stat identity is already the trust boundary inside a process:
 //! [`crate::module_source`] memoizes reads on `(path, len, mtime_ns)`. This
 //! extends that same decision across process boundaries, matching how Cargo,
@@ -41,6 +46,7 @@
 //! pinned by a test rather than left to prose, so closing it — or widening it —
 //! has to be a deliberate edit and cannot happen by accident.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -58,11 +64,15 @@ pub struct ManifestFile {
     pub mtime_ns: i128,
     /// SHA-256 of the bytes that were folded into the context hash.
     ///
-    /// Only read for an entry inside the racy window, where stats cannot
-    /// decide. SHA-256 because the rest of the cache already identifies source
-    /// by it — entry `source_hash`, module keys, artifact filenames — so this
-    /// adds no second digest of the same bytes, and a warm process that has
-    /// keyed the module artifact has already paid for it.
+    /// SHA-256 because the rest of the cache already identifies source by it —
+    /// entry `source_hash`, module keys, artifact filenames — so this adds no
+    /// second digest of the same bytes, and a warm process that has keyed the
+    /// module artifact has already paid for it.
+    ///
+    /// Two things read it. A racily-clean entry is decided by content when
+    /// stats cannot decide. And a manifest that re-checked clean hands these
+    /// digests to the module loader as a [`GraphLinkTable`], because this is
+    /// also the only per-file component of the file's module artifact key.
     pub content_hash: [u8; 32],
     /// Extensionless sibling that would shadow this file if it appeared.
     ///
@@ -204,6 +214,47 @@ impl ContextManifest {
         } else {
             ManifestCheck::Valid
         }
+    }
+}
+
+/// A re-checked manifest, indexed the way module loading asks questions:
+/// canonical path to the digest that names that module's artifact.
+///
+/// The walk that built the manifest read and digested every reachable file.
+/// Proving that manifest current proves those digests still describe the bytes
+/// on disk — and a module artifact's cache key depends on its file through
+/// nothing but that digest, everything else being process-global. So a validated
+/// manifest already holds what module loading was re-reading the whole graph to
+/// rediscover: not the sources, which it no longer needs, but their identities.
+///
+/// A table is a shortcut, never an authority. Its digest names an artifact;
+/// whether one is on disk under that name is a separate question, and a module
+/// whose artifact was evicted — or which the graph never reached — falls back to
+/// being read and compiled.
+///
+/// Only [`crate::bytecode_cache::load`] can build one, at the point where its
+/// own re-check succeeded. That is what the table's existence means, and it is
+/// why there is no way to assemble one from observations nothing has validated.
+#[derive(Debug)]
+pub struct GraphLinkTable {
+    content_hash_by_path: HashMap<PathBuf, [u8; 32]>,
+}
+
+impl GraphLinkTable {
+    pub(crate) fn from_validated(manifest: &ContextManifest) -> Self {
+        Self {
+            content_hash_by_path: manifest
+                .files
+                .iter()
+                .map(|file| (file.path.clone(), file.content_hash))
+                .collect(),
+        }
+    }
+
+    /// The digest recorded for `canonical`, or `None` when this graph does not
+    /// contain it.
+    pub(crate) fn content_hash(&self, canonical: &Path) -> Option<[u8; 32]> {
+        self.content_hash_by_path.get(canonical).copied()
     }
 }
 

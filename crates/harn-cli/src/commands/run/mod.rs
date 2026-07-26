@@ -268,6 +268,10 @@ pub(crate) fn build_denied_builtins(
 pub(crate) struct LoadedChunk {
     pub(crate) source: String,
     pub(crate) chunk: harn_vm::Chunk,
+    /// The import graph's link table, when the cache lookup proved one current.
+    /// Handing it to the VM lets module loading resolve each module's artifact
+    /// from a recorded digest instead of re-reading the graph to rederive one.
+    pub(crate) link_table: Option<Arc<harn_vm::context_manifest::GraphLinkTable>>,
 }
 
 /// Load the entry pipeline as a runnable [`harn_vm::Chunk`], using the
@@ -321,7 +325,11 @@ pub(crate) fn compile_or_load_chunk_with_timing(
             t.cache_hit = true;
             t.bytecode_compile = compile_phase_start.elapsed();
         }
-        return Some(LoadedChunk { source, chunk });
+        return Some(LoadedChunk {
+            source,
+            chunk,
+            link_table: lookup.link_table,
+        });
     }
     if let Some(t) = timing.as_deref_mut() {
         t.cache_hit = false;
@@ -378,7 +386,11 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         t.bytecode_compile = compile_step_start.elapsed();
     }
 
-    Some(LoadedChunk { source, chunk })
+    Some(LoadedChunk {
+        source,
+        chunk,
+        link_table: lookup.link_table,
+    })
 }
 
 fn parse_source_for_run(
@@ -1076,8 +1088,11 @@ async fn execute_run_inner_scoped(
         path
     };
 
-    let Some(LoadedChunk { source, chunk }) =
-        compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
+    let Some(LoadedChunk {
+        source,
+        chunk,
+        link_table,
+    }) = compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
     else {
         let message = stderr.clone();
         return finalize_run_error(
@@ -1132,6 +1147,7 @@ async fn execute_run_inner_scoped(
     }
 
     let mut vm = harn_vm::Vm::new();
+    vm.set_graph_link_table(link_table);
     if let Some(timing) = timing.as_deref_mut() {
         timing.module_phases = Some(vm.enable_module_phase_timing());
     }
@@ -2086,7 +2102,11 @@ pub(crate) async fn run_file_mcp_serve(
     mode: RunFileMcpServeMode,
 ) {
     let mut diagnostics = String::new();
-    let Some(LoadedChunk { source, chunk }) = compile_or_load_chunk_for_run(path, &mut diagnostics)
+    let Some(LoadedChunk {
+        source,
+        chunk,
+        link_table,
+    }) = compile_or_load_chunk_for_run(path, &mut diagnostics)
     else {
         eprint!("{diagnostics}");
         process::exit(1);
@@ -2096,6 +2116,7 @@ pub(crate) async fn run_file_mcp_serve(
     }
 
     let mut vm = harn_vm::Vm::new();
+    vm.set_graph_link_table(link_table);
     harn_vm::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     let source_parent = std::path::Path::new(path)
