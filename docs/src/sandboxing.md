@@ -337,12 +337,14 @@ the workload's control:
   [`runtime_paths()`](builtins.md) for these paths rather than joining
   `.harn` onto a directory themselves.
 
-Only directories genuinely outside the declared roots are added — in
-the default layout Harn's directories already sit inside the workspace,
-so nothing widens. The overrides are read from the process environment,
-which a sandboxed script cannot write, so the grant follows the same
-principal that configured the sandbox. Granting a relocated state root
-does not grant its parent or its siblings.
+Only directories genuinely outside the declared roots are added, and
+only once they exist — in the default layout Harn's directories already
+sit inside the workspace, so nothing widens. Runtime directories become
+available to Harn code after the runtime materializes them. The overrides
+are read from the process environment, which a sandboxed script cannot
+write, so the grant follows the same principal that configured the
+sandbox. Granting a relocated state root does not grant its parent or
+its siblings.
 
 ## Selecting a profile
 

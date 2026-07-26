@@ -122,6 +122,36 @@ fn a_worktree_root_nested_under_the_state_root_is_not_listed_twice() {
 }
 
 #[test]
+fn a_root_that_does_not_exist_yet_is_not_granted() {
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let workspace = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let absent = parent.path().join("never-created");
+    let _env = RuntimeRootEnv::set(&[(HARN_STATE_DIR_ENV, absent.as_path())]);
+    // Pin the base, or the run root resolves against the test binary's own
+    // directory — where a previous run may well have left a real `.harn-runs`,
+    // and the assertion would be about that instead of the absent state root.
+    crate::stdlib::process::set_thread_execution_context(Some(
+        crate::orchestration::RunExecutionRecord {
+            cwd: Some(workspace.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        },
+    ));
+
+    let relocated = relocated_runtime_roots(&[normalized(workspace.path())]);
+
+    crate::stdlib::process::set_thread_execution_context(None);
+    // Landlock names a root by opening it, so an absent path does not make the
+    // jail narrower — it makes building the jail fail.
+    assert!(
+        relocated.is_empty(),
+        "a runtime root that does not exist grants nothing: {relocated:?}"
+    );
+}
+
+#[test]
 fn no_granted_root_is_nested_inside_another() {
     let _env_lock = crate::runtime_paths::test_env_lock()
         .lock()

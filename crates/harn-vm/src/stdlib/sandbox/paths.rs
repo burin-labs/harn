@@ -88,6 +88,10 @@ pub(super) fn path_is_within(path: &Path, root: &Path) -> bool {
 /// layout already sits inside it and needs no grant. The overrides come from
 /// the process environment, which a sandboxed script cannot write, so this
 /// widens the jail only where the operator configuring it asked.
+///
+/// A root is granted only once it exists, matching the git extension above.
+/// This is required by backends such as Landlock, which name a root by opening
+/// it: an absent path is not a narrower jail but a failure to build one.
 pub(super) fn relocated_runtime_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
     let base = crate::stdlib::process::runtime_root_base();
     // State first, so the worktree root nested under it by default is absorbed
@@ -104,7 +108,7 @@ pub(super) fn relocated_runtime_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
             .iter()
             .chain(relocated.iter())
             .any(|existing| path_is_within(&candidate, existing));
-        if !covered {
+        if !covered && candidate.is_dir() {
             relocated.push(candidate);
         }
     }
