@@ -265,28 +265,6 @@ run_security_audit() {
 }
 
 run_rust_audit() {
-  # Regenerate the CLI AOT payload before anything consumes it.
-  #
-  # crates/harn-cli/generated/ is gitignored build input, not a committed
-  # artifact, so there is no drift to detect here — only staleness. A payload
-  # left over from an earlier commit still parses, so build.rs embeds it and
-  # sets CLI_AOT_PAYLOAD_PRESENT while it carries no bytecode for scripts
-  # registered since. `make test` then fails deep inside this lane on
-  # every_cli_script_has_non_empty_bytecode_when_aot_enabled.
-  #
-  # `make check-cli-aot` does catch that, but it lives in the generated-audit
-  # lane, which release_audit_contract.json marks proof: residual — and the
-  # --source-only plan runs only the merge_group lanes. So this lane consumed
-  # a payload nothing in the plan had verified. Regenerating makes the lane
-  # guarantee its own input instead of inheriting it from whatever the
-  # checkout last built. CI never hit this because CI checkouts are clean;
-  # any long-lived checkout goes stale about once per commit that touches the
-  # script registry.
-  #
-  # Deliberately not `rm -rf` the payload: that flips CLI_AOT_PAYLOAD_PRESENT
-  # to false, the test returns early, and the lane silently stops covering the
-  # AOT path — a worse outcome than the loud failure it replaces.
-  time_phase "regenerate CLI AOT payload" make gen-cli-aot
   time_phase "cargo fmt --check" make fmt-check
   time_phase "cargo clippy --workspace --all-targets" \
     env RUN_PROMPT_PROSE_RATCHET=true ./scripts/ci/run_rust_lint_lane.sh
@@ -497,6 +475,27 @@ cmd_audit() {
   HARN_CONFORMANCE_HARN_BIN="$stable_harn_bin"
   export HARN_BIN HARN_CONFORMANCE_HARN_BIN
   printf 'ok: %-15s (%s)\n' "harn-bin" "$HARN_BIN"
+
+  # crates/harn-cli/generated/ is gitignored build input shared by rust-audit
+  # and package-audit. Generate it once before either parallel consumer starts:
+  # generating inside rust-audit lets package-audit copy a mixed old/new
+  # payload while the writer replaces the manifest and bytecode files.
+  #
+  # The residual receipt plan omits rust-audit and verifies the already-bumped
+  # payload with check-cli-aot, so keep this preparation scoped to plans that
+  # actually run the source Rust lane.
+  local prepare_cli_aot=0
+  local selected_step
+  for selected_step in "${SELECTED_AUDIT_STEPS[@]}"; do
+    if [[ "$selected_step" == "rust-audit" ]]; then
+      prepare_cli_aot=1
+      break
+    fi
+  done
+  if [[ "$prepare_cli_aot" -eq 1 ]]; then
+    time_phase "prepare shared CLI AOT payload" make gen-cli-aot
+  fi
+
   echo "audit lane log dir: $tmp"
   local -a steps=()
   local -a pids=()

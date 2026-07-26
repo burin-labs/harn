@@ -720,6 +720,18 @@ grep -Fq "error: hosted audit receipt rejected: no_receipt" \
   "$tmp_root/audit-invalid-receipt.txt"
 
 run_audit source-only --source-only
+if [[ "$(grep -Fc "make gen-cli-aot " "$audit_record")" -ne 1 ]]; then
+  echo "source-only audit did not generate the shared CLI AOT payload exactly once" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+cli_aot_line="$(grep -Fn "make gen-cli-aot " "$audit_record" | cut -d: -f1)"
+package_audit_line="$(grep -Fn "package-audit HARN_BIN=" "$audit_record" | cut -d: -f1)"
+if [[ -z "$package_audit_line" || "$cli_aot_line" -ge "$package_audit_line" ]]; then
+  echo "source-only audit started package-audit before preparing the shared CLI AOT payload" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
 for lane in rust-audit harn-audit package-audit; do
   if ! grep -Eq "ok: +$lane " "$tmp_root/audit-source-only.txt"; then
     echo "source-only audit omitted contract-owned lane: $lane" >&2
