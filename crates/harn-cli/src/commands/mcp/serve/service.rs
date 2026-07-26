@@ -72,12 +72,31 @@ impl McpOrchestratorService {
             task_notify_tx,
             log_notify_tx,
             log_event_log,
+            orchestrator_event_log: std::sync::OnceLock::new(),
             log_watchers_ready,
             tasks: Arc::new(Mutex::new(BTreeMap::new())),
             resource_watchers: Arc::new(Mutex::new(BTreeMap::new())),
             _list_watcher: Arc::new(Mutex::new(list_watcher)),
             _log_watchers: Arc::new(AbortOnDrop(log_watchers)),
         })
+    }
+
+    /// The orchestrator's event log, opened once per service.
+    ///
+    /// Same database `OrchestratorRole::build_vm` installs, reached without
+    /// building the VM. Two callers racing the first open both get a working
+    /// log; the loser's handle is dropped and every later call returns the
+    /// winner, so the service keeps exactly one.
+    pub(super) fn orchestrator_event_log(
+        &self,
+    ) -> Result<Arc<harn_vm::event_log::AnyEventLog>, String> {
+        if let Some(log) = self.orchestrator_event_log.get() {
+            return Ok(log.clone());
+        }
+        let config = harn_vm::event_log::EventLogConfig::for_state_root(&self.state_dir)
+            .map_err(|error| error.to_string())?;
+        let log = harn_vm::event_log::open_event_log(&config).map_err(|error| error.to_string())?;
+        Ok(self.orchestrator_event_log.get_or_init(|| log).clone())
     }
 
     pub(super) fn local_args(&self) -> OrchestratorLocalArgs {
@@ -136,13 +155,11 @@ impl McpOrchestratorService {
 
     #[cfg(test)]
     pub(super) async fn wait_for_log_watchers_ready(&self) {
-        use std::sync::atomic::Ordering;
         loop {
-            let notified = self.log_watchers_ready.notify.notified();
+            let notified = self.log_watchers_ready.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            let expected = self.log_watchers_ready.expected.load(Ordering::SeqCst);
-            if expected > 0 && self.log_watchers_ready.ready.load(Ordering::SeqCst) >= expected {
+            if self.log_watchers_ready.settled() {
                 return;
             }
             notified.await;

@@ -41,6 +41,15 @@ pub(crate) struct McpOrchestratorService {
     pub(super) log_notify_tx: broadcast::Sender<McpLogNotification>,
     #[allow(dead_code)]
     pub(super) log_event_log: Option<Arc<harn_vm::event_log::AnyEventLog>>,
+    /// The orchestrator's own event log, opened on first use and shared.
+    ///
+    /// Not the same database as `log_event_log`, which is the listener's auth
+    /// log under `<state>/.harn/`; this one is `<state>/events.sqlite`, the log
+    /// `OrchestratorRole::build_vm` installs. Handlers that only read or append
+    /// events open it directly instead of building an entire orchestrator VM —
+    /// stdlib registration, manifest compile, trigger registration — and
+    /// discarding all of it.
+    pub(super) orchestrator_event_log: std::sync::OnceLock<Arc<harn_vm::event_log::AnyEventLog>>,
     #[allow(dead_code)]
     pub(super) log_watchers_ready: Arc<LogWatcherReadiness>,
     pub(super) tasks: Arc<Mutex<BTreeMap<String, McpTaskRecord>>>,
@@ -67,21 +76,58 @@ pub(super) struct McpLogNotification {
     pub(super) message: JsonValue,
 }
 
-/// Counts the log topic watchers that have finished registering with
-/// the event log so callers (currently tests) can deterministically
-/// wait until the broadcast subscription is in place before publishing
-/// events. Production code never blocks on this.
+/// Tracks how many log topic watchers have finished starting, so callers
+/// (currently tests) can deterministically wait until the broadcast
+/// subscriptions are in place before publishing events. Production code never
+/// blocks on this.
+///
+/// "Settled", not "ready": a watcher that fails to read or subscribe to its
+/// topic never streams anything, but it is just as finished starting as one
+/// that succeeded, and a waiter that only counts successes waits forever for
+/// a watcher that is never coming. Every terminal path a watcher can take —
+/// subscribed, or given up — settles it exactly once, and the spawner
+/// publishes the total it actually spawned even when that total is zero.
+/// Those two rules are what make [`Self::settled`] unable to stall; keep them
+/// if you add a path.
 #[derive(Default)]
 pub(super) struct LogWatcherReadiness {
-    pub(super) ready: std::sync::atomic::AtomicUsize,
-    pub(super) expected: std::sync::atomic::AtomicUsize,
-    pub(super) notify: tokio::sync::Notify,
+    settled: std::sync::atomic::AtomicUsize,
+    expected: std::sync::atomic::AtomicUsize,
+    /// Whether the spawner has published `expected` yet. Distinguishes "no
+    /// watchers were spawned" from "the count has not been stored", which a
+    /// bare `expected == 0` cannot.
+    published: std::sync::atomic::AtomicBool,
+    notify: tokio::sync::Notify,
 }
 
 impl LogWatcherReadiness {
-    pub(super) fn record_ready(&self) {
-        self.ready.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    /// Record that one watcher has finished starting, successfully or not.
+    pub(super) fn record_settled(&self) {
+        self.settled
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.notify.notify_waiters();
+    }
+
+    /// Publish how many watchers were spawned. Must be called on every exit
+    /// path of the spawner, including the ones that spawn none.
+    pub(super) fn publish_expected(&self, expected: usize) {
+        self.expected
+            .store(expected, std::sync::atomic::Ordering::SeqCst);
+        self.published
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    /// True once the spawner has published its count and that many watchers
+    /// have settled.
+    pub(super) fn settled(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.published.load(Ordering::SeqCst)
+            && self.settled.load(Ordering::SeqCst) >= self.expected.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
+        self.notify.notified()
     }
 }
 
@@ -353,4 +399,48 @@ pub(super) struct TrustQueryRequest {
     pub(super) limit: Option<usize>,
     #[serde(default)]
     pub(super) grouped_by_trace: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogWatcherReadiness;
+
+    /// The spawner publishes its count on every exit path, including the ones
+    /// that spawn nothing. Before it does, "zero watchers settled out of zero
+    /// expected" is indistinguishable from "the count has not arrived yet", so
+    /// settling early would let a waiter proceed before the subscriptions it
+    /// asked about exist.
+    #[test]
+    fn nothing_is_settled_until_the_count_is_published() {
+        let readiness = LogWatcherReadiness::default();
+        assert!(!readiness.settled());
+        readiness.publish_expected(0);
+        assert!(readiness.settled());
+    }
+
+    /// A watcher that gives up still settles. Counting only the ones that
+    /// subscribed left a waiter blocked forever on a watcher that was never
+    /// coming — the failure this whole type exists to prevent (#5619).
+    #[test]
+    fn a_watcher_that_gave_up_still_settles_the_wait() {
+        let readiness = LogWatcherReadiness::default();
+        readiness.publish_expected(2);
+        assert!(!readiness.settled());
+        readiness.record_settled();
+        assert!(!readiness.settled(), "one of two is not all of them");
+        // The second watcher failed to subscribe rather than succeeding.
+        readiness.record_settled();
+        assert!(readiness.settled());
+    }
+
+    /// Watchers can settle before the spawner finishes collecting them, so the
+    /// count may be published last.
+    #[test]
+    fn settling_before_the_count_arrives_still_converges() {
+        let readiness = LogWatcherReadiness::default();
+        readiness.record_settled();
+        assert!(!readiness.settled());
+        readiness.publish_expected(1);
+        assert!(readiness.settled());
+    }
 }
