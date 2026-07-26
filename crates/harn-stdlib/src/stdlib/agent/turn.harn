@@ -72,6 +72,8 @@ fn __agent_turn_judge_decisions(events) {
           reason: event?.reason,
           confirm: event?.confirm,
           converted_from: event?.converted_from,
+          escalation_recommended: event?.escalation_recommended,
+          escalation_target: event?.escalation_target,
         },
       )
     }

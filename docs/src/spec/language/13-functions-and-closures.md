@@ -183,7 +183,8 @@ judge returns `verdict: "done" | "continue"` plus optional `reasoning` and
 rejects completion. Each built-in judge call and deterministic
 `verify_completion` decision emits `JudgeDecision {session_id, iteration,
 verdict, reasoning, next_step, judge_duration_ms, trigger?, reason?, confirm?,
-converted_from?}`. The optional `trigger` is `"stalled"` when a
+converted_from?, escalation_recommended?, escalation_target?}`. The optional
+`trigger` is `"stalled"` when a
 `done_judge.cadence.when: "stalled"` judge fires from an
 `agent_loop_stall_warning`; a `done` verdict stops the loop with
 `stalled_done_judge` before the repeated tool call dispatches, and a

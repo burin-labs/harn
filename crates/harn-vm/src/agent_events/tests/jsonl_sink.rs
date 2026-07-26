@@ -54,9 +54,11 @@ fn judge_decision_round_trips_through_jsonl_sink() {
         judge_duration_ms: 17,
         source: Some("llm".into()),
         trigger: Some("stalled".into()),
-        reason: Some("missing_verification".into()),
+        reason: Some("repeated_verification_failures".into()),
         confirm: Some(false),
         converted_from: None,
+        escalation_recommended: Some(true),
+        escalation_target: Some("frontier".into()),
         specific_gaps: vec!["rerun the verifier".into(), "cite the changed file".into()],
         accepted_evidence: Vec::new(),
     });
@@ -78,6 +80,8 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             reason,
             confirm,
             converted_from,
+            escalation_recommended,
+            escalation_target,
             specific_gaps,
             accepted_evidence,
         } => {
@@ -89,9 +93,11 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             assert_eq!(judge_duration_ms, 17);
             assert_eq!(source.as_deref(), Some("llm"));
             assert_eq!(trigger.as_deref(), Some("stalled"));
-            assert_eq!(reason.as_deref(), Some("missing_verification"));
+            assert_eq!(reason.as_deref(), Some("repeated_verification_failures"));
             assert_eq!(confirm, Some(false));
             assert_eq!(converted_from, None);
+            assert_eq!(escalation_recommended, Some(true));
+            assert_eq!(escalation_target.as_deref(), Some("frontier"));
             assert_eq!(
                 specific_gaps,
                 vec![
@@ -142,6 +148,8 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
         reason: Some("verified_after_write".into()),
         confirm: Some(true),
         converted_from: None,
+        escalation_recommended: None,
+        escalation_target: None,
         specific_gaps: Vec::new(),
         accepted_evidence: vec!["targeted verifier passed".into()],
     });

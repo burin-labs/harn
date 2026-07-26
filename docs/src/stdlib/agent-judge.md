@@ -58,19 +58,27 @@ knobs. Every field is optional.
 | `facts` | `fn(ctx) -> CompletionFacts` | — | The primary fact supplier. `ctx` is `{session_id, task, stop_reason, text, messages}`. |
 | `classify_write` | `fn(path, diff?) -> WriteKind` | — | Labels one write when `facts` returns a `writes` list without counts. |
 | `verify_command` | `fn() -> CompletionVerifyVerdict` | — | Runs the verifier oracle when `facts` carries no `verify` verdict. |
+| `feedback_decorator` | `fn(reason, feedback, verdict) -> string` | — | Decorates a delivered veto using its stable ladder reason and structured verdict. |
 | `require_source_write` | bool | `true` | Enforce the source-write evidence requirement. |
 | `requires_write` | bool | per-task fact | Override the "this task needs a source change" fact. |
 | `max_vetoes` | int | `3` | Per-session soft-veto budget; `0` disables. |
 | `veto_combine` | `fn(verdicts) -> CompletionVerifyVerdict` | AND-of-oracles | Override how multiple verifier verdicts combine. |
 | `judge` | bool / dict | off | Attach a bounded LLM judge (`true` or a judge-config dict). |
 | `judge_seam` | string | `"verify_completion_judge"` | Which capped LLM seam the judge rides (`"verify_completion_judge"` or `"done_judge"`). |
+| `feedback_templates` | dict | defaults | Override feedback by ladder key; repeated failures support `{attempts}` and `{findings}`. |
+| `escalation_threshold` | int | `3` | Failed-after-write streak required to recommend escalation. |
+| `escalation_target` | string | — | Host routing channel copied onto an escalated verdict and event. |
 
 The fact types:
 
-- `CompletionFacts` — `{source_write_count?, cosmetic_write_count?, writes?,
-  verify?, requires_write?}`. Supply counts directly, or a `writes` list of
-  `CompletionWriteFact` for the gate to classify. `verify` is one
-  `CompletionVerifyVerdict` or a list of them.
+- `CompletionFacts` — `{consecutive_failed_after_write?,
+  source_write_count?, cosmetic_write_count?, writes?, verify?,
+  verification_failures_converging?, requires_write?}`. Supply counts directly,
+  or a `writes` list of `CompletionWriteFact` for the gate to classify.
+  `verify` is one `CompletionVerifyVerdict` or a list of them. When the streak
+  is present, a red verifier uses the streak-aware reasons below; a converging
+  diagnostic set consumes churn credit and suppresses escalation for that
+  decision.
 - `CompletionWriteFact` — `{path?, diff?, kind?}`. `kind` is a `WriteKind`
   string; `"source"` and `"cosmetic"` are load-bearing, anything else is treated
   as non-source.
@@ -85,7 +93,9 @@ verifier facts, first match wins:
 | Reason | Result | Condition |
 | --- | --- | --- |
 | `no_source_write` | veto (soft) | task requires a source change, but only cosmetic / zero source writes so far |
-| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier — the budget never releases it |
+| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier and no streak fact — backward-compatible path |
+| `failed_verification` | veto (**strict**) | streak-aware red verifier below the threshold, or diagnostic churn is still converging |
+| `repeated_verification_failures` | veto (**strict**) + escalation | non-converging red verifier at or above `escalation_threshold` |
 | `verified_after_write` / `verified` | allow | verifier is green |
 | `missing_verification` | veto (**strict**) | source written, verifier configured, not yet run — the budget never releases it |
 | `no_workspace_write` | allow | task does not require a source change |
@@ -101,6 +111,14 @@ Each deterministic decision emits a `judge_decision` event with
 `trigger: "verify_completion"`, `confirm`, and the stable `reason` above. When
 the budget converts a soft veto into an allow, the event carries
 `reason: "veto_budget_exhausted"` plus `converted_from` with the original class.
+Streak escalation decisions also carry `escalation_recommended` and, when
+configured, `escalation_target`. `agent_turn(...).judge_decisions` preserves
+the same fields.
+
+`feedback_decorator` runs only after the ladder and veto budget resolve a veto
+that will actually be delivered. It receives `(reason, feedback, verdict)`;
+the verdict includes any escalation fields, so a host can attach
+language-specific repair cues without parsing the default prose.
 
 ### Degraded mode
 

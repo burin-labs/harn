@@ -13,7 +13,7 @@ judge; omit it to use the default judge.
 The return value is the normal `agent_loop` result with two extra summaries:
 `iterations` (`[{iteration, started, ended?, tool_count?, prose_chars?}]`) and `judge_decisions`
 (`[{iteration, verdict, reasoning, next_step, judge_duration_ms, trigger?, reason?, confirm?,
-converted_from?}]`).
+converted_from?, escalation_recommended?, escalation_target?}]`).
 
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
@@ -120,7 +120,8 @@ top-level keys before `v0.8`).
 | `done_judge` | dict | Present when `done_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session done-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `done_judge.cadence.max_invocations`, which only gates when the judge is due |
 
 `judge_decision` agent events carry `{verdict, confirm, reason, reasoning,
-next_step, trigger}`. `verify_completion` closures, `verify_completion_judge`,
+next_step, trigger, escalation_recommended?, escalation_target?}`.
+`verify_completion` closures, `verify_completion_judge`,
 and `done_judge` all use this event, so harnesses can measure completion-gate
 class fire rates from structured fields instead of parsing feedback prose.
 
@@ -1014,7 +1015,9 @@ verifier facts. Its default veto ladder (first match wins):
 | Reason | Result | Condition |
 | --- | --- | --- |
 | `no_source_write` | veto (soft) | task requires a source change, but only cosmetic / zero source writes so far |
-| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier — never released by the budget |
+| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier and no streak fact — never released by the budget |
+| `failed_verification` | veto (**strict**) | streak-aware red verifier below the threshold, or diagnostic churn is converging |
+| `repeated_verification_failures` | veto (**strict**) + escalation | non-converging red verifier at or above the configured threshold |
 | `verified_after_write` / `verified` | allow | verifier is green |
 | `missing_verification` | veto (**strict**) | source written, verifier configured, not yet run — never released by the budget (a source write always needs a fresh green verifier) |
 | `no_workspace_write` | allow | task does not require a source change |
@@ -1024,16 +1027,20 @@ Each deterministic gate decision emits a `judge_decision` event with
 `trigger: "verify_completion"`, `confirm`, and the stable `reason` above. When
 the veto budget converts a soft veto into an allow, the event uses
 `reason: "veto_budget_exhausted"` and also carries `converted_from` with the
-original veto class.
+original veto class. Escalated streak decisions carry
+`escalation_recommended: true` and the configured `escalation_target`.
 
 Only **source** writes count as progress toward "done" — a cosmetic final write
 (a comment, a `.md` typo) is not evidence, so it cannot flip an already-passed
 run back to unverified, and a run that only wrote cosmetics cannot claim done.
 
 Host-fact callbacks (all optional): `facts(ctx)` returns
-`{source_write_count?, cosmetic_write_count?, writes?, verify?, requires_write?}`;
+`{consecutive_failed_after_write?, source_write_count?, cosmetic_write_count?,
+writes?, verify?, verification_failures_converging?, requires_write?}`;
 `classify_write(path, diff?)` labels one write `"source"`/`"cosmetic"`/…;
-`verify_command()` runs the verifier oracle. With **no** callbacks the gate
+`verify_command()` runs the verifier oracle; and
+`feedback_decorator(reason, feedback, verdict)` adds host repair cues keyed by
+the resolved ladder reason. With **no** callbacks the gate
 degrades to judge-only mode and surfaces the degraded state on the returned bundle
 (`_completion_gate.facts_available = false`) rather than fabricating a pass.
 
