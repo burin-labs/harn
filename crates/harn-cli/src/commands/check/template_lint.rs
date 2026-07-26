@@ -50,8 +50,6 @@ pub(crate) fn lint_prompt_file_inner(
     let has_warning = diagnostics
         .iter()
         .any(|d| d.severity == LintSeverity::Warning);
-    // Template lint rules carry no autofix edits, so `fixable` stays 0; the
-    // findings still count toward the run-wide "all fixable?" determination.
     let (has_error, fixable) = print_lint_diagnostics(&path_str, &source, &diagnostics);
     CommandOutcome {
         has_error,

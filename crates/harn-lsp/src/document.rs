@@ -7,8 +7,8 @@ use tower_lsp::lsp_types::*;
 
 use crate::document_kind::DocumentKind;
 use crate::helpers::{
-    diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic,
-    span_to_full_range, span_to_range,
+    diagnostic_data_value, lexer_error_to_diagnostic, lint_span_to_range,
+    parser_error_to_diagnostic, span_to_full_range, span_to_range,
 };
 use crate::rules::{RuleDiagnostic, RuleWorkspace};
 use crate::source_text::SourceText;
@@ -318,7 +318,7 @@ impl DocumentState {
             };
             let lint_repair = ld.repair();
             self.diagnostics.push(Diagnostic {
-                range: span_to_range(&ld.span),
+                range: lint_span_to_range(ld, &self.source),
                 severity: Some(severity),
                 source: Some("harn-lint".to_string()),
                 code: Some(NumberOrString::String(ld.code.to_string())),
@@ -708,6 +708,24 @@ regex = "debugger;"
             Some(DiagnosticSeverity::ERROR),
             "an unparseable template is an error, not a warning"
         );
+    }
+
+    #[test]
+    fn an_unknown_filter_is_reported_on_its_name() {
+        let state = prompt_document("Hello {{ name | uppr }}.\n");
+
+        let diagnostic = state
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("unknown template filter"))
+            .expect("expected an unknown-filter diagnostic");
+        assert_eq!(diagnostic.source.as_deref(), Some("harn-lint"));
+        assert_eq!(
+            diagnostic.range,
+            Range::new(Position::new(0, 16), Position::new(0, 20))
+        );
+        assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+        assert!(diagnostic.message.contains("did you mean `upper`?"));
     }
 
     #[test]

@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::*;
 use crate::helpers::{
     code_action_kind_for_safety_name, diagnostic_repair_code_action_data,
     diagnostic_repair_code_action_kind, extract_backtick_name, find_word_in_region,
-    repair_code_action_data, repair_code_action_kind, span_to_range,
+    lint_span_to_range, repair_code_action_data, repair_code_action_kind, span_to_range,
 };
 use crate::rules::RuleDiagnostic;
 use crate::source_text::SourceText;
@@ -143,7 +143,7 @@ pub(crate) fn build_code_actions(
         let msg = &diag.message;
 
         if let Some(ld) = lint_diags.iter().find(|ld| {
-            msg.contains(&format!("[{}]", ld.rule)) && span_to_range(&ld.span) == diag.range
+            msg.contains(&format!("[{}]", ld.rule)) && lint_span_to_range(ld, source) == diag.range
         }) {
             if let Some(ref fix_edits) = ld.fix {
                 let repair = ld.repair();
@@ -547,6 +547,7 @@ mod tests {
         build_code_actions, build_missing_arms_edit, format_whole_document_edit, range_format_edit,
     };
     use crate::document::DocumentState;
+    use crate::rules::RuleWorkspace;
     use crate::source_text::SourceText;
     use harn_lexer::Span;
     use tower_lsp::lsp_types::{
@@ -609,6 +610,63 @@ mod tests {
             data.get("diagnostic_code").and_then(|value| value.as_str()),
             Some("HARN-TYP-003")
         );
+    }
+
+    #[test]
+    fn unknown_prompt_filter_quickfix_replaces_only_the_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("system.harn.prompt");
+        let uri = Url::from_file_path(&path).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            "Hello {{ name | uppr }}.\n".to_string(),
+            "harn-prompt",
+            &uri,
+            &RuleWorkspace::from_root(temp.path()),
+        );
+        let diagnostic = state
+            .diagnostics
+            .iter()
+            .find(|diagnostic| {
+                matches!(
+                    diagnostic.code.as_ref(),
+                    Some(NumberOrString::String(code)) if code == "HARN-LNT-068"
+                )
+            })
+            .expect("expected unknown-filter diagnostic")
+            .clone();
+        let context = CodeActionContext {
+            diagnostics: vec![diagnostic],
+            only: None,
+            trigger_kind: None,
+        };
+
+        let actions = build_code_actions(
+            &uri,
+            &state.source,
+            &state.lint_diagnostics,
+            &state.type_diagnostics,
+            &state.rule_diagnostics,
+            &context,
+        );
+        let action = actions
+            .into_iter()
+            .find_map(|action| match action {
+                CodeActionOrCommand::CodeAction(action) => Some(action),
+                CodeActionOrCommand::Command(_) => None,
+            })
+            .expect("expected unknown-filter code action");
+        assert_eq!(action.title, "did you mean `upper`?");
+        let edit = action
+            .edit
+            .and_then(|edit| edit.changes)
+            .and_then(|mut changes| changes.remove(&uri))
+            .and_then(|edits| edits.into_iter().next())
+            .expect("expected a text edit");
+        assert_eq!(
+            edit.range,
+            Range::new(Position::new(0, 16), Position::new(0, 20))
+        );
+        assert_eq!(edit.new_text, "upper");
     }
 
     #[test]

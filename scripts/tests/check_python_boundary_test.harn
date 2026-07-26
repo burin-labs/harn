@@ -39,18 +39,9 @@ fn write_text(root: string, rel: string, text: string) -> nil {
 }
 
 @test
-pipeline test_current_repo_python_boundary_is_explicit(task) {
-  const report = check_python_boundary()
-  assert_eq(report.violation_count, 0)
-  const paths = report.allowed.map({ row -> row.path }).to_list()
-  assert_eq(paths.contains("scripts/affected-crates.py"), false)
-  assert_eq(paths.contains("scripts/check_protocol_bindings.py"), false)
-  assert_eq(paths.contains("scripts/check_burin_protocol_bindings.py"), false)
-  assert_eq(paths.contains("spec/protocol-artifacts/python/harn_protocol.py"), true)
-}
-
-@test
 pipeline test_allowlist_exact_and_prefix_rules(task) {
+  // `make check-python-boundary` owns the live repository scan. Keep this suite
+  // to bounded fixtures so the per-test deadline is independent of checkout size.
   assert_eq(python_boundary_rule_for("scripts/affected-crates.py").allowed, false)
   const mcp_rule = python_boundary_rule_for("conformance/helpers/mcp_stdio_tool.py")
   assert_eq(mcp_rule.allowed, false)

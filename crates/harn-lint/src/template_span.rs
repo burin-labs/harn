@@ -8,6 +8,26 @@
 
 use harn_lexer::Span;
 
+/// Span an exact byte range in a prompt template.
+pub(crate) fn byte_span(source: &str, start: usize, end: usize) -> Span {
+    let start = start.min(source.len());
+    let end = end.clamp(start, source.len());
+    let line = source[..start]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1;
+    let line_start = source[..start].rfind('\n').map_or(0, |offset| offset + 1);
+    let column = source[line_start..start].chars().count() + 1;
+    Span {
+        start,
+        end,
+        line,
+        column,
+        end_line: line + source[start..end].matches('\n').count(),
+    }
+}
+
 /// Span the `{{ .. }}` directive that starts at 1-based `line`/`col`.
 ///
 /// Falls back to the remainder of that line when no directive starts
@@ -64,7 +84,16 @@ fn byte_offset_for_column(line_text: &str, col: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::directive_span;
+    use super::{byte_span, directive_span};
+
+    #[test]
+    fn byte_ranges_get_character_columns() {
+        let source = "héllo {{ value | uppr }}\n";
+        let start = source.find("uppr").unwrap();
+        let span = byte_span(source, start, start + "uppr".len());
+        assert_eq!(&source[span.start..span.end], "uppr");
+        assert_eq!((span.line, span.column, span.end_line), (1, 18, 1));
+    }
 
     #[test]
     fn spans_the_directive_that_starts_at_the_position() {

@@ -17,7 +17,7 @@ use std::path::Path;
 use std::process;
 
 use harn_vm::stdlib::template::vocabulary::{
-    BLOCK_KEYWORDS, CLAUSE_KEYWORDS, FILTERS, LITERAL_KEYWORDS, OPERATOR_KEYWORDS, SECTIONS,
+    block_keywords, filter_names, CLAUSE_KEYWORDS, LITERAL_KEYWORDS, OPERATOR_KEYWORDS, SECTIONS,
 };
 use serde_json::{json, Value};
 
@@ -75,9 +75,8 @@ fn alternation(words: &[&str]) -> String {
 /// built from `json!` rather than string concatenation so the output is valid
 /// by construction.
 fn grammar() -> Value {
-    let block_and_clause: Vec<&str> = BLOCK_KEYWORDS
-        .iter()
-        .copied()
+    let block_and_clause: Vec<&str> = block_keywords()
+        .into_iter()
         .chain(CLAUSE_KEYWORDS.iter().copied())
         .collect();
 
@@ -151,7 +150,7 @@ fn grammar() -> Value {
             // `|`, and TextMate's regex engine does not reliably support
             // variable-length lookbehind.
             "filter": {
-                "match": format!("(\\|)(\\s*)({filters})\\b", filters = alternation(FILTERS)),
+                "match": format!("(\\|)(\\s*)({filters})\\b", filters = alternation(&filter_names())),
                 "captures": {
                     "1": { "name": "keyword.operator.filter.harn.prompt" },
                     "3": { "name": "entity.name.function.filter.harn.prompt" }
@@ -253,7 +252,7 @@ mod tests {
     #[test]
     fn keyword_alternation_covers_the_engine_vocabulary() {
         let keywords = pattern_match("keyword");
-        for word in BLOCK_KEYWORDS.iter().chain(CLAUSE_KEYWORDS) {
+        for word in block_keywords().iter().chain(CLAUSE_KEYWORDS) {
             assert!(
                 keywords.contains(word),
                 "keyword `{word}` missing from the generated grammar"
@@ -264,7 +263,7 @@ mod tests {
     #[test]
     fn filter_alternation_is_exactly_the_engine_filter_set() {
         let filters = pattern_match("filter");
-        for name in FILTERS {
+        for name in filter_names() {
             assert!(
                 filters.contains(name),
                 "filter `{name}` missing from the generated grammar"

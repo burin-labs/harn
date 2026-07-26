@@ -22,11 +22,15 @@ use super::parser::parse_outline;
 /// branch inside an `{{ if }}` chain opens at its own `{{ elif }}` /
 /// `{{ else }}` and closes at the chain's shared `{{ end }}`, so nested
 /// branches produce nested ranges.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlineBlock {
     pub kind: OutlineBlockKind,
     pub start: usize,
     pub end: usize,
+    /// Names the block binds inside its body: the value variable, and
+    /// the key variable when present, of `{{ for k, v in dict }}`.
+    /// Empty for every other kind.
+    pub bindings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +126,44 @@ mod tests {
                 (OutlineBlockKind::If, "{{ if x }}y{{ end }}"),
             ]
         );
+    }
+
+    #[test]
+    fn loops_report_the_names_they_bind() {
+        let bindings = |src: &str| {
+            parse(src)
+                .expect("parses")
+                .into_iter()
+                .filter(|block| block.kind == OutlineBlockKind::For)
+                .map(|block| block.bindings)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            bindings("{{ for item in items }}x{{ end }}"),
+            vec![vec!["item".to_string()]]
+        );
+        assert_eq!(
+            bindings("{{ for key, value in dict }}x{{ end }}"),
+            vec![vec!["key".to_string(), "value".to_string()]]
+        );
+        // The `{{ else }}` form still reports the loop's bindings.
+        assert_eq!(
+            bindings("{{ for x in xs }}a{{ else }}b{{ end }}"),
+            vec![vec!["x".to_string()]]
+        );
+    }
+
+    #[test]
+    fn only_loops_bind_names() {
+        for block in
+            parse("{{ if a }}x{{ end }}{{ section \"task\" }}y{{ endsection }}").expect("parses")
+        {
+            assert!(
+                block.bindings.is_empty(),
+                "{:?} should bind nothing",
+                block.kind
+            );
+        }
     }
 
     #[test]

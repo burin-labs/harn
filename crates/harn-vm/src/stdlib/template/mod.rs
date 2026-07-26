@@ -33,7 +33,7 @@ mod assets;
 mod ast;
 mod error;
 mod expr_parser;
-mod filters;
+pub mod filters;
 mod lexer;
 pub mod lint;
 pub(crate) mod llm_context;
