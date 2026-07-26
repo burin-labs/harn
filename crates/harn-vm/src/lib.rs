@@ -328,6 +328,12 @@ pub use sessions::{
     CreateSession, ExpireSession, Session, SessionAttributes, SessionError, SessionStore,
     TouchSession, SESSIONS_TOPIC,
 };
+/// The single owner of ignore policy for every Harn filesystem walk.
+///
+/// Re-exported so embedders that enumerate files on behalf of Harn scripts
+/// (today: the `harn-hostlib` deterministic-tool builtins) skip exactly the
+/// same paths the in-VM builtins do.
+pub use stdlib::fs::ignore_policy;
 pub use stdlib::hitl::{
     append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
     HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,

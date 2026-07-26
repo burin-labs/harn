@@ -10,9 +10,10 @@ use serde::Serialize;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
+use super::ignore_policy::{self, IgnorePolicy};
 use super::{
-    bool_option, int_option, reject_retired_long_running_option, resolve_fs_path,
-    string_list_option, string_option, u64_option,
+    bool_option, ignore_policy_option, int_option, reject_retired_long_running_option,
+    resolve_fs_path, string_list_option, string_option, u64_option,
 };
 
 const DEFAULT_MATCH_BUDGET: usize = 1_000;
@@ -37,7 +38,7 @@ struct EvidenceOptions {
     max_filesize: Option<u64>,
     follow_symlinks: bool,
     include_hidden: bool,
-    respect_gitignore: bool,
+    ignore_policy: IgnorePolicy,
     case_insensitive: bool,
     include_globs: Vec<String>,
     exclude_globs: Vec<String>,
@@ -196,6 +197,12 @@ fn required_labeled_values(
     Ok(parsed)
 }
 
+/// Exclude globs the `source` preset adds on top of the ignore stack.
+///
+/// These overlap [`ignore_policy::BUILTIN_IGNORED_DIRS`] on purpose: the
+/// preset must still trim build output when a caller pairs it with
+/// `ignore_policy: "none"`. `vendor/**` is absent for the same reason the
+/// built-in list omits `vendor` — committed `go mod vendor` trees are source.
 fn source_excludes() -> Vec<String> {
     [
         ".git/**",
@@ -203,7 +210,6 @@ fn source_excludes() -> Vec<String> {
         "dist/**",
         "node_modules/**",
         "target/**",
-        "vendor/**",
     ]
     .into_iter()
     .map(str::to_string)
@@ -216,7 +222,7 @@ fn parse_options(args: &[VmValue], root_count: usize) -> Result<EvidenceOptions,
         max_filesize: None,
         follow_symlinks: false,
         include_hidden: false,
-        respect_gitignore: true,
+        ignore_policy: IgnorePolicy::default(),
         case_insensitive: false,
         include_globs: Vec::new(),
         exclude_globs: Vec::new(),
@@ -233,10 +239,6 @@ fn parse_options(args: &[VmValue], root_count: usize) -> Result<EvidenceOptions,
         Some("source") | Some("sources") => {
             options.exclude_globs = source_excludes();
             options.max_filesize = Some(1_048_576);
-        }
-        Some("all") => {
-            options.include_hidden = true;
-            options.respect_gitignore = false;
         }
         Some("default") | None => {}
         Some(other) => {
@@ -255,8 +257,7 @@ fn parse_options(args: &[VmValue], root_count: usize) -> Result<EvidenceOptions,
     options.include_hidden = bool_option(raw, "include_hidden")
         .or_else(|| bool_option(raw, "hidden"))
         .unwrap_or(options.include_hidden);
-    options.respect_gitignore =
-        bool_option(raw, "respect_gitignore").unwrap_or(options.respect_gitignore);
+    options.ignore_policy = ignore_policy_option(raw, "find_evidence")?;
     options.case_insensitive = bool_option(raw, "case_insensitive")
         .unwrap_or_else(|| !bool_option(raw, "case_sensitive").unwrap_or(true));
     options.include_globs = string_list_option(raw, "include")
@@ -269,12 +270,6 @@ fn parse_options(args: &[VmValue], root_count: usize) -> Result<EvidenceOptions,
     options
         .exclude_globs
         .extend(string_list_option(raw, "exclude_globs"));
-    options
-        .exclude_globs
-        .extend(string_list_option(raw, "ignore"));
-    options
-        .exclude_globs
-        .extend(string_list_option(raw, "ignore_globs"));
     if let Some(value) = int_option(raw, "max_matches") {
         options.max_matches = usize::try_from(value.max(1)).unwrap_or(usize::MAX);
     }
@@ -318,25 +313,24 @@ fn glob_set(patterns: &[String], label: &str) -> Result<Option<GlobSet>, VmError
         .map_err(|error| evidence_error(format!("find_evidence: invalid {label} globs: {error}")))
 }
 
-fn walk_builder(root: &Path, options: &EvidenceOptions) -> WalkBuilder {
+fn walk_builder(root: &Path, options: &EvidenceOptions) -> Result<WalkBuilder, String> {
     let mut walker = WalkBuilder::new(root);
     walker
-        .hidden(!options.include_hidden)
-        .ignore(options.respect_gitignore)
-        .git_ignore(options.respect_gitignore)
-        .git_global(options.respect_gitignore)
-        .git_exclude(options.respect_gitignore)
-        .require_git(false)
-        .parents(true)
         .follow_links(options.follow_symlinks)
         .sort_by_file_name(|left, right| left.cmp(right));
+    ignore_policy::configure(
+        &mut walker,
+        root,
+        options.ignore_policy,
+        options.include_hidden,
+    )?;
     if let Some(depth) = options.max_depth {
         walker.max_depth(Some(depth));
     }
     if let Some(size) = options.max_filesize {
         walker.max_filesize(Some(size));
     }
-    walker
+    Ok(walker)
 }
 
 fn included(
@@ -422,7 +416,13 @@ fn scan_root(
     let mut error_count = 0usize;
     let mut truncated = false;
     let mut cancelled = false;
-    'walk: for entry in walk_builder(&root.path, options).build() {
+    let walker = match walk_builder(&root.path, options) {
+        Ok(walker) => walker,
+        // Settle the root instead of failing the whole receipt: one
+        // unconfigurable root must not erase the evidence gathered elsewhere.
+        Err(error) => return failed_root(root.id.clone(), patterns, &error),
+    };
+    'walk: for entry in walker.build() {
         if cancel.load(Ordering::Acquire) {
             cancelled = true;
             break;
@@ -724,7 +724,7 @@ mod tests {
             max_filesize: None,
             follow_symlinks: false,
             include_hidden: false,
-            respect_gitignore: true,
+            ignore_policy: IgnorePolicy::default(),
             case_insensitive: false,
             include_globs: Vec::new(),
             exclude_globs: Vec::new(),

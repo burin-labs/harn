@@ -306,11 +306,7 @@ fn __project_deep_scan_walk_options(options) {
     },
     include_hidden: options?.include_hidden ?? false,
     include_vendor: options?.include_vendor ?? false,
-    respect_gitignore: if options?.respect_gitignore == nil {
-      true
-    } else {
-      options.respect_gitignore
-    },
+    ignore_policy: options?.ignore_policy ?? "project",
   }
 }
 

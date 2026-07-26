@@ -14,22 +14,11 @@ use crate::stdlib::json_to_vm_value;
 use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
+use super::fs::ignore_policy::BUILTIN_IGNORED_DIRS;
 use super::process::resolve_source_relative_path;
 use super::project::project_scan_config_value;
 use super::template::render_template_result;
 
-const STANDARD_VENDOR_DIRS: &[&str] = &[
-    ".git",
-    ".hg",
-    ".svn",
-    ".venv",
-    "__pycache__",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-    "venv",
-];
 const MAX_CONTEXT_FILES: usize = 12;
 const MAX_SOURCE_FILES: usize = 8;
 const MAX_FILE_CHARS: usize = 4_000;
@@ -1426,7 +1415,7 @@ fn collect_source_files_recursive(root: &Path, dir: &Path, exts: &[&str], files:
         };
         let name = child.file_name().to_string_lossy().into_owned();
         if file_type.is_dir() {
-            if name.starts_with('.') || STANDARD_VENDOR_DIRS.contains(&name.as_str()) {
+            if name.starts_with('.') || BUILTIN_IGNORED_DIRS.contains(&name.as_str()) {
                 continue;
             }
             collect_source_files_recursive(root, &child.path(), exts, files);

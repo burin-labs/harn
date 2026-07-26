@@ -10,35 +10,12 @@ use crate::stdlib::process::resolve_source_relative_path;
 use crate::stdlib::project_catalog::{project_catalog, ProjectCatalogEntry};
 use crate::value::{VmDictExt, VmError, VmValue};
 
+// One shared list owns "what counts as build output" for every Harn walk.
 use super::*;
+use crate::stdlib::fs::ignore_policy::{
+    IgnorePolicy, BUILTIN_IGNORED_DIRS, PROJECT_IGNORE_FILENAMES,
+};
 
-const STANDARD_VENDOR_DIRS: &[&str] = &[
-    ".git",
-    ".hg",
-    ".svn",
-    ".venv",
-    "__pycache__",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-    "venv",
-];
-
-const FINGERPRINT_SKIP_DIRS: &[&str] = &[
-    ".git",
-    ".hg",
-    ".next",
-    ".svn",
-    ".venv",
-    "__pycache__",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "target",
-    "venv",
-];
 const PROJECT_FINGERPRINT_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_project_fingerprint_depth;
 const PROJECT_LANGUAGE_ORDER: &[&str] = &[
     "rust",
@@ -274,7 +251,7 @@ pub(super) struct ProjectScanOptions {
     depth: Option<usize>,
     include_hidden: bool,
     include_vendor: bool,
-    respect_gitignore: bool,
+    ignore_policy: IgnorePolicy,
 }
 
 impl Default for ProjectScanOptions {
@@ -284,7 +261,7 @@ impl Default for ProjectScanOptions {
             depth: Some(3),
             include_hidden: false,
             include_vendor: false,
-            respect_gitignore: true,
+            ignore_policy: IgnorePolicy::default(),
         }
     }
 }
@@ -457,8 +434,14 @@ pub(super) fn parse_project_options(value: Option<&VmValue>) -> ProjectScanOptio
     if let Some(include_vendor) = dict.get("include_vendor").and_then(value_as_bool) {
         options.include_vendor = include_vendor;
     }
-    if let Some(respect_gitignore) = dict.get("respect_gitignore").and_then(value_as_bool) {
-        options.respect_gitignore = respect_gitignore;
+    // An unknown level falls back to the default: this parser has no error
+    // channel, and every other option here is equally lenient.
+    if let Some(policy) = dict
+        .get(IgnorePolicy::OPTION_KEY)
+        .map(VmValue::display)
+        .and_then(|raw| IgnorePolicy::parse(&raw))
+    {
+        options.ignore_policy = policy;
     }
     if let Some(tiers) = dict.get("tiers").and_then(value_as_list) {
         options.tiers.clear();
@@ -699,7 +682,7 @@ fn walk_project_fingerprint(
         if file_type.is_dir() {
             inspect_fingerprint_dir(&rel, &name, signals);
             if depth < PROJECT_FINGERPRINT_MAX_DEPTH
-                && !FINGERPRINT_SKIP_DIRS.contains(&name.as_str())
+                && !BUILTIN_IGNORED_DIRS.contains(&name.as_str())
             {
                 walk_project_fingerprint(base, &path, depth + 1, signals);
             }
@@ -1419,7 +1402,7 @@ pub(super) fn walk_project_tree(
 }
 
 fn build_project_walk_builder(base: &Path, options: &ProjectScanOptions) -> WalkBuilder {
-    let gitignore = build_gitignore(base, options.respect_gitignore);
+    let gitignore = build_gitignore(base, options.ignore_policy);
     let mut builder = WalkBuilder::new(base);
     builder
         .hidden(!options.include_hidden)
@@ -1432,7 +1415,7 @@ fn build_project_walk_builder(base: &Path, options: &ProjectScanOptions) -> Walk
         .max_depth(options.depth)
         .sort_by_file_name(|left, right| left.cmp(right));
 
-    let include_vendor = options.include_vendor;
+    let skip_builtin_dirs = skips_builtin_dirs(options);
     builder.filter_entry(move |entry| {
         if entry.depth() == 0 {
             return true;
@@ -1449,20 +1432,36 @@ fn build_project_walk_builder(base: &Path, options: &ProjectScanOptions) -> Walk
         if !file_type.is_dir() {
             return true;
         }
-        if include_vendor {
+        if !skip_builtin_dirs {
             return true;
         }
         let name = entry.file_name().to_string_lossy();
-        !STANDARD_VENDOR_DIRS.contains(&name.as_ref())
+        !BUILTIN_IGNORED_DIRS.contains(&name.as_ref())
     });
 
     builder
 }
 
-fn build_gitignore(base: &Path, enabled: bool) -> Gitignore {
+/// Whether the built-in directory names are skipped for this scan.
+///
+/// `include_vendor` is the long-standing per-scan escape hatch and stays
+/// independent of the ignore level, so a caller can keep project ignore files
+/// while still descending into build output.
+fn skips_builtin_dirs(options: &ProjectScanOptions) -> bool {
+    !options.include_vendor && options.ignore_policy != IgnorePolicy::None
+}
+
+/// Project ignore files at `base`, merged in stack order: within one
+/// [`Gitignore`] the last matching pattern wins, so appending
+/// [`PROJECT_IGNORE_FILENAMES`] in order reproduces the layer precedence every
+/// other Harn walk gets. The built-in directory names stay out of this matcher
+/// so `include_vendor` can still switch them off on their own.
+fn build_gitignore(base: &Path, policy: IgnorePolicy) -> Gitignore {
     let mut builder = GitignoreBuilder::new(base);
-    if enabled {
-        let _ = builder.add(base.join(".gitignore"));
+    if policy.reads_project_files() {
+        for name in PROJECT_IGNORE_FILENAMES {
+            let _ = builder.add(base.join(name));
+        }
     }
     builder.build().unwrap_or_else(|_| Gitignore::empty())
 }
@@ -1472,7 +1471,7 @@ fn compute_directory_structure_hash(
     dir: &Path,
     options: &ProjectScanOptions,
 ) -> String {
-    let gitignore = build_gitignore(base, options.respect_gitignore);
+    let gitignore = build_gitignore(base, options.ignore_policy);
     let mut entries = Vec::new();
     for child in list_immediate_entries(dir) {
         if !should_include_tree_entry(base, &child, &gitignore, options) {
@@ -1492,7 +1491,7 @@ fn compute_directory_structure_hash(
 }
 
 fn compute_directory_content_hash(base: &Path, dir: &Path, options: &ProjectScanOptions) -> String {
-    let gitignore = build_gitignore(base, options.respect_gitignore);
+    let gitignore = build_gitignore(base, options.ignore_policy);
     let mut digest = Sha256::new();
     for child in list_immediate_entries(dir) {
         if !should_include_tree_entry(base, &child, &gitignore, options) {
@@ -1550,8 +1549,8 @@ fn should_include_tree_entry(
         return false;
     }
     if file_type.is_dir()
-        && !options.include_vendor
-        && STANDARD_VENDOR_DIRS.contains(&name.as_str())
+        && skips_builtin_dirs(options)
+        && BUILTIN_IGNORED_DIRS.contains(&name.as_str())
     {
         return false;
     }
@@ -1917,7 +1916,7 @@ fn scan_sources(
             continue;
         }
         if file_type.is_dir() {
-            if !options.include_vendor && STANDARD_VENDOR_DIRS.contains(&name.as_str()) {
+            if skips_builtin_dirs(options) && BUILTIN_IGNORED_DIRS.contains(&name.as_str()) {
                 continue;
             }
             if child.path() != root && is_project_root_candidate(&child.path()) {

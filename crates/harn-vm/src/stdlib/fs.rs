@@ -14,7 +14,10 @@ use crate::vm::Vm;
 mod conditional_replace;
 mod find_evidence;
 mod find_text;
+pub mod ignore_policy;
 mod line_page;
+
+use ignore_policy::IgnorePolicy;
 
 thread_local! {
     static FILE_TEXT_CACHE: RefCell<BTreeMap<PathBuf, FileTextCacheEntry>> = const { RefCell::new(BTreeMap::new()) };
@@ -71,6 +74,7 @@ struct WalkDirOptions {
     max_depth: Option<usize>,
     follow_symlinks: bool,
     background: bool,
+    ignore_policy: IgnorePolicy,
 }
 
 #[derive(Clone)]
@@ -85,6 +89,7 @@ struct WalkDirEntry {
 struct GlobOptions {
     base: String,
     background: bool,
+    ignore_policy: IgnorePolicy,
 }
 
 #[derive(Clone, Copy)]
@@ -249,11 +254,31 @@ fn reject_retired_long_running_option(
     Ok(())
 }
 
+/// Read the shared `ignore_policy` option, defaulting to the full stack.
+///
+/// Every fs surface spells this option the same way and rejects unknown
+/// levels the same way, so a caller learns one vocabulary.
+fn ignore_policy_option(
+    opts: &crate::value::DictMap,
+    builtin: &str,
+) -> Result<IgnorePolicy, VmError> {
+    match string_option(opts, IgnorePolicy::OPTION_KEY) {
+        Some(raw) => IgnorePolicy::parse_for(builtin, &raw)
+            .map_err(|message| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))),
+        None => Ok(IgnorePolicy::default()),
+    }
+}
+
+fn ignore_policy_thrown(error: String) -> VmError {
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error)))
+}
+
 fn parse_walk_dir_options(args: &[VmValue]) -> Result<WalkDirOptions, VmError> {
     let mut options = WalkDirOptions {
         max_depth: None,
         follow_symlinks: false,
         background: false,
+        ignore_policy: IgnorePolicy::default(),
     };
     if let Some(VmValue::Dict(opts)) = args.get(1) {
         reject_retired_long_running_option(opts, "walk_dir")?;
@@ -264,6 +289,7 @@ fn parse_walk_dir_options(args: &[VmValue]) -> Result<WalkDirOptions, VmError> {
         }
         options.follow_symlinks = bool_option(opts, "follow_symlinks").unwrap_or(false);
         options.background = bool_option(opts, "background").unwrap_or(false);
+        options.ignore_policy = ignore_policy_option(opts, "walk_dir")?;
     }
     Ok(options)
 }
@@ -272,25 +298,34 @@ fn walk_dir_entries(
     resolved: &PathBuf,
     options: WalkDirOptions,
     cancel: Option<&AtomicBool>,
-) -> Vec<WalkDirEntry> {
-    let mut walker = walkdir::WalkDir::new(resolved).follow_links(options.follow_symlinks);
+) -> Result<Vec<WalkDirEntry>, VmError> {
+    let mut walker = ignore::WalkBuilder::new(resolved);
+    walker
+        .follow_links(options.follow_symlinks)
+        .sort_by_file_name(|left, right| left.cmp(right));
+    // Dotfiles stay visible: `walk_dir` is the primitive CI drift guards use
+    // to reach `.github/workflows`, and hidden-file filtering is a separate
+    // axis from the ignore stack.
+    ignore_policy::configure(&mut walker, resolved, options.ignore_policy, true)
+        .map_err(ignore_policy_thrown)?;
     if let Some(d) = options.max_depth {
-        walker = walker.max_depth(d);
+        walker.max_depth(Some(d));
     }
     let mut entries = Vec::new();
-    for entry in walker.into_iter().filter_map(|e| e.ok()) {
+    for entry in walker.build().filter_map(|e| e.ok()) {
         if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             break;
         }
         let path = entry.path();
+        let file_type = entry.file_type();
         entries.push(WalkDirEntry {
             path: path.to_string_lossy().replace('\\', "/"),
-            is_dir: entry.file_type().is_dir(),
-            is_file: entry.file_type().is_file(),
+            is_dir: file_type.is_some_and(|kind| kind.is_dir()),
+            is_file: file_type.is_some_and(|kind| kind.is_file()),
             depth: entry.depth() as i64,
         });
     }
-    entries
+    Ok(entries)
 }
 
 fn walk_entry_to_vm(entry: WalkDirEntry) -> VmValue {
@@ -322,12 +357,14 @@ fn parse_glob_options(args: &[VmValue]) -> Result<GlobOptions, VmError> {
     let mut options = GlobOptions {
         base: ".".to_string(),
         background: false,
+        ignore_policy: IgnorePolicy::default(),
     };
     match args.get(1) {
         Some(VmValue::Dict(opts)) => {
             reject_retired_long_running_option(opts, "glob")?;
             options.base = string_option(opts, "base").unwrap_or_else(|| ".".to_string());
             options.background = bool_option(opts, "background").unwrap_or(false);
+            options.ignore_policy = ignore_policy_option(opts, "glob")?;
         }
         Some(value) => {
             let base = value.display();
@@ -337,6 +374,7 @@ fn parse_glob_options(args: &[VmValue]) -> Result<GlobOptions, VmError> {
             if let Some(VmValue::Dict(opts)) = args.get(2) {
                 reject_retired_long_running_option(opts, "glob")?;
                 options.background = bool_option(opts, "background").unwrap_or(false);
+                options.ignore_policy = ignore_policy_option(opts, "glob")?;
             }
         }
         None => {}
@@ -361,6 +399,7 @@ fn parse_append_locked_options(args: &[VmValue]) -> AppendLockBuiltinOptions {
 fn glob_matches(
     pattern: &str,
     base: &PathBuf,
+    policy: IgnorePolicy,
     cancel: Option<&AtomicBool>,
 ) -> Result<Vec<String>, VmError> {
     let mut builder = globset::GlobSetBuilder::new();
@@ -371,11 +410,14 @@ fn glob_matches(
     let set = builder.build().map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!("glob: {e}"))))
     })?;
+    let mut walker = ignore::WalkBuilder::new(base);
+    walker.sort_by_file_name(|left, right| left.cmp(right));
+    // No blanket dotfile skip: `glob(".github/workflows/*.yml", ...)` is how
+    // the CI drift guards read their own workflows, and pruning dot
+    // directories would turn them vacuously green.
+    ignore_policy::configure(&mut walker, base, policy, true).map_err(ignore_policy_thrown)?;
     let mut matches = Vec::new();
-    for entry in walkdir::WalkDir::new(base)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for entry in walker.build().filter_map(|e| e.ok()) {
         if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             break;
         }
@@ -1291,7 +1333,7 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[harn_builtin(
     sig = "walk_dir(path: string, options?: dict) -> list",
     category = "fs",
-    doc = "Recursively list files and directories."
+    doc = "Recursively list files and directories, honoring the project ignore stack by default."
 )]
 fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let root = args.first().map(|a| a.display()).unwrap_or_default();
@@ -1315,17 +1357,15 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             descriptor,
             session_id,
             move |cancel| {
-                Ok(walk_entries_to_json(walk_dir_entries(
-                    &resolved,
-                    options,
-                    Some(&cancel),
-                )))
+                walk_dir_entries(&resolved, options, Some(&cancel))
+                    .map(walk_entries_to_json)
+                    .map_err(|error| error.to_string())
             },
         )
         .map_err(VmError::Runtime)?;
         return Ok(handle.into_vm_value());
     }
-    let entries = walk_dir_entries(&resolved, options, None)
+    let entries = walk_dir_entries(&resolved, options, None)?
         .into_iter()
         .map(walk_entry_to_vm)
         .collect::<Vec<_>>();
@@ -1335,7 +1375,7 @@ fn walk_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 #[harn_builtin(
     sig = "glob(pattern: string, base_or_options?: any, options?: dict) -> list",
     category = "fs",
-    doc = "Match files under a base directory using a glob pattern."
+    doc = "Match files under a base directory using a glob pattern, honoring the project ignore stack by default."
 )]
 fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pattern = args.first().map(|a| a.display()).unwrap_or_default();
@@ -1347,6 +1387,7 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let options = parse_glob_options(args)?;
     let base = resolve_fs_path(&options.base);
     crate::stdlib::sandbox::enforce_fs_path("glob", &base, crate::stdlib::sandbox::FsAccess::Read)?;
+    let policy = options.ignore_policy;
     if options.background {
         let session_id = crate::llm::current_agent_session_id().unwrap_or_default();
         let descriptor = format!("glob {} in {}", pattern, base.display());
@@ -1355,7 +1396,7 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
             descriptor,
             session_id,
             move |cancel| {
-                glob_matches(&pattern, &base, Some(&cancel))
+                glob_matches(&pattern, &base, policy, Some(&cancel))
                     .map(|items| {
                         serde_json::Value::Array(
                             items.into_iter().map(serde_json::Value::String).collect(),
@@ -1367,7 +1408,7 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
         .map_err(VmError::Runtime)?;
         return Ok(handle.into_vm_value());
     }
-    let matches = glob_matches(&pattern, &base, None)?
+    let matches = glob_matches(&pattern, &base, policy, None)?
         .into_iter()
         .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
         .collect::<Vec<_>>();

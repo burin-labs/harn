@@ -26,7 +26,12 @@
     },
     "recursive": { "type": "boolean", "default": true },
     "debounce_ms": { "type": "integer", "minimum": 0, "default": 50 },
-    "respect_gitignore": { "type": "boolean", "default": false },
+    "ignore_policy": {
+      "type": "string",
+      "enum": ["none", "builtin", "project"],
+      "default": "builtin",
+      "description": "How much of the shared ignore stack applies. `none` watches everything; `builtin` (the default here) applies Harn's built-in directory defaults, keeping recursive watches out of dependency and build trees that would exhaust the OS watch budget; `project` adds `.gitignore`, `.ignore`, and `.agentignore`. Watching defaults to `builtin` rather than `project` because a gitignored file is still a file whose changes a subscriber may need."
+    },
     "kinds": {
       "type": "array",
       "description": "Optional filter on event kinds (`create`, `modify`, `remove`, `rename`). Defaults to those four mutation kinds.",

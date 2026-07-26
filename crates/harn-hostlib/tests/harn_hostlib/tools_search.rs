@@ -444,6 +444,10 @@ fn search_rejects_invalid_regex() {
 #[test]
 fn search_respects_gitignore_unless_overridden() {
     let dir = TempDir::new().unwrap();
+    // Project ignore files only apply inside a project. Without a `.git`
+    // anchor the search degrades to Harn's built-in directory defaults, which
+    // is what `search_outside_a_project_ignores_stray_project_files` pins.
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
     fs::write(dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
     fs::write(dir.path().join("ignored.txt"), "needle\n").unwrap();
     fs::write(dir.path().join("included.txt"), "needle\n").unwrap();
@@ -477,6 +481,7 @@ fn search_respects_gitignore_unless_overridden() {
 #[test]
 fn search_glob_filter_does_not_reinclude_gitignored_paths() {
     let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
     fs::write(dir.path().join(".gitignore"), "target/\n").unwrap();
     fs::create_dir_all(dir.path().join("crates/burin-tui/src")).unwrap();
     fs::create_dir_all(dir.path().join("crates/burin-tui/target/debug")).unwrap();
@@ -545,4 +550,87 @@ fn search_gate_blocks_when_feature_disabled() {
         msg.contains("hostlib_enable"),
         "expected gate message pointing at hostlib_enable, got `{msg}`"
     );
+}
+
+/// A `.gitignore` sitting outside any checkout is not a project rule, so it
+/// does not filter. The built-in directory defaults still do, which is what
+/// keeps an unmanaged directory from dragging `node_modules` into a search.
+#[test]
+fn search_outside_a_project_ignores_stray_project_files() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join(".gitignore"), "stray.txt\n").unwrap();
+    fs::write(dir.path().join("stray.txt"), "needle\n").unwrap();
+    fs::create_dir_all(dir.path().join("node_modules")).unwrap();
+    fs::write(dir.path().join("node_modules/dep.txt"), "needle\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("needle")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    let paths = match_paths(&result);
+    assert!(
+        paths.iter().any(|p| p.ends_with("stray.txt")),
+        "a stray .gitignore must not filter, got {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p.contains("node_modules")),
+        "built-in defaults still apply, got {paths:?}"
+    );
+}
+
+/// `ignore_policy: "none"` is the one spelling for a raw walk.
+#[test]
+fn search_ignore_policy_none_walks_everything() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    fs::write(dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
+    fs::write(dir.path().join("ignored.txt"), "needle\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("needle")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("fixed_strings", VmValue::Bool(true)),
+        ("ignore_policy", vm_string("none")),
+    ]))
+    .unwrap();
+    let paths = match_paths(&result);
+    assert!(
+        paths.iter().any(|p| p.ends_with("ignored.txt")),
+        "{paths:?}"
+    );
+}
+
+#[test]
+fn search_rejects_an_unknown_ignore_policy() {
+    let dir = TempDir::new().unwrap();
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let error = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("needle")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("ignore_policy", vm_string("gitignore")),
+    ]))
+    .expect_err("unknown level must be rejected");
+    let rendered = error.to_string();
+    assert!(rendered.contains("ignore_policy"), "{rendered}");
+    assert!(rendered.contains("none, builtin, project"), "{rendered}");
+}
+
+fn match_paths(result: &VmValue) -> Vec<String> {
+    matches_in(result)
+        .iter()
+        .map(|row| match row {
+            VmValue::Dict(dict) => match dict.get("path") {
+                Some(VmValue::String(text)) => text.to_string(),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        })
+        .collect()
 }

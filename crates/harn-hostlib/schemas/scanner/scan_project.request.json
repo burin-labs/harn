@@ -14,10 +14,11 @@
       "default": false,
       "description": "Include dotfiles (`.envrc`, `.github/`, etc.). The standard excluded-directory set still applies."
     },
-    "respect_gitignore": {
-      "type": "boolean",
-      "default": true,
-      "description": "Honor `.gitignore`/`.git/info/exclude`. Set false to scan ignored content (e.g. when indexing a vendored snapshot)."
+    "ignore_policy": {
+      "type": "string",
+      "enum": ["none", "builtin", "project"],
+      "default": "project",
+      "description": "How much of the shared ignore stack applies. `none` walks everything; `builtin` applies Harn's built-in directory defaults; `project` adds `.gitignore`, `.ignore`, and `.agentignore`."
     },
     "max_files": {
       "type": "integer",

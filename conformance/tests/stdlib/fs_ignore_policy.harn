@@ -1,0 +1,58 @@
+/**
+ * `glob` and `walk_dir` share one ignore stack, selected with `ignore_policy`.
+ *
+ * The fixture is a checkout whose `.gitignore` ignores `logs/` and *negates*
+ * `dist/`, which the built-in layer would otherwise skip. That negation is the
+ * point: the built-in defaults are the lowest layer, not a hard filter.
+ */
+const root = harness.fs.mkdtemp("harn-ignore-policy-")
+
+harness.fs.mkdir(path_join(root, ".git"))
+
+harness.fs.mkdir(path_join(root, "src"))
+
+harness.fs.mkdir(path_join(root, "logs"))
+
+harness.fs.mkdir(path_join(root, "target"))
+
+harness.fs.mkdir(path_join(root, "dist"))
+
+harness.fs.write_text(path_join(root, ".gitignore"), "logs/\n!dist/\n")
+
+harness.fs.write_text(path_join(root, "src", "a.txt"), "a\n")
+
+harness.fs.write_text(path_join(root, "logs", "b.txt"), "b\n")
+
+harness.fs.write_text(path_join(root, "logs", "e.txt"), "e\n")
+
+harness.fs.write_text(path_join(root, "target", "c.txt"), "c\n")
+
+harness.fs.write_text(path_join(root, "dist", "d.txt"), "d\n")
+
+fn counts(policy) {
+  return [
+    len(harness.fs.glob("src/*.txt", root, {ignore_policy: policy})),
+    len(harness.fs.glob("logs/*.txt", root, {ignore_policy: policy})),
+    len(harness.fs.glob("target/*.txt", root, {ignore_policy: policy})),
+    len(harness.fs.glob("dist/*.txt", root, {ignore_policy: policy})),
+    len(harness.fs.walk(root, {ignore_policy: policy})),
+  ]
+}
+
+// none: raw walk. src=1 logs=2 target=1 dist=1, 12 walk entries.
+__io_println(counts("none"))
+
+// builtin: target/ and dist/ are built-in skips; logs/ is not.
+__io_println(counts("builtin"))
+
+// project: logs/ falls to `.gitignore`, dist/ is re-included by `!dist/`.
+__io_println(counts("project"))
+
+// The default is the full stack.
+__io_println(len(harness.fs.walk(root)) == len(harness.fs.walk(root, {ignore_policy: "project"})))
+
+// A base pointed straight at an ignored directory is still walked: the walk
+// root is never matched against the stack.
+__io_println(len(harness.fs.glob("*.txt", path_join(root, "target"))))
+
+harness.fs.delete(root)

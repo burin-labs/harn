@@ -61,11 +61,19 @@ conformance/tests/**/.harn/test-timings.json
 .claude/commands/merge-captain.md
 
 # Codex local environment config is reviewed repo setup; other generated
-# environment files remain local state.
+# environment files remain local state. Shared command and skill definitions
+# are tracked, exactly as the Claude block below tracks its own — without the
+# re-includes they stay reachable only because they were force-added, which
+# leaves them invisible to every ignore-aware tool that reads the rules rather
+# than the index.
 .codex/*
 !.codex/environments/
 .codex/environments/*
 !.codex/environments/environment.toml
+!.codex/commands/
+!.codex/commands/**
+!.codex/skills/
+!.codex/skills/**
 
 # JavaScript, portal, and website artifacts.
 node_modules/

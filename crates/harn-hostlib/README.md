@@ -217,7 +217,16 @@ boundary.
 file/folder/symbol records, dependency edges, sub-project boundaries, and
 a token-budgeted text repo map. Two builtins:
 
-- `hostlib_scanner_scan_project({ root, include_hidden?, respect_gitignore?,
+Every hostlib builtin that enumerates or watches files takes `ignore_policy`
+(`none` | `builtin` | `project`) with the same meaning as the in-VM fs
+builtins: `none` is a raw walk, `builtin` applies Harn's built-in directory
+defaults, and `project` adds `.gitignore`, `.ignore`, and `.agentignore`.
+`tools/search` and the scanner builtins default to `project`; `fs_watch`
+defaults to `builtin`, because a recursive watch over dependency and build
+trees exhausts the OS watch budget while a gitignored file is still a file
+whose changes a subscriber may need.
+
+- `hostlib_scanner_scan_project({ root, include_hidden?, ignore_policy?,
   max_files?, include_git_history?, repo_map_token_budget? })` — full scan.
   Persists a snapshot to `<root>/.harn/hostlib/scanner-snapshot.json` so
   follow-up incremental scans can diff against it.

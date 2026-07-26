@@ -26,7 +26,12 @@
       "default": 0
     },
     "include_hidden": { "type": "boolean", "default": false },
-    "respect_gitignore": { "type": "boolean", "default": true }
+    "ignore_policy": {
+      "type": "string",
+      "enum": ["none", "builtin", "project"],
+      "default": "project",
+      "description": "How much of the shared ignore stack applies. `none` walks everything; `builtin` applies Harn's built-in directory defaults; `project` adds `.gitignore`, `.ignore`, and `.agentignore`."
+    }
   },
   "required": ["snapshot_token"],
   "additionalProperties": false

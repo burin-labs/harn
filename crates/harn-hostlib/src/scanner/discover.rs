@@ -11,6 +11,7 @@
 //!    [`super::extensions::EXCLUDED_DIRS`] table.
 //! 3. Filter to source extensions and de-duplicate.
 
+use harn_vm::ignore_policy::{self, IgnorePolicy};
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 
@@ -43,21 +44,12 @@ pub fn discover_files(
 }
 
 /// Tunable knobs for [`discover_files`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DiscoverOptions {
     /// Include hidden (`.foo`) entries.
     pub include_hidden: bool,
-    /// Honor `.gitignore`/`.git/info/exclude` chains.
-    pub respect_gitignore: bool,
-}
-
-impl Default for DiscoverOptions {
-    fn default() -> Self {
-        Self {
-            include_hidden: false,
-            respect_gitignore: true,
-        }
-    }
+    /// How much of the shared ignore stack applies.
+    pub ignore_policy: IgnorePolicy,
 }
 
 fn git_ls_files(root: &Path, git: &dyn GitCapabilities) -> Option<Vec<DiscoveredFile>> {
@@ -86,21 +78,23 @@ fn git_ls_files(root: &Path, git: &dyn GitCapabilities) -> Option<Vec<Discovered
 
 fn walk_files(root: &Path, opts: DiscoverOptions) -> Vec<DiscoveredFile> {
     let mut walker = WalkBuilder::new(root);
-    walker
-        .hidden(!opts.include_hidden)
-        .ignore(opts.respect_gitignore)
-        .git_ignore(opts.respect_gitignore)
-        .git_global(opts.respect_gitignore)
-        .git_exclude(opts.respect_gitignore)
-        .require_git(false)
-        .parents(true)
-        .filter_entry(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .map(|name| !is_excluded_dir(name))
-                .unwrap_or(true)
-        });
+    // The scanner skips exactly what every other Harn walk skips; the extra
+    // `EXCLUDED_DIRS` filter below is scanner-specific and deliberately
+    // broader (editor and package-manager caches a source scan never wants).
+    //
+    // A configuration failure means only that the built-in directory layer
+    // could not be materialized, and the walk is already correct without it.
+    // This function has no error channel, and over-including a few build
+    // directories is a visible, recoverable scan; returning an empty file list
+    // would read as "this project has no source" and be silently wrong.
+    let _ = ignore_policy::configure(&mut walker, root, opts.ignore_policy, opts.include_hidden);
+    walker.filter_entry(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .map(|name| !is_excluded_dir(name))
+            .unwrap_or(true)
+    });
 
     let mut entries = Vec::new();
     for result in walker.build() {

@@ -173,13 +173,14 @@ const tree = project_scan_tree(".", {tiers: ["ambient"], depth: 3})
 
 - always includes `"."` for the requested base directory
 - walks subdirectories deterministically
-- honors `.gitignore` by default
+- honors `.gitignore`, `.ignore`, and `.agentignore` by default
 - skips standard vendor/build directories such as `node_modules/` and `target/`
   by default
 
 You can override those defaults with:
 
-- `respect_gitignore: false`
+- `ignore_policy: "builtin"` to keep the built-in directory skips but stop
+  reading project ignore files, or `ignore_policy: "none"` for a raw walk
 - `include_vendor: true`
 - `include_hidden: true`
 
