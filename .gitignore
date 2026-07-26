@@ -75,6 +75,12 @@ conformance/tests/**/.harn/test-timings.json
 !.codex/skills/
 !.codex/skills/**
 
+# `merge-captain` covers the Harn triad, including private harn-cloud context,
+# so it stays local state here — the same carve-out the `.claude` block makes
+# for its own copy. The re-includes above would otherwise surface it.
+.codex/commands/merge-captain.md
+.codex/skills/merge-captain/
+
 # JavaScript, portal, and website artifacts.
 node_modules/
 /crates/harn-cli/portal-dist/
