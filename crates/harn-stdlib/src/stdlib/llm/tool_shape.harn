@@ -1,0 +1,198 @@
+/**
+ * std/llm/tool_shape — did the parser drop something the model MEANT as a tool call?
+ *
+ * Import with: import { tool_shape_findings, tool_shape_feedback, ToolShapeFinding }
+ *   from "std/llm/tool_shape"
+ *
+ * WHY THIS MODULE EXISTS. The text parser recognizes tool syntax for a fixed set
+ * of wrapper tags. Every other dialect a model emits — and models invent them
+ * constantly, because their chat templates differ — falls through to prose: zero
+ * calls, zero violations, zero events. The turn dies looking like the model
+ * simply chose not to act, and stall detection and the governor then blame the
+ * model for a parse boundary that ate its work.
+ *
+ * The obvious repair is to add each newly-observed dialect to the parser. That
+ * is a treadmill: it fixes the dialect in front of you and leaves the next one
+ * just as silent. So this module inverts the question. The parser reports what
+ * it consumed without producing a call (`dropped`); this module asks whether any
+ * of it has the SHAPE of a call.
+ *
+ * SHAPE, NOT VOCABULARY. Nothing here matches a list of known tag names. A
+ * fragment is suspicious because it is *structured like an invocation* — a tag
+ * wrapping a call expression, an object naming a tool and its arguments, markup
+ * carrying a callee. A dialect nobody has seen yet trips the same checks with no
+ * change to this file, which is the property that kills the class rather than
+ * the instance.
+ *
+ * FALSE POSITIVES ARE THE REAL COST. A finding becomes corrective feedback on a
+ * paid turn, so merely *mentioning* tool syntax must not trip it: prose that
+ * says "wrap calls in <tool_call>" carries no body and matches nothing here.
+ * Every check below requires an argument-bearing body, not a name.
+ */
+
+/// One dropped fragment as reported by the parser.
+pub type DroppedFragment = {
+  /// The text the parser consumed without producing a call.
+  text: string,
+  /// Why it was consumed: `salvaged_as_prose` or `fenced_narration`.
+  reason: string,
+}
+
+/// A dropped fragment that is shaped like a tool call.
+pub type ToolShapeFinding = {
+  /// Which shape matched: `tagged_call_body`, `json_name_arguments`, or
+  /// `call_markup`. Stable identifiers, safe to branch on.
+  shape: string,
+  /// The parser's reason for dropping the fragment.
+  dropped_reason: string,
+  /// A bounded excerpt of the offending text, for events and feedback.
+  excerpt: string,
+}
+
+/// Response tags that are part of the protocol. A fragment built only from
+/// these is the model using the contract, not an unrecognized dialect.
+const __TOOL_SHAPE_PROTOCOL_TAGS = [
+  "tool_call",
+  "toolcall",
+  "assistant_prose",
+  "assistantprose",
+  "user_response",
+  "userresponse",
+  "done",
+]
+
+/// Longest excerpt carried into a violation. Long enough to identify the
+/// dialect, short enough not to replay a whole response back at the model.
+const __TOOL_SHAPE_EXCERPT_LIMIT = 240
+
+fn __tool_shape_excerpt(text: string) -> string {
+  const collapsed = trim(text)
+  if len(collapsed) <= __TOOL_SHAPE_EXCERPT_LIMIT {
+    return collapsed
+  }
+  return collapsed.slice(0, __TOOL_SHAPE_EXCERPT_LIMIT) + "…"
+}
+
+/// Does `body` carry arguments, rather than merely naming something?
+///
+/// This is the guard that keeps prose *about* tool syntax from being reported
+/// as tool syntax. A call expression (`name(`) or an object literal with at
+/// least one `key:`/`"key":` pair counts; a bare word does not.
+fn __tool_shape_body_has_arguments(body: string) -> bool {
+  const trimmed = trim(body)
+  if trimmed == "" {
+    return false
+  }
+  if regex_match("[A-Za-z_][A-Za-z0-9_]*\\s*\\(", trimmed) != nil {
+    return true
+  }
+  return regex_match("\\{[^{}]*\"?[A-Za-z_][A-Za-z0-9_]*\"?\\s*:", trimmed) != nil
+}
+
+/// An angle tag wrapping a body that carries arguments.
+///
+/// Catches the whole family of single-tag dialects (`<tool>`, `<call>`,
+/// `<action>`, and whatever comes next) without naming any of them: the tag name
+/// is captured, not compared against a list, and only the protocol's own tags
+/// are excluded.
+fn __tool_shape_tagged_call(text: string) -> bool {
+  // Open and close tags are matched separately and paired here, because the
+  // regex engine has no backreferences — `</\1>` is not expressible. Pairing in
+  // Harn also keeps the tag name available for the protocol-tag exclusion.
+  for opened in regex_captures("(?is)<([A-Za-z_][A-Za-z0-9_.:-]*)\\b[^>]*>", text) {
+    const tag = lowercase(trim((opened?.groups ?? [])[0] ?? ""))
+    if tag == "" || __TOOL_SHAPE_PROTOCOL_TAGS.contains(tag) {
+      continue
+    }
+    // `end` is a character offset, matching `slice`/`index_of`/`len`.
+    const rest = text.slice(opened?.end ?? 0, len(text))
+    const close_at = rest.index_of("</" + tag + ">")
+    if close_at < 0 {
+      continue
+    }
+    if __tool_shape_body_has_arguments(rest.slice(0, close_at)) {
+      return true
+    }
+  }
+  return false
+}
+
+/// An object that names a tool and supplies its arguments.
+///
+/// This is the native/bare-JSON dialect family: `{"name": ..., "arguments": ...}`
+/// and its spellings. Both halves are required — a `"name"` key alone appears in
+/// plenty of ordinary JSON a model might legitimately be discussing.
+fn __tool_shape_json_call(text: string) -> bool {
+  if !text.contains("{") {
+    return false
+  }
+  const names = regex_match("(?i)\"(?:name|tool|tool_name|recipient)\"\\s*:", text)
+  if names == nil {
+    return false
+  }
+  return regex_match("(?i)\"(?:arguments|args|parameters|input|params)\"\\s*:", text) != nil
+}
+
+/// Chat-template markup that carries a callee.
+///
+/// `<function=NAME>`, `<invoke name="NAME">`, and the `[TOOL_CALLS]` /
+/// `<|recipient|>` frame markers are invocation markup by construction — there
+/// is no reading of them that is ordinary prose.
+fn __tool_shape_call_markup(text: string) -> bool {
+  if regex_match("(?i)<(?:function|invoke|tool)\\s*[=\\s][^>]*>", text) != nil {
+    return true
+  }
+  return regex_match("(?i)\\[TOOL_CALLS\\]|<\\|recipient\\|>|<\\|channel\\|>", text) != nil
+}
+
+fn __tool_shape_of(text: string) -> string {
+  if __tool_shape_call_markup(text) {
+    return "call_markup"
+  }
+  if __tool_shape_tagged_call(text) {
+    return "tagged_call_body"
+  }
+  if __tool_shape_json_call(text) {
+    return "json_name_arguments"
+  }
+  return ""
+}
+
+/// Findings for every dropped fragment that is shaped like a tool call.
+///
+/// Empty when the parser dropped nothing suspicious, which is the common case:
+/// most dropped text is genuine narration.
+pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFinding> {
+  let findings = []
+  for fragment in dropped ?? [] {
+    const text = fragment?.text ?? ""
+    if trim(text) == "" {
+      continue
+    }
+    const shape = __tool_shape_of(text)
+    if shape == "" {
+      continue
+    }
+    findings = push(findings, {
+      shape: shape,
+      dropped_reason: fragment?.reason ?? "",
+      excerpt: __tool_shape_excerpt(text),
+    })
+  }
+  return findings
+}
+
+/// Corrective feedback for the model, one line per finding.
+///
+/// Phrased as the contract it should have used, because the model can act on
+/// that; the shape identifier is for events, not for the model.
+pub fn tool_shape_feedback(findings: list<ToolShapeFinding>) -> list<string> {
+  let messages = []
+  for finding in findings ?? [] {
+    messages = push(messages, "unparsed_tool_syntax: text shaped like a tool call was not "
+      + "recognized as one and did not run. Emit every call as "
+      + "`<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: "
+      + (finding?.excerpt ?? ""))
+  }
+  return messages
+}

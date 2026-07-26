@@ -1,0 +1,54 @@
+// An unrecognized tool dialect must not vanish into prose.
+//
+// The parser recognizes tool syntax for a fixed set of wrapper tags. These
+// cases pin the property that makes the omission recoverable: the parser
+// reports what it dropped, and the shape detector recognizes an invocation by
+// its STRUCTURE, so a dialect the parser has never seen is still caught with no
+// code change. The last case pins the other side of that bargain — prose that
+// merely talks about tool syntax must stay silent, because a finding costs the
+// model a corrective turn.
+
+import { agent_parse_tool_calls } from "std/agent/primitives"
+import { tool_shape_findings } from "std/llm/tool_shape"
+
+fn shapes(text: string) -> list<string> {
+  const parsed = agent_parse_tool_calls(text, nil, "text")
+  let out = []
+  for finding in tool_shape_findings(parsed.dropped) {
+    out = push(out, finding.shape)
+  }
+  return out
+}
+
+pipeline main() {
+  // The `<tool>` single-tag dialect observed in raw model bytes: dozens of
+  // blocks, zero parsed calls, and — before this — zero violations.
+  const single_tag = agent_parse_tool_calls(
+    "<tool>\nlook({ file: \"src/main.rs\" })\n</tool>",
+    nil,
+    "text",
+  )
+  __io_println(len(single_tag.tool_calls))
+  __io_println(len(single_tag.dropped) > 0)
+  __io_println(shapes("<tool>\nlook({ file: \"src/main.rs\" })\n</tool>")[0])
+
+  // A dialect nobody has ever emitted. Nothing in the detector names it; it is
+  // caught because it is SHAPED like an invocation.
+  __io_println(shapes("<perform_action>\nlook({ file: \"a.rs\" })\n</perform_action>")[0])
+
+  // The bare/native JSON family: a tool named alongside its arguments.
+  __io_println(shapes("{\"name\": \"look\", \"arguments\": {\"file\": \"a.rs\"}}")[0])
+
+  // Prose ABOUT the protocol carries no arguments and must not fire.
+  __io_println(len(shapes("I will wrap every call in <tool_call> tags from now on.")))
+  __io_println(len(shapes("The tool_call wrapper is required for each invocation.")))
+
+  // A well-formed call is parsed, so nothing is dropped and nothing is flagged.
+  const good = agent_parse_tool_calls(
+    "<tool_call>\nlook({ file: \"src/main.rs\" })\n</tool_call>",
+    nil,
+    "text",
+  )
+  __io_println(len(good.tool_calls))
+  __io_println(len(tool_shape_findings(good.dropped)))
+}
