@@ -91,14 +91,66 @@ jobs:
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.132
-      - name: Run workspace nextest
+      # TEMPORARY diagnostic branch. Not for merge.
+      - name: Build once
         shell: bash
-        # No package filter — the whole workspace runs. Tests gated to
-        # `#![cfg(unix)]` are excluded at compile time, so the nightly
-        # surface is exactly what is portable.
-        run: cargo nextest run --workspace --profile ci
-      - name: Smoke test harn run
+        run: cargo nextest run --workspace --profile ci --no-run 2>&1 | tee build1.log
+      - name: Prove the build graph is now stable across invocations
+        shell: bash
+        # Verifies #5640. Before that fix harn-cli recompiled here every time
+        # (~2m12s) because its build script watched a \\?\ verbatim path.
+        # Strip ANSI first: CARGO_TERM_COLOR=always puts a reset sequence
+        # between "Compiling" and the crate name, so a naive grep for
+        # "Compiling harn-cli" silently never matches and reports a false pass.
+        run: |
+          cargo nextest run --workspace --profile ci --no-run 2>&1 | tee build2.log
+          sed 's/\x1b\[[0-9;]*m//g' build2.log > build2.plain
+          if grep -qE "Compiling +harn-cli " build2.plain; then
+            echo "::error::harn-cli recompiled on a second cargo invocation with no source change"
+            grep -E "Compiling" build2.plain
+            exit 1
+          fi
+          echo "::notice::second cargo invocation recompiled nothing"
+      - name: Capture reuse-build metadata
         shell: bash
         run: |
-          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
-          "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn
+          cargo metadata --format-version 1 --all-features \
+            > "$RUNNER_TEMP/cargo-metadata.json"
+          cargo nextest list --workspace --profile ci \
+            --list-type binaries-only --message-format json \
+            > "$RUNNER_TEMP/binaries.json"
+      - name: Replay the full workspace until the time budget is spent
+        shell: bash
+        # The full workspace, not a filter: the single sighting of the
+        # trust_query wedge happened under full fan-out, and a targeted loop
+        # of 40 iterations did not reproduce it. Replaying against captured
+        # metadata skips cargo entirely, so an iteration costs its ~6 min of
+        # real test time instead of that plus a ~2-4 min rebuild.
+        run: |
+          budget_seconds=$((150 * 60))
+          started=$SECONDS
+          i=0
+          hangs=0
+          while [ $((SECONDS - started)) -lt "$budget_seconds" ]; do
+            i=$((i + 1))
+            if ! cargo nextest run --profile ci --workspace \
+                --cargo-metadata "$RUNNER_TEMP/cargo-metadata.json" \
+                --binaries-metadata "$RUNNER_TEMP/binaries.json" \
+                2>&1 | tee "full-$i.log"; then
+              hangs=$((hangs + 1))
+              echo "::warning::iteration $i failed"
+            fi
+            sed 's/\x1b\[[0-9;]*m//g' "full-$i.log" \
+              | grep -E "SLOW|TERMINATING|TIMEOUT" || true
+          done
+          echo "::notice::full workspace: $hangs/$i runs failed"
+      - name: Upload iteration logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-replay-logs
+          path: |
+            build1.log
+            build2.log
+            full-*.log
+          retention-days: 7
