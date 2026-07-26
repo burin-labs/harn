@@ -74,8 +74,8 @@ fn check_literal_composition(
     // Raw LLM calls only care about a tool format when they offer tools.
     // Agent calls and option constructors feed the tool-bearing agent loop.
     if call_name.starts_with("llm_")
-        && !dict_literal_field(options, "tools")
-            .is_some_and(|tools| !matches!(&tools.node, Node::NilLiteral))
+        && dict_literal_field(options, "tools")
+            .is_none_or(|tools| matches!(&tools.node, Node::NilLiteral))
     {
         return;
     }
