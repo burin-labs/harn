@@ -6968,6 +6968,13 @@ The module exposes:
 | `cost_per_solved(rows)` | Total realized cost divided by solved cases, or `nil` when nothing solved |
 | `routing_calibration_report(cheap, ladder, frontier)` | Pairs cheap-only, ladder, and frontier rows to report over-escalation, under-escalation, costs, and convergence-at-frontier |
 
+These are fixed-sample reports. Repeatedly inspecting them while accumulating
+trials invalidates their nominal interval level. `std/eval/sequential` provides
+`bounded_cs`, `paired_delta_cs`, cumulative ladder helpers, realized savings,
+and frozen-family `arm_decision` for repeated-look or data-dependent stopping
+workflows. Sequential observations must be append-only across looks; callers
+must project mutable case aggregates into stable case/trial rows first.
+
 ### Package registry index
 
 `harn package search`, `harn package info`, and registry-name
