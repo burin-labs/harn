@@ -158,25 +158,60 @@ fn __tool_shape_of(text: string) -> string {
   return ""
 }
 
-/// Findings for every dropped fragment that is shaped like a tool call.
+/// A run of consecutive fragments dropped for the same reason, rejoined.
+type ToolShapeRun = { text: string, reason: string }
+
+/// Rejoin consecutive fragments that were dropped for the same reason.
 ///
-/// Empty when the parser dropped nothing suspicious, which is the common case:
-/// most dropped text is genuine narration.
-pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFinding> {
-  let findings = []
+/// The parser drops at the granularity it scans, which inside a fenced block is
+/// one line at a time. A fenced dialect therefore arrives as `<tool>`,
+/// `look({ ... })`, `</tool>` — three fragments, none of which is an invocation
+/// on its own, though together they plainly are. Reassembling the run before
+/// asking about shape is what lets the detector see the block the model wrote
+/// rather than the slices the scanner happened to cut it into.
+///
+/// Fragments arrive in document order, so a run is a contiguous span of the
+/// response and rejoining with newlines reproduces it.
+fn __tool_shape_runs(dropped: list<DroppedFragment>) -> list<ToolShapeRun> {
+  let runs = []
+  let current = ""
+  let current_reason = ""
   for fragment in dropped {
     const text = fragment.text
     if trim(text) == "" {
       continue
     }
-    const shape = __tool_shape_of(text)
+    if current != "" && fragment.reason == current_reason {
+      current = current + "\n" + text
+      continue
+    }
+    if current != "" {
+      runs = runs.appending({ text: current, reason: current_reason })
+    }
+    current = text
+    current_reason = fragment.reason
+  }
+  if current != "" {
+    runs = runs.appending({ text: current, reason: current_reason })
+  }
+  return runs
+}
+
+/// Findings for every run of dropped text that is shaped like a tool call.
+///
+/// Empty when the parser dropped nothing suspicious, which is the common case:
+/// most dropped text is genuine narration.
+pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFinding> {
+  let findings = []
+  for run in __tool_shape_runs(dropped) {
+    const shape = __tool_shape_of(run.text)
     if shape == "" {
       continue
     }
     findings = findings.appending({
       shape: shape,
-      dropped_reason: fragment.reason,
-      excerpt: __tool_shape_excerpt(text),
+      dropped_reason: run.reason,
+      excerpt: __tool_shape_excerpt(run.text),
     })
   }
   return findings

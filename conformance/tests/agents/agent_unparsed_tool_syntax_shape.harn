@@ -1,54 +1,53 @@
 // An unrecognized tool dialect must not vanish into prose.
 //
-// The parser recognizes tool syntax for a fixed set of wrapper tags. These
-// cases pin the property that makes the omission recoverable: the parser
-// reports what it dropped, and the shape detector recognizes an invocation by
-// its STRUCTURE, so a dialect the parser has never seen is still caught with no
-// code change. The last case pins the other side of that bargain — prose that
-// merely talks about tool syntax must stay silent, because a finding costs the
-// model a corrective turn.
+// The parser recognizes tool syntax for a fixed set of wrapper tags. A dialect
+// it does not know, emitted inside a code fence, is skipped as narration: zero
+// calls, zero violations, zero events. These cases pin the property that makes
+// that recoverable — the parser reports what it dropped, and the shape detector
+// recognizes an invocation by its STRUCTURE, so a dialect nobody has emitted yet
+// is caught with no code change.
+//
+// The negative cases matter just as much: a finding costs the model a corrective
+// turn, so fenced source code and prose about the protocol must stay silent.
 
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { tool_shape_findings } from "std/llm/tool_shape"
 
-fn shapes(text: string) -> list<string> {
+fn shapes(text: string) -> string {
   const parsed = agent_parse_tool_calls(text, nil, "text")
-  let out = []
-  for finding in tool_shape_findings(parsed.dropped) {
-    out = push(out, finding.shape)
+  let out = ""
+  for finding in tool_shape_findings(parsed.dropped ?? []) {
+    out = out + finding.shape + ";"
   }
   return out
 }
 
 pipeline main() {
-  // The `<tool>` single-tag dialect observed in raw model bytes: dozens of
-  // blocks, zero parsed calls, and — before this — zero violations.
-  const single_tag = agent_parse_tool_calls(
-    "<tool>\nlook({ file: \"src/main.rs\" })\n</tool>",
-    nil,
-    "text",
-  )
-  __io_println(len(single_tag.tool_calls))
-  __io_println(len(single_tag.dropped) > 0)
-  __io_println(shapes("<tool>\nlook({ file: \"src/main.rs\" })\n</tool>")[0])
+  // The `<tool>` single-tag dialect, fenced — dozens of these appeared in raw
+  // model bytes with zero parsed calls and, before this, zero violations.
+  __io_println(shapes("```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```"))
 
-  // A dialect nobody has ever emitted. Nothing in the detector names it; it is
-  // caught because it is SHAPED like an invocation.
-  __io_println(shapes("<perform_action>\nlook({ file: \"a.rs\" })\n</perform_action>")[0])
+  // A dialect invented for this test. Nothing in the detector names it; it is
+  // caught because it is SHAPED like an invocation. This is the case that makes
+  // the fix a class-kill rather than one more allowlist entry.
+  __io_println(shapes("```\n<perform_action>\nlook({ file: \"a.rs\" })\n</perform_action>\n```"))
 
-  // The bare/native JSON family: a tool named alongside its arguments.
-  __io_println(shapes("{\"name\": \"look\", \"arguments\": {\"file\": \"a.rs\"}}")[0])
+  // The bare/native JSON family, spread across lines inside a fence.
+  __io_println(shapes("```\n{\n  \"name\": \"look\",\n  \"arguments\": { \"file\": \"a.rs\" }\n}\n```"))
 
-  // Prose ABOUT the protocol carries no arguments and must not fire.
-  __io_println(len(shapes("I will wrap every call in <tool_call> tags from now on.")))
-  __io_println(len(shapes("The tool_call wrapper is required for each invocation.")))
+  // Fenced source code is not an invocation.
+  __io_println(shapes("```rust\nfn main() { println!(\"hi\"); }\n```"))
+  __io_println(shapes("```html\n<div class=\"x\">hello</div>\n```"))
 
-  // A well-formed call is parsed, so nothing is dropped and nothing is flagged.
+  // Prose about the protocol carries no arguments and must not fire.
+  __io_println(shapes("<assistant_prose>Wrap every call in <tool_call> tags.</assistant_prose>"))
+
+  // A well-formed call parses, so there is nothing to flag.
   const good = agent_parse_tool_calls(
-    "<tool_call>\nlook({ file: \"src/main.rs\" })\n</tool_call>",
+    "<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>",
     nil,
     "text",
   )
   __io_println(len(good.tool_calls))
-  __io_println(len(tool_shape_findings(good.dropped)))
+  __io_println(shapes("<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>"))
 }
