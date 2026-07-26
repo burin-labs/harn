@@ -672,7 +672,7 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/stdlib/triggers_stdlib.rs"
+path = "src/stdlib/triggers_stdlib/auto_resume.rs"
 statics = ["AUTO_RESUME_TIMEOUTS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
