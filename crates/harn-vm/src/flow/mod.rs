@@ -41,11 +41,11 @@ pub use predicates::{
     DiscoveryDiagnostic, DiscoveryDiagnosticSeverity, EditAuthor, EvidenceItem,
     InvariantBlockError, InvariantResult, ParsedInvariantFile, PredicateCeiling,
     PredicateCeilingLevel, PredicateCeilingOutcome, PredicateCeilingViolation, PredicateContext,
-    PredicateEvaluation, PredicateExecutionRecord, PredicateExecutionReport, PredicateExecutor,
-    PredicateExecutorConfig, PredicateKind, PredicateRunner, PredicateSchedulerConfig,
-    PredicateSource, Remediation, ResolvedPredicate, SemanticReplayAuditMetadata, Verdict,
-    VerdictStrictness, DEFAULT_MAINTAINER_ROLE, INVARIANTS_FILE, META_INVARIANTS_FILE,
-    PREDICATE_COUNT_EXPLOSION_CODE,
+    PredicateEvaluation, PredicateExecutionRecord, PredicateExecutionReport,
+    PredicateExecutionSkip, PredicateExecutor, PredicateExecutorConfig, PredicateKind,
+    PredicateRunner, PredicateSchedulerConfig, PredicateSource, Remediation, ResolvedPredicate,
+    SemanticFallbackPolicy, SemanticReplayAuditMetadata, Verdict, VerdictStrictness,
+    DEFAULT_MAINTAINER_ROLE, INVARIANTS_FILE, META_INVARIANTS_FILE, PREDICATE_COUNT_EXPLOSION_CODE,
 };
 pub use slice::{
     derive_slice, Approval, CoverageMap, PredicateHash, Slice, SliceDerivationError,

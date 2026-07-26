@@ -147,6 +147,7 @@ mod tests {
                 name: name.to_string(),
                 kind: PredicateKind::Deterministic,
                 fallback: None,
+                fallback_policy: crate::flow::SemanticFallbackPolicy::Enforce,
                 archivist: None,
                 retroactive,
                 source_hash: PredicateHash::new(hash),

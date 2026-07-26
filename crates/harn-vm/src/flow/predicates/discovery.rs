@@ -14,7 +14,7 @@ use harn_lexer::{Lexer, Span};
 use harn_parser::{peel_attributes, Attribute, AttributeArg, Node, Parser};
 use sha2::{Digest, Sha256};
 
-use super::executor::PredicateKind;
+use super::executor::{PredicateKind, SemanticFallbackPolicy};
 use crate::flow::slice::PredicateHash;
 
 /// Filename used for per-directory Flow invariant declarations.
@@ -47,6 +47,9 @@ pub struct DiscoveredPredicate {
     /// For `@semantic` predicates, the named deterministic predicate that
     /// carries the replayable enforcement path.
     pub fallback: Option<String>,
+    /// Whether the fallback enforces a deterministic lower bound or is
+    /// retained only as replay/audit evidence.
+    pub fallback_policy: SemanticFallbackPolicy,
     /// Optional Archivist provenance block.
     pub archivist: Option<ArchivistMetadata>,
     /// Advisory historical flag — predicates that legalise existing state
@@ -239,6 +242,11 @@ fn predicate_from_attributes(
         .iter()
         .find(|a| a.name == "semantic")
         .and_then(parse_semantic_fallback);
+    let fallback_policy = attrs
+        .iter()
+        .find(|a| a.name == "semantic")
+        .map(|attr| parse_semantic_fallback_policy(attr, name, span, diagnostics))
+        .unwrap_or_default();
     if kind == PredicateKind::Semantic && fallback.is_none() {
         diagnostics.push(DiscoveryDiagnostic {
             severity: DiagnosticSeverity::Error,
@@ -255,6 +263,7 @@ fn predicate_from_attributes(
         name: name.to_string(),
         kind,
         fallback,
+        fallback_policy,
         archivist,
         retroactive,
         source_hash,
@@ -268,6 +277,37 @@ fn parse_semantic_fallback(attr: &Attribute) -> Option<String> {
         .find(|arg| arg.name.as_deref() == Some("fallback"))
         .or_else(|| attr.args.iter().find(|arg| arg.name.is_none()))
         .and_then(identifier_or_string_arg)
+}
+
+fn parse_semantic_fallback_policy(
+    attr: &Attribute,
+    predicate_name: &str,
+    span: Span,
+    diagnostics: &mut Vec<DiscoveryDiagnostic>,
+) -> SemanticFallbackPolicy {
+    let Some(value) = attr
+        .args
+        .iter()
+        .find(|arg| arg.name.as_deref() == Some("policy"))
+        .and_then(identifier_or_string_arg)
+    else {
+        return SemanticFallbackPolicy::Enforce;
+    };
+    match value.as_str() {
+        "enforce" => SemanticFallbackPolicy::Enforce,
+        "advisory" => SemanticFallbackPolicy::Advisory,
+        _ => {
+            diagnostics.push(DiscoveryDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                message: format!(
+                    "semantic predicate `{predicate_name}` has unsupported fallback policy \
+                     `{value}`; expected `enforce` or `advisory`"
+                ),
+                span: Some(span),
+            });
+            SemanticFallbackPolicy::Enforce
+        }
+    }
 }
 
 fn validate_semantic_fallbacks(files: &mut [DiscoveredInvariantFile]) {
@@ -550,6 +590,30 @@ fn fallback_check(slice) -> bool { return true }
         assert_eq!(pred.kind, PredicateKind::Semantic);
         assert_eq!(pred.fallback.as_deref(), Some("fallback_check"));
         assert!(pred.retroactive);
+    }
+
+    #[test]
+    fn parse_recognises_advisory_fallback_policy() {
+        let source = r#"
+@invariant
+@semantic(fallback: "fallback_check", policy: "advisory")
+@archivist(evidence: ["https://x"], confidence: 0.5)
+fn check(slice) -> bool { return true }
+
+@invariant
+@deterministic
+@archivist(evidence: ["https://x"])
+fn fallback_check(slice) -> bool { return true }
+"#;
+        let parsed = parse_invariants_source(source);
+        assert!(parsed
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != DiagnosticSeverity::Error));
+        assert_eq!(
+            parsed.predicates[0].fallback_policy,
+            SemanticFallbackPolicy::Advisory
+        );
     }
 
     #[test]
