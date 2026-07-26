@@ -53,7 +53,7 @@ fn model_execution_contract_to_vm_value(contract: &llm_config::ModelExecutionCon
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::super::llm_model_defaults_builtin;
+    use super::super::selection_builtins::llm_model_defaults_builtin;
     use super::*;
 
     #[test]
