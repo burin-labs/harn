@@ -192,7 +192,17 @@ fn discover_rule_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     let mut out = Vec::new();
     let mut walker = WalkBuilder::new(root);
-    walker.git_ignore(true).require_git(false);
+    // Skip decisions belong to `harn_vm::ignore_policy`, which is the only
+    // configuration that bounds the `ignore` crate's upward search at the
+    // repository root. Setting `require_git(false)` here left that search
+    // unbounded, so an ignore file above the checkout could hide a project's
+    // own rule files. Hidden entries stay skipped, as they were before.
+    let _ = harn_vm::ignore_policy::configure(
+        &mut walker,
+        root,
+        harn_vm::ignore_policy::IgnorePolicy::Project,
+        false,
+    );
     for entry in walker.build().filter_map(Result::ok) {
         let path = entry.path();
         if entry.file_type().is_some_and(|t| t.is_file())

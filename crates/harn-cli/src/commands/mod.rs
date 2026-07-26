@@ -106,6 +106,7 @@ pub(crate) mod workflow;
 
 use std::path::{Path, PathBuf};
 
+use harn_vm::ignore_policy::{self, IgnorePolicy};
 use ignore::WalkBuilder;
 
 /// Nearest-rank percentile over a pre-sorted slice. `quantile` is clamped to
@@ -195,26 +196,36 @@ fn collect_source_targets_dir(
 ) {
     let root = dir.to_path_buf();
     let mut walker = WalkBuilder::new(dir);
-    walker
-        .hidden(false)
-        .ignore(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .require_git(false)
-        .parents(true)
-        .follow_links(false)
-        .filter_entry(move |entry| {
-            let path = entry.path();
-            if path == root {
-                return true;
-            }
-            if path.is_dir() {
-                !should_skip_recursive_source_dir(path)
-            } else {
-                !should_skip_recursive_source_file(path)
-            }
-        });
+    // `harn_vm::ignore_policy` owns what a Harn walk skips, and this walk is
+    // no exception even though it enumerates lint targets rather than user
+    // data. Configuring the `ignore` crate here by hand is what broke it: the
+    // crate's upward search for ignore files is only bounded when a
+    // repository anchors it, so `require_git(false)` plus `parents(true)` let
+    // a `.gitignore` *above* the checkout decide which of the project's own
+    // sources exist. A repository cloned under an ignoring parent — an agent
+    // worktree beneath `~/.cursor`, whose `.gitignore` is `*` — enumerated as
+    // empty, so every directory target expanded to nothing.
+    //
+    // Hidden entries stay visible: `.github/` and friends hold real sources,
+    // and dotfile filtering is a separate axis from the ignore stack.
+    //
+    // A configuration error means only that the built-in directory layer
+    // could not be materialized. This function has no error channel, and the
+    // walk is already correct without that layer — it would over-include some
+    // build directories, which the caller then reports on and a reader can
+    // see. Returning nothing is the failure worth avoiding.
+    let _ = ignore_policy::configure(&mut walker, dir, IgnorePolicy::Project, true);
+    walker.follow_links(false).filter_entry(move |entry| {
+        let path = entry.path();
+        if path == root {
+            return true;
+        }
+        if path.is_dir() {
+            !should_skip_recursive_source_dir(path)
+        } else {
+            !should_skip_recursive_source_file(path)
+        }
+    });
 
     for entry in walker.build().filter_map(Result::ok) {
         let path = entry.path();
