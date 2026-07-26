@@ -113,32 +113,45 @@ mod tests {
     /// that no longer means anything to the engine would otherwise keep its
     /// highlight forever.
     ///
-    /// Recognition is proved two ways: the openers by parsing a well-formed
-    /// block, the enders by the *specific* "unexpected" diagnostic the parser
-    /// raises for a stray closer. A word the parser did not know would instead
-    /// parse as a bare interpolation and produce no error at all.
+    /// Recognition is proved two ways: a well-formed block, which only parses
+    /// if every keyword in it means what it claims; and, for the closers, the
+    /// *specific* "unexpected" diagnostic the parser raises for a stray one. A
+    /// word the parser did not know would instead parse as a bare interpolation
+    /// and produce no error at all.
+    ///
+    /// The proofs are checked to cover `BLOCK_KEYWORDS` exhaustively, so
+    /// declaring a keyword the engine does not implement — which would give it
+    /// editor highlighting it has not earned — fails here.
     #[test]
     fn parser_recognizes_every_block_keyword() {
-        for (keyword, well_formed) in [
-            ("if", "{{ if true }}x{{ end }}"),
-            ("elif", "{{ if false }}x{{ elif true }}y{{ end }}"),
-            ("else", "{{ if false }}x{{ else }}y{{ end }}"),
-            ("for", "{{ for x in items }}{{ x }}{{ end }}"),
-            ("include", "{{ include \"other.prompt\" }}"),
-            ("section", "{{ section \"task\" }}body{{ endsection }}"),
-            ("raw", "{{ raw }}{{ not a directive }}{{ endraw }}"),
+        let mut proved: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+
+        // Each source parses only if all the keywords it is credited with are
+        // live. `{{ raw }}` covers `endraw` too: an unknown terminator would
+        // leave the block unterminated, which is an error.
+        for (keywords, well_formed) in [
+            (&["if", "end"][..], "{{ if true }}x{{ end }}"),
+            (&["elif"][..], "{{ if false }}x{{ elif true }}y{{ end }}"),
+            (&["else"][..], "{{ if false }}x{{ else }}y{{ end }}"),
+            (&["for"][..], "{{ for x in items }}{{ x }}{{ end }}"),
+            // `include` resolves its target at render time, so a missing file
+            // is not a syntax error here.
+            (&["include"][..], "{{ include \"other.prompt\" }}"),
+            (
+                &["section", "endsection"][..],
+                "{{ section \"task\" }}body{{ endsection }}",
+            ),
+            (
+                &["raw", "endraw"][..],
+                "{{ raw }}{{ not a directive }}{{ endraw }}",
+            ),
         ] {
-            assert!(
-                BLOCK_KEYWORDS.contains(&keyword),
-                "`{keyword}` exercised but not declared"
-            );
             let result = validate_template_syntax(well_formed);
-            // `include` resolves its target at render time, not parse time, so
-            // a missing file is not a syntax error here.
             assert!(
                 result.is_ok(),
-                "declared keyword `{keyword}` failed to parse: {result:?}"
+                "declared keyword(s) {keywords:?} failed to parse: {result:?}"
             );
+            proved.extend(keywords);
         }
 
         for (keyword, stray) in [
@@ -147,10 +160,6 @@ mod tests {
             ("else", "{{ else }}"),
             ("elif", "{{ elif true }}"),
         ] {
-            assert!(
-                BLOCK_KEYWORDS.contains(&keyword),
-                "`{keyword}` exercised but not declared"
-            );
             let Err(err) = validate_template_syntax(stray) else {
                 panic!("a stray `{keyword}` should not parse");
             };
@@ -158,7 +167,15 @@ mod tests {
                 err.contains(keyword),
                 "stray `{keyword}` did not raise a keyword-specific error: {err}"
             );
+            proved.insert(keyword);
         }
+
+        let declared: std::collections::BTreeSet<&str> = BLOCK_KEYWORDS.iter().copied().collect();
+        assert_eq!(
+            declared, proved,
+            "every declared block keyword needs a case proving the engine still \
+             implements it, and every case needs its keyword declared"
+        );
     }
 
     /// `in` and `with` must still be the words that split a block header.
