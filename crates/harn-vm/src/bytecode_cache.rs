@@ -67,7 +67,9 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// contract shared by the module graph and runtime.
 /// v8: entry-chunk payload carries a [`ContextManifest`] so a warm lookup can
 /// prove the import graph is unchanged with stats instead of re-walking it.
-pub const SCHEMA_VERSION: u32 = 8;
+/// v9: each manifest file records its source digest, so a validated manifest
+/// doubles as a link table and module loading can skip re-reading the graph.
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -127,6 +129,18 @@ impl LookupOutcome {
     pub fn store(&self, chunk: &Chunk) -> io::Result<()> {
         store(&self.key, chunk, self.manifest.as_ref())
     }
+
+    /// Resolve this lookup's manifest into the link plan for the graph it
+    /// describes, or `None` when there is nothing to plan from.
+    ///
+    /// Only a manifest that re-checked clean yields a table, so callers cannot
+    /// hand a VM a plan built from observations that were never validated.
+    pub fn link_table(&self) -> Option<Arc<crate::context_manifest::GraphLinkTable>> {
+        self.manifest
+            .as_ref()
+            .and_then(crate::context_manifest::GraphLinkTable::resolve)
+            .map(Arc::new)
+    }
 }
 
 /// Cache key components for a single pipeline source. Equality of all
@@ -166,8 +180,19 @@ impl CacheKey {
     /// Diagnostic paths are rebound when the artifact is loaded, so adjacent
     /// and packaged artifacts remain relocatable without aliasing attribution.
     pub fn from_module_source(source: &ModuleSource) -> Self {
+        Self::from_module_sha256(source.sha256())
+    }
+
+    /// As [`from_module_source`](Self::from_module_source), but from a digest
+    /// recorded earlier instead of bytes in hand.
+    ///
+    /// The digest is the only part of a module key that depends on the file;
+    /// everything else is process-global. That asymmetry is what lets a
+    /// validated [`crate::context_manifest::GraphLinkTable`] name a module's
+    /// artifact without the file being read again.
+    pub fn from_module_sha256(source_hash: [u8; 32]) -> Self {
         Self {
-            source_hash: source.sha256(),
+            source_hash,
             context_hash: module_compilation_context_hash(),
             harn_version: HARN_VERSION,
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
@@ -385,7 +410,16 @@ pub fn store_at(path: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
 /// Look up the [`ModuleArtifact`] for `source_path` (whose contents are
 /// `source`). Mirrors [`load`] but for the `.harnmod` family.
 pub fn load_module(source_path: &Path, source: &ModuleSource) -> ModuleLookupOutcome {
-    let key = CacheKey::from_module_source(source);
+    load_module_for_key(source_path, CacheKey::from_module_source(source))
+}
+
+/// As [`load_module`], but for a key already known without reading the source.
+///
+/// Returns the artifact if one is on disk under `key`, and `None` otherwise —
+/// including when the artifact was evicted. A caller that gets `None` must fall
+/// back to reading and compiling; a known key is a shortcut to the artifact, not
+/// a promise that one exists.
+pub fn load_module_for_key(source_path: &Path, key: CacheKey) -> ModuleLookupOutcome {
     if !cache_enabled() {
         return ModuleLookupOutcome {
             key,
@@ -855,7 +889,7 @@ fn hash_transitive_user_imports_fingerprinted(
                         content: Arc::clone(module.text()),
                     },
                 );
-                match ManifestFile::observe(&canonical) {
+                match ManifestFile::observe(&canonical, module.sha256()) {
                     Some(file) => {
                         if let Some(m) = manifest.as_mut() {
                             m.files.push(file);

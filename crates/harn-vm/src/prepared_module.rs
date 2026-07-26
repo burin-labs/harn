@@ -14,7 +14,6 @@ use parking_lot::Mutex;
 
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::module_artifact::{ModuleArtifact, ModuleImportSpec};
-use crate::module_source::ModuleSource;
 
 const DEFAULT_MAX_ENTRIES: usize = 512;
 
@@ -69,10 +68,15 @@ struct PreparedModuleCacheKey {
 }
 
 impl PreparedModuleCacheKey {
-    fn new(canonical_path: PathBuf, source: &ModuleSource) -> Self {
+    /// `source_hash` is the same SHA-256 that names the module's on-disk
+    /// artifact. Keying on it rather than a second digest of the same bytes
+    /// means a warm module load hashes its source at most once, and lets a
+    /// caller holding a recorded digest look up a prepared artifact without
+    /// having the bytes at all.
+    fn new(canonical_path: PathBuf, source_hash: [u8; 32]) -> Self {
         Self {
             canonical_path,
-            source_hash: source.blake3(),
+            source_hash,
             harn_version: crate::bytecode_cache::HARN_VERSION,
             codegen_fingerprint: crate::bytecode_cache::CODEGEN_FINGERPRINT,
             optimizations_enabled: crate::compiler::CompilerOptions::from_env()
@@ -143,9 +147,9 @@ impl PreparedModuleCache {
     pub(crate) fn get(
         &self,
         canonical_path: &Path,
-        source: &ModuleSource,
+        source_hash: [u8; 32],
     ) -> Option<Arc<PreparedModuleArtifact>> {
-        let key = PreparedModuleCacheKey::new(canonical_path.to_path_buf(), source);
+        let key = PreparedModuleCacheKey::new(canonical_path.to_path_buf(), source_hash);
         let mut inner = self.inner.lock();
         let artifact = inner.entries.get(&key).cloned();
         if artifact.is_some() {
@@ -159,10 +163,10 @@ impl PreparedModuleCache {
     pub(crate) fn insert(
         &self,
         canonical_path: PathBuf,
-        source: &ModuleSource,
+        source_hash: [u8; 32],
         artifact: Arc<PreparedModuleArtifact>,
     ) -> Arc<PreparedModuleArtifact> {
-        let key = PreparedModuleCacheKey::new(canonical_path, source);
+        let key = PreparedModuleCacheKey::new(canonical_path, source_hash);
         let mut inner = self.inner.lock();
         if let Some(existing) = inner.entries.get(&key) {
             return Arc::clone(existing);
@@ -186,6 +190,7 @@ impl PreparedModuleCache {
 mod tests {
     use super::*;
     use crate::module_artifact::compile_module_artifact_from_source;
+    use crate::module_source::ModuleSource;
     use harn_parser::TypeExpr;
 
     fn named_list_element(type_expr: &Option<TypeExpr>) -> &str {
@@ -216,16 +221,18 @@ mod tests {
         let first_source = ModuleSource::from_text("pub fn first() { 1 }");
         let second_source = ModuleSource::from_text("pub fn second() { 2 }");
         let first = empty_artifact();
-        let _ = cache.insert(PathBuf::from("first.harn"), &first_source, first);
+        let _ = cache.insert(PathBuf::from("first.harn"), first_source.sha256(), first);
         let _ = cache.insert(
             PathBuf::from("second.harn"),
-            &second_source,
+            second_source.sha256(),
             empty_artifact(),
         );
 
-        assert!(cache.get(Path::new("first.harn"), &first_source).is_none());
         assert!(cache
-            .get(Path::new("second.harn"), &second_source)
+            .get(Path::new("first.harn"), first_source.sha256())
+            .is_none());
+        assert!(cache
+            .get(Path::new("second.harn"), second_source.sha256())
             .is_some());
         assert_eq!(cache.stats().evictions, 1);
         assert_eq!(cache.stats().entries, 1);
@@ -234,8 +241,10 @@ mod tests {
     #[test]
     fn cache_key_separates_compiler_configuration() {
         let path = PathBuf::from("module.harn");
-        let key =
-            PreparedModuleCacheKey::new(path, &ModuleSource::from_text("pub fn value() { 1 }"));
+        let key = PreparedModuleCacheKey::new(
+            path,
+            ModuleSource::from_text("pub fn value() { 1 }").sha256(),
+        );
         let mut other_compiler = key.clone();
         other_compiler.optimizations_enabled = !key.optimizations_enabled;
 
@@ -249,7 +258,7 @@ mod tests {
         let source = ModuleSource::from_text("pub fn value() { 1 }");
         let artifact = empty_artifact();
         let weak = Arc::downgrade(&artifact);
-        let _ = cache.insert(path, &source, artifact);
+        let _ = cache.insert(path, source.sha256(), artifact);
         let clone = cache.clone();
 
         drop(cache);

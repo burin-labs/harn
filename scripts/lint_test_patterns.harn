@@ -283,6 +283,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/portal/dlq.rs",
   "crates/harn-cli/src/commands/portal/run_analysis.rs",
   "crates/harn-cli/src/commands/portal/util.rs",
+  // `harn time run` reports how long each load phase actually took, so the
+  // host wall clock is the measurement itself rather than a proxy for one.
+  // Split out of the allowlisted `run/mod.rs` alongside the phase timings.
+  "crates/harn-cli/src/commands/run/chunk_loading.rs",
   "crates/harn-cli/src/commands/run/mod.rs",
   // The script MCP HTTP server bounds how long a queued server-to-client
   // request may wait for a real network client to open its event stream

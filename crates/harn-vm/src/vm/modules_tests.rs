@@ -786,3 +786,89 @@ fn an_edited_dependency_is_re_read_rather_than_served_from_the_shared_owner() {
         );
     });
 }
+
+/// Seed `temp` with an entry importing one dependency, run it once cold so both
+/// the entry manifest and the dependency's module artifact are on disk, and
+/// return the entry path with its source.
+///
+/// This is the state every warm spawn starts from, produced the way the run
+/// path produces it rather than hand-assembled, so the digests the manifest
+/// records are the ones the module cache was actually keyed on.
+async fn seed_warm_cache(temp: &Path) -> (PathBuf, String) {
+    let entry = temp.join("entry.harn");
+    std::fs::write(
+        &entry,
+        "import { value } from \"./value\"\n__io_println(\"x\")\n",
+    )
+    .expect("write entry");
+    std::fs::write(temp.join("value.harn"), "pub fn value() { return 1 }\n")
+        .expect("write dependency");
+
+    let entry_source = std::fs::read_to_string(&entry).expect("read entry");
+    let cold = bytecode_cache::load(&entry, &entry_source);
+    assert!(cold.chunk.is_none(), "a fresh cache cannot hold this entry");
+    cold.store(&crate::compile_source(&entry_source).expect("entry compiles"))
+        .expect("store entry chunk and manifest");
+
+    let mut vm = Vm::new();
+    vm.set_source_dir(temp);
+    vm.execute_import("./value", None)
+        .await
+        .expect("cold import succeeds");
+
+    (entry, entry_source)
+}
+
+#[test]
+fn a_planned_module_loads_without_reading_its_source() {
+    // Proving a negative — "the file was not read" — which no output can show:
+    // a planned load and a read-and-compile load produce the same module by
+    // construction, since the plan's digest describes the bytes on disk. Only
+    // the work differs, so only a counter can separate them.
+    //
+    // The second half is the falsifier. Without it this test would still pass
+    // if the fast path silently stopped being taken, because zero reads and
+    // "no module was loaded at all" look identical from here.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    runtime.block_on(async {
+        let (entry, entry_source) = seed_warm_cache(temp.path()).await;
+
+        let warm = bytecode_cache::load(&entry, &entry_source);
+        assert!(warm.chunk.is_some(), "the seeded entry must hit the cache");
+        let link_table = warm
+            .link_table()
+            .expect("a cache hit on an unchanged graph must resolve into a plan");
+
+        let before = module_source::SOURCE_READS.with(|c| c.get());
+        let mut planned_vm = Vm::new();
+        planned_vm.set_source_dir(temp.path());
+        planned_vm.set_graph_link_table(Some(link_table));
+        planned_vm
+            .execute_import("./value", None)
+            .await
+            .expect("planned import succeeds");
+        assert_eq!(
+            module_source::SOURCE_READS.with(|c| c.get()),
+            before,
+            "a module named by the link plan must load without reading its source"
+        );
+
+        let before = module_source::SOURCE_READS.with(|c| c.get());
+        let mut unplanned_vm = Vm::new();
+        unplanned_vm.set_source_dir(temp.path());
+        unplanned_vm
+            .execute_import("./value", None)
+            .await
+            .expect("unplanned import succeeds");
+        assert!(
+            module_source::SOURCE_READS.with(|c| c.get()) > before,
+            "without a plan the same import must fall back to reading the file, \
+             or this test cannot tell the fast path from an import that never ran"
+        );
+    });
+}

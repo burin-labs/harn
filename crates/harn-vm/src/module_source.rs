@@ -31,7 +31,6 @@ use sha2::{Digest, Sha256};
 pub struct ModuleSource {
     text: Arc<str>,
     sha256: OnceLock<[u8; 32]>,
-    blake3: OnceLock<[u8; 32]>,
     imports: OnceLock<Vec<Arc<str>>>,
 }
 
@@ -44,7 +43,6 @@ impl ModuleSource {
         Self {
             text: text.into(),
             sha256: OnceLock::new(),
-            blake3: OnceLock::new(),
             imports: OnceLock::new(),
         }
     }
@@ -67,13 +65,6 @@ impl ModuleSource {
             hasher.update(self.text.as_bytes());
             hasher.finalize().into()
         })
-    }
-
-    /// BLAKE3 over the source bytes — the prepared-module cache key digest.
-    pub(crate) fn blake3(&self) -> [u8; 32] {
-        *self
-            .blake3
-            .get_or_init(|| *blake3::hash(self.text.as_bytes()).as_bytes())
     }
 
     /// User (non-stdlib) import paths mentioned by this source, in source
@@ -151,6 +142,16 @@ pub(crate) fn canonical_identity(path: &Path) -> PathBuf {
     }
 }
 
+// A module loaded from the link plan and one loaded by reading its file produce
+// the same module — the plan's digest describes the bytes on disk, so nothing in
+// the result tells them apart. Only whether the file was consulted at all
+// differs, and this counts it. Thread-local so tests running in parallel cannot
+// perturb each other's counts.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SOURCE_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Read `path`'s module source, reusing the process-wide memo when the file is
 /// unchanged since it was last read.
 ///
@@ -160,6 +161,9 @@ pub(crate) fn canonical_identity(path: &Path) -> PathBuf {
 /// reads of a file version this process has already seen. I/O errors are never
 /// memoized: a transient failure must not become sticky.
 pub(crate) fn read(path: &Path) -> io::Result<Arc<ModuleSource>> {
+    #[cfg(test)]
+    SOURCE_READS.with(|c| c.set(c.get() + 1));
+
     let path = canonical_identity(path);
     let Some((len, mtime_ns)) = stat_identity(&path) else {
         // No stat (the file vanished between resolve and read): read directly
@@ -430,16 +434,10 @@ mod tests {
         let text = source.as_str().to_string();
 
         assert_eq!(source.sha256(), source.sha256());
-        assert_eq!(source.blake3(), source.blake3());
         assert_eq!(
             source.sha256(),
             <[u8; 32]>::from(Sha256::digest(text.as_bytes())),
             "the memoized digest must equal a direct SHA-256 of the same bytes"
-        );
-        assert_eq!(
-            source.blake3(),
-            *blake3::hash(text.as_bytes()).as_bytes(),
-            "the memoized digest must equal a direct BLAKE3 of the same bytes"
         );
         assert_eq!(source.imports(), [Arc::<str>::from("./dep")]);
     }

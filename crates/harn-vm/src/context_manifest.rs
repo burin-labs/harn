@@ -18,6 +18,7 @@
 //! Zig and Bazel gate their warm paths. The accepted gap is identical to
 //! theirs: an edit that preserves both length and mtime is not noticed.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,15 @@ pub struct ManifestFile {
     pub path: PathBuf,
     pub len: u64,
     pub mtime_ns: i128,
+    /// SHA-256 of this file's bytes — the only per-file component of its module
+    /// artifact's cache key. The rest of that key (compiler context, release,
+    /// option tag) is process-global and derivable without touching the file.
+    ///
+    /// Recording it is what turns a validated manifest into a link table: the
+    /// walk has already read and hashed every file, so a later spawn can go
+    /// straight from canonical path to artifact instead of re-reading 5.7 MB of
+    /// source to rediscover hashes this walk already computed.
+    pub source_sha256: [u8; 32],
     /// Extensionless sibling that would shadow this file if it appeared.
     ///
     /// `resolve_local_import` probes `base.join(import)` *before* appending
@@ -92,15 +102,60 @@ impl ContextManifest {
     }
 }
 
+/// A validated manifest, resolved into path → module identity lookups.
+///
+/// This is the plan a spawn executes against. It exists only for a manifest
+/// that has already been proven current, so every entry is a file whose bytes
+/// are known unchanged since the walk hashed them — which is what makes it safe
+/// to load that file's module artifact without reading the file.
+///
+/// Built once per spawn and consulted once per module, so it indexes by path
+/// rather than rescanning the manifest's file list on each lookup.
+#[derive(Debug, Default)]
+pub struct GraphLinkTable {
+    source_sha256_by_path: BTreeMap<PathBuf, [u8; 32]>,
+}
+
+impl GraphLinkTable {
+    /// Resolve `manifest` into a link table, or `None` unless it is still valid.
+    ///
+    /// Validity is checked here rather than trusted from the caller: a link
+    /// table is a claim that these paths hold these bytes, and nothing else in
+    /// the system re-checks it before an artifact is loaded on its word.
+    pub fn resolve(manifest: &ContextManifest) -> Option<Self> {
+        if !manifest.still_valid() {
+            return None;
+        }
+        Some(Self {
+            source_sha256_by_path: manifest
+                .files
+                .iter()
+                .map(|file| (file.path.clone(), file.source_sha256))
+                .collect(),
+        })
+    }
+
+    /// The recorded digest of `canonical`, or `None` when this graph does not
+    /// contain it — in which case the caller must fall back to reading the file.
+    pub fn source_sha256(&self, canonical: &Path) -> Option<[u8; 32]> {
+        self.source_sha256_by_path.get(canonical).copied()
+    }
+}
+
 impl ManifestFile {
     /// Record `path` as observed on disk now, or `None` if it cannot be stat'ed
     /// — a file we cannot describe is one we must not claim is unchanged.
-    pub fn observe(path: &Path) -> Option<Self> {
+    ///
+    /// `source_sha256` is the digest of the bytes the caller just read for this
+    /// path. It is passed in rather than recomputed here so the manifest can
+    /// never disagree with the content the walk actually folded into the key.
+    pub fn observe(path: &Path, source_sha256: [u8; 32]) -> Option<Self> {
         let (len, mtime_ns) = module_source::stat_identity(path)?;
         Some(Self {
             path: path.to_path_buf(),
             len,
             mtime_ns,
+            source_sha256,
             shadow: shadow_path(path),
         })
     }
@@ -152,11 +207,15 @@ mod tests {
         std::fs::write(path, body).unwrap();
     }
 
+    fn digest_of(path: &Path) -> [u8; 32] {
+        module_source::read(path).expect("read").sha256()
+    }
+
     fn manifest_for(paths: &[PathBuf]) -> ContextManifest {
         ContextManifest {
             files: paths
                 .iter()
-                .map(|p| ManifestFile::observe(p).expect("observe"))
+                .map(|p| ManifestFile::observe(p, digest_of(p)).expect("observe"))
                 .collect(),
             unresolved: Vec::new(),
             unreadable: Vec::new(),
@@ -248,6 +307,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let odd = tmp.path().join("dep");
         write(&odd, "pub fn v() -> int { return 1 }\n");
-        assert_eq!(ManifestFile::observe(&odd).unwrap().shadow, None);
+        assert_eq!(
+            ManifestFile::observe(&odd, digest_of(&odd)).unwrap().shadow,
+            None
+        );
     }
 }
