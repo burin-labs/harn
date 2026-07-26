@@ -495,7 +495,7 @@ fn resolve_region(override_region: Option<&str>) -> Result<String, VmError> {
     ))
 }
 
-async fn resolve_live_region(override_region: Option<&str>) -> Result<String, VmError> {
+pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result<String, VmError> {
     if let Some(region) = override_region {
         let trimmed = region.trim();
         if !trimmed.is_empty() {
@@ -520,7 +520,7 @@ async fn resolve_live_region(override_region: Option<&str>) -> Result<String, Vm
         })
 }
 
-async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentials, VmError> {
+pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentials, VmError> {
     let provider = DefaultCredentialsChain::builder()
         .region(Region::new(region.to_string()))
         .build()

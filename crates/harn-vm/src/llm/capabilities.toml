@@ -59,7 +59,7 @@
 #   batch_wire_format:
 #                     provider batch request/result family. Known values:
 #                     openai, anthropic_messages, gemini, mistral, fireworks,
-#                     xai.
+#                     xai, bedrock.
 #   batch_input_mode:
 #                     how work is submitted: jsonl_file, inline_requests, or
 #                     jsonl_or_inline.
@@ -334,6 +334,21 @@ batch_operational_notes = [
   "Use stable custom_id values to rejoin unordered output and error rows.",
 ]
 top_k_supported = false
+
+[provider_defaults.bedrock]
+batch_wire_format = "bedrock"
+batch_input_mode = "jsonl_file"
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Batch input and output artifacts are stored in caller-owned Amazon S3 locations.",
+  "Harn resolves AWS credentials through the maintained AWS SDK credential chain and never persists credential values in receipts.",
+]
+batch_operational_notes = [
+  "A Bedrock batch job requires a service role ARN plus typed input and output S3 URIs in the same region as the selected model.",
+  "Harn derives clientRequestToken from the durable operation identity so an ambiguous create response can be retried safely.",
+]
 
 [provider_defaults.azure_openai]
 batch_wire_format = "openai"
@@ -5155,9 +5170,21 @@ thinking_block_style = "none"
 # come before the broader `*claude*` fallback so the canonical Bedrock
 # model identifiers pick up the anthropic wire-format fields.
 [[provider.bedrock]]
+model_match = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+extends = true
+batch_api = true
+batch_regions = ["us-east-1", "us-west-2"]
+
+[[provider.bedrock]]
+model_match = "meta.llama3-1-70b-instruct-v1:0"
+extends = true
+batch_api = true
+batch_regions = ["us-west-2"]
+
+[[provider.bedrock]]
 model_match = "anthropic.claude-*"
 native_tools = true
-batch_api = true
+batch_api = false
 preferred_tool_format = "native"
 message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
@@ -5178,7 +5205,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*claude*"
 native_tools = true
-batch_api = true
+batch_api = false
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 # Bedrock Converse has only a top-level `system[]` field — no positional system
@@ -5197,7 +5224,7 @@ thinking_block_style = "thinking_blocks"
 [[provider.bedrock]]
 model_match = "*"
 native_tools = true
-batch_api = true
+batch_api = false
 preferred_tool_format = "native"
 recommended_endpoint = "/model/{model}/converse"
 # Bedrock Converse has only a top-level `system[]` field — no positional system

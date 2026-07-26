@@ -646,7 +646,7 @@ path = "/models"
 # AWS Bedrock — resolves credentials through env, profile, container, or
 # EC2 instance roles, then signs Converse API calls with SigV4.
 [providers.bedrock]
-base_url = ""
+base_url = "https://bedrock-runtime.{region}.amazonaws.com"
 base_url_env = "BEDROCK_BASE_URL"
 auth_style = "aws_sigv4"
 credential_resolution = "platform_managed"

@@ -143,7 +143,7 @@
       "display_name": "Bedrock",
       "classification": "hosted",
       "endpoint": {
-        "base_url": "",
+        "base_url": "https://bedrock-runtime.{region}.amazonaws.com",
         "base_url_env": "BEDROCK_BASE_URL",
         "chat_endpoint": "/model/{model}/converse"
       },
@@ -4627,6 +4627,157 @@
         "tool_use",
         "reasoning",
         "long_context"
+      ]
+    },
+    {
+      "id": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "name": "Claude Sonnet 4.5 (Amazon Bedrock)",
+      "provider": "bedrock",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "bedrock",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "security_notes": [
+          "Batch input and output artifacts are stored in caller-owned Amazon S3 locations.",
+          "Harn resolves AWS credentials through the maintained AWS SDK credential chain and never persists credential values in receipts."
+        ],
+        "operational_notes": [
+          "A Bedrock batch job requires a service role ARN plus typed input and output S3 URIs in the same region as the selected model.",
+          "Harn derives clientRequestToken from the durable operation identity so an ambiguous create response can be retried safely."
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "batch"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "meta.llama3-1-70b-instruct-v1:0",
+      "name": "Llama 3.1 70B Instruct (Amazon Bedrock)",
+      "provider": "bedrock",
+      "aliases": [],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "batch": {
+        "wire_format": "bedrock",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "security_notes": [
+          "Batch input and output artifacts are stored in caller-owned Amazon S3 locations.",
+          "Harn resolves AWS credentials through the maintained AWS SDK credential chain and never persists credential values in receipts."
+        ],
+        "operational_notes": [
+          "A Bedrock batch job requires a service role ARN plus typed input and output S3 URIs in the same region as the selected model.",
+          "Harn derives clientRequestToken from the durable operation identity so an ambiguous create response can be retried safely."
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "batch"
+      ],
+      "family": "llama",
+      "lineage": "llama",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "general",
+        "tool_use"
       ]
     },
     {
@@ -24533,6 +24684,38 @@
         "structured_output_mode:native_json",
         "text_tools",
         "thinking",
+        "tools"
+      ]
+    },
+    {
+      "provider": "bedrock",
+      "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "base_url": "https://bedrock-runtime.{region}.amazonaws.com",
+      "label": "Claude Sonnet 4.5 (Amazon Bedrock)",
+      "family": "anthropic-claude",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_xml_scaffolding",
+        "streaming",
+        "structured_output_mode:xml_tagged",
+        "text_tools",
+        "tools"
+      ]
+    },
+    {
+      "provider": "bedrock",
+      "model": "meta.llama3-1-70b-instruct-v1:0",
+      "base_url": "https://bedrock-runtime.{region}.amazonaws.com",
+      "label": "Llama 3.1 70B Instruct (Amazon Bedrock)",
+      "family": "llama",
+      "capabilities": [
+        "batch",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output_mode:delimited",
+        "text_tools",
         "tools"
       ]
     },

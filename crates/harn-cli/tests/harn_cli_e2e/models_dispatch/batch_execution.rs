@@ -7,6 +7,7 @@ use sha2::{Digest as _, Sha256};
 use super::support::{harn_e2e_binary, parse_json, run, success_data};
 
 const REQUESTS: &str = r#"{"custom_id":"wire-anthropic","provider":"anthropic","model":"claude-3-5-haiku-20241022","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}
+{"custom_id":"wire-bedrock","provider":"bedrock","model":"anthropic.claude-sonnet-4-5-20250929-v1:0","provider_policy":{"region":"us-west-2","role_arn":"arn:aws:iam::123456789012:role/HarnBatch","input_s3_uri":"s3://fixture-bucket/input/requests.jsonl","output_s3_uri":"s3://fixture-bucket/output/results.jsonl"},"messages":[{"role":"user","content":"grade this"}],"max_tokens":16}
 {"custom_id":"wire-fireworks","provider":"fireworks","model":"accounts/fireworks/models/deepseek-v4-pro","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}
 {"custom_id":"wire-gemini","provider":"gemini","model":"gemini-2.5-flash","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}
 {"custom_id":"wire-mistral","provider":"mistral","model":"codestral-2508","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}
@@ -173,13 +174,23 @@ fn durable_fixture_execution_rejoins_every_supported_wire_family() {
         &fs::read(execution.join("prepared/receipt.json")).expect("read prepare receipt"),
     )
     .expect("parse prepare receipt");
-    assert!(prepare["jobs"]
-        .as_array()
-        .is_some_and(|jobs| jobs.iter().all(|job| job["create_recovery"]
-            == serde_json::json!({
-                "mode": "reconcile_only",
-                "retry_after_ambiguous_acceptance": false
-            }))));
+    let jobs = prepare["jobs"].as_array().expect("prepare jobs");
+    assert!(
+        jobs.iter().any(|job| {
+            job["provider"] == "bedrock" && job["create_recovery"]["mode"] == "deterministic_token"
+        }),
+        "jobs={jobs:?}"
+    );
+    assert!(jobs
+        .iter()
+        .filter(|job| job["provider"] != "bedrock")
+        .all(|job| {
+            job["create_recovery"]
+                == serde_json::json!({
+                    "mode": "reconcile_only",
+                    "retry_after_ambiguous_acceptance": false
+                })
+        }));
 
     assert_eq!(success_data(&advance(&execution))["phase"], "submitted");
     assert_eq!(success_data(&advance(&execution))["phase"], "completed");
@@ -196,7 +207,7 @@ fn durable_fixture_execution_rejoins_every_supported_wire_family() {
     assert_eq!(receipt["kind"], "harn.model_batch_rejoin_receipt");
     assert_eq!(receipt["status"], "complete");
     assert_eq!(receipt["consumable"], true);
-    assert_eq!(receipt["matchedCount"], 6);
+    assert_eq!(receipt["matchedCount"], 7);
     assert_eq!(receipt["quarantine"]["reasons"], serde_json::json!([]));
 
     let normalized = fs::read_to_string(execution.join("rejoin/normalized.jsonl"))
@@ -213,6 +224,7 @@ fn durable_fixture_execution_rejoins_every_supported_wire_family() {
         ids,
         [
             "wire-anthropic",
+            "wire-bedrock",
             "wire-fireworks",
             "wire-gemini",
             "wire-mistral",
@@ -223,7 +235,7 @@ fn durable_fixture_execution_rejoins_every_supported_wire_family() {
     assert!(rows.iter().all(|row| row["state"] == "succeeded"));
     assert!(receipt["rawArtifacts"]
         .as_array()
-        .is_some_and(|artifacts| artifacts.len() == 6));
+        .is_some_and(|artifacts| artifacts.len() == 7));
 }
 
 #[test]
@@ -575,6 +587,71 @@ fn accepted_without_receipt_requires_reconciliation_and_never_retries() {
         fs::read(execution.join("execution.json")).expect("read execution after retry")
     );
     assert!(!execution.join("submission.json").exists());
+}
+
+#[test]
+fn accepted_without_receipt_retries_the_same_deterministic_operation() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let requests = tmp.path().join("requests.jsonl");
+    let execution = tmp.path().join("execution");
+    initialize(&requests, &execution);
+
+    let prepare_path = execution.join("prepared/receipt.json");
+    let mut prepare: Value =
+        serde_json::from_slice(&fs::read(&prepare_path).expect("read prepare receipt"))
+            .expect("parse prepare receipt");
+    for job in prepare["jobs"].as_array_mut().expect("prepare jobs") {
+        job["create_recovery"] = serde_json::json!({"mode": "deterministic_token"});
+    }
+    write_json(&prepare_path, &prepare);
+    let prepare_sha = sha256(&fs::read(&prepare_path).expect("read mutated prepare receipt"));
+    let execution_path = execution.join("execution.json");
+    let mut execution_state: Value =
+        serde_json::from_slice(&fs::read(&execution_path).expect("read execution state"))
+            .expect("parse execution state");
+    for artifact in execution_state["artifacts"]
+        .as_array_mut()
+        .expect("execution artifacts")
+    {
+        if artifact["role"] == "prepare_receipt" {
+            artifact["sha256"] = Value::String(prepare_sha.clone());
+        }
+    }
+    write_json(&execution_path, &execution_state);
+
+    let first = run(
+        &[
+            "models",
+            "batch",
+            "execute",
+            "advance",
+            "--execution-dir",
+            execution.to_str().expect("utf8 execution"),
+            "--json",
+        ],
+        &[("HARN_MODELS_BATCH_TEST_KILL_POINT", "accepted_middle")],
+    );
+    assert_eq!(first.exit_code, 86);
+    let dispatching: Value =
+        serde_json::from_slice(&fs::read(execution.join("execution.json")).expect("read state"))
+            .expect("parse state");
+    let operation_id = dispatching["operation"]["id"]
+        .as_str()
+        .expect("operation id")
+        .to_string();
+    assert_eq!(
+        dispatching["operation"]["idempotencyMode"],
+        "deterministic_client_token"
+    );
+
+    let resumed = advance(&execution);
+    let state = success_data(&resumed);
+    assert_eq!(state["phase"], "submitted");
+    assert_eq!(state["operation"]["id"], operation_id);
+    assert!(state["history"].as_array().is_some_and(|entries| entries
+        .iter()
+        .any(|entry| entry["detail"]["operation"] == "retry_planned"
+            && entry["detail"]["operationId"] == operation_id)));
 }
 
 #[test]

@@ -51,6 +51,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `baseten` | `*gpt-oss*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `baseten` | `*nemotron*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `baseten` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `bedrock` | `anthropic.claude-sonnet-4-5-20250929-v1:0` | `any; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `bedrock` | `meta.llama3-1-70b-instruct-v1:0` | `any; extends` | no | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `bedrock` | `anthropic.claude-*` | `any` | no | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | no |
 | `bedrock` | `*claude*` | `any` | no | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | no |
 | `bedrock` | `*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -293,6 +295,8 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `baseten` | `baseten/zai-org/GLM-5` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\nadd({ ... })\n</tool_call>`. |
 | `baseten` | `baseten/zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\nadd({ ... })\n</tool_call>`. |
 | `baseten` | `baseten/zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\nadd({ ... })\n</tool_call>`. |
+| `bedrock` | `anthropic.claude-sonnet-4-5-20250929-v1:0` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `bedrock` | `meta.llama3-1-70b-instruct-v1:0` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `llama-3.3-70b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `zai-glm-4.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

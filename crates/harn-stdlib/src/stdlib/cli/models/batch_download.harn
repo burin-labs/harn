@@ -7,6 +7,7 @@ import {
 } from "std/cli/models/batch_lifecycle"
 import {
   __api_key_for_job,
+  __bedrock_http_result,
   __filter_int,
   __fireworks_account_id,
   __fireworks_account_id_or_placeholder,
@@ -18,8 +19,10 @@ import {
   __live_batch_operation_error,
   __mkdirp,
   __provider_auth_env,
+  __provider_auth_headers,
   __provider_base_url,
   __redact_download_url,
+  __s3_request_url,
   __truthy_env,
   __xai_results_url,
 } from "std/cli/models/batch_transport"
@@ -309,13 +312,70 @@ fn __download_openai_file(
     harness,
     provider,
     url,
-    {Authorization: "Bearer " + safe_string(auth["value"], "")},
+    __provider_auth_headers(provider, safe_string(auth["env"], ""), safe_string(auth["value"], "")),
     auth_env,
     label,
     handle,
     out_path,
     max_bytes,
   )
+}
+
+fn __download_bedrock_results(
+  harness: Harness,
+  job: dict,
+  out_dir: string,
+  dry_run: bool,
+  max_bytes: int,
+) -> dict {
+  const region = safe_string(
+    job["region"],
+    safe_string(safe_dict(job["provider_policy"])["region"], ""),
+  )
+  const output_s3_uri = safe_string(job["output_s3_uri"], "")
+  const url = __s3_request_url(harness, output_s3_uri, region)
+  const out_path = __download_artifact_path(out_dir, job, "output")
+  const operation = __download_operation("bedrock", "GET", url, "", out_path)
+    + {
+    auth: "aws_sdk_default_chain",
+  }
+  if url == "" {
+    return {ok: false, artifact: nil, errors: ["invalid Bedrock output_s3_uri"]}
+  }
+  if dry_run {
+    return {
+      ok: true,
+      artifact: __download_artifact_record("output", output_s3_uri, out_path, operation, "", true),
+      errors: [],
+    }
+  }
+  const response = __bedrock_http_result(harness, "GET", url, region, "s3", "", max_bytes)
+  const body_text = safe_string(response["body_text"], "")
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      artifact: __download_artifact_record("output", output_s3_uri, out_path, operation, "", false)
+        + {
+        response_status: response["status"],
+      },
+      errors: ["Bedrock batch result download failed for " + output_s3_uri],
+    }
+  }
+  __mkdirp(harness, dirname(out_path) ?? ".")
+  harness.fs.write_text(out_path, body_text)
+  return {
+    ok: true,
+    artifact: __download_artifact_record(
+      "output",
+      output_s3_uri,
+      out_path,
+      operation,
+      body_text,
+      false,
+    )
+      + {response_status: response["status"]},
+    errors: [],
+  }
 }
 
 fn __download_mistral_file(
@@ -636,6 +696,11 @@ fn __download_one_job(
     state = __append_download_result(
       state,
       __download_xai_results(harness, job, out_dir, dry_run, max_bytes),
+    )
+  } else if adapter == "bedrock" {
+    state = __append_download_result(
+      state,
+      __download_bedrock_results(harness, job, out_dir, dry_run, max_bytes),
     )
   } else {
     state = {artifacts: [], errors: [__live_batch_operation_error("download", provider, wire)]}

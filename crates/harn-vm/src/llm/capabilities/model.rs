@@ -138,6 +138,10 @@ pub struct ProviderDefaults {
     pub batch_security_notes: Option<Vec<String>>,
     #[serde(default)]
     pub batch_operational_notes: Option<Vec<String>>,
+    /// Regions where the provider/model batch route is explicitly supported.
+    /// Empty means the capability is not region-scoped.
+    #[serde(default)]
+    pub batch_regions: Option<Vec<String>>,
     /// Explicit prompt-cache TTL values this provider can honor on request.
     /// Empty means the route may cache, but Harn has no explicit TTL knob for
     /// it. Known values today: `5m`, `1h`.
@@ -222,6 +226,7 @@ macro_rules! merge_provider_defaults {
             &mut $dst.batch_operational_notes,
             &$src.batch_operational_notes,
         );
+        $op(&mut $dst.batch_regions, &$src.batch_regions);
         $op(&mut $dst.prompt_cache_ttls, &$src.prompt_cache_ttls);
         $op(
             &mut $dst.prompt_cache_min_prefix_tokens,
@@ -272,6 +277,7 @@ impl ProviderDefaults {
             || self.batch_cancellation.is_some()
             || self.batch_security_notes.is_some()
             || self.batch_operational_notes.is_some()
+            || self.batch_regions.is_some()
             || self.prompt_cache_ttls.is_some()
             || self.prompt_cache_min_prefix_tokens.is_some()
             || self.seed_supported.is_some()
@@ -462,6 +468,7 @@ pub struct Capabilities {
     pub batch_cancellation: Option<String>,
     pub batch_security_notes: Vec<String>,
     pub batch_operational_notes: Vec<String>,
+    pub batch_regions: Vec<String>,
     pub tool_approval_policy: Option<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
@@ -607,6 +614,7 @@ impl Default for Capabilities {
             batch_cancellation: None,
             batch_security_notes: Vec::new(),
             batch_operational_notes: Vec::new(),
+            batch_regions: Vec::new(),
             tool_approval_policy: None,
             max_tools: None,
             prompt_caching: false,

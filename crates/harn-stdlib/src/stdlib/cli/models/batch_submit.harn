@@ -6,6 +6,7 @@ import {
 } from "std/cli/models/batch_lifecycle"
 import {
   __api_key_for_job,
+  __bedrock_http_result,
   __dry_run_submission,
   __fireworks_account_id,
   __fireworks_batch_job_id,
@@ -22,8 +23,10 @@ import {
   __live_batch_adapter_key,
   __live_batch_operation_error,
   __mkdirp,
+  __provider_auth_headers,
   __provider_base_url,
   __request_file_payload,
+  __s3_request_url,
   __submission_job_base,
   __truthy_env,
   __upload_gemini_jsonl_file,
@@ -146,10 +149,12 @@ fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
       "/accounts/" + account_id + "/batchInferenceJobs?batchInferenceJobId=" + batch_job_id,
     ),
     {
-      headers: {
-        Authorization: "Bearer " + safe_string(auth["value"], ""),
-        "content-type": "application/json",
-      },
+      headers: __provider_auth_headers(
+        provider,
+        safe_string(auth["env"], ""),
+        safe_string(auth["value"], ""),
+      )
+        + {"content-type": "application/json"},
       body: json_stringify(create_body),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -200,6 +205,87 @@ fn __openai_compatible_create_body(provider: string, upload: dict, endpoint: str
   return body + {completion_window: "24h"}
 }
 
+fn __submit_bedrock(harness: Harness, job: dict, payload: dict) -> dict {
+  const base_job = __submission_job_base(harness, job, payload, false)
+  const policy = safe_dict(job["provider_policy"])
+  const region = safe_string(policy["region"], "")
+  const input_s3_uri = safe_string(policy["input_s3_uri"], "")
+  const output_s3_uri = safe_string(policy["output_s3_uri"], "")
+  const role_arn = safe_string(policy["role_arn"], "")
+  const input_url = __s3_request_url(harness, input_s3_uri, region)
+  if input_url == "" {
+    return {
+      ok: false,
+      job: base_job + {status: "failed"},
+      errors: ["invalid Bedrock input_s3_uri for job " + safe_string(job["id"], "")],
+    }
+  }
+  const upload = __bedrock_http_result(
+    harness,
+    "PUT",
+    input_url,
+    region,
+    "s3",
+    safe_string(payload["text"], ""),
+    1048576,
+  )
+  if !safe_bool(upload["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", upload_status: upload["status"]},
+      errors: ["Bedrock input upload failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  const operation_id = harness.env.get_or(
+    "HARN_MODELS_BATCH_OPERATION_ID",
+    safe_string(job["id"], ""),
+  )
+  const client_token = substring(sha256("bedrock-batch:" + operation_id), 0, 64)
+  const job_name = "harn-" + substring(sha256(safe_string(job["id"], "")), 0, 24)
+  const create_body = {
+    jobName: job_name,
+    roleArn: role_arn,
+    modelId: safe_string(job["model"], ""),
+    clientRequestToken: client_token,
+    inputDataConfig: {s3InputDataConfig: {s3Uri: input_s3_uri}},
+    outputDataConfig: {s3OutputDataConfig: {s3Uri: output_s3_uri}},
+  }
+  const response = __bedrock_http_result(
+    harness,
+    "POST",
+    __join_url(__provider_base_url(harness, "bedrock"), "/model-invocation-job"),
+    region,
+    "bedrock",
+    json_stringify(create_body),
+    1048576,
+  )
+  const body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["Bedrock batch create failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: "submitted",
+      provider_batch_id: safe_string(body["jobArn"], job_name),
+      provider_batch_handle: job_name,
+      provider_status: body["status"] ?? "Submitted",
+      input_s3_uri: input_s3_uri,
+      output_s3_uri: output_s3_uri,
+      region: region,
+      client_request_token: client_token,
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
 fn __openai_compatible_batch_body(provider: string, body: dict) -> dict {
   if provider == "together" {
     const wrapped = safe_dict(body["job"])
@@ -247,10 +333,12 @@ fn __submit_openai_compatible(
     "POST",
     __join_url(base, "/batches"),
     {
-      headers: {
-        Authorization: "Bearer " + safe_string(auth["value"], ""),
-        "content-type": "application/json",
-      },
+      headers: __provider_auth_headers(
+        provider,
+        safe_string(auth["env"], ""),
+        safe_string(auth["value"], ""),
+      )
+        + {"content-type": "application/json"},
       body: json_stringify(create_body),
       timeout_ms: 120000,
       max_response_bytes: 1048576,
@@ -526,6 +614,9 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   }
   if adapter == "xai" {
     return __submit_xai(harness, job, payload)
+  }
+  if adapter == "bedrock" {
+    return __submit_bedrock(harness, job, payload)
   }
   const base_job = __submission_job_base(harness, job, payload, false)
   return {

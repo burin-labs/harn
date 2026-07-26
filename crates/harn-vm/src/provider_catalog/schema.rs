@@ -319,7 +319,8 @@ pub fn schema_value() -> Value {
                             "gemini",
                             "mistral",
                             "fireworks",
-                            "xai"
+                            "xai",
+                            "bedrock"
                         ]
                     },
                     "input_mode": {

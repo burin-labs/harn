@@ -79,7 +79,7 @@ pub(super) struct HttpSession {
 pub(super) struct HttpRequestParts {
     pub(super) method: reqwest::Method,
     pub(super) headers: reqwest::header::HeaderMap,
-    recorded_headers: crate::value::DictMap,
+    pub(super) recorded_headers: crate::value::DictMap,
     pub(super) body: Option<String>,
     multipart: Option<MultipartRequest>,
 }
@@ -1061,9 +1061,9 @@ async fn vm_execute_http_request_with_client(
     url: &str,
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
-    let parts = parse_http_request_parts(method, options)?;
+    let mut parts = parse_http_request_parts(method, options)?;
     let final_url = final_http_url(url, options, "http")?;
-
+    super::sigv4::apply(options, &final_url, &mut parts).await?;
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
         return Err(vm_error(format!(
             "http: URL must start with http:// or https://, got '{url}'"
@@ -1172,8 +1172,9 @@ pub(super) async fn vm_http_download(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "GET".to_string())
         .to_uppercase();
-    let parts = parse_http_request_parts(&method, options)?;
+    let mut parts = parse_http_request_parts(&method, options)?;
     let final_url = final_http_url(url, options, "http_download")?;
+    super::sigv4::apply(options, &final_url, &mut parts).await?;
     let config = parse_http_options(options);
     let resolved = resolve_http_path(
         "http_download",
@@ -1182,7 +1183,6 @@ pub(super) async fn vm_http_download(
     )?;
     let mut egress_checked = false;
     let mut client = None;
-
     for attempt in 0..=config.retry.max {
         if let Some(mock_response) = consume_http_mock(
             &method,

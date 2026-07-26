@@ -523,7 +523,7 @@ accepts these fields:
 | `compaction` | bool | Provider-side truncation/compaction controls are available. |
 | `background_mode` | bool | Provider-side background jobs are available. |
 | `batch_api` | bool | The route can be submitted through a provider-side asynchronous Batch API for offline, non-interactive work. |
-| `batch_wire_format` | string | Provider batch request/result family: `openai`, `anthropic_messages`, `gemini`, `mistral`, `fireworks`, or `xai`. |
+| `batch_wire_format` | string | Provider batch request/result family: `openai`, `anthropic_messages`, `gemini`, `mistral`, `fireworks`, `xai`, or `bedrock`. |
 | `batch_input_mode` | string | Batch submission mode: `jsonl_file`, `inline_requests`, or `jsonl_or_inline`. |
 | `batch_discount_percent` | int | Published discount versus equivalent synchronous traffic, when known. |
 | `batch_turnaround_hours` | int | Published target or maximum turnaround window, in hours, when known. |
@@ -535,6 +535,7 @@ accepts these fields:
 | `batch_cancellation` | string | Cancellation support: `supported`, `not_supported`, or `unknown`. |
 | `batch_security_notes` | list of strings | Non-secret provider storage/security notes safe to surface in catalogs and receipts. |
 | `batch_operational_notes` | list of strings | Non-secret submit, retry, and rejoin constraints safe to surface in catalogs and receipts. |
+| `batch_regions` | list of strings | Explicit regions where this provider/model batch route is supported. Empty means the capability is not region-scoped. |
 | `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | Provider-side prompt caching is available. |
@@ -626,9 +627,15 @@ sequencing those stages themselves.
 Provider batch envelopes, submission state, and poll/download/rejoin logic stay
 in Harn instead of host products.
 
-Current live batch adapters cover OpenAI, OpenAI-compatible Groq, Together, and
-Parasail, Gemini File API JSONL batches, Anthropic Messages, Mistral, Fireworks
-dataset batches, and xAI. Other catalogued batch providers remain
+Current live batch adapters cover OpenAI, Azure OpenAI, OpenAI-compatible Groq,
+Together, and Parasail, Gemini File API JSONL batches, Anthropic Messages,
+Mistral, Fireworks dataset batches, xAI, and explicit Amazon Bedrock
+model/region rows. Azure uses its canonical `/openai/v1` Files and Batch routes
+with either `AZURE_OPENAI_API_KEY` or an Azure bearer token. Bedrock request
+rows use `{recordId, modelInput}` and require `provider_policy` fields for
+`region`, `role_arn`, `input_s3_uri`, and `output_s3_uri`; the host resolves the
+AWS SDK credential chain and signs S3 plus Bedrock control-plane requests.
+Other catalogued batch providers remain
 prepare/dry-run only until Harn has a provider adapter for their submission and
 result APIs.
 

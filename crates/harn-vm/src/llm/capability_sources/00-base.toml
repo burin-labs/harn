@@ -55,7 +55,7 @@
 #   batch_wire_format:
 #                     provider batch request/result family. Known values:
 #                     openai, anthropic_messages, gemini, mistral, fireworks,
-#                     xai.
+#                     xai, bedrock.
 #   batch_input_mode:
 #                     how work is submitted: jsonl_file, inline_requests, or
 #                     jsonl_or_inline.

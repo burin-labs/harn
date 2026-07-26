@@ -1,14 +1,18 @@
+use super::helpers::vm_value_to_json;
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
-use super::helpers::vm_value_to_json;
-
+mod batch_projection;
 mod catalog_projection;
 mod execution_contract;
 mod option_registry;
+use batch_projection::{
+    optional_batch_string, optional_batch_string_list, optional_batch_u32, optional_batch_u64,
+    string_list_to_vm_value,
+};
 use catalog_projection::{
     insert_tool_mode_parity_fields, reasoning_history_wire_field_value, toml_value_to_vm_value,
     tools_value,
@@ -978,48 +982,6 @@ fn provider_def_to_vm_value(
     VmValue::dict(dict)
 }
 
-fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        items
-            .into_iter()
-            .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
-            .collect(),
-    ))
-}
-
-fn optional_batch_string(batch_api: bool, value: Option<&str>) -> VmValue {
-    batch_api
-        .then_some(value)
-        .flatten()
-        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-        .unwrap_or(VmValue::Nil)
-}
-
-fn optional_batch_u32(batch_api: bool, value: Option<u32>) -> VmValue {
-    batch_api
-        .then_some(value)
-        .flatten()
-        .map(|value| VmValue::Int(value as i64))
-        .unwrap_or(VmValue::Nil)
-}
-
-fn optional_batch_u64(batch_api: bool, value: Option<u64>) -> VmValue {
-    batch_api
-        .then_some(value)
-        .flatten()
-        .and_then(|value| i64::try_from(value).ok())
-        .map(VmValue::Int)
-        .unwrap_or(VmValue::Nil)
-}
-
-fn optional_batch_string_list(batch_api: bool, items: &[String]) -> VmValue {
-    if batch_api && !items.is_empty() {
-        string_list_to_vm_value(items.to_vec())
-    } else {
-        VmValue::Nil
-    }
-}
-
 fn batch_support_to_vm_value(
     batch_api: bool,
     caps: &crate::llm::capabilities::Capabilities,
@@ -1083,6 +1045,10 @@ fn batch_support_to_vm_value(
         crate::value::intern_key("operational_notes"),
         optional_batch_string_list(batch_api, &caps.batch_operational_notes),
     );
+    dict.insert(
+        crate::value::intern_key("regions"),
+        optional_batch_string_list(batch_api, &caps.batch_regions),
+    );
     VmValue::dict(dict)
 }
 
@@ -1142,6 +1108,10 @@ fn insert_batch_support_fields(
     dict.insert(
         crate::value::intern_key("batch_operational_notes"),
         optional_batch_string_list(batch_api, &caps.batch_operational_notes),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_regions"),
+        optional_batch_string_list(batch_api, &caps.batch_regions),
     );
     dict.insert(
         crate::value::intern_key("batch"),
