@@ -362,6 +362,39 @@ fn the_well_formed_wire_opener_is_left_alone() {
 }
 
 #[test]
+fn a_reserved_opener_longer_than_its_canonical_tag_still_maps_offsets() {
+    // Recovery normalizes the stub to the canonical opener and maps offsets
+    // back by the length difference. Both lengths are caller data, so the
+    // marker may be longer OR shorter than the tag it stands in for.
+    let spec = spec_from(serde_json::json!({
+        "call_tags": ["tc"],
+        "block_tags": [],
+        "wrapper_tags": [],
+        "markup_openers": [],
+        "reserved_openers": ["[[LONG_WIRE_CALL_MARKER]"],
+        "harmony": {
+            "header_markers": [],
+            "standalone_markers": [],
+            "frame_prefix": "<|",
+            "frame_suffix": "|>",
+            "message_marker": "<|message|>",
+            "tool_call_header_prefix": "tool_call to=",
+            "corrupted_openers": [],
+        },
+        "known_tools": [],
+    }));
+    let source = "[[LONG_WIRE_CALL_MARKER]look({})</tc>trailing";
+    let output = scan_units(source, &spec);
+    assert_tiles(&output.source, &output.units);
+    assert_eq!(kinds(&output.units), vec!["block", "text"]);
+    let block = &output.units[0];
+    assert_eq!(
+        &output.source[block.start..block.end],
+        "[[LONG_WIRE_CALL_MARKER]look({})</tc>"
+    );
+}
+
+#[test]
 fn a_reserved_opener_inside_a_fence_is_an_example_not_an_action() {
     let (_, units) = scan("```\n[[CALL]look({})\n```\n");
     assert!(

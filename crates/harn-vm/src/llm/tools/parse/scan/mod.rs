@@ -317,20 +317,22 @@ impl<'a> Scan<'a> {
         };
         let tail = &self.src[cursor + opener.len()..];
         let canonical_open = format!("<{canonical_tag}>");
-        let delta = canonical_open.len() - opener.len();
         let synthetic = format!("{canonical_open}{tail}");
 
-        for tag in &self.spec.call_tags {
-            if let Some((body, after)) = match_tool_call_block(&synthetic, 0, tag) {
-                let payload = UnitPayload::Block {
-                    tag: tag.clone(),
-                    body: body.to_string(),
-                    head: call_head(body),
-                    reserved: true,
-                };
-                self.emit_block(cursor + after - delta, payload);
-                return true;
-            }
+        if let Some((body, after)) = match_tool_call_block(&synthetic, 0, canonical_tag) {
+            // The opener is the only rewritten span, so an offset past it maps
+            // back to the original by the length difference. Expressed as
+            // `after - canonical_open.len()` rather than a signed delta because
+            // the two lengths come from caller data and either may be longer.
+            let end = cursor + opener.len() + (after - canonical_open.len());
+            let payload = UnitPayload::Block {
+                tag: canonical_tag.clone(),
+                body: body.to_string(),
+                head: call_head(body),
+                reserved: true,
+            };
+            self.emit_block(end, payload);
+            return true;
         }
         let payload = UnitPayload::UnclosedBlock {
             tag: canonical_tag.clone(),
