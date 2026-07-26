@@ -170,7 +170,13 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       write_source(root, ".target-4688/debug/build/pkg/out/generated.rs", 1)
       write_source(root, "target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
       write_source(root, "target-source/src/lib.rs", 1)
-      write_source(root, "crates/app/target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
+      // Below the repo root, a `target-` directory stays in scope even when it
+      // carries a `debug/` artifact dir — only a ROOT `target-*` is treated as
+      // a per-worktree Cargo target. The path deliberately avoids a `build/`
+      // component: `files_below` inherits `walk_dir`'s built-in ignore set, so
+      // no fixture can assert anything about a path under `target/`, `build/`,
+      // `dist/`, `node_modules/`, `coverage/`, `venv/`, or `__pycache__/`.
+      write_source(root, "crates/app/target-codex0-4942/debug/generated.rs", 1)
       write_source(root, "tree-sitter-harn/node_modules/pkg/binding.rs", 1)
       write_text(root, "crates/app/src/not-source.txt", "text\n")
       assert_eq(
@@ -178,7 +184,7 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
         [
           "crates/app/benches/latency.rs",
           "crates/app/src/lib.rs",
-          "crates/app/target-codex0-4942/debug/build/pkg/out/generated.rs",
+          "crates/app/target-codex0-4942/debug/generated.rs",
           "crates/app/tests/integration.rs",
           "crates/harn-stdlib/src/stdlib/agent/loop.harn",
           "perf/src/bin/bench.rs",
@@ -189,6 +195,40 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       )
     },
   )
+}
+
+// A file the inventory walk never reaches is a file the ratchet silently stops
+// governing, and the fixtures above cannot catch that class — they can only
+// assert about paths the walk already reaches. `check_source_file_lengths`
+// reconciles the inventory against git to close it; these pin that reconciliation
+// without walking the repo, so the suite stays hermetic and fast.
+@test
+pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(task) {
+  // `build` is one of the directory names `walk_dir` refuses to descend into,
+  // so a source tree under it is tracked by git and invisible to the ratchet.
+  assert_eq(
+    unscanned_sources(
+      ["crates/app/src/lib.rs"],
+      ["crates/app/src/lib.rs", "crates/app/src/build/hidden.rs"],
+    ),
+    ["crates/app/src/build/hidden.rs"],
+  )
+}
+
+@test
+pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(task) {
+  assert_eq(unscanned_sources(["a.rs", "b.rs"], ["b.rs", "a.rs"]), [])
+  // Nothing is tracked under a synthetic root, so a fixture run reports nothing
+  // rather than flagging every file the fixture never committed.
+  assert_eq(unscanned_sources([], []), [])
+}
+
+@test
+pipeline test_unscanned_sources_excludes_generated_and_sorts(task) {
+  // Generated protocol artifacts are deliberately outside the ratchet, so their
+  // absence from the inventory is not a coverage hole.
+  assert_eq(unscanned_sources([], ["spec/protocol-artifacts/harn-protocol.rs"]), [])
+  assert_eq(unscanned_sources([], ["z.rs", "a.rs", "m.rs"]), ["a.rs", "m.rs", "z.rs"])
 }
 
 @test

@@ -25,6 +25,9 @@ const CARGO_TARGET_ARTIFACT_DIR_NAMES = ["debug", "release"]
 
 const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
 
+/** The only tree whose `.harn` sources the ratchet governs. */
+pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
+
 pub type SourceCount = {path: string, lines: int}
 
 pub type ValidBaselineCount = {kind: "valid", shard_path: string, source_path: string, lines: int}
@@ -44,7 +47,8 @@ pub type SourceLengthFindingKind = "malformed_baseline" \
   | "obsolete_baseline" \
   | "new_oversized_source" \
   | "growth" \
-  | "stale_baseline"
+  | "stale_baseline" \
+  | "unscanned_source"
 
 pub type SourceLengthFinding = {
   kind: SourceLengthFindingKind,
@@ -139,6 +143,18 @@ fn skip_dir(root: string, rel_dir: string, name: string) -> bool {
     || root_worktree_cargo_target_dir(root, rel_dir, name)
 }
 
+/**
+ * Recursively collect `suffix` files under `rel_dir`, skipping the directories
+ * this script owns rules for.
+ *
+ * Those rules are not the whole story: `walk_dir` refuses on its own to descend
+ * into `target`, `build`, `dist`, `node_modules`, `coverage`, `venv`, and
+ * `__pycache__`, so the inventory's real reach is narrower than the constants
+ * above suggest, and a source tree under one of those names would escape the
+ * ratchet with no diagnostic.
+ * `test_inventory_covers_every_tracked_in_scope_source` is what makes such a
+ * hole loud, by reconciling the inventory against git rather than a fixture.
+ */
 fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
   const dir = if rel_dir == "" {
     root
@@ -177,7 +193,8 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
   return paths
 }
 
-fn is_generated_source(path: string) -> bool {
+/** Whether `path` is a generated source the ratchet must not govern. */
+pub fn is_generated_source(path: string) -> bool {
   for prefix in GENERATED_SOURCE_PREFIXES {
     if path.starts_with(prefix) {
       return true
@@ -195,7 +212,7 @@ pub fn source_files(root: string = "") -> list<string> {
   }
   let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) })
     .to_list()
-  for path in files_below(resolved_root, "crates/harn-stdlib/src/stdlib", ".harn") {
+  for path in files_below(resolved_root, STDLIB_SOURCE_DIR, ".harn") {
     paths = paths.appending(path)
   }
   return paths.sorted()
@@ -442,6 +459,45 @@ pub fn apply_baseline_edits(root: string, edits: list<BaselineEdit>) -> nil {
   return nil
 }
 
+/** In-scope source paths git tracks under `root`, empty when git cannot answer. */
+fn git_tracked_sources(root: string) -> list<string> {
+  const res = harness.process.spawn_captured(
+    {cmd: "git", args: ["-C", root, "ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
+  )
+  if !res.success {
+    return []
+  }
+  let out: list<string> = []
+  for line in res.stdout.lines() {
+    const path = line.trim()
+    if path != "" {
+      out = out.appending(normalize_source_path(path))
+    }
+  }
+  return out
+}
+
+/**
+ * Tracked sources the inventory walk never returned.
+ *
+ * Every entry is a file whose length this ratchet has silently stopped
+ * governing. Fixture-based tests cannot detect that class at all — they can
+ * only assert about paths the walk already reaches — so the inventory is
+ * reconciled against git, the one authority on what source this repo has.
+ */
+pub fn unscanned_sources(scanned: list<string>, tracked: list<string>) -> list<string> {
+  let missing: list<string> = []
+  for path in tracked {
+    if is_generated_source(path) {
+      continue
+    }
+    if !scanned.contains(path) {
+      missing = missing.appending(path)
+    }
+  }
+  return missing.sorted()
+}
+
 pub fn check_source_file_lengths(root: string = "") -> SourceLengthReport {
   const resolved_root = if root == "" {
     repo_root()
@@ -450,13 +506,29 @@ pub fn check_source_file_lengths(root: string = "") -> SourceLengthReport {
   }
   const sources = source_inventory(resolved_root)
   const baselines = baseline_inventory(resolved_root)
+  let findings = evaluate_inventory(sources, baselines)
+  // Reuses the inventory walk that just ran, so the reconciliation costs one
+  // `git ls-files`. Under a synthetic root nothing is tracked, so this is a
+  // no-op for fixture tests rather than something they have to opt out of.
+  for path in unscanned_sources(
+    sources.map({ source -> source.path }).to_list(),
+    git_tracked_sources(resolved_root),
+  ) {
+    findings = findings.appending(
+      {
+        kind: "unscanned_source",
+        path: path,
+        message: "tracked source is unreachable by the inventory walk, so its length is ungoverned",
+      },
+    )
+  }
   return {
     root: resolved_root,
     max_lines: MAX_LINES,
     source_count: sources.count,
     baseline_count: baselines.count,
     oversized_count: sources.filter({ source -> source.lines > MAX_LINES }).count,
-    findings: evaluate_inventory(sources, baselines),
+    findings: findings,
   }
 }
 
