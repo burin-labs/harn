@@ -390,6 +390,11 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/mcp_host.rs",
   "crates/harn-vm/src/mcp_registry.rs",
   "crates/harn-vm/src/metadata.rs",
+  // The context manifest's capture time is compared against filesystem mtimes
+  // to decide which entries are racily clean (#5582). Only the host wall clock
+  // stamps those mtimes, so an injected clock would make the two sides
+  // incomparable and the staleness rule unsound.
+  "crates/harn-vm/src/module_source.rs",
   "crates/harn-vm/src/orchestration/command_policy.rs",
   "crates/harn-vm/src/orchestration/merge_captain_iteration.rs",
   "crates/harn-vm/src/orchestration/mod.rs",

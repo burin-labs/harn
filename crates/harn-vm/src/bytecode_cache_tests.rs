@@ -113,9 +113,11 @@ fn codegen_fingerprint_changes_cache_key() {
     let entry = tmp.path().join("entry.harn");
     std::fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let source = std::fs::read_to_string(&entry).unwrap();
-    let a = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A");
-    let b = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-B");
-    let a_again = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A");
+    // The key is the hash; the manifest alongside it carries the capture time
+    // of its own walk and is deliberately not stable across walks.
+    let a = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A").0;
+    let b = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-B").0;
+    let a_again = hash_transitive_user_imports_fingerprinted(&entry, &source, "compiler-A").0;
     assert_ne!(
         a, b,
         "differing compiler fingerprints must change the cache key"
@@ -439,11 +441,32 @@ fn identical_import_strings_in_different_directories_resolve_separately() {
 
 /// Build a graph, compile it, and write the adjacent artifact with the
 /// manifest the walk produced. Returns the entry path and its source.
+///
+/// The sources are aged before the walk so every manifest entry is outside the
+/// racy window: a file written in the same timestamp tick as the capture is
+/// judged by content instead of stats, which is a different path from the one
+/// most of these tests are about. Ageing states that rather than leaving it to
+/// how finely the host filesystem keeps time.
 fn seed_entry_with_manifest(tmp: &Path, dep_body: &str) -> (PathBuf, String) {
+    seed_entry(tmp, dep_body, Settle::Yes)
+}
+
+/// Whether a seeded graph is aged out of the racy window before its manifest
+/// is captured.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Settle {
+    Yes,
+    No,
+}
+
+fn seed_entry(tmp: &Path, dep_body: &str, settle: Settle) -> (PathBuf, String) {
     let entry = tmp.join("entry.harn");
     let entry_source = "import \"./dep\"\n__io_println(\"hi\")\n".to_string();
     std::fs::write(&entry, &entry_source).unwrap();
     std::fs::write(tmp.join("dep.harn"), dep_body).unwrap();
+    if settle == Settle::Yes {
+        age_out_of_racy_window(&[entry.clone(), tmp.join("dep.harn")]);
+    }
 
     let (context_hash, manifest) =
         hash_transitive_user_imports_with_manifest(&entry, &entry_source);
@@ -466,6 +489,24 @@ fn seed_entry_with_manifest(tmp: &Path, dep_body: &str) -> (PathBuf, String) {
     )
     .unwrap();
     (entry, entry_source)
+}
+
+/// Push each path's mtime an hour into the past, so a manifest captured now
+/// records it as settled. Deterministic in place of waiting for a filesystem
+/// clock to tick.
+fn age_out_of_racy_window(paths: &[PathBuf]) {
+    for path in paths {
+        // Relative to the file's own mtime, so the ageing is expressed in the
+        // filesystem's clock rather than a second reading of the host's.
+        let long_ago = std::fs::metadata(path).unwrap().modified().unwrap()
+            - std::time::Duration::from_hours(1);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(long_ago))
+            .unwrap();
+    }
 }
 
 /// Rewrite `path` with `body` while restoring its previous mtime, so the
@@ -495,8 +536,11 @@ fn a_valid_manifest_serves_the_chunk_without_walking_the_graph() {
     // were recomputed. A hit therefore means the manifest answered.
     //
     // This is also the design's one accepted blind spot, stated as a fact
-    // rather than left implicit: the same one Cargo, Zig and Bazel accept,
-    // and the one `module_source`'s in-process read memo already accepts.
+    // rather than left implicit: the same one Cargo, Zig and Bazel accept.
+    // The edit here only stays invisible because the file was settled — a
+    // write inside the capture's timestamp tick is content-checked instead
+    // (#5582), so reaching the blind spot takes a deliberately forged mtime
+    // on an old file rather than an ordinarily fast rewrite.
     let tmp = tempfile::tempdir().unwrap();
     let (entry, entry_source) =
         seed_entry_with_manifest(tmp.path(), "pub fn v() -> int { return 111 }\n");
@@ -559,6 +603,58 @@ fn a_directory_shadowed_import_does_not_defeat_the_manifest() {
     assert!(
         !manifest.still_valid(&anchor),
         "a path that became readable changes the graph and must invalidate"
+    );
+}
+
+/// The manifest currently stored in `entry`'s adjacent artifact.
+fn stored_manifest(entry: &Path, entry_source: &str) -> ContextManifest {
+    read_entry_candidate(
+        &adjacent_cache_path(entry).unwrap(),
+        &CacheKey {
+            source_hash: sha256(entry_source.as_bytes()),
+            context_hash: [0u8; 32],
+            harn_version: HARN_VERSION,
+            compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+        },
+    )
+    .unwrap()
+    .expect("artifact is still readable")
+    .manifest
+    .expect("the artifact carries a manifest")
+}
+
+#[test]
+fn a_hit_that_needed_a_content_read_re_stamps_the_artifact() {
+    // A graph captured in the same timestamp tick it was written in — a fresh
+    // checkout followed straight away by a run — has entries stats cannot
+    // decide. They still hit, by content; what must not happen is paying that
+    // read on every later spawn, so the hit writes the artifact back with the
+    // capture that just proved it.
+    let tmp = tempfile::tempdir().unwrap();
+    let (entry, entry_source) =
+        seed_entry(tmp.path(), "pub fn v() -> int { return 1 }\n", Settle::No);
+    let seeded = stored_manifest(&entry, &entry_source);
+    assert!(
+        seeded
+            .files
+            .iter()
+            .any(|file| !module_source::mtime_predates_capture(file.mtime_ns, seeded.captured_ns)),
+        "an unaged graph must land inside the racy window for this test to mean anything"
+    );
+
+    let walks_before = WALKS_PERFORMED.with(|c| c.get());
+    assert!(
+        load(&entry, &entry_source).chunk.is_some(),
+        "a racy entry whose content still matches must serve the chunk"
+    );
+    assert_eq!(
+        WALKS_PERFORMED.with(|c| c.get()),
+        walks_before,
+        "a content read is the fallback for one entry, not a reason to re-walk the graph"
+    );
+    assert!(
+        stored_manifest(&entry, &entry_source).captured_ns > seeded.captured_ns,
+        "the hit must persist its newer capture, or every later spawn re-reads the same files"
     );
 }
 

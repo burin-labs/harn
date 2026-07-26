@@ -129,6 +129,17 @@ the other:
 - **that this build emitted the chunk** — from the header's `codegen_fp`,
   since the fast path never computes the `context_hash` the fingerprint
   otherwise hides in (#5610).
+- **that no recorded file moved** — from `(len, mtime_ns)` where that is
+  proof, and from the recorded content digest where it is not. Filesystems
+  quantize `mtime` — two seconds on FAT, one second on HFS+ and older NFS,
+  a ~15.6ms clock tick on NTFS — so two writes inside one tick record one
+  `mtime`, and a second write preserving length leaves an identity
+  identical to the first. Each manifest therefore records when its capture
+  began, and an entry whose `mtime` is not a full granularity older than
+  that is *racily clean* in git's sense: decided by re-reading its content
+  (#5582). A hit that needed such a read writes the artifact back with a
+  fresh capture, so the entry returns to the stats-only path next spawn
+  rather than paying a read forever.
 
 Anything a manifest cannot describe (a file that will not stat, a
 manifest that was never written, an anchor that does not match) falls
@@ -138,6 +149,37 @@ can only ever save work; it can never decide a hit on its own.
 When the walk does run and finds the key unchanged — a touched mtime, a
 restored checkout — the artifact is rewritten with fresh observations, so
 the next spawn is back on the fast path instead of walking forever.
+
+#### What the racy window costs
+
+The assumed granularity is the coarsest a supported filesystem can have
+(two seconds, FAT/exFAT), not the one in force. On ext4 or APFS, which
+keep nanoseconds, that over-classifies: a graph checked out and first
+walked inside the same two seconds — CI cloning and running immediately —
+has *every* entry racily clean, and the first warm lookups read the whole
+graph rather than stat it.
+
+That is the intended trade, and it is bounded in both size and time.
+Measured on Linux/ext4 over a 377-module, 4.9 MB graph (release build):
+
+| warm lookup | cost |
+| --- | --- |
+| settled — stats only | 0.27 ms |
+| racily clean — content read | 1.94 ms |
+| the full walk both avoid | 5.98 ms |
+
+So the worst case still resolves about 3x faster than the walk it
+replaces, and it is not permanent: raciness is judged against the
+manifest's *own* capture, so re-stamping on a racy hit is what ends it.
+Once wall time passes the files' mtime by the granularity, the next
+lookup re-stamps to a settled capture and every later spawn is stats
+only. Only lookups landing within about two seconds of the source mtimes
+pay anything. Recording each entry's digest also costs the cold walk one
+SHA-256 pass per file — 5.98 ms to 6.76 ms on the same graph.
+
+Probing each filesystem for its actual granularity would narrow the
+window, at the price of a rule whose soundness depends on the probe. The
+measured cost does not justify that.
 
 Each `import` the VM executes at runtime follows the same protocol
 for the `.harnmod` family: read source, look for an adjacent
