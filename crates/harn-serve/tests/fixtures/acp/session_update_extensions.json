@@ -339,6 +339,34 @@
       "update": {
         "_meta": {
           "harn": {
+            "kind": "staged_writes_pending",
+            "message": "staged writes pending",
+            "pendingCount": 1,
+            "pendingWrites": [
+              {
+                "byteDelta": 3,
+                "kind": "modify",
+                "path": "/tmp/project/src/lib.rs",
+                "snapshotId": "tool-42"
+              }
+            ],
+            "phase": "fs_staging",
+            "progress": 1,
+            "totalBytes": 7
+          }
+        },
+        "sessionUpdate": "progress"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
             "audit": {
               "run_id": "run_x"
             },

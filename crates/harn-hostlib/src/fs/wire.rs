@@ -35,6 +35,14 @@ fn pending_write_to_value(write: PendingWrite) -> VmValue {
         ("kind", str_value(write.kind)),
         ("bytes_added", VmValue::Int(write.bytes_added as i64)),
         ("bytes_removed", VmValue::Int(write.bytes_removed as i64)),
+        (
+            "snapshot_id",
+            write
+                .snapshot_id
+                .as_deref()
+                .map(str_value)
+                .unwrap_or(VmValue::Nil),
+        ),
     ])
 }
 

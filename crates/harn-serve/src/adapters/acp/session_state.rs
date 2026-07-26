@@ -378,20 +378,19 @@ impl AcpServer {
             None,
             None,
         );
-        let mut harn_meta = serde_json::Map::new();
-        harn_meta.insert(
-            "kind".to_string(),
-            serde_json::Value::String("staged_writes_pending".to_string()),
+        let pending_writes = status
+            .pending_writes
+            .iter()
+            .map(harn_hostlib::fs::PendingWrite::event_summary)
+            .collect::<Vec<_>>();
+        events::merge_harn_meta(
+            &mut update,
+            staged_writes::harn_meta(
+                pending_writes.len(),
+                status.total_bytes_pending,
+                &pending_writes,
+            ),
         );
-        harn_meta.insert(
-            "pendingCount".to_string(),
-            serde_json::Value::from(status.pending_writes.len() as u64),
-        );
-        harn_meta.insert(
-            "totalBytes".to_string(),
-            serde_json::Value::from(status.total_bytes_pending),
-        );
-        events::merge_harn_meta(&mut update, harn_meta);
         self.send_notification(
             "session/update",
             serde_json::json!({

@@ -848,6 +848,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 pending_count,
                 total_bytes,
+                pending_writes,
             } => {
                 let mut update = super::bridge::progress_update(
                     "fs_staging",
@@ -856,20 +857,10 @@ impl AgentEventSink for AcpAgentEventSink {
                     None,
                     None,
                 );
-                let mut harn_meta = serde_json::Map::new();
-                harn_meta.insert(
-                    "kind".to_string(),
-                    serde_json::Value::String("staged_writes_pending".to_string()),
+                merge_harn_meta(
+                    &mut update,
+                    super::staged_writes::harn_meta(*pending_count, *total_bytes, pending_writes),
                 );
-                harn_meta.insert(
-                    "pendingCount".to_string(),
-                    serde_json::Value::from(*pending_count as u64),
-                );
-                harn_meta.insert(
-                    "totalBytes".to_string(),
-                    serde_json::Value::from(*total_bytes),
-                );
-                merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
                     "update": update,
@@ -1847,5 +1838,7 @@ impl AgentEventSink for AcpAgentEventSink {
     }
 }
 
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;

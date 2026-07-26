@@ -12,6 +12,16 @@ use super::host_injection::{
 use super::tool::{ToolCallErrorCategory, ToolCallStatus, ToolExecutor, ToolMutationStatus};
 use super::worker::{FsWatchEvent, WorkerEvent};
 
+/// Reviewable summary of one path in the staged filesystem overlay.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedWriteSummary {
+    pub path: String,
+    pub kind: String,
+    pub byte_delta: i64,
+    pub snapshot_id: Option<String>,
+}
+
 /// Events emitted by the agent loop. Some variants map 1:1 to ACP
 /// `sessionUpdate` variants; Harn-specific lifecycle events ride on the
 /// extension stream.
@@ -625,6 +635,7 @@ pub enum AgentEvent {
         session_id: String,
         pending_count: usize,
         total_bytes: u64,
+        pending_writes: Vec<StagedWriteSummary>,
     },
     /// Per-call outcome of `hostlib_fs_safe_text_patch`. Hosts subscribe to
     /// this to roll up stale-base / hunk-conflict rates and average

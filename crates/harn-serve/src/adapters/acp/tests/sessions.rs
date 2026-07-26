@@ -444,10 +444,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                 harn_capabilities["toolLifecycleExtensionFields"],
                 serde_json::json!(HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS)
             );
-            assert_eq!(
-                harn_capabilities["promptResultExtensionFields"],
-                serde_json::json!(HARN_PROMPT_RESULT_EXTENSION_FIELDS)
-            );
+            super::super::staged_writes::assert_capabilities(harn_capabilities);
 
             request_tx
                 .send(serde_json::json!({
