@@ -911,13 +911,13 @@ pub fn axis_breakdown(rows: list, axis: string) -> EvalAxisBreakdown {
  * @errors: []
  * @example: paired_case_deltas([{name: "a", passes: 0, trials: 1}], [{name: "a", passes: 1, trials: 1}])
  */
-pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list {
+pub fn paired_case_deltas(baseline_rows: list, current_rows: list) -> list<float> {
   let baseline = {}
   for row in __decided_rows(baseline_rows) {
     const name = __row_case_name(row)
     baseline = baseline + {[name]: row}
   }
-  let deltas = []
+  let deltas: list<float> = []
   for row in __decided_rows(current_rows) {
     const name = __row_case_name(row)
     const base = baseline[name]

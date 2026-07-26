@@ -1,0 +1,287 @@
+import {
+  arm_decision,
+  bounded_cs,
+  default_ladder,
+  incremental_ladder_trials,
+  n_at_ladder_round,
+  paired_delta_cs,
+  savings_report,
+} from "std/eval/sequential"
+
+fn lcg_next(state: int) -> int {
+  return (1664525 * state + 1013904223) % 4294967296
+}
+
+fn seed_mix(base: int, a: int, b: int, c: int) -> int {
+  let state = base % 4294967296
+  state = lcg_next(state + a * 374761393)
+  state = lcg_next(state + b * 668265263)
+  state = lcg_next(state + c * 2246822519)
+  return state
+}
+
+fn uniform(state: int) -> float {
+  return to_float(state % 4294967296) / 4294967296.0
+}
+
+fn paired_null_delta(seed: int, case_index: int, trial_index: int) -> float {
+  const shared = uniform(seed_mix(seed, case_index, trial_index, 7))
+  const baseline_noise = uniform(seed_mix(seed, case_index * 31 + trial_index, 101, 2))
+  const arm_noise = uniform(seed_mix(seed, case_index * 31 + trial_index, 202, 3))
+  const baseline = if 0.6 * shared + 0.4 * baseline_noise < 0.5 {
+    1
+  } else {
+    0
+  }
+  const arm = if 0.6 * shared + 0.4 * arm_noise < 0.5 {
+    1
+  } else {
+    0
+  }
+  return to_float(arm - baseline)
+}
+
+fn run_corrected_null(seed: int, delta: float) -> string {
+  const ladder = default_ladder()
+  const k_frozen = 5
+  const cases = 6
+  const arm_channels = {a: 0, b: 1, c: 2, d: 3, e: 4}
+  let alive = [
+    {id: "a", deltas: [], complexity: 0},
+    {id: "b", deltas: [], complexity: 1},
+    {id: "c", deltas: [], complexity: 2},
+    {id: "d", deltas: [], complexity: 3},
+    {id: "e", deltas: [], complexity: 4},
+  ]
+  let round = 1
+  while round <= len(ladder) {
+    const previous_n = if round == 1 {
+      0
+    } else {
+      n_at_ladder_round(ladder, round - 1)
+    }
+    const current_n = n_at_ladder_round(ladder, round)
+    let extended = []
+    for arm in alive {
+      let values = arm.deltas
+      const arm_channel = arm_channels[arm.id] ?? 0
+      let case_index = 0
+      while case_index < cases {
+        let trial_index = previous_n
+        while trial_index < current_n {
+          values = values
+            + [
+            paired_null_delta(seed_mix(seed, arm_channel, 97, 13), case_index, trial_index),
+          ]
+          trial_index = trial_index + 1
+        }
+        case_index = case_index + 1
+      }
+      extended = extended + [arm + {deltas: values}]
+    }
+    const decision = arm_decision(extended, k_frozen, delta, 0.02, current_n, round == len(ladder))
+    if decision.verdict != "RUNNING" {
+      return decision.verdict
+    }
+    let survivors = []
+    for arm in extended {
+      if !decision.killed.contains(arm.id) {
+        survivors = survivors + [arm]
+      }
+    }
+    alive = survivors
+    round = round + 1
+  }
+  return "UNRESOLVED"
+}
+
+fn flawed_bootstrap_lower(values: list<float>, delta: float, seed: int) -> float {
+  const resamples = 24
+  let means: list<float> = []
+  let state = seed
+  let sample = 0
+  while sample < resamples {
+    let total = 0.0
+    let index = 0
+    while index < len(values) {
+      state = lcg_next(state)
+      total = total + (values[state % len(values)] ?? 0.0)
+      index = index + 1
+    }
+    means = means + [total / to_float(len(values))]
+    sample = sample + 1
+  }
+  means = means.sorted()
+  return means[to_int(floor(delta * to_float(resamples))) ?? 0] ?? -1.0
+}
+
+/**
+ * Deliberately broken repeated-look racer retained as a falsifying control.
+ *
+ * It gives every arm the full family delta at every look, uses a fixed-sample
+ * percentile bootstrap, permits declarations at n=1, and uses epsilon zero.
+ */
+fn run_broken_null(seed: int, delta: float) -> string {
+  const ladder = default_ladder()
+  const arms = 5
+  const cases = 6
+  let round = 1
+  while round <= len(ladder) {
+    const current_n = n_at_ladder_round(ladder, round)
+    let arm_index = 0
+    while arm_index < arms {
+      let case_means: list<float> = []
+      let case_index = 0
+      while case_index < cases {
+        let total = 0.0
+        let trial_index = 0
+        while trial_index < current_n {
+          total = total
+            + paired_null_delta(seed_mix(seed, arm_index, 97, 13), case_index, trial_index)
+          trial_index = trial_index + 1
+        }
+        case_means = case_means + [total / to_float(current_n)]
+        case_index = case_index + 1
+      }
+      const lower = flawed_bootstrap_lower(
+        case_means,
+        delta,
+        seed_mix(seed, round * 1000 + arm_index, 555, 13),
+      )
+      if lower > 0.0 {
+        return "WINNER"
+      }
+      arm_index = arm_index + 1
+    }
+    round = round + 1
+  }
+  return "UNRESOLVED"
+}
+
+fn test_sequential_primitives() {
+  const cs = bounded_cs([0.0, 1.0, 1.0], 0.05, 0.0, 1.0)
+  require cs.n == 3, "bounded sequence records its observation count"
+  require cs.lo <= cs.mean && cs.mean <= cs.hi, "bounded sequence contains its point estimate"
+  const baseline = [
+    {name: "a", passes: 0, trials: 1, case_fingerprint: "a", harness_config_fingerprint: "h"},
+    {name: "b", passes: 1, trials: 1, case_fingerprint: "b", harness_config_fingerprint: "h"},
+  ]
+  const current = [
+    {name: "a", passes: 1, trials: 1, case_fingerprint: "a", harness_config_fingerprint: "h"},
+    {name: "b", passes: 1, trials: 1, case_fingerprint: "b", harness_config_fingerprint: "h"},
+  ]
+  const paired = paired_delta_cs(baseline, current, 0.05)
+  require paired.n == 2, "paired sequence reuses both compatible cases"
+  require paired.mean == 0.5, "paired sequence reports current minus baseline"
+  const ladder = default_ladder()
+  require ladder == [1, 2, 3, 5], "default ladder is stable"
+  require incremental_ladder_trials(ladder, 4) == 2, "ladder increments are cumulative"
+  const savings = savings_report(4, ladder, [4, 4, 2, 1])
+  require savings.factor > 1.0, "realized pruning saves trials"
+  const impossible_savings = try {
+    savings_report(4, ladder, [3])
+  }
+  require is_err(impossible_savings), "savings reject a schedule that omits registered arms"
+}
+
+fn test_sequential_decision_contract() {
+  const zero_band = try {
+    arm_decision([{id: "arm", deltas: [0.0], complexity: 0}], 1, 0.05, 0.0, 3, true)
+  }
+  require is_err(zero_band), "the practical-equivalence band must be nonzero"
+  const shallow = arm_decision(
+    [{id: "strong", deltas: [1.0], complexity: 2}, {id: "simple", deltas: [-1.0], complexity: 0}],
+    2,
+    0.1,
+    0.02,
+    1,
+    false,
+  )
+  require shallow.verdict == "RUNNING", "a shallow look keeps running"
+  require shallow.killed == [], "the minimum-trial floor prevents early kills"
+  require shallow.winner == nil, "running decisions have a stable nullable winner field"
+  let positive: list<float> = []
+  let negative: list<float> = []
+  let neutral: list<float> = []
+  let index = 0
+  while index < 160 {
+    positive = positive + [1.0]
+    negative = negative + [-1.0]
+    neutral = neutral + [0.0]
+    index = index + 1
+  }
+  const decisive = arm_decision(
+    [
+      {id: "strong", deltas: positive, complexity: 2},
+      {id: "simple", deltas: negative, complexity: 0},
+    ],
+    2,
+    0.1,
+    0.02,
+    5,
+    true,
+  )
+  require decisive.verdict == "WINNER", "a separated arm can win"
+  require decisive.winner == "strong", "the separated leader is returned"
+  const tied = arm_decision(
+    [
+      {id: "complex", deltas: neutral, complexity: 3},
+      {id: "simple", deltas: neutral, complexity: 0},
+    ],
+    2,
+    0.05,
+    0.2,
+    5,
+    true,
+  )
+  require tied.verdict == "TIED_CONFIRMED", "precise equivalent arms resolve as tied"
+  require tied.winner == "simple", "a confirmed tie selects the least complex arm"
+  const unresolved = arm_decision(
+    [
+      {id: "replicate-a", deltas: [0.0, 0.0, 0.0], complexity: 0},
+      {id: "replicate-b", deltas: [0.0, 0.0, 0.0], complexity: 1},
+    ],
+    2,
+    0.05,
+    0.01,
+    3,
+    true,
+  )
+  require unresolved.verdict == "UNRESOLVED", "an underpowered null stays unresolved"
+  require unresolved.no_decision, "unresolved is explicitly not a baseline confirmation"
+}
+
+fn test_anytime_valid_null_and_broken_control() {
+  const delta = 0.1
+  const simulations = 12
+  let corrected_winners = 0
+  let broken_winners = 0
+  let simulation = 0
+  while simulation < simulations {
+    const seed = seed_mix(1234567, simulation, 17, 3)
+    if run_corrected_null(seed, delta) == "WINNER" {
+      corrected_winners = corrected_winners + 1
+    }
+    if run_broken_null(seed, delta) == "WINNER" {
+      broken_winners = broken_winners + 1
+    }
+    simulation = simulation + 1
+  }
+  const corrected_rate = to_float(corrected_winners) / to_float(simulations)
+  const broken_rate = to_float(broken_winners) / to_float(simulations)
+  harness.stdio.eprintln(
+    "sequential null control: corrected=" + to_string(corrected_rate) + " broken="
+      + to_string(
+      broken_rate,
+    ),
+  )
+  require corrected_rate <= delta, "anytime-valid racer must control null false winners"
+  require broken_rate > delta, "known-broken repeated-look racer must visibly inflate false winners"
+}
+
+pipeline test(_task) {
+  test_sequential_primitives()
+  test_sequential_decision_contract()
+  test_anytime_valid_null_and_broken_control()
+  harness.stdio.println("[harn] stdlib eval sequential ok")
+}

@@ -585,6 +585,39 @@ rows whose case or harness-config fingerprints are incompatible.
 | `regression_gate(baseline, current, k?)` | Baseline-standard-deviation-aware regression gate |
 | `routing_calibration_report(cheap, ladder, frontier)` | Over- and under-escalation routing report |
 
+The intervals in `std/eval/stats` are fixed-sample reports. Do not repeatedly
+inspect them while accumulating trials and stop when one becomes favorable.
+Use `std/eval/sequential` for that workflow.
+
+### std/eval/sequential
+
+Anytime-valid confidence sequences and best-arm decisions for experiments that
+inspect accumulating observations more than once. Confidence sequences cover
+the bounded mean simultaneously at every look, so data-dependent stopping does
+not consume another per-look error budget.
+
+| Function | Description |
+|---|---|
+| `bounded_cs(values, delta, lo, hi)` | Anytime-valid confidence sequence for a bounded mean |
+| `paired_delta_cs(baseline, current, delta)` | Sequential counterpart to `paired_delta_report`, reusing its case and fingerprint pairing |
+| `default_ladder()` | Default cumulative trials-per-case schedule `[1, 2, 3, 5]` |
+| `n_at_ladder_round(ladder, round)` | Cumulative trials at a one-based look |
+| `incremental_ladder_trials(ladder, round)` | Fresh trials needed to reach a look |
+| `savings_report(k, ladder, alive_per_round)` | Realized trial factor versus a fixed deepest-rung grid |
+| `arm_decision(arms, k_frozen, delta, epsilon, n, spent, floor?)` | Frozen-family prune or terminal decision from arm confidence sequences |
+
+The ladder schedules spend only. It never authorizes a prune or declaration.
+`arm_decision` permanently divides `delta` by the number of registered arms,
+requires a nonzero practical-equivalence band, and prevents pruning below its
+minimum-trial floor. Its terminal outcomes distinguish a strict `WINNER`, a
+precisely measured `TIED_CONFIRMED`, and an underpowered `UNRESOLVED` result.
+
+Sequential inputs must be append-only observations. At each look, prior values
+remain byte-for-byte identical and only newly observed units are appended.
+Mutable per-case aggregates do not meet that contract: project each immutable
+case/trial cell to a stable row before using `paired_delta_cs`, or pass the
+resulting bounded delta vector directly to `bounded_cs`.
+
 `eval_pack_run` also supports live-verify eval cases. Set `kind: "live-verify"`
 and provide `task`, `workspace` or `project`, `verify_command`,
 `expected_output_paths`, and `required_output_snippets`; declare `executor` on
