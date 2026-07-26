@@ -40,7 +40,7 @@ const library = prompt_library_load("std/agent/prompts/tool_contract_text.harn.p
 
 Single `.harn.prompt` files can carry TOML front matter:
 
-```harn,ignore
+```harn-prompt
 ---
 id = "ops-prefix"
 tags = ["ops"]
