@@ -23,19 +23,27 @@ magic        : [u8; 8]   = "HARNBC\0\0"
 schema_ver   : u32       = SCHEMA_VERSION
 version_len  : u32
 harn_version : [u8; version_len]
+fp_len       : u32
+codegen_fp   : [u8; fp_len]   CODEGEN_FINGERPRINT of the producing build
 compiler_tag : u8        bitmask of active CompilerOptions
 kind         : u8        1 = entry chunk, 2 = module artifact
 source_hash  : [u8; 32]   sha256(entry source)
-import_hash  : [u8; 32]   sha256(sorted import graph contents)
+context_hash : [u8; 32]   sha256(sorted import graph contents)
 payload      : postcard-serialized payload (Chunk or ModuleArtifact, per kind)
 ```
 
-Mismatch on any of magic / schema / harn_version / source_hash /
-import_hash triggers a silent recompile and rewrite. A future Harn
-release that bumps the schema can simply increment `SCHEMA_VERSION`
-in `crates/harn-vm/src/bytecode_cache.rs`; older binaries reject the
-file as a header mismatch instead of attempting to decode an incompatible
-payload.
+Mismatch on any of magic / schema / harn_version / codegen_fp /
+compiler_tag / source_hash triggers a silent recompile and rewrite, as
+does a `context_hash` mismatch wherever the loader has computed one. A
+future Harn release that bumps the schema can simply increment
+`SCHEMA_VERSION` in `crates/harn-vm/src/bytecode_cache.rs`; older binaries
+reject the file as a header mismatch instead of attempting to decode an
+incompatible payload.
+
+`codegen_fp` is in the header rather than only inside `context_hash`
+because the entry fast path (below) deliberately does not compute a
+context hash, and a stale-compiler check that costs a graph walk is one
+the fast path cannot make.
 
 ## Cache directory
 
@@ -61,11 +69,18 @@ atomic on every supported filesystem.
 The on-disk filename is `<hex(source_hash)>.harnbc`. We key by the
 content of the entry file alone so two invocations from different
 `PATH`-relative locations share one cache entry; the in-file
-`import_hash` then guards against stale reuse when an imported file
+`context_hash` then guards against stale reuse when an imported file
 changes but the entry stays identical.
 
+Because the filename carries no graph and no location, a candidate found
+this way may have been written by an entirely different entry that
+happens to have identical bytes — two checkouts of one repository, say,
+where only one has local edits. Everything that distinguishes them lives
+inside the file, so nothing may be trusted before the header and the
+manifest have both agreed.
+
 `source_hash` is sha256 of the entry file's bytes.
-`import_hash` is sha256 of the canonical path + content of every user
+`context_hash` is sha256 of the canonical path + content of every user
 file transitively reachable through `import` declarations. `std/…`
 imports are excluded because the embedded `harn_version` covers them.
 Unresolved imports still contribute a fixed sentinel so dropping a
@@ -87,11 +102,42 @@ they never produce an incorrect bytecode load.
 3. Look for an adjacent `script.harnbc` (shipped artifacts win over the
    shared cache so release builds avoid touching `$HOME`).
 4. Look for `$HARN_CACHE_DIR/<source_hash>.harnbc`.
-5. On a hit, deserialize the payload and execute. Parse, type-check,
+5. Decide whether the candidate is valid (below).
+6. On a hit, deserialize the payload and execute. Parse, type-check,
    and compile are all skipped: the writer ran them.
-6. On a miss, parse + type-check + compile, then atomically write
+7. On a miss, parse + type-check + compile, then atomically write
    the artifact back into the shared cache. Write failures are
    best-effort and silent unless `HARN_BYTECODE_CACHE_DEBUG=1`.
+
+### Deciding an entry chunk is valid
+
+Recomputing `context_hash` means re-reading and re-hashing the whole
+import graph — a cold-path algorithm on the warm path. So an entry chunk
+carries a [`ContextManifest`]: the entry it was walked from, plus each
+reachable file's `(len, mtime_ns)` and the negative facts the graph
+depends on (imports that resolved to nothing, paths that failed to read).
+Re-checking that is stats only, and a chunk whose manifest re-checks
+clean is served without any walk at all.
+
+The manifest has to establish two separate things, and neither implies
+the other:
+
+- **that it describes this graph** — the recorded paths are absolute and
+  re-check clean from anywhere, so without the anchor a manifest proves
+  only that *some* graph is unchanged. That is what let one entry run
+  another's bytecode (#5591).
+- **that this build emitted the chunk** — from the header's `codegen_fp`,
+  since the fast path never computes the `context_hash` the fingerprint
+  otherwise hides in (#5610).
+
+Anything a manifest cannot describe (a file that will not stat, a
+manifest that was never written, an anchor that does not match) falls
+back to the full walk, which recomputes the key from scratch. A manifest
+can only ever save work; it can never decide a hit on its own.
+
+When the walk does run and finds the key unchanged — a touched mtime, a
+restored checkout — the artifact is rewritten with fresh observations, so
+the next spawn is back on the fast path instead of walking forever.
 
 Each `import` the VM executes at runtime follows the same protocol
 for the `.harnmod` family: read source, look for an adjacent

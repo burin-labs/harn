@@ -21,6 +21,8 @@
 //! schema_ver   : u32       = SCHEMA_VERSION
 //! version_len  : u32
 //! harn_version : [u8; version_len]
+//! fp_len       : u32
+//! codegen_fp   : [u8; fp_len]   CODEGEN_FINGERPRINT of the producing build
 //! compiler_tag : u8        bitmask of active CompilerOptions
 //! kind         : u8        1 = entry chunk, 2 = module artifact
 //! source_hash  : [u8; 32]
@@ -67,7 +69,11 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// contract shared by the module graph and runtime.
 /// v8: entry-chunk payload carries a [`ContextManifest`] so a warm lookup can
 /// prove the import graph is unchanged with stats instead of re-walking it.
-pub const SCHEMA_VERSION: u32 = 8;
+/// v9: that manifest records the entry it was walked from, so it cannot vouch
+/// for a different entry that happens to have identical source bytes; and the
+/// header carries [`CODEGEN_FINGERPRINT`], which the manifest fast path needs
+/// in order to reject a chunk built by another compiler at the same version.
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -80,6 +86,13 @@ pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// entries automatically, within a single version, with no manual cache wipe.
 /// `HARN_VERSION` only busts the cache across release bumps; this closes the
 /// same gap for the within-version compiler edits that masked #2610. See #2621.
+///
+/// It reaches a lookup two ways. The header comparison is what *rejects* a
+/// stale artifact, and is the only one the entry fast path can afford, since
+/// that path proves its graph from a manifest and never recomputes the context
+/// hash (#5610). Folding it into the context hash as well is what keeps two
+/// builds' module artifacts on distinct filenames rather than overwriting each
+/// other, since `module_filename` is derived from that hash.
 pub const CODEGEN_FINGERPRINT: &str = env!("HARN_CODEGEN_FINGERPRINT");
 
 /// Conventional extension for entry-chunk cache files.
@@ -281,6 +294,12 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
     }
     candidates.push(cache_dir().join(key.filename()));
 
+    // Candidates are found by entry source hash alone, so a candidate may have
+    // been written by a *different* entry with byte-identical source. Its
+    // manifest has to say it describes this one before its observations mean
+    // anything here.
+    let entry = module_source::canonical_identity(source_path);
+
     for path in candidates {
         let Ok(Some(candidate)) = read_entry_candidate(&path, &key) else {
             continue;
@@ -288,7 +307,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
         if candidate
             .manifest
             .as_ref()
-            .is_some_and(ContextManifest::still_valid)
+            .is_some_and(|manifest| manifest.still_valid(&entry))
         {
             // The graph is provably unchanged, so the stored context hash is
             // still the one this source would produce.
@@ -545,18 +564,46 @@ fn deserialize_cache_payload<T: DeserializeOwned>(payload: &[u8]) -> Result<T, S
 }
 
 fn encode_artifact(key: &CacheKey, kind: u8, payload: &[u8]) -> Vec<u8> {
+    encode_artifact_fingerprinted(key, kind, payload, CODEGEN_FINGERPRINT)
+}
+
+/// Inner form of [`encode_artifact`] parameterized on the compiler fingerprint
+/// so tests can write an artifact as if a different build had produced it;
+/// production always passes [`CODEGEN_FINGERPRINT`].
+fn encode_artifact_fingerprinted(
+    key: &CacheKey,
+    kind: u8,
+    payload: &[u8],
+    codegen_fingerprint: &str,
+) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(payload.len() + 128);
     buf.extend_from_slice(MAGIC);
     buf.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
     let version_bytes = HARN_VERSION.as_bytes();
     buf.extend_from_slice(&(version_bytes.len() as u32).to_le_bytes());
     buf.extend_from_slice(version_bytes);
+    let fingerprint_bytes = codegen_fingerprint.as_bytes();
+    buf.extend_from_slice(&(fingerprint_bytes.len() as u32).to_le_bytes());
+    buf.extend_from_slice(fingerprint_bytes);
     buf.push(key.compiler_tag);
     buf.push(kind);
     buf.extend_from_slice(&key.source_hash);
     buf.extend_from_slice(&key.context_hash);
     buf.extend_from_slice(payload);
     buf
+}
+
+/// Reads `len` bytes and reports whether they equal `expected`.
+///
+/// `len` comes off disk, so it is bounded before it becomes an allocation: a
+/// corrupted or hostile file must not be able to ask for an unbounded read.
+/// A length that cannot match `expected` is rejected without reading at all.
+fn read_length_prefixed_match(file: &mut fs::File, len: usize, expected: &[u8]) -> bool {
+    if len > 256 || len != expected.len() {
+        return false;
+    }
+    let mut buf = vec![0u8; len];
+    file.read_exact(&mut buf).is_ok() && buf == expected
 }
 
 /// Parsed cache header. Read by both the chunk and module loaders so the
@@ -594,15 +641,20 @@ fn read_header_if_matches(
         return Ok(None);
     }
     let version_len = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
-    if version_len > 256 {
-        // Bound the alloc so a corrupted file cannot force an unbounded read.
+    if !read_length_prefixed_match(&mut file, version_len, key.harn_version.as_bytes()) {
         return Ok(None);
     }
-    let mut version_buf = vec![0u8; version_len];
-    if file.read_exact(&mut version_buf).is_err() {
+    // Which build produced this artifact, checkable without computing anything.
+    // The entry fast path proves its graph unchanged from a manifest and never
+    // recomputes the context hash, so a fingerprint carried only inside that
+    // hash would go unexamined and a chunk from a previous build of the same
+    // release would be replayed. See #5610.
+    let mut fingerprint_len_bytes = [0u8; 4];
+    if file.read_exact(&mut fingerprint_len_bytes).is_err() {
         return Ok(None);
     }
-    if version_buf != key.harn_version.as_bytes() {
+    let fingerprint_len = u32::from_le_bytes(fingerprint_len_bytes) as usize;
+    if !read_length_prefixed_match(&mut file, fingerprint_len, CODEGEN_FINGERPRINT.as_bytes()) {
         return Ok(None);
     }
     let mut compiler_and_kind = [0u8; 2];
@@ -814,9 +866,12 @@ fn hash_transitive_user_imports_fingerprinted(
         .map(|import| (source_path.to_path_buf(), Arc::clone(import)))
         .collect();
     // Built alongside the hash: the same observations, in a form a later
-    // process can re-check with stats instead of repeating this walk. Set to
-    // `None` the moment the graph contains something stats cannot describe.
-    let mut manifest = Some(ContextManifest::default());
+    // process can re-check with stats instead of repeating this walk. Anchored
+    // at the entry, because that is what the observations are relative to. Set
+    // to `None` the moment the graph contains something stats cannot describe.
+    let mut manifest = Some(ContextManifest::for_entry(
+        module_source::canonical_identity(source_path),
+    ));
 
     while let Some((anchor, import)) = frontier.pop() {
         let Some(resolved) = harn_modules::resolve_import_path(&anchor, &import) else {

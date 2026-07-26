@@ -546,8 +546,9 @@ fn a_directory_shadowed_import_does_not_defeat_the_manifest() {
         1,
         "the directory-shadowed import must be recorded, not dropped"
     );
+    let anchor = module_source::canonical_identity(&entry);
     assert!(
-        manifest.still_valid(),
+        manifest.still_valid(&anchor),
         "nothing changed, so the manifest must still validate"
     );
 
@@ -556,7 +557,7 @@ fn a_directory_shadowed_import_does_not_defeat_the_manifest() {
     std::fs::remove_dir(tmp.path().join("types")).unwrap();
     std::fs::write(tmp.path().join("types"), "pub fn t() -> int { return 2 }\n").unwrap();
     assert!(
-        !manifest.still_valid(),
+        !manifest.still_valid(&anchor),
         "a path that became readable changes the graph and must invalidate"
     );
 }
@@ -702,4 +703,146 @@ fn import_hash_stable_across_repeated_calls_same_process() {
             "repeated import-graph hashing over an unchanged tree must be stable"
         );
     }
+}
+
+/// Seeds `dir` with an entry importing `./dep`, where the entry text is
+/// identical for every caller and only the dependency body varies.
+///
+/// That is the shape #5591 turns on: the entry-chunk cache names files by entry
+/// *source* hash alone, so two trees whose entries are byte-identical share one
+/// cache identity while having genuinely different graphs.
+fn seed_shared_identity_entry(dir: &Path, dep_body: &str) -> (PathBuf, String) {
+    let entry = dir.join("entry.harn");
+    let entry_source = "import \"./dep\"\n__io_println(\"same\")\n".to_string();
+    std::fs::write(&entry, &entry_source).unwrap();
+    std::fs::write(dir.join("dep.harn"), dep_body).unwrap();
+    (entry, entry_source)
+}
+
+/// Compiles `entry` and writes its artifact beside it, manifest included.
+///
+/// Deliberately not `LookupOutcome::store`, which targets the shared cache
+/// directory: these tests are about what happens when one entry reads another's
+/// artifact, and writing into the developer's real cache would both leak and
+/// let one run's leftovers decide the next one's answer.
+fn store_beside(entry: &Path, source: &str) -> PathBuf {
+    let (context_hash, manifest) = hash_transitive_user_imports_with_manifest(entry, source);
+    let manifest = manifest.expect("a graph of ordinary readable files must produce a manifest");
+    let key = CacheKey {
+        source_hash: sha256(source.as_bytes()),
+        context_hash,
+        harn_version: HARN_VERSION,
+        compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+    };
+    let artifact = adjacent_cache_path(entry).unwrap();
+    let chunk = compile_source(source).expect("compile");
+    write_atomic_chunk(&artifact, &key, &chunk, Some(&manifest)).unwrap();
+    artifact
+}
+
+#[test]
+fn a_manifest_does_not_vouch_for_a_different_entry() {
+    // A manifest records stat identities of absolute paths, all of which stay
+    // perfectly clean no matter which entry re-checks them. Only the anchor
+    // distinguishes "this graph is unchanged" from "some graph is unchanged".
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let (entry_a, source) =
+        seed_shared_identity_entry(a.path(), "pub fn v() -> int { return 1 }\n");
+    let (entry_b, source_b) =
+        seed_shared_identity_entry(b.path(), "pub fn v() -> int { return 2 }\n");
+    assert_eq!(source, source_b, "the entries must be byte-identical");
+
+    let (_hash, manifest) = hash_transitive_user_imports_with_manifest(&entry_a, &source);
+    let manifest = manifest.expect("a graph of ordinary readable files must produce a manifest");
+
+    assert!(
+        manifest.still_valid(&module_source::canonical_identity(&entry_a)),
+        "nothing moved under the entry it was walked from"
+    );
+    assert!(
+        !manifest.still_valid(&module_source::canonical_identity(&entry_b)),
+        "a manifest describing A's graph must not prove anything about B's"
+    );
+}
+
+#[test]
+fn an_artifact_from_an_identical_entry_elsewhere_is_not_served() {
+    // End-to-end over `load`: the cache hands one entry an artifact another
+    // entry wrote, because `CacheKey::filename` is the entry source hash and
+    // nothing else. Here the artifact is planted at B's adjacent path rather
+    // than in a shared directory, so the test needs no ambient cache state --
+    // the candidate B reads is byte-for-byte the one A wrote either way, which
+    // is the whole of the mechanism.
+    let a = tempfile::tempdir().unwrap();
+    let b = tempfile::tempdir().unwrap();
+    let (entry_a, source) =
+        seed_shared_identity_entry(a.path(), "pub fn v() -> int { return 1 }\n");
+    let (entry_b, _) = seed_shared_identity_entry(b.path(), "pub fn v() -> int { return 992 }\n");
+
+    let artifact = store_beside(&entry_a, &source);
+
+    // A re-runs and takes the manifest fast path: the positive control, without
+    // which a miss below would prove nothing.
+    assert!(
+        load(&entry_a, &source).chunk.is_some(),
+        "A's own artifact must still validate for A"
+    );
+
+    // Now B finds exactly that artifact. Its own graph differs.
+    std::fs::copy(&artifact, adjacent_cache_path(&entry_b).unwrap()).unwrap();
+    assert!(
+        load(&entry_b, &source).chunk.is_none(),
+        "B must not run bytecode compiled against A's graph"
+    );
+}
+
+#[test]
+fn an_artifact_from_another_build_of_this_version_is_not_served() {
+    // The manifest fast path proves the *graph* is unchanged and stops there,
+    // so a chunk emitted by a different compiler at the same release -- every
+    // edit to the lexer, parser, IR or codegen during development -- has an
+    // immaculate manifest and nothing else to fail on. `harn_version` does not
+    // move within a release and `compiler_tag` only tracks `CompilerOptions`,
+    // which leaves the header's fingerprint as the one field that can notice.
+    // See #5610, and #2621 for the class it belongs to.
+    let tmp = tempfile::tempdir().unwrap();
+    let (entry, source) =
+        seed_shared_identity_entry(tmp.path(), "pub fn v() -> int { return 7 }\n");
+    let (context_hash, manifest) = hash_transitive_user_imports_with_manifest(&entry, &source);
+    let manifest = manifest.expect("a graph of ordinary readable files must produce a manifest");
+    let key = CacheKey {
+        source_hash: sha256(source.as_bytes()),
+        context_hash,
+        harn_version: HARN_VERSION,
+        compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+    };
+    let payload = serialize_cache_payload(&EntryPayload {
+        manifest: Some(manifest),
+        chunk: compile_source(&source).expect("compile").freeze_for_cache(),
+    })
+    .unwrap();
+
+    let artifact = adjacent_cache_path(&entry).unwrap();
+    std::fs::write(
+        &artifact,
+        encode_artifact_fingerprinted(&key, KIND_ENTRY_CHUNK, &payload, "some-other-build"),
+    )
+    .unwrap();
+    assert!(
+        load(&entry, &source).chunk.is_none(),
+        "a chunk this compiler did not emit must not be replayed"
+    );
+
+    // The same bytes under this build's fingerprint do load, so the miss above
+    // is the fingerprint and not some other part of the artifact.
+    std::fs::write(
+        &artifact,
+        encode_artifact_fingerprinted(&key, KIND_ENTRY_CHUNK, &payload, CODEGEN_FINGERPRINT),
+    )
+    .unwrap();
+    assert!(
+        load(&entry, &source).chunk.is_some(),
+        "an artifact from this build must still take the fast path"
+    );
 }
