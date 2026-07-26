@@ -287,6 +287,44 @@ async fn expected_error_and_lint_expectations_are_additive() {
 }
 
 #[tokio::test]
+async fn conformance_case_cannot_write_into_the_runner_checkout() {
+    let temp = TempTestDir::new();
+    let escape_path = std::env::current_dir()
+        .unwrap()
+        .join(format!(".harn-conformance-escape-{}", std::process::id()));
+    let _ = fs::remove_file(&escape_path);
+    let quoted_path = serde_json::to_string(&escape_path.display().to_string()).unwrap();
+    temp.write_content(
+        "conformance/tests/write_escape.harn",
+        &format!(
+            "fn main(harness: Harness) {{\n  harness.fs.write_text({quoted_path}, \"escaped\")\n}}\n"
+        ),
+    );
+    temp.write_content(
+        "conformance/tests/write_escape.error",
+        &format!(
+            "re:HARN-CAP-201.*{}",
+            regex::escape(&escape_path.display().to_string())
+        ),
+    );
+    let harn_file = temp.path().join("conformance/tests/write_escape.harn");
+
+    let evaluation = evaluate_case_serialized(
+        &harn_file,
+        "tests/write_escape.harn",
+        &conformance_options(),
+    )
+    .await;
+    let escaped = escape_path.exists();
+    if escaped {
+        fs::remove_file(&escape_path).unwrap();
+    }
+
+    assert!(evaluation.passed, "{:?}", evaluation.message);
+    assert!(!escaped, "the denied conformance write reached disk");
+}
+
+#[tokio::test]
 async fn expected_output_fails_on_unasserted_error_lint() {
     let temp = TempTestDir::new();
     temp.write_content(
