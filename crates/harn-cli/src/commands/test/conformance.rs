@@ -1,6 +1,7 @@
 use super::*;
 
 mod lint;
+mod write_root;
 
 use lint::{format_conformance_lint_diagnostics, lint_expectation_error};
 
@@ -247,6 +248,7 @@ async fn execute_conformance_source(
     let state_dir = state_dir.to_string_lossy().into_owned();
     let _state_dir_guard =
         ScopedEnvVar::set(harn_vm::runtime_paths::HARN_STATE_DIR_ENV, &state_dir);
+    let _write_root_guard = write_root::ConformanceWriteRoot::install(Path::new(&state_dir));
     let harn_bin = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current harn executable: {error}"))?;
     let harn_bin = harn_bin.to_string_lossy().into_owned();
