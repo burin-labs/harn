@@ -81,6 +81,36 @@ impl OverlayFs {
         key.starts_with(&self.root)
     }
 
+    /// Whether a write or delete of `path` is absorbed by this overlay —
+    /// served entirely from the in-memory layer, never reaching disk.
+    ///
+    /// Every mutation inside the root is absorbed, so this is exactly
+    /// [`Self::within_root`]. It exists as its own name because the
+    /// sandbox asks a different question than the overlay's internal
+    /// dispatch does: not "do I handle this path" but "is this access
+    /// incapable of touching the real filesystem". Callers rely on a
+    /// `true` here to mean the mutation is inert.
+    pub fn absorbs_mutation(&self, path: &Path) -> bool {
+        self.within_root(path)
+    }
+
+    /// Whether a read of `path` is absorbed by this overlay.
+    ///
+    /// Deliberately narrower than [`Self::absorbs_mutation`]. A read
+    /// inside the root with no layer entry falls through to
+    /// `std::fs::read` (see [`Self::read`]), so it *does* reach the real
+    /// filesystem and is not absorbed. Only a path the layer already
+    /// holds — written, deleted, or created as a directory — is served
+    /// from memory.
+    pub fn absorbs_read(&self, path: &Path) -> bool {
+        if !self.within_root(path) {
+            return false;
+        }
+        let key = self.key(path);
+        let layer = self.layer.lock().expect("overlay layer poisoned");
+        layer.contains_key(&key)
+    }
+
     pub fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
         if !self.within_root(path) {
             return std::fs::read(path);

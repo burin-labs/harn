@@ -48,8 +48,8 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
 use paths::{
-    is_standard_io_device_for_access, normalize_for_policy, normalize_io_device_path,
-    path_is_within,
+    access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
+    normalize_io_device_path, path_is_within,
 };
 
 mod handler_env;
@@ -418,7 +418,7 @@ pub fn check_fs_path_scope(path: &Path, access: FsAccess) -> Result<(), SandboxV
     // rewrites /dev/stdout to a per-process /dev/fd/<…>.output alias that no
     // longer looks like a standard device. Kept deliberately narrow — only
     // the well-known device files, no broader /dev access.
-    if is_standard_io_device_for_access(&normalize_io_device_path(path), access) {
+    if access_is_exempt_from_scope(path, access) {
         return Ok(());
     }
     let candidate = normalize_for_policy(path);
