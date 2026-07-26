@@ -19,6 +19,28 @@ pub type RuntimePromptContentBlock = {
 }
 
 /**
+ * Harn-owned state directories rooted beneath a caller-selected directory.
+ *
+ * Unlike `runtime_paths()`, this explicit layout never consults ambient path
+ * overrides such as `HARN_STATE_DIR`.
+ */
+pub type RuntimeStatePaths = {state_root: string, worktree_root: string}
+
+/**
+ * Resolve Harn's conventional state layout beneath `root`.
+ *
+ * Use `runtime_paths()` for the active process and this function only when a
+ * caller has named a distinct project root.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn runtime_state_paths_under(root: string) -> RuntimeStatePaths {
+  const state_root = path_join(root, ".harn")
+  return {state_root: state_root, worktree_root: path_join(state_root, "worktrees")}
+}
+
+/**
  * runtime_task.
  *
  * @effects: [host]
