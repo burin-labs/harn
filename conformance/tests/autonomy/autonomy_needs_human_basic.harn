@@ -20,13 +20,12 @@ fn attempt_write(harness: Harness, target: string) -> dict {
 }
 
 pipeline test(task) {
-  harness.fs.mkdir(".harn")
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
     harness.random.gen_range(100000, 999999),
   )
   const agent = "needs-human-" + unique
-  const target = path_join(".harn", "needs_human_" + unique + ".txt")
+  const target = path_join(harness.fs.temp_dir(), "needs_human_" + unique + ".txt")
   const outcome = with_autonomy_policy(
     {
       agent_id: agent,

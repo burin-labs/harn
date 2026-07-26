@@ -6,7 +6,7 @@ import "std/memory"
  * by id, and "rejected stays queryable" (status, not tombstone).
  */
 pipeline default() {
-  const root = path_join(".harn", "tmp", "harn-mem-richer-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-mem-richer-" + uuid())
   const ns = "agent/notes"
   memory_store(
     ns,
