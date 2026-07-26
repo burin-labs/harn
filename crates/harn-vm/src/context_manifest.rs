@@ -16,7 +16,9 @@
 //! [`crate::module_source`] memoizes reads on `(path, len, mtime_ns)`. This
 //! extends that same decision across process boundaries, matching how Cargo,
 //! Zig and Bazel gate their warm paths. The accepted gap is identical to
-//! theirs: an edit that preserves both length and mtime is not noticed.
+//! theirs: an edit that preserves both length and mtime is not noticed. That
+//! gap is pinned by a test rather than left to prose, so closing it — or
+//! widening it — has to be a deliberate edit and cannot happen by accident.
 
 use std::path::{Path, PathBuf};
 
@@ -163,6 +165,32 @@ mod tests {
         }
     }
 
+    /// State a file's mtime outright, so a test can say which version it means
+    /// instead of hoping the clock moved between two writes.
+    ///
+    /// Two writes in quick succession routinely share an mtime: Windows' system
+    /// clock ticks at ~15.6ms, and HFS+/ext3/some NFS store whole seconds. A
+    /// test that rewrites a file and expects the stat to differ is asserting
+    /// something about the host's timer, not about this module.
+    /// `module_source`'s twin test (`a_same_length_edit_is_re_read_in_a_warm_process`)
+    /// sets the timestamp for exactly this reason rather than sleeping out the
+    /// coarsest plausible tick.
+    fn set_mtime(path: &Path, when: std::time::SystemTime) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(when))
+            .unwrap();
+    }
+
+    /// Move `path`'s mtime `secs` forward, making the current contents
+    /// unambiguously newer than anything observed before now.
+    fn advance_mtime(path: &Path, secs: u64) {
+        let current = std::fs::metadata(path).unwrap().modified().unwrap();
+        set_mtime(path, current + std::time::Duration::from_secs(secs));
+    }
+
     #[test]
     fn an_unchanged_graph_stays_valid() {
         let tmp = tempfile::tempdir().unwrap();
@@ -176,14 +204,61 @@ mod tests {
         // Length alone cannot carry the check: `mtime_ns` is what catches an
         // edit that keeps the file the same size. The in-process read memo
         // relies on exactly this, and so does the manifest.
+        //
+        // The rewrite's mtime is set rather than left to the clock. Without
+        // that this asserts the host produced two distinguishable timestamps
+        // within a few microseconds, which Windows does not
+        // (see `set_mtime`), so the test failed there while passing
+        // everywhere else — a portability bug in the test, not a change in
+        // what this module guarantees. The guarantee under test is that a
+        // *distinguishable* mtime is noticed; the case where it is not
+        // distinguishable is pinned by the test below.
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 111 }\n");
         let manifest = manifest_for(&[dep.clone()]);
         write(&dep, "pub fn v() -> int { return 222 }\n");
+        advance_mtime(&dep, 10);
+        assert_eq!(
+            std::fs::metadata(&dep).unwrap().len(),
+            33,
+            "both versions must be the same byte length or this exercises \
+             the length path instead of the mtime path"
+        );
         assert!(
             !manifest.still_valid(),
             "an edit of identical length must still invalidate the manifest"
+        );
+    }
+
+    #[test]
+    fn a_same_length_edit_under_one_mtime_tick_is_the_documented_gap() {
+        // The stated limit of a stat-only proof, made executable so it is a
+        // decision rather than a footnote: an edit that preserves BOTH length
+        // and mtime is not noticed. Reproduced deterministically by restoring
+        // the original timestamp, because the filesystems where this happens
+        // for real (Windows' ~15.6ms clock tick, 1s-granularity filesystems)
+        // are not the ones CI necessarily runs on.
+        //
+        // This is inherited, not introduced by the manifest: `module_source`'s
+        // in-process memo keys on the same `(len, mtime_ns)` identity and has
+        // the same blind spot. If that identity is ever strengthened, this
+        // test should fail and be deleted deliberately — it exists so the
+        // trade-off cannot be changed by accident in either direction.
+        let tmp = tempfile::tempdir().unwrap();
+        let dep = tmp.path().join("dep.harn");
+        write(&dep, "pub fn v() -> int { return 111 }\n");
+        let original = std::fs::metadata(&dep).unwrap().modified().unwrap();
+        let manifest = manifest_for(&[dep.clone()]);
+
+        write(&dep, "pub fn v() -> int { return 222 }\n");
+        set_mtime(&dep, original);
+
+        assert!(
+            manifest.still_valid(),
+            "a stat-only manifest cannot notice an edit that preserves both \
+             length and mtime; if this now fails, the identity was \
+             strengthened and this test should be removed on purpose"
         );
     }
 
