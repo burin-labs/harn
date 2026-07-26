@@ -2,6 +2,7 @@ use super::*;
 use crate::orchestration::{pop_execution_policy, push_execution_policy};
 
 mod path_contracts;
+mod process_axis;
 
 #[test]
 fn missing_create_path_normalizes_against_existing_parent() {
@@ -186,96 +187,6 @@ fn empty_workspace_roots_prefer_project_root_env_over_execution_root() {
     pop_execution_policy();
     crate::stdlib::process::set_thread_execution_context(None);
     std::env::remove_var("HARN_PROJECT_ROOT");
-}
-
-#[test]
-fn empty_workspace_roots_default_to_execution_root_for_process_cwd() {
-    let _env_lock = crate::runtime_paths::test_env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    std::env::remove_var("HARN_PROJECT_ROOT");
-    let dir = tempfile::tempdir().unwrap();
-    crate::stdlib::process::set_thread_execution_context(Some(
-        crate::orchestration::RunExecutionRecord {
-            cwd: Some(dir.path().to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: None,
-            env: Default::default(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
-        },
-    ));
-    push_execution_policy(CapabilityPolicy {
-        sandbox_profile: SandboxProfile::Worktree,
-        ..CapabilityPolicy::default()
-    });
-
-    assert!(enforce_process_cwd(dir.path()).is_ok());
-    let outside = tempfile::tempdir().unwrap();
-    assert!(enforce_process_cwd(outside.path()).is_err());
-
-    pop_execution_policy();
-    crate::stdlib::process::set_thread_execution_context(None);
-}
-
-#[test]
-fn scoped_process_sandbox_roots_concretize_empty_policy_for_command_cwd() {
-    let _env_lock = crate::runtime_paths::test_env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    std::env::remove_var("HARN_PROJECT_ROOT");
-    let execution_root = tempfile::tempdir().unwrap();
-    let command_root = tempfile::tempdir().unwrap();
-    crate::stdlib::process::set_thread_execution_context(Some(
-        crate::orchestration::RunExecutionRecord {
-            cwd: Some(execution_root.path().to_string_lossy().into_owned()),
-            project_root: None,
-            source_dir: None,
-            env: Default::default(),
-            adapter: None,
-            repo_path: None,
-            worktree_path: None,
-            branch: None,
-            base_ref: None,
-            cleanup: None,
-            grants: Vec::new(),
-        },
-    ));
-    push_execution_policy(CapabilityPolicy {
-        sandbox_profile: SandboxProfile::Worktree,
-        ..CapabilityPolicy::default()
-    });
-
-    assert!(
-        enforce_process_cwd(command_root.path()).is_err(),
-        "before the scoped overlay the command temp root is outside the execution-root fallback",
-    );
-    {
-        let _guard = push_process_sandbox_scope(ProcessSandboxScope {
-            workspace_roots: vec![command_root.path().to_string_lossy().into_owned()],
-        })
-        .unwrap();
-        assert!(
-            enforce_process_cwd(command_root.path()).is_ok(),
-            "scoped command root must be usable as the process cwd"
-        );
-        assert!(
-            enforce_process_cwd(execution_root.path()).is_err(),
-            "the scoped root must narrow the concrete spawn jail instead of widening it"
-        );
-    }
-    assert!(
-        enforce_process_cwd(command_root.path()).is_err(),
-        "the scoped command root must pop after the command spawn"
-    );
-
-    pop_execution_policy();
-    crate::stdlib::process::set_thread_execution_context(None);
 }
 
 #[test]
