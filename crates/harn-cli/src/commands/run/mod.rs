@@ -369,7 +369,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // sandboxes are common in CI environments. Surface the failure as a
     // single-line warning when explicitly requested via the audit hook;
     // otherwise stay quiet to avoid bloating happy-path output.
-    if let Err(err) = harn_vm::bytecode_cache::store(&lookup.key, &chunk) {
+    if let Err(err) = lookup.store(&chunk) {
         if std::env::var_os(crate::dispatch::CACHE_DEBUG_ENV).is_some() {
             eprintln!("[harn] bytecode cache write skipped: {err}");
         }

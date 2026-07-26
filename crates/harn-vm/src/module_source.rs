@@ -98,7 +98,11 @@ fn memo() -> &'static Memo {
 
 /// Identity of the file version currently on disk. Any change to either
 /// component invalidates the memo entry.
-fn stat_identity(path: &Path) -> Option<(u64, i128)> {
+///
+/// Also the unit the entry-chunk context manifest re-checks, so that the
+/// in-process memo and the cross-process manifest agree on what "unchanged"
+/// means by construction rather than by convention.
+pub(crate) fn stat_identity(path: &Path) -> Option<(u64, i128)> {
     let meta = fs::metadata(path).ok()?;
     let len = meta.len();
     // Nanosecond mtime where available; fall back to coarse seconds.
