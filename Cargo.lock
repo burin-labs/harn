@@ -3444,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-macros"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3455,18 +3455,18 @@ dependencies = [
 
 [[package]]
 name = "harn-builtin-meta"
-version = "0.10.39"
+version = "0.10.40"
 
 [[package]]
 name = "harn-builtin-registry"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-builtin-meta",
 ]
 
 [[package]]
 name = "harn-cli"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "arcstr",
  "async-trait",
@@ -3546,7 +3546,7 @@ dependencies = [
 
 [[package]]
 name = "harn-cli-aot-gen"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-stdlib",
  "harn-vm",
@@ -3559,7 +3559,7 @@ dependencies = [
 
 [[package]]
 name = "harn-clock"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "async-trait",
  "parking_lot",
@@ -3570,7 +3570,7 @@ dependencies = [
 
 [[package]]
 name = "harn-codegen"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -3585,7 +3585,7 @@ dependencies = [
 
 [[package]]
 name = "harn-dap"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "arcstr",
  "harn-modules",
@@ -3600,7 +3600,7 @@ dependencies = [
 
 [[package]]
 name = "harn-fmt"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-lexer",
  "harn-parser",
@@ -3609,14 +3609,14 @@ dependencies = [
 
 [[package]]
 name = "harn-glob"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "globset",
 ]
 
 [[package]]
 name = "harn-guard"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-vm",
  "ort",
@@ -3630,7 +3630,7 @@ dependencies = [
 
 [[package]]
 name = "harn-hostlib"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "arcstr",
  "async-trait",
@@ -3703,7 +3703,7 @@ dependencies = [
 
 [[package]]
 name = "harn-ir"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-glob",
  "harn-lexer",
@@ -3712,14 +3712,14 @@ dependencies = [
 
 [[package]]
 name = "harn-lexer"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "harn-lint"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-builtin-meta",
  "harn-fmt",
@@ -3745,7 +3745,7 @@ dependencies = [
 
 [[package]]
 name = "harn-lsp"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-fmt",
  "harn-hostlib",
@@ -3767,7 +3767,7 @@ dependencies = [
 
 [[package]]
 name = "harn-mcp-rc-compat"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "axum",
  "harn-serve",
@@ -3781,7 +3781,7 @@ dependencies = [
 
 [[package]]
 name = "harn-modules"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "blake3",
  "croner",
@@ -3796,7 +3796,7 @@ dependencies = [
 
 [[package]]
 name = "harn-opcode-macros"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3816,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "harn-parser"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-builtin-meta",
  "harn-builtin-registry",
@@ -3837,7 +3837,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "harn-hostlib",
  "regex",
@@ -3852,7 +3852,7 @@ dependencies = [
 
 [[package]]
 name = "harn-rules-hostlib"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "arcstr",
  "harn-fmt",
@@ -3867,11 +3867,11 @@ dependencies = [
 
 [[package]]
 name = "harn-secret-catalog"
-version = "0.10.39"
+version = "0.10.40"
 
 [[package]]
 name = "harn-serve"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "arcstr",
  "async-compression",
@@ -3916,7 +3916,7 @@ dependencies = [
 
 [[package]]
 name = "harn-session-store"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3937,14 +3937,14 @@ dependencies = [
 
 [[package]]
 name = "harn-skills"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "harn-sqlite"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -3953,11 +3953,11 @@ dependencies = [
 
 [[package]]
 name = "harn-stdlib"
-version = "0.10.39"
+version = "0.10.40"
 
 [[package]]
 name = "harn-terminal"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "portable-pty",
  "serde",
@@ -3967,7 +3967,7 @@ dependencies = [
 
 [[package]]
 name = "harn-vm"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "aes-gcm",
  "apple-native-keyring-store",
@@ -8964,7 +8964,7 @@ dependencies = [
 
 [[package]]
 name = "tree-sitter-harn"
-version = "0.10.39"
+version = "0.10.40"
 dependencies = [
  "cc",
  "tree-sitter",

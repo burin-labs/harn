@@ -44,24 +44,24 @@ otel = [
 testbench-wasi = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wat", "dep:tempfile"]
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.39" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.39" }
-harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.39" }
-harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.39" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.40" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.40" }
+harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.40" }
+harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.40" }
 linkme = "0.3"
 lopdf = { version = "0.44", default-features = false, features = ["wasm_js"] }
 parking_lot = "0.12"
 pin-project-lite = "0.2"
-harn-clock = { path = "../harn-clock", version = "=0.10.39" }
-harn-glob = { path = "../harn-glob", version = "=0.10.39" }
-harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.39" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.39" }
-harn-sqlite = { path = "../harn-sqlite", version = "=0.10.39" }
-harn-ir = { path = "../harn-ir", version = "=0.10.39" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.39" }
-harn-modules = { path = "../harn-modules", version = "=0.10.39" }
-harn-parser = { path = "../harn-parser", version = "=0.10.39" }
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.39" }
+harn-clock = { path = "../harn-clock", version = "=0.10.40" }
+harn-glob = { path = "../harn-glob", version = "=0.10.40" }
+harn-secret-catalog = { path = "../harn-secret-catalog", version = "=0.10.40" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.40" }
+harn-sqlite = { path = "../harn-sqlite", version = "=0.10.40" }
+harn-ir = { path = "../harn-ir", version = "=0.10.40" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.40" }
+harn-modules = { path = "../harn-modules", version = "=0.10.40" }
+harn-parser = { path = "../harn-parser", version = "=0.10.40" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.40" }
 async-trait = "0.1"
 aws-config = "1.10.1"
 aws-credential-types = "1.3.0"

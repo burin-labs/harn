@@ -13,7 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 /// Harn release that generated this binding.
-pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.39";
+pub const HARN_PROTOCOL_ARTIFACT_VERSION: &str = "0.10.40";
 
 /// Upstream ACP schema version Harn tracks.
 pub const ACP_SCHEMA_COMPATIBILITY: &str = "agentclientprotocol/agent-client-protocol schema v0.12.2";

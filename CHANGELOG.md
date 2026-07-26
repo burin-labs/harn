@@ -9,6 +9,385 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.40
+
+### Breaking
+
+- Replace capability profiles with a first-class `inherited`, `isolated`, or
+  `granted` environment policy on every CLI and ACP session. The policy now
+  governs `harness.env`, provider credentials/endpoints/regions, platform
+  credential discovery, and subprocesses from one launch-time snapshot;
+  children may only narrow their parent's authority. The old
+  `--capability-profile hermetic|lane`, ACP `profile` field, and
+  `provider:NAME` grant shorthand are removed.
+- Replace Harn's AWS SigV4 and credential-provider implementations with the
+  maintained AWS crates. Bedrock now supports the full SDK credential chain,
+  including assume-role profiles, web identity, SSO, and `credential_process`.
+  `aws_sigv4_headers` no longer exposes canonical-request internals; its signed
+  request headers and stable signing metadata remain available.
+- **Cookie and stateless-session helpers now use the maintained `cookie` crate
+  for RFC parsing, serialization, and signing (#5542).** Signing secrets must
+  contain at least 32 bytes of cryptographically random data, signed values use
+  the crate's authenticated wire format, and `SameSite=None` serialization
+  automatically adds `Secure`.
+- Replace Harn's bespoke Keychain and Windows Credential Manager
+  implementations with the maintained `keyring-core` platform stores, use
+  Secret Service by default on Linux/Unix, and normalize native hostlib
+  responses to `backend = "keyring"`. Set
+  `HARN_SECRET_STORE_BACKEND=file` for headless environments.
+
+### Added
+
+- **Completion gates can escalate repeated verification failures without losing
+  host-specific repair coaching (#4229).** `std/agent/judge` accepts an
+  opt-in failed-after-write streak and convergence fact, emits structured
+  escalation routing at the configured threshold, and lets hosts decorate
+  delivered feedback by stable ladder reason.
+- **Provider rate-limit admission is fair across agent sessions (#4546).**
+  Shared durable RPM/TPM ledgers now rotate queued capacity by
+  `rate_limit_consumer_id` (defaulting to `session_id`), promote starving
+  callers, emit structured queue position/wait/counter facts, and advance
+  through `equivalent_failover` when the bounded queue wait expires.
+- **`harn runs export-training` projects one authoritative agent run into a
+  typed training example (#4702).** The new command reads a run record and its
+  digest-verified LLM transcript and emits `harn.agent_training_example.v1`:
+  the exact provider-visible message sequence, typed tool call/result pairs,
+  the tool catalog exactly as it was served, and provenance carrying the run
+  and session ids, route, tool format, token usage, terminal status, and the
+  source transcript's SHA-256 and event span. Downstream corpus builders no
+  longer need to parse Harn's transcript vocabulary themselves.
+
+  The projector never guesses. Malformed JSONL, a missing, orphaned,
+  duplicated, or out-of-order tool result, an unknown event schema version, a
+  truncated terminal record, a sidecar edited after the run finalized, and a
+  wrong run or session id each fail with a structured diagnostic rather than
+  being skipped. A directory holding several runs requires an explicit
+  `--run-id`; nothing is selected by output length or a `DONE` marker.
+
+  The agent runtime now records a `tool_call` receipt at dispatch and a
+  `tool_result` receipt at injection, so a call and its result stay paired even
+  on the text channel, where the result reaches the model as an ordinary `user`
+  echo carrying no id. Both receipts are observability-only; request
+  construction is unchanged.
+
+  `harn models lora export` consumes projected examples directly. The served
+  catalog flows through to the trainer with every declared parameter intact,
+  instead of being re-derived from prompt prose or from the argument values a
+  run happened to use, and a row whose call/result pairing is broken is refused
+  rather than exported.
+- **Durable model-batch execution and normalized terminal rejoin (#4704,
+  #4701).** `harn models batch execute` now owns lock/CAS-protected initialize,
+  advance, inspect, cancel, provider-operation recovery, dry-run fixtures, and
+  the complete hash-bound lifecycle, while `harn models batch rejoin`
+  normalizes provider wire rows into manifest order and emits exact typed
+  consumable or quarantine receipts without downstream provider parsing.
+- **Azure OpenAI and Amazon Bedrock now have complete live Batch API adapters
+  (#4706).** Azure uses canonical Files/Batch routing with API-key or bearer
+  authentication, while Bedrock uses explicit model/region eligibility,
+  AWS SDK credential-chain SigV4 requests, typed S3 policy, deterministic
+  create-token crash recovery, and normalized result rejoin.
+- Added the typed `runtime_prompt_content()` host capability for reading normalized ACP session text, image, audio,
+  and PDF prompt blocks without depending on a bare ambient global.
+- Generate serde-backed Rust ACP permission and Harn agent-event wire types alongside the protocol constants.
+- **Legacy LoRA corpora now have an honest behavior-strata migration path
+  (#4842).** Preflight can explicitly acknowledge a wholly unclassified corpus,
+  reports it as `legacy_unclassified` with every missing class and stable record
+  ids, and leaves partial coverage and trainer export fail-closed.
+- `harn run` gains repeatable
+  `--grant NAME=SOURCE[,expose=ENV_VAR]` declarations (#4992). A grant may
+  snapshot an `env:VAR` source or retain a live `secret://ACCOUNT/KEY`
+  reference, and may expose the value to the session under one environment
+  name. Grants are disclosed on stderr and receipted under `--attest`.
+- `harn time run` now accepts every confinement and credential flag `harn run`
+  accepts, including `--environment-policy` and `--grant`. Both commands share
+  one flag definition, so a run and its timed twin can no longer drift apart.
+- An exported-but-empty provider auth variable is now treated as a missing
+  credential rather than resolving to an empty key. Providers declaring several
+  auth variables already behaved this way.
+- Add `harn lint --changed-from <REV> [--changed-to <REV>]` to enforce strict
+  diagnostics only where their UTF-8 source spans overlap Git-added lines, with
+  fail-closed path/span evaluation and typed JSON range metadata.
+- `std/schema` now publishes canonical typed contracts for its validator
+  boundary — `SchemaIssue`, `SchemaFailure`, `SchemaResult<T>`, `SchemaReport<T>`,
+  `JsonTypedReport<T>`, `SchemaValidatorOptions`, and `SchemaValidator<T>` — owned
+  in one place (`std/schema/contracts`) and re-exported from `std/schema`. Every
+  public schema builder and typed helper now carries explicit return annotations,
+  `std/fs` and `std/cli/argparse` consume the shared failure/issue types instead
+  of reconstructing them, and a zero-baseline gate (`make check-schema-strict`)
+  keeps the module strict-types and strict-lint clean.
+- Add Claude Opus 5 (`claude-opus-5`) to the bundled provider catalog and move
+  the `opus` alias onto it, with `opus5` and `opus48` pinning aliases alongside.
+  Pricing matches Opus 4.8 at $5/$25 per MTok, and the row carries the same
+  research-preview fast-mode serving tier at 2x standard rates.
+- Add a Claude Code Bash guard (`scripts/claude_bash_guard.harn`, wired as a
+  `PreToolUse` hook). It rejects `cargo build/check/clippy/fmt/test/bench` in
+  favour of the Makefile target that sets the worktree-local build dir,
+  `RUST_MIN_STACK`, egress unsets, and nextest, and it rejects piping a build or
+  test straight into a filter — that discards every line the filter did not print,
+  so recovering one costs a full rerun. `HARN_ALLOW_RAW_CARGO=1` opts out.
+- `harn provider catalog overlay-audit --overlay <file>` reports the entries in
+  a product-local `providers.toml` that the baseline catalog already covers:
+  ones whose removal changes nothing, and whole-row `[models.<id>]` copies that
+  a smaller `[patch.models.<id>]` reproduces. Every suggestion is verified by
+  re-running the real merge with the substitution, so it can be applied as
+  printed. Whole-row copies also report the baseline fields they were silently
+  dropping, which narrowing hands back. `--check` exits non-zero for CI on
+  those; entries matching nothing in the catalog, and ordered rules duplicating
+  a baseline rule, are reported without gating, because an overlay may
+  legitimately speak about routes discovered at runtime and overlay rules are
+  prepended. `--json` emits the findings as data.
+- Tool-call failures caused by the host machine rather than the agent's work now
+  reach the ACP wire as their own `environment` error category instead of being
+  folded into `host_bridge_error` (#5537). A host reading a `tool_call_update`
+  can now tell "widen the sandbox or provision this machine" apart from "the
+  bridge broke", and say so to the user rather than blaming the model. Blocked
+  outbound egress moves into the same category, since its fix is also a
+  configuration change. `ErrorCategory::ALL` is now public, matching the other
+  taxonomies, so code that must decide something for every category can
+  enumerate them instead of keeping a private copy of the list.
+- Guard the two `host_call` dispatch routes against silent divergence: the
+  cross-cutting behaviour in `dispatch_host_operation_with_ctx` and the set of
+  builtins the ACP adapter re-registers are now declared with a per-entry
+  rationale, and a test fails when the code and the declaration disagree.
+
+### Changed
+
+- **Sequence aggregation helpers now own nil handling and replace remaining
+  collection boilerplate (#4548).** `std/math::sum` skips nil elements,
+  `sum_by` and `count_where` document their empty-sequence behavior, and Harn
+  scripts use the helpers instead of repeated map/reduce or filtered-list
+  counts.
+- Use `background` as the sole public option for asynchronous command and
+  filesystem operations; the deprecated alias is now rejected.
+- Give module source bytes and the digests derived from them a single
+  process-wide owner, keyed by canonical file identity rather than by the path
+  spelling an import happened to resolve to. Relative imports reach one file under
+  many spellings, so the previous key missed on most edges of a real pipeline
+  tree: a 377-module graph read 860 files per spawn to load 298 distinct ones, and
+  the module loader re-read and re-hashed sources the entry cache-key walk had
+  already read. A spawn of that graph now performs 298 source reads, holds one
+  copy of the graph's text instead of two, and hashes each source once instead of
+  three times.
+- ACP staged-write progress notifications now enumerate each pending path with its create/modify/delete kind,
+  signed byte delta, and originating tool-call snapshot id.
+- **Unified transcript compaction into one versioned receipt across every
+  projection (#4995).** A single `CompactionReceipt` — with a stable
+  `receipt_id`, session identity, reason, mode, strategy, message/token metrics,
+  policy, recap metrics, and snapshot provenance — is now built once at the
+  compaction lifecycle boundary and embedded verbatim in the transcript
+  `compaction` event, carried on the `TranscriptCompacted` live event, forwarded
+  through ACP (`receiptId` / `schemaVersion`), and projected typed into
+  `RunObservabilityRecord.compaction_events`. One compaction yields one receipt
+  id everywhere, so ACP consumers no longer synthesize a host-local UUID, and
+  `reason` and recap metrics now survive into the observability record instead of
+  being dropped by JSON re-scraping. Existing run records still load: legacy
+  transcripts without an embedded receipt are migrated (marked
+  `schema_version: 0`), and the new record fields default.
+- A chunk loaded from the bytecode cache no longer builds its constant-pool
+  dedup index on load. Only `Chunk::add_constant` reads that index, and a
+  cache-loaded chunk is executed rather than appended to, so the index is now
+  derived on the first append instead of hashing every constant of every chunk
+  of every module on a path that never appends one. On a 377-module graph this
+  is a paired median 3.0 ms off `module_load` (95% CI [-4.0, -2.0], n=60).
+- Document the required early owner-death guardian dispatch for embedded Rust hosts and expose it through `harn-serve`.
+- All eight hosted `gpt-oss-120b` catalog rows move from `tier = "frontier"` to
+  `tier = "mid"`. The model is strong for its weight class — Artificial Analysis
+  scores it at Intelligence Index 24, fifth of 62 open-weight 40-150B models —
+  but `tier` is an absolute capability class, and measured against everything
+  tracked it lands 71st of 390 for intelligence and 78th of 156 for coding. The
+  rows claim `strengths = ["speed", "cheap", "tool_use"]`, naming neither coding
+  nor agentic work, and the 20B sibling was already `mid`. This affects
+  capability decisions rather than presentation: cross-family reviewer selection
+  scores candidates on tier distance, and escalation ladders treat a `frontier`
+  primary as already strong enough not to escalate, so the old value could pin a
+  run to a model it should have escalated away from. `catalog_sources/README.md`
+  now documents how to calibrate a tier so the next row does not drift the same
+  way.
+- Spawning a script on a large import graph is ~4 ms faster. The entry-chunk
+  cache key's import scan no longer rewrites every transitively reachable
+  source file into a comment-stripped copy before scanning it.
+- A warm `harn run` no longer re-reads and re-hashes the whole import graph to
+  decide the entry-chunk cache is still valid. The artifact now carries a
+  manifest of each reachable file's size and mtime, which a later spawn
+  re-checks with stats; anything that does not match falls back to the full
+  walk. On a 377-module graph the entry cache check drops from ~23 ms to ~1 ms.
+  Cache artifacts written by older builds are ignored and rebuilt once.
+- Delegate runtime schema constraint evaluation to the standards-based
+  `jsonschema` Draft 2020-12 implementation while preserving Harn types,
+  recursive defaults, bounded traversal, path-aware diagnostics, and bounded
+  compiled-validator reuse. The internal runtime-limit key is now
+  `max_schema_validator_cache_entries`. Canonical Harn unions now export as
+  JSON Schema `anyOf`, preserving their inclusive match semantics when branches
+  overlap.
+- Preserve comments, quoted keys, ordering, and unrelated formatting when
+  `harn add` or local-package rollback edits `harn.toml`, using `toml_edit`
+  instead of line-oriented TOML rewriting.
+- Raise the Linux release-binary size ratchet to 211 MiB for the maintained AWS
+  SDK credential and SigV4 stack, leaving 0.60 MiB above the measured binary.
+
+### Fixed
+
+- **ACP thought-level discovery now matches Harn's reasoning policies
+  (#4569).** Clients can discover and select the runtime-supported `max`
+  reasoning policy instead of seeing a list that stops at `xhigh`.
+- Unified `flow_evaluate_invariants` with the Flow predicate executor so
+  semantic predicates and deterministic fallbacks share selection, budgets,
+  typed records, fail-closed diagnostics, and stricter-verdict composition,
+  with an explicit advisory policy for replay-only fallback links.
+- Removed the remaining embedded Python control-plane parsers from release,
+  audit, verification, and experiment scripts. The Python boundary gate now
+  blocks new shell, Makefile, or workflow embeddings unless they are an
+  explicitly owned foreign-runtime bootstrap.
+- Collapsed repeated turn-stable host reads on the ACP route. The adapter
+  replaces the `host_call` builtin, so the per-turn memo added for
+  `runtime.pipeline_input` never applied to editor-hosted sessions and every
+  agent turn paid ~25x the necessary JSON-RPC round-trips to the editor.
+- Send `thinking: {"type": "disabled"}` explicitly on generation-5 Claude models.
+  Through Opus 4.8 an omitted `thinking` field meant no thinking; on Opus 5,
+  Sonnet 5, Fable 5, and Mythos 5 it defaults to adaptive, so a `Disabled`
+  thinking config was silently buying reasoning tokens the caller had turned off.
+
+  Report the minimum cacheable prompt prefix per model instead of a flat 1024
+  tokens for every Anthropic route. The real floor ranges from 512 tokens on
+  Opus 5 to 4096 on Opus 4.6 and Haiku 4.5, so `prompt_cache_support` was
+  reporting a 1400-token prefix as cacheable on routes where the provider
+  silently ignores the breakpoint and bills the full prompt every request.
+
+  Clamp `output_config.effort` to `high` when a caller override pairs it with
+  disabled thinking on a generation-5 Claude model, which the API rejects with a
+  400 above that level.
+- Stop corrupting streamed assistant text in transcripts. Consecutive `text` /
+  `output_text` blocks are chunks of one continuous string split at arbitrary
+  byte offsets, but the transcript renderer joined every block with a space, so a
+  word split across two chunks came back with a space wedged into it ("El Alto"
+  rendered as "El Al to"). Adjacent text blocks now concatenate directly;
+  label blocks such as `<tool_call:…>` keep their surrounding spaces.
+- Accept a full JSON Schema in a tool's `parameters` field instead of reading its
+  keys as parameter names. Harn's `parameters` is a flat `{name: type}` map, so a
+  caller who passed the OpenAI/Anthropic tool shape
+  (`{type: "object", properties: {...}, required: [...]}`) got `type`,
+  `properties`, and `required` registered as three parameters. The provider
+  accepted the resulting schema and the model answered with the schema's own keys
+  as arguments, so the mistake surfaced as a confidently wrong tool call rather
+  than an error. An unambiguous JSON Schema object now passes through verbatim; a
+  tool that genuinely takes a `type` argument is unaffected.
+- Pinned the sccache version installed by CI behind a single composite action.
+  sccache allows one server per user and a client whose version differs from
+  the running server shuts it down, so an unpinned install on a self-hosted
+  runner hosting many concurrent workers killed the shared compiler-cache
+  server out from under unrelated jobs, surfacing as spurious
+  `Connection reset by peer` build failures.
+- Stop rejecting a package over a symlink at a path the installer was going to
+  skip. `compute_package_content_hash` checked for symlinks before checking its
+  exclusion list, so a symlinked `.gitignore`, `.git`, content-hash file, or
+  cache-metadata file failed the install with "package content contains
+  unsupported symlink" even though none of them reach the content hash. Symlinks
+  in real package content are still rejected.
+- Model rows now serialize `capabilities`, `quality_tags`, `strengths`,
+  `complementary_with`, and `avoid_as_reviewer_for` only when non-empty, and
+  `deprecated` / `availability` only when non-default, matching `serving_tiers`
+  and the documented "missing means no claim" reading. Emitting a default for
+  every unstated field made an unstated field indistinguishable from one an
+  overlay deliberately set, which is how a whole-row overlay copy could
+  silently un-deprecate a route it merely forgot to mention.
+- Converged the `harn-cli` test suite onto a single lock over the process
+  environment. `env_lock` and `harn_state_lock` were separate mutexes guarding
+  the same `HARN_STATE_DIR` / `HARN_EVENT_LOG_*` variables, so they excluded
+  nothing from each other: a conformance case would point `HARN_STATE_DIR` at a
+  temp dir, delete it, and leave a portal, persona, or orchestrator-harness test
+  resolving its event log into the deleted path. `env_lock` is gone and every
+  caller now takes `harn_state_lock`, which also clears the leaky variables on
+  entry. Re-acquiring it from a test that already holds it now panics with an
+  explanation instead of deadlocking silently.
+- The orchestrator no longer exports its `--state-dir` as the process-global
+  `HARN_STATE_DIR`. It builds its VM with that path passed as an argument, so a
+  running orchestrator can no longer redirect the state root of other components
+  in the same process — including ones given an explicit base dir, which an
+  absolute `HARN_STATE_DIR` silently replaced. The event log and the store,
+  metadata, and checkpoint builtins stay rooted at `--state-dir` exactly as
+  before. Ambient runtime caches that only followed along because of the export
+  (LLM response cache, rate-limit databases, remote provider-catalog cache, and
+  the `state_root` reported by the `runtime_paths()` builtin) now resolve under
+  the project's own state root.
+- Added `EventLogConfig::for_state_root` and
+  `event_log::install_default_at_state_root` for callers whose state root is a
+  parameter rather than ambient configuration. Unlike the `_for_base_dir` forms,
+  they cannot be redirected by `HARN_STATE_DIR` or the `HARN_EVENT_LOG_*` path
+  overrides.
+- `harn run --profile` no longer reports `vm/residual 100%` with no builtins
+  named when unrelated runtime state is reset mid-flight. Builtin recording is
+  process-global, and `reset_thread_local_state()` disarmed it from ~150 test
+  setups and from production entry points that know nothing about an in-flight
+  profiled run. `builtin_profile::enable()` now returns a guard, so the run that
+  asked for profiling is the only thing that ends it, and overlapping runs
+  degrade predictably: the later run owns the recorder rather than an outgoing
+  one disarming it.
+- Loading a package's runtime extensions no longer erases the providers another
+  package contributed. Installing a manifest replaced the whole process-wide
+  provider catalog with "the builtins plus mine", so an orchestrator harness
+  could lose its connector to a persona command that loaded a package moments
+  later, and the listener would then reject its own registered provider. A
+  package now contributes its providers additively. Re-registering the same
+  provider is a no-op, a package cannot redefine a builtin like `github`, and
+  two packages that disagree about what one provider id means are reported as a
+  conflict instead of being settled by load order.
+- `make setup` no longer adopts a target directory belonging to another
+  checkout. `HARN_DEV_TARGET_WORKTREE_PATH` and `CODEX_WORKTREE_PATH` name the
+  worktree a target dir belongs to, and setup honoured either without checking
+  that it named the checkout being configured — so a shell exporting one
+  checkout's path while work happened in a sibling worktree gave both the same
+  mutable target dir, which is the concurrent-build hazard the per-worktree
+  target dir exists to prevent. Setup now derives from the checkout it is
+  configuring whenever the configured path disagrees, and warns that it did.
+- `scripts/tests/dev_setup_profile_test.sh` clears both worktree-path variables
+  instead of inheriting them. Two cases assume no per-worktree target dir is
+  configured, so they passed in CI and failed in any shell that exported one.
+- A Cargo probe timeout now explains itself. A cold workspace build legitimately
+  exceeds the default deadline, so the bare timeout read like a hang; the error
+  now names an unconfigured checkout as the likely cause and offers both ways
+  past it (`HARN_BIN` with `HARN_BIN_NO_BUILD=1`, or a larger
+  `HARN_BIN_CARGO_TIMEOUT_SECONDS`). A checkout with no `.cargo/config.toml`
+  warns before the build rather than after the deadline.
+- Trigger handlers and persona stages no longer impose workspace-root sandboxing on a
+  run that deliberately has none. An autonomy tier and a stage declaration bound what code
+  may *do*, not where it may read and write, but both were built on
+  `CapabilityPolicy::default()` — whose `sandbox_profile` is `Worktree` — and were pushed
+  verbatim when there was no parent policy to intersect against. A handler fired under
+  `harn run --no-sandbox` was confined to the script's directory even though the same
+  command announces that it "disables filesystem, process, and egress sandbox defaults",
+  and a handler fired under `harn test conformance` was confined to the checkout while its
+  own pipeline was not. Overlay policies now build on the new `CapabilityPolicy::neutral()`,
+  the identity element under `intersect`; policies that *are* a complete confinement
+  decision keep the fail-closed `Worktree` default.
+- `std/session-store` now honors `HARN_STATE_DIR` when its location is defaulted, instead
+  of always writing `<runtime root>/.harn/session-store.sqlite`. It was the one state
+  consumer that joined a literal `.harn` rather than going through the shared state-root
+  resolver, so a `harn test conformance` run — which already points `HARN_STATE_DIR` at a
+  temp dir — left a database inside the checkout under a dozen test directories. A tree
+  named explicitly, via the `root` option or `HARN_SESSION_STORE_ROOT`, still gets that
+  tree's `.harn`: naming a location is a stronger statement than the ambient default, and
+  both overrides continue to win.
+- Conformance cases that built scratch fixtures no longer write them into the
+  repository root. Eleven cases named bare relative paths — `project_scan_*`,
+  `polyglot_tree`, `meta_scratch`, `rfr_fixture.txt`, `vision_fixture.png`,
+  `sample.pdf`, `media_helper_fixture.png` — which resolved against the runner's
+  working directory; they now build under `harness.fs.temp_dir()`. The
+  `.gitignore` block that had been hiding some of them (and two entries whose
+  cases no longer exist) is gone with them.
+- The sqlite init lock a conformance fixture's session store leaves behind is
+  ignored alongside the `*.sqlite`, `-shm` and `-wal` files it sits next to,
+  which were already ignored.
+- Eight more conformance cases stopped writing into the checkout's `.harn`.
+  They hardcoded relative paths — `path_join(".harn", "tmp", ...)` for scratch,
+  or `.harn` as a state directory — which resolve against the runner's working
+  directory. Because `.gitignore` ignores `.harn/` globally, this pollution was
+  invisible rather than absent. The scratch cases now use
+  `harness.fs.temp_dir()` directly, which is what `.harn/tmp` was standing in
+  for.
+- Allow a closed release-audit receipt to remain valid when the certified
+  source SHA is unchanged but the base branch advances afterward, so explicit
+  `--at-sha` releases can complete.
+
 ## v0.10.39
 
 ### Changed
