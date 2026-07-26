@@ -46,8 +46,6 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 
 // tokio::time::sleep in test files (outside start_paused = true tests).
 // Legitimate uses:
-//   - `orchestration/tests.rs`: paired with `start_paused = true`,
-//     drives advanced timers explicitly.
 //   - `orchestrator_http/support.rs`: `wait_for_path` polls a real
 //     filesystem marker written by handler-side code where no
 //     event signal is available; bounded with `tokio::time::timeout`.
@@ -57,7 +55,6 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
 //     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
-  "crates/harn-vm/src/orchestration/tests.rs",
   "crates/harn-vm/src/agent_sessions_tests.rs",
   "crates/harn-vm/src/flow/predicates/executor_tests.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",
@@ -526,10 +523,36 @@ pub fn base_name(p: string) -> string {
 }
 
 /**
+ * True when a single path segment names a test module by convention:
+ * `tests`, `tests_*`, or `*_tests`, with or without the `.rs` extension.
+ *
+ * A test module may be a file (`tests_runtime.rs`) or a directory holding
+ * the same module split across several files (`tests_runtime/language.rs`),
+ * so this is checked per segment rather than against the base name alone.
+ * Matching only the base name silently reclassified every file of a split
+ * test module as runtime source.
+ */
+pub fn is_test_module_segment(seg: string) -> bool {
+  const stem = seg.ends_with(".rs") ? seg.substring(0, seg.len() - 3) : seg
+  return stem == "tests" || stem.starts_with("tests_") || stem.ends_with("_tests")
+}
+
+/** True when any segment of `rel` names a test module. */
+pub fn has_test_module_segment(rel: string) -> bool {
+  for seg in rel.split("/") {
+    if is_test_module_segment(seg) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * True when a repo-relative `.rs` path under the crates tree counts as a
  * test file:
  * any `.rs` under a `tests/` directory, or an inline/sibling test module
- * (`tests.rs`, `tests_*.rs`, `*_tests.rs`) under a `src/` directory.
+ * (`tests.rs`, `tests_*.rs`, `*_tests.rs`, or a directory of either shape)
+ * under a `src/` directory.
  * Mirrors the bash `find` pair feeding TEST_FILES_TMP.
  */
 pub fn is_test_rs_path(rel: string) -> bool {
@@ -542,8 +565,7 @@ pub fn is_test_rs_path(rel: string) -> bool {
   if !rel.contains("/src/") {
     return false
   }
-  const name = base_name(rel)
-  return name == "tests.rs" || name.starts_with("tests_") || name.ends_with("_tests.rs")
+  return has_test_module_segment(rel)
 }
 
 /**
@@ -558,14 +580,7 @@ pub fn is_runtime_rs_path(rel: string) -> bool {
   if !rel.starts_with("crates/harn-vm/src/") && !rel.starts_with("crates/harn-cli/src/") {
     return false
   }
-  if rel.contains("/tests/") {
-    return false
-  }
-  const name = base_name(rel)
-  if name == "tests.rs" || name.starts_with("tests_") || name.ends_with("_tests.rs") {
-    return false
-  }
-  return true
+  return !has_test_module_segment(rel)
 }
 
 /** True when `rel` is one of the sanctioned E2E subprocess test files. */
