@@ -258,6 +258,43 @@ fn strip_native_name_provider_suffixes(mut text: &str) -> &str {
     }
 }
 
+/// Text the parser consumed without turning it into a tool call.
+///
+/// The parser deliberately does not decide whether a dropped span was *meant*
+/// to be a tool call. Answering that here is what produced an allowlist of
+/// known wrapper tags with a silent fall-through for everything else: a dialect
+/// nobody had added yet was not "unrecognized tool syntax", it was prose, and
+/// the turn died with no calls, no violations, and no events. The parser's
+/// obligation is to be honest about what it dropped; deciding whether any of it
+/// carried tool intent is policy, and lives above this layer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DroppedFragment {
+    /// The dropped text itself. Carried rather than referenced by offset
+    /// because the parser rewrites its input before scanning (thinking tags are
+    /// stripped), so an offset would be relative to a string the caller never
+    /// sees.
+    pub text: String,
+    pub reason: DroppedReason,
+}
+
+/// Why a span was consumed without producing a call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DroppedReason {
+    /// Absorbed into assistant prose as ordinary narration.
+    SalvagedAsProse,
+    /// Skipped as narration inside a closed markdown fence.
+    FencedNarration,
+}
+
+impl DroppedReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            DroppedReason::SalvagedAsProse => "salvaged_as_prose",
+            DroppedReason::FencedNarration => "fenced_narration",
+        }
+    }
+}
+
 /// Result of parsing a prose-interleaved TS tool-call stream.
 ///
 /// The scanner walks the model's text once and splits it into three
@@ -300,6 +337,10 @@ pub(crate) struct TextToolParseResult {
     /// Used as the assistant's history entry so future turns see the
     /// well-formed shape instead of the raw provider bytes.
     pub canonical: String,
+    /// Text consumed without producing a call. See [`DroppedFragment`]: this is
+    /// what makes "the parser silently ate something that looked like a tool
+    /// call" an answerable question instead of an invisible one.
+    pub dropped: Vec<DroppedFragment>,
 }
 
 #[cfg(test)]

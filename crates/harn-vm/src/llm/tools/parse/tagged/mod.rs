@@ -18,7 +18,7 @@ use super::syntax::{
     parse_ts_call_from, preview_str, render_canonical_call, skip_heredoc_body, strip_thinking_tags,
     CloseScan,
 };
-use super::TextToolParseResult;
+use super::{DroppedFragment, DroppedReason, TextToolParseResult};
 use crate::llm::tools::collect_tool_schemas;
 use crate::text_index::TextIndex;
 use crate::value::VmValue;
@@ -79,6 +79,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     let mut canonical_parts: Vec<String> = Vec::new();
     let mut done_marker: Option<String> = None;
     let mut recovered_from_stray_count = 0usize;
+    let mut dropped: Vec<DroppedFragment> = Vec::new();
 
     let mut cursor = 0usize;
     let bytes = src.as_bytes();
@@ -158,8 +159,14 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts: &mut canonical_parts,
                 done_marker: &mut done_marker,
                 recovered_from_stray_count: &mut recovered_from_stray_count,
+                dropped: &mut dropped,
             };
-            report_stray(&src[start..cursor], tools_val, &mut stray);
+            report_stray(
+                &src[start..cursor],
+                DroppedReason::SalvagedAsProse,
+                tools_val,
+                &mut stray,
+            );
             continue;
         }
 
@@ -173,8 +180,14 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts: &mut canonical_parts,
                 done_marker: &mut done_marker,
                 recovered_from_stray_count: &mut recovered_from_stray_count,
+                dropped: &mut dropped,
             };
-            report_stray(&src[cursor..after], tools_val, &mut stray);
+            report_stray(
+                &src[cursor..after],
+                DroppedReason::SalvagedAsProse,
+                tools_val,
+                &mut stray,
+            );
             cursor = after;
             last_block_end = cursor;
             continue;
@@ -214,8 +227,14 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts: &mut canonical_parts,
                 done_marker: &mut done_marker,
                 recovered_from_stray_count: &mut recovered_from_stray_count,
+                dropped: &mut dropped,
             };
-            report_stray(&src[start..cursor], tools_val, &mut stray);
+            report_stray(
+                &src[start..cursor],
+                DroppedReason::FencedNarration,
+                tools_val,
+                &mut stray,
+            );
             continue;
         }
 
@@ -602,6 +621,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         recovered_from_stray_count,
         done_marker,
         canonical: canonical_parts.join("\n\n"),
+        dropped,
     }
 }
 
@@ -873,13 +893,23 @@ struct StrayReportContext<'a> {
     canonical_parts: &'a mut Vec<String>,
     done_marker: &'a mut Option<String>,
     recovered_from_stray_count: &'a mut usize,
+    dropped: &'a mut Vec<DroppedFragment>,
 }
 
-fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayReportContext<'_>) {
+fn report_stray(
+    fragment: &str,
+    reason: DroppedReason,
+    tools_val: Option<&VmValue>,
+    ctx: &mut StrayReportContext<'_>,
+) {
     let trimmed = fragment.trim();
     if trimmed.is_empty() {
         return;
     }
+    let dropped_fragment = DroppedFragment {
+        text: trimmed.to_string(),
+        reason,
+    };
     if is_orphaned_tool_call_wrapper_fragment(trimmed) {
         return;
     }
@@ -904,6 +934,7 @@ fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayRepo
         if !prose.is_empty() && should_salvage_stray_prose(prose) {
             push_assistant_prose(prose, ctx.assistant_prose_parts, ctx.canonical_parts);
         }
+        return;
     } else if !sniff.errors.is_empty() {
         ctx.errors.extend(sniff.errors);
     } else if !salvage_stray_done(
@@ -914,6 +945,7 @@ fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayRepo
     ) {
         if should_salvage_stray_prose(trimmed) {
             push_assistant_prose(trimmed, ctx.assistant_prose_parts, ctx.canonical_parts);
+            ctx.dropped.push(dropped_fragment);
         } else {
             ctx.violations.push(format!(
                 "Stray text outside response tags: {:?}. Wrap all prose in \

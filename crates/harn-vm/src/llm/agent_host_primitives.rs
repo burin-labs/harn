@@ -678,6 +678,18 @@ async fn host_agent_parse_tool_calls_impl(
         "user_response": parsed.user_response,
         "done_marker": parsed.done_marker,
         "canonical_text": parsed.canonical,
+        // What the parser consumed without producing a call. Whether any of it
+        // was MEANT as a tool call is a dialect question, answered in Harn.
+        "dropped": parsed
+            .dropped
+            .iter()
+            .map(|fragment| {
+                serde_json::json!({
+                    "text": fragment.text,
+                    "reason": fragment.reason.as_str(),
+                })
+            })
+            .collect::<Vec<_>>(),
     })))
 }
 

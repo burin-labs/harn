@@ -131,6 +131,7 @@ pub(super) fn parse_mistral_marker_calls(
         recovered_from_stray_count: 0,
         done_marker: None,
         canonical,
+        dropped: Vec::new(),
     })
 }
 
@@ -303,6 +304,7 @@ pub(super) fn parse_deepseek_dsml_calls(
         recovered_from_stray_count: 0,
         done_marker: None,
         canonical,
+        dropped: Vec::new(),
     })
 }
 

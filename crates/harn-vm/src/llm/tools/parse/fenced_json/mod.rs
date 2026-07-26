@@ -223,6 +223,7 @@ pub(crate) fn parse_fenced_json_tool_calls(text: &str) -> TextToolParseResult {
         recovered_from_stray_count: 0,
         done_marker: None,
         canonical: src.to_string(),
+        dropped: Vec::new(),
     }
 }
 
