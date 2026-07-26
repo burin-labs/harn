@@ -9,7 +9,8 @@
         "harn"
       ],
       "highlights": "queries/highlights.scm",
-      "injections": "queries/injections.scm"
+      "injections": "queries/injections.scm",
+      "folds": "queries/folds.scm"
     }
   ],
   "metadata": {

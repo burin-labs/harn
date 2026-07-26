@@ -8967,6 +8967,7 @@ name = "tree-sitter-harn"
 version = "0.10.40"
 dependencies = [
  "cc",
+ "serde_json",
  "tree-sitter",
  "tree-sitter-language",
 ]
