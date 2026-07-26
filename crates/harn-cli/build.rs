@@ -207,6 +207,35 @@ fn ensure_git_hooks_installed() {
         .status();
 }
 
+/// Watch the CLI AOT manifest in a way that survives its absence.
+///
+/// A source checkout normally has no release/package payload — the manifest is
+/// generated and git-ignored — and Cargo treats a `rerun-if-changed` path that
+/// does not exist as permanently stale. Naming it unconditionally therefore
+/// reran this build script on every invocation and recompiled `harn-cli` in
+/// full: a measured ~2m12s on every `cargo` call on Windows CI, and the same
+/// staleness on every other platform's fresh checkout.
+///
+/// Watching the containing directory gives Cargo something that exists, so an
+/// absent payload is stable, and creating one changes that directory's mtime
+/// and still triggers the rerun that embeds it. The manifest is watched
+/// directly as well whenever it is present, because regenerating it in place
+/// does not touch the directory's mtime — and a silently stale embedded
+/// payload is the exact failure this watch exists to prevent.
+fn emit_cli_aot_manifest_watches(manifest_path: &Path) {
+    if let Some(generated_dir) = manifest_path.parent() {
+        // Git-ignored, and absent in a fresh checkout. Creating it is what
+        // makes it watchable; the build script already materializes
+        // `portal-dist` the same way.
+        if fs::create_dir_all(generated_dir).is_ok() {
+            println!("cargo:rerun-if-changed={}", generated_dir.display());
+        }
+    }
+    if manifest_path.exists() {
+        println!("cargo:rerun-if-changed={}", manifest_path.display());
+    }
+}
+
 /// Embed an optional release/package CLI AOT payload.
 ///
 /// The generator validates source and compiler freshness while it has the full
@@ -220,7 +249,7 @@ fn emit_cli_script_bytecode() {
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let manifest_path = manifest_dir.join(CLI_AOT_MANIFEST);
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    println!("cargo:rerun-if-changed={}", manifest_path.display());
+    emit_cli_aot_manifest_watches(&manifest_path);
     println!("cargo:rerun-if-env-changed={CLI_AOT_REQUIRED_ENV}");
     let required = cli_aot_required();
     let table = cli_aot_manifest::read_manifest(&manifest_path)
