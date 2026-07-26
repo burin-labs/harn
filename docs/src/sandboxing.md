@@ -52,17 +52,37 @@ trusted and independently scoped.
 ## Sandbox profiles
 
 The active [`CapabilityPolicy`](./host-boundary.md) carries a
-`sandbox_profile` field that selects how strictly the runtime confines
-spawned processes. Pipelines and the `process.exec` host call set it
-explicitly when they want stronger or weaker isolation than the
+`sandbox_profile` field. Pipelines and the `process.exec` host call set
+it explicitly when they want stronger or weaker isolation than the
 default.
+
+A profile decides two independent questions:
+
+- **Path enforcement** — do Harn's own in-process checks apply? This
+  covers the `harness.fs.*` builtins scoping against `workspace_roots`
+  and `read_only_roots`, plus the launch-cwd check for subprocesses. It
+  is portable and deterministic, because Harn performs it itself.
+- **OS confinement** — is a platform mechanism (Linux Landlock+seccomp,
+  macOS sandbox-exec, Windows AppContainer) applied to spawned
+  subprocesses? This depends on a mechanism that may be unavailable, and
+  it is the only axis that can deny a child something Harn never asked
+  about.
 
 | Profile | Path enforcement | OS confinement | When the spawn fails |
 |---|---|---|---|
 | `unrestricted` | skipped | skipped | only on direct OS errors |
+| `workspace_paths` | required (`workspace_roots`) | skipped | only on direct OS errors |
 | `worktree` *(default)* | required (`workspace_roots`) | best-effort | OS sandbox unavailability is logged once and ignored unless `HARN_HANDLER_SANDBOX=enforce` |
+| `wasi` | required | not applied on the host path | testbench-only; the host spawn path is never reached |
 | `os_hardened` | required | **required** | spawn returns `tool_rejected` if the platform mechanism is missing or rejects the call, regardless of `HARN_HANDLER_SANDBOX` |
-| `wasi` | enforced by the WASI runtime | enforced by the WASI runtime | testbench-only; the host spawn path is never reached |
+
+`workspace_paths` is for callers that own the code they are running and
+want its writes confined, but must let it shell out freely — a test
+runner isolating cases from each other, a build driver invoking a
+toolchain. OS confinement would buy nothing there, since the subprocess
+is as trusted as its parent, while costing portability. **Do not use it
+for foreign or untrusted code:** a subprocess it spawns is unconfined,
+so path scoping alone is not containment.
 
 Top-level `agent_loop` sessions install an empty-ceiling `os_hardened`
 carrier by default, so agent subprocess tools require the OS sandbox
@@ -70,11 +90,12 @@ even when the caller did not pass an explicit capability policy. Direct
 scripts and process calls keep the `worktree` default unless their
 caller selects a stricter profile.
 
-The strictness ladder is `unrestricted < worktree < wasi <
-os_hardened`. `CapabilityPolicy::intersect` always picks the strictest
-of the two profiles when a parent ceiling is composed with a child
-request — so a lenient parent cannot weaken a child's `os_hardened`
-ask.
+The strictness ladder is `unrestricted < workspace_paths < worktree <
+wasi < os_hardened`. `CapabilityPolicy::intersect` always picks the
+strictest of the two profiles when a parent ceiling is composed with a
+child request — so a lenient parent cannot weaken a child's
+`os_hardened` ask, and a child asking for `workspace_paths` cannot shed
+an OS sandbox its parent imposed.
 
 `HARN_HANDLER_SANDBOX={off,warn,enforce}` controls fallback behavior
 for the `worktree` profile. `os_hardened` ignores the env var on

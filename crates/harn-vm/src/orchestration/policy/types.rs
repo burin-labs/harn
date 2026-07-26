@@ -120,12 +120,27 @@ pub fn enforce_tool_arg_constraints(
     Ok(())
 }
 
-/// Selectable confinement strength for processes spawned under this
-/// policy. Defaults to [`SandboxProfile::Worktree`] — workspace-roots
-/// path enforcement plus best-effort OS confinement (warn-and-skip if
-/// the platform mechanism is unavailable). Stricter callers opt into
-/// [`SandboxProfile::OsHardened`], which requires the OS sandbox to
-/// engage and surfaces a typed `tool_rejected` error otherwise.
+/// Selectable confinement strength, ordered from weakest to strongest.
+///
+/// A profile decides two separate questions, and callers must ask which
+/// one they mean rather than matching on variants:
+///
+/// - [`SandboxProfile::enforces_path_scope`] — do the in-process
+///   `harness.fs.*` builtins check paths against `workspace_roots`?
+/// - [`SandboxProfile::confines_processes`] — is an OS mechanism applied
+///   to subprocesses this policy spawns?
+///
+/// The two are genuinely independent: path scoping is portable and
+/// deterministic, while OS confinement depends on a platform mechanism
+/// that may be unavailable or too coarse for the job.
+/// [`SandboxProfile::WorkspacePaths`] is the rung that answers yes to the
+/// first and no to the second.
+///
+/// Defaults to [`SandboxProfile::Worktree`] — path enforcement plus
+/// best-effort OS confinement (warn-and-skip if the platform mechanism is
+/// unavailable). Stricter callers opt into [`SandboxProfile::OsHardened`],
+/// which requires the OS sandbox to engage and surfaces a typed
+/// `tool_rejected` error otherwise.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxProfile {
@@ -133,42 +148,94 @@ pub enum SandboxProfile {
     /// embeddings with no orchestration policy and by escape hatches
     /// that explicitly disable isolation.
     Unrestricted,
+    /// Workspace-root path enforcement, no OS confinement.
+    ///
+    /// For callers that own the code they are running and want its
+    /// writes confined, but must let it shell out freely — a test runner
+    /// isolating cases from each other, a build driver that invokes a
+    /// toolchain. OS confinement would buy nothing here (the subprocess
+    /// is as trusted as its parent) while costing portability, since the
+    /// platform mechanisms differ in what they permit.
+    ///
+    /// Do not use this for foreign or untrusted code: a subprocess it
+    /// spawns is unconfined, so path scoping alone is not containment.
+    WorkspacePaths,
     /// Workspace-root path enforcement plus best-effort OS confinement.
     /// Honors `HARN_HANDLER_SANDBOX={off,warn,enforce}` for the OS
     /// portion. Default for `harn run` and orchestrator-launched
     /// workflows.
     #[default]
     Worktree,
+    /// Testbench WASI sandbox — subprocess execution is replayed from
+    /// recorded WASI modules instead of running on the host. Selected
+    /// indirectly by `harn test bench --process-wasi <dir>`. No OS
+    /// mechanism is applied on the host spawn path, because a replayed
+    /// subprocess never reaches it.
+    Wasi,
     /// Workspace-root path enforcement plus required OS confinement.
     /// Spawns fail with `tool_rejected` if the platform's hardening
     /// mechanism (Linux Landlock+seccomp, macOS sandbox-exec, Windows
     /// AppContainer) is unavailable, regardless of
     /// `HARN_HANDLER_SANDBOX`.
     OsHardened,
-    /// Testbench WASI sandbox — subprocess execution is replayed from
-    /// recorded WASI modules instead of running on the host. Selected
-    /// indirectly by `harn test bench --process-wasi <dir>`.
-    Wasi,
 }
 
 impl SandboxProfile {
     pub fn as_str(self) -> &'static str {
         match self {
             SandboxProfile::Unrestricted => "unrestricted",
+            SandboxProfile::WorkspacePaths => "workspace_paths",
             SandboxProfile::Worktree => "worktree",
-            SandboxProfile::OsHardened => "os_hardened",
             SandboxProfile::Wasi => "wasi",
+            SandboxProfile::OsHardened => "os_hardened",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "unrestricted" => Some(SandboxProfile::Unrestricted),
+            "workspace_paths" => Some(SandboxProfile::WorkspacePaths),
             "worktree" => Some(SandboxProfile::Worktree),
-            "os_hardened" => Some(SandboxProfile::OsHardened),
             "wasi" => Some(SandboxProfile::Wasi),
+            "os_hardened" => Some(SandboxProfile::OsHardened),
             _ => None,
         }
+    }
+
+    /// Every profile name, weakest first — the single source of truth for
+    /// error messages, CLI help, and docs that enumerate the vocabulary.
+    pub fn all() -> &'static [SandboxProfile] {
+        &[
+            SandboxProfile::Unrestricted,
+            SandboxProfile::WorkspacePaths,
+            SandboxProfile::Worktree,
+            SandboxProfile::Wasi,
+            SandboxProfile::OsHardened,
+        ]
+    }
+
+    /// Whether Harn's own in-process path checks are enforced: the
+    /// `harness.fs.*` builtins scoping against `workspace_roots` and
+    /// `read_only_roots`, and the launch-cwd check for subprocesses.
+    ///
+    /// This axis is pure Harn bookkeeping — portable, deterministic, and
+    /// independent of any platform mechanism.
+    pub fn enforces_path_scope(self) -> bool {
+        !matches!(self, SandboxProfile::Unrestricted)
+    }
+
+    /// Whether an OS mechanism (Linux Landlock+seccomp, macOS
+    /// sandbox-exec, Windows AppContainer) is applied to subprocesses
+    /// spawned under this policy.
+    ///
+    /// This axis is the only one that can deny a child something Harn did
+    /// not ask about, so it is also the only one entitled to report a
+    /// failure as an OS sandbox denial.
+    ///
+    /// False for `Wasi`: testbench mode intercepts subprocesses before
+    /// they reach the host spawn path, so nothing there is confined.
+    pub fn confines_processes(self) -> bool {
+        matches!(self, SandboxProfile::Worktree | SandboxProfile::OsHardened)
     }
 }
 
@@ -949,12 +1016,17 @@ fn root_is_within(candidate: &str, root: &str) -> bool {
     Path::new(candidate).starts_with(Path::new(root))
 }
 
+/// Rank within the confinement ladder, weakest first. Exhaustive so that
+/// a new profile cannot be added without being placed on the ladder —
+/// [`CapabilityPolicy::intersect`] takes the stricter of two profiles, and
+/// an unranked variant would silently intersect as the weakest.
 fn sandbox_profile_strictness(profile: SandboxProfile) -> u8 {
     match profile {
         SandboxProfile::Unrestricted => 0,
-        SandboxProfile::Worktree => 1,
-        SandboxProfile::Wasi => 2,
-        SandboxProfile::OsHardened => 3,
+        SandboxProfile::WorkspacePaths => 1,
+        SandboxProfile::Worktree => 2,
+        SandboxProfile::Wasi => 3,
+        SandboxProfile::OsHardened => 4,
     }
 }
 
@@ -1298,96 +1370,4 @@ pub struct EscalationPolicy {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        intersect_roots, CapabilityPolicy, ModelPolicy, RequiredSuccessfulTool, SandboxProfile,
-    };
-
-    #[test]
-    fn a_neutral_policy_leaves_the_parent_confinement_untouched() {
-        for parent_profile in [
-            SandboxProfile::Unrestricted,
-            SandboxProfile::Worktree,
-            SandboxProfile::Wasi,
-            SandboxProfile::OsHardened,
-        ] {
-            let parent = CapabilityPolicy {
-                sandbox_profile: parent_profile,
-                ..CapabilityPolicy::default()
-            };
-            let merged = parent
-                .intersect(&CapabilityPolicy::neutral())
-                .expect("a neutral overlay always fits its parent");
-            assert_eq!(
-                merged.sandbox_profile, parent_profile,
-                "neutral overlay must be the identity for {parent_profile:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_neutral_policy_asserts_no_confinement_of_its_own() {
-        // The whole point of `neutral()`: pushed with no parent to intersect
-        // against, it must not invent confinement the run never asked for.
-        assert_eq!(
-            CapabilityPolicy::neutral().sandbox_profile,
-            SandboxProfile::Unrestricted
-        );
-        // `default()` stays fail-closed for policies that *are* the decision.
-        assert_eq!(
-            CapabilityPolicy::default().sandbox_profile,
-            SandboxProfile::Worktree
-        );
-    }
-
-    #[test]
-    fn model_policy_round_trips_required_successful_tool_or_groups() {
-        let value = serde_json::json!({
-            "require_successful_tools": ["verify", ["edit", "scaffold"]]
-        });
-
-        let policy: ModelPolicy = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(
-            policy.require_successful_tools,
-            Some(vec![
-                RequiredSuccessfulTool::Tool("verify".to_string()),
-                RequiredSuccessfulTool::AnyOf(vec!["edit".to_string(), "scaffold".to_string()]),
-            ])
-        );
-        let serialized = serde_json::to_value(policy).unwrap();
-        assert_eq!(
-            serialized.get("require_successful_tools"),
-            value.get("require_successful_tools")
-        );
-    }
-
-    #[test]
-    fn a_narrower_requested_root_survives_intersection() {
-        let roots = intersect_roots(
-            &["/repo".to_string()],
-            &["/repo/crates/harn-vm".to_string()],
-        );
-        assert_eq!(roots, vec!["/repo/crates/harn-vm".to_string()]);
-    }
-
-    #[test]
-    fn a_wider_requested_root_is_clamped_to_the_host_root() {
-        let roots = intersect_roots(&["/repo/crates".to_string()], &["/repo".to_string()]);
-        assert_eq!(roots, vec!["/repo/crates".to_string()]);
-    }
-
-    #[test]
-    fn a_disjoint_requested_root_is_dropped() {
-        let roots = intersect_roots(&["/repo".to_string()], &["/elsewhere".to_string()]);
-        assert!(roots.is_empty(), "{roots:?}");
-    }
-
-    #[test]
-    fn a_sibling_sharing_a_name_prefix_is_not_treated_as_nested() {
-        let roots = intersect_roots(&["/repo".to_string()], &["/repo-backup".to_string()]);
-        assert!(
-            roots.is_empty(),
-            "/repo-backup is beside /repo, not inside it: {roots:?}"
-        );
-    }
-}
+mod tests;

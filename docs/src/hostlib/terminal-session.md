@@ -23,8 +23,9 @@ explicit secret-like environment keys, and applies Harn's universal
 catastrophic-command floor before allocating a child.
 
 The PTY backend cannot yet translate Harn's restricted process policy into
-the platform PTY spawn. It therefore fails closed under `worktree`,
-`os_hardened`, and `wasi` with a structured `sandbox_unsupported` exception.
+the platform PTY spawn. It therefore fails closed under every profile that
+enforces path scope — that is, all of them except `unrestricted` — with a
+structured `sandbox_unsupported` exception.
 Use terminal sessions only in an explicitly unrestricted, trusted harness:
 
 ```text

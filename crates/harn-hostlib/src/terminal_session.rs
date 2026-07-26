@@ -12,7 +12,7 @@ use harn_terminal::{
     CellRegion, InputEvent, ProcessStatus, SessionOptions, TerminalError, TerminalSession,
     DEFAULT_RAW_CAPACITY,
 };
-use harn_vm::orchestration::{current_execution_policy, SandboxProfile};
+use harn_vm::orchestration::current_execution_policy;
 use harn_vm::VmValue;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -451,7 +451,9 @@ fn ensure_unrestricted(builtin: &'static str) -> Result<(), HostlibError> {
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    if policy.sandbox_profile == SandboxProfile::Unrestricted {
+    // A PTY spawn cannot carry Harn's path scoping into the child, so any
+    // profile that enforces it must fail closed rather than silently drop it.
+    if !policy.sandbox_profile.enforces_path_scope() {
         return Ok(());
     }
     let profile = policy.sandbox_profile.as_str().to_string();

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+use crate::orchestration::CapabilityPolicy;
 
 use super::{normalized_workspace_roots, warn_once};
 
@@ -14,7 +14,7 @@ fn create_self_ignored_dir(
     warning_key: &str,
     label: &str,
 ) -> Option<PathBuf> {
-    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+    if !policy.sandbox_profile.enforces_path_scope() {
         return None;
     }
     let root = normalized_workspace_roots(policy).into_iter().next()?;
@@ -147,6 +147,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::orchestration::SandboxProfile;
 
     fn policy(root: &std::path::Path) -> CapabilityPolicy {
         CapabilityPolicy {

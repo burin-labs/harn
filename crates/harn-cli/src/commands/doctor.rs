@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use harn_vm::llm_config;
+use harn_vm::orchestration::SandboxProfile;
 use harn_vm::runtime_paths;
 use harn_vm::secrets::{
     configured_default_chain, EnvSecretProvider, KeyringSecretProvider, SecretId,
@@ -575,17 +576,16 @@ fn provider_doctor_checks(providers: &[ProviderInfo]) -> Vec<DoctorCheck> {
 /// that need subprocess execution mark the `OsHardened` profile based on
 /// whether the host advertises a working sandbox engine.
 fn stdlib_capability_matrix() -> Vec<CapabilityInfo> {
-    let in_process = vec![
-        "unrestricted".to_string(),
-        "worktree".to_string(),
-        "os_hardened".to_string(),
-        "wasi".to_string(),
-    ];
-    let mut subprocess = vec!["unrestricted".to_string(), "worktree".to_string()];
-    if os_sandbox_available() {
-        subprocess.push("os_hardened".to_string());
-    }
-    subprocess.push("wasi".to_string()); // WASI replay covers subprocess capture
+    // Derived from the ladder so a new profile cannot silently go missing.
+    let names = |include_hardened: bool| -> Vec<String> {
+        SandboxProfile::all()
+            .iter()
+            .filter(|p| include_hardened || **p != SandboxProfile::OsHardened)
+            .map(|p| p.as_str().to_string())
+            .collect()
+    };
+    let in_process = names(true);
+    let subprocess = names(os_sandbox_available()); // only os_hardened needs it
 
     let mut entries = Vec::new();
     for name in [
@@ -1674,7 +1674,7 @@ mod tests {
         build_host_info, build_summary, check_event_log, check_hardware, check_manifest_from,
         check_ollama, check_platform_capabilities, find_nearest_manifest, format_trigger_metrics,
         read_manifest, stdlib_capability_matrix, target_doctor_checks, DoctorCheck, DoctorReport,
-        DoctorStatus, HardwareSnapshot, TargetInfo, DOCTOR_SCHEMA_VERSION,
+        DoctorStatus, HardwareSnapshot, SandboxProfile, TargetInfo, DOCTOR_SCHEMA_VERSION,
     };
     use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
@@ -1987,7 +1987,7 @@ pub fn on_new_issue(event: TriggerEvent) {
             );
             for profile in &entry.available_in_sandbox_profile {
                 assert!(
-                    ["unrestricted", "worktree", "os_hardened", "wasi"].contains(&profile.as_str()),
+                    SandboxProfile::parse(profile).is_some(),
                     "unknown sandbox profile '{profile}'"
                 );
             }
