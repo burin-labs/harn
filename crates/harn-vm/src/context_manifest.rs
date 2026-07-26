@@ -21,16 +21,32 @@
 //! Stat identity is already the trust boundary inside a process:
 //! [`crate::module_source`] memoizes reads on `(path, len, mtime_ns)`. This
 //! extends that same decision across process boundaries, matching how Cargo,
-//! Zig and Bazel gate their warm paths. The accepted gap is identical to
-//! theirs: an edit that preserves both length and mtime is not noticed. That
-//! gap is pinned by a test rather than left to prose, so closing it — or
-//! widening it — has to be a deliberate edit and cannot happen by accident.
+//! Zig and Bazel gate their warm paths.
+//!
+//! Stats alone are not sufficient for a file written *while* the manifest was
+//! being captured. Filesystems quantize mtime — two seconds on FAT, one second
+//! on HFS+ and older NFS, a ~15.6ms clock tick on NTFS — so two writes inside
+//! one tick record one mtime, and if the second preserves length the recorded
+//! identity is byte-identical to the first. Programmatic agent edits land in
+//! that window routinely. Each manifest therefore records when its capture
+//! began, and an entry whose mtime is not a full granularity older than that
+//! is "racily clean" in git's sense: judged by content instead of by stats
+//! ([`crate::module_source::mtime_predates_capture`]). Re-checking a racy
+//! entry also re-stamps the manifest, so the entry settles onto the stats-only
+//! path on the next spawn rather than paying a read forever.
+//!
+//! The remaining gap is the one Cargo, Zig and Bazel accept: an edit that
+//! preserves length *and* restores a settled mtime is not noticed, which takes
+//! a deliberate timestamp forgery rather than an ordinary write. That gap is
+//! pinned by a test rather than left to prose, so closing it — or widening it —
+//! has to be a deliberate edit and cannot happen by accident.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::module_source;
+use crate::module_source::{self, ModuleSource};
 
 /// One transitively reachable source file, plus the path that must stay absent
 /// for the imports that reached it to keep resolving here.
@@ -40,6 +56,14 @@ pub struct ManifestFile {
     pub path: PathBuf,
     pub len: u64,
     pub mtime_ns: i128,
+    /// SHA-256 of the bytes that were folded into the context hash.
+    ///
+    /// Only read for an entry inside the racy window, where stats cannot
+    /// decide. SHA-256 because the rest of the cache already identifies source
+    /// by it — entry `source_hash`, module keys, artifact filenames — so this
+    /// adds no second digest of the same bytes, and a warm process that has
+    /// keyed the module artifact has already paid for it.
+    pub content_hash: [u8; 32],
     /// Extensionless sibling that would shadow this file if it appeared.
     ///
     /// `resolve_local_import` probes `base.join(import)` *before* appending
@@ -88,13 +112,42 @@ pub struct ContextManifest {
     pub files: Vec<ManifestFile>,
     pub unresolved: Vec<ManifestUnresolved>,
     pub unreadable: Vec<ManifestUnreadable>,
+    /// When this capture began, in [`module_source::stat_identity`]'s units and
+    /// epoch. Every recorded stat was taken after this instant, which is what
+    /// makes an older mtime provably un-reproducible by a later write.
+    ///
+    /// [`ContextManifest::begin`] is the only way to start one, so this is
+    /// never absent. A manifest decoded from an artifact whose stamp is 0 —
+    /// which no writer produces — classifies every entry as racy, costing
+    /// reads rather than trusting stats that were never timestamped.
+    pub captured_ns: i128,
+}
+
+/// What a re-check concluded about a manifest.
+#[derive(Clone, Debug)]
+pub enum ManifestCheck {
+    /// The graph moved, or could not be proven unmoved. The caller must walk.
+    Stale,
+    /// Proven unchanged from stats alone.
+    Valid,
+    /// Proven unchanged, but at least one entry sat in the racy window and had
+    /// to be read to decide. `refreshed` is the same manifest stamped with this
+    /// re-check's capture time; persisting it settles those entries onto the
+    /// stats-only path, the way git rewrites a racily-clean index entry rather
+    /// than re-reading it on every command.
+    ValidAfterRecheck { refreshed: ContextManifest },
 }
 
 impl ContextManifest {
-    /// An empty manifest anchored at `entry`, ready for a walk's observations.
-    pub fn for_entry(entry: PathBuf) -> Self {
+    /// Begin a capture anchored at `entry`, stamping the time *before*
+    /// anything is observed.
+    ///
+    /// The order matters: a stat taken before the stamp could miss a write that
+    /// landed between the two and still be called settled.
+    pub fn begin(entry: PathBuf) -> Self {
         Self {
             entry,
+            captured_ns: module_source::now_ns(),
             files: Vec::new(),
             unresolved: Vec::new(),
             unreadable: Vec::new(),
@@ -104,46 +157,125 @@ impl ContextManifest {
     /// Whether this manifest describes the graph reachable from `entry`, and
     /// that graph still looks exactly as it did when the manifest was written.
     ///
-    /// Both halves are load-bearing. The observations alone prove only that
-    /// some set of files is unchanged, not that it is *this* entry's set.
-    ///
     /// Conservative in every direction: anything unreadable, ambiguous, or
     /// changed reports `false` and costs a walk.
     pub fn still_valid(&self, entry: &Path) -> bool {
-        self.entry == entry
-            && self.files.iter().all(ManifestFile::still_valid)
-            && self
-                .unresolved
-                .iter()
-                .all(ManifestUnresolved::still_unresolved)
-            && self
+        !matches!(self.check(entry), ManifestCheck::Stale)
+    }
+
+    /// As [`Self::still_valid`], but also reports whether the answer needed a
+    /// content read, so a caller holding the artifact can re-stamp it.
+    pub fn check(&self, entry: &Path) -> ManifestCheck {
+        // The anchor first: it is a comparison, where everything below is at
+        // least a stat. The observations prove only that some set of files is
+        // unchanged, never that it is *this* entry's set (#5591).
+        if self.entry != entry {
+            return ManifestCheck::Stale;
+        }
+        // Sampled before the stats below, so the refreshed stamp is as
+        // trustworthy as one a fresh walk would produce.
+        let captured_ns = module_source::now_ns();
+        let mut rechecked = false;
+        for file in &self.files {
+            match file.check(self.captured_ns) {
+                FileCheck::Stale => return ManifestCheck::Stale,
+                FileCheck::Settled => {}
+                FileCheck::Rechecked => rechecked = true,
+            }
+        }
+        if !self
+            .unresolved
+            .iter()
+            .all(ManifestUnresolved::still_unresolved)
+            || !self
                 .unreadable
                 .iter()
                 .all(ManifestUnreadable::still_unreadable)
+        {
+            return ManifestCheck::Stale;
+        }
+        if rechecked {
+            ManifestCheck::ValidAfterRecheck {
+                refreshed: Self {
+                    captured_ns,
+                    ..self.clone()
+                },
+            }
+        } else {
+            ManifestCheck::Valid
+        }
     }
 }
 
+/// What a re-check concluded about one recorded file.
+enum FileCheck {
+    /// Stats matched and the entry was old enough for stats to be proof.
+    Settled,
+    /// Stats matched but the entry was racily clean, and its content confirmed
+    /// it.
+    Rechecked,
+    Stale,
+}
+
 impl ManifestFile {
-    /// Record `path` as observed on disk now, or `None` if it cannot be stat'ed
-    /// — a file we cannot describe is one we must not claim is unchanged.
-    pub fn observe(path: &Path) -> Option<Self> {
+    /// Record `path` as observed on disk now, carrying the digest of the
+    /// `source` the walk folded into the context hash. `None` if the file
+    /// cannot be stat'ed — a file we cannot describe is one we must not claim
+    /// is unchanged.
+    ///
+    /// The digest comes from the caller's already-read bytes rather than from a
+    /// re-read here: it has to describe the version that went into the hash,
+    /// not whatever a second read would find.
+    pub fn observe(path: &Path, source: &ModuleSource) -> Option<Self> {
         let (len, mtime_ns) = module_source::stat_identity(path)?;
         Some(Self {
             path: path.to_path_buf(),
             len,
             mtime_ns,
+            content_hash: source.sha256(),
             shadow: shadow_path(path),
         })
     }
 
-    pub(crate) fn still_valid(&self) -> bool {
+    fn check(&self, captured_ns: i128) -> FileCheck {
         let Some((len, mtime_ns)) = module_source::stat_identity(&self.path) else {
-            return false;
+            return FileCheck::Stale;
         };
         if len != self.len || mtime_ns != self.mtime_ns {
-            return false;
+            return FileCheck::Stale;
         }
-        !self.shadow.as_ref().is_some_and(|shadow| shadow.exists())
+        if self.shadow.as_ref().is_some_and(|shadow| shadow.exists()) {
+            return FileCheck::Stale;
+        }
+        if module_source::mtime_predates_capture(mtime_ns, captured_ns) {
+            return FileCheck::Settled;
+        }
+        if self.content_matches() {
+            FileCheck::Rechecked
+        } else {
+            FileCheck::Stale
+        }
+    }
+
+    /// Whether the file still holds the bytes whose digest was recorded.
+    ///
+    /// Deliberately not [`module_source::read`]: that memo is keyed on the very
+    /// `(path, len, mtime_ns)` triple this entry just failed to trust, so a hit
+    /// would answer with the same bytes the racy window let through. Reading as
+    /// a string mirrors how the recorded digest was produced, so a file that
+    /// stopped being UTF-8 reads as changed.
+    fn content_matches(&self) -> bool {
+        let Ok(text) = std::fs::read_to_string(&self.path) else {
+            return false;
+        };
+        // A direct read, deliberately not `module_source::read`: that memo is
+        // keyed on the very `(len, mtime_ns)` identity this entry has already
+        // been shown to reproduce, so it would hand back the stale bytes and
+        // agree with itself.
+        let mut hasher = Sha256::new();
+        hasher.update(text.as_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+        digest == self.content_hash
     }
 }
 
@@ -198,10 +330,12 @@ mod tests {
             entry: anchor(),
             files: paths
                 .iter()
-                .map(|p| ManifestFile::observe(p).expect("observe"))
+                .map(|p| {
+                    let source = ModuleSource::from_text(std::fs::read_to_string(p).unwrap());
+                    ManifestFile::observe(p, &source).expect("observe")
+                })
                 .collect(),
-            unresolved: Vec::new(),
-            unreadable: Vec::new(),
+            ..ContextManifest::begin(anchor())
         }
     }
 
@@ -210,18 +344,11 @@ mod tests {
         manifest.still_valid(&anchor())
     }
 
-    /// State a file's mtime outright, so a test can say which version it means
-    /// instead of hoping the clock moved between two writes.
-    ///
-    /// Two writes in quick succession routinely share an mtime: Windows' system
-    /// clock ticks at ~15.6ms, and HFS+/ext3/some NFS store whole seconds. A
-    /// test that rewrites a file and expects the stat to differ is asserting
-    /// something about the host's timer, not about this module.
-    /// `module_source`'s twin test (`a_same_length_edit_is_re_read_in_a_warm_process`)
-    /// sets the timestamp for exactly this reason rather than sleeping out the
-    /// coarsest plausible tick.
+    /// Stamp `path`'s mtime. Every timestamp this module reasons about is
+    /// controlled outright rather than waited for, so the tests neither sleep
+    /// nor depend on how finely the host filesystem happens to keep time.
     fn set_mtime(path: &Path, when: std::time::SystemTime) {
-        std::fs::OpenOptions::new()
+        std::fs::File::options()
             .write(true)
             .open(path)
             .unwrap()
@@ -229,11 +356,43 @@ mod tests {
             .unwrap();
     }
 
-    /// Move `path`'s mtime `secs` forward, making the current contents
-    /// unambiguously newer than anything observed before now.
-    fn advance_mtime(path: &Path, secs: u64) {
-        let current = std::fs::metadata(path).unwrap().modified().unwrap();
-        set_mtime(path, current + std::time::Duration::from_secs(secs));
+    fn mtime_of(path: &Path) -> std::time::SystemTime {
+        std::fs::metadata(path).unwrap().modified().unwrap()
+    }
+
+    /// A manifest over files old enough that stats alone are proof — the
+    /// ordinary case, and the one the fast path exists for.
+    fn settled_manifest_for(paths: &[PathBuf]) -> ContextManifest {
+        for path in paths {
+            // Relative to the file's own mtime, so the ageing is expressed in
+            // the filesystem's clock rather than a second reading of the host's.
+            set_mtime(path, mtime_of(path) - std::time::Duration::from_hours(1));
+        }
+        let manifest = manifest_for(paths);
+        for file in &manifest.files {
+            assert!(
+                module_source::mtime_predates_capture(file.mtime_ns, manifest.captured_ns),
+                "{} must be outside the racy window for this helper to mean anything",
+                file.path.display()
+            );
+        }
+        manifest
+    }
+
+    /// Put `manifest`'s capture in the same timestamp tick as its first entry's
+    /// mtime — what a coarse filesystem does on its own (NTFS quantizes to a
+    /// ~15.6ms clock tick, FAT to two seconds) and what a nanosecond-resolution
+    /// APFS or ext4 would essentially never produce, which is why the tests
+    /// state it rather than hoping for it.
+    fn place_inside_racy_window(manifest: &mut ContextManifest) {
+        manifest.captured_ns = manifest.files[0].mtime_ns;
+        assert!(
+            !module_source::mtime_predates_capture(
+                manifest.files[0].mtime_ns,
+                manifest.captured_ns
+            ),
+            "the entry must be racily clean for the guard to be under test"
+        );
     }
 
     #[test]
@@ -246,30 +405,29 @@ mod tests {
 
     #[test]
     fn a_same_length_edit_invalidates() {
-        // Length alone cannot carry the check: `mtime_ns` is what catches an
-        // edit that keeps the file the same size. The in-process read memo
-        // relies on exactly this, and so does the manifest.
-        //
-        // The rewrite's mtime is set rather than left to the clock. Without
-        // that this asserts the host produced two distinguishable timestamps
-        // within a few microseconds, which Windows does not
-        // (see `set_mtime`), so the test failed there while passing
-        // everywhere else — a portability bug in the test, not a change in
-        // what this module guarantees. The guarantee under test is that a
-        // *distinguishable* mtime is noticed; the case where it is not
-        // distinguishable is pinned by the test below.
+        // Two writes inside one filesystem timestamp tick record one mtime, so
+        // when the second preserves byte length the recorded `(len, mtime_ns)`
+        // is identical and stats have nothing left to notice. Windows hits this
+        // routinely; the agent edits Harn exists to orchestrate are exactly the
+        // fast programmatic writes that land inside a tick. The capture time is
+        // what makes it decidable: an entry that was not already settled when
+        // the manifest was taken is judged by content.
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 111 }\n");
-        let manifest = manifest_for(&[dep.clone()]);
+        let mut manifest = manifest_for(&[dep.clone()]);
+        place_inside_racy_window(&mut manifest);
+
+        let recorded = mtime_of(&dep);
         write(&dep, "pub fn v() -> int { return 222 }\n");
-        advance_mtime(&dep, 10);
+        set_mtime(&dep, recorded);
         assert_eq!(
-            std::fs::metadata(&dep).unwrap().len(),
-            33,
-            "both versions must be the same byte length or this exercises \
-             the length path instead of the mtime path"
+            module_source::stat_identity(&dep).unwrap(),
+            (manifest.files[0].len, manifest.files[0].mtime_ns),
+            "the edit must leave a byte-identical stat identity, or this test \
+             would pass on the stats path and prove nothing"
         );
+
         assert!(
             !revalidates(&manifest),
             "an edit of identical length must still invalidate the manifest"
@@ -277,33 +435,100 @@ mod tests {
     }
 
     #[test]
-    fn a_same_length_edit_under_one_mtime_tick_is_the_documented_gap() {
-        // The stated limit of a stat-only proof, made executable so it is a
-        // decision rather than a footnote: an edit that preserves BOTH length
-        // and mtime is not noticed. Reproduced deterministically by restoring
-        // the original timestamp, because the filesystems where this happens
-        // for real (Windows' ~15.6ms clock tick, 1s-granularity filesystems)
-        // are not the ones CI necessarily runs on.
+    fn a_settled_entry_is_proven_by_stats_without_reading_content() {
+        // The counterweight to the racy-window check: the overwhelming majority
+        // of entries are old enough that stats decide, and they must not start
+        // paying a read. Proven by recording a digest that cannot match — a
+        // check that consulted content would reject this manifest, and one that
+        // needed a re-stamp would report `ValidAfterRecheck`.
+        let tmp = tempfile::tempdir().unwrap();
+        let dep = tmp.path().join("dep.harn");
+        write(&dep, "pub fn v() -> int { return 1 }\n");
+        let mut manifest = settled_manifest_for(&[dep]);
+        manifest.files[0].content_hash = [0xAB; 32];
+
+        assert!(
+            matches!(manifest.check(&anchor()), ManifestCheck::Valid),
+            "a settled entry must be decided by stats alone"
+        );
+    }
+
+    #[test]
+    fn an_edit_that_restores_a_settled_mtime_is_the_documented_gap() {
+        // The stated limit of the whole scheme, made executable so it stays a
+        // decision rather than a footnote. Once an entry is settled, stats are
+        // treated as proof and content is never consulted — so an edit that
+        // preserves length and puts the old, already-settled mtime back is not
+        // noticed. Unlike the racy window this replaces, that takes deliberate
+        // timestamp forgery rather than an ordinary fast write, which is the
+        // same line Cargo, Zig and Bazel draw.
         //
-        // This is inherited, not introduced by the manifest: `module_source`'s
-        // in-process memo keys on the same `(len, mtime_ns)` identity and has
-        // the same blind spot. If that identity is ever strengthened, this
-        // test should fail and be deleted deliberately — it exists so the
-        // trade-off cannot be changed by accident in either direction.
+        // If this ever fails, the identity was strengthened and this test
+        // should be deleted on purpose, not repaired.
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 111 }\n");
-        let original = std::fs::metadata(&dep).unwrap().modified().unwrap();
-        let manifest = manifest_for(&[dep.clone()]);
+        let manifest = settled_manifest_for(&[dep.clone()]);
 
+        let settled = mtime_of(&dep);
         write(&dep, "pub fn v() -> int { return 222 }\n");
-        set_mtime(&dep, original);
+        set_mtime(&dep, settled);
+        assert_eq!(
+            module_source::stat_identity(&dep).unwrap(),
+            (manifest.files[0].len, manifest.files[0].mtime_ns),
+            "the forgery must leave a byte-identical stat identity, or this \
+             test proves nothing"
+        );
 
         assert!(
             revalidates(&manifest),
-            "a stat-only manifest cannot notice an edit that preserves both \
-             length and mtime; if this now fails, the identity was \
-             strengthened and this test should be removed on purpose"
+            "a settled entry is decided by stats, so a forged timestamp is not \
+             noticed; if this now fails the trade-off changed and the test \
+             should be removed deliberately"
+        );
+    }
+
+    #[test]
+    fn a_racy_entry_that_still_matches_settles_instead_of_re_reading_forever() {
+        // A racily clean entry that checks out is not a miss: the graph is
+        // unchanged, and re-stamping the manifest with this check's capture
+        // time moves the entry onto the stats path for later spawns. Without
+        // that, every future spawn would re-read the same file.
+        let tmp = tempfile::tempdir().unwrap();
+        let dep = tmp.path().join("dep.harn");
+        write(&dep, "pub fn v() -> int { return 1 }\n");
+        let mut manifest = manifest_for(&[dep.clone()]);
+        place_inside_racy_window(&mut manifest);
+
+        // Rewritten with the same bytes and stamped back, so only content can
+        // tell this apart from the edit above.
+        let recorded = mtime_of(&dep);
+        write(&dep, "pub fn v() -> int { return 1 }\n");
+        set_mtime(&dep, recorded);
+
+        let ManifestCheck::ValidAfterRecheck { refreshed } = manifest.check(&anchor()) else {
+            panic!("a racy entry whose content matches must validate, and report the re-check");
+        };
+        assert!(
+            refreshed.captured_ns > manifest.captured_ns,
+            "the re-stamped manifest must carry the newer capture"
+        );
+        assert_eq!(
+            refreshed.files, manifest.files,
+            "re-stamping must not disturb the observations themselves"
+        );
+
+        // A later spawn re-checks the re-stamped manifest, and once its capture
+        // is a full granularity past the write the entry is decided by stats.
+        // Advancing the recorded capture stands in for that elapsed time rather
+        // than sleeping through it.
+        let later = ContextManifest {
+            captured_ns: refreshed.captured_ns + module_source::TIMESTAMP_GRANULARITY_NS,
+            ..refreshed
+        };
+        assert!(
+            matches!(later.check(&anchor()), ManifestCheck::Valid),
+            "an entry the racy window has moved past must return to the stats path"
         );
     }
 
@@ -348,7 +573,7 @@ mod tests {
                 anchor: entry,
                 import: "./late".to_string(),
             }],
-            ..ContextManifest::for_entry(anchor())
+            ..ContextManifest::begin(anchor())
         };
         assert!(revalidates(&manifest));
 
@@ -384,7 +609,9 @@ mod tests {
     fn a_file_without_a_harn_extension_has_no_shadow() {
         let tmp = tempfile::tempdir().unwrap();
         let odd = tmp.path().join("dep");
-        write(&odd, "pub fn v() -> int { return 1 }\n");
-        assert_eq!(ManifestFile::observe(&odd).unwrap().shadow, None);
+        let body = "pub fn v() -> int { return 1 }\n";
+        write(&odd, body);
+        let source = ModuleSource::from_text(body);
+        assert_eq!(ManifestFile::observe(&odd, &source).unwrap().shadow, None);
     }
 }

@@ -51,7 +51,7 @@ use sha2::{Digest, Sha256};
 use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
 use crate::context_manifest::{
-    ContextManifest, ManifestFile, ManifestUnreadable, ManifestUnresolved,
+    ContextManifest, ManifestCheck, ManifestFile, ManifestUnreadable, ManifestUnresolved,
 };
 use crate::module_artifact::ModuleArtifact;
 use crate::module_source::{self, ModuleSource};
@@ -69,10 +69,13 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// contract shared by the module graph and runtime.
 /// v8: entry-chunk payload carries a [`ContextManifest`] so a warm lookup can
 /// prove the import graph is unchanged with stats instead of re-walking it.
-/// v9: that manifest records the entry it was walked from, so it cannot vouch
-/// for a different entry that happens to have identical source bytes; and the
-/// header carries [`CODEGEN_FINGERPRINT`], which the manifest fast path needs
-/// in order to reject a chunk built by another compiler at the same version.
+/// v9: the manifest records the entry it was walked from, so it cannot vouch
+/// for a different entry that happens to have identical source bytes (#5591);
+/// the header carries [`CODEGEN_FINGERPRINT`], which the manifest fast path
+/// needs in order to reject a chunk built by another compiler at the same
+/// version (#5610); and manifest entries carry a content digest, and the
+/// manifest a capture time, so a rewrite inside the filesystem's timestamp
+/// granularity cannot present itself as unchanged (#5582).
 pub const SCHEMA_VERSION: u32 = 9;
 
 /// Compile-time Harn release. Cache files written by a different release
@@ -304,19 +307,35 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
         let Ok(Some(candidate)) = read_entry_candidate(&path, &key) else {
             continue;
         };
-        if candidate
+        match candidate
             .manifest
             .as_ref()
-            .is_some_and(|manifest| manifest.still_valid(&entry))
+            .map(|manifest| manifest.check(&entry))
         {
             // The graph is provably unchanged, so the stored context hash is
             // still the one this source would produce.
-            key.context_hash = candidate.context_hash;
-            return LookupOutcome {
-                key,
-                chunk: Some(candidate.chunk),
-                manifest: candidate.manifest,
-            };
+            Some(ManifestCheck::Valid) => {
+                key.context_hash = candidate.context_hash;
+                return LookupOutcome {
+                    key,
+                    chunk: Some(candidate.chunk),
+                    manifest: candidate.manifest,
+                };
+            }
+            // Same answer, but it cost a content read because some entry was
+            // still inside the racy window when this manifest was captured.
+            // Writing the re-stamped manifest back settles those entries, so
+            // the read is paid once rather than on every later spawn.
+            Some(ManifestCheck::ValidAfterRecheck { refreshed }) => {
+                key.context_hash = candidate.context_hash;
+                let _ = write_atomic_chunk(&path, &key, &candidate.chunk, Some(&refreshed));
+                return LookupOutcome {
+                    key,
+                    chunk: Some(candidate.chunk),
+                    manifest: Some(refreshed),
+                };
+            }
+            Some(ManifestCheck::Stale) | None => {}
         }
         if walk.context_hash() != candidate.context_hash {
             continue;
@@ -867,11 +886,13 @@ fn hash_transitive_user_imports_fingerprinted(
         .collect();
     // Built alongside the hash: the same observations, in a form a later
     // process can re-check with stats instead of repeating this walk. Anchored
-    // at the entry, because that is what the observations are relative to. Set
-    // to `None` the moment the graph contains something stats cannot describe.
-    let mut manifest = Some(ContextManifest::for_entry(
-        module_source::canonical_identity(source_path),
-    ));
+    // at the entry, because that is what the observations are relative to, and
+    // stamped before the first file is stat'ed, so entries observed inside a
+    // timestamp tick are recognizable as such later. Set to `None` the moment
+    // the graph contains something stats cannot describe.
+    let mut manifest = Some(ContextManifest::begin(module_source::canonical_identity(
+        source_path,
+    )));
 
     while let Some((anchor, import)) = frontier.pop() {
         let Some(resolved) = harn_modules::resolve_import_path(&anchor, &import) else {
@@ -910,7 +931,7 @@ fn hash_transitive_user_imports_fingerprinted(
                         content: Arc::clone(module.text()),
                     },
                 );
-                match ManifestFile::observe(&canonical) {
+                match ManifestFile::observe(&canonical, &module) {
                     Some(file) => {
                         if let Some(m) = manifest.as_mut() {
                             m.files.push(file);

@@ -115,6 +115,57 @@ pub(crate) fn stat_identity(path: &Path) -> Option<(u64, i128)> {
     Some((len, mtime_ns))
 }
 
+/// Wall clock now, in [`stat_identity`]'s units and epoch.
+///
+/// Comparable with a recorded `mtime_ns` by construction, which is the whole
+/// reason it lives here rather than at each call site.
+pub(crate) fn now_ns() -> i128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i128)
+        .unwrap_or(0)
+}
+
+/// Coarsest file-timestamp granularity any filesystem we run on may quantize
+/// `mtime` to.
+///
+/// ext4 and APFS store nanoseconds, NTFS stores 100ns units but is fed by a
+/// system clock that ticks about every 15.6ms, HFS+ and older NFS store whole
+/// seconds, and FAT/exFAT store two-second units. The bound has to cover the
+/// coarsest of those, because [`mtime_predates_capture`] is only sound when it
+/// is not smaller than the granularity actually in force.
+///
+/// Assuming the worst case everywhere over-classifies on a nanosecond
+/// filesystem: a tree checked out and first walked within two seconds has every
+/// entry racily clean. That was measured rather than assumed — on a 377-module,
+/// 4.9MB graph the content path costs 1.94ms against 0.27ms for stats, still
+/// 3x cheaper than the 5.98ms walk it replaces, and it stops as soon as the
+/// re-stamped capture clears the window. Probing each filesystem's real
+/// granularity would narrow it, at the cost of a soundness argument that
+/// depends on the probe. See `docs/perf/bytecode-cache.md`.
+pub(crate) const TIMESTAMP_GRANULARITY_NS: i128 = 2_000_000_000;
+
+/// Whether a file whose recorded mtime is `mtime_ns` was already settled when
+/// an observation that began at `captured_ns` read it — that is, whether no
+/// write landing after that observation could leave the same mtime behind.
+///
+/// This is git's "racily clean" rule. A write that happens after the observing
+/// process stat'ed the file necessarily happens after `captured_ns`, so its
+/// mtime quantizes to at least the tick containing `captured_ns`. An mtime a
+/// full granularity older than `captured_ns` therefore cannot be reproduced by
+/// any later write, and stats alone are proof the file is unchanged. Anything
+/// newer — including an mtime *ahead* of the clock, as a skewed network
+/// filesystem can produce — sits in the window where a same-length rewrite
+/// inside one timestamp tick is invisible to stats, and can only be settled by
+/// looking at the content.
+///
+/// The comparison is only sound if `captured_ns` was sampled *before* the
+/// stats it guards; a capture taken afterwards would call a write that landed
+/// in between settled.
+pub(crate) fn mtime_predates_capture(mtime_ns: i128, captured_ns: i128) -> bool {
+    mtime_ns.saturating_add(TIMESTAMP_GRANULARITY_NS) <= captured_ns
+}
+
 /// Stable identity for a module file, memoizing `Path::canonicalize`.
 ///
 /// Relative imports resolve to unnormalized paths, so one file is reached under
@@ -522,6 +573,34 @@ mod tests {
             "a same-length edit must be re-read rather than served from the memo"
         );
         assert_ne!(before.sha256(), after.sha256());
+    }
+
+    #[test]
+    fn only_an_mtime_a_full_granularity_older_than_the_capture_counts_as_settled() {
+        // The boundary is where the rule is either sound or not: a filesystem
+        // quantizing to `TIMESTAMP_GRANULARITY_NS` can place a write up to one
+        // whole tick before the capture and still record it under the tick the
+        // capture fell in, so only an mtime at least a full granularity older
+        // is beyond a later write's reach.
+        let capture = 1_000 * TIMESTAMP_GRANULARITY_NS;
+        assert!(mtime_predates_capture(
+            capture - TIMESTAMP_GRANULARITY_NS,
+            capture
+        ));
+        assert!(!mtime_predates_capture(
+            capture - TIMESTAMP_GRANULARITY_NS + 1,
+            capture
+        ));
+        assert!(!mtime_predates_capture(capture, capture));
+        assert!(
+            !mtime_predates_capture(capture + TIMESTAMP_GRANULARITY_NS, capture),
+            "an mtime ahead of the clock, as a skewed network filesystem \
+             produces, must never be treated as settled"
+        );
+        assert!(
+            !mtime_predates_capture(i128::MAX, capture),
+            "the granularity offset must not overflow into a false settle"
+        );
     }
 
     #[test]
