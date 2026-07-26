@@ -122,8 +122,8 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   # Keep a narrow release-size ratchet while allowing the current stripped
-  # Linux x86_64 binary (203.25 MiB after the grammar-table and K3 additions).
-  BINARY_SIZE_BUDGET_MB: "204.00"
+  # Linux x86_64 binary (210.40 MiB after adopting the AWS SDK credential chain).
+  BINARY_SIZE_BUDGET_MB: "211.00"
 
 jobs:
   setup:
