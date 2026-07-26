@@ -489,6 +489,7 @@ mod tests {
             name: name.to_string(),
             kind: PredicateKind::Deterministic,
             fallback: None,
+            fallback_policy: crate::flow::SemanticFallbackPolicy::Enforce,
             archivist: None,
             retroactive: false,
             source_hash: PredicateHash::new(format!("sha256:{name}")),

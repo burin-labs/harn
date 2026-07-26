@@ -25,8 +25,9 @@ pub use discovery::{
 };
 pub use executor::{
     CheapJudge, CheapJudgeRequest, CheapJudgeResponse, PredicateContext, PredicateExecutionRecord,
-    PredicateExecutionReport, PredicateExecutor, PredicateExecutorConfig, PredicateKind,
-    PredicateRunner, PredicateSchedulerConfig, SemanticReplayAuditMetadata,
+    PredicateExecutionReport, PredicateExecutionSkip, PredicateExecutor, PredicateExecutorConfig,
+    PredicateKind, PredicateRunner, PredicateSchedulerConfig, SemanticFallbackPolicy,
+    SemanticReplayAuditMetadata,
 };
 pub use result::{
     Approver, ByteSpan, EvidenceItem, InvariantBlockError, InvariantResult, Remediation, Verdict,

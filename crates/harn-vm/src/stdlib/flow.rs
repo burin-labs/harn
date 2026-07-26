@@ -12,19 +12,22 @@
 //! introspection helpers (`flow_invariant_kind`, `flow_invariant_is_blocking`,
 //! `flow_invariant_confidence`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::flow::{
-    parse_invariants_source, Approver, ByteSpan, EvidenceItem, InvariantBlockError,
-    InvariantResult, PredicateKind, Remediation, Verdict,
+    parse_invariants_source, Approver, AtomId, ByteSpan, EvidenceItem, InvariantBlockError,
+    InvariantResult, PredicateExecutor, PredicateExecutorConfig, PredicateHash, PredicateKind,
+    PredicateRunner, Remediation, SemanticFallbackPolicy, Slice, SliceId, SliceStatus, Verdict,
 };
 use crate::llm::helpers::vm_value_to_json;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm, VmBuiltinArity, VmBuiltinMetadata};
+use async_trait::async_trait;
 
 const DEFAULT_FEEDBACK_MAX_ITEMS: usize = 8;
 const HARD_FEEDBACK_MAX_ITEMS: usize = 50;
@@ -266,6 +269,7 @@ async fn flow_evaluate_invariants_impl(
                 crate::flow::DiscoveryDiagnosticSeverity::Warning => "warning",
                 crate::flow::DiscoveryDiagnosticSeverity::Error => "error",
             },
+            "code": discovery_diagnostic_code(&diagnostic.message),
             "message": diagnostic.message,
             "span": diagnostic.span.map(|span| serde_json::json!({
                 "start": span.start,
@@ -288,133 +292,116 @@ async fn flow_evaluate_invariants_impl(
         })));
     }
 
+    let predicates = parsed.predicates;
+    let by_name = predicates
+        .iter()
+        .cloned()
+        .map(|predicate| (predicate.name.clone(), predicate))
+        .collect::<BTreeMap<_, _>>();
+    let requested_names = request
+        .predicate_names
+        .as_ref()
+        .map(|names| names.iter().cloned().collect::<BTreeSet<_>>());
     let mut vm = ctx.child_vm();
-    let exports = match &request.module_path {
-        Some(path) => vm.load_module_exports(path).await?,
+    let exports = match request.module_path.clone() {
+        Some(path) => vm.load_module_exports(&path).await?,
         None => {
+            let source = request.source.clone();
             vm.load_module_exports_from_source(
                 request
                     .source_key
                     .clone()
                     .unwrap_or_else(|| PathBuf::from("<flow-evaluate-invariants>.harn")),
-                &request.source,
+                &source,
             )
             .await?
         }
     };
-
-    let slice_arg = json_to_vm_value(&request.slice);
-    let predicate_ctx_arg = json_to_vm_value(&request.predicate_ctx);
-    let repo_at_base_arg = request
-        .repo_at_base
-        .as_ref()
-        .map(json_to_vm_value)
-        .unwrap_or(VmValue::Nil);
-    let mut records = Vec::new();
-    let mut skipped = Vec::new();
-
-    for predicate in parsed.predicates {
-        let kind = predicate.kind;
-        if kind == PredicateKind::Semantic && !request.include_semantic {
-            skipped.push(serde_json::json!({
-                "name": predicate.name,
-                "hash": predicate.source_hash.as_str(),
-                "kind": "semantic",
-                "reason": "semantic predicates require an explicit include_semantic option",
-            }));
-            continue;
-        }
-        if !request
-            .predicate_names
+    let vm = Arc::new(tokio::sync::Mutex::new(vm));
+    let mut runners: Vec<Arc<dyn PredicateRunner>> = Vec::new();
+    for predicate in predicates {
+        let closure = exports.get(&predicate.name).cloned();
+        let fallback_hash = predicate
+            .fallback
             .as_ref()
-            .map(|names| names.iter().any(|name| name == &predicate.name))
-            .unwrap_or(true)
-        {
-            skipped.push(serde_json::json!({
-                "name": predicate.name,
-                "hash": predicate.source_hash.as_str(),
-                "kind": predicate_kind_label(kind),
-                "reason": "not selected",
-            }));
-            continue;
-        }
-
-        let Some(closure) = exports.get(&predicate.name).cloned() else {
-            records.push(predicate_error_record(
-                &predicate.name,
-                predicate.source_hash.as_str(),
-                kind,
-                "predicate_missing_export",
-                format!("invariant `{}` was parsed but not exported", predicate.name),
-            ));
-            continue;
-        };
-
-        let first = tokio::time::timeout(
-            request.budget,
-            vm.call_closure_pub(
-                &closure,
-                &[
-                    slice_arg.clone(),
-                    predicate_ctx_arg.clone(),
-                    repo_at_base_arg.clone(),
-                ],
-            ),
-        )
-        .await;
-        let first = match first {
-            Ok(Ok(value)) => value,
-            Ok(Err(error)) => {
-                records.push(predicate_error_record(
-                    &predicate.name,
-                    predicate.source_hash.as_str(),
-                    kind,
-                    "predicate_runtime_error",
-                    error.to_string(),
-                ));
-                continue;
-            }
-            Err(_) => {
-                records.push(predicate_error_record(
-                    &predicate.name,
-                    predicate.source_hash.as_str(),
-                    kind,
-                    "budget_exceeded",
-                    format!(
-                        "{:?} predicate exceeded {}ms budget",
-                        kind,
-                        request.budget.as_millis()
-                    ),
-                ));
-                continue;
+            .and_then(|name| by_name.get(name))
+            .map(|fallback| fallback.source_hash.clone());
+        let fallback_diagnostic = if predicate.kind != PredicateKind::Semantic {
+            None
+        } else {
+            match predicate.fallback.as_ref() {
+                None => Some(InvariantBlockError::new(
+                    "fallback_missing",
+                    "semantic predicate did not declare a deterministic fallback",
+                )),
+                Some(name) if !by_name.contains_key(name) => Some(InvariantBlockError::new(
+                    "fallback_unresolved",
+                    format!("semantic predicate fallback `{name}` could not be resolved"),
+                )),
+                Some(_) => None,
             }
         };
-        let first_json = vm_value_to_json(&first);
-        let result = adapt_invariant_result(&first).unwrap_or_else(|message| {
-            InvariantResult::block(InvariantBlockError::new(
-                "invalid_predicate_result",
-                message,
-            ))
-        });
-        records.push(serde_json::json!({
-            "name": predicate.name,
-            "hash": predicate.source_hash.as_str(),
-            "kind": predicate_kind_label(kind),
-            "result": serde_json::to_value(&result).unwrap_or(serde_json::Value::Null),
-            "raw_result": first_json,
-            "attempts": 1,
-            "replayable": kind == PredicateKind::Deterministic,
+        runners.push(Arc::new(HarnPredicateRunner {
+            name: predicate.name.clone(),
+            hash: predicate.source_hash.clone(),
+            kind: predicate.kind,
+            fallback_hash,
+            fallback_policy: predicate.fallback_policy,
+            fallback_diagnostic,
+            vm: vm.clone(),
+            closure,
+            args: [
+                request.slice.clone(),
+                request.predicate_ctx.clone(),
+                request.repo_at_base.clone(),
+            ],
+            raw_result: Mutex::new(None),
         }));
     }
 
-    let ok = records.iter().all(|record| {
-        record
+    let executor = PredicateExecutor::new(PredicateExecutorConfig {
+        deterministic_budget: request.budget,
+        semantic_budget: request.budget,
+        replay_deterministic: false,
+        ..PredicateExecutorConfig::default()
+    });
+    let report = executor
+        .execute_named_slice_serial(
+            &opaque_flow_slice(),
+            &runners,
+            requested_names.as_ref(),
+            request.include_semantic,
+        )
+        .await;
+    let ok = report.is_allowed();
+    let skipped = serde_json::to_value(&report.skipped)
+        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+    let records = serde_json::to_value(&report.records)
+        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+    let records = records.as_array().cloned().unwrap_or_default();
+    for record in &records {
+        let Some(code) = record
             .get("result")
             .and_then(|result| result.get("verdict"))
-            .and_then(|verdict| verdict.get("kind"))
+            .and_then(|verdict| verdict.get("error"))
+            .and_then(|error| error.get("code"))
             .and_then(serde_json::Value::as_str)
-            != Some("block")
-    });
+        else {
+            continue;
+        };
+        if code.starts_with("fallback_") {
+            diagnostics.push(serde_json::json!({
+                "severity": "error",
+                "code": code,
+                "predicate": record.get("name"),
+                "message": record
+                    .get("result")
+                    .and_then(|result| result.get("verdict"))
+                    .and_then(|verdict| verdict.get("error"))
+                    .and_then(|error| error.get("message")),
+            }));
+        }
+    }
     Ok(json_to_vm_value(&serde_json::json!({
         "ok": ok,
         "status": if ok { "pass" } else { "fail" },
@@ -424,13 +411,106 @@ async fn flow_evaluate_invariants_impl(
     })))
 }
 
+struct HarnPredicateRunner {
+    name: String,
+    hash: PredicateHash,
+    kind: PredicateKind,
+    fallback_hash: Option<PredicateHash>,
+    fallback_policy: SemanticFallbackPolicy,
+    fallback_diagnostic: Option<InvariantBlockError>,
+    vm: Arc<tokio::sync::Mutex<Vm>>,
+    closure: Option<Arc<VmClosure>>,
+    args: [VmValue; 3],
+    raw_result: Mutex<Option<serde_json::Value>>,
+}
+
+#[async_trait]
+impl PredicateRunner for HarnPredicateRunner {
+    fn hash(&self) -> PredicateHash {
+        self.hash.clone()
+    }
+
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn kind(&self) -> PredicateKind {
+        self.kind
+    }
+
+    fn fallback_hash(&self) -> Option<PredicateHash> {
+        self.fallback_hash.clone()
+    }
+
+    fn fallback_policy(&self) -> SemanticFallbackPolicy {
+        self.fallback_policy
+    }
+
+    fn fallback_diagnostic(&self) -> Option<InvariantBlockError> {
+        self.fallback_diagnostic.clone()
+    }
+
+    fn raw_result(&self) -> Option<serde_json::Value> {
+        self.raw_result
+            .lock()
+            .expect("Harn predicate raw result lock")
+            .clone()
+    }
+
+    async fn evaluate(&self, _context: crate::flow::PredicateContext) -> InvariantResult {
+        let Some(closure) = self.closure.as_ref() else {
+            return InvariantResult::block(InvariantBlockError::new(
+                "predicate_missing_export",
+                format!("invariant `{}` was parsed but not exported", self.name),
+            ));
+        };
+        match self
+            .vm
+            .lock()
+            .await
+            .call_closure_pub(closure, &self.args)
+            .await
+        {
+            Ok(value) => {
+                *self
+                    .raw_result
+                    .lock()
+                    .expect("Harn predicate raw result lock") = Some(vm_value_to_json(&value));
+                adapt_invariant_result(&value).unwrap_or_else(|message| {
+                    InvariantResult::block(InvariantBlockError::new(
+                        "invalid_predicate_result",
+                        message,
+                    ))
+                })
+            }
+            Err(error) => InvariantResult::block(InvariantBlockError::new(
+                "predicate_runtime_error",
+                error.to_string(),
+            )),
+        }
+    }
+}
+
+fn opaque_flow_slice() -> Slice {
+    Slice {
+        id: SliceId([0; 32]),
+        atoms: Vec::new(),
+        intents: Vec::new(),
+        invariants_applied: Vec::new(),
+        required_tests: Vec::new(),
+        approval_chain: Vec::new(),
+        base_ref: AtomId([0; 32]),
+        status: SliceStatus::Empty,
+    }
+}
+
 struct InvariantEvalRequest {
     source: String,
     source_key: Option<PathBuf>,
     module_path: Option<PathBuf>,
-    slice: serde_json::Value,
-    predicate_ctx: serde_json::Value,
-    repo_at_base: Option<serde_json::Value>,
+    slice: VmValue,
+    predicate_ctx: VmValue,
+    repo_at_base: VmValue,
     predicate_names: Option<Vec<String>>,
     include_semantic: bool,
     budget: Duration,
@@ -438,6 +518,7 @@ struct InvariantEvalRequest {
 
 impl InvariantEvalRequest {
     fn parse(args: &[VmValue]) -> Result<Self, VmError> {
+        let option_values = args.get(2).and_then(VmValue::as_dict);
         let options = args
             .get(2)
             .map(vm_value_to_json)
@@ -458,18 +539,19 @@ impl InvariantEvalRequest {
         } else {
             required_string(args, 0, "flow_evaluate_invariants", "source")?
         };
-        let slice = args.get(1).map(vm_value_to_json).ok_or_else(|| {
+        let slice = args.get(1).cloned().ok_or_else(|| {
             VmError::Runtime(
                 "flow_evaluate_invariants: missing required slice argument".to_string(),
             )
         })?;
-        let predicate_ctx = options
+        let predicate_ctx = option_values
             .and_then(|map| map.get("ctx").or_else(|| map.get("predicate_ctx")))
             .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        let repo_at_base = options
-            .and_then(|map| map.get("repo_at_base").cloned())
-            .filter(|value| !value.is_null());
+            .unwrap_or_else(|| json_to_vm_value(&serde_json::json!({})));
+        let repo_at_base = option_values
+            .and_then(|map| map.get("repo_at_base"))
+            .cloned()
+            .unwrap_or(VmValue::Nil);
         let predicate_names = options
             .and_then(|map| map.get("predicate_names").or_else(|| map.get("predicates")))
             .and_then(serde_json::Value::as_array)
@@ -563,34 +645,14 @@ fn non_empty_or_rule(value: &str, rule: &str) -> String {
     }
 }
 
-fn predicate_error_record(
-    name: &str,
-    hash: &str,
-    kind: PredicateKind,
-    code: &str,
-    message: impl Into<String>,
-) -> serde_json::Value {
-    let result = InvariantResult::block(InvariantBlockError::new(code, message));
-    serde_json::json!({
-        "name": name,
-        "hash": hash,
-        "kind": predicate_kind_label(kind),
-        "result": serde_json::to_value(&result).unwrap_or(serde_json::Value::Null),
-        "raw_result": nil_json(),
-        "attempts": 0,
-        "replayable": kind == PredicateKind::Deterministic,
-    })
-}
-
-fn predicate_kind_label(kind: PredicateKind) -> &'static str {
-    match kind {
-        PredicateKind::Deterministic => "deterministic",
-        PredicateKind::Semantic => "semantic",
+fn discovery_diagnostic_code(message: &str) -> &'static str {
+    if message.contains("must declare a deterministic fallback") {
+        "fallback_missing"
+    } else if message.contains("unsupported fallback policy") {
+        "fallback_policy_invalid"
+    } else {
+        "predicate_discovery_error"
     }
-}
-
-fn nil_json() -> serde_json::Value {
-    serde_json::Value::Null
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -1126,597 +1188,5 @@ fn value_to_json(value: &VmValue) -> serde_json::Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::vm::Vm;
-
-    fn vm_with_flow_builtins() -> Vm {
-        let mut vm = Vm::new();
-        register_flow_builtins(&mut vm);
-        vm
-    }
-
-    fn call(vm: &Vm, name: &str, args: &[VmValue]) -> VmValue {
-        let mut out = String::new();
-        let builtin = vm
-            .builtins
-            .get(name)
-            .unwrap_or_else(|| panic!("builtin {name} not registered"))
-            .clone();
-        builtin(args, &mut out).expect("builtin call failed")
-    }
-
-    #[test]
-    fn flow_invariant_allow_returns_dict_round_trippable() {
-        let vm = vm_with_flow_builtins();
-        let result = call(&vm, "flow_invariant_allow", &[]);
-        let decoded = InvariantResult::from_vm_value(&result).unwrap();
-        assert_eq!(decoded, InvariantResult::allow());
-    }
-
-    #[test]
-    fn flow_invariant_warn_carries_reason() {
-        let vm = vm_with_flow_builtins();
-        let result = call(
-            &vm,
-            "flow_invariant_warn",
-            &[VmValue::String(arcstr::ArcStr::from("untested helper"))],
-        );
-        let decoded = InvariantResult::from_vm_value(&result).unwrap();
-        match decoded.verdict {
-            Verdict::Warn { reason } => assert_eq!(reason, "untested helper"),
-            other => panic!("expected warn verdict, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn flow_invariant_block_carries_code_and_message() {
-        let vm = vm_with_flow_builtins();
-        let result = call(
-            &vm,
-            "flow_invariant_block",
-            &[
-                VmValue::String(arcstr::ArcStr::from("missing_test")),
-                VmValue::String(arcstr::ArcStr::from("no test covers this atom")),
-            ],
-        );
-        let decoded = InvariantResult::from_vm_value(&result).unwrap();
-        assert!(decoded.is_blocking());
-        let error = decoded.block_error().unwrap();
-        assert_eq!(error.code, "missing_test");
-        assert_eq!(error.message, "no test covers this atom");
-    }
-
-    #[test]
-    fn flow_invariant_require_approval_routes_to_principal_or_role() {
-        let vm = vm_with_flow_builtins();
-        let principal_value = call(
-            &vm,
-            "flow_invariant_require_approval",
-            &[
-                VmValue::String(arcstr::ArcStr::from("principal")),
-                VmValue::String(arcstr::ArcStr::from("user:alice")),
-            ],
-        );
-        let role_value = call(
-            &vm,
-            "flow_invariant_require_approval",
-            &[
-                VmValue::String(arcstr::ArcStr::from("role")),
-                VmValue::String(arcstr::ArcStr::from("security-reviewer")),
-            ],
-        );
-        let principal = InvariantResult::from_vm_value(&principal_value).unwrap();
-        let role = InvariantResult::from_vm_value(&role_value).unwrap();
-        assert_eq!(
-            principal.verdict,
-            Verdict::RequireApproval {
-                approver: Approver::principal("user:alice"),
-            }
-        );
-        assert_eq!(
-            role.verdict,
-            Verdict::RequireApproval {
-                approver: Approver::role("security-reviewer"),
-            }
-        );
-    }
-
-    #[test]
-    fn flow_invariant_require_approval_rejects_unknown_kind() {
-        let vm = vm_with_flow_builtins();
-        let mut out = String::new();
-        let builtin = vm
-            .builtins
-            .get("flow_invariant_require_approval")
-            .unwrap()
-            .clone();
-        let error = builtin(
-            &[
-                VmValue::String(arcstr::ArcStr::from("squad")),
-                VmValue::String(arcstr::ArcStr::from("ship-captains")),
-            ],
-            &mut out,
-        )
-        .unwrap_err();
-        assert!(format!("{error:?}").contains("kind must be"));
-    }
-
-    #[test]
-    fn flow_with_evidence_attaches_all_four_evidence_kinds() {
-        let vm = vm_with_flow_builtins();
-        let allow = call(&vm, "flow_invariant_allow", &[]);
-        let atom_hex = "01".repeat(32);
-        let atom_evidence = call(
-            &vm,
-            "flow_evidence_atom",
-            &[
-                VmValue::String(arcstr::ArcStr::from(atom_hex.as_str())),
-                VmValue::Int(0),
-                VmValue::Int(64),
-            ],
-        );
-        let metadata_evidence = call(
-            &vm,
-            "flow_evidence_metadata",
-            &[
-                VmValue::String(arcstr::ArcStr::from("src/auth")),
-                VmValue::String(arcstr::ArcStr::from("policy")),
-                VmValue::String(arcstr::ArcStr::from("min_review_count")),
-            ],
-        );
-        let transcript_evidence = call(
-            &vm,
-            "flow_evidence_transcript",
-            &[
-                VmValue::String(arcstr::ArcStr::from("transcript-0001")),
-                VmValue::Int(128),
-                VmValue::Int(256),
-            ],
-        );
-        let citation_evidence = call(
-            &vm,
-            "flow_evidence_citation",
-            &[
-                VmValue::String(arcstr::ArcStr::from("https://harnlang.com/spec")),
-                VmValue::String(arcstr::ArcStr::from("verdicts may grade")),
-                VmValue::String(arcstr::ArcStr::from("2026-04-26T00:00:00Z")),
-            ],
-        );
-        let evidence_list = VmValue::List(std::sync::Arc::new(vec![
-            atom_evidence,
-            metadata_evidence,
-            transcript_evidence,
-            citation_evidence,
-        ]));
-        let attached = call(&vm, "flow_with_evidence", &[allow, evidence_list]);
-        let decoded = InvariantResult::from_vm_value(&attached).unwrap();
-        assert_eq!(decoded.evidence.len(), 4);
-        assert!(matches!(
-            decoded.evidence[0],
-            EvidenceItem::AtomPointer { .. }
-        ));
-        assert!(matches!(
-            decoded.evidence[1],
-            EvidenceItem::MetadataPath { .. }
-        ));
-        assert!(matches!(
-            decoded.evidence[2],
-            EvidenceItem::TranscriptExcerpt { .. }
-        ));
-        assert!(matches!(
-            decoded.evidence[3],
-            EvidenceItem::ExternalCitation { .. }
-        ));
-    }
-
-    #[test]
-    fn flow_with_remediation_attaches_description() {
-        let vm = vm_with_flow_builtins();
-        let block = call(
-            &vm,
-            "flow_invariant_block",
-            &[
-                VmValue::String(arcstr::ArcStr::from("style")),
-                VmValue::String(arcstr::ArcStr::from("trailing whitespace")),
-            ],
-        );
-        let remediation = call(
-            &vm,
-            "flow_remediation",
-            &[VmValue::String(arcstr::ArcStr::from(
-                "strip trailing whitespace",
-            ))],
-        );
-        let attached = call(&vm, "flow_with_remediation", &[block, remediation]);
-        let decoded = InvariantResult::from_vm_value(&attached).unwrap();
-        assert_eq!(
-            decoded.remediation.unwrap().description,
-            "strip trailing whitespace"
-        );
-    }
-
-    #[test]
-    fn flow_with_confidence_clamps_to_unit_interval() {
-        let vm = vm_with_flow_builtins();
-        let warn = call(
-            &vm,
-            "flow_invariant_warn",
-            &[VmValue::String(arcstr::ArcStr::from("low signal"))],
-        );
-        let attached = call(&vm, "flow_with_confidence", &[warn, VmValue::Float(1.5)]);
-        let decoded = InvariantResult::from_vm_value(&attached).unwrap();
-        assert_eq!(decoded.confidence, 1.0);
-    }
-
-    #[test]
-    fn flow_invariant_kind_returns_string_label() {
-        let vm = vm_with_flow_builtins();
-        let allow = call(&vm, "flow_invariant_allow", &[]);
-        let kind = call(&vm, "flow_invariant_kind", &[allow]);
-        match kind {
-            VmValue::String(s) => assert_eq!(s.as_str(), "allow"),
-            other => panic!("expected string, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn flow_invariant_feedback_summarizes_non_allow_records() {
-        let vm = vm_with_flow_builtins();
-        let report = json_to_vm_value(&serde_json::json!({
-            "ok": false,
-            "status": "fail",
-            "records": [
-                {
-                    "name": "no_bad",
-                    "kind": "deterministic",
-                    "result": {
-                        "verdict": {
-                            "kind": "block",
-                            "error": {
-                                "code": "no_bad",
-                                "message": "bad sentinel text remains"
-                            }
-                        },
-                        "confidence": 1.0
-                    },
-                    "raw_result": {
-                        "remediation": "Remove bad sentinel text.",
-                        "findings": [
-                            {"path": "src/main.zig", "pattern": "bad"},
-                            {"path": "src/lib.zig", "line": 42},
-                            {"path": "src/extra.zig"},
-                            {"path": "src/omitted.zig"}
-                        ]
-                    }
-                },
-                {
-                    "name": "style_nit",
-                    "kind": "deterministic",
-                    "result": {
-                        "verdict": {
-                            "kind": "warn",
-                            "reason": "comment is stale"
-                        },
-                        "remediation": {
-                            "description": "Update the comment."
-                        },
-                        "confidence": 1.0
-                    }
-                },
-                {
-                    "name": "passed",
-                    "kind": "deterministic",
-                    "result": {
-                        "verdict": {"kind": "allow"},
-                        "confidence": 1.0
-                    }
-                }
-            ],
-            "skipped": []
-        }));
-        let feedback = call(&vm, "flow_invariant_feedback", &[report]);
-        let VmValue::String(text) = feedback else {
-            panic!("expected feedback string");
-        };
-
-        assert!(text.contains("Flow invariants need attention:"));
-        assert!(text.contains("- Block no_bad: no_bad: bad sentinel text remains"));
-        assert!(text.contains("Remediation: Remove bad sentinel text."));
-        assert!(text.contains("Findings: src/main.zig, src/lib.zig:42, src/extra.zig (+1 more)"));
-        assert!(text.contains("- Warn style_nit: comment is stale"));
-        assert!(text.contains("Remediation: Update the comment."));
-        assert!(!text.contains("passed"));
-    }
-
-    #[test]
-    fn flow_invariant_feedback_can_omit_findings() {
-        let vm = vm_with_flow_builtins();
-        let report = json_to_vm_value(&serde_json::json!({
-            "ok": false,
-            "status": "fail",
-            "records": [{
-                "name": "no_bad",
-                "kind": "deterministic",
-                "result": {
-                    "verdict": {
-                        "kind": "block",
-                        "error": {
-                            "code": "no_bad",
-                            "message": "bad sentinel text remains"
-                        }
-                    },
-                    "confidence": 1.0
-                },
-                "raw_result": {
-                    "findings": [{"path": "src/main.zig"}]
-                }
-            }],
-            "skipped": []
-        }));
-        let options = json_to_vm_value(&serde_json::json!({"include_findings": false}));
-        let feedback = call(&vm, "flow_invariant_feedback", &[report, options]);
-        let VmValue::String(text) = feedback else {
-            panic!("expected feedback string");
-        };
-
-        assert!(text.contains("- Block no_bad: no_bad: bad sentinel text remains"));
-        assert!(!text.contains("Findings:"));
-        assert!(!text.contains("src/main.zig"));
-    }
-
-    #[test]
-    fn flow_invariant_feedback_caps_findings_per_item() {
-        let vm = vm_with_flow_builtins();
-        let report = json_to_vm_value(&serde_json::json!({
-            "ok": false,
-            "status": "fail",
-            "records": [{
-                "name": "no_bad",
-                "kind": "deterministic",
-                "result": {
-                    "verdict": {
-                        "kind": "block",
-                        "error": {
-                            "code": "no_bad",
-                            "message": "bad sentinel text remains"
-                        }
-                    },
-                    "confidence": 1.0
-                },
-                "raw_result": {
-                    "findings": [
-                        {"path": "src/main.zig"},
-                        {"path": "src/main.zig"},
-                        {"pattern": "not enough to label"},
-                        "src/lib.zig",
-                        {"message": "src/extra.zig"}
-                    ]
-                }
-            }],
-            "skipped": []
-        }));
-        let options = json_to_vm_value(&serde_json::json!({"max_findings_per_item": 1}));
-        let feedback = call(&vm, "flow_invariant_feedback", &[report, options]);
-        let VmValue::String(text) = feedback else {
-            panic!("expected feedback string");
-        };
-
-        assert!(text.contains("Findings: src/main.zig (+2 more)"));
-        assert!(!text.contains("src/lib.zig"));
-        assert!(!text.contains("src/extra.zig"));
-        assert!(!text.contains("not enough to label"));
-    }
-
-    #[test]
-    fn flow_invariant_feedback_is_empty_when_clear_by_default() {
-        let vm = vm_with_flow_builtins();
-        let report = json_to_vm_value(&serde_json::json!({
-            "ok": true,
-            "status": "pass",
-            "records": [{
-                "name": "passed",
-                "result": {
-                    "verdict": {"kind": "allow"},
-                    "confidence": 1.0
-                }
-            }],
-            "skipped": []
-        }));
-        let feedback = call(&vm, "flow_invariant_feedback", &[report]);
-
-        match feedback {
-            VmValue::String(text) => assert_eq!(text.as_str(), ""),
-            other => panic!("expected string, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn flow_invariant_feedback_can_include_skipped_records() {
-        let vm = vm_with_flow_builtins();
-        let report = json_to_vm_value(&serde_json::json!({
-            "ok": true,
-            "status": "pass",
-            "records": [],
-            "skipped": [{
-                "name": "semantic_review",
-                "kind": "semantic",
-                "reason": "semantic predicates require an explicit include_semantic option"
-            }]
-        }));
-        let options = json_to_vm_value(&serde_json::json!({
-            "include_skipped": true,
-            "empty_if_clear": false
-        }));
-        let feedback = call(&vm, "flow_invariant_feedback", &[report, options]);
-        let VmValue::String(text) = feedback else {
-            panic!("expected feedback string");
-        };
-
-        assert!(text.contains("- Skipped semantic_review: semantic predicates require"));
-    }
-
-    #[test]
-    fn flow_invariant_feedback_summarizes_discovery_errors() {
-        let vm = vm_with_flow_builtins();
-        let report = json_to_vm_value(&serde_json::json!({
-            "ok": false,
-            "status": "discovery_error",
-            "diagnostics": [
-                {"severity": "warning", "message": "missing archivist metadata"},
-                {"severity": "error", "message": "semantic fallback is unresolved"}
-            ],
-            "records": [],
-            "skipped": []
-        }));
-        let feedback = call(&vm, "flow_invariant_feedback", &[report]);
-        let VmValue::String(text) = feedback else {
-            panic!("expected feedback string");
-        };
-
-        assert!(text.contains("- Diagnostic warning: missing archivist metadata"));
-        assert!(text.contains("- Diagnostic error: semantic fallback is unresolved"));
-    }
-
-    #[test]
-    fn flow_evidence_atom_rejects_invalid_span() {
-        let vm = vm_with_flow_builtins();
-        let mut out = String::new();
-        let builtin = vm.builtins.get("flow_evidence_atom").unwrap().clone();
-        let atom_hex = "ab".repeat(32);
-        let error = builtin(
-            &[
-                VmValue::String(arcstr::ArcStr::from(atom_hex.as_str())),
-                VmValue::Int(64),
-                VmValue::Int(32),
-            ],
-            &mut out,
-        )
-        .unwrap_err();
-        assert!(format!("{error:?}").contains("must be >="));
-    }
-
-    #[test]
-    fn flow_evidence_atom_rejects_bad_hex() {
-        let vm = vm_with_flow_builtins();
-        let mut out = String::new();
-        let builtin = vm.builtins.get("flow_evidence_atom").unwrap().clone();
-        let error = builtin(
-            &[
-                VmValue::String(arcstr::ArcStr::from("not-hex")),
-                VmValue::Int(0),
-                VmValue::Int(8),
-            ],
-            &mut out,
-        )
-        .unwrap_err();
-        assert!(format!("{error:?}").contains("invalid atom id"));
-    }
-
-    async fn eval_source(source: &str, slice: serde_json::Value) -> serde_json::Value {
-        let mut vm = vm_with_flow_builtins();
-        let value = vm
-            .call_named_builtin(
-                "flow_evaluate_invariants",
-                vec![
-                    VmValue::String(arcstr::ArcStr::from(source)),
-                    json_to_vm_value(&slice),
-                ],
-            )
-            .await
-            .unwrap();
-        vm_value_to_json(&value)
-    }
-
-    #[tokio::test]
-    async fn flow_evaluate_invariants_adapts_harn_canon_result_shape() {
-        let report = eval_source(
-            r#"
-@invariant
-@deterministic
-@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
-pub fn no_bad(slice, _ctx, _repo_at_base) {
-  return {
-    verdict: "Block",
-    rule: "no_bad",
-    findings: [{path: slice.files[0].path}],
-    remediation: "Remove bad sentinel text.",
-  }
-}
-"#,
-            serde_json::json!({
-                "files": [{"path": "src/lib.rs", "text": "bad"}],
-            }),
-        )
-        .await;
-
-        assert_eq!(report["ok"], false);
-        assert_eq!(report["status"], "fail");
-        assert_eq!(report["records"][0]["name"], "no_bad");
-        assert_eq!(
-            report["records"][0]["result"]["verdict"]["error"]["code"],
-            "no_bad"
-        );
-        assert_eq!(
-            report["records"][0]["raw_result"]["findings"][0]["path"],
-            "src/lib.rs"
-        );
-    }
-
-    #[tokio::test]
-    async fn flow_evaluate_invariants_accepts_typed_flow_results() {
-        let report = eval_source(
-            r#"
-@invariant
-@deterministic
-@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
-pub fn typed_block(_slice, _ctx, _repo_at_base) {
-  return flow_invariant_block("typed_rule", "Typed Flow result blocked.")
-}
-"#,
-            serde_json::json!({"files": []}),
-        )
-        .await;
-
-        assert_eq!(report["ok"], false);
-        assert_eq!(
-            report["records"][0]["result"]["verdict"]["error"]["code"],
-            "typed_rule"
-        );
-        assert_eq!(
-            report["records"][0]["raw_result"]["verdict"]["kind"],
-            "block"
-        );
-    }
-
-    #[tokio::test]
-    async fn flow_evaluate_invariants_skips_semantic_by_default() {
-        let report = eval_source(
-            r#"
-@invariant
-@deterministic
-@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
-pub fn fallback(_slice, _ctx, _repo_at_base) {
-  return {verdict: "Allow", rule: "fallback", findings: [], remediation: ""}
-}
-
-@invariant
-@semantic(fallback: "fallback")
-@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
-pub fn semantic_check(_slice, _ctx, _repo_at_base) {
-  return {verdict: "Block", rule: "semantic_check", findings: [], remediation: "should not run"}
-}
-"#,
-            serde_json::json!({"files": []}),
-        )
-        .await;
-
-        assert_eq!(report["ok"], true);
-        assert_eq!(report["records"][0]["name"], "fallback");
-        assert_eq!(report["skipped"][0]["name"], "semantic_check");
-        assert_eq!(
-            report["skipped"][0]["reason"],
-            "semantic predicates require an explicit include_semantic option"
-        );
-    }
-}
+#[path = "flow_tests.rs"]
+mod tests;

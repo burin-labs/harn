@@ -63,6 +63,11 @@ LLM calls, host tools, clocks, random sources, or mutable ambient state.
 pre-baked evidence captured in `@archivist(...)`. The fallback must name a
 deterministic predicate declared in the same `invariants.harn` file or an
 ancestor file. They still cannot fetch fresh evidence during slice evaluation.
+The default `policy: enforce` composes the stricter semantic or fallback
+verdict. `policy: advisory` is an explicit migration contract for fallback
+links that are useful replay evidence but are not proven deterministic lower
+bounds. Advisory fallbacks are still evaluated and recorded; a dependency-only
+advisory record has `enforced: false` and does not change the current verdict.
 
 The result is an `InvariantResult`:
 
@@ -86,6 +91,13 @@ also includes up to three `findings` labels from harn-canon-style predicate
 results, preferring `path` plus line metadata when present. Set
 `include_findings: false`, or lower `max_findings_per_item`, when a caller needs
 a terser reminder.
+
+`flow_evaluate_invariants` is an adapter over `PredicateExecutor`; it does not
+implement a second selection or fallback policy. Semantic execution is opt-in
+with `include_semantic: true`. Selecting a semantic predicate also selects its
+named fallback as an execution dependency, so both appear exactly once in the
+typed record set even when only the semantic name was requested. The original
+Harn `ctx` value is preserved, including a callable `semantic_judge`.
 
 ```harn,ignore
 const report = flow_evaluate_invariants("", slice, {
@@ -249,6 +261,15 @@ The v0 rule is:
   the semantic predicate.
 - If the semantic predicate and fallback disagree, the stricter verdict wins:
   `Block` over `RequireApproval` over `Warn` over `Allow`.
+- `@semantic(..., policy: advisory)` is the explicit exception for a fallback
+  that is not an enforceable lower bound. It still resolves, executes, and
+  records exactly once, but its dependency-only record is not included in the
+  live verdict. Omitting `policy` is equivalent to `policy: enforce`.
+- Selection treats the fallback as part of the semantic predicate: requesting
+  the semantic name evaluates both records once. A missing, unresolved,
+  non-deterministic, or otherwise unselected fallback fails closed with
+  `fallback_missing`, `fallback_unresolved`, `fallback_not_deterministic`, or
+  `fallback_unselected`.
 - Replay audits use the pinned predicate source hashes. Semantic result drift is
   advisory unless the deterministic fallback also fails.
 - Predicate hashes include the predicate source. For semantic predicates, audit
@@ -369,13 +390,14 @@ If no Flow store exists, `shadow_evaluation.status` is `no_flow_store` rather
 than an error. That keeps initial repo bootstrap useful while making the
 absence of atom history explicit.
 
-## Remaining implementation work
-
-The decisions above leave one concrete implementation gap beyond the landed
-predicate runtime: deterministic fallback metadata and enforcement for
-`@semantic` predicates. Bootstrap validation, approval-chain checks,
-cross-slice scheduling, aggregate predicate budgets, and cross-directory
-predicate ceilings are covered by the implementation described above.
+The public Harn adapter disables the executor's immediate deterministic
+double-run so a semantic predicate and its fallback each execute once per
+request. Both records retain pinned source hashes; the deterministic record is
+replayable while the semantic record retains judge audit metadata. Later replay
+audits re-evaluate the deterministic record and treat semantic drift as
+advisory under the rule above. An advisory fallback can inform replay audit but
+cannot retroactively become enforcement without changing its policy and source
+hash.
 
 ## External reference points
 

@@ -28,6 +28,7 @@ fn discovered_predicate(name: &str) -> DiscoveredPredicate {
         name: name.to_string(),
         kind: PredicateKind::Deterministic,
         fallback: None,
+        fallback_policy: harn_vm::flow::SemanticFallbackPolicy::Enforce,
         archivist: None,
         retroactive: false,
         source_hash: PredicateHash::new(format!("sha256:bench/{name}")),

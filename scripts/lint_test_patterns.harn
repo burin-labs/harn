@@ -54,9 +54,12 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `agent_sessions_tests.rs`: pre-existing real-time delivery test
 //     for the event-log sink (extracted from agent_sessions.rs's inline
 //     test mod, which was previously below this lint's file filter).
+//   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
+//     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/orchestration/tests.rs",
   "crates/harn-vm/src/agent_sessions_tests.rs",
+  "crates/harn-vm/src/flow/predicates/executor_tests.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",
 ]
 
