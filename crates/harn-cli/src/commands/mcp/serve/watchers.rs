@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use futures::channel::mpsc::UnboundedSender;
 use futures::StreamExt;
@@ -27,7 +28,7 @@ pub(super) fn start_list_change_watcher(
     list_notify_tx: broadcast::Sender<JsonValue>,
 ) -> Option<notify::RecommendedWatcher> {
     let project_root_for_callback = project_root.clone();
-    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+    let watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
         let Ok(event) = result else {
             return;
         };
@@ -69,10 +70,59 @@ pub(super) fn start_list_change_watcher(
         send_list_changed(&list_notify_tx, &kinds);
     })
     .ok()?;
-    watcher
-        .watch(&project_root, notify::RecursiveMode::Recursive)
-        .ok()?;
-    Some(watcher)
+    watch_with_deadline(watcher, &project_root)
+}
+
+/// How long to wait for the platform watcher to accept a registration.
+///
+/// Registering is a handshake with the backend's own thread, not real work, so
+/// a wait this long means that thread is not coming back.
+const WATCH_REGISTRATION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Register `project_root` with `watcher`, giving up if the backend never
+/// answers.
+///
+/// `notify`'s Windows backend registers by handing the request to its server
+/// thread and then blocking on an unacknowledged channel receive
+/// (`send_action_require_ack`). That receive has no timeout: if the server
+/// thread does not acknowledge, `watch` never returns. It runs on the caller's
+/// thread, so the whole process stops — no error, no log line, no indication of
+/// which call is stuck. The inotify and FSEvents backends have no such
+/// handshake, which is why this can only wedge on Windows.
+///
+/// So registration happens on a thread we are willing to abandon. A backend
+/// that never answers costs us list-change notifications and a warning line
+/// instead of the server. The abandoned thread keeps the watcher, which is the
+/// only place it can safely be dropped.
+fn watch_with_deadline(
+    mut watcher: notify::RecommendedWatcher,
+    project_root: &Path,
+) -> Option<notify::RecommendedWatcher> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let root = project_root.to_path_buf();
+    std::thread::spawn(move || {
+        let registered = watcher
+            .watch(&root, notify::RecursiveMode::Recursive)
+            .map(|()| watcher);
+        // Fails only if we already gave up and dropped the receiver.
+        let _ = tx.send(registered);
+    });
+    match rx.recv_timeout(WATCH_REGISTRATION_TIMEOUT) {
+        Ok(Ok(watcher)) => Some(watcher),
+        Ok(Err(error)) => {
+            eprintln!("[harn] warning: filesystem watch unavailable: {error}");
+            None
+        }
+        Err(_) => {
+            eprintln!(
+                "[harn] warning: registering a filesystem watch on {} did not complete within {}s; \
+                 continuing without tools/resources/prompts list-change notifications",
+                project_root.display(),
+                WATCH_REGISTRATION_TIMEOUT.as_secs()
+            );
+            None
+        }
+    }
 }
 
 pub(super) fn refresh_manifest_derived_state_cache(
