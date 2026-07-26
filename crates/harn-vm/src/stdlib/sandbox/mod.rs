@@ -49,7 +49,7 @@ use crate::vm::Vm;
 
 use paths::{
     access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
-    normalize_io_device_path, path_is_within,
+    normalize_io_device_path, path_is_within, relocated_runtime_roots,
 };
 
 mod handler_env;
@@ -1865,11 +1865,11 @@ fn project_root_workspace_root() -> Option<PathBuf> {
 
 fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = base_workspace_roots(policy);
-    // Git keeps a linked worktree's real git dir and shared common dir outside
-    // the working tree; both need read-write scope or every git subprocess
-    // fails inside an otherwise ordinary worktree checkout. See
-    // [`crate::stdlib::git_topology`].
-    for dir in git_scope_extension_for_roots(&roots).read_write {
+    // A linked worktree's git dirs and Harn's own relocated runtime
+    // directories sit outside the working tree and must stay writable.
+    let mut outside = git_scope_extension_for_roots(&roots).read_write;
+    outside.extend(relocated_runtime_roots(&roots));
+    for dir in outside {
         if !roots.iter().any(|existing| existing == &dir) {
             roots.push(dir);
         }

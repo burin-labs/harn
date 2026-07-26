@@ -462,7 +462,23 @@ fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     )))
 }
 
-#[harn_builtin(sig = "runtime_paths() -> dict", category = "process")]
+/// The single owner of Harn's runtime path model for scripts.
+///
+/// The three roots below resolve through [`crate::runtime_paths`], so they
+/// honor `HARN_STATE_DIR` / `HARN_RUN_DIR` / `HARN_WORKTREE_DIR` and no script
+/// needs to know that the default segment is spelled `.harn`. Every script
+/// that wants Harn's own runtime state should ask here rather than rebuild
+/// the path from a literal, which silently ignores those overrides.
+///
+/// These are the *ambient* roots — the ones belonging to the run in progress.
+/// A helper acting on a directory handed to it by its caller (a repository
+/// named in an argument, say) wants that directory joined explicitly instead:
+/// an absolute `HARN_STATE_DIR` deliberately discards the base, which is right
+/// for the current run and wrong for an arbitrary one.
+#[harn_builtin(
+    sig = "runtime_paths() -> {execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}",
+    category = "process"
+)]
 fn runtime_paths_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let runtime_base = runtime_root_base();
     let mut paths = BTreeMap::new();

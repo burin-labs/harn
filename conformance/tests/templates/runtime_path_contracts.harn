@@ -8,4 +8,9 @@ pipeline default() {
   __io_println(paths.state_root.ends_with(".harn"))
   __io_println(paths.run_root.ends_with(".harn-runs"))
   __io_println(paths.worktree_root.ends_with(".harn/worktrees"))
+  // `.harn` is only the default. When an operator names a state directory,
+  // the resolved root is that directory — the reason scripts must ask
+  // `runtime_paths()` instead of joining `.harn` onto their own cwd.
+  const state_override = harness.env.get("HARN_STATE_DIR")
+  __io_println(state_override == nil || paths.state_root == state_override)
 }

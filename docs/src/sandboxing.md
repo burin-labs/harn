@@ -318,6 +318,34 @@ workload can read but cannot mutate. `CapabilityPolicy::intersect`
 narrows each list to the roots common to both sides, with an empty list
 on either side deferring to the other.
 
+### Roots that sit outside the working tree
+
+Two kinds of directory are writable without appearing in the policy,
+because a workload cannot function without them and neither is under
+the workload's control:
+
+- **Git's real dir and shared common dir for a linked worktree.**
+  Git keeps both outside the working tree, and every git subprocess
+  fails without read-write scope on them.
+- **Harn's own runtime directories, once relocated.** `HARN_STATE_DIR`,
+  `HARN_RUN_DIR`, and `HARN_WORKTREE_DIR` let an operator move Harn's
+  state, run records, and managed worktrees anywhere. The runtime writes
+  there from Rust either way; scoping `harness.fs.*` out of them would
+  leave the state root readable and unwritable from Harn code, which is
+  what pushes stdlib features into rebuilding a cwd-relative `.harn`
+  and silently ignoring the override. Scripts should ask
+  [`runtime_paths()`](builtins.md) for these paths rather than joining
+  `.harn` onto a directory themselves.
+
+Only directories genuinely outside the declared roots are added, and
+only once they exist — in the default layout Harn's directories already
+sit inside the workspace, so nothing widens. Runtime directories become
+available to Harn code after the runtime materializes them. The overrides
+are read from the process environment, which a sandboxed script cannot
+write, so the grant follows the same principal that configured the
+sandbox. Granting a relocated state root does not grant its parent or
+its siblings.
+
 ## Selecting a profile
 
 ### From a pipeline

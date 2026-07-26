@@ -73,6 +73,48 @@ pub(super) fn path_is_within(path: &Path, root: &Path) -> bool {
     path == root || path.starts_with(root)
 }
 
+/// Harn's own runtime directories, when an override has moved them outside
+/// the workspace `roots`.
+///
+/// `HARN_STATE_DIR`, `HARN_RUN_DIR`, and `HARN_WORKTREE_DIR` let an operator
+/// put Harn's state, run records, and managed worktrees anywhere. The runtime
+/// writes to them from Rust either way, but `harness.fs.*` is scoped to the
+/// workspace — so without this, relocating the state root leaves it readable
+/// and unwritable from Harn code, and stdlib features that persist run state
+/// are pushed into guessing a cwd-relative `.harn` that ignores the override
+/// entirely.
+///
+/// Only directories genuinely outside the workspace are returned: the default
+/// layout already sits inside it and needs no grant. The overrides come from
+/// the process environment, which a sandboxed script cannot write, so this
+/// widens the jail only where the operator configuring it asked.
+///
+/// A root is granted only once it exists, matching the git extension above.
+/// This is required by backends such as Landlock, which name a root by opening
+/// it: an absent path is not a narrower jail but a failure to build one.
+pub(super) fn relocated_runtime_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let base = crate::stdlib::process::runtime_root_base();
+    // State first, so the worktree root nested under it by default is absorbed
+    // rather than listed twice.
+    let candidates = [
+        crate::runtime_paths::state_root(&base),
+        crate::runtime_paths::run_root(&base),
+        crate::runtime_paths::worktree_root(&base),
+    ];
+    let mut relocated: Vec<PathBuf> = Vec::new();
+    for candidate in candidates {
+        let candidate = normalize_for_policy(&candidate);
+        let covered = roots
+            .iter()
+            .chain(relocated.iter())
+            .any(|existing| path_is_within(&candidate, existing));
+        if !covered && candidate.is_dir() {
+            relocated.push(candidate);
+        }
+    }
+    relocated
+}
+
 /// Resolve `path` without canonicalizing it so `/dev/stdout` remains a stable
 /// standard-device name on macOS rather than becoming a per-process `/dev/fd`
 /// alias.

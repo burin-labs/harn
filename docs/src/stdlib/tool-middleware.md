@@ -151,7 +151,10 @@ instead of raw payloads.
 
 `sink_or_options` accepts a callable sink, `"local"`, `"cloud"`,
 `"both"`, or `{sink, redact}`. Local receipts append to
-`.harn/receipts/<session_id>.jsonl`; cloud receipts mirror through the
+`<state_root>/receipts/<session_id>.jsonl`, where `<state_root>` is
+`runtime_paths().state_root` — Harn's runtime state directory, which
+follows `HARN_STATE_DIR` and defaults to `.harn` under the project root.
+Cloud receipts mirror through the
 host event bridge; `both` writes local first and mirrors the same
 receipt. `redact` is a list of argument keys removed before `args_hash`
 is computed. In `agent_loop({prefetch_next_turn: true})`, local and

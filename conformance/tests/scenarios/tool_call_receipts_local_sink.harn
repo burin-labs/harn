@@ -76,7 +76,9 @@ pipeline default() {
     },
   )
   const local_session = "receipt-local-" + uuid()
-  const local_path = path_join(".harn", "receipts", local_session + ".jsonl")
+  // Derived, not spelled out: the local sink writes under the runtime state
+  // root, so a run with `HARN_STATE_DIR` set finds its receipts there too.
+  const local_path = path_join(runtime_paths().state_root, "receipts", local_session + ".jsonl")
   if harness.fs.exists(local_path) {
     harness.fs.delete(local_path)
   }
@@ -91,7 +93,7 @@ pipeline default() {
   const reminder_audit = receipt?.audit?.reminders ?? {}
   const reminder_lifecycle = reminder_audit?.lifecycle ?? []
   const expected_args_hash = sha256("{\"message\":\"hello\",\"reason\":\"Need a receipt\"}")
-  const expected_receipt_uri = "file://" + path_join(cwd(), local_path)
+  const expected_receipt_uri = "file://" + local_path
   const local_audit_events = local_captured.events.filter(
     { event -> event.type == "tool_call_audit" },
   )
