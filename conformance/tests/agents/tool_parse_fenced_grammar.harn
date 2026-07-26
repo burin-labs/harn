@@ -1,0 +1,147 @@
+// The fenced-JSON protocol: ```tool fences carrying one or more JSON objects.
+//
+// This is a separate grammar from the tagged one, selected by `tool_format:
+// "json"`, and it resolves nothing against a registry — a fence body either is
+// a well-formed call object or it is not. The object may spell its keys
+// `name`/`args` or the `tool`/`arguments` aliases (MiniMax, qwen, gpt-oss on
+// text), with the canonical spelling winning when both appear.
+//
+// The delimiter rules are what make the lane safe for file content: because a
+// JSON string cannot hold a raw newline, an embedded ```, `<<EOF`, `}`, or
+// `</tool>` is always on an escaped segment and never fronts a real source
+// line, so a fence body can carry arbitrary code without closing early.
+import { probe_json } from "_tool_parse_probe"
+
+pipeline main() {
+  probe_json(
+    "single clean call",
+    """```tool
+{"name": "read_file", "args": {"path": "a.rs"}}
+```""",
+  )
+  probe_json(
+    "tool/arguments dialect aliases",
+    """```tool
+{"tool": "read_file", "arguments": {"path": "a.rs"}}
+```""",
+  )
+  probe_json(
+    "canonical keys win over aliases",
+    """```tool
+{"name": "canonical", "tool": "alias", "args": {"k": 1}, "arguments": {"k": 2}}
+```""",
+  )
+  probe_json(
+    "generic tool wrapper unwraps",
+    """```tool
+{"name":"tool","args":{"name":"look","args":{"intent":"read","file":"src/lib.rs"}}}
+```""",
+  )
+  probe_json(
+    "harmony channel suffix strips from the name",
+    """```tool
+{"name":"run<|channel|>commentary","args":{"command":"cargo test"}}
+```""",
+  )
+  // Delimiter soup as JSON string content: every literal survives.
+  probe_json(
+    "content with backticks, heredoc, brace, and close tag",
+    """```tool
+{"name": "write_file", "args": {"path": "f.go", "content": "```\nx := `raw`\n<<EOF\n}\n</tool>\n```"}}
+```""",
+  )
+  probe_json(
+    "content starting with a heredoc opener is just a string",
+    """```tool
+{"name": "write_file", "args": {"content": "<<EOF\npackage main\n"}}
+```""",
+  )
+  probe_json(
+    "embedded fence does not close early",
+    """```tool
+{"name": "w", "args": {"c": "before\n```\nafter"}}
+```""",
+  )
+  probe_json(
+    "content containing a close tool tag",
+    """```tool
+{"name": "w", "args": {"c": "x </tool> y"}}
+```""",
+  )
+  // N fences, N calls, with prose between them.
+  probe_json(
+    "two fences yield two calls",
+    """```tool
+{"name": "a", "args": {}}
+```
+some prose
+```tool
+{"name": "b", "args": {"k": 1}}
+```""",
+  )
+  // Absent args is an empty object; downstream validation owns required params.
+  probe_json(
+    "absent args is an empty object",
+    """```tool
+{"name": "list_dir"}
+```""",
+  )
+  // Rejections. A JSON array is a single non-object entry, not a batch — a
+  // batch is consecutive objects.
+  probe_json(
+    "array body is rejected as a non-object",
+    """```tool
+[{"name": "a", "args": {}}]
+```""",
+  )
+  probe_json(
+    "missing name",
+    """```tool
+{"args": {"path": "a"}}
+```""",
+  )
+  probe_json(
+    "empty name",
+    """```tool
+{"name": "  ", "args": {}}
+```""",
+  )
+  probe_json(
+    "args is not an object",
+    """```tool
+{"name": "a", "args": "oops"}
+```""",
+  )
+  // Salvage: a complete object plus trailing non-JSON dispatches the object and
+  // errors on the tail — never zero, never silent.
+  probe_json(
+    "trailing bytes after the object",
+    """```tool
+{"name": "a", "args": {}} trailing
+```""",
+  )
+  // Unterminated: fence opens, the JSON string is cut off, no close fence.
+  probe_json(
+    "truncated string is unterminated",
+    "```tool\n{\"name\": \"write_file\", \"args\": {\"content\": \"half a str",
+  )
+  // A balanced object with EOF before the close fence is an implicit close.
+  probe_json(
+    "complete object without a close fence",
+    """```tool
+{"name": "a", "args": {"k": 1}}""",
+  )
+  // A non-tool fence is prose, not a call, in both fence spellings.
+  probe_json(
+    "unrelated backtick fence stays prose",
+    """```python
+print('hi')
+```""",
+  )
+  probe_json(
+    "unrelated tilde fence stays prose",
+    """~~~python
+print('hi')
+~~~""",
+  )
+}

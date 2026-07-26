@@ -1,0 +1,22 @@
+# mistral TOOL_CALLS ARGS markers
+  calls=1 errors=0 violations=1 stray=0
+  call edit {"action":"create","path":"a.rs"}
+  vio "Tool call(s) were emitted with Mistral `[TOOL_CALLS]name[ARGS]{...}` markers. Executed this turn so work moves forward; use `<tool_call>name({ ... })</tool_call>` on subsequent turns."
+  prose="I'll inspect first."
+  answer=null
+  done=null
+# mistral TOOL_CALLS json array payload
+  calls=2 errors=0 violations=1 stray=0
+  call edit {"action":"create","content":"fn a() {}","path":"a.rs"}
+  call run {"command":"cargo test"}
+  vio "Tool call(s) were emitted with Mistral `[TOOL_CALLS]name[ARGS]{...}` markers. Executed this turn so work moves forward; use `<tool_call>name({ ... })</tool_call>` on subsequent turns."
+  prose="I'll inspect first."
+  answer=null
+  done=null
+# deepseek dsml invoke blocks
+  calls=2 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"fn main() {}","path":"a.rs"}
+  call run {"command":["cargo","test"]}
+  prose="I'll inspect first."
+  answer=null
+  done=null

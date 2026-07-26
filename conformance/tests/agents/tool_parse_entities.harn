@@ -1,0 +1,73 @@
+// HTML character references inside tool-call string arguments.
+//
+// A model trained on angle-bracket framing escapes its own delimiters inside
+// string arguments so a literal operator cannot be mistaken for a frame or tag
+// boundary. Left encoded, that source reaches disk as `if (a &lt;= b)` and
+// `xs.map(x =&gt; x)` — bytes that cannot compile. The decode happens once, at
+// the JSON-string parse boundary.
+//
+// "Once" is the load-bearing word. A value the model DOUBLE-escaped —
+// `&amp;lt;`, the wire form of a literal `&lt;` — must decode to `&lt;`, not
+// `<`, or authored HTML that really wants the reference is corrupted. And the
+// scope is the JSON-string channel only: a heredoc body is raw by construction,
+// so a model never escapes into it, and decoding one would break the same
+// authored-reference case from the other direction.
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main() {
+  probe(
+    "encoded operator in json content",
+    "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.ts\",\"content\":\"xs.map(x =&gt; x)\"}}</tool_call>",
+    sample_registry(),
+  )
+  // The three operator classes from the field forensics in one pass.
+  probe(
+    "all operator classes decode",
+    "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.ts\",\"content\":\"if (a &lt;= b &amp;&amp; b &gt;= 0) {}\"}}</tool_call>",
+    sample_registry(),
+  )
+  // Double-escaped references survive as literal references.
+  probe(
+    "double escaped reference stays literal",
+    "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"page.html\",\"content\":\"<p>a &amp;lt; b &amp;amp; c</p>\"}}</tool_call>",
+    sample_registry(),
+  )
+  // A bare `&` that opens no recognized reference is emitted verbatim.
+  probe(
+    "bare ampersands untouched",
+    "<tool_call>{\"name\":\"run\",\"arguments\":{\"command\":\"echo R&D && sleep 1 & wait; printf '&amp'\"}}</tool_call>",
+    sample_registry(),
+  )
+  probe(
+    "quote references decode",
+    "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.py\",\"content\":\"print(&quot;a&quot;, &#39;b&#39;, &apos;c&apos;)\"}}</tool_call>",
+    sample_registry(),
+  )
+  // Decoding recurses into nested arrays and objects.
+  probe(
+    "nested arguments decode recursively",
+    "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"patch\",\"path\":\"a.ts\",\"ops\":[{\"content\":\"x =&gt; x\"},{\"content\":\"a &lt; b\"}]}}</tool_call>",
+    sample_registry(),
+  )
+  // The nested-XML wrapper shares the JSON-string channel.
+  probe(
+    "nested xml wrapper content decodes",
+    "<tool_call><edit>{\"action\":\"create\",\"path\":\"a.ts\",\"content\":\"x =&gt; x\"}</edit></tool_call>",
+    sample_registry(),
+  )
+  // SCOPE GUARD: a heredoc raw body is not decoded.
+  probe(
+    "heredoc raw body is not decoded",
+    """edit({ action: "create", path: "page.html", content: <<EOF
+<p>a &lt; b</p>
+EOF
+ })""",
+    sample_registry(),
+  )
+  // The whole point: a compile-breaking edit becomes compilable.
+  probe(
+    "operator corruption class is repaired",
+    "<tool_call>{\"name\":\"edit\",\"arguments\":{\"action\":\"replace_body\",\"path\":\"a.ts\",\"new_body\":\"const f = (xs) =&gt; xs.filter(x =&gt; x &gt; 0)\"}}</tool_call>",
+    sample_registry(),
+  )
+}

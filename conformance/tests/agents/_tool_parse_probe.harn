@@ -1,0 +1,197 @@
+// Shared probe surface for the `tool_parse_*` dialect corpus.
+//
+// Every `tool_parse_*` fixture drives `agent_parse_tool_calls` — the one public
+// entry point into the text tool-call parser — and prints the facts the parser
+// promises its caller: which calls it recovered and with what arguments, which
+// diagnostics it raised, and what visible text survived. The baselines are
+// generated from the binary's observed output, so they pin behavior rather than
+// intent; a diff in one is a behavior change that has to be argued for.
+//
+// The printed record deliberately excludes three things that live in their own
+// fixtures because they are expected to move independently of dialect
+// behavior: `dropped` fragment granularity (tool_parse_drops_*), the canonical
+// replay text (tool_parse_canonical_*), and synthetic call ids, which come from
+// a process-wide counter and so depend on how many parses ran before
+// (tool_parse_core_turn_unique_ids).
+import { agent_parse_tool_calls } from "std/agent/primitives"
+
+/**
+ * The two-tool registry the Rust corpus calls `sample_tool_registry`: an
+ * `edit` with an enum action and typed optional fields, plus a `run`. The
+ * parameter TYPES are load-bearing — chat-template markup parses a value as
+ * JSON when the schema is non-string and keeps it verbatim when it is a string.
+ */
+pub fn sample_registry() -> dict {
+  return {
+    _type: "tool_registry",
+    tools: [
+      {
+        name: "edit",
+        description: "Precise code edit.",
+        parameters: {
+          action: {
+            type: "string",
+            enum: ["create", "patch", "replace_body"],
+            description: "Kind of edit.",
+          },
+          path: {
+            type: "string",
+            description: "Repo-relative path.",
+            examples: ["internal/manifest/parser.go"],
+          },
+          content: {type: "string", required: false, description: "File contents for create."},
+          new_body: {
+            type: "string",
+            required: false,
+            description: "Replacement body for replace_body.",
+          },
+          function_name: {type: "string", required: false, description: "Existing function name."},
+          import_statement: {
+            type: "string",
+            required: false,
+            description: "Import line for add_import.",
+          },
+          ops: {type: "list", required: false, description: "Atomic same-file batch edit ops."},
+        },
+      },
+      {
+        name: "run",
+        description: "Run a shell command.",
+        parameters: {command: {type: "string", description: "Shell command to execute."}},
+      },
+    ],
+  }
+}
+
+/**
+ * The coding-agent surface the mined eval corpus actually ran: `look`, `edit`
+ * with a bool `overwrite` and int ranges, `run`, and a no-argument `verify`.
+ */
+pub fn corpus_registry() -> dict {
+  return {
+    _type: "tool_registry",
+    tools: [
+      {
+        name: "look",
+        description: "Read a file.",
+        parameters: {file: {type: "string"}, intent: {type: "string", required: false}},
+      },
+      {
+        name: "edit",
+        description: "Precise code edit.",
+        parameters: {
+          action: {
+            type: "string",
+            enum: ["create", "replace_range", "delete_range", "exact_patch"],
+            required: false,
+          },
+          path: {type: "string", required: false},
+          old_string: {type: "string", required: false},
+          new_string: {type: "string", required: false},
+          content: {type: "string", required: false},
+          anchor: {type: "string", required: false},
+          range_start: {type: "int", required: false},
+          range_end: {type: "int", required: false},
+          overwrite: {type: "bool", required: false},
+          ops: {type: "list", required: false},
+        },
+      },
+      {name: "run", description: "Run a shell command.", parameters: {command: {type: "string"}}},
+      {name: "verify", description: "Run the project verify command.", parameters: {}},
+    ],
+  }
+}
+
+/**
+ * The conformance probe's single-tool registry, used by the chat-template
+ * markup cases that assert a trailing JSON object round-trips as arguments.
+ */
+pub fn echo_registry() -> dict {
+  return {
+    _type: "tool_registry",
+    tools: [
+      {
+        name: "echo_marker",
+        description: "Echo the probe marker exactly.",
+        parameters: {value: {type: "string", description: "The marker value to echo."}},
+      },
+    ],
+  }
+}
+
+/**
+ * The name set the native-JSON fallback cases resolve against, mirroring the
+ * Rust corpus's `known_tools_set`. `look` is present alongside `read` in the
+ * alias cases, so it is spelled out per fixture rather than folded in here.
+ */
+pub fn native_registry() -> dict {
+  return {
+    _type: "tool_registry",
+    tools: [
+      {name: "edit", description: "Precise code edit.", parameters: {}},
+      {name: "read", description: "Read a file.", parameters: {}},
+      {name: "run", description: "Run a shell command.", parameters: {}},
+      {name: "lookup", description: "Look something up.", parameters: {}},
+      {name: "scaffold", description: "Scaffold a project.", parameters: {}},
+    ],
+  }
+}
+
+/** Print the observable outcome of one parse under `label`. */
+pub fn report(label: string, parsed) -> nil {
+  __io_println("# ${label}")
+  __io_println(
+    "  calls=${len(parsed.tool_calls)} errors=${len(parsed.tool_parse_errors)} violations=${len(parsed.protocol_violations)} stray=${parsed.recovered_from_stray_count}",
+  )
+  for call in parsed.tool_calls {
+    __io_println("  call ${call.name} ${json_stringify(call.arguments)}")
+  }
+  for error in parsed.tool_parse_errors {
+    __io_println("  err ${json_stringify(error)}")
+  }
+  for violation in parsed.protocol_violations {
+    __io_println("  vio ${json_stringify(violation)}")
+  }
+  __io_println("  prose=${json_stringify(parsed.prose)}")
+  __io_println("  answer=${json_stringify(parsed.user_response)}")
+  __io_println("  done=${json_stringify(parsed.done_marker)}")
+  return nil
+}
+
+/** Parse `text` through the canonical tagged/heredoc text grammar and report it. */
+pub fn probe(label: string, text: string, tools) -> nil {
+  return report(label, agent_parse_tool_calls(text, tools, "text"))
+}
+
+/**
+ * Parse `text` through the fenced-JSON grammar. That grammar carries no
+ * registry — it resolves nothing against tool names — so none is passed.
+ */
+pub fn probe_json(label: string, text: string) -> nil {
+  return report(label, agent_parse_tool_calls(text, nil, "json"))
+}
+
+/**
+ * Report the canonical replay text, which is what the agent loop writes back
+ * into assistant history in place of the model's raw bytes.
+ */
+pub fn probe_canonical(label: string, text: string, tools) -> nil {
+  const parsed = agent_parse_tool_calls(text, tools, "text")
+  __io_println("# ${label}")
+  __io_println("  canonical=${json_stringify(parsed.canonical_text)}")
+  return nil
+}
+
+/**
+ * Report the dropped-fragment ledger: every path that consumes text without
+ * producing a call must record what it swallowed.
+ */
+pub fn probe_drops(label: string, text: string, tools) -> nil {
+  const parsed = agent_parse_tool_calls(text, tools, "text")
+  __io_println("# ${label}")
+  __io_println("  calls=${len(parsed.tool_calls)} dropped=${len(parsed.dropped ?? [])}")
+  for fragment in parsed.dropped ?? [] {
+    __io_println("  drop ${json_stringify(fragment)}")
+  }
+  return nil
+}

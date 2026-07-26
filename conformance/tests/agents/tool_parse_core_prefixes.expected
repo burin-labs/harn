@@ -1,0 +1,48 @@
+# gemma tool_code prefix
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# qwen call colon brace marker
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"git status --short"}
+  prose=""
+  answer=null
+  done=null
+# tool_call prefix
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# tool_output prefix
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# python prefix
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# javascript prefix
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# shell prefix
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# bash prefix
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null

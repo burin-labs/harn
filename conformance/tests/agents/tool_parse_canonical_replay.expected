@@ -1,0 +1,26 @@
+# full canonical response round trips
+  canonical="<assistant_prose>\nCreating the file.\n</assistant_prose>\n\n<user_response>\nCreated the file.\n</user_response>\n\n<tool_call>\nedit({\n  \"action\": \"create\",\n  \"content\": \"fn a() {}\",\n  \"path\": \"a.rs\"\n})\n</tool_call>\n\n<done>##DONE##</done>"
+# user_response only
+  canonical="<user_response>\nVisible answer.\n</user_response>"
+# stray text is wrapped as assistant prose
+  canonical="<assistant_prose>\nleading garbage\n</assistant_prose>\n\n<assistant_prose>\nNarration.\n</assistant_prose>"
+# plain prose response
+  canonical="<assistant_prose>\njust prose with no tags at all\n</assistant_prose>"
+# bare call gains a wrapper
+  canonical="<tool_call>\nedit({\n  \"action\": \"create\",\n  \"content\": \"x\",\n  \"path\": \"a.rs\"\n})\n</tool_call>"
+# compact aliases replay canonically
+  canonical="<assistant_prose>\nChecking status.\n</assistant_prose>\n\n<user_response>\nDone.\n</user_response>\n\n<tool_call>\nrun({\n  \"command\": \"git status\"\n})\n</tool_call>\n\n<done>##DONE##</done>"
+# nested xml body replays as harn syntax
+  canonical="<tool_call>\nedit({\n  \"action\": \"create\",\n  \"content\": \"fn a() {}\",\n  \"path\": \"a.rs\"\n})\n</tool_call>"
+# mistral markers replay as tool_call blocks
+  canonical="<assistant_prose>\nI'll inspect first.\n</assistant_prose>\n\n<tool_call>\nedit({\n  \"action\": \"create\",\n  \"content\": \"fn a() {}\",\n  \"path\": \"a.rs\"\n})\n</tool_call>\n\n<tool_call>\nrun({\n  \"command\": \"cargo test\"\n})\n</tool_call>"
+# harmony frames do not survive replay
+  canonical="<assistant_prose>\nI need to inspect the files first.\n</assistant_prose>\n\n<tool_call>\nedit({\n  \"action\": \"create\",\n  \"content\": \"a\",\n  \"path\": \"a.rs\"\n})\n</tool_call>"
+# malformed wrapper debris does not survive replay
+  canonical="<tool_call>\nrun({\n  \"command\": \"cargo test -p core\"\n})\n</tool_call>\n\n<tool_call>\nrun({\n  \"command\": \"cargo test -p app\"\n})\n</tool_call>"
+# malformed assistant header does not survive replay
+  canonical="<assistant_prose>\nWe need to inspect the file.\n</assistant_prose>\n\n<tool_call>\nrun({\n  \"command\": \"zig test src/root.zig\"\n})\n</tool_call>"
+# function markup replays as the tagged grammar
+  canonical="<tool_call>\nedit({\n  \"action\": \"create\",\n  \"path\": \"internal/handlers/health.go\"\n})\n</tool_call>"
+# recovered unclosed wrapper replays well formed
+  canonical="<tool_call>\nedit({\n  \"action\": \"create\",\n  \"content\": \"import Foundation\",\n  \"path\": \"src/main.swift\"\n})\n</tool_call>"

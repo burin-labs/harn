@@ -1,0 +1,47 @@
+// Provider-native tool markers emitted through the text channel.
+//
+// Mistral frames a call as `[TOOL_CALLS]name[ARGS]{json}` or
+// `[TOOL_CALLS] [ ... ]`; DeepSeek emits DSML, its own full-width-pipe XML
+// vocabulary with per-parameter tags. Both arrive as plain assistant text when
+// the native channel is unavailable or collapses, and both are recovered into
+// real calls with canonical replay so assistant history stays well-formed.
+//
+// The two dialects differ in how much they cost the model: Mistral's marker is
+// close enough to a mistake that the recovery teaches the canonical protocol,
+// while accepted DSML raises nothing — injecting parse feedback for a dialect
+// the parser fully understood would waste a turn.
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main() {
+  probe(
+    "mistral TOOL_CALLS ARGS markers",
+    "I'll inspect first.[TOOL_CALLS]edit[ARGS]{\"action\":\"create\",\"path\":\"a.rs\"}",
+    sample_registry(),
+  )
+  probe(
+    "mistral TOOL_CALLS json array payload",
+    """I'll inspect first.
+[TOOL_CALLS] [{"name":"edit","arguments":{"action":"create","path":"a.rs","content":"fn a() {}"}},{"name":"run","arguments":"{\"command\":\"cargo test\"}"}]""",
+    sample_registry(),
+  )
+  // DeepSeek DSML: two complete invoke blocks under different wrapper tags,
+  // plus a third that is cut off after its opener. The complete ones dispatch;
+  // a `string="false"` parameter is parsed as JSON, so `command` is a list.
+  probe(
+    "deepseek dsml invoke blocks",
+    """I'll inspect first.
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="edit">
+<｜DSML｜parameter name="action" string="true">create</｜DSML｜parameter>
+<｜DSML｜parameter name="path" string="true">a.rs</｜DSML｜parameter>
+<｜DSML｜parameter name="content" string="true">fn main() {}</｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜tool_calls><｜DSML｜function_calls>
+<｜DSML｜invoke name="run">
+<｜DSML｜parameter name="command" string="false">["cargo", "test"]</｜DSML｜parameter>
+</｜DSML｜invoke>
+</｜DSML｜function_calls><｜DSML｜function_calls>
+<｜DSML｜invoke name="edit">""",
+    sample_registry(),
+  )
+}
