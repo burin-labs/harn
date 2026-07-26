@@ -14,6 +14,10 @@ async fn request_json(
     recv_json(rx).await
 }
 
+fn wire_path(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
     permissions::reset();
@@ -97,13 +101,13 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
         pending_writes,
         &vec![
             serde_json::json!({
-                "path": discarded_file.to_string_lossy(),
+                "path": wire_path(&discarded_file),
                 "kind": "create",
                 "byteDelta": 7,
                 "snapshotId": "tc-discard",
             }),
             serde_json::json!({
-                "path": committed_file.to_string_lossy(),
+                "path": wire_path(&committed_file),
                 "kind": "create",
                 "byteDelta": 5,
                 "snapshotId": "tc-commit",
@@ -135,10 +139,7 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
         .iter()
         .map(|write| write["path"].as_str().expect("pending path").to_string())
         .collect::<Vec<_>>();
-    assert_eq!(
-        advertised_paths,
-        vec![committed_file.to_string_lossy().into_owned()]
-    );
+    assert_eq!(advertised_paths, vec![wire_path(&committed_file)]);
 
     let commit_response = request_json(
         &mut server,
@@ -156,7 +157,7 @@ async fn acp_fs_mode_commit_and_discard_staged_hostlib_writes() {
     .await;
     assert_eq!(
         commit_response["result"]["committedPaths"][0],
-        committed_file.to_string_lossy().as_ref()
+        wire_path(&committed_file)
     );
     assert_eq!(std::fs::read_to_string(&committed_file).unwrap(), "draft");
     let commit_update = recv_json(&mut rx).await;
