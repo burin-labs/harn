@@ -39,7 +39,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 13 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
-| [`LLM`](#llm--llm-calls) | LLM calls | 5 |
+| [`LLM`](#llm--llm-calls) | LLM calls | 6 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 5 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
@@ -150,6 +150,7 @@ An `llm_call(...)` invocation violates the schema Harn enforces. Schema-validate
 | [`HARN-LLM-003`](#harn-llm-003) | LLM call is missing schema validation | `llm/add-schema` | `surface-changing` |
 | [`HARN-LLM-004`](#harn-llm-004) | LLM schema option is invalid | — | — |
 | [`HARN-LLM-005`](#harn-llm-005) | prompt branches on provider identity instead of capability flags | `llm/use-capability-flag` | `capability-changing` |
+| [`HARN-LLM-006`](#harn-llm-006) | provider, model, and tool format form a known-unsafe composition | — | — |
 
 ## ORC — Orchestration constructs
 
@@ -1283,6 +1284,21 @@ prompt branches on provider identity instead of capability flags
 - Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
 - Drop or rename deprecated options to the names listed in the LLM call quickref.
 - Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
+
+### `HARN-LLM-006`
+
+**Category:** `LLM` (LLM calls) &nbsp;·&nbsp; **API stability:** `stable`
+
+provider, model, and tool format form a known-unsafe composition
+
+#### How to fix
+
+- Omit `tool_format` to use the catalog default, or select the catalog-recommended format.
+- Choose a provider/model route whose declared tool-calling channel supports the requested format.
+- For a deliberate agent-loop probe, add a non-empty `tool_format_override_reason`; Harn records the override in the transcript.
+
+Dynamic and custom routes remain open-world. This diagnostic only rejects literal compositions that Harn's capability
+registry already knows it must correct or cannot serve.
 
 ### `HARN-ORC-001`
 

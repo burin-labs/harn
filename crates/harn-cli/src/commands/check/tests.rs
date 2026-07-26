@@ -115,10 +115,9 @@ pipeline main() {
 }
 
 /// Acceptance for issue #771: `render_prompt(...)` literal-string targets
-/// must be validated alongside `render(...)`, the diagnostic must name
-/// the actual builtin (`render_prompt`), and the resolved candidate path
-/// must be visible so the author can see exactly where the lookup tried
-/// to land.
+/// must be validated alongside `render(...)`, name the actual builtin
+/// (`render_prompt`), and show the resolved candidate path so authors can
+/// see exactly where lookup was attempted.
 #[test]
 fn preflight_reports_missing_literal_render_prompt_target() {
     let dir = unique_temp_dir("harn-check-render-prompt");
@@ -1811,3 +1810,4 @@ pipeline main() {
 }
 
 mod effect_inheritance;
+mod llm_composition;

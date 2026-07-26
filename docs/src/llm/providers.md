@@ -449,7 +449,12 @@ contract is the reliable tool path, and can mark `tool_mode_parity` /
 interchangeable. If a caller explicitly forces a conflicting `tool_format`,
 the agent loop emits a `tool_format_override` transcript event; pass
 `tool_format_override_reason` when intentionally forcing a catalog-marked
-unreliable side. Model-catalog display tags are derived from this matrix too;
+unreliable side. `harn check` rejects that same conflict when the provider,
+model, and format are all literal, so known-bad compositions fail before they
+consume tokens. Dynamic and custom routes remain open-world and stay under the
+runtime guard. Raw tool-bearing `llm_call` options have no override event, so
+they must use a viable catalog format. Model-catalog display tags are derived
+from this matrix too;
 legacy `models.*.capabilities` entries are parsed for backwards compatibility
 but do not override runtime capability resolution.
 

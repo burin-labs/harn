@@ -237,6 +237,7 @@ diagnostic_codes! {
     LlmSchemaMissing, "HARN-LLM-003", Llm, "LLM call is missing schema validation";
     LlmSchemaInvalid, "HARN-LLM-004", Llm, "LLM schema option is invalid";
     LlmProviderIdentityBranch, "HARN-LLM-005", Llm, "prompt branches on provider identity instead of capability flags";
+    LlmToolFormatCompositionInvalid, "HARN-LLM-006", Llm, "provider, model, and tool format form a known-unsafe composition";
     OrchestrationArity, "HARN-ORC-001", Orc, "orchestration construct has invalid arity";
     OrchestrationType, "HARN-ORC-002", Orc, "orchestration construct argument has invalid type";
     AgentDefinitionInvalid, "HARN-ORC-003", Orc, "agent declaration is invalid";
@@ -581,8 +582,7 @@ impl FromStr for Code {
 
 /// Autonomy ceiling of a proposed repair.
 ///
-/// Agents and IDEs dispatch on this class to decide whether to auto-apply
-/// a fix, propose it as a suggestion, or escalate to a human. Variants
+/// Agents and IDEs use this class to auto-apply, suggest, or escalate a fix. Variants
 /// are ordered from least to most disruptive — call sites can compare
 /// with `<=` to enforce a configured ceiling like
 /// `"apply anything up to behavior-preserving"`.

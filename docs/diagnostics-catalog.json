@@ -24,7 +24,7 @@
     {
       "id": "LLM",
       "title": "LLM calls",
-      "count": 5
+      "count": 6
     },
     {
       "id": "ORC",
@@ -875,6 +875,15 @@
       "related": [
         "HARN-PRM-004"
       ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LLM-006",
+      "category": "LLM",
+      "summary": "provider, model, and tool format form a known-unsafe composition",
+      "repairs": [],
+      "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
     },
