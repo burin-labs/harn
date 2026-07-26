@@ -1325,7 +1325,6 @@ crates/harn-stdlib/src/stdlib/stdlib_web.harn::html_title
 crates/harn-stdlib/src/stdlib/stdlib_web.harn::web_grounding_tools
 crates/harn-stdlib/src/stdlib/stdlib_web.harn::web_resolve_url
 crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_create
-crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_default_path
 crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_diff
 crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_remove
 crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_shell
