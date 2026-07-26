@@ -1,4 +1,4 @@
-//! The `ReminderInject` handler (#1876): render the binding\'s body template
+//! The `ReminderInject` handler (#1876): render the binding's body template
 //! against the event and inject the result into a running agent session.
 
 use super::*;

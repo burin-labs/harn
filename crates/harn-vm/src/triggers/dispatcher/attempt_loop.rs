@@ -4,7 +4,7 @@
 //! flow-control leases and checks the destination circuit, then loops over
 //! attempts — emitting lifecycle/outbox/action-graph records for each one and
 //! deciding between success, waiting, retry-with-backoff, and the dead-letter
-//! queue. Every exit path releases the leases it took and settles the binding\'s
+//! queue. Every exit path releases the leases it took and settles the binding's
 //! in-flight accounting.
 
 use super::*;

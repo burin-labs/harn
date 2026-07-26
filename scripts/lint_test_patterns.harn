@@ -465,9 +465,14 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/synchronization.rs",
   "crates/harn-vm/src/tenant.rs",
   "crates/harn-vm/src/tracing.rs",
+  // Inherited from the pre-split `triggers/dispatcher/mod.rs` entry: these
+  // three files carry the dispatcher's attempt-runtime, drain-deadline, and
+  // dispatch-span duration measurements, which are host-observability reads.
+  "crates/harn-vm/src/triggers/dispatcher/attempt_loop.rs",
   "crates/harn-vm/src/triggers/dispatcher/circuits.rs",
-  "crates/harn-vm/src/triggers/dispatcher/mod.rs",
+  "crates/harn-vm/src/triggers/dispatcher/lifecycle.rs",
   "crates/harn-vm/src/triggers/dispatcher/predicate_eval.rs",
+  "crates/harn-vm/src/triggers/dispatcher/routing.rs",
   "crates/harn-vm/src/triggers/event.rs",
   "crates/harn-vm/src/triggers/inbox.rs",
   "crates/harn-vm/src/triggers/registry.rs",

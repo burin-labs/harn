@@ -1,6 +1,6 @@
 //! Parsing the `trigger_register` configuration dict into a [`TriggerBindingSpec`].
 //!
-//! This is the trigger DSL\'s front door: match rules, autonomy tier, budgets and
+//! This is the trigger DSL's front door: match rules, autonomy tier, budgets and
 //! their exhaustion strategy, retry policy, batching, and the `handler:` field —
 //! which is uniformly a closure, a `a2a://`/`worker://` URI, or a handler-variant
 //! dict (`spawn_to_pool`, `reminder_inject`, `interrupt_and_suspend`). It also

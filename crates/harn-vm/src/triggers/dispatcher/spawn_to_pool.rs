@@ -1,4 +1,4 @@
-//! The `SpawnToPool` handler (#1889): run the binding\'s task factory and hand
+//! The `SpawnToPool` handler (#1889): run the binding's task factory and hand
 //! the closure it returns to a named pool.
 
 use super::*;

@@ -1,4 +1,4 @@
-//! Dispatching one attempt to whatever the binding\'s handler URI points at.
+//! Dispatching one attempt to whatever the binding's handler URI points at.
 //!
 //! `dispatch_once` is the single place that maps a resolved [`DispatchUri`] to
 //! the machinery behind it — a local closure, an A2A peer, a worker queue, a

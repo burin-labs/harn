@@ -3,7 +3,7 @@
 //! `trigger_fire` lets a script synthesize an event by hand, so this module
 //! fills in every field the wire format requires but an author would not want
 //! to write out — id, timestamps, dedupe key, trace id, signature status — and
-//! synthesizes a provider payload matching the named provider\'s schema when the
+//! synthesizes a provider payload matching the named provider's schema when the
 //! caller did not supply one.
 
 use uuid::Uuid;

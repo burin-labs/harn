@@ -1,6 +1,6 @@
-//! Applying a binding\'s flow-control configuration to one dispatch.
+//! Applying a binding's flow-control configuration to one dispatch.
 //!
-//! Resolves each gate\'s key expression against the event, then drives the
+//! Resolves each gate's key expression against the event, then drives the
 //! [`flow_control::FlowControlManager`] primitives in order — batch, debounce,
 //! rate limit, throttle, singleton, concurrency — and releases the singleton and
 //! concurrency leases when the dispatch finishes. The manager owns the queues

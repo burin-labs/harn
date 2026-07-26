@@ -1,7 +1,7 @@
 //! Pre-attempt admission gates: may this binding act on this event at all?
 //!
 //! Each gate runs before the dispatcher takes any flow-control lease or touches
-//! the destination: an outstanding cancel request, the binding\'s `when`
+//! the destination: an outstanding cancel request, the binding's `when`
 //! predicate, the binding/orchestrator spend budgets, and the autonomy-tier
 //! approval ceiling. A gate that stops the dispatch returns the terminal
 //! [`DispatchOutcome`] the caller should hand back; passing every gate returns
@@ -25,6 +25,7 @@ impl Dispatcher {
         source_node_id: &mut String,
     ) -> Result<Option<DispatchOutcome>, DispatchError> {
         let binding_key = binding.binding_key();
+
         if dispatch_cancel_requested(
             &self.event_log,
             &binding_key,
