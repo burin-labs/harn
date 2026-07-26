@@ -41,6 +41,7 @@ pub mod outline;
 mod parser;
 mod render;
 mod sections;
+pub mod vocabulary;
 
 #[cfg(test)]
 mod tests;

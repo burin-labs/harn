@@ -13,6 +13,21 @@ pub(crate) struct DumpHighlightKeywordsArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpPromptGrammarArgs {
+    /// Path to the generated TextMate grammar (relative to the repo root).
+    #[arg(
+        long,
+        default_value = "editors/vscode/syntaxes/harn-prompt.tmLanguage.json"
+    )]
+    pub output: String,
+    /// Verify the on-disk grammar matches what would be generated; exit
+    /// non-zero if stale. Used by CI to prevent drift between the editor
+    /// grammar and the prompt-template engine.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpTriggerQuickrefArgs {
     /// Path to the generated trigger quickref file (relative to the repo root).
     #[arg(long, default_value = "docs/llm/harn-triggers-quickref.md")]

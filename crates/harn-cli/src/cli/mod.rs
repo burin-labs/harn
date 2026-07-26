@@ -113,7 +113,7 @@ pub(crate) use doc::DocArgs;
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
     ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs,
-    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
@@ -560,6 +560,14 @@ SCRIPTING
     /// `make gen-highlight` target.
     #[command(hide = true, name = "dump-highlight-keywords")]
     DumpHighlightKeywords(DumpHighlightKeywordsArgs),
+    /// Regenerate the VS Code `.harn.prompt` TextMate grammar from the live
+    /// prompt-template keyword, filter, and section vocabulary.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- dump-prompt-grammar` or the
+    /// `make gen-prompt-grammar` target.
+    #[command(hide = true, name = "dump-prompt-grammar")]
+    DumpPromptGrammar(DumpPromptGrammarArgs),
     /// Regenerate docs/llm/harn-triggers-quickref.md from the live trigger provider catalog.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

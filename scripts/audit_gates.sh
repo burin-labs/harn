@@ -52,6 +52,7 @@ GATES=(
   lint-harn
   fmt-harn
   check-highlight
+  check-prompt-grammar
   check-language-spec
   check-grammar-keywords
   verify-tree-sitter-parse

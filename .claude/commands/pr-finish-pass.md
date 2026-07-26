@@ -145,9 +145,10 @@ A change that looks local often leaves another crate stale.
   conformance, transcripts.
 - **Prompt-template change** → `crates/harn-vm/src/stdlib/template.rs` is the
   one parser; do not add a second. Also `docs/src/prompt-templating.md`, the
-  prompt section of `harn-quickref.md`, VS Code grammar at
-  `editors/vscode/syntaxes/harn-prompt.tmLanguage.json`,
-  `conformance/tests/template_*`.
+  prompt section of `harn-quickref.md`, and `conformance/tests/template_*`.
+  New keywords/filters/sections go in
+  `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate the VS Code
+  grammar with `make gen-prompt-grammar` rather than editing it.
 - **CLI surface change** → help text, README, docs, `harn-quickref.md`.
 
 If the diff touches behavior the portal renders, run the portal locally

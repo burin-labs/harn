@@ -16,6 +16,7 @@
   },
   "activationEvents": [
     "onLanguage:harn",
+    "onLanguage:harn-prompt",
     "onDebug",
     "onTaskType:harn"
   ],
@@ -31,7 +32,8 @@
       {
         "id": "harn-prompt",
         "aliases": ["Harn Prompt", "harn-prompt"],
-        "extensions": [".harn.prompt", ".prompt"]
+        "extensions": [".harn.prompt", ".prompt"],
+        "configuration": "./language-configuration-prompt.json"
       }
     ],
     "grammars": [

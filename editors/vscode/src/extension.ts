@@ -163,8 +163,15 @@ export function activate(context: vscode.ExtensionContext) {
     command: lspPath,
   };
 
+  // A server without prompt-file support simply never reports diagnostics for
+  // `harn-prompt` documents; syntax highlighting comes from the TextMate
+  // grammar either way, so listing the language here is safe against older
+  // `harn-lsp` builds.
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "harn" }],
+    documentSelector: [
+      { scheme: "file", language: "harn" },
+      { scheme: "file", language: "harn-prompt" },
+    ],
   };
 
   client = new LanguageClient(

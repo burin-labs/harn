@@ -33,6 +33,34 @@ the generated `harn-lang-0.1.0.vsix`.
 The extension starts `harn-lsp` from your `PATH` by default. Set `harn.lspPath`
 in your settings if the binary lives somewhere else.
 
+### Cursor and other VS Code forks
+
+Cursor resolves extensions through [Open VSX](https://open-vsx.org) rather than
+the VS Code Marketplace. Once published, search for **Harn Language** there;
+until then, package the VSIX with the command above and install it with
+`cursor --install-extension harn-lang-0.1.0.vsix`, or use **Extensions: Install
+from VSIX…** from the command palette.
+
+### `.harn.prompt` files
+
+Files ending in `.harn.prompt` or `.prompt` open as **Harn Prompt** templates.
+The extension gives them:
+
+- Highlighting for directives (`{{ if }}`, `{{ for }}`, `{{ include }}`,
+  `{{ section }}`, `{{ raw }}`), `{{# comments #}}`, literals,
+  [filters](./prompt-templating.md#filters), and the built-in section names.
+- Folding for `{{ if }}` / `{{ for }}` / `{{ section }}` / `{{ raw }}` blocks
+  and their matching `{{ end }}` / `{{ endsection }}` / `{{ endraw }}`.
+- `{{` → `}}` auto-closing and surrounding, plus `{{#` / `#}}` as the comment
+  pair so **Toggle Comment** works inside a template.
+
+The keyword, filter, and section vocabulary in that grammar is generated from
+the runtime's template engine, so the editor accepts exactly what
+`render(...)` does. Contributors changing the template language should edit
+`crates/harn-vm/src/stdlib/template/vocabulary.rs` and run
+`make gen-prompt-grammar` rather than hand-editing the grammar; CI fails on
+drift.
+
 ## Neovim
 
 Neovim's built-in LSP client (0.11+) can start `harn-lsp` directly. First
