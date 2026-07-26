@@ -35,7 +35,7 @@ There are two cost regimes:
 `vars.HARN_WINDOWS_LLD == 'on'`. This drives rustc at the toolchain-bundled
 `rust-lld` (rustc injects the `lld-link` flavor for the msvc target) instead of
 MSVC `link.exe`. It is the Windows analog of the `-Clink-arg=-fuse-ld=mold`
-link-arg the Linux `rust-builds` lane already uses.
+link-arg the Linux `rust-checks` lane already uses.
 
 **Why it is not a no-op:** rust-lld became the *default* linker only on
 `x86_64-unknown-linux-gnu` in Rust 1.90. `x86_64-pc-windows-msvc` still defaults
