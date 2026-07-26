@@ -178,6 +178,11 @@ test-group = "harn-cli-bin"
 leak-timeout = { period = "10s", result = "pass" }
 
 [[profile.default.overrides]]
+filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
+test-group = "harn-dap"
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
+
+[[profile.default.overrides]]
 filter = "package(harn-dap)"
 test-group = "harn-dap"
 
@@ -206,6 +211,11 @@ leak-timeout = { period = "10s", result = "pass" }
 filter = "package(harn-cli) and binary(harn)"
 test-group = "harn-cli-bin"
 leak-timeout = { period = "10s", result = "pass" }
+
+[[profile.ci.overrides]]
+filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
+test-group = "harn-dap"
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
 
 [[profile.ci.overrides]]
 filter = "package(harn-dap)"
@@ -259,6 +269,11 @@ leak-timeout = { period = "10s", result = "pass" }
 filter = "package(harn-cli) and binary(harn)"
 test-group = "harn-cli-bin"
 leak-timeout = { period = "10s", result = "pass" }
+
+[[profile.flake-detection.overrides]]
+filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
+test-group = "harn-dap"
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
 
 [[profile.flake-detection.overrides]]
 filter = "package(harn-dap)"

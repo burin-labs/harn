@@ -312,6 +312,10 @@ These tests are subject to different rules:
   tune.
 - Always provide a human-readable timeout message so a failure says _what_ timed
   out, not just that an assertion failed.
+- Do not fold process spawn and initial scheduling into a per-message response
+  timeout. Give startup its own generous budget beneath nextest's test-specific
+  outer ceiling, then use the tighter response timeout once the child has
+  produced its first protocol response.
 - Prefer `tokio::time::timeout` over `recv_timeout` even in E2E tests; it
   composes better with async code and gives cleaner error messages.
 
