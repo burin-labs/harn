@@ -147,6 +147,9 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/postgres"` — Postgres persistence helpers (pg_pool,
   pg_connect, pg_query, pg_query_one, pg_execute, pg_transaction, pg_close,
   pg_stmt_cache_clear, pg_mock_pool, pg_mock_calls)
+- `import "std/abort"` — cooperative abort across concurrent branches
+  (abort_token, abort_requested, abort_reason, request_abort,
+  settle_with_abort, decisive_error)
 - `import "std/llm/handlers"` — LLM call-handler middleware
   (with_circuit_breaker)
 - `import "std/llm/prompts"` — deterministic prompt builders and system

@@ -1,0 +1,321 @@
+// std/abort — cooperative abort for concurrent branches.
+//
+// `parallel` / `parallel each` are fail-fast: the first branch to *throw*
+// cancels its siblings, and per-branch results are discarded. `parallel
+// settle` is run-everything: every branch runs to completion and every
+// outcome is collected, but nothing ever stops a sibling. `parallel_race`
+// is first-success.
+//
+// The missing form is "run everything and record every outcome, but let a
+// branch that reaches a doomed verdict stop its siblings early": a
+// long-poll fan-out where one lane going terminal makes the remaining
+// polling pointless, yet the receipt still needs every lane's structured
+// outcome. `settle_with_abort` is that form.
+//
+// COOPERATIVE, NOT CANCELLATION. Nothing here preempts a running branch.
+// A branch blocked inside one long call keeps blocking; the abort takes
+// effect at the next point the branch itself chooses to look. The two
+// checkpoints you get for free are (1) before a branch starts — a branch
+// still queued behind `max_concurrent` when the token trips never runs at
+// all — and (2) after a branch finishes. Everything in between is up to
+// the branch: read `abort_requested(token)` at whatever point in your poll
+// or retry loop is safe to stop at. Bounding the waste at one poll
+// interval is the realistic goal, not instant teardown.
+//
+// Import with:
+//   import { abort_token, abort_requested, request_abort,
+//            settle_with_abort, decisive_error } from "std/abort"
+/**
+ * Why a cooperative abort was requested. `code` is a stable machine label,
+ * `message` is human-facing detail.
+ */
+pub type AbortReason = {code: string, message: string}
+
+/**
+ * A cooperative-abort token. It is a plain value built on a scoped shared
+ * cell, so it crosses into the isolated interpreter of a `spawn` or
+ * `parallel*` branch by being captured or passed like any other value.
+ */
+pub type AbortToken = {cell: dict}
+
+/** Options accepted by `abort_token`. */
+pub type AbortTokenOptions = {key?: string, scope?: string}
+
+/** Options accepted by `settle_with_abort`. */
+pub type SettleAbortOptions = {
+  max_concurrent?: int,
+  max_failures?: int,
+  token?: AbortToken,
+  abort_on?: fn(any, int) -> AbortReason,
+}
+
+/**
+ * The outcome of `settle_with_abort`.
+ *
+ * `results` is one `Result` per input item, in source order, with the same
+ * meaning at every position: `Ok(value)` when the branch produced a value,
+ * `Err(payload)` when it threw, returned `Result.Err`, or was abandoned.
+ * That makes every `std/settled` helper apply unchanged. `abandoned_indexes`
+ * is how you tell an abandonment apart from a real failure without matching
+ * on message text.
+ */
+pub type AbortSettleOutcome = {
+  results: list,
+  succeeded: int,
+  failed: int,
+  abandoned: int,
+  aborted: bool,
+  reason: AbortReason?,
+  abandoned_indexes: list<int>,
+  token: AbortToken,
+}
+
+/** `code` on the synthetic error recorded for a branch that never started. */
+pub const ABORT_ABANDONED_CODE: string = "branch_abandoned"
+
+/**
+ * Mint a cooperative-abort token. The default scope is `task_group`, which
+ * is the scope every branch of one `parallel*` block shares, and the default
+ * key is unique per call so two concurrent token holders never collide.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn abort_token(options: AbortTokenOptions? = nil) -> AbortToken {
+  const key = options?.key ?? ("abort:" + uuid())
+  const scope = options?.scope ?? "task_group"
+  return {cell: shared_cell({scope: scope, key: key})}
+}
+
+/**
+ * The reason the token was tripped, or `nil` while it is untripped.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn abort_reason(token: AbortToken) -> AbortReason? {
+  const reason: AbortReason? = shared_get(token.cell)
+  return reason
+}
+
+/**
+ * Whether an abort has been requested. Call this at your branch's own safe
+ * checkpoints — typically right before the next long wait.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn abort_requested(token: AbortToken) -> bool {
+  return abort_reason(token) != nil
+}
+
+/**
+ * Request a cooperative abort. First writer wins: returns `true` when this
+ * call recorded the reason, `false` when another branch had already tripped
+ * the token, so the reported cause is stable no matter how many branches
+ * fail at once.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn request_abort(token: AbortToken, reason: AbortReason) -> bool {
+  return shared_cas(token.cell, nil, reason)
+}
+
+// Cancellation and internal engine errors are not branch outcomes; they must
+// reach the caller unchanged rather than becoming a collected `Err`. This
+// mirrors the rule the agent loop applies at its own parallel dispatch site.
+fn __abort_must_propagate(err) -> bool {
+  const category = error_category(err)
+  return category == "cancelled" || category == "internal"
+}
+
+// How many decisive failures trip the token. Absent means "never trip
+// automatically" — explicit `request_abort` only. Supplying `abort_on`
+// without `max_failures` means "abort on the first decisive failure".
+fn __abort_threshold(options: SettleAbortOptions?) -> int? {
+  const explicit = options?.max_failures
+  if explicit != nil {
+    return explicit
+  }
+  if options?.abort_on != nil {
+    return 1
+  }
+  return nil
+}
+
+fn __abort_note_failure(
+  err,
+  index: int,
+  token: AbortToken,
+  counter,
+  options: SettleAbortOptions?,
+) -> nil {
+  const threshold = __abort_threshold(options)
+  if threshold == nil {
+    return nil
+  }
+  const classify = options?.abort_on
+  const reason = if classify == nil {
+    {code: "branch_failed", message: to_string(err)}
+  } else {
+    classify(err, index)
+  }
+  if reason == nil {
+    return nil
+  }
+  const total = atomic_add(counter, 1) + 1
+  if total >= threshold {
+    let _ = request_abort(token, reason)
+  }
+  return nil
+}
+
+fn __abort_branch(entry, body, token: AbortToken, counter, options: SettleAbortOptions?) -> dict {
+  const index = entry.index
+  const stop = abort_reason(token)
+  if stop != nil {
+    return {
+      index: index,
+      state: "abandoned",
+      value: nil,
+      error: {
+        code: ABORT_ABANDONED_CODE,
+        message: "not started: aborted by ${stop.code}: ${stop.message}",
+      },
+    }
+  }
+  const raw = try {
+    body(entry.item, token)
+  }
+  if is_err(raw) {
+    const thrown = unwrap_err(raw)
+    if __abort_must_propagate(thrown) {
+      throw thrown
+    }
+    __abort_note_failure(thrown, index, token, counter, options)
+    return {index: index, state: "failed", value: nil, error: thrown}
+  }
+  // A branch that *returns* `Result.Err` has reached a failing verdict without
+  // throwing. `parallel settle` would record that as `Ok(Err(..))` and count it
+  // a success; here it is a first-class failure, which is what lets a poll loop
+  // report a terminal outcome as data and still drive the abort policy.
+  const value = unwrap(raw)
+  if is_err(value) {
+    const returned = unwrap_err(value)
+    __abort_note_failure(returned, index, token, counter, options)
+    return {index: index, state: "failed", value: nil, error: returned}
+  }
+  if is_ok(value) {
+    return {index: index, state: "ok", value: unwrap(value), error: nil}
+  }
+  return {index: index, state: "ok", value: value, error: nil}
+}
+
+/**
+ * Run `body` over `items` concurrently, collecting every outcome like
+ * `parallel settle`, while letting any branch stop the ones that have not
+ * started yet.
+ *
+ * `body` is called as `body(item, token)`; a one-parameter closure that
+ * ignores the token is fine. A branch fails when it throws or returns
+ * `Result.Err`.
+ *
+ * With no options this is `parallel settle` plus a token: nothing aborts
+ * unless a branch calls `request_abort`. `max_failures` trips the token
+ * after that many decisive failures, and `abort_on(error, index)` chooses
+ * which failures are decisive by returning a reason (or `nil` to let the
+ * run continue) — a transient network error need not doom the run when a
+ * terminal one does.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn settle_with_abort(
+  items: list,
+  body,
+  options: SettleAbortOptions? = nil,
+) -> AbortSettleOutcome {
+  const token = options?.token ?? abort_token()
+  const counter = atomic(0)
+  let indexed = []
+  for (position, item) in iter(items).enumerate() {
+    indexed = indexed.appending({index: position, item: item})
+  }
+  const settled = parallel settle indexed with {
+    max_concurrent: options?.max_concurrent ?? 0,
+  } { entry ->
+    __abort_branch(entry, body, token, counter, options)
+  }
+  let results = []
+  let succeeded = 0
+  let failed = 0
+  let abandoned = 0
+  let abandoned_indexes: list<int> = []
+  let index = 0
+  for settled_result in settled.results {
+    if is_err(settled_result) {
+      const err = unwrap_err(settled_result)
+      if __abort_must_propagate(err) {
+        throw err
+      }
+      failed = failed + 1
+      results = results.appending(Err(err))
+      index = index + 1
+      continue
+    }
+    const record = unwrap(settled_result)
+    if record.state == "ok" {
+      succeeded = succeeded + 1
+      results = results.appending(Ok(record.value))
+    } else if record.state == "abandoned" {
+      abandoned = abandoned + 1
+      abandoned_indexes = abandoned_indexes.appending(index)
+      results = results.appending(Err(record.error))
+    } else {
+      failed = failed + 1
+      results = results.appending(Err(record.error))
+    }
+    index = index + 1
+  }
+  const reason = abort_reason(token)
+  return {
+    results: results,
+    succeeded: succeeded,
+    failed: failed,
+    abandoned: abandoned,
+    aborted: reason != nil,
+    reason: reason,
+    abandoned_indexes: abandoned_indexes,
+    token: token,
+  }
+}
+
+/**
+ * The first branch failure that was not an abandonment, or `nil` when every
+ * branch either succeeded or was abandoned.
+ *
+ * Report this, not the first `Err` in `results`: a branch that stopped
+ * waiting because a sibling was already doomed is a consequence of the
+ * failure, never its cause. Use `outcome.reason` for "why the run stopped"
+ * and `decisive_error` for "which branch actually failed".
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn decisive_error(outcome: AbortSettleOutcome) -> any {
+  // `abandoned_indexes` is ascending by construction, so one cursor walks it
+  // alongside the results instead of rescanning it per element.
+  const abandoned = outcome.abandoned_indexes
+  let cursor = 0
+  let index = 0
+  for result in outcome.results {
+    if cursor < len(abandoned) && abandoned[cursor] == index {
+      cursor = cursor + 1
+    } else if is_err(result) {
+      return unwrap_err(result)
+    }
+    index = index + 1
+  }
+  return nil
+}

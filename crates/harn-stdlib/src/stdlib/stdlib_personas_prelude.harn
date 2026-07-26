@@ -4,6 +4,8 @@
  * The helpers return explicit envelopes so callers can persist, render, or
  * compose them without depending on ambient host state.
  */
+import { settle_with_abort } from "std/abort"
+
 fn __prelude_is_callable(value) -> bool {
   const kind = type_of(value)
   return kind == "function" || kind == "closure" || kind == "fn"
@@ -577,38 +579,44 @@ pub fn parallel_sweep_with_circuit_breaker(items, step_fn, options = nil) {
     max_concurrent = 1
   }
   const max_failures = opts?.max_failures ?? 1
-  let index = 0
+  // One cooperative-abort settle replaces the old batch-at-a-time loop. The
+  // batching existed only to give the sweep somewhere to check the failure
+  // count — `parallel settle` alone never stops — and it cost real pipelining:
+  // one slow item stalled its whole chunk, and a failure could not stop the
+  // chunk it was in. `settle_with_abort` checks the threshold as each branch
+  // settles, so items that have not started yet are dropped immediately.
+  const outcome = settle_with_abort(
+    items,
+    { item -> step_fn(item) },
+    {max_concurrent: max_concurrent, max_failures: max_failures},
+  )
   let succeeded = 0
   let failed = 0
   let results = []
-  let broken = false
-  while index < len(items) {
-    let end_index = index + max_concurrent
-    if end_index > len(items) {
-      end_index = len(items)
+  let position = 0
+  let abandoned_cursor = 0
+  for item_result in outcome.results {
+    // Abandoned branches never ran; they are `skipped`, not results.
+    // `abandoned_indexes` is ascending, so one cursor keeps this O(n).
+    if abandoned_cursor < len(outcome.abandoned_indexes)
+      && outcome.abandoned_indexes[abandoned_cursor]
+      == position {
+      abandoned_cursor += 1
+      position += 1
+      continue
     }
-    const batch = items[index:end_index]
-    const settled = parallel settle batch { item ->
-      step_fn(item)
+    if is_ok(item_result) {
+      succeeded += 1
+      results = results + [{ok: true, value: unwrap(item_result), error: nil}]
+    } else {
+      const error = unwrap_err(item_result)
+      failed += 1
+      results = results + [{ok: false, value: nil, error: __prelude_error_object(error)}]
     }
-    for item_result in settled.results {
-      if is_ok(item_result) {
-        const value = unwrap(item_result)
-        succeeded += 1
-        results = results + [{ok: true, value: value, error: nil}]
-      } else {
-        const error = unwrap_err(item_result)
-        failed += 1
-        results = results + [{ok: false, value: nil, error: __prelude_error_object(error)}]
-      }
-    }
-    index = end_index
-    if failed >= max_failures {
-      broken = true
-      break
-    }
+    position += 1
   }
-  const skipped = len(items) - index
+  const broken = outcome.aborted
+  const skipped = outcome.abandoned
   if broken && __prelude_is_callable(opts?.on_break) {
     opts.on_break({failed: failed, skipped: skipped, succeeded: succeeded})
   }

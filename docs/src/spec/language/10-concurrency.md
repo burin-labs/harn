@@ -123,6 +123,69 @@ const pages = parallel settle cursors with { max_concurrent: 4 } { cursor ->
 zero, and negative values mean unlimited. Results are still returned in
 source order.
 
+### Cooperative abort
+
+The built-in forms cover two of the three ways a fan-out can end. `parallel`
+and `parallel each` are fail-fast: the first branch to *throw* cancels its
+siblings, and per-branch results are discarded. `parallel settle` is
+run-everything: every outcome is collected and nothing ever stops a sibling.
+`parallel_race` is first-success.
+
+The third way is "run everything and record every outcome, but let a branch
+that reaches a doomed verdict stop its siblings early" — a long-poll fan-out
+where one lane going terminal makes the remaining polling pointless while the
+receipt still needs every lane's structured outcome. `std/abort` is that form,
+built on scoped shared state rather than on new syntax:
+
+```harn
+import { abort_requested, request_abort, settle_with_abort } from "std/abort"
+
+const outcome = settle_with_abort(lanes, { lane, token ->
+  while !lane_terminal(lane) {
+    if abort_requested(token) {
+      return Err({code: "stopped_waiting", message: "a sibling lane failed"})
+    }
+    sleep(poll_interval_ms)
+  }
+  if lane_failed(lane) {
+    let _ = request_abort(token, {code: "doomed", message: "lane ${lane} failed"})
+    return Err({code: "terminal", message: "lane ${lane} failed"})
+  }
+  return lane_proof(lane)
+}, {max_concurrent: 3})
+```
+
+`settle_with_abort(items, body, options?)` returns one `Result` per input
+item in source order, so every `std/settled` helper applies unchanged. A
+branch fails when it throws *or* returns `Result.Err`; the second case is what
+lets a lane report a terminal outcome as data and still drive the abort
+policy, which plain `parallel settle` cannot do because it records a returned
+`Result.Err` as `Ok(Err(..))`. `abandoned_indexes` distinguishes a branch that
+never started from one that genuinely failed, and `decisive_error(outcome)`
+returns the first non-abandoned failure so a lane that merely stopped waiting
+is never reported as the cause.
+
+Abort can be requested explicitly with `request_abort`, or automatically:
+`max_failures` trips the token after that many failures, and
+`abort_on(error, index)` chooses which failures are decisive by returning a
+reason (or `nil` to keep going), so a transient error need not doom a run that
+a terminal one does. With neither option the form behaves exactly like
+`parallel settle`.
+
+This is cooperative, not cancellation. Nothing preempts a running branch: a
+branch blocked inside one long call keeps blocking, and the abort takes effect
+at the next point the branch itself looks. Two checkpoints come for free — a
+branch still queued behind `max_concurrent` when the token trips never runs at
+all, and each branch is checked as it settles. Everything in between is the
+branch's own choice of safe stopping point, so the realistic goal is bounding
+the waste at one poll interval, not instant teardown.
+
+`abort_token()` mints the underlying token directly for use with `spawn`,
+`parallel each`, or any other structure. It is a plain value over a
+`task_group`-scoped shared cell, so it crosses into a child task's isolated
+interpreter like any other value, and `request_abort` is first-writer-wins so
+the recorded cause is stable when several branches fail at once.
+
 ### defer
 
 ```harn

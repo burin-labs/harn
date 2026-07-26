@@ -910,6 +910,39 @@ const results = parallel settle paths with { max_concurrent: 4 } { p ->
 }
 ```
 
+`std/abort` adds the third form: run everything and collect every outcome
+like `parallel settle`, but let a branch that reaches a doomed verdict stop
+the siblings that have not started. Use it when branches poll or wait and a
+sibling's failure makes the rest pointless. It is COOPERATIVE — a branch
+blocked inside one long call is not interrupted; the abort lands at the next
+checkpoint the branch itself checks.
+
+```harn,ignore
+import { abort_requested, decisive_error, request_abort, settle_with_abort } from "std/abort"
+
+const outcome = settle_with_abort(lanes, { lane, token ->
+  if abort_requested(token) {           // your own safe checkpoint
+    return Err({code: "stopped_waiting", message: "sibling already failed"})
+  }
+  if doomed(lane) {
+    let _ = request_abort(token, {code: "lane_failed", message: "${lane} red"})
+    return Err({code: "terminal", message: "${lane} red"})
+  }
+  return proof(lane)
+}, {max_concurrent: 3})
+
+// outcome.results is one Result per item in source order (std/settled applies).
+// A branch fails when it throws OR returns Result.Err — plain `parallel settle`
+// would record a returned Err as Ok(Err(..)) and count it a success.
+log(outcome.aborted, outcome.abandoned, outcome.reason?.code)
+log(decisive_error(outcome))  // first non-abandoned failure: the real cause
+```
+
+`max_failures: N` trips the token automatically after N failures;
+`abort_on: fn(err, i) -> AbortReason?` chooses which failures are decisive
+(return `nil` to keep going). With neither, it behaves exactly like
+`parallel settle`.
+
 `max_concurrent: 0` (or no `with` clause) means unlimited. See also
 `retry <count> { }` (count mandatory; returns nil when all attempts fail —
 no `catch` clause), channels, `select`, and `deadline` in

@@ -172,6 +172,24 @@ Polling and retry helpers for closure-shaped conditions:
 | `retry_predicate_with_backoff(max_attempts, base_ms, predicate)` | Retry `predicate()` with exponential backoff between attempts |
 | `circuit_call(name, closure)` | Run `closure()` only while the named circuit breaker allows calls, recording success or failure |
 
+### std/abort
+
+Cooperative abort across concurrent branches: run everything and record every
+outcome like `parallel settle`, but let a branch that reaches a doomed verdict
+stop the siblings that have not started. See
+[Cooperative abort](./concurrency.md#cooperative-abort-stdabort) for the full
+semantics and its limits — it is cooperative, so a branch blocked inside one
+long call is not interrupted.
+
+| Function | Description |
+|---|---|
+| `abort_token(options?)` | Mint a cooperative-abort token that crosses into child tasks as a plain value |
+| `abort_requested(token)` | Whether an abort has been requested — call at your branch's own safe checkpoints |
+| `abort_reason(token)` | The `AbortReason` recorded when the token was tripped, else `nil` |
+| `request_abort(token, reason)` | Trip the token, first writer wins; `true` when this call recorded the reason |
+| `settle_with_abort(items, body, options?)` | Settle over `items` while honouring the token, with optional `max_failures` / `abort_on` policies |
+| `decisive_error(outcome)` | The first failure that was not an abandonment — the cause to report |
+
 ### std/connectors/shared
 
 Connector package helpers for common provider plumbing:

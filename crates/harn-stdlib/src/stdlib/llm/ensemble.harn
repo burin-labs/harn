@@ -10,6 +10,7 @@
 //   - Du et al. 2023 "Improving Factuality and Reasoning in Language Models
 //     through Multiagent Debate" (arxiv:2305.14325).
 //   - OpenAI best-of-n / reranking patterns (cookbook).
+import { decisive_error, settle_with_abort } from "std/abort"
 import { agent_emit_event } from "std/agent/state"
 import { safe_call, with_case_insensitive_keys } from "std/llm/safe"
 
@@ -494,6 +495,47 @@ pub fn self_consistency(prompt, system, opts = nil) {
 // parallel_judge
 // -------------------------------------------------------------------------------------------------
 
+// One judged item. Returns `Ok(record)` / `Err(record)` so `settle_with_abort`
+// can see the failure: the record itself is the payload either way.
+fn __parallel_judge_step(entry, judge_fn, total, on_progress) {
+  const started = harness.clock.now_ms()
+  const r = try {
+    judge_fn(entry.item)
+  }
+  const duration = harness.clock.now_ms() - started
+  if is_err(r) {
+    const record = {
+      index: entry.index,
+      item: entry.item,
+      ok: false,
+      error: unwrap_err(r),
+      duration_ms: duration,
+    }
+    if on_progress != nil {
+      let _ = try {
+        on_progress({index: entry.index, total: total, item: entry.item, verdict: nil})
+      }
+    }
+    // An `Err` return is what makes this branch a failure for the abort
+    // policy; `parallel settle` would have counted the record as a success.
+    return Err(record)
+  }
+  const verdict = unwrap(r)
+  const record = {
+    index: entry.index,
+    item: entry.item,
+    ok: true,
+    verdict: verdict,
+    duration_ms: duration,
+  }
+  if on_progress != nil {
+    let _ = try {
+      on_progress({index: entry.index, total: total, item: entry.item, verdict: verdict})
+    }
+  }
+  return Ok(record)
+}
+
 /**
  * parallel_judge(items, judge_fn, opts) -> list<dict>
  *
@@ -504,6 +546,9 @@ pub fn self_consistency(prompt, system, opts = nil) {
  *   - max_concurrent: int (default 4)
  *   - on_error: "skip" | "fail_fast" | "collect" (default "collect")
  *   - on_progress: closure({index, total, item, verdict}) -> nil
+ *
+ * `fail_fast` stops dispatching judges as soon as one fails, instead of
+ * running every judge call and only then throwing.
  *
  * @effects: []
  * @errors: []
@@ -520,65 +565,44 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
   if total == 0 {
     return []
   }
-  // index pairs to preserve order through parallel each
+  // index pairs to preserve order through the settle
   let indexed = []
   let i = 0
   for item in items {
     indexed = indexed.appending({index: i, item: item})
     i = i + 1
   }
-  const raw = parallel each indexed with {
-    max_concurrent: __clamp_int(cfg?.max_concurrent ?? 4, 1, 64),
-  } { entry ->
-    const started = harness.clock.now_ms()
-    const r = try {
-      judge_fn(entry.item)
-    }
-    const duration = harness.clock.now_ms() - started
-    if is_err(r) {
-      const err = unwrap_err(r)
-      const record = {
-        index: entry.index,
-        item: entry.item,
-        ok: false,
-        error: err,
-        duration_ms: duration,
-      }
-      if on_progress != nil {
-        let _ = try {
-          on_progress({index: entry.index, total: total, item: entry.item, verdict: nil})
-        }
-      }
-      record
-    } else {
-      const verdict = unwrap(r)
-      const record = {
-        index: entry.index,
-        item: entry.item,
-        ok: true,
-        verdict: verdict,
-        duration_ms: duration,
-      }
-      if on_progress != nil {
-        let _ = try {
-          on_progress({index: entry.index, total: total, item: entry.item, verdict: verdict})
-        }
-      }
-      record
+  const cap = __clamp_int(cfg?.max_concurrent ?? 4, 1, 64)
+  // `fail_fast` is a cooperative abort, not a post-hoc check: the first
+  // failing judge trips the token so judges still queued behind `cap` are
+  // never dispatched. The other modes set no threshold and run everything.
+  const settle_options = if on_error == "fail_fast" {
+    {max_concurrent: cap, max_failures: 1}
+  } else {
+    {max_concurrent: cap}
+  }
+  const outcome = settle_with_abort(
+    indexed,
+    { entry -> __parallel_judge_step(entry, judge_fn, total, on_progress) },
+    settle_options,
+  )
+  if on_error == "fail_fast" {
+    const decisive = decisive_error(outcome)
+    if decisive != nil {
+      throw decisive?.error ?? "parallel_judge: judge_fn errored"
     }
   }
-  // Sort by index to preserve input order. parallel each currently returns
-  // results in input-list order, but we sort defensively in case that ever
-  // changes.
-  const sorted = raw.sorted_by({ entry -> entry.index })
+  // Results come back in source order, so the records are already ordered.
   let out = []
-  for r in sorted {
-    const failed = !(r?.ok ?? false)
-    if failed && on_error == "fail_fast" {
-      throw r?.error ?? "parallel_judge: judge_fn errored"
+  for r in outcome.results {
+    const record = if is_ok(r) {
+      unwrap(r)
+    } else {
+      unwrap_err(r)
     }
+    const failed = !(record?.ok ?? false)
     if !(failed && on_error == "skip") {
-      out = out.appending(r)
+      out = out.appending(record)
     }
   }
   return out
