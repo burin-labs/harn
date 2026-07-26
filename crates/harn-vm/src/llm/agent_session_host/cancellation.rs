@@ -113,10 +113,12 @@ mod tests {
 
         assert!(!crate::agent_sessions::has_journal(session_id));
         assert_eq!(cleanup_count.load(Ordering::SeqCst), 1);
-        let store =
-            crate::stdlib::session_store::open_canonical_agent_session(root.path(), session_id)
-                .await
-                .expect("open canonical session");
+        let store = crate::stdlib::session_store::open_canonical_agent_session(
+            &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
+            session_id,
+        )
+        .await
+        .expect("open canonical session");
         let events = crate::stdlib::session_store::read_all_events(&store, session_id)
             .await
             .expect("read canonical events");
