@@ -7577,7 +7577,8 @@ The following environment variables configure runtime behavior:
 |---|---|
 | `HARN_LLM_PROVIDER` | Override the default LLM provider. Any configured provider is accepted. Built-in names include `anthropic` (default), `openai`, `openrouter`, `huggingface`, `ollama`, `local`, and `mock`. |
 | `HARN_LLM_TIMEOUT` | LLM request timeout in seconds. Default `120`. |
-| `HARN_STATE_DIR` | Override the runtime state root used for store, checkpoint, metadata, and default worktree state. Relative values resolve from the active project/runtime root. |
+| `HARN_STATE_DIR` | Override the runtime state root used for store, checkpoint, metadata, session-store, and default worktree state. Relative values resolve from the active project/runtime root. |
+| `HARN_SESSION_STORE_ROOT` | Override the tree `std/session-store` keeps its database under; state lands in that tree's `.harn`. Narrower than `HARN_STATE_DIR` and wins over it. A `root` option passed to a session-store builtin wins over both. |
 | `HARN_RUN_DIR` | Override the default persisted run directory. Relative values resolve from the active project/runtime root. |
 | `HARN_WORKTREE_DIR` | Override the default worker worktree root. Relative values resolve from the active project/runtime root. |
 | `ANTHROPIC_API_KEY` | API key for the Anthropic provider. |

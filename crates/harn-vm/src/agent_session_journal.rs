@@ -84,8 +84,8 @@ pub(crate) async fn prepare(
     run_id: String,
     turn_id: String,
 ) -> Result<PreparedJournal, VmError> {
-    let root = session_store::canonical_store_root(Some(options))?;
-    let store = session_store::open_canonical_agent_session(&root, session_id).await?;
+    let state_dir = session_store::canonical_store_state_dir(Some(options))?;
+    let store = session_store::open_canonical_agent_session(&state_dir, session_id).await?;
     let events = session_store::read_all_events(&store, session_id).await?;
     Ok(PreparedJournal {
         transcript: hydrate_events(events),
@@ -518,9 +518,12 @@ mod tests {
         install_test_journal(session_id, &mut journal);
         flush(session_id).await.expect("flush messages");
 
-        let store = session_store::open_canonical_agent_session(root.path(), session_id)
-            .await
-            .expect("open canonical store");
+        let store = session_store::open_canonical_agent_session(
+            &session_store::SessionStoreDir::under_root(root.path()),
+            session_id,
+        )
+        .await
+        .expect("open canonical store");
         let events = session_store::read_all_events(&store, session_id)
             .await
             .expect("read canonical events");
@@ -786,9 +789,12 @@ pipeline main(task) {{
         assert!(output.lines().any(|line| line.ends_with("done")));
 
         let session_id = "live-journal-agent-loop";
-        let store = session_store::open_canonical_agent_session(root.path(), session_id)
-            .await
-            .expect("open canonical store");
+        let store = session_store::open_canonical_agent_session(
+            &session_store::SessionStoreDir::under_root(root.path()),
+            session_id,
+        )
+        .await
+        .expect("open canonical store");
         let events = session_store::read_all_events(&store, session_id)
             .await
             .expect("read canonical events");

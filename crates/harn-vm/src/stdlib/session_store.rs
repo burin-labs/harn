@@ -28,6 +28,32 @@ use crate::vm::Vm;
 const LEGACY_STORE_DIR: &str = "session-store";
 const LEGACY_EVENT_FILE_EXT: &str = "jsonl";
 const STORE_DB_FILE: &str = "session-store.sqlite";
+/// Directory name for state under an explicitly named store root. The
+/// defaulted case goes through `runtime_paths::state_root` instead, which
+/// owns the same name plus the `HARN_STATE_DIR` override.
+const STATE_DIR_NAME: &str = ".harn";
+
+/// The directory session-store files live in.
+///
+/// Deliberately not a bare `PathBuf`. Callers naturally hold the *tree root*
+/// — a temp dir, a project root — and the state directory is one level below
+/// it. Both are paths, so passing one where the other is meant compiles
+/// silently and fails at runtime as an empty store. Naming the distinction in
+/// the type makes that mistake a compile error, and
+/// [`SessionStoreDir::under_root`] is the only way to descend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SessionStoreDir(PathBuf);
+
+impl SessionStoreDir {
+    /// State for an explicitly named tree: `<root>/.harn`.
+    pub(crate) fn under_root(root: &Path) -> Self {
+        Self(root.join(STATE_DIR_NAME))
+    }
+
+    pub(crate) fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
 const STORE_ROOT_ENV: &str = "HARN_SESSION_STORE_ROOT";
 const DEFAULT_ACTOR: &str = "harn";
 const DEFAULT_KIND_TYPE: &str = "LibrarianEntry";
@@ -74,10 +100,10 @@ async fn session_store_append_impl(
         ErrorKind::Runtime,
     )?;
     reject_retired_now(options)?;
-    let root = store_root(options)?;
-    let store = open_store(&root)?;
+    let state_dir = store_state_dir(options)?;
+    let store = open_store(&state_dir)?;
     let tenant_id = option_string(options, "tenant_id")?;
-    ensure_session(&store, &root, &session_id, true, tenant_id).await?;
+    ensure_session(&store, &state_dir, &session_id, true, tenant_id).await?;
 
     let kind = match option_string(options, "kind")?.as_deref() {
         Some("hypothesis") => SessionEventKind::Hypothesis,
@@ -126,10 +152,10 @@ async fn session_store_events_impl(
         "options",
         ErrorKind::Runtime,
     )?;
-    let root = store_root(options)?;
-    let store = open_store(&root)?;
+    let state_dir = store_state_dir(options)?;
+    let store = open_store(&state_dir)?;
     let tenant_id = option_string(options, "tenant_id")?;
-    if !ensure_session(&store, &root, &session_id, false, tenant_id).await? {
+    if !ensure_session(&store, &state_dir, &session_id, false, tenant_id).await? {
         return Ok(VmValue::List(Arc::new(Vec::new())));
     }
     let events = read_all_events(&store, &session_id).await?;
@@ -165,10 +191,10 @@ async fn session_store_verify_impl(
         "options",
         ErrorKind::Runtime,
     )?;
-    let root = store_root(options)?;
-    let store = open_store(&root)?;
+    let state_dir = store_state_dir(options)?;
+    let store = open_store(&state_dir)?;
     let tenant_id = option_string(options, "tenant_id")?;
-    if !ensure_session(&store, &root, &session_id, false, tenant_id).await? {
+    if !ensure_session(&store, &state_dir, &session_id, false, tenant_id).await? {
         return Ok(json_to_vm_value(&json!({
             "_type": "session_store_verify",
             "session_id": session_id,
@@ -217,7 +243,7 @@ async fn session_store_path_impl(
         ErrorKind::Runtime,
     )?;
     Ok(VmValue::String(arcstr::ArcStr::from(
-        legacy_session_path(&store_root(options)?, &session_id)?
+        legacy_session_path(&store_state_dir(options)?, &session_id)?
             .to_string_lossy()
             .as_ref(),
     )))
@@ -240,33 +266,35 @@ async fn session_store_database_path_impl(
         ErrorKind::Runtime,
     )?;
     Ok(VmValue::String(arcstr::ArcStr::from(
-        store_path(&store_root(options)?).to_string_lossy().as_ref(),
+        store_path(&store_state_dir(options)?)
+            .to_string_lossy()
+            .as_ref(),
     )))
 }
 
-fn open_store(root: &Path) -> Result<SqliteSessionStore, VmError> {
+fn open_store(state_dir: &SessionStoreDir) -> Result<SqliteSessionStore, VmError> {
     let hooks = StoreHooks {
         redaction: Some(Arc::new(crate::redact::current_policy())),
         ..StoreHooks::default()
     };
-    SqliteSessionStore::open_with_hooks(store_path(root), hooks).map_err(store_error)
+    SqliteSessionStore::open_with_hooks(store_path(state_dir), hooks).map_err(store_error)
 }
 
-fn store_path(root: &Path) -> PathBuf {
-    root.join(".harn").join(STORE_DB_FILE)
+fn store_path(state_dir: &SessionStoreDir) -> PathBuf {
+    state_dir.as_path().join(STORE_DB_FILE)
 }
 
 async fn ensure_session(
     store: &SqliteSessionStore,
-    root: &Path,
+    state_dir: &SessionStoreDir,
     session_id: &str,
     create_if_missing: bool,
     tenant_id: Option<String>,
 ) -> Result<bool, VmError> {
     validate_session_id(session_id)?;
-    let legacy_path = legacy_session_path(root, session_id)?;
+    let legacy_path = legacy_session_path(state_dir, session_id)?;
     if legacy_path.is_file() {
-        let source = read_legacy_events(root, session_id)?;
+        let source = read_legacy_events(state_dir, session_id)?;
         if !source.events.is_empty() {
             import_legacy_events(store, session_id, source, tenant_id.as_deref()).await?;
             return match store.describe(session_id).await {
@@ -314,11 +342,11 @@ async fn ensure_session(
 /// journal uses this adapter instead of reproducing SQLite setup, redaction,
 /// legacy import, or session-creation policy.
 pub(crate) async fn open_canonical_agent_session(
-    root: &Path,
+    state_dir: &SessionStoreDir,
     session_id: &str,
 ) -> Result<SqliteSessionStore, VmError> {
-    let store = open_store(root)?;
-    ensure_session(&store, root, session_id, true, None).await?;
+    let store = open_store(state_dir)?;
+    ensure_session(&store, state_dir, session_id, true, None).await?;
     Ok(store)
 }
 
@@ -378,8 +406,11 @@ struct LegacySource {
     events: Vec<LegacyEvent>,
 }
 
-fn read_legacy_events(root: &Path, session_id: &str) -> Result<LegacySource, VmError> {
-    let path = legacy_session_path(root, session_id)?;
+fn read_legacy_events(
+    state_dir: &SessionStoreDir,
+    session_id: &str,
+) -> Result<LegacySource, VmError> {
+    let path = legacy_session_path(state_dir, session_id)?;
     let bytes = fs::read(&path).map_err(|error| {
         VmError::Runtime(format!(
             "session_store: failed to read legacy {}: {error}",
@@ -526,25 +557,40 @@ fn verify_report_value(report: VerifyReport, broken_at: Option<usize>) -> Result
     Ok(json_to_vm_value(&value))
 }
 
-pub(crate) fn canonical_store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
-    Ok(option_string(options, "root")?
+/// The directory session-store files live in.
+///
+/// A caller that names a tree — via the `root` option or `HARN_SESSION_STORE_ROOT`
+/// — gets that tree's `.harn`, because it asked for a specific location. With
+/// neither, the location is Harn's own default, so it goes through
+/// [`crate::runtime_paths::state_root`] and honors `HARN_STATE_DIR` like every
+/// other state consumer. Resolving both cases here keeps one owner for the
+/// question; downstream helpers only join file names onto the result.
+pub(crate) fn canonical_store_state_dir(
+    options: Option<&DictMap>,
+) -> Result<SessionStoreDir, VmError> {
+    let named_root = option_string(options, "root")?
         .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
         .or_else(|| {
             crate::stdlib::process::read_env_value(STORE_ROOT_ENV)
                 .filter(|value| !value.trim().is_empty())
                 .map(|root| crate::stdlib::process::resolve_source_relative_path(&root))
-        })
-        .unwrap_or_else(crate::stdlib::process::runtime_root_base))
+        });
+    Ok(match named_root {
+        Some(root) => SessionStoreDir::under_root(&root),
+        None => SessionStoreDir(crate::runtime_paths::state_root(
+            &crate::stdlib::process::runtime_root_base(),
+        )),
+    })
 }
 
-fn store_root(options: Option<&DictMap>) -> Result<PathBuf, VmError> {
-    canonical_store_root(options)
+fn store_state_dir(options: Option<&DictMap>) -> Result<SessionStoreDir, VmError> {
+    canonical_store_state_dir(options)
 }
 
-fn legacy_session_path(root: &Path, session_id: &str) -> Result<PathBuf, VmError> {
+fn legacy_session_path(state_dir: &SessionStoreDir, session_id: &str) -> Result<PathBuf, VmError> {
     validate_session_id(session_id)?;
-    Ok(root
-        .join(".harn")
+    Ok(state_dir
+        .as_path()
         .join(LEGACY_STORE_DIR)
         .join(format!("{session_id}.{LEGACY_EVENT_FILE_EXT}")))
 }
@@ -795,8 +841,8 @@ mod tests {
         );
     }
 
-    fn write_legacy_fixture(root: &Path, session_id: &str) -> PathBuf {
-        let path = legacy_session_path(root, session_id).unwrap();
+    fn write_legacy_fixture(state_dir: &SessionStoreDir, session_id: &str) -> PathBuf {
+        let path = legacy_session_path(state_dir, session_id).unwrap();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let rows = [
             json!({
@@ -862,12 +908,43 @@ mod tests {
     }
 
     #[test]
+    fn a_named_root_keeps_its_own_state_dir_regardless_of_harn_state_dir() {
+        let _guard = crate::runtime_paths::test_env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let elsewhere = std::env::temp_dir().join("harn-session-store-state-dir-probe");
+        let previous = std::env::var(crate::runtime_paths::HARN_STATE_DIR_ENV).ok();
+        unsafe { std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, &elsewhere) };
+
+        // A caller that names a tree asked for a specific location; an
+        // unrelated HARN_STATE_DIR must not relocate its store out of it.
+        let options = json_to_vm_value(&json!({"root": "/workspace"}));
+        let named = canonical_store_state_dir(options.as_dict()).unwrap();
+        assert_eq!(named, SessionStoreDir::under_root(Path::new("/workspace")));
+
+        // The defaulted case is Harn's own state, so it follows HARN_STATE_DIR
+        // like every other state consumer.
+        let defaulted = canonical_store_state_dir(None).unwrap();
+        assert_eq!(defaulted.as_path(), elsewhere);
+
+        match previous {
+            Some(value) => unsafe {
+                std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, value);
+            },
+            None => unsafe { std::env::remove_var(crate::runtime_paths::HARN_STATE_DIR_ENV) },
+        }
+    }
+
+    #[test]
     fn canonical_and_legacy_paths_are_explicitly_distinct() {
-        let root = Path::new("/workspace");
-        assert_eq!(store_path(root), root.join(".harn/session-store.sqlite"));
+        let state_dir = SessionStoreDir::under_root(Path::new("/workspace"));
+        assert_eq!(
+            store_path(&state_dir),
+            Path::new("/workspace/.harn/session-store.sqlite")
+        );
         assert_ne!(
-            store_path(root),
-            legacy_session_path(root, "session").unwrap()
+            store_path(&state_dir),
+            legacy_session_path(&state_dir, "session").unwrap()
         );
     }
 
@@ -879,7 +956,7 @@ mod tests {
             "headers": {"run_id": 3},
         }));
         let options = options.as_dict().unwrap();
-        assert!(store_root(Some(options)).is_err());
+        assert!(store_state_dir(Some(options)).is_err());
         assert!(option_tags(Some(options)).is_err());
         assert!(option_headers(Some(options)).is_err());
     }
@@ -903,13 +980,20 @@ mod tests {
     async fn legacy_import_is_idempotent_and_preserves_source_facts() {
         let dir = tempfile::tempdir().unwrap();
         let session_id = "legacy.session";
-        let legacy_path = write_legacy_fixture(dir.path(), session_id);
+        let legacy_path =
+            write_legacy_fixture(&SessionStoreDir::under_root(dir.path()), session_id);
         let legacy_before = fs::read_to_string(&legacy_path).unwrap();
-        let store = open_store(dir.path()).unwrap();
+        let store = open_store(&SessionStoreDir::under_root(dir.path())).unwrap();
 
-        assert!(ensure_session(&store, dir.path(), session_id, false, None)
-            .await
-            .unwrap());
+        assert!(ensure_session(
+            &store,
+            &SessionStoreDir::under_root(dir.path()),
+            session_id,
+            false,
+            None
+        )
+        .await
+        .unwrap());
         let events = read_all_events(&store, session_id).await.unwrap();
 
         assert_eq!(events.len(), 2);
@@ -939,10 +1023,16 @@ mod tests {
         assert!(store.verify(session_id).await.unwrap().failures.is_empty());
 
         drop(store);
-        let store = open_store(dir.path()).unwrap();
-        assert!(ensure_session(&store, dir.path(), session_id, false, None)
-            .await
-            .unwrap());
+        let store = open_store(&SessionStoreDir::under_root(dir.path())).unwrap();
+        assert!(ensure_session(
+            &store,
+            &SessionStoreDir::under_root(dir.path()),
+            session_id,
+            false,
+            None
+        )
+        .await
+        .unwrap());
         assert_eq!(
             store.describe(session_id).await.unwrap().event_count,
             events.len()
@@ -954,18 +1044,30 @@ mod tests {
     async fn imported_legacy_source_does_not_resurrect_after_hard_delete() {
         let dir = tempfile::tempdir().unwrap();
         let session_id = "deleted.session";
-        write_legacy_fixture(dir.path(), session_id);
-        let store = open_store(dir.path()).unwrap();
-        ensure_session(&store, dir.path(), session_id, false, None)
-            .await
-            .unwrap();
+        write_legacy_fixture(&SessionStoreDir::under_root(dir.path()), session_id);
+        let store = open_store(&SessionStoreDir::under_root(dir.path())).unwrap();
+        ensure_session(
+            &store,
+            &SessionStoreDir::under_root(dir.path()),
+            session_id,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
         store.hard_delete(session_id).await.unwrap();
         drop(store);
 
-        let store = open_store(dir.path()).unwrap();
-        let error = ensure_session(&store, dir.path(), session_id, false, None)
-            .await
-            .unwrap_err();
+        let store = open_store(&SessionStoreDir::under_root(dir.path())).unwrap();
+        let error = ensure_session(
+            &store,
+            &SessionStoreDir::under_root(dir.path()),
+            session_id,
+            false,
+            None,
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("was already imported"));
         assert!(matches!(
             store.describe(session_id).await,
@@ -977,7 +1079,7 @@ mod tests {
     async fn canonical_collision_never_strands_a_legacy_source_silently() {
         let dir = tempfile::tempdir().unwrap();
         let session_id = "collision.session";
-        let store = open_store(dir.path()).unwrap();
+        let store = open_store(&SessionStoreDir::under_root(dir.path())).unwrap();
         store
             .create(CreateSession {
                 id: Some(session_id.to_string()),
@@ -985,12 +1087,18 @@ mod tests {
             })
             .await
             .unwrap();
-        write_legacy_fixture(dir.path(), session_id);
+        write_legacy_fixture(&SessionStoreDir::under_root(dir.path()), session_id);
 
         for _ in 0..2 {
-            let error = ensure_session(&store, dir.path(), session_id, false, None)
-                .await
-                .unwrap_err();
+            let error = ensure_session(
+                &store,
+                &SessionStoreDir::under_root(dir.path()),
+                session_id,
+                false,
+                None,
+            )
+            .await
+            .unwrap_err();
             assert!(error.to_string().contains("already exists"));
         }
         assert_eq!(store.describe(session_id).await.unwrap().event_count, 0);
@@ -1000,7 +1108,7 @@ mod tests {
     fn corrupt_or_mixed_tenant_legacy_stream_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let session_id = "invalid.session";
-        let path = write_legacy_fixture(dir.path(), session_id);
+        let path = write_legacy_fixture(&SessionStoreDir::under_root(dir.path()), session_id);
         let original = fs::read_to_string(&path).unwrap();
         let mut rows = original
             .lines()
@@ -1017,10 +1125,12 @@ mod tests {
                 + "\n",
         )
         .unwrap();
-        assert!(read_legacy_events(dir.path(), session_id)
-            .unwrap_err()
-            .to_string()
-            .contains("record_hash mismatch"));
+        assert!(
+            read_legacy_events(&SessionStoreDir::under_root(dir.path()), session_id)
+                .unwrap_err()
+                .to_string()
+                .contains("record_hash mismatch")
+        );
 
         let mut rows = original
             .lines()
@@ -1036,19 +1146,21 @@ mod tests {
                 + "\n",
         )
         .unwrap();
-        assert!(read_legacy_events(dir.path(), session_id)
-            .unwrap_err()
-            .to_string()
-            .contains("mixed tenant_id"));
+        assert!(
+            read_legacy_events(&SessionStoreDir::under_root(dir.path()), session_id)
+                .unwrap_err()
+                .to_string()
+                .contains("mixed tenant_id")
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn append_rejects_tenant_drift() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(dir.path()).unwrap();
+        let store = open_store(&SessionStoreDir::under_root(dir.path())).unwrap();
         assert!(ensure_session(
             &store,
-            dir.path(),
+            &SessionStoreDir::under_root(dir.path()),
             "tenant.session",
             true,
             Some("tenant-a".to_string()),
@@ -1058,7 +1170,7 @@ mod tests {
 
         let error = ensure_session(
             &store,
-            dir.path(),
+            &SessionStoreDir::under_root(dir.path()),
             "tenant.session",
             true,
             Some("tenant-b".to_string()),
@@ -1071,10 +1183,10 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn reads_and_verification_reject_tenant_drift() {
         let dir = tempfile::tempdir().unwrap();
-        let store = open_store(dir.path()).unwrap();
+        let store = open_store(&SessionStoreDir::under_root(dir.path())).unwrap();
         assert!(ensure_session(
             &store,
-            dir.path(),
+            &SessionStoreDir::under_root(dir.path()),
             "tenant.session",
             true,
             Some("tenant-a".to_string()),
@@ -1140,8 +1252,8 @@ mod tests {
                     "{label}: VM-visible environment must expose the child root"
                 );
                 assert_eq!(
-                    canonical_store_root(None).unwrap(),
-                    root,
+                    canonical_store_state_dir(None).unwrap(),
+                    SessionStoreDir::under_root(&root),
                     "{label}: native store root must match the VM-visible environment"
                 );
 
@@ -1150,7 +1262,10 @@ mod tests {
                     .await
                     .unwrap();
                 let database_path = PathBuf::from(database_path.display());
-                assert_eq!(database_path, store_path(&root));
+                assert_eq!(
+                    database_path,
+                    store_path(&SessionStoreDir::under_root(&root))
+                );
 
                 session_store_append_impl(
                     ctx.clone(),
@@ -1216,13 +1331,19 @@ mod tests {
             })
             .await;
 
-        assert_eq!(patch_path, store_path(&patch_root));
-        assert_eq!(replace_path, store_path(&replace_root));
+        assert_eq!(
+            patch_path,
+            store_path(&SessionStoreDir::under_root(&patch_root))
+        );
+        assert_eq!(
+            replace_path,
+            store_path(&SessionStoreDir::under_root(&replace_root))
+        );
         assert!(patch_path.is_file());
         assert!(replace_path.is_file());
         assert_ne!(patch_path, replace_path);
         assert!(
-            !store_path(&fallback_root).exists(),
+            !store_path(&SessionStoreDir::under_root(&fallback_root)).exists(),
             "the inherited/global fallback store must remain untouched"
         );
     }
