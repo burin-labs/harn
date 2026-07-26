@@ -79,7 +79,7 @@ directory is not automatically removed; callers own cleanup with
 
 `harness.fs.glob(pattern, base_or_options?, options?)` returns the same sorted
 matches as `glob(...)`. Patterns are matched against forward-slash paths
-relative to the base directory, and `long_running` / `background` options return
+relative to the base directory, and the `background` option returns
 a long-running operation handle.
 
 `harness.fs.find_text(root, pattern, options?)` walks with gitignore-aware
@@ -101,8 +101,8 @@ accept labeled `{id, path}` roots
 and labeled `{id, text}` literals. It walks each root once, matches all literals
 with one matcher, and returns deterministic path-relative hits plus settled
 per-root failures and match-budget receipts. Root paths are not copied into the
-receipt. Its `case_insensitive` option folds ASCII letters. Set `long_running`
-or `background` for the standard cancellable operation handle. Import
+receipt. Its `case_insensitive` option folds ASCII letters. Set `background`
+for the standard cancellable operation handle. Import
 `search_evidence` or `search_evidence_background` from `std/fs` for typed Harn
 options and results.
 

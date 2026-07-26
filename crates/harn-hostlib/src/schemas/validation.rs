@@ -219,6 +219,38 @@ mod tests {
     }
 
     #[test]
+    fn asynchronous_command_schemas_accept_only_background() {
+        for (schema, method) in [
+            ("hostlib_tools_run_command", "run_command"),
+            ("hostlib_tools_run_test", "run_test"),
+            ("hostlib_tools_run_build_command", "run_build_command"),
+        ] {
+            let request = VmValue::dict([
+                (
+                    "argv",
+                    VmValue::List(Arc::new(vec![VmValue::string("true")])),
+                ),
+                ("background", VmValue::Bool(true)),
+            ]);
+            validate_request_args(schema, "tools", method, &[request])
+                .unwrap_or_else(|error| panic!("tools.{method} must accept background: {error}"));
+
+            let retired = VmValue::dict([
+                (
+                    "argv",
+                    VmValue::List(Arc::new(vec![VmValue::string("true")])),
+                ),
+                ("long_running", VmValue::Bool(true)), // retired-option-rejection
+            ]);
+            let error = validate_request_args(schema, "tools", method, &[retired]).unwrap_err();
+            assert!(
+                error.to_string().contains("long_running"), // retired-option-rejection
+                "tools.{method} accepted the retired field: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn response_validation_rejects_incomplete_run_command_result() {
         let response = VmValue::dict([("status", VmValue::string("completed"))]);
 

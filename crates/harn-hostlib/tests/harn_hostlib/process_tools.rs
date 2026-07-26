@@ -968,10 +968,10 @@ fn manage_packages_runs_for_detected_ecosystem_with_explicit_cwd() {
     assert_eq!(captured[0].args, vec!["update".to_string()]);
 }
 
-// -------- long_running handles --------
+// -------- background handles --------
 
 #[test]
-fn run_command_long_running_returns_handle_immediately() {
+fn run_command_background_returns_handle_immediately() {
     let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
         "test-run-command-long-running",
     ));
@@ -980,7 +980,7 @@ fn run_command_long_running_returns_handle_immediately() {
 
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
-    req.insert("long_running".into(), VmValue::Bool(true));
+    req.insert("background".into(), VmValue::Bool(true));
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
     let handle_id = require_str(&resp, "handle_id");
@@ -1024,7 +1024,7 @@ fn run_command_long_running_returns_handle_immediately() {
 }
 
 #[test]
-fn run_command_long_running_reports_nil_process_group_when_unavailable() {
+fn run_command_background_reports_nil_process_group_when_unavailable() {
     let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
         "test-run-command-long-running-no-pgid",
     ));
@@ -1642,7 +1642,7 @@ fn cancel_handle_unknown_handle_returns_false() {
 }
 
 #[test]
-fn run_test_long_running_returns_handle() {
+fn run_test_background_returns_handle() {
     let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
         "test-run-test-long-running",
     ));
@@ -1650,7 +1650,7 @@ fn run_test_long_running_returns_handle() {
 
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
-    req.insert("long_running".into(), VmValue::Bool(true));
+    req.insert("background".into(), VmValue::Bool(true));
     let resp = require_dict(call("hostlib_tools_run_test", req).unwrap());
     let handle_id = require_str(&resp, "handle_id");
     assert!(
@@ -1668,7 +1668,7 @@ fn run_test_long_running_returns_handle() {
 }
 
 #[test]
-fn run_build_command_long_running_returns_handle() {
+fn run_build_command_background_returns_handle() {
     let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
         "test-run-build-long-running",
     ));
@@ -1676,7 +1676,7 @@ fn run_build_command_long_running_returns_handle() {
 
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
-    req.insert("long_running".into(), VmValue::Bool(true));
+    req.insert("background".into(), VmValue::Bool(true));
     let resp = require_dict(call("hostlib_tools_run_build_command", req).unwrap());
     let handle_id = require_str(&resp, "handle_id");
     assert!(

@@ -16,7 +16,7 @@
       "description": "Optional test name / path filter passed through to the runner. A filtered partial plan cannot authorize a positive verdict."
     },
     "timeout_ms": { "type": "integer", "minimum": 0 },
-    "long_running": { "type": "boolean", "default": false }
+    "background": { "type": "boolean", "default": false }
   },
   "additionalProperties": false
 }

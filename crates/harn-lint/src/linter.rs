@@ -954,11 +954,11 @@ impl<'a> Linter<'a> {
         });
     }
 
-    pub(super) fn call_uses_long_running_flag(name: &str, args: &[SNode]) -> bool {
+    pub(super) fn call_uses_background_flag(name: &str, args: &[SNode]) -> bool {
         if !Self::long_running_capable_call(name, args) {
             return false;
         }
-        args.iter().any(Self::expr_has_long_running_flag)
+        args.iter().any(Self::expr_has_background_flag)
     }
 
     fn long_running_capable_call(name: &str, args: &[SNode]) -> bool {
@@ -989,13 +989,11 @@ impl<'a> Linter<'a> {
         )
     }
 
-    fn expr_has_long_running_flag(node: &SNode) -> bool {
+    fn expr_has_background_flag(node: &SNode) -> bool {
         match &node.node {
             Node::DictLiteral(entries) => entries.iter().any(|entry| {
-                matches!(
-                    Self::dict_key_name(&entry.key).as_deref(),
-                    Some("long_running" | "background")
-                ) && matches!(entry.value.node, Node::BoolLiteral(true))
+                Self::dict_key_name(&entry.key).as_deref() == Some("background")
+                    && matches!(entry.value.node, Node::BoolLiteral(true))
             }),
             _ => false,
         }

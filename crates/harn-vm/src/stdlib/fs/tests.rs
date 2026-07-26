@@ -727,7 +727,7 @@ fn fs_mutations_emit_file_edited_notifications() {
 }
 
 #[test]
-fn walk_dir_long_running_returns_handle_and_feedback() {
+fn walk_dir_background_returns_handle_and_feedback() {
     // Recover from a poisoned mutex: each test calls
     // `reset_state()` immediately below, so the previous test's
     // panic-shaped failure does not contaminate this one. Without
@@ -751,7 +751,7 @@ fn walk_dir_long_running_returns_handle_and_feedback() {
         "walk_dir",
         vec![
             s(&dir.path().to_string_lossy()),
-            dict(vec![("long_running", b(true))]),
+            dict(vec![("background", b(true))]),
         ],
     )
     .unwrap();
@@ -774,7 +774,7 @@ fn walk_dir_long_running_returns_handle_and_feedback() {
 }
 
 #[test]
-fn glob_long_running_returns_handle_and_feedback() {
+fn glob_background_returns_handle_and_feedback() {
     // Recover from a poisoned mutex: each test calls
     // `reset_state()` immediately below, so the previous test's
     // panic-shaped failure does not contaminate this one. Without
@@ -814,6 +814,53 @@ fn glob_long_running_returns_handle_and_feedback() {
     let result = payload["result"].as_array().unwrap();
     assert_eq!(result.len(), 1);
     assert!(result[0].as_str().unwrap().ends_with("src/lib.harn"));
+}
+
+#[test]
+fn asynchronous_filesystem_options_accept_only_background() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("source.harn"), "needle\n").unwrap();
+    let retired_options = || {
+        dict(vec![(
+            "long_running", // retired-option-rejection
+            b(true),
+        )])
+    };
+    let cases = vec![
+        (
+            "walk_dir",
+            vec![s(&dir.path().to_string_lossy()), retired_options()],
+        ),
+        ("glob", vec![s("**/*"), retired_options()]),
+        (
+            "find_text",
+            vec![
+                s(&dir.path().to_string_lossy()),
+                s("needle"),
+                retired_options(),
+            ],
+        ),
+        (
+            "find_evidence",
+            vec![
+                VmValue::List(Arc::new(vec![evidence_root("repo", dir.path())])),
+                VmValue::List(Arc::new(vec![evidence_pattern("needle", "needle")])),
+                retired_options(),
+            ],
+        ),
+    ];
+
+    let mut vm = vm();
+    for (builtin, args) in cases {
+        let error = match call(&mut vm, builtin, args) {
+            Ok(value) => panic!("{builtin} accepted the retired option: {value:?}"),
+            Err(error) => error,
+        };
+        assert!(
+            format!("{error:?}").contains("unknown option(s): long_running"),
+            "unexpected {builtin} error: {error:?}"
+        );
+    }
 }
 
 #[test]
@@ -920,7 +967,7 @@ fn find_text_summary_modes_and_source_preset() {
 }
 
 #[test]
-fn find_text_long_running_returns_handle_and_feedback() {
+fn find_text_background_returns_handle_and_feedback() {
     let _guard = LONG_RUNNING_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1064,7 +1111,7 @@ fn find_evidence_follows_symlinks_only_when_requested() {
 }
 
 #[test]
-fn find_evidence_long_running_returns_typed_feedback() {
+fn find_evidence_background_returns_typed_feedback() {
     let _guard = LONG_RUNNING_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());

@@ -1,6 +1,6 @@
 //! Long-running tool handle machinery.
 //!
-//! When a caller passes `long_running: true` to `run_command`, `run_test`, or
+//! When a caller passes `background: true` to `run_command`, `run_test`, or
 //! `run_build_command`, the builtin spawns the child process without waiting,
 //! registers it here, and returns a handle dict immediately:
 //!

@@ -14,8 +14,8 @@ use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
 use super::{
-    bool_option, int_option, resolve_fs_path, string_list_option, string_option, u64_option,
-    usize_option,
+    bool_option, int_option, reject_retired_long_running_option, resolve_fs_path,
+    string_list_option, string_option, u64_option, usize_option,
 };
 
 #[derive(Clone)]
@@ -31,7 +31,7 @@ struct FindTextOptions {
     include_globs: Vec<String>,
     exclude_globs: Vec<String>,
     max_matches: usize,
-    long_running: bool,
+    background: bool,
     mode: FindTextMode,
     parallel: bool,
     threads: Option<usize>,
@@ -81,12 +81,13 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
         include_globs: Vec::new(),
         exclude_globs: Vec::new(),
         max_matches: 1000,
-        long_running: false,
+        background: false,
         mode: FindTextMode::Hits,
         parallel: false,
         threads: None,
     };
     if let Some(VmValue::Dict(opts)) = args.get(2) {
+        reject_retired_long_running_option(opts, "find_text")?;
         options.preset = match string_option(opts, "preset").as_deref() {
             Some("source") | Some("sources") => FindTextPreset::Source,
             Some("all") => FindTextPreset::All,
@@ -157,9 +158,7 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
         }
         options.parallel = bool_option(opts, "parallel").unwrap_or(false);
         options.threads = usize_option(opts, "threads").filter(|threads| *threads > 0);
-        options.long_running = bool_option(opts, "long_running")
-            .or_else(|| bool_option(opts, "background"))
-            .unwrap_or(false);
+        options.background = bool_option(opts, "background").unwrap_or(false);
     }
     Ok(options)
 }
@@ -615,7 +614,7 @@ fn find_text_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
     let options = parse_find_text_options(args)?;
-    if options.long_running {
+    if options.background {
         let session_id = crate::llm::current_agent_session_id().unwrap_or_default();
         let descriptor = format!("find_text {} in {}", pattern, resolved.display());
         let handle = crate::stdlib::long_running::spawn_json_operation(

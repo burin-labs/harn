@@ -179,7 +179,7 @@ startup. Windows uses a Job Object and the function returns `false`.
   output capped by `capture.max_inline_bytes`, full output artifact paths,
   byte/line counts, `output_sha256`, sandbox metadata, and `audit_id`.
   `background: true` returns the same envelope with `status: "running"` and
-  a `handle_id`; the old `long_running` field remains accepted as an alias.
+  a `handle_id`.
 - `tools/read_command_output` range-reads the artifact for a `command_id`,
   `handle_id`, or explicit `path`. Use it when `stdout`/`stderr` were capped
   inline or when an agent needs to inspect large command output.

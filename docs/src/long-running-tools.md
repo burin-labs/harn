@@ -3,15 +3,15 @@
 Long-running tool handles let a script start slow work, continue the agent
 loop, and receive the final result through the pending feedback queue on a
 later turn. The idiom is the same for host command tools and stdlib operations
-that support `long_running: true` or `background: true`.
+that support `background: true`.
 
 Supported stdlib operations:
 
-- `walk_dir(path, {long_running: true, ...})`
-- `glob(pattern, base?, {long_running: true})`
-- `glob(pattern, {base: "...", long_running: true})`
-- `find_text(root, pattern, {long_running: true, ...})`
-- `find_evidence(roots, patterns, {long_running: true, ...})`
+- `walk_dir(path, {background: true, ...})`
+- `glob(pattern, base?, {background: true})`
+- `glob(pattern, {base: "...", background: true})`
+- `find_text(root, pattern, {background: true, ...})`
+- `find_evidence(roots, patterns, {background: true, ...})`
 
 Supported host tools:
 
@@ -52,7 +52,7 @@ the whole group — grandchildren included — receives SIGTERM and, after a
 runtime kills the direct child (best effort) instead.
 
 Work that must outlive the invoking scope belongs in a background handle:
-`background: true` (or legacy `long_running: true`) children are exempt
+`background: true` children are exempt
 from scope cancellation and deadlines. They are owned by the handle store
 and die only through `tools.cancel_handle` or agent-session-end cleanup,
 as described below.
@@ -62,7 +62,7 @@ as described below.
 A long-running call returns immediately with a handle envelope:
 
 ```harn
-const handle = walk_dir(".", {long_running: true})
+const handle = walk_dir(".", {background: true})
 ```
 
 The returned dict includes:
@@ -81,7 +81,7 @@ planned output paths, and sandbox metadata.
 
 ## Lifecycle
 
-1. Spawn the operation with `long_running: true` or `background: true`.
+1. Spawn the operation with `background: true`.
 2. Save `handle_id`.
 3. Let the agent loop poll normally. Background workers push a `tool_result`
    item to the pending feedback queue when they complete.
@@ -97,7 +97,7 @@ handle when the script no longer needs the result.
 
 ```harn
 pipeline main() {
-  const handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {background: true})
   defer {
     host_tool_call("cancel_handle", {handle_id: handle.handle_id})
   }
@@ -118,7 +118,7 @@ This starts background work but has no cleanup path if the pipeline exits early:
 
 ```harn
 pipeline main() {
-  const handle = walk_dir(".", {long_running: true})
+  const handle = walk_dir(".", {background: true})
   log(handle.handle_id)
 }
 ```

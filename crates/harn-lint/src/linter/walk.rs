@@ -424,7 +424,7 @@ impl<'a> Linter<'a> {
                         fix,
                     });
                 }
-                if Self::call_uses_long_running_flag(name, args) {
+                if Self::call_uses_background_flag(name, args) {
                     self.warn_unmanaged_long_running_call(name, snode.span);
                 }
                 for type_arg in type_args {

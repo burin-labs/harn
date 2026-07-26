@@ -11,7 +11,8 @@ use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
 use super::{
-    bool_option, int_option, resolve_fs_path, string_list_option, string_option, u64_option,
+    bool_option, int_option, reject_retired_long_running_option, resolve_fs_path,
+    string_list_option, string_option, u64_option,
 };
 
 const DEFAULT_MATCH_BUDGET: usize = 1_000;
@@ -43,7 +44,7 @@ struct EvidenceOptions {
     max_matches: usize,
     max_matches_per_root: usize,
     threads: usize,
-    long_running: bool,
+    background: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -222,11 +223,12 @@ fn parse_options(args: &[VmValue], root_count: usize) -> Result<EvidenceOptions,
         max_matches: DEFAULT_MATCH_BUDGET,
         max_matches_per_root: DEFAULT_MATCH_BUDGET,
         threads: root_count.clamp(1, DEFAULT_THREAD_CAP),
-        long_running: false,
+        background: false,
     };
     let Some(VmValue::Dict(raw)) = args.get(2) else {
         return Ok(options);
     };
+    reject_retired_long_running_option(raw, "find_evidence")?;
     match string_option(raw, "preset").as_deref() {
         Some("source") | Some("sources") => {
             options.exclude_globs = source_excludes();
@@ -286,9 +288,7 @@ fn parse_options(args: &[VmValue], root_count: usize) -> Result<EvidenceOptions,
             .unwrap_or(usize::MAX)
             .min(root_count.max(1));
     }
-    options.long_running = bool_option(raw, "long_running")
-        .or_else(|| bool_option(raw, "background"))
-        .unwrap_or(false);
+    options.background = bool_option(raw, "background").unwrap_or(false);
     Ok(options)
 }
 
@@ -681,7 +681,7 @@ fn find_evidence_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             root.denied = true;
         }
     }
-    if options.long_running {
+    if options.background {
         let session_id = crate::llm::current_agent_session_id().unwrap_or_default();
         let descriptor = format!(
             "find_evidence across {} roots and {} patterns",
@@ -731,7 +731,7 @@ mod tests {
             max_matches: 10,
             max_matches_per_root: 10,
             threads: 2,
-            long_running: false,
+            background: false,
         };
         let cancel = AtomicBool::new(true);
         let receipt = search_receipt(
