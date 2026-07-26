@@ -746,7 +746,10 @@ thinking_block_style = "inline"
 [[provider.huggingface]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-07-26 forced-format single-tool sweep (N=5): Hugging Face Qwen3.6-35B-A3B native dispatched 3/5 and returned two billed empty completions; fenced JSON dispatched 5/5; tagged text improved from 4/5 with one raw model tool tag to 5/5 after enabling the Qwen reserved-token remap."
+reserved_tool_call_token = true
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }

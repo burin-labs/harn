@@ -43,6 +43,28 @@ fn probe_payload_applies_provider_qualified_model_defaults() {
 }
 
 #[test]
+fn live_openai_compatible_streaming_probe_sets_stream_flag() {
+    let mut body = probe_request_body(
+        "together",
+        "Qwen/Qwen3.6-Plus",
+        ToolProbeMode::Streaming,
+        ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("streaming probe body");
+
+    assert!(body.get("stream").is_none());
+    helpers::apply_live_transport_mode(
+        "together",
+        "Qwen/Qwen3.6-Plus",
+        ToolProbeMode::Streaming,
+        &mut body,
+    );
+    assert_eq!(body["stream"], true);
+}
+
+#[test]
 fn request_report_materializes_large_string_case_without_provider_call() {
     let report = tool_conformance_request_report(
         "openai",

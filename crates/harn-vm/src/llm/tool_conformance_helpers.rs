@@ -5,6 +5,20 @@ use serde_json::{json, Value};
 use super::TOOL_PROBE_TOOL_NAME;
 use crate::value::VmValue;
 
+pub(crate) fn apply_live_transport_mode(
+    provider: &str,
+    model: &str,
+    mode: super::ToolProbeMode,
+    body: &mut Value,
+) {
+    if mode == super::ToolProbeMode::Streaming
+        && crate::llm::capabilities::lookup(provider, model).message_wire_format
+            == crate::llm::capabilities::WireDialect::OpenAiCompat
+    {
+        body["stream"] = Value::Bool(true);
+    }
+}
+
 pub(crate) fn aggregate_stream_text(text: &str, _provider: &str) -> Value {
     let mut content = String::new();
     let mut calls: BTreeMap<String, PartialStreamCall> = BTreeMap::new();

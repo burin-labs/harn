@@ -928,7 +928,7 @@ async fn execute_live_probe_case(
             );
         }
     };
-    let body = match probe_request_body_for_format(
+    let mut body = match probe_request_body_for_format(
         provider,
         model,
         mode,
@@ -946,6 +946,7 @@ async fn execute_live_probe_case(
             );
         }
     };
+    helpers::apply_live_transport_mode(provider, model, mode, &mut body);
     let client = if mode == ToolProbeMode::Streaming {
         crate::llm::streaming_client_for_base_url(&base_url)
     } else {
