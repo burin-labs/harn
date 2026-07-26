@@ -197,34 +197,38 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
   )
 }
 
-// The inventory walk is bounded by `walk_dir`'s built-in ignore set, which is
-// invisible from this script: a source tree under a directory named `target`,
-// `build`, `dist`, `node_modules`, `coverage`, `venv`, or `__pycache__` is
-// simply never reached, and a file the walk never reaches is a file the ratchet
-// silently stops governing. The synthetic fixtures above cannot catch that,
-// because they can only assert about paths the walk already reaches. Comparing
-// the inventory against git — the one authority on what source this repo
-// actually has — is what makes such a hole loud.
+// A file the inventory walk never reaches is a file the ratchet silently stops
+// governing, and the fixtures above cannot catch that class — they can only
+// assert about paths the walk already reaches. `check_source_file_lengths`
+// reconciles the inventory against git to close it; these pin that reconciliation
+// without walking the repo, so the suite stays hermetic and fast.
 @test
-pipeline test_inventory_covers_every_tracked_in_scope_source(task) {
-  const tracked = harness.process.spawn_captured(
-    {cmd: "git", args: ["ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
+pipeline test_unscanned_sources_reports_tracked_files_the_walk_missed(task) {
+  // `build` is one of the directory names `walk_dir` refuses to descend into,
+  // so a source tree under it is tracked by git and invisible to the ratchet.
+  assert_eq(
+    unscanned_sources(
+      ["crates/app/src/lib.rs"],
+      ["crates/app/src/lib.rs", "crates/app/src/build/hidden.rs"],
+    ),
+    ["crates/app/src/build/hidden.rs"],
   )
-  assert_eq(tracked.success, true)
-  const scanned = source_files()
-  let missing: list<string> = []
-  for line in tracked.stdout.lines() {
-    const path = line.trim()
-    if path == "" || is_generated_source(path) {
-      continue
-    }
-    if !scanned.contains(path) {
-      missing = missing.appending(path)
-    }
-  }
-  // A tracked file the inventory never returned. Every entry here is a source
-  // file the length ratchet has silently stopped governing.
-  assert_eq(missing.sorted(), [])
+}
+
+@test
+pipeline test_unscanned_sources_is_quiet_when_coverage_is_complete(task) {
+  assert_eq(unscanned_sources(["a.rs", "b.rs"], ["b.rs", "a.rs"]), [])
+  // Nothing is tracked under a synthetic root, so a fixture run reports nothing
+  // rather than flagging every file the fixture never committed.
+  assert_eq(unscanned_sources([], []), [])
+}
+
+@test
+pipeline test_unscanned_sources_excludes_generated_and_sorts(task) {
+  // Generated protocol artifacts are deliberately outside the ratchet, so their
+  // absence from the inventory is not a coverage hole.
+  assert_eq(unscanned_sources([], ["spec/protocol-artifacts/harn-protocol.rs"]), [])
+  assert_eq(unscanned_sources([], ["z.rs", "a.rs", "m.rs"]), ["a.rs", "m.rs", "z.rs"])
 }
 
 @test
