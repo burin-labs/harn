@@ -93,6 +93,9 @@ pub enum InitializationError<E> {
         path: PathBuf,
         source: std::io::Error,
     },
+    /// The sidecar lock was still held when the wait budget expired, or the
+    /// operating system refused it. Carries the path and the elapsed wait.
+    InitializationLock(harn_flock::LockError),
     /// SQLite rejected WAL journal mode for a non-contention reason.
     WalPragma(rusqlite::Error),
     /// SQLite accepted the journal-mode request but returned another mode.
@@ -171,6 +174,9 @@ impl<E: fmt::Display> fmt::Display for InitializationError<E> {
                 "could not acquire SQLite initialization lock {}: {source}",
                 path.display()
             ),
+            Self::InitializationLock(error) => {
+                write!(f, "SQLite initialization lock unavailable: {error}")
+            }
             Self::WalPragma(error) => write!(f, "WAL journal_mode pragma failed: {error}"),
             Self::WalNotEnabled { mode } => {
                 write!(f, "WAL journal_mode request returned {mode}")
@@ -220,6 +226,7 @@ impl<E: std::error::Error + 'static> std::error::Error for InitializationError<E
             Self::DatabasePath { source, .. }
             | Self::InitializationLockOpen { source, .. }
             | Self::InitializationLockAcquire { source, .. } => Some(source),
+            Self::InitializationLock(error) => Some(error),
             Self::WalBusyQuery { wal_error, .. } => Some(wal_error),
             Self::Initialize(error) => Some(error),
             Self::BusyTimeoutTooLarge { .. }
@@ -257,7 +264,7 @@ where
         return configure_connection(connection);
     }
 
-    let _initialization_lock = acquire_initialization_lock(connection)?;
+    let _initialization_lock = acquire_initialization_lock(connection, lock_timeout())?;
     ensure_wal_journal_mode(connection)?;
     configure_connection(connection)?;
     initialize_schema(connection, schema, initialize)
@@ -301,6 +308,7 @@ fn initialization_stage_is_busy_or_locked<E>(error: &InitializationError<E>) -> 
         | InitializationError::FileBackedTransient { .. }
         | InitializationError::InitializationLockOpen { .. }
         | InitializationError::InitializationLockAcquire { .. }
+        | InitializationError::InitializationLock(_)
         | InitializationError::SchemaNotInitialized { .. }
         | InitializationError::NewerSchemaVersion { .. }
         | InitializationError::WalNotEnabled { .. }
@@ -335,7 +343,8 @@ fn require_file_initialized_impl<E>(
         return Ok(());
     }
 
-    let _readiness_lock = acquire_readiness_lock(connection, schema, on_readiness_contention)?;
+    let _readiness_lock =
+        acquire_readiness_lock(connection, schema, lock_timeout(), on_readiness_contention)?;
     if is_wal_journal_mode(connection)? && schema_is_ready(connection, schema)? {
         return Ok(());
     }
@@ -422,8 +431,34 @@ fn configure_connection<E>(connection: &Connection) -> Result<(), Initialization
         .map_err(InitializationError::Synchronous)
 }
 
+/// Environment override for [`lock_timeout`], in whole seconds.
+pub const LOCK_TIMEOUT_SECONDS_ENV: &str = "HARN_SQLITE_LOCK_TIMEOUT_SECONDS";
+
+/// Default wait for the sidecar lock.
+///
+/// The critical section it guards is WAL promotion plus one schema
+/// transaction — milliseconds of work, and only on the first open of a
+/// database. Three orders of magnitude of headroom means expiry says the
+/// holder is wedged, not that the disk was slow.
+const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long to wait for the sidecar lock.
+///
+/// Operators can raise this for a filesystem where the default is genuinely
+/// too tight. An unparseable or zero value falls back to the default rather
+/// than failing the open: this is a diagnostic bound, and a typo in it must not
+/// take a database offline.
+fn lock_timeout() -> Duration {
+    std::env::var(LOCK_TIMEOUT_SECONDS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .map_or(DEFAULT_LOCK_TIMEOUT, Duration::from_secs)
+}
+
 fn acquire_initialization_lock<E>(
     connection: &Connection,
+    timeout: Duration,
 ) -> Result<SqliteInitializationLock, InitializationError<E>> {
     let path = initialization_lock_path(connection)?;
     let file = OpenOptions::new()
@@ -436,17 +471,15 @@ fn acquire_initialization_lock<E>(
             path: path.clone(),
             source,
         })?;
-    file.lock()
-        .map_err(|source| InitializationError::InitializationLockAcquire {
-            path: path.clone(),
-            source,
-        })?;
+    harn_flock::lock_with_deadline(&file, &path, harn_flock::LockMode::Exclusive, timeout)
+        .map_err(InitializationError::InitializationLock)?;
     Ok(SqliteInitializationLock { file })
 }
 
 fn acquire_readiness_lock<E>(
     connection: &Connection,
     schema: SchemaVersion,
+    timeout: Duration,
     on_contention: impl FnOnce(),
 ) -> Result<SqliteInitializationLock, InitializationError<E>> {
     let path = initialization_lock_path(connection)?;
@@ -466,12 +499,8 @@ fn acquire_readiness_lock<E>(
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => {
             on_contention();
-            file.lock_shared().map_err(|source| {
-                InitializationError::InitializationLockAcquire {
-                    path: path.clone(),
-                    source,
-                }
-            })?;
+            harn_flock::lock_with_deadline(&file, &path, harn_flock::LockMode::Shared, timeout)
+                .map_err(InitializationError::InitializationLock)?;
         }
         Err(TryLockError::Error(source)) => {
             return Err(InitializationError::InitializationLockAcquire { path, source });

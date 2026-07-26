@@ -6,6 +6,7 @@ members = [
     "crates/harn-builtin-macros",
     "crates/harn-opcode-macros",
     "crates/harn-clock",
+    "crates/harn-flock",
     "crates/harn-glob",
     "crates/harn-secret-catalog",
     "crates/harn-terminal",
