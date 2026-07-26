@@ -351,6 +351,9 @@ fn from_host_judge_decision_preserves_source() {
             "judge_duration_ms": 0,
             "source": "deterministic",
             "trigger": "verify_completion",
+            "reason": "repeated_verification_failures",
+            "escalation_recommended": true,
+            "escalation_target": "frontier",
             "specific_gaps": [],
             "accepted_evidence": [],
         }),
@@ -358,10 +361,16 @@ fn from_host_judge_decision_preserves_source() {
     .expect("judge_decision");
     match event {
         AgentEvent::JudgeDecision {
-            source, trigger, ..
+            source,
+            trigger,
+            escalation_recommended,
+            escalation_target,
+            ..
         } => {
             assert_eq!(source.as_deref(), Some("deterministic"));
             assert_eq!(trigger.as_deref(), Some("verify_completion"));
+            assert_eq!(escalation_recommended, Some(true));
+            assert_eq!(escalation_target.as_deref(), Some("frontier"));
         }
         other => panic!("expected JudgeDecision, got {other:?}"),
     }

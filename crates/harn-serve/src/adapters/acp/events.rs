@@ -7,9 +7,8 @@ use harn_vm::visible_text::sanitize_visible_assistant_text;
 
 use super::AcpOutput;
 
-/// Writes canonical ACP `session/update` notifications for each
-/// `AgentEvent` the turn loop emits. Holds only the minimum state needed
-/// to serialize notifications without the full AcpBridge.
+/// Writes canonical ACP `session/update` notifications for each `AgentEvent`.
+/// Holds only the minimum state needed to serialize without the full AcpBridge.
 pub(super) struct AcpAgentEventSink {
     output: AcpOutput,
     replayed: bool,
@@ -34,11 +33,9 @@ impl AcpAgentEventSink {
         self.write_jsonrpc_notification("session/update", params);
     }
 
-    /// Emit an arbitrary JSON-RPC notification through the same transport
-    /// as `session/update`. Used for ACP `ExtNotification` envelopes
-    /// (methods prefixed with `_`, per the ACP extensibility spec) when
-    /// the canonical `session/update` discriminator has no slot for the
-    /// event being surfaced via `_harn/agentEvent`.
+    /// Emit a JSON-RPC notification through the `session/update` transport.
+    /// Used for vendor-prefixed ACP `ExtNotification` envelopes when the
+    /// canonical discriminator has no slot for `_harn/agentEvent`.
     fn write_jsonrpc_notification(&self, method: &str, mut params: serde_json::Value) {
         if self.replayed {
             mark_replayed_params(method, &mut params);
@@ -56,12 +53,9 @@ impl AcpAgentEventSink {
         }
     }
 
-    /// Emit a Harn agent event as an ACP `ExtNotification` under the
-    /// `_harn/agentEvent` method. The schema is the per-`kind`
-    /// payload defined in `HARN_AGENT_EVENT_KINDS` — `sessionId` + `kind`
-    /// are required at the top level, and kind-specific fields ride
-    /// directly under `params` (no nested `_meta` wrapper, since the
-    /// whole notification is already vendor-prefixed).
+    /// Emit a Harn agent event as `_harn/agentEvent`. The schema is the per-kind
+    /// payload defined in `HARN_AGENT_EVENT_KINDS`: top-level `sessionId` and
+    /// `kind`, plus kind-specific fields directly under `params`.
     fn emit_agent_event_ext(&self, kind: &str, session_id: &str, mut payload: serde_json::Value) {
         let obj = payload
             .as_object_mut()
@@ -1121,6 +1115,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 reason,
                 confirm,
                 converted_from,
+                escalation_recommended,
+                escalation_target,
                 specific_gaps,
                 accepted_evidence,
             } => {
@@ -1138,6 +1134,8 @@ impl AgentEventSink for AcpAgentEventSink {
                         "reason": reason,
                         "confirm": confirm,
                         "convertedFrom": converted_from,
+                        "escalationRecommended": escalation_recommended,
+                        "escalationTarget": escalation_target,
                         "specificGaps": specific_gaps,
                         "acceptedEvidence": accepted_evidence,
                     }),

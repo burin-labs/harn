@@ -504,9 +504,11 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             judge_duration_ms: 42,
             source: Some("deterministic".to_string()),
             trigger: Some("stalled".to_string()),
-            reason: Some("no_source_write".to_string()),
+            reason: Some("repeated_verification_failures".to_string()),
             confirm: Some(false),
             converted_from: Some("cosmetic_only".to_string()),
+            escalation_recommended: Some(true),
+            escalation_target: Some("frontier".to_string()),
             specific_gaps: vec![
                 "rerun the verifier".to_string(),
                 "cite the changed source file".to_string(),
@@ -658,14 +660,10 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     ]
 }
 
-/// Harn agent events without a canonical ACP `session/update` slot ride on
-/// the ACP `ExtNotification`
-/// channel via `_harn/agentEvent`. The fixture pins the wire shape
-/// per kind so any drift in field names (e.g. snake_case vs.
-/// camelCase) or payload structure trips a build-time failure
-/// rather than silently breaking downstream client decoders. Every kind
-/// in the fixture must also appear in `HARN_AGENT_EVENT_KINDS` so
-/// the capability advertisement stays honest.
+/// Harn events without a canonical ACP slot ride on `_harn/agentEvent`.
+/// The fixture pins each kind's wire shape so field-name or payload drift fails
+/// at build time. Every kind must also appear in `HARN_AGENT_EVENT_KINDS`, keeping
+/// the capability advertisement honest.
 #[tokio::test(flavor = "current_thread")]
 async fn agent_event_ext_notification_fixtures_are_pinned() {
     let actual = collect_notifications(agent_event_ext_fixture_events()).await;
@@ -687,6 +685,8 @@ async fn agent_event_ext_notification_fixtures_are_pinned() {
         judge["params"]["source"],
         serde_json::json!("deterministic")
     );
+    assert_eq!(judge["params"]["escalationRecommended"], true);
+    assert_eq!(judge["params"]["escalationTarget"], "frontier");
     assert_eq!(judge["params"]["acceptedEvidence"], serde_json::json!([]));
 
     for notification in actual {

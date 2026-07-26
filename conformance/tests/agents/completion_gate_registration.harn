@@ -185,6 +185,52 @@ pipeline default() {
       )
     },
   )
+  // --- E. streak escalation + decorator are live and reach structured events ---
+  with_llm_script(
+    done_turns(1),
+    { ->
+      const session = "cg-escalation-" + uuid()
+      const decorated_key = "cg-decorated-" + session
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Repair the failing verifier.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 1,
+            max_nudges: 20,
+            session_id: session,
+          }
+            + agent_completion_gate(
+            {
+              escalation_target: "frontier",
+              facts: fn(_ctx) { return {
+                consecutive_failed_after_write: 3,
+                source_write_count: 1,
+                verification_failures_converging: false,
+                verify: {findings: "boom", ok: false},
+              } },
+              feedback_decorator: fn(reason, feedback, verdict) {
+                store_set(decorated_key, reason + ":" + to_string(verdict?.escalation_target ?? ""))
+                return feedback + " Use language-specific repair guidance."
+              },
+            },
+          ),
+        ) },
+      )
+      const decisions = events_of(captured.events, "judge_decision")
+      __io_println("E.status=" + captured.result.status)
+      __io_println("E.decorator=" + to_string(store_get(decorated_key)))
+      __io_println("E.reasons=" + event_field_values(decisions, "reason"))
+      __io_println(
+        "E.escalation_recommended="
+          + event_field_values(decisions, "escalation_recommended"),
+      )
+      __io_println("E.escalation_target=" + event_field_values(decisions, "escalation_target"))
+    },
+  )
 }
 // Consulted once per done attempt: 3 charged vetoes + 1 budget-exhausted allow.
 // Strict veto is never released by the budget (max_vetoes: 1): the run does

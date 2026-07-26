@@ -59,6 +59,61 @@ pipeline test_source_write_red_verifier_is_strict_veto(task) {
   assert(v.feedback.contains("E0308"), "red feedback carries the findings")
 }
 
+pipeline test_red_verifier_with_streak_uses_failed_reason_before_threshold(task) {
+  const v = __completion_gate_ladder(
+    {
+      consecutive_failed_after_write: 2,
+      escalation_target: "frontier",
+      escalation_threshold: 3,
+      requires_write: true,
+      source_known: true,
+      source_write_count: 1,
+      verification_failures_converging: false,
+      verify: {ok: false, findings: "error[E0308]"},
+    },
+  )
+  assert_eq(v.reason, "failed_verification")
+  assert_eq(v.escalation_recommended, false)
+  assert_eq(v.escalation_target, nil)
+}
+
+pipeline test_red_verifier_escalates_at_streak_threshold(task) {
+  const v = __completion_gate_ladder(
+    {
+      consecutive_failed_after_write: 3,
+      escalation_target: "frontier",
+      escalation_threshold: 3,
+      requires_write: true,
+      source_known: true,
+      source_write_count: 1,
+      verification_failures_converging: false,
+      verify: {ok: false, findings: "error[E0308]"},
+    },
+  )
+  assert_eq(v.reason, "repeated_verification_failures")
+  assert_eq(v.escalation_recommended, true)
+  assert_eq(v.escalation_target, "frontier")
+  assert(v.feedback.contains("3 consecutive times"), "escalated feedback renders the streak")
+}
+
+pipeline test_converging_failure_churn_does_not_escalate(task) {
+  const v = __completion_gate_ladder(
+    {
+      consecutive_failed_after_write: 8,
+      escalation_target: "frontier",
+      escalation_threshold: 3,
+      requires_write: true,
+      source_known: true,
+      source_write_count: 1,
+      verification_failures_converging: true,
+      verify: {ok: false, findings: "one fewer diagnostic"},
+    },
+  )
+  assert_eq(v.reason, "failed_verification")
+  assert_eq(v.escalation_recommended, false)
+  assert_eq(v.escalation_target, nil)
+}
+
 pipeline test_source_write_green_verifier_allows(task) {
   // burin verified_after_write.
   const v = __completion_gate_ladder(
@@ -314,4 +369,19 @@ pipeline test_ladder_feedback_override_keeps_findings_token(task) {
     {verification_after_write_red: "Red.{findings} Retry."},
   )
   assert_eq(v.feedback, "Red. Findings: E0308. Retry.")
+}
+
+pipeline test_escalated_feedback_override_renders_attempts_and_findings(task) {
+  const v = __completion_gate_ladder(
+    {
+      consecutive_failed_after_write: 4,
+      escalation_threshold: 3,
+      requires_write: true,
+      source_known: true,
+      source_write_count: 1,
+      verify: {findings: "E0308", ok: false},
+    },
+    {repeated_verification_failures: "Attempt {attempts}.{findings} Escalate."},
+  )
+  assert_eq(v.feedback, "Attempt 4. Findings: E0308. Escalate.")
 }

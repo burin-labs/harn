@@ -107,10 +107,74 @@ pipeline test_feedback_templates_valid_accepted(task) {
   assert(!is_err(outcome), "gate accepts a valid feedback_templates override")
 }
 
-// --- Per-class veto counters (item 6): keyed by the vetoing ladder rule id -------
-// Facts keyed on the payload text so one gate closure can produce two different
-// vetoing classes: "nowrite" -> evidence gate (`no_source_write`), otherwise a
-// source write with a red verifier (`verification_after_write_red`).
+pipeline test_noncallable_feedback_decorator_throws(task) {
+  const outcome = try {
+    agent_completion_gate({facts: __facts, feedback_decorator: "not callable"})
+  }
+  assert(is_err(outcome), "gate rejects a non-callable feedback_decorator")
+}
+
+pipeline test_invalid_escalation_threshold_throws(task) {
+  const outcome = try {
+    agent_completion_gate({escalation_threshold: 0, facts: __facts})
+  }
+  assert(is_err(outcome), "gate rejects a non-positive escalation_threshold")
+}
+
+pipeline test_blank_escalation_target_throws(task) {
+  const outcome = try {
+    agent_completion_gate({escalation_target: " ", facts: __facts})
+  }
+  assert(is_err(outcome), "gate rejects a blank escalation_target")
+}
+
+fn __escalating_facts(_ctx) {
+  return {
+    consecutive_failed_after_write: 3,
+    source_write_count: 1,
+    verification_failures_converging: false,
+    verify: {findings: "E0308", ok: false},
+  }
+}
+
+fn __decorate_escalation(reason, feedback, verdict) {
+  return "[" + reason + " -> " + to_string(verdict?.escalation_target ?? "") + "] " + feedback
+}
+
+pipeline test_feedback_decorator_receives_resolved_escalation_verdict(task) {
+  const gate = agent_completion_gate(
+    {
+      escalation_target: "frontier",
+      facts: __escalating_facts,
+      feedback_decorator: __decorate_escalation,
+    },
+  ).verify_completion
+  const verdict = gate({session_id: "decorated-escalation", transcript: "[]"})
+  assert_eq(verdict.confirm, false)
+  assert_eq(verdict.reason, "repeated_verification_failures")
+  assert_eq(verdict.escalation_recommended, true)
+  assert_eq(verdict.escalation_target, "frontier")
+  assert(verdict.message.starts_with("[repeated_verification_failures -> frontier]"))
+}
+
+fn __bad_decorator(_reason, _feedback, _verdict) {
+  return {not: "a string"}
+}
+
+pipeline test_feedback_decorator_nonstring_result_throws(task) {
+  const gate = agent_completion_gate(
+    {facts: __escalating_facts, feedback_decorator: __bad_decorator},
+  ).verify_completion
+  const outcome = try {
+    gate({session_id: "bad-decorator", transcript: "[]"})
+  }
+  assert(is_err(outcome), "gate rejects a non-string feedback_decorator result")
+}
+
+/**
+ * Per-class veto counters, keyed by the vetoing ladder rule id.
+ * Facts use payload text so one closure can produce two different classes.
+ */
 fn __class_facts(ctx) {
   if ctx.text == "nowrite" {
     return {requires_write: true, source_write_count: 0}
@@ -145,6 +209,11 @@ pipeline test_veto_counts_accumulate_per_class(task) {
   )
   // A class that never fired stays flat.
   assert_eq(after.by_class.missing_verification - before.by_class.missing_verification, 0)
+  assert_eq(after.by_class.failed_verification - before.by_class.failed_verification, 0)
+  assert_eq(
+    after.by_class.repeated_verification_failures - before.by_class.repeated_verification_failures,
+    0,
+  )
 }
 
 pipeline test_veto_counts_absent_without_session(task) {
@@ -155,6 +224,8 @@ pipeline test_veto_counts_absent_without_session(task) {
   assert_eq(counts.by_class.no_source_write, 0)
   assert_eq(counts.by_class.verification_after_write_red, 0)
   assert_eq(counts.by_class.missing_verification, 0)
+  assert_eq(counts.by_class.failed_verification, 0)
+  assert_eq(counts.by_class.repeated_verification_failures, 0)
 }
 
 pipeline test_veto_count_keys_do_not_leak_into_bundle_projection(task) {

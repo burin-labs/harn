@@ -290,15 +290,22 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
  *   - `verification_after_write_red` — a red verifier after a write. The `{findings}`
  *     token is substituted with the rendered findings detail (` Findings: <x>.` or
  *     empty), so an override keeps the dynamic findings unless it drops the token.
+ *   - `failed_verification` — the opt-in streak-aware form before escalation.
+ *   - `repeated_verification_failures` — the opt-in escalated form. Supports both
+ *     `{attempts}` and `{findings}` tokens.
  *   - `missing_verification`     — a source write with a configured-but-unrun verifier.
  */
 const __COMPLETION_GATE_FEEDBACK_DEFAULTS = {
+  failed_verification:
+    "Verification is still failing after your change.{findings} Fix the specific failure and re-run the verifier before finishing.",
   missing_verification:
     "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
   no_source_write_absent:
     "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing.",
   no_source_write_cosmetic:
     "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing.",
+  repeated_verification_failures:
+    "Verification has failed {attempts} consecutive times after your changes.{findings} Stop re-running the same check unchanged: inspect the failure, make a targeted repair, then verify again.",
   verification_after_write_red:
     "Verification is still failing after your change.{findings} Fix the specific failure and re-run the verifier before finishing.",
 }
@@ -318,12 +325,52 @@ pub fn __completion_gate_feedback_keys() {
 
 /**
  * Resolve one ladder feedback string: the host override (if any) else the default,
- * with the `{findings}` token substituted. Only the red-verifier rule passes a
- * non-empty `findings` detail; for the other rules the default carries no token, so
- * the substitution is a no-op.
+ * with the `{findings}` and `{attempts}` tokens substituted. Only red-verifier
+ * rules pass non-empty values; for the other rules the defaults carry no tokens, so
+ * the substitutions are no-ops.
  */
-fn __completion_gate_render_feedback(templates, key, findings) {
-  return replace(to_string(templates[key] ?? ""), "{findings}", findings)
+fn __completion_gate_render_feedback(templates, key, findings, attempts = "") {
+  return replace(
+    replace(to_string(templates[key] ?? ""), "{findings}", findings),
+    "{attempts}",
+    attempts,
+  )
+}
+
+/** Build the strict red-verifier verdict, including opt-in streak escalation. */
+fn __completion_gate_red_verdict(derived, templates, detail) {
+  if derived?.consecutive_failed_after_write == nil {
+    return {
+      ok: false,
+      reason: "verification_after_write_red",
+      strict: true,
+      feedback: __completion_gate_render_feedback(
+        templates,
+        "verification_after_write_red",
+        detail,
+      ),
+    }
+  }
+  const streak = max(to_int(derived?.consecutive_failed_after_write ?? 0) ?? 0, 0)
+  const threshold = max(to_int(derived?.escalation_threshold ?? 3) ?? 3, 1)
+  const converging = derived?.verification_failures_converging ?? false
+  const escalation_recommended = streak >= threshold && !converging
+  const reason = if escalation_recommended {
+    "repeated_verification_failures"
+  } else {
+    "failed_verification"
+  }
+  let verdict = {
+    ok: false,
+    reason: reason,
+    strict: true,
+    escalation_recommended: escalation_recommended,
+    feedback: __completion_gate_render_feedback(templates, reason, detail, to_string(streak)),
+  }
+  if escalation_recommended && derived?.escalation_target != nil {
+    verdict = verdict + {escalation_target: derived.escalation_target}
+  }
+  return verdict
 }
 
 /**
@@ -334,7 +381,9 @@ fn __completion_gate_render_feedback(templates, key, findings) {
  * `derived` fields: `source_known` (whether write facts were supplied),
  * `source_write_count`, `cosmetic_write_count`, `requires_write` (task needs a
  * source change), `verify` (`{ok, findings}` or nil = unknown), `oracle_expected`
- * (a verifier is configured).
+ * (a verifier is configured), and optional streak-aware escalation facts:
+ * `consecutive_failed_after_write`, `verification_failures_converging`,
+ * `escalation_threshold`, and `escalation_target`.
  *
  * Returns `{ok, reason, strict?, feedback?}`. `strict: true` marks a veto that the
  * per-session veto budget may NEVER convert to an allow — every post-write-not-green
@@ -383,16 +432,7 @@ pub fn __completion_gate_ladder(derived, feedback_templates = nil) {
     } else {
       ""
     }
-    return {
-      ok: false,
-      reason: "verification_after_write_red",
-      strict: true,
-      feedback: __completion_gate_render_feedback(
-        templates,
-        "verification_after_write_red",
-        detail,
-      ),
-    }
+    return __completion_gate_red_verdict(derived, templates, detail)
   }
   // 3. Green verifier -> completion is honorable.
   if verify_ok {

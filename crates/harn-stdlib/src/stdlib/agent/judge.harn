@@ -137,6 +137,8 @@ fn __judge_invoke_closure(verify_completion, payload) {
       source: "deterministic",
       reason: result?.reason,
       converted_from: result?.converted_from,
+      escalation_recommended: result?.escalation_recommended,
+      escalation_target: result?.escalation_target,
       trigger: result?.trigger ?? "verify_completion",
     }
   }
@@ -340,6 +342,8 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
       reason: verdict?.reason,
       confirm: verdict?.confirm ?? !verdict.vetoed,
       converted_from: verdict?.converted_from,
+      escalation_recommended: verdict?.escalation_recommended,
+      escalation_target: verdict?.escalation_target,
       specific_gaps: verdict?.specific_gaps ?? [],
       accepted_evidence: verdict?.accepted_evidence ?? [],
     },
@@ -528,10 +532,12 @@ pub type CompletionVerifyVerdict = {ok?: bool, findings?: string}
  * `verify_command` callback. Rust twin: none — stdlib-owned.
  */
 pub type CompletionFacts = {
+  consecutive_failed_after_write?: int,
   source_write_count?: int,
   cosmetic_write_count?: int,
   writes?: list<CompletionWriteFact>,
   verify?: CompletionVerifyVerdict | list<CompletionVerifyVerdict>,
+  verification_failures_converging?: bool,
   requires_write?: bool,
 }
 
@@ -546,6 +552,9 @@ pub type CompletionFacts = {
  *   `facts` returns a `writes` list without counts.
  * - `verify_command() -> CompletionVerifyVerdict` — runs the verifier oracle when
  *   `facts` does not carry a `verify` verdict.
+ * - `feedback_decorator(reason, feedback, verdict) -> string` — decorates a
+ *   veto message after the ladder and budget resolve it. `reason` is the stable
+ *   ladder key; `verdict` carries the structured escalation fields.
  *
  * Policy knobs:
  * - `require_source_write` (default true) — enforce the evidence gate ⛔#5.
@@ -562,13 +571,20 @@ pub type CompletionFacts = {
  *   strings per ladder rule (the coding-domain prose is host content, not
  *   mechanism). Keys are the recognized rules (`__completion_gate_feedback_keys`):
  *   `no_source_write_cosmetic`, `no_source_write_absent`,
- *   `verification_after_write_red` (supports a `{findings}` token), and
- *   `missing_verification`. Values must be strings. Absent keys keep the defaults.
+ *   `verification_after_write_red` and `failed_verification` (support a
+ *   `{findings}` token), `repeated_verification_failures` (supports `{attempts}`
+ *   and `{findings}`), and `missing_verification`. Values must be strings.
+ *   Absent keys keep the defaults.
+ * - `escalation_threshold` (default 3) — consecutive failed verifications needed
+ *   before the streak-aware ladder recommends escalation.
+ * - `escalation_target` (optional) — a host routing channel copied onto an
+ *   escalated verdict and its `judge_decision` event.
  */
 pub type CompletionGateOptions = {
   facts?: any,
   classify_write?: any,
   verify_command?: any,
+  feedback_decorator?: any,
   require_source_write?: bool,
   requires_write?: bool,
   max_vetoes?: int,
@@ -576,6 +592,8 @@ pub type CompletionGateOptions = {
   judge?: any,
   judge_seam?: string,
   feedback_templates?: dict,
+  escalation_threshold?: int,
+  escalation_target?: string,
 }
 
 /**
@@ -603,7 +621,7 @@ fn __completion_gate_callable(value) -> bool {
  *     (any other string is a key `agent_loop` ignores — a silently dead judge).
  */
 fn __completion_gate_validate_options(opts) {
-  for field in ["facts", "classify_write", "verify_command", "veto_combine"] {
+  for field in ["facts", "classify_write", "verify_command", "veto_combine", "feedback_decorator"] {
     const value = opts[field]
     if value != nil && !__completion_gate_callable(value) {
       throw "agent_completion_gate: `" + field + "` must be a callable or nil; got "
@@ -612,6 +630,27 @@ fn __completion_gate_validate_options(opts) {
   }
   if opts?.classify_write != nil && opts?.facts == nil {
     throw "agent_completion_gate: `classify_write` only classifies the writes `facts` returns, so it does nothing without `facts` — set `facts` too or remove `classify_write`."
+  }
+  if opts?.escalation_threshold != nil
+    && (type_of(opts.escalation_threshold) != "int"
+    || opts
+    .escalation_threshold
+    < 1) {
+    throw "agent_completion_gate: `escalation_threshold` must be a positive int; got "
+      + to_string(
+      opts.escalation_threshold,
+    )
+  }
+  if opts?.escalation_target != nil
+    && (type_of(opts.escalation_target) != "string"
+    || trim(
+    opts.escalation_target,
+  )
+    == "") {
+    throw "agent_completion_gate: `escalation_target` must be a non-empty string; got "
+      + to_string(
+      opts.escalation_target,
+    )
   }
   if opts?.judge_seam != nil
     && opts.judge_seam != "verify_completion_judge"
@@ -643,6 +682,28 @@ fn __completion_gate_validate_options(opts) {
   }
 }
 
+/**
+ * Run the host feedback decorator only for a veto that will actually be
+ * delivered. The callback receives the stable ladder reason, the default or
+ * templated feedback, and the complete resolved verdict (including escalation
+ * fields). A non-string result fails loudly at the callback boundary.
+ */
+fn __completion_gate_decorate_feedback(verdict, decorator) {
+  if decorator == nil || (verdict?.ok ?? false) {
+    return verdict
+  }
+  const decorated = decorator(
+    to_string(verdict?.reason ?? ""),
+    to_string(verdict?.feedback ?? ""),
+    verdict,
+  )
+  if type_of(decorated) != "string" {
+    throw "agent_completion_gate: `feedback_decorator` must return a string; got "
+      + type_of(decorated)
+  }
+  return verdict + {feedback: decorated}
+}
+
 /** Session-store key for the completion-gate per-session veto counter. */
 fn __completion_gate_veto_key(session_id) {
   return "harn.completion_gate." + session_id + ".veto_count"
@@ -663,8 +724,10 @@ fn __completion_gate_veto_class_key(session_id, reason) {
  * the budget-charge path are counted; the abstain/allow reasons never charge.
  */
 const __COMPLETION_GATE_VETO_CLASSES = [
+  "failed_verification",
   "missing_verification",
   "no_source_write",
+  "repeated_verification_failures",
   "verification_after_write_red",
 ]
 
@@ -780,12 +843,16 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
     opts?.require_source_write ?? true
   }
   const derived = {
+    consecutive_failed_after_write: raw?.consecutive_failed_after_write,
     source_known: counts.source_known,
     source_write_count: counts.source_write_count,
     cosmetic_write_count: counts.cosmetic_write_count,
     requires_write: requires_write,
     verify: verify,
+    verification_failures_converging: raw?.verification_failures_converging ?? false,
     oracle_expected: verify_command != nil || raw?.verify != nil,
+    escalation_threshold: opts?.escalation_threshold ?? 3,
+    escalation_target: opts?.escalation_target,
   }
   const verdict = __completion_gate_ladder(derived, opts?.feedback_templates)
   const vetoes_used = __completion_gate_vetoes_used(session_id)
@@ -801,14 +868,22 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
       store_set(__completion_gate_veto_class_key(session_id, reason), class_used + 1)
     }
   }
-  const resolved = budgeted.verdict
+  const resolved = __completion_gate_decorate_feedback(budgeted.verdict, opts?.feedback_decorator)
   if resolved?.ok ?? false {
-    return {confirm: true, reason: resolved?.reason ?? "", converted_from: resolved?.converted_from}
+    return {
+      confirm: true,
+      reason: resolved?.reason ?? "",
+      converted_from: resolved?.converted_from,
+      escalation_recommended: resolved?.escalation_recommended,
+      escalation_target: resolved?.escalation_target,
+    }
   }
   return {
     confirm: false,
     message: to_string(resolved?.feedback ?? ""),
     reason: resolved?.reason ?? "",
+    escalation_recommended: resolved?.escalation_recommended,
+    escalation_target: resolved?.escalation_target,
   }
 }
 
