@@ -34,7 +34,8 @@ pub use rules::template_variant_explosion::DEFAULT_BRANCH_THRESHOLD as DEFAULT_T
 
 /// Lint a single `.harn.prompt` template source. Returns the
 /// diagnostics produced by the template-specific lint rules
-/// (`template-provider-identity-branch`, `template-variant-explosion`).
+/// (`template-provider-identity-branch`, `template-unknown-filter`,
+/// `template-variant-explosion`).
 ///
 /// `branch_threshold` overrides the default for the variant-
 /// explosion rule (see [`DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`]);
@@ -70,6 +71,7 @@ pub fn lint_prompt_template(
         &constructs,
         source,
     ));
+    diagnostics.extend(rules::template_unknown_filter::check(&constructs, source));
     diagnostics.extend(rules::template_variant_explosion::check(
         &constructs,
         threshold,

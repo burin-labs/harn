@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 67 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 68 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -319,6 +319,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-065`](#harn-lnt-065) | nil coalesce fallback repeats the left identifier | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-066`](#harn-lnt-066) | the result of a pure collection method is discarded, so the call has no effect on the receiver | — | — |
 | [`HARN-LNT-067`](#harn-lnt-067) | public callable parameter or return is missing an explicit type | — | — |
+| [`HARN-LNT-068`](#harn-lnt-068) | prompt template names a filter the engine does not implement | — | — |
 
 ## FMT — Formatter
 
@@ -3695,6 +3696,30 @@ or for one lint invocation with `harn lint --require-public-api-types`.
 
 The rule does not choose or insert a type automatically because selecting a
 public contract is an API-design decision.
+
+### `HARN-LNT-068`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+prompt template names a filter the engine does not implement
+
+A `.harn.prompt` or `.prompt` expression names a filter the template engine
+does not implement. Filter names are valid identifiers, so this is a lint error
+rather than a template parse error.
+
+```harn-prompt,ignore
+Hello {{ name | uppr }}
+```
+
+#### How to fix
+
+Replace the name with one of the built-in filters. Near misses include a
+machine-applicable suggestion, so `harn lint --fix` can repair `uppr` to
+`upper`.
+
+```harn-prompt
+Hello {{ name | upper }}
+```
 
 ### `HARN-FMT-001`
 

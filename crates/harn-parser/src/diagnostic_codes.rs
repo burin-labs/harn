@@ -357,6 +357,7 @@ diagnostic_codes! {
     LintNilCoalesceSelfFallback, "HARN-LNT-065", Lnt, "nil coalesce fallback repeats the left identifier";
     LintDiscardedPureResult, "HARN-LNT-066", Lnt, "the result of a pure collection method is discarded, so the call has no effect on the receiver";
     LintMissingPublicApiType, "HARN-LNT-067", Lnt, "public callable parameter or return is missing an explicit type";
+    LintTemplateUnknownFilter, "HARN-LNT-068", Lnt, "prompt template names a filter the engine does not implement";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";

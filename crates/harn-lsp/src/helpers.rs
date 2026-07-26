@@ -148,6 +148,17 @@ pub(crate) fn span_to_full_range(span: &Span, source: &SourceText) -> Range {
     }
 }
 
+pub(crate) fn lint_span_to_range(
+    diagnostic: &harn_lint::LintDiagnostic,
+    source: &SourceText,
+) -> Range {
+    if diagnostic.code == harn_parser::DiagnosticCode::LintTemplateUnknownFilter {
+        span_to_full_range(&diagnostic.span, source)
+    } else {
+        span_to_range(&diagnostic.span)
+    }
+}
+
 /// Check whether a 0-based LSP Position falls within a 1-based Span.
 pub(crate) fn position_in_span(pos: &Position, span: &Span, source: &SourceText) -> bool {
     let r = span_to_full_range(span, source);

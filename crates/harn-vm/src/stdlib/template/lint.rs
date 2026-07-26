@@ -21,12 +21,13 @@ pub fn parse(src: &str) -> Result<Vec<LintConstruct>, TemplateParseError> {
     let nodes = parse_template(src).map_err(TemplateParseError::from)?;
     let mut out = Vec::new();
     walk_nodes(&nodes, &mut out, 0)?;
+    out.extend(filter_uses(src)?);
     Ok(out)
 }
 
-/// One lintable construct, materialized in source order so rules can
-/// reason about counts (e.g. branch-explosion) and individual call
-/// sites (e.g. provider-identity comparisons).
+/// One lintable construct. Rules use these to reason about counts
+/// (e.g. branch explosion) and individual call sites (e.g. provider-identity
+/// comparisons and filter names).
 #[derive(Debug, Clone)]
 pub enum LintConstruct {
     /// An `{{ if .. }}` / `{{ elif }}` chain. One entry per condition
@@ -41,6 +42,16 @@ pub enum LintConstruct {
         name: String,
         line: usize,
         col: usize,
+    },
+    /// A filter named after `|`, with the exact byte range of its name.
+    ///
+    /// The parser has already accepted the surrounding expression. This
+    /// shallow view lets lint and editor diagnostics validate the name
+    /// against the engine's filter registry without exposing the template AST.
+    Filter {
+        name: String,
+        start: usize,
+        end: usize,
     },
 }
 
@@ -165,6 +176,67 @@ fn walk_node(
     Ok(())
 }
 
+fn filter_uses(src: &str) -> Result<Vec<LintConstruct>, TemplateParseError> {
+    let tokens = super::lexer::tokenize(src).map_err(TemplateParseError::from)?;
+    let mut filters = Vec::new();
+    for token in tokens {
+        let super::lexer::Token::Directive { start, end, .. } = token else {
+            continue;
+        };
+        scan_directive_filters(src, start, end, &mut filters);
+    }
+    Ok(filters)
+}
+
+fn scan_directive_filters(src: &str, start: usize, end: usize, filters: &mut Vec<LintConstruct>) {
+    let bytes = src.as_bytes();
+    let mut quote = None;
+    let mut cursor = start;
+    while cursor < end {
+        let byte = bytes[cursor];
+        if let Some(delimiter) = quote {
+            if byte == b'\\' {
+                cursor = (cursor + 2).min(end);
+                continue;
+            }
+            if byte == delimiter {
+                quote = None;
+            }
+            cursor += 1;
+            continue;
+        }
+        if matches!(byte, b'"' | b'\'') {
+            quote = Some(byte);
+            cursor += 1;
+            continue;
+        }
+        if byte != b'|' {
+            cursor += 1;
+            continue;
+        }
+        if bytes.get(cursor + 1) == Some(&b'|') {
+            cursor += 2;
+            continue;
+        }
+
+        cursor += 1;
+        while cursor < end && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        let name_start = cursor;
+        while cursor < end && (bytes[cursor].is_ascii_alphanumeric() || bytes[cursor] == b'_') {
+            cursor += 1;
+        }
+        if cursor > name_start {
+            filters.push(LintConstruct::Filter {
+                name: src[name_start..cursor].to_string(),
+                start: name_start,
+                end: cursor,
+            });
+        }
+    }
+}
+
 fn lint_depth_error(node: &Node) -> TemplateParseError {
     let (line, col) = node_location(node).unwrap_or((1, 1));
     TemplateParseError {
@@ -282,6 +354,42 @@ mod tests {
 
     fn parse_ok(src: &str) -> Vec<LintConstruct> {
         parse(src).expect("template should parse")
+    }
+
+    fn filters(src: &str) -> Vec<(String, usize, usize)> {
+        parse_ok(src)
+            .into_iter()
+            .filter_map(|construct| match construct {
+                LintConstruct::Filter { name, start, end } => Some((name, start, end)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn filter_uses_carry_exact_name_ranges() {
+        let source = "{{ name | uppr | default: \"| not_a_filter\" }}";
+        let found = filters(source);
+        assert_eq!(
+            found
+                .iter()
+                .map(|(name, _, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["uppr", "default"]
+        );
+        for (name, start, end) in found {
+            assert_eq!(&source[start..end], name);
+        }
+    }
+
+    #[test]
+    fn logical_or_comments_and_raw_text_are_not_filters() {
+        let source = concat!(
+            "{{ if a || b }}x{{ end }}\n",
+            "{{# ignored | nope #}}\n",
+            "{{ raw }}{{ value | nope }}{{ endraw }}\n",
+        );
+        assert!(filters(source).is_empty());
     }
 
     fn first_if(constructs: &[LintConstruct]) -> &[IfBranch] {

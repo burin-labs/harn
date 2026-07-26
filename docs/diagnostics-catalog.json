@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 67
+      "count": 68
     },
     {
       "id": "FMT",
@@ -2407,6 +2407,15 @@
       "code": "HARN-LNT-067",
       "category": "LNT",
       "summary": "public callable parameter or return is missing an explicit type",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-068",
+      "category": "LNT",
+      "summary": "prompt template names a filter the engine does not implement",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

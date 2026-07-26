@@ -2,7 +2,7 @@
 //!
 //! Everything offered here comes from the template engine's own
 //! vocabulary — `template::directives`, `template::filters`,
-//! `template::BUILTIN_SECTIONS` — so the editor cannot suggest a
+//! `template::SECTIONS` — so the editor cannot suggest a
 //! construct the engine would reject. That matters most for block
 //! closers: `{{ endif }}` is a valid bare identifier, so the engine
 //! accepts it silently and renders the literal text. It is not in the
@@ -15,10 +15,9 @@
 //! cursor is inside, and which slot within it — and never to what the
 //! template means.
 
-use harn_vm::stdlib::template::directives::{Directive, DirectiveRole, DIRECTIVES};
 use harn_vm::stdlib::template::filters::{self, FILTERS};
 use harn_vm::stdlib::template::outline::{self, OutlineBlockKind};
-use harn_vm::stdlib::template::BUILTIN_SECTIONS;
+use harn_vm::stdlib::template::vocabulary::{self, Directive, DirectiveRole, DIRECTIVES, SECTIONS};
 use tower_lsp::lsp_types::*;
 
 use crate::source_text::SourceText;
@@ -109,7 +108,7 @@ pub(crate) fn hover(source: &SourceText, position: Position) -> Option<Hover> {
     let markdown = if preceded_by_filter_pipe(source, directive.body_start, start) {
         filters::lookup(&word).map(filter_documentation)
     } else {
-        harn_vm::stdlib::template::directives::lookup(&word).map(directive_documentation)
+        vocabulary::directive(&word).map(directive_documentation)
     }?;
 
     Some(Hover {
@@ -368,7 +367,7 @@ fn filter_documentation(filter: &filters::Filter) -> String {
 }
 
 fn section_items(partial: &str, replace: Range) -> Vec<CompletionItem> {
-    BUILTIN_SECTIONS
+    SECTIONS
         .iter()
         .filter(|name| name.starts_with(partial))
         .map(|name| {

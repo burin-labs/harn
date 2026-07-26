@@ -70,7 +70,7 @@ instead of diagnostics. Prompt documents get:
 
 | Feature | Description |
 |---------|-------------|
-| **Diagnostics** | Template parse errors plus the same `template-*` lint rules `harn lint` applies, positioned on the directive that caused them. Honours `[lint] disabled` and `[lint] template_variant_branch_threshold` from `harn.toml`. |
+| **Diagnostics** | Template parse errors plus the same `template-*` lint rules `harn lint` applies. Structural errors point at their directive; unknown filters point at the filter name and suggest close built-ins. Honours `[lint] disabled` and `[lint] template_variant_branch_threshold` from `harn.toml`. |
 | **Folding ranges** | `{{ if }}`/`{{ elif }}`/`{{ else }}`, `{{ for }}`, `{{ section }}`, `{{ raw }}`, and multi-line `{{# #}}` comments. Ranges come from the same parser that renders the template, so a fold can never disagree with the real block structure. |
 | **Completions** | Directive keywords, filters after `\|`, section names inside `{{ section "…" }}`, and the names bound by an enclosing `{{ for }}`. Every suggestion comes from the engine's own vocabulary, so only real closers are offered — `{{ endif }}` and `{{ endfor }}` do not exist and are never suggested. |
 | **Hover** | What a directive or filter does, the filter's signature, and — for a block opener — the keyword that closes it. |

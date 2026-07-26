@@ -439,11 +439,11 @@ reproducible.
 ## Drift-prevention lints
 
 `harn lint` walks `.harn.prompt` (and bare `.prompt`) files alongside
-`.harn` programs and enforces two rules that keep the
-capability-adaptive primitive honest:
+`.harn` programs and enforces three prompt-specific rules:
 
 | Rule | What it catches |
 | :--- | :--- |
+| `template-unknown-filter` | A filter name the engine does not implement. Near-miss names such as `uppr` suggest and can fix the closest built-in filter. |
 | `template-provider-identity-branch` | Branching directly on `llm.provider`, `llm.model`, or `llm.family`. The diagnostic suggests the corresponding capability flag (e.g. `provider == "anthropic"` → `llm.capabilities.prefers_xml_scaffolding`). |
 | `template-variant-explosion` | More than `N` capability-aware conditionals in a single template. Default `N=3`, configurable via `[lint] template_variant_branch_threshold` in `harn.toml`. |
 

@@ -31,7 +31,6 @@ use crate::value::VmError;
 
 mod assets;
 mod ast;
-pub mod directives;
 mod error;
 mod expr_parser;
 pub mod filters;
@@ -56,7 +55,6 @@ pub use llm_context::{
     LlmRenderContextGuard,
 };
 use render::{render_nodes, RenderCtx, Scope};
-pub use sections::BUILTIN_SECTIONS;
 
 // Thread-local registry of recent prompt renders keyed by `prompt_id`.
 // Populated by `render_with_provenance` so the DAP adapter can serve
