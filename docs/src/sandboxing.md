@@ -1,53 +1,123 @@
 # Process sandboxing
 
-Harn ships a default `harn run` worktree sandbox plus an OS-level
-process sandbox that engages whenever a subprocess is spawned under an
-active capability policy. The OS sandbox runs in addition to the
-workspace-root path enforcement and the approval-policy DSL — defense
-in depth, not a replacement.
+**What this page covers:** which directories a script can read and write, and
+what a command the script spawns is allowed to do. Three related boundaries
+are documented elsewhere, and mixing them up is the usual source of
+confusion:
 
-Direct `harn run` invocations install a `worktree` capability policy
-before the VM starts. The policy roots filesystem and process-cwd
-access at the nearest `harn.toml` project root, or at the invocation
-working directory when no manifest is present, and sets the
-side-effect ceiling below `network`. Pass `--allow-process-network`
-when a command spawned by the script must open a network socket; this
-raises only the side-effect ceiling and keeps the worktree filesystem
-and process sandbox active. Pass `--no-sandbox` to opt out entirely for
-a single run; the CLI prints a warning when that escape hatch is used.
+| If you are asking… | Go to |
+|---|---|
+| Which environment variables and secrets can the script see? | [Environment policies and grants](./cli-reference.md#environment-policies-and-grants) |
+| Which hosts may the Harn runtime itself call over the network? | [Egress policy](./builtins.md#http) (`HARN_EGRESS_ALLOW`, `egress_policy(...)`) |
+| What is a capability policy, and who sets one? | [Host boundary](./host-boundary.md) |
 
-When a script needs a single out-of-jail path — writing one status file
-to a host-level state directory outside the workspace, or reading a
-sibling reference tree — reach for a scoped grant instead of the
-all-or-nothing `--no-sandbox`. `--write-root <path>` adds a writable
-root and `--read-only-root <path>` adds a read-only root to the active
-profile; both compose with the default filesystem, process, and egress
-sandbox rather than disabling it, and both are rejected when combined
-with `--no-sandbox`. A grant-scoped run discloses exactly the delta on
-one stderr line (for example `sandbox active; extra write root: /path`)
-and skips the blanket `--no-sandbox` warning.
+`harn run` confines a script to its own project directory before the VM
+starts. You do not turn the sandbox on. It is already on, and this page is
+mostly about how to give a script the one extra path or socket it needs
+without switching it off.
 
-When only a spawned compiler or package manager needs the path, use
-`--sandbox-write-root <path>` or `--sandbox-read-root <path>` instead.
-These flags populate `process_sandbox.write_roots` and `.read_roots`;
-Harn filesystem builtins do not gain access to the path.
+Three terms show up throughout, so it helps to pin them down first:
 
-The filesystem grants above widen *where* a subprocess reaches; the
-environment boundary is separate. Every session has an environment policy:
+- A **capability policy** is the record of what one run is allowed to do:
+  which directories are readable, which are writable, and how far its side
+  effects may go. `harn run` builds one for you; see
+  [Host boundary](./host-boundary.md) for the full reference.
+- A **root** is one directory that a policy opens up, along with everything
+  beneath it.
+- The **side-effect ceiling** is the highest class of effect a run may reach,
+  ordered from harmless to far-reaching. The default stops just below
+  `network`, so a script can touch files in its project but cannot open a
+  socket.
+
+Confinement then comes in two layers. Harn checks every path itself, against
+the roots in the active policy. Separately, when a script spawns a
+subprocess, the operating system confines that child using whatever mechanism
+the platform provides: Landlock on Linux, `sandbox-exec` on macOS,
+AppContainer on Windows.
+
+Both layers stay in force alongside approval policy, the separate rule set
+that decides which risky operations have to ask a human first. None of the
+three replaces the others, so a path can be refused by any one of them.
+
+## What a default run can do
+
+A direct `harn run` installs the `worktree` capability policy before the VM
+starts. That policy:
+
+- roots filesystem and process-cwd access at the nearest `harn.toml`
+  project root, falling back to the working directory you launched from
+  when there is no manifest;
+- holds the side-effect ceiling below `network`.
+
+So a script can read and write inside its own project and nowhere else, and
+neither it nor anything it spawns can open a socket.
+
+To let a spawned command reach the network, pass `--allow-process-network`.
+That raises the side-effect ceiling and nothing else: the filesystem and
+process sandboxes stay exactly as they were.
+
+## Widening the sandbox for one path
+
+Scripts often need a single path outside the project. Writing a status file
+to a host-level state directory, say, or reading a sibling checkout. Grant
+that one path rather than reaching for `--no-sandbox`:
+
+| Flag | Effect |
+|---|---|
+| `--write-root <path>` | Adds a writable root for Harn and its subprocesses. |
+| `--read-only-root <path>` | Adds a readable root for Harn and its subprocesses. |
+| `--sandbox-write-root <path>` | Adds a writable root for subprocesses only. |
+| `--sandbox-read-root <path>` | Adds a readable root for subprocesses only. |
+
+The first two widen the active profile and leave the rest of the sandbox
+intact. The last two populate `process_sandbox.write_roots` and
+`.read_roots`, so a compiler or package manager gets the path while Harn's
+own filesystem builtins still cannot touch it. Reach for those when only
+the child needs access.
+
+All four are rejected alongside `--no-sandbox`, which would make them
+meaningless.
+
+A run that grants a root prints one line to stderr naming exactly what it
+widened:
+
+```text
+sandbox active; extra write root: /path
+```
+
+That line replaces the blanket `--no-sandbox` warning. A run that grants
+nothing prints nothing.
+
+## Opting out for a single run
+
+`--no-sandbox` removes the confinement entirely for one invocation, and the
+CLI warns when you use it. Prefer a scoped root whenever you can name the
+path you actually need.
+
+## Network grants are coarser than they look
+
+`--allow-process-network` is deliberately broader than Harn's egress
+allowlist, and the difference matters. `HARN_EGRESS_ALLOW` and
+`egress_policy(...)` constrain calls the Harn runtime makes itself: HTTP,
+providers, connectors. The OS backends underneath a subprocess can only
+allow or deny sockets outright. They cannot enforce hostname rules on
+traffic from an arbitrary child process.
+
+Once you pass `--allow-process-network`, that child can talk to anything.
+Use it only for a command whose network behavior you already trust and have
+scoped some other way.
+
+## Environment variables are a separate boundary
+
+Sandbox roots control *where* a script reaches. What it can *read out of the
+environment* is governed independently, by the session's environment policy:
 `inherited` snapshots the launcher environment, `isolated` admits runtime
-essentials only, and `granted` adds declared `--grant` mappings. The same
-resolved values govern `harness.env`, providers, and subprocesses. See
-[Environment policies and grants](./cli-reference.md#environment-policies-and-grants).
-Environment policy remains active with `--no-sandbox`; neither boundary
-implicitly widens the other.
+essentials only, and `granted` adds the `--grant` mappings you declare. The
+resolved values govern `harness.env`, providers, and subprocesses alike.
 
-The process-network opt-in is deliberately broader than Harn's egress
-allowlist. `HARN_EGRESS_ALLOW` and `egress_policy(...)` constrain HTTP,
-provider, connector, and other network calls owned by the Harn runtime.
-The current OS subprocess backends can allow or deny addressable sockets,
-but cannot enforce hostname rules on arbitrary child-process traffic.
-Use `--allow-process-network` only for a command whose network behavior is
-trusted and independently scoped.
+The two boundaries never widen each other, and environment policy stays
+active under `--no-sandbox`. See
+[Environment policies and grants](./cli-reference.md#environment-policies-and-grants).
 
 ## Sandbox profiles
 

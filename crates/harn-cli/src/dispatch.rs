@@ -352,10 +352,7 @@ mod tests {
             outcome.stderr
         );
         assert_eq!(outcome.stdout, "[\"foo\",\"bar\"]\n");
-        assert_eq!(
-            outcome.stderr,
-            "environment policy: inherited — applies to this session and its subprocesses\n"
-        );
+        assert!(outcome.stderr.is_empty(), "stderr was: {}", outcome.stderr);
     }
 
     #[tokio::test]
@@ -363,9 +360,49 @@ mod tests {
         let outcome = run_embedded_script("echo", vec![], false).await;
         assert_eq!(outcome.exit_code, 0, "stderr={}", outcome.stderr);
         assert_eq!(outcome.stdout, "[]\n");
+        assert!(outcome.stderr.is_empty(), "stderr was: {}", outcome.stderr);
+    }
+
+    /// A run that departs from nothing announces nothing.
+    ///
+    /// Several launch-time surfaces write a one-line advisory to stderr — the
+    /// sandbox grant disclosure in `commands::run::sandbox`, the session
+    /// environment-policy disclosure in `commands::run::environment` — and more
+    /// will follow. They share one rule: name a departure from what the caller
+    /// already had, and stay silent on the default. `sandbox_grant_disclosure`
+    /// encodes it directly by returning `None` for an unmodified default run.
+    ///
+    /// The rule is load-bearing. `--summary-fd` and `--rusage-fd` exist so a
+    /// machine-readable run puts its JSON on a dedicated descriptor and leaves
+    /// stderr free for the caller's own diagnostics; `harn_cli_e2e`'s
+    /// `run_json_cli` asserts that directly, and it dates to those features
+    /// themselves (#2372, #2401). An advisory printed on every invocation
+    /// breaks it for every consumer in order to report the status quo. It also
+    /// blunts the disclosures that matter, since a line that fires on 100% of
+    /// runs is one operators learn to skip.
+    ///
+    /// This guard is deliberately here rather than in `harn_cli_e2e`. The `ci`
+    /// nextest profile filters every harn-cli integration binary out of the
+    /// required lane except `harn_cli_fast`, and the e2e tier otherwise runs
+    /// only nightly or behind the `e2e` label — so a regression there passes
+    /// every required check and ships. #5602 did exactly that. This test runs
+    /// in the harn-cli lib suite, which the required lane does execute, and it
+    /// goes through the real launch path, so it sees any emitter on it.
+    ///
+    /// Assert on the whole stream rather than the absence of one known string:
+    /// the point is to catch the next emitter, whose wording nobody has
+    /// thought of yet.
+    #[tokio::test]
+    async fn a_default_run_writes_nothing_to_stderr() {
+        let outcome = run_embedded_script("echo", vec!["quiet".into()], false).await;
+
+        assert_eq!(outcome.exit_code, 0, "stderr={}", outcome.stderr);
         assert_eq!(
-            outcome.stderr,
-            "environment policy: inherited — applies to this session and its subprocesses\n"
+            outcome.stderr, "",
+            "a default run must leave stderr clean, so `--summary-fd` / \
+             `--rusage-fd` consumers receive only their own diagnostics. A new \
+             launch-time advisory has to stay silent when the run does not \
+             depart from the caller's defaults."
         );
     }
 }

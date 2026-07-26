@@ -224,9 +224,21 @@ pub(crate) fn launch_scope(
 /// stderr — the credential-facing counterpart to the sandbox root disclosure.
 /// It names grants (their target env var and source kind) but never a value,
 /// so a granted run is never silent about the values it carries.
+///
+/// Silent for the one case that carries nothing and changes nothing: the
+/// default `inherited` policy with no grants, which is the environment the
+/// launcher already had. Announcing it discloses no value, and `--summary-fd`
+/// and `--rusage-fd` exist precisely so a machine-readable run leaves `stderr`
+/// clean for its caller — a line on every invocation breaks that for every
+/// consumer in order to say nothing. `isolated` still announces itself even
+/// with no receipts, because a stripped environment is a real departure from
+/// what the caller would otherwise assume.
 fn environment_disclosure(environment: &SessionEnvironment) -> String {
     let receipts = environment.receipts();
     if receipts.is_empty() {
+        if environment.kind() == EnvironmentPolicyKind::Inherited {
+            return String::new();
+        }
         return format!(
             "environment policy: {} — applies to this session and its subprocesses\n",
             environment.kind().as_str()
@@ -445,5 +457,18 @@ mod tests {
     fn isolated_disclosure_names_the_posture() {
         let disclosure = environment_disclosure(&SessionEnvironment::isolated());
         assert!(disclosure.contains("isolated"), "{disclosure}");
+    }
+
+    #[test]
+    fn the_default_policy_carrying_nothing_says_nothing() {
+        // The pair with the test above is the whole rule: disclose a departure
+        // from what the caller already had, not the fact that nothing changed.
+        // An unconditional line costs every `--summary-fd` / `--rusage-fd`
+        // consumer a dirty stderr in order to report the status quo.
+        let config = EnvironmentPolicyConfig::from_flags(None, &[]).unwrap();
+        let environment = config.launch().expect("the default policy launches");
+        assert_eq!(environment.kind(), EnvironmentPolicyKind::Inherited);
+        assert!(environment.receipts().is_empty());
+        assert_eq!(environment_disclosure(&environment), "");
     }
 }
