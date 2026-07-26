@@ -13,9 +13,9 @@
 // root. When HARN_BIN / CARGO_TARGET_DIR / --report-dir point outside the
 // repo, run with `harn run --no-sandbox` (CI keeps everything in-tree).
 // Keep local/standalone checks on the same release ratchet as the binary
-// workflow. The Linux release grew structurally with grammar tables and the
-// K3 catalog; the workflow's 204 MiB limit is the authoritative policy.
-const DEFAULT_BINARY_SIZE_BUDGET_MB: string = "204.00"
+// workflow. The Linux release grew structurally with the AWS SDK credential
+// chain; the workflow's 211 MiB limit is the authoritative policy.
+const DEFAULT_BINARY_SIZE_BUDGET_MB: string = "211.00"
 
 pub fn default_binary_size_budget_mb() -> string {
   return DEFAULT_BINARY_SIZE_BUDGET_MB
