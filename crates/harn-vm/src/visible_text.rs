@@ -75,22 +75,40 @@ fn is_protocol_tag_position(index: &TextIndex, text: &str, idx: usize) -> bool {
     index.is_line_leading(text, idx) && !index.inside_markdown_fence(idx)
 }
 
-fn extract_user_response(text: &str) -> Option<String> {
+/// The `<user_response>` sections of `text`, plus everything outside them.
+///
+/// The remainder is returned rather than discarded because `<user_response>`
+/// *supersedes* the rest of the turn: when the model wraps an answer, every
+/// other word it wrote stops reaching the host. That subtraction is the single
+/// largest silent loss in this file, so the caller needs the remainder in hand
+/// to report it (harn#5142).
+fn extract_user_response(text: &str) -> Option<(String, String)> {
     let index = TextIndex::build(text);
-    let sections: Vec<String> = user_response_regex()
-        .captures_iter(text)
-        .filter(|caps| {
-            caps.get(0)
-                .is_some_and(|m| is_protocol_tag_position(&index, text, m.start()))
-        })
-        .filter_map(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
-        .filter(|section| !section.is_empty())
-        .collect();
-    if sections.is_empty() {
-        None
-    } else {
-        Some(sections.join("\n\n"))
+    let mut sections: Vec<String> = Vec::new();
+    let mut remainder = String::with_capacity(text.len());
+    let mut last = 0;
+    for caps in user_response_regex().captures_iter(text) {
+        let Some(whole) = caps.get(0) else {
+            continue;
+        };
+        if !is_protocol_tag_position(&index, text, whole.start()) {
+            continue;
+        }
+        let Some(section) = caps.get(1).map(|m| m.as_str().trim().to_string()) else {
+            continue;
+        };
+        if section.is_empty() {
+            continue;
+        }
+        sections.push(section);
+        remainder.push_str(&text[last..whole.start()]);
+        last = whole.end();
     }
+    if sections.is_empty() {
+        return None;
+    }
+    remainder.push_str(&text[last..]);
+    Some((sections.join("\n\n"), remainder))
 }
 
 fn unwrap_assistant_prose(text: &str) -> String {
@@ -118,11 +136,33 @@ fn unwrap_assistant_prose(text: &str) -> String {
 /// surfaced visible text reads as plain narration. When a
 /// `<user_response>` block is present, it becomes the authoritative
 /// host-facing surface and supersedes generic assistant prose.
-fn extract_visible_prose(text: &str) -> String {
-    if let Some(user_response) = extract_user_response(text) {
+fn extract_visible_prose(text: &str, report: Option<&mut String>) -> String {
+    if let Some((user_response, superseded)) = extract_user_response(text) {
+        if let Some(slot) = report {
+            *slot = superseded;
+        }
         return user_response;
     }
     unwrap_assistant_prose(text)
+}
+
+/// Report prose the model wrote that no host will ever render (harn#5142).
+///
+/// By the time this runs the internal protocol blocks are already gone —
+/// thinking, tool calls, tool results, done markers — so whatever is left is
+/// narration, and dropping it is a real subtraction from what the model said
+/// rather than protocol hygiene.
+fn report_stripped_prose(superseded: &str) {
+    if superseded.trim().is_empty() {
+        return;
+    }
+    crate::boundary::BoundaryFailure::new(
+        crate::boundary::BoundaryId::VisibleTextSanitize,
+        crate::boundary::BoundaryFailureKind::Truncated,
+        "a <user_response> block superseded assistant prose that no host will render",
+    )
+    .with_excerpt(superseded)
+    .report();
 }
 
 fn json_fence_regex() -> &'static Regex {
@@ -503,7 +543,38 @@ fn normalize_visible_whitespace(text: &str) -> String {
         .to_string()
 }
 
+/// Project a freshly produced assistant reply into the text a host renders,
+/// reporting what the projection removed (harn#5142).
+///
+/// This is the **only** entry point that reports, and it has exactly one
+/// caller: the LLM result projection, which sees a turn's reply once, at the
+/// moment it is produced. Every other consumer of visible text — the session
+/// finalize path walking a transcript for the last assistant message, the
+/// sub-agent result synthesizer, its transcript fallback walk — is
+/// *re-deriving* a projection over text that was already projected once. If
+/// those reported too, a single lost paragraph would be re-reported on every
+/// re-derivation, unbounded in transcript length, and a replay would emit
+/// boundary events for historical turns into the very record it replays from.
+///
+/// Keeping the reporting path out of [`sanitize_visible_assistant_text`] is
+/// what makes that impossible rather than merely discouraged: a re-derivation
+/// site cannot emit, because the function it calls has no emit path.
+pub fn project_visible_assistant_text(text: &str) -> String {
+    let mut superseded = String::new();
+    let visible = sanitize_inner(text, false, Some(&mut superseded));
+    report_stripped_prose(&superseded);
+    visible
+}
+
+/// Sanitize text that has already been projected once — a transcript entry, a
+/// recorded result, a streamed partial.
+///
+/// Never reports. See [`project_visible_assistant_text`] for why.
 pub fn sanitize_visible_assistant_text(text: &str, partial: bool) -> String {
+    sanitize_inner(text, partial, None)
+}
+
+fn sanitize_inner(text: &str, partial: bool, superseded: Option<&mut String>) -> String {
     let mut sanitized = text.to_string();
     for pattern in internal_block_patterns() {
         sanitized = pattern.replace_all(&sanitized, "").to_string();
@@ -511,7 +582,7 @@ pub fn sanitize_visible_assistant_text(text: &str, partial: bool) -> String {
     // After runtime tags are stripped, surface only the explicit
     // user-facing response when one exists; otherwise unwrap
     // <assistant_prose> into plain narration.
-    sanitized = extract_visible_prose(&sanitized);
+    sanitized = extract_visible_prose(&sanitized, superseded);
     sanitized = strip_internal_json_fences(&sanitized);
     sanitized = strip_inline_internal_planning_json(&sanitized, partial);
     // Unconditional: orphan/truncated control-token residue and bare internal
@@ -531,7 +602,118 @@ pub fn sanitize_visible_assistant_text(text: &str, partial: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_visible_assistant_text, VisibleTextState};
+    use super::{
+        project_visible_assistant_text, sanitize_visible_assistant_text, VisibleTextState,
+    };
+    use crate::agent_events::AgentEvent;
+    use crate::boundary::tests::CapturedEvents;
+    use crate::boundary::{BoundaryFailureKind, BoundaryId};
+
+    const SUPERSEDED: &str = "Here is a long piece of narration the operator will never see.\n\
+                              <user_response>Visible answer.</user_response>";
+
+    /// The `visible_text_sanitize` boundary (harn#5142). A `<user_response>`
+    /// block supersedes the whole rest of the turn, so narration the model
+    /// wrote reaches no host. Protocol blocks are already stripped by the time
+    /// the check runs, so what is reported here is genuinely lost prose.
+    #[test]
+    fn prose_superseded_by_a_user_response_block_reaches_the_event_bus() {
+        let captured = CapturedEvents::install();
+        let raw = SUPERSEDED;
+        assert_eq!(project_visible_assistant_text(raw), "Visible answer.");
+
+        let events = captured.boundary_failures();
+        assert_eq!(events.len(), 1, "got: {events:?}");
+        match &events[0] {
+            AgentEvent::BoundaryFailure {
+                boundary,
+                kind,
+                owner,
+                excerpt,
+                ..
+            } => {
+                assert_eq!(*boundary, BoundaryId::VisibleTextSanitize);
+                assert_eq!(*kind, BoundaryFailureKind::Truncated);
+                assert_eq!(owner, "harness");
+                assert!(
+                    excerpt
+                        .as_deref()
+                        .is_some_and(|text| text.contains("never see")),
+                    "the event must carry the prose that died: {excerpt:?}",
+                );
+            }
+            other => panic!("expected a BoundaryFailure, got {other:?}"),
+        }
+    }
+
+    /// A partial pass runs once per streamed delta over a remainder the next
+    /// delta may still complete. Reporting there would emit noise proportional
+    /// to token count, and a funnel that cries wolf gets muted.
+    #[test]
+    fn a_streaming_partial_pass_stays_quiet() {
+        let captured = CapturedEvents::install();
+        let raw = "Narration in flight.\n<user_response>Visible answer.</user_response>";
+        sanitize_visible_assistant_text(raw, true);
+        assert!(captured.boundary_failures().is_empty());
+    }
+
+    /// The load-bearing separation: only the first-time projection reports.
+    /// Every other consumer re-derives a projection over text that was already
+    /// projected, and re-derivation must be silent or one lost paragraph gets
+    /// re-reported on every pass.
+    #[test]
+    fn re_sanitizing_already_projected_text_never_reports() {
+        let captured = CapturedEvents::install();
+        for _ in 0..5 {
+            assert_eq!(
+                sanitize_visible_assistant_text(SUPERSEDED, false),
+                "Visible answer."
+            );
+        }
+        assert!(
+            captured.boundary_failures().is_empty(),
+            "re-derivation must not emit: {:?}",
+            captured.boundary_failures(),
+        );
+    }
+
+    /// A turn is projected once, so one loss produces exactly one event no
+    /// matter how many times the resulting text is later re-read.
+    #[test]
+    fn one_lost_paragraph_produces_exactly_one_event() {
+        let captured = CapturedEvents::install();
+        let visible = project_visible_assistant_text(SUPERSEDED);
+        // Everything downstream re-reads the same turn: the session finalize
+        // walk, the sub-agent synthesizer, its transcript fallback walk.
+        for _ in 0..3 {
+            sanitize_visible_assistant_text(SUPERSEDED, false);
+            sanitize_visible_assistant_text(&visible, false);
+        }
+        assert_eq!(captured.boundary_failures().len(), 1);
+    }
+
+    /// Replay walks history. If it reported, it would write boundary events for
+    /// old turns into the very record it replays from.
+    #[test]
+    fn replaying_a_transcript_of_historical_turns_reports_nothing() {
+        let captured = CapturedEvents::install();
+        let history = [SUPERSEDED, SUPERSEDED, "plain narration, no wrapper"];
+        for turn in history.iter().rev() {
+            sanitize_visible_assistant_text(turn, false);
+        }
+        assert!(captured.boundary_failures().is_empty());
+    }
+
+    #[test]
+    fn a_user_response_with_nothing_else_around_it_stays_quiet() {
+        let captured = CapturedEvents::install();
+        let raw = "<user_response>Visible answer.</user_response>";
+        assert_eq!(project_visible_assistant_text(raw), "Visible answer.");
+        assert!(
+            captured.boundary_failures().is_empty(),
+            "stripping only the wrapper tags is not a loss",
+        );
+    }
 
     #[test]
     fn push_emits_incremental_visible_delta_for_plain_chunks() {

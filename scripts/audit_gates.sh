@@ -75,6 +75,7 @@ GATES=(
   check-source-file-lengths
   check-python-boundary
   check-harn-syntax-sensitive-scans
+  check-loud-boundaries
   check-ci-cache-policy
   check-crate-sibling-versions
   check-dependabot-groups

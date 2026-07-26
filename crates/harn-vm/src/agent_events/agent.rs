@@ -928,10 +928,48 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         scope: Option<String>,
     },
+    /// A boundary between model-produced bytes and executed action declined to
+    /// carry part of that flow: a parser dropped a span, an extractor skipped a
+    /// content block, a sanitizer stripped text, a cap stopped a loop.
+    ///
+    /// This is the one wire form of the loud-boundary invariant (harn#5142).
+    /// Before it existed, each of those losses was invisible, and every
+    /// downstream signal — stall feedback, the rate governor, the verdict layer
+    /// — read the resulting inaction as model pathology. `owner` carries the
+    /// attribution in the same vocabulary as
+    /// [`super::AgentTerminalKind::owner`], so a consumer can bucket the run as
+    /// harness/policy fault without re-deriving it from `boundary`.
+    ///
+    /// Constructed through [`crate::boundary::BoundaryFailure`], never by hand;
+    /// `scripts/loud_boundaries.toml` enumerates every boundary that can emit
+    /// it and `make check-loud-boundaries` keeps that enumeration honest.
+    BoundaryFailure {
+        session_id: String,
+        boundary: crate::boundary::BoundaryId,
+        kind: crate::boundary::BoundaryFailureKind,
+        owner: String,
+        detail: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        excerpt: Option<String>,
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        dropped_count: usize,
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        dropped_bytes: usize,
+        /// Set when the failure reached the bus through the `Drop` backstop
+        /// rather than an explicit `report()` — i.e. a drop path built the
+        /// record and then lost track of it. Always `false` in normal
+        /// operation; a `true` here is a harness bug worth fixing.
+        #[serde(default, skip_serializing_if = "is_false")]
+        unreported: bool,
+    },
 }
 
 fn is_zero_usize(value: &usize) -> bool {
     *value == 0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl AgentEvent {
@@ -1000,7 +1038,8 @@ impl AgentEvent {
             | Self::LoopCheckpoint { session_id, .. }
             | Self::McpNotification { session_id, .. }
             | Self::McpCatalogChanged { session_id, .. }
-            | Self::McpAuthRequired { session_id, .. } => session_id,
+            | Self::McpAuthRequired { session_id, .. }
+            | Self::BoundaryFailure { session_id, .. } => session_id,
         }
     }
 }

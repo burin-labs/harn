@@ -57,6 +57,7 @@ pub const HARN_PROVIDER_CATALOG_METHOD: &str = "_harn/providerCatalog";
 /// for diff-friendliness and keep it in lockstep with the match arm in
 /// `events.rs`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
+    "boundary_failure",
     "budget_circuit_breaker",
     "budget_exhausted",
     "composition_child_call",

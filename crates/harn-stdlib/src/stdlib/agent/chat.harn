@@ -1,5 +1,6 @@
 // @harn-entrypoint-category agent.stdlib
 import { agent_loop } from "std/agent/loop"
+import { agent_emit_event } from "std/agent/state"
 import { filter_nil, pick_keys } from "std/collections"
 import { read_line } from "std/io"
 
@@ -367,6 +368,14 @@ fn __chat_after_model(callback: AgentModelTurnCallback?, result, state) {
   return state + update
 }
 
+/**
+ * Stop reasons that mean a cap ended the conversation rather than the
+ * operator or the agent. Both used to be plain loop exits: the chat simply
+ * stopped, and nothing downstream could tell "the operator was done" from
+ * "we ran out of allowance mid-thought".
+ */
+const __CHAT_CAP_STOP_REASONS = ["max_turns", "input_exhausted"]
+
 fn __chat_finish(
   session_id,
   state,
@@ -377,6 +386,24 @@ fn __chat_finish(
   close_session,
   transcript_path,
 ) {
+  // Report cap stops through the loud-boundary funnel (harn#5142) before the
+  // session closes, so a truncated conversation is attributable to policy
+  // instead of reading as an agent that ran out of things to say.
+  if __CHAT_CAP_STOP_REASONS.contains(stop_reason) {
+    const _ = try {
+      agent_emit_event(
+        session_id,
+        "boundary_failure",
+        {
+          boundary: "chat_turn_cap",
+          kind: "capped",
+          detail: "agent_chat_loop stopped at ${stop_reason} after ${to_string(turns)} turn(s) "
+            + "and ${to_string(input_events)} input event(s)",
+          dropped_count: 1,
+        },
+      )
+    }
+  }
   const transcript = agent_session_snapshot(session_id)
   const final_state = __chat_state(state, session_id, turns, input_events, last_result)
   if close_session {

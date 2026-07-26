@@ -30,6 +30,7 @@ pub mod agent_transcript_budget;
 pub mod atomic_io;
 pub mod autonomy;
 pub(crate) mod aws_sigv4;
+pub mod boundary;
 pub mod bridge;
 mod builtin_id;
 pub mod builtin_profile;

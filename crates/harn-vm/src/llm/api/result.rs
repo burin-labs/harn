@@ -424,7 +424,7 @@ fn build_text_tool_projection(
     let visible_text = if parsed_has_calls || has_native_tool_calls || tools_val.is_some() {
         public_text.clone()
     } else {
-        crate::visible_text::sanitize_visible_assistant_text(visible_text_src, false)
+        crate::visible_text::project_visible_assistant_text(visible_text_src)
     };
 
     TextToolProjection {

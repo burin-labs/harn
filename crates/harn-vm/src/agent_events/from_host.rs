@@ -71,6 +71,10 @@ const HOST_DESERIALIZE_EVENT_TYPES: &[&str] = &[
     "tool_format_override",
     "tool_call_audit",
     "loop_checkpoint",
+    // The loud-boundary funnel (harn#5142). Allowlisted so a `.harn` boundary
+    // — an agent-loop cap, a stdlib filter — reports a drop through the same
+    // typed event as the Rust funnel instead of inventing a parallel one.
+    "boundary_failure",
 ];
 
 impl AgentEvent {
@@ -260,9 +264,11 @@ fn from_host_generic(
     payload: &Value,
 ) -> Result<AgentEvent, VmError> {
     if !HOST_DESERIALIZE_EVENT_TYPES.contains(&event_type) {
-        return Err(VmError::Runtime(format!(
-            "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{event_type}`"
-        )));
+        return Err(reject(
+            session_id,
+            format!("unsupported event type `{event_type}`"),
+            payload,
+        ));
     }
     let mut obj = match payload {
         Value::Object(map) => map.clone(),
@@ -275,9 +281,11 @@ fn from_host_generic(
         Value::String(session_id.to_string()),
     );
     let mut event: AgentEvent = serde_json::from_value(Value::Object(obj)).map_err(|error| {
-        VmError::Runtime(format!(
-            "{HOST_AGENT_EMIT_EVENT}: invalid `{event_type}` payload: {error}"
-        ))
+        reject(
+            session_id,
+            format!("invalid `{event_type}` payload: {error}"),
+            payload,
+        )
     })?;
     // `tool_call` / `tool_call_update` carry the mutation-session audit
     // context active at emit time, never a payload-supplied value.
@@ -287,6 +295,27 @@ fn from_host_generic(
         *audit = crate::orchestration::current_mutation_session();
     }
     Ok(event)
+}
+
+/// Refuse a host event, loudly.
+///
+/// The `VmError` alone was not enough: every stdlib emit site wraps
+/// `agent_emit_event` in `try { }` and discards the result, so a rejected
+/// event type or a malformed payload used to vanish without a trace — the
+/// runtime's own event bus had a silent boundary in it. The rejection now also
+/// goes out through the loud-boundary funnel (harn#5142), which is not
+/// swallowable by a caller's `try`, so a `.harn` boundary reporting through a
+/// name nobody registered is visible instead of merely ineffective.
+fn reject(session_id: &str, detail: String, payload: &Value) -> VmError {
+    crate::boundary::BoundaryFailure::new(
+        crate::boundary::BoundaryId::HostEventIngest,
+        crate::boundary::BoundaryFailureKind::Unrecognized,
+        detail.clone(),
+    )
+    .in_session(session_id)
+    .with_excerpt(&payload.to_string())
+    .report();
+    VmError::Runtime(format!("{HOST_AGENT_EMIT_EVENT}: {detail}"))
 }
 
 /// Fill in the required-field defaults the retired hand-match applied that
@@ -321,6 +350,23 @@ fn apply_host_payload_defaults(
             set_default(obj, "remaining_tools", Value::Array(Vec::new()));
         }
         "tool_call_audit" => set_default(obj, "audit", Value::Null),
+        // `owner` is derived from `kind`, never supplied: one attribution rule
+        // for the Rust funnel and the `.harn` boundaries alike. A payload that
+        // tries to set it is overruled rather than trusted.
+        "boundary_failure" => {
+            let owner = obj
+                .get("kind")
+                .and_then(Value::as_str)
+                .and_then(|kind| {
+                    serde_json::from_value::<crate::boundary::BoundaryFailureKind>(Value::String(
+                        kind.to_string(),
+                    ))
+                    .ok()
+                })
+                .map(|kind| kind.owner())
+                .unwrap_or("harness");
+            obj.insert("owner".to_string(), Value::String(owner.to_string()));
+        }
         _ => {}
     }
     Ok(())

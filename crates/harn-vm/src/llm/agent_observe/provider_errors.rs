@@ -56,7 +56,24 @@ pub(super) async fn await_governor_admission(
     }
     // Cap hit: one last gate. Proceed reserves a slot; a persisting OPEN does
     // not — we fall through unreserved rather than hammer or hang.
-    matches!(gate(provider, org_key, est_tokens), GateOutcome::Proceed)
+    let reserved = matches!(gate(provider, org_key, est_tokens), GateOutcome::Proceed);
+    if !reserved {
+        // Falling through unreserved abandons the back-pressure guarantee the
+        // rest of the system assumes is in force, and it used to do so with no
+        // event, no record, and no log — so the 429 storm that follows reads as
+        // a provider problem rather than as the governor having given up
+        // (harn#5142).
+        crate::boundary::BoundaryFailure::new(
+            crate::boundary::BoundaryId::ProviderAdmissionGate,
+            crate::boundary::BoundaryFailureKind::Capped,
+            format!(
+                "rate governor circuit for `{provider}` stayed open through \
+                 {GOVERNOR_MAX_ADMISSION_WAITS} admission waits; the call proceeds unreserved"
+            ),
+        )
+        .report();
+    }
+    reserved
 }
 
 /// Release the governor slot reserved by [`await_governor_admission`] and record

@@ -8,6 +8,10 @@ use super::openai_normalize::{append_paragraph, normalize_openai_message_text};
 use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::ProviderTelemetry;
 
+mod boundary;
+mod item_kinds;
+use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
+
 #[cfg(test)]
 #[path = "response_gateway_tests.rs"]
 mod gateway_tests;
@@ -324,26 +328,6 @@ fn push_internal_tool_call(
     }));
 }
 
-fn openai_responses_tool_kind(item_type: &str) -> &'static str {
-    match item_type {
-        "web_search_call" => "web_search",
-        "file_search_call" => "file_search",
-        "code_interpreter_call" => "code_interpreter",
-        "computer_call" => "computer_use",
-        "image_generation_call" => "image_generation",
-        "tool_search_call" | "tool_search_output" => "tool_search",
-        _ if item_type.starts_with("mcp_") => "remote_mcp",
-        _ => "hosted_tool",
-    }
-}
-
-fn is_openai_responses_hosted_tool_item(item_type: &str) -> bool {
-    item_type.ends_with("_call")
-        || item_type == "tool_search_output"
-        || item_type == "mcp_list_tools"
-        || item_type == "mcp_approval_request"
-}
-
 fn push_openai_responses_text_block(
     content: &serde_json::Value,
     text: &mut String,
@@ -355,7 +339,7 @@ fn push_openai_responses_text_block(
         .or_else(|| content.get("content"))
         .and_then(|value| value.as_str())
     else {
-        return;
+        return boundary::unreadable_message_part(block_type, content);
     };
     match block_type {
         Some("output_text") | Some("text") | None => {
@@ -374,7 +358,7 @@ fn push_openai_responses_text_block(
                 "visibility": "public",
             }));
         }
-        _ => {}
+        other => boundary::unhandled_message_part(other, content),
     }
 }
 
@@ -589,7 +573,7 @@ pub(crate) fn parse_openai_responses_response(
             other if is_openai_responses_hosted_tool_item(other) => {
                 push_openai_responses_hosted_tool_block(item, other, &mut blocks);
             }
-            _ => {}
+            other => boundary::unhandled_output_item(other, item),
         }
     }
 
@@ -877,7 +861,7 @@ pub(crate) fn parse_llm_response(
                         "visibility": "internal",
                     }));
                 }
-                _ => {}
+                other => boundary::unhandled_content_block(provider, other, block),
             }
         }
 
@@ -940,6 +924,7 @@ pub(crate) fn parse_llm_response(
                     "{provider} API response missing non-empty choices array"
                 ))))
             })?;
+        boundary::discarded_choices(provider, choices);
         let choice = &choices[0];
         let message = choice.get("message").ok_or_else(|| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(

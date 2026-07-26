@@ -822,26 +822,33 @@ pub fn reset_for_tests() {
     reg.governors.clear();
 }
 
+/// Test-only handle on the governor's process-global arming flag.
+///
+/// Lives outside `mod tests` because the admission-gate boundary test
+/// (`llm::agent_observe::provider_errors_boundary_tests`) has to arm the same
+/// process-global flag and registry. Two modules toggling that flag under
+/// separate locks would race; one shared guard is the only safe shape.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::clock_mock::{install_override, MockClock};
+pub(crate) mod test_support {
+    use super::{reset_for_tests, RATE_GOVERNOR_ENABLED_ENV};
+    use std::sync::Mutex;
 
-    /// Serializes the tests that toggle the process-global `HARN_LLM_RATE_GOVERNOR`
-    /// env var and share the process-global registry, so cargo's parallel test
-    /// threads cannot race the flag or clobber each other's governor state.
+    /// Serializes every test that toggles the process-global
+    /// `HARN_LLM_RATE_GOVERNOR` env var and shares the process-global registry,
+    /// so cargo's parallel test threads cannot race the flag or clobber each
+    /// other's governor state.
     static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Sets the env flag on for the guard's lifetime and restores it after,
-    /// holding [`TEST_ENV_LOCK`] the whole time. Also wipes the registry so the
-    /// test starts clean.
-    struct GovernorEnabledGuard {
+    /// Arms the governor for the guard's lifetime and restores the previous
+    /// value after, holding [`TEST_ENV_LOCK`] the whole time. Also wipes the
+    /// registry so the test starts clean.
+    pub(crate) struct GovernorEnabledGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         prev: Option<String>,
     }
 
     impl GovernorEnabledGuard {
-        fn on() -> Self {
+        pub(crate) fn on() -> Self {
             let lock = TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
             let prev = std::env::var(RATE_GOVERNOR_ENABLED_ENV).ok();
             std::env::set_var(RATE_GOVERNOR_ENABLED_ENV, "1");
@@ -859,6 +866,43 @@ mod tests {
             reset_for_tests();
         }
     }
+
+    /// The mirror of [`GovernorEnabledGuard`]: holds the same lock and forces
+    /// the flag OFF for the guard's lifetime. A test that reads the disabled
+    /// behavior needs the lock just as much as one that arms it, because the
+    /// flag is process-global and a sibling test arming it mid-read would flip
+    /// the answer.
+    pub(crate) struct GovernorDisabledGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        prev: Option<String>,
+    }
+
+    impl GovernorDisabledGuard {
+        pub(crate) fn off() -> Self {
+            let lock = TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let prev = std::env::var(RATE_GOVERNOR_ENABLED_ENV).ok();
+            std::env::remove_var(RATE_GOVERNOR_ENABLED_ENV);
+            reset_for_tests();
+            Self { _lock: lock, prev }
+        }
+    }
+
+    impl Drop for GovernorDisabledGuard {
+        fn drop(&mut self) {
+            match self.prev.take() {
+                Some(v) => std::env::set_var(RATE_GOVERNOR_ENABLED_ENV, v),
+                None => std::env::remove_var(RATE_GOVERNOR_ENABLED_ENV),
+            }
+            reset_for_tests();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{GovernorDisabledGuard, GovernorEnabledGuard};
+    use super::*;
+    use crate::clock_mock::{install_override, MockClock};
 
     fn limits(max: u32, min: u32) -> ResolvedLimits {
         ResolvedLimits {
@@ -1154,18 +1198,12 @@ mod tests {
 
     #[test]
     fn gate_no_op_when_flag_off() {
-        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let prev = std::env::var(RATE_GOVERNOR_ENABLED_ENV).ok();
-        std::env::remove_var(RATE_GOVERNOR_ENABLED_ENV);
-        reset_for_tests();
+        let _governor = GovernorDisabledGuard::off();
         // Flag off → gate is a bare Proceed and record_outcome a no-op; the
         // route's governor is never created, so snapshot stays None.
         assert_eq!(gate("anthropic", "default", 0), GateOutcome::Proceed);
         record_outcome("anthropic", "default", GovernorOutcome::Served);
         assert!(snapshot("anthropic", "default").is_none());
-        if let Some(v) = prev {
-            std::env::set_var(RATE_GOVERNOR_ENABLED_ENV, v);
-        }
     }
 
     #[test]

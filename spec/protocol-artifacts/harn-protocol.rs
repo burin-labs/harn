@@ -99,6 +99,7 @@ pub struct ACPSessionRequestPermissionResult {
 /// events while still proxying or recording the original notification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum HarnAgentEventKind {
+    BoundaryFailure,
     BudgetCircuitBreaker,
     BudgetExhausted,
     CompositionChildCall,
@@ -136,6 +137,7 @@ pub enum HarnAgentEventKind {
 impl HarnAgentEventKind {
     pub fn as_str(&self) -> &str {
         match self {
+            Self::BoundaryFailure => "boundary_failure",
             Self::BudgetCircuitBreaker => "budget_circuit_breaker",
             Self::BudgetExhausted => "budget_exhausted",
             Self::CompositionChildCall => "composition_child_call",
@@ -188,6 +190,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
     {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
+            "boundary_failure" => Self::BoundaryFailure,
             "budget_circuit_breaker" => Self::BudgetCircuitBreaker,
             "budget_exhausted" => Self::BudgetExhausted,
             "composition_child_call" => Self::CompositionChildCall,
@@ -706,6 +709,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "worker_update",
 ];
 
+pub const HARN_AGENT_EVENT_KIND_BOUNDARY_FAILURE: &str = "boundary_failure";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_CIRCUIT_BREAKER: &str = "budget_circuit_breaker";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_EXHAUSTED: &str = "budget_exhausted";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_CALL: &str = "composition_child_call";
@@ -740,6 +744,7 @@ pub const HARN_AGENT_EVENT_KIND_TYPED_CHECKPOINT: &str = "typed_checkpoint";
 
 /// Pipeline-loop milestone kinds emitted via `_harn/agentEvent`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
+    "boundary_failure",
     "budget_circuit_breaker",
     "budget_exhausted",
     "composition_child_call",

@@ -454,3 +454,91 @@ fn from_host_rejects_non_host_and_unknown_event_types() {
     AgentEvent::from_host_payload("s1", "totally_made_up", &json!({}))
         .expect_err("unknown event type rejected");
 }
+
+// --- Loud-boundary funnel (harn#5142) ------------------------------------
+
+/// A `.harn` boundary reports through the same typed event as the Rust funnel,
+/// and `owner` is derived from `kind` here rather than trusted from the
+/// payload, so one attribution rule covers both languages.
+#[test]
+fn from_host_accepts_a_harn_side_boundary_failure_and_derives_the_owner() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "boundary_failure",
+        &json!({
+            "boundary": "chat_turn_cap",
+            "kind": "capped",
+            "owner": "agent",
+            "detail": "agent_chat_loop stopped at max_turns after 4 turn(s)",
+            "dropped_count": 1,
+        }),
+    )
+    .expect("boundary_failure is host-emittable");
+    match event {
+        AgentEvent::BoundaryFailure {
+            session_id,
+            boundary,
+            kind,
+            owner,
+            detail,
+            dropped_count,
+            unreported,
+            ..
+        } => {
+            assert_eq!(session_id, "s1");
+            assert_eq!(boundary, crate::boundary::BoundaryId::ChatTurnCap);
+            assert_eq!(kind, crate::boundary::BoundaryFailureKind::Capped);
+            assert_eq!(
+                owner, "policy",
+                "a payload-supplied owner must be overruled, not trusted",
+            );
+            assert!(detail.contains("max_turns"));
+            assert_eq!(dropped_count, 1);
+            assert!(!unreported);
+        }
+        other => panic!("expected BoundaryFailure, got {other:?}"),
+    }
+}
+
+/// The `host_event_ingest` boundary. The `VmError` alone was never enough:
+/// every stdlib emit site wraps `agent_emit_event` in `try { }` and discards
+/// the result, so a rejected event used to vanish. The funnel emission is not
+/// swallowable by a caller's `try`.
+#[test]
+fn a_rejected_host_event_reports_through_the_funnel() {
+    for (event_type, payload) in [
+        ("totally_made_up", json!({})),
+        ("iteration_start", json!({ "iteration": "not-a-number" })),
+    ] {
+        let captured = crate::boundary::tests::CapturedEvents::install();
+        AgentEvent::from_host_payload("s1", event_type, &payload)
+            .expect_err("this payload must be rejected");
+        let events = captured.boundary_failures();
+        assert_eq!(events.len(), 1, "for {event_type}: got {events:?}");
+        match &events[0] {
+            AgentEvent::BoundaryFailure {
+                session_id,
+                boundary,
+                kind,
+                owner,
+                excerpt,
+                ..
+            } => {
+                assert_eq!(session_id, "s1");
+                assert_eq!(*boundary, crate::boundary::BoundaryId::HostEventIngest);
+                assert_eq!(*kind, crate::boundary::BoundaryFailureKind::Unrecognized);
+                assert_eq!(owner, "harness");
+                assert!(excerpt.is_some(), "the rejected payload must ride along");
+            }
+            other => panic!("expected BoundaryFailure, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn an_accepted_host_event_reports_no_boundary_failure() {
+    let captured = crate::boundary::tests::CapturedEvents::install();
+    AgentEvent::from_host_payload("s1", "iteration_start", &json!({ "iteration": 1 }))
+        .expect("accepted");
+    assert!(captured.boundary_failures().is_empty());
+}
