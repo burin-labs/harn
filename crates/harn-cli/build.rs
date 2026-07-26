@@ -349,21 +349,50 @@ fn empty_cli_aot_table() -> String {
     )
 }
 
+/// Resolve a package-relative CLI AOT payload to the path Cargo should watch.
+///
+/// The returned path is the plain `manifest_dir` join, never the canonical
+/// form. Canonicalizing is how we check the payload stays inside the package,
+/// but a canonical path must not reach `cargo:rerun-if-changed`: on Windows
+/// `fs::canonicalize` yields a `\\?\` verbatim path, and Cargo cannot match one
+/// against the ordinary path in its fingerprint, so the crate reads as changed
+/// on every invocation and rebuilds in full. That cost a measured ~2m12s per
+/// `cargo` call on Windows CI, on every call, for every job and every
+/// developer.
+///
+/// [`ensure_payload_inside_package`] owns the canonical form and returns
+/// nothing, so there is no canonical path here to emit by accident.
 fn resolve_cli_aot_payload_path(manifest_dir: &Path, relative: &str) -> Result<PathBuf, String> {
     let candidate = Path::new(relative);
     if candidate.is_absolute() {
         return Err(format!("CLI AOT payload path must be relative: {relative}"));
     }
+    let path = manifest_dir.join(candidate);
+    ensure_payload_inside_package(manifest_dir, &path, relative)?;
+    Ok(path)
+}
+
+/// Reject a payload that resolves outside the package once symlinks and `..`
+/// are folded away.
+///
+/// Deliberately returns `()`. The canonical paths are the whole point of the
+/// check and the whole hazard if they escape — see
+/// [`resolve_cli_aot_payload_path`].
+fn ensure_payload_inside_package(
+    manifest_dir: &Path,
+    path: &Path,
+    relative: &str,
+) -> Result<(), String> {
     let root = fs::canonicalize(manifest_dir)
         .map_err(|error| format!("canonicalize {}: {error}", manifest_dir.display()))?;
-    let resolved = fs::canonicalize(manifest_dir.join(candidate))
+    let resolved = fs::canonicalize(path)
         .map_err(|error| format!("canonicalize CLI AOT payload {relative}: {error}"))?;
     if !resolved.starts_with(&root) {
         return Err(format!(
             "CLI AOT payload path escapes the package: {relative}"
         ));
     }
-    Ok(resolved)
+    Ok(())
 }
 
 /// Embed every demo *sibling* file (anything under `assets/demo/<id>/` other
