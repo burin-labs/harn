@@ -1011,6 +1011,12 @@ jobs:
         with:
           node-version: "22"
           cache-dependency-path: tree-sitter-harn/package-lock.json
+      - name: Install Harn script test dependencies
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: ripgrep
+          check-command: rg
       - name: Build tree-sitter grammar for the parse sweep
         working-directory: tree-sitter-harn
         run: |
