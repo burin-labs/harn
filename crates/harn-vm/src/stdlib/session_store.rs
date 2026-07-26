@@ -912,15 +912,17 @@ mod tests {
         let _guard = crate::runtime_paths::test_env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let elsewhere = std::env::temp_dir().join("harn-session-store-state-dir-probe");
+        let temp_dir = std::env::temp_dir();
+        let elsewhere = temp_dir.join("harn-session-store-state-dir-probe");
+        let named_root = temp_dir.join("harn-session-store-named-root-probe");
         let previous = std::env::var(crate::runtime_paths::HARN_STATE_DIR_ENV).ok();
         unsafe { std::env::set_var(crate::runtime_paths::HARN_STATE_DIR_ENV, &elsewhere) };
 
         // A caller that names a tree asked for a specific location; an
         // unrelated HARN_STATE_DIR must not relocate its store out of it.
-        let options = json_to_vm_value(&json!({"root": "/workspace"}));
+        let options = json_to_vm_value(&json!({"root": named_root}));
         let named = canonical_store_state_dir(options.as_dict()).unwrap();
-        assert_eq!(named, SessionStoreDir::under_root(Path::new("/workspace")));
+        assert_eq!(named, SessionStoreDir::under_root(&named_root));
 
         // The defaulted case is Harn's own state, so it follows HARN_STATE_DIR
         // like every other state consumer.
