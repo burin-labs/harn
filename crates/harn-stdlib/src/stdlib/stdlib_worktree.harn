@@ -14,7 +14,7 @@
 // Import: import "std/worktree"
 import { unique } from "std/collections"
 import { git_env_remove, git_noninteractive_env } from "std/git"
-import { process_run, process_shell } from "std/runtime"
+import { process_run, process_shell, runtime_state_paths_under } from "std/runtime"
 
 const WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS = 60 * 60
 
@@ -22,7 +22,6 @@ const WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS = [
   "target",
   ".target",
   ".build",
-  ".harn",
   "node_modules",
   "Pods",
   ".venv",
@@ -79,7 +78,7 @@ pub fn worktree_prune_default_min_age_seconds() -> int {
  * @errors: []
  */
 pub fn worktree_prune_default_disposable_paths() -> list<string> {
-  return WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS
+  return [runtime_state_paths_under(".").state_root] + WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS
 }
 
 /**
@@ -182,7 +181,7 @@ pub fn worktree_prune_normalize_disposable_path(raw: string) -> string? {
 
 fn __worktree_prune_disposable_paths(extra_paths: list<string> = []) -> list<string> {
   let out = []
-  for path in WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS + (extra_paths ?? []) {
+  for path in worktree_prune_default_disposable_paths() + (extra_paths ?? []) {
     const normalized = worktree_prune_normalize_disposable_path(path)
     if normalized != nil {
       out = out + [normalized]
@@ -292,8 +291,8 @@ fn __worktree_git(cwd, args, options) {
  * @effects: []
  * @errors: []
  */
-pub fn worktree_default_path(repo, name) {
-  return repo + "/.harn/worktrees/" + name
+pub fn worktree_default_path(repo: string, name: string) -> string {
+  return path_join(runtime_state_paths_under(repo).worktree_root, name)
 }
 
 /**
@@ -303,13 +302,14 @@ pub fn worktree_default_path(repo, name) {
  * @errors: []
  */
 pub fn worktree_create(repo, name, base_ref, path, options = {}) {
+  const layout = runtime_state_paths_under(repo)
   const target = if path == nil || path == "" {
     worktree_default_path(repo, name)
   } else {
     path
   }
-  harness.fs.mkdir(repo + "/.harn")
-  harness.fs.mkdir(repo + "/.harn/worktrees")
+  harness.fs.mkdir(layout.state_root)
+  harness.fs.mkdir(layout.worktree_root)
   const result = __worktree_git(repo, ["worktree", "add", "-B", name, target, base_ref], options)
   return {
     repo: repo,

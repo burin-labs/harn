@@ -1014,6 +1014,7 @@ Generic host/runtime helpers that are useful across many hosts:
 | `runtime_prompt_content()` | Return the active ACP session prompt as typed, normalized text/image/audio/PDF content blocks |
 | `runtime_dry_run()` | Return whether the current run is dry-run only |
 | `runtime_approved_plan()` | Return the host-approved plan text when available |
+| `runtime_state_paths_under(root)` | Return the conventional state and worktree roots beneath a caller-selected project root without consulting ambient path overrides |
 | `process_run(argv, options?)` | Execute a process through argv-mode `process.exec`; prefer this for programmatic commands |
 | `process_shell(command, options?)` | Execute an explicit shell command through `process.exec` using the host default shell unless options provide `shell` or `shell_id` |
 | `process_result_text(result)` | Return stdout, stderr, combined output, or inline output from a command-runner result |
@@ -1860,7 +1861,7 @@ Helpers for isolated git worktree execution built on `exec_at(...)` and
 
 | Function | Description |
 |---|---|
-| `worktree_default_path(repo, name)` | Return the default `.harn/worktrees/<name>` path |
+| `worktree_default_path(repo, name)` | Return the default Harn-owned worktree path beneath `repo` |
 | `worktree_create(repo, name, base_ref, path?)` | Create or reset a worktree branch at a target path |
 | `worktree_remove(repo, path, force)` | Remove a worktree from the parent repo |
 | `worktree_status(path)` | Run `git status --short --branch` in the worktree |

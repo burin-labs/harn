@@ -5,6 +5,7 @@
 // and render review UI.
 import { write_json } from "std/fs"
 import { memory_forget, memory_store, memory_summarize } from "std/memory"
+import { runtime_state_paths_under } from "std/runtime"
 
 const PATTERN_SCHEMA = "harn.pattern_learning.v1"
 
@@ -68,12 +69,20 @@ fn pl_project_root(options = nil) -> string {
   return pl_text(options?.project_root ?? project_root() ?? cwd() ?? ".")
 }
 
+fn pl_state_root(options = nil) -> string {
+  const explicit_project_root = pl_text(options?.project_root)
+  if explicit_project_root != "" {
+    return runtime_state_paths_under(explicit_project_root).state_root
+  }
+  return runtime_paths().state_root
+}
+
 fn pl_memory_root(options = nil) -> string {
   const explicit = pl_text(options?.memory_root ?? options?.root)
   if explicit != "" {
     return explicit
   }
-  return path_join(pl_project_root(options), ".harn", "memory")
+  return path_join(pl_state_root(options), "memory")
 }
 
 fn pl_namespace(options = nil) -> string {
@@ -90,28 +99,25 @@ fn pl_now(options = nil) -> string {
   return explicit == "" ? date_now_iso() : explicit
 }
 
-fn pl_observation_file(project_root: string) -> string {
+fn pl_observation_file(options = nil) -> string {
   return path_join(
-    project_root,
-    ".harn",
+    pl_state_root(options),
     "session-store",
     "burin.agent_context.pattern_learning.observations.jsonl",
   )
 }
 
-fn pl_pending_file(project_root: string) -> string {
+fn pl_pending_file(options = nil) -> string {
   return path_join(
-    project_root,
-    ".harn",
+    pl_state_root(options),
     "session-store",
     "burin.agent_context.pattern_learning.pending.jsonl",
   )
 }
 
-fn pl_state_file(project_root: string) -> string {
+fn pl_state_file(options = nil) -> string {
   return path_join(
-    project_root,
-    ".harn",
+    pl_state_root(options),
     "session-store",
     "burin.agent_context.pattern_learning.state.jsonl",
   )
@@ -1183,8 +1189,7 @@ pub fn pattern_learning_status(options = nil) -> dict {
 }
 
 fn pl_migrate_observations(options = nil) -> nil {
-  const project = pl_project_root(options)
-  for legacy in pl_project_collection(pl_read_jsonl_payloads(pl_observation_file(project))) {
+  for legacy in pl_project_collection(pl_read_jsonl_payloads(pl_observation_file(options))) {
     const converted = try {
       pl_observation_from_legacy(legacy, options)
     }
@@ -1195,9 +1200,8 @@ fn pl_migrate_observations(options = nil) -> nil {
 }
 
 fn pl_migrate_pending(options = nil) -> nil {
-  const project = pl_project_root(options)
   const pending = pl_project_value(
-    pl_read_jsonl_payloads(pl_pending_file(project)),
+    pl_read_jsonl_payloads(pl_pending_file(options)),
     {generatedAt: "", proposals: []},
   )
   for proposal in pending?.proposals ?? [] {
@@ -1228,9 +1232,8 @@ fn pl_migrate_pending(options = nil) -> nil {
 }
 
 fn pl_migrate_state(options = nil) -> nil {
-  const project = pl_project_root(options)
   const state = pl_project_value(
-    pl_read_jsonl_payloads(pl_state_file(project)),
+    pl_read_jsonl_payloads(pl_state_file(options)),
     {enabled: true, suppressedUntil: {}},
   )
   pl_replace_state(
