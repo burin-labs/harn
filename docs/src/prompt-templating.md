@@ -461,8 +461,21 @@ documents are parsed by the template engine and never by the Harn parser.
 Alongside diagnostics, the server folds `{{ if }}` / `{{ elif }}` / `{{ else }}`,
 `{{ for }}`, [`{{ section }}`](#logical-sections), [`{{ raw }}`](#raw-blocks),
 and multi-line [`{{# #}}` comments](#comments) — from the same parse the
-renderer uses, so folds always match the real block structure. See
-[Editor integration](editor-integration.md#prompt-templates).
+renderer uses, so folds always match the real block structure.
+
+Completion and hover read the same tables the engine dispatches on: the
+[filters](#built-in-filters) it can apply, the [section names](#logical-sections)
+it accepts, and the directive keywords it parses. One consequence is worth
+stating plainly — **`{{ endif }}` and `{{ endfor }}` do not exist**, so they are
+never suggested. Both `{{ if }}` and `{{ for }}` close with `{{ end }}`; writing
+`{{ endif }}` is not an error but a bare variable lookup, which renders as the
+literal text and leaves a block silently unclosed.
+
+Inside a `{{ for }}` body, the names the loop binds are offered as completions.
+Nothing else is: a template's other names come from the bindings its caller
+passes at render time, which the editor cannot see.
+
+See [Editor integration](editor-integration.md#prompt-templates).
 
 ## Preflight checks
 

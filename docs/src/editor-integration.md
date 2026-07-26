@@ -72,10 +72,18 @@ instead of diagnostics. Prompt documents get:
 |---------|-------------|
 | **Diagnostics** | Template parse errors plus the same `template-*` lint rules `harn lint` applies, positioned on the directive that caused them. Honours `[lint] disabled` and `[lint] template_variant_branch_threshold` from `harn.toml`. |
 | **Folding ranges** | `{{ if }}`/`{{ elif }}`/`{{ else }}`, `{{ for }}`, `{{ section }}`, `{{ raw }}`, and multi-line `{{# #}}` comments. Ranges come from the same parser that renders the template, so a fold can never disagree with the real block structure. |
+| **Completions** | Directive keywords, filters after `\|`, section names inside `{{ section "…" }}`, and the names bound by an enclosing `{{ for }}`. Every suggestion comes from the engine's own vocabulary, so only real closers are offered — `{{ endif }}` and `{{ endfor }}` do not exist and are never suggested. |
+| **Hover** | What a directive or filter does, the filter's signature, and — for a block opener — the keyword that closes it. |
 
-The language-specific capabilities above (completion, hover, go-to-definition,
-formatting, semantic tokens, …) do not apply to prompt documents and return
-nothing rather than Harn answers.
+Completion inside `{{ }}` is context-sensitive: the leading word offers
+keywords and in-scope loop bindings, text after a `|` offers filters, and a
+string literal offers section names only where section names are legal.
+Nothing is offered inside a `{{# comment #}}` or a `{{ raw }}` block, where
+the engine would not evaluate it anyway.
+
+The remaining capabilities above — go-to-definition, find references, rename,
+document symbols, semantic tokens, formatting, code actions — are Harn-language
+features and return nothing for prompt documents rather than Harn answers.
 
 See [Prompt templating](prompt-templating.md) for the template language itself.
 

@@ -13,6 +13,7 @@ mod document_kind;
 mod folding;
 mod handlers;
 mod helpers;
+mod prompt;
 mod references;
 mod rules;
 mod semantic_tokens;

@@ -54,7 +54,21 @@ impl<'a> Parser<'a> {
     }
 
     fn push_block(&mut self, kind: OutlineBlockKind, start: usize, end: usize) {
-        self.outline.push(OutlineBlock { kind, start, end });
+        self.outline.push(OutlineBlock {
+            kind,
+            start,
+            end,
+            bindings: Vec::new(),
+        });
+    }
+
+    fn push_loop_block(&mut self, start: usize, end: usize, bindings: Vec<String>) {
+        self.outline.push(OutlineBlock {
+            kind: OutlineBlockKind::For,
+            start,
+            end,
+            bindings,
+        });
     }
 
     fn parse_block(&mut self, stops: &[&str]) -> Result<Vec<Node>, TemplateError> {
@@ -296,7 +310,7 @@ impl<'a> Parser<'a> {
                 let fw = first_word(&tbody);
                 self.pos += 1;
                 if fw == "end" {
-                    self.push_block(OutlineBlockKind::For, site.start, tend);
+                    self.push_loop_block(site.start, tend, loop_bindings(&value_var, &key_var));
                     None
                 } else if fw == "else" {
                     let empty_body = self.parse_block(&["end"])?;
@@ -313,7 +327,7 @@ impl<'a> Parser<'a> {
                             ));
                         }
                     };
-                    self.push_block(OutlineBlockKind::For, site.start, loop_end);
+                    self.push_loop_block(site.start, loop_end, loop_bindings(&value_var, &key_var));
                     self.push_block(OutlineBlockKind::Else, tstart, loop_end);
                     Some(empty_body)
                 } else {
@@ -611,6 +625,17 @@ fn parse_dict_literal(
         pairs.push((k.to_string(), v));
     }
     Ok(pairs)
+}
+
+/// The names a `{{ for }}` binds inside its body, key first so they
+/// read in the order they were written.
+fn loop_bindings(value_var: &str, key_var: &Option<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(2);
+    if let Some(key) = key_var {
+        out.push(key.clone());
+    }
+    out.push(value_var.to_string());
+    out
 }
 
 fn first_word(s: &str) -> &str {

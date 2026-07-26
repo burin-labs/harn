@@ -5,6 +5,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::constants::{builtin_doc, builtin_signature, keyword_doc};
+use crate::document_kind::DocumentKind;
 use crate::helpers::{is_member_access, word_span_at_position};
 use crate::source_text::SourceText;
 use crate::symbols::{
@@ -122,12 +123,16 @@ impl HarnLsp {
             Some(s) => s,
             None => return Ok(None),
         };
-        if !state.kind.is_harn() {
-            return Ok(None);
-        }
+        let kind = state.kind;
         let source = state.source.clone();
         let symbols = state.symbols.clone();
         drop(docs);
+
+        match kind {
+            DocumentKind::Harn => {}
+            DocumentKind::Prompt => return Ok(crate::prompt::hover(&source, position)),
+            DocumentKind::Other => return Ok(None),
+        }
 
         let markup = |value: String| {
             Ok(Some(Hover {

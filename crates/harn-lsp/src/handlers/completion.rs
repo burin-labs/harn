@@ -8,6 +8,7 @@ use tower_lsp::lsp_types::*;
 use crate::constants::{
     builtin_details, builtin_doc, keyword_doc, DICT_METHODS, KEYWORDS, LIST_METHODS, STRING_METHODS,
 };
+use crate::document_kind::DocumentKind;
 use crate::helpers::{
     char_before_position, infer_dot_receiver_name, infer_dot_receiver_type, position_in_span,
 };
@@ -29,13 +30,21 @@ impl HarnLsp {
             None => return Ok(None),
         };
 
-        if !state.kind.is_harn() {
-            return Ok(None);
-        }
+        let kind = state.kind;
         let source = state.source.clone();
         let symbols = state.symbols.clone();
         let ast = state.cached_ast.clone();
         drop(docs);
+
+        match kind {
+            DocumentKind::Harn => {}
+            DocumentKind::Prompt => {
+                return Ok(Some(CompletionResponse::Array(crate::prompt::completions(
+                    &source, position,
+                ))));
+            }
+            DocumentKind::Other => return Ok(None),
+        }
 
         let mut items = Vec::new();
 
