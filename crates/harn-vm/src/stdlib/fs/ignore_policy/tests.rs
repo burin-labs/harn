@@ -464,9 +464,10 @@ fn a_sandbox_workspace_anchor_reads_its_own_rules_but_no_ancestor_rules() {
     write(&workspace, "local.txt", "\n");
     write(&workspace, "src/main.rs", "\n");
 
-    let mut policy = crate::orchestration::CapabilityPolicy::default();
-    policy.workspace_roots = vec![workspace.display().to_string()];
-    crate::orchestration::push_execution_policy(policy);
+    crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
+        workspace_roots: vec![workspace.display().to_string()],
+        ..Default::default()
+    });
     let entries = walk(&workspace, IgnorePolicy::Project);
     let anchor = super::project_root_for(&super::absolutize(&workspace));
     crate::orchestration::pop_execution_policy();
