@@ -40,7 +40,7 @@ mod tests;
 #[cfg(test)]
 mod tool_taxonomy_tests;
 
-pub use agent::AgentEvent;
+pub use agent::{AgentEvent, StagedWriteSummary};
 pub use host_injection::{
     AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
     SanitizationAction, SanitizationVerdict,

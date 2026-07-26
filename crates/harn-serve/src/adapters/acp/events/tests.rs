@@ -18,6 +18,7 @@ use super::super::schema::{
     ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS, HARN_AGENT_EVENT_METHOD,
     HARN_SESSION_UPDATE_EXTENSIONS,
 };
+use super::test_support::{self, update_harn_meta};
 use super::{AcpAgentEventSink, AcpOutput};
 
 async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
@@ -34,10 +35,6 @@ async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value
         notifications.push(serde_json::from_str(&line).expect("json"));
     }
     notifications
-}
-
-fn update_harn_meta(payload: &serde_json::Value) -> &serde_json::Value {
-    &payload["params"]["update"]["_meta"]["harn"]
 }
 
 fn fixture_handoff() -> HandoffArtifact {
@@ -289,6 +286,7 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
                 error: None,
             }],
         },
+        test_support::staged_writes_fixture_event(),
         AgentEvent::WorkerUpdate {
             session_id: "session-1".into(),
             worker_id: "worker-1".into(),
@@ -2203,6 +2201,7 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
         ("reminder_emitted", &["reminder"]),
         ("handoff", &["handoffId", "artifactId", "handoff"]),
         ("fs_watch", &["subscriptionId", "events"]),
+        ("progress", test_support::STAGED_WRITES_META_FIELDS),
         (
             "worker_update",
             &[

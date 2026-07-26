@@ -328,7 +328,9 @@ until they are committed or discarded. The ACP server also exposes
 `session/fs_mode` and `session/fs_commit_staged`, and emits
 `session/update` progress notifications with
 `_meta.harn.kind = "staged_writes_pending"` whenever the pending count
-or staged byte total changes.
+or staged byte total changes. `_meta.harn.pendingWrites` enumerates the
+reviewable path, create/modify/delete kind, signed byte delta, and originating
+tool-call snapshot id for every pending change.
 
 ## Per-tool-call FS snapshots
 

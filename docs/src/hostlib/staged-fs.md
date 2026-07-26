@@ -48,4 +48,10 @@ The ACP adapter exposes host controls for the same state:
 
 Every staging mutation emits a `session/update` progress extension with
 `_meta.harn.kind = "staged_writes_pending"`, `_meta.harn.pendingCount`,
-and `_meta.harn.totalBytes`.
+and `_meta.harn.totalBytes`. `_meta.harn.pendingWrites` is sorted by path
+and contains `{path, kind, byteDelta, snapshotId}` for each pending change.
+`kind` is `create`, `modify`, or `delete`; `byteDelta` is the signed change
+in bytes; and `snapshotId` is the ACP tool-call id that produced the final
+staged view, or `null` for mutations made outside a tool call. Clients can
+pass the advertised paths directly to `session/fs_commit_staged` or
+`session/fs_discard_staged`.

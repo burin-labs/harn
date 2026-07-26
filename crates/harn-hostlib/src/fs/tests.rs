@@ -2,9 +2,71 @@ use std::path::{Component, Path};
 
 use super::{
     hash_label, paths::sanitize_component, safe_text_patch, scope_conditional_replace_lock_root,
-    session_dir, set_mode, stage_write_or_none, staged_pending_paths, staged_status, FsMode,
-    SafeTextPatchResult, STATE_REL,
+    session_dir, set_mode, stage_delete_or_none, stage_write_or_none, staged_pending_paths,
+    staged_status, FsMode, SafeTextPatchResult, STATE_REL,
 };
+
+#[test]
+fn staged_status_attributes_review_details_to_the_final_mutating_tool_call() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().canonicalize().expect("canonical tempdir");
+    let created = root.join("created.txt");
+    let modified = root.join("modified.txt");
+    let deleted = root.join("deleted.txt");
+    std::fs::write(&modified, b"old").expect("modified preimage");
+    std::fs::write(&deleted, b"remove").expect("deleted preimage");
+    let session_id = format!(
+        "review-details-{}-{}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("test")
+    );
+
+    set_mode(&session_id, FsMode::Staged, Some(&root)).expect("set staged mode");
+    {
+        let _tool_call = harn_vm::agent_sessions::enter_current_tool_call("tc-create");
+        stage_write_or_none("test", &created, b"draft", true, true, Some(&session_id))
+            .expect("stage create")
+            .expect("staged create");
+    }
+    {
+        let _tool_call = harn_vm::agent_sessions::enter_current_tool_call("tc-modify");
+        stage_write_or_none("test", &modified, b"updated", true, true, Some(&session_id))
+            .expect("stage modify")
+            .expect("staged modify");
+    }
+    {
+        let _tool_call = harn_vm::agent_sessions::enter_current_tool_call("tc-delete");
+        stage_delete_or_none("test", &deleted, false, Some(&session_id))
+            .expect("stage delete")
+            .expect("staged delete");
+    }
+
+    let status = staged_status(&session_id).expect("staged status");
+    let find = |path: &Path| {
+        status
+            .pending_writes
+            .iter()
+            .find(|write| write.path == crate::tools::args::to_agent_path(path))
+            .expect("pending path")
+    };
+
+    let create = find(&created);
+    assert_eq!(create.event_summary().kind, "create");
+    assert_eq!(create.event_summary().byte_delta, 5);
+    assert_eq!(create.snapshot_id.as_deref(), Some("tc-create"));
+
+    let modify = find(&modified);
+    assert_eq!(modify.event_summary().kind, "modify");
+    assert_eq!(modify.event_summary().byte_delta, 4);
+    assert_eq!(modify.snapshot_id.as_deref(), Some("tc-modify"));
+
+    let delete = find(&deleted);
+    assert_eq!(delete.kind, "delete");
+    assert_eq!(delete.event_summary().byte_delta, -6);
+    assert_eq!(delete.snapshot_id.as_deref(), Some("tc-delete"));
+
+    let _ = super::remove_session_state(&session_id, Some(&root));
+}
 
 #[test]
 fn staged_pending_paths_preserve_native_filesystem_paths() {

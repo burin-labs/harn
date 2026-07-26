@@ -122,6 +122,34 @@
       "params": {
         "sessionId": "session-1",
         "update": {
+          "sessionUpdate": "progress",
+          "_meta": {
+            "harn": {
+              "phase": "fs_staging",
+              "message": "staged writes pending",
+              "progress": 1,
+              "kind": "staged_writes_pending",
+              "pendingCount": 1,
+              "totalBytes": 7,
+              "pendingWrites": [
+                {
+                  "path": "/tmp/project/src/lib.rs",
+                  "kind": "modify",
+                  "byteDelta": 3,
+                  "snapshotId": "tool-42"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
           "sessionUpdate": "worker_update",
           "workerId": "worker-1",
           "workerName": "reviewer",

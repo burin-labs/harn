@@ -20,9 +20,10 @@
         "path": { "type": "string" },
         "kind": { "type": "string", "enum": ["write", "delete", "move"] },
         "bytes_added": { "type": "integer", "minimum": 0 },
-        "bytes_removed": { "type": "integer", "minimum": 0 }
+        "bytes_removed": { "type": "integer", "minimum": 0 },
+        "snapshot_id": { "type": ["string", "null"] }
       },
-      "required": ["path", "kind", "bytes_added", "bytes_removed"],
+      "required": ["path", "kind", "bytes_added", "bytes_removed", "snapshot_id"],
       "additionalProperties": false
     }
   }

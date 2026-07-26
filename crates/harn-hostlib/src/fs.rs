@@ -136,10 +136,14 @@ enum StagedEntry {
         body_hash: String,
         len: u64,
         created_at_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_id: Option<String>,
     },
     Delete {
         recursive: bool,
         created_at_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_id: Option<String>,
     },
 }
 
@@ -156,6 +160,14 @@ impl StagedEntry {
         match self {
             Self::Write { len, .. } => *len,
             Self::Delete { .. } => 0,
+        }
+    }
+
+    fn snapshot_id(&self) -> Option<&str> {
+        match self {
+            Self::Write { snapshot_id, .. } | Self::Delete { snapshot_id, .. } => {
+                snapshot_id.as_deref()
+            }
         }
     }
 }
@@ -198,12 +210,29 @@ pub struct StagedStatus {
 pub struct PendingWrite {
     /// Absolute path affected by this staged change.
     pub path: String,
-    /// Change kind (`write`, `delete`, or reserved future `move`).
+    /// Staging operation kind (`write`, `delete`, or reserved future `move`).
     pub kind: &'static str,
     /// Bytes the final staged view adds at this path.
     pub bytes_added: u64,
     /// Bytes the final staged view removes at this path.
     pub bytes_removed: u64,
+    /// ACP tool-call id of the mutation that produced the final staged view.
+    pub snapshot_id: Option<String>,
+    change_kind: &'static str,
+}
+
+impl PendingWrite {
+    /// Convert the hostlib status row into the shared agent-event projection.
+    pub fn event_summary(&self) -> harn_vm::agent_events::StagedWriteSummary {
+        let added = i64::try_from(self.bytes_added).unwrap_or(i64::MAX);
+        let removed = i64::try_from(self.bytes_removed).unwrap_or(i64::MAX);
+        harn_vm::agent_events::StagedWriteSummary {
+            path: self.path.clone(),
+            kind: self.change_kind.to_string(),
+            byte_delta: added.saturating_sub(removed),
+            snapshot_id: self.snapshot_id.clone(),
+        }
+    }
 }
 
 /// Result returned after changing a session's filesystem mode.
@@ -512,6 +541,7 @@ pub(crate) fn stage_write_or_none(
             body_hash: hash,
             len: bytes.len() as u64,
             created_at_ms: now_ms(),
+            snapshot_id: harn_vm::agent_sessions::current_tool_call_id(),
         },
     );
     persist_state(&state, "write", Some(&key)).map_err(|err| HostlibError::Backend {
@@ -564,6 +594,7 @@ pub(crate) fn stage_delete_or_none(
             StagedEntry::Delete {
                 recursive,
                 created_at_ms: now_ms(),
+                snapshot_id: harn_vm::agent_sessions::current_tool_call_id(),
             },
         );
     }
@@ -770,6 +801,7 @@ fn safe_text_patch_staged(
             body_hash,
             len: new_bytes.len() as u64,
             created_at_ms: now_ms(),
+            snapshot_id: harn_vm::agent_sessions::current_tool_call_id(),
         },
     );
     persist_state(&state, "safe_text_patch", Some(&key)).map_err(|err| HostlibError::Backend {
@@ -1380,15 +1412,20 @@ fn status_from_state(state: &SessionState) -> StagedStatus {
         oldest = Some(oldest.map_or(entry.created_at_ms(), |old: i64| {
             old.min(entry.created_at_ms())
         }));
-        let (kind, bytes_added, bytes_removed) = match entry {
-            StagedEntry::Write { len, .. } => ("write", *len, disk_size(path).unwrap_or(0)),
-            StagedEntry::Delete { .. } => ("delete", 0, disk_size(path).unwrap_or(0)),
+        let (kind, change_kind, bytes_added, bytes_removed) = match entry {
+            StagedEntry::Write { len, .. } => match disk_size(path) {
+                Some(previous_len) => ("write", "modify", *len, previous_len),
+                None => ("write", "create", *len, 0),
+            },
+            StagedEntry::Delete { .. } => ("delete", "delete", 0, disk_size(path).unwrap_or(0)),
         };
         pending_writes.push(PendingWrite {
             path: to_agent_path(path),
             kind,
             bytes_added,
             bytes_removed,
+            snapshot_id: entry.snapshot_id().map(str::to_string),
+            change_kind,
         });
     }
     StagedStatus {
@@ -1449,5 +1486,10 @@ fn emit_staged_update(state: &SessionState) {
         session_id: state.session_id.clone(),
         pending_count: status.pending_writes.len(),
         total_bytes: status.total_bytes_pending,
+        pending_writes: status
+            .pending_writes
+            .iter()
+            .map(PendingWrite::event_summary)
+            .collect(),
     });
 }
