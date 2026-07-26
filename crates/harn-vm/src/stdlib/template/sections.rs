@@ -1,16 +1,7 @@
 use crate::value::VmValue;
 
 use super::error::TemplateError;
-
-const BUILTIN_SECTIONS: &[&str] = &[
-    "task",
-    "examples",
-    "output_format",
-    "tools",
-    "thinking_scaffold",
-    "chain_of_thought",
-    "system_framing",
-];
+use super::vocabulary::SECTIONS;
 
 pub(super) struct SectionRender {
     pub(super) text: String,
@@ -37,7 +28,7 @@ struct SectionProfile {
 }
 
 pub(super) fn is_builtin_section(name: &str) -> bool {
-    BUILTIN_SECTIONS.contains(&name)
+    SECTIONS.contains(&name)
 }
 
 pub(super) fn render_section(

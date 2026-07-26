@@ -210,9 +210,12 @@ polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
   `#[harn_builtin]` + the workspace-global `ALL_BUILTIN_DEFS` linkme slice.
 - Public CLI, builtin, or host-capability changes need user-facing docs and
   help text.
-- Prompt-template syntax changes also require
-  `editors/vscode/syntaxes/harn-prompt.tmLanguage.json`,
-  `conformance/tests/template_*`, and `CHANGELOG.md`.
+- Prompt-template syntax changes also require `conformance/tests/template_*`
+  and `CHANGELOG.md`. Declare any new keyword, filter, or section name in
+  `crates/harn-vm/src/stdlib/template/vocabulary.rs` and run
+  `make gen-prompt-grammar`; the VS Code grammar
+  (`editors/vscode/syntaxes/harn-prompt.tmLanguage.json`) is generated from
+  that vocabulary and `make check-prompt-grammar` fails on drift.
 
 ## Trust boundary
 

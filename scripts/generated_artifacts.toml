@@ -101,6 +101,19 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "prompt-grammar"
+description = "VS Code/Cursor TextMate grammar for .harn.prompt files, generated from the prompt-template keyword, filter, and section vocabulary the engine renders with."
+gen = "gen-prompt-grammar"
+check = "check-prompt-grammar"
+outputs = ["editors/vscode/syntaxes/harn-prompt.tmLanguage.json"]
+sources = [
+  "crates/harn-vm/src/stdlib/template/vocabulary.rs",
+  "crates/harn-cli/src/commands/dump_prompt_grammar.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "language-spec"
 description = "spec/HARN_SPEC.md (single-file assembly), docs/src/language-spec.md (docs landing page), the per-chapter docs pages under docs/src/spec/language/, and the chapter list in docs/src/SUMMARY.md are all generated from the per-chapter sources in spec/chapters/."
 gen = "sync-language-spec"
@@ -424,6 +437,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "lint-agent-path-normalization" = "source"
 # --- binary: verdict depends on current executable semantics (check-drift-binary) ---
 "check-highlight" = "binary"
+"check-prompt-grammar" = "binary"
 "check-protocol-artifacts" = "binary"
 "check-connector-schemas" = "binary"
 "check-session-bundle-schema" = "binary"

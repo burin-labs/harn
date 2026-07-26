@@ -239,3 +239,41 @@ pub(super) fn apply_filter(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::vocabulary::FILTERS;
+
+    /// The dispatch above and the declared filter vocabulary must name the same
+    /// set. Editors highlight from the declaration, so a filter implemented
+    /// here but never declared would go un-highlighted, and a declared filter
+    /// with no arm would highlight as valid while failing at render time.
+    ///
+    /// Reading this file's own source is what makes the check exact: the arms
+    /// are data the compiler otherwise erases, and enumerating them any other
+    /// way would just be a third copy of the list.
+    #[test]
+    fn declared_filters_match_the_dispatch_arms() {
+        let source = include_str!("filters.rs");
+        let implemented: Vec<&str> = source
+            .lines()
+            .filter_map(|line| line.strip_prefix("        \"")?.strip_suffix("\" => {"))
+            .collect();
+
+        assert!(
+            !implemented.is_empty(),
+            "no filter arms found — the arm layout changed, so this guard is no \
+             longer checking anything. Update the scan in this test."
+        );
+
+        let implemented_set: std::collections::BTreeSet<&str> =
+            implemented.iter().copied().collect();
+        let declared_set: std::collections::BTreeSet<&str> = FILTERS.iter().copied().collect();
+
+        assert_eq!(
+            implemented_set, declared_set,
+            "filter dispatch and `vocabulary::FILTERS` disagree.\n\
+             Add the filter to both, then run `make gen-prompt-grammar`."
+        );
+    }
+}

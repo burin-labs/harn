@@ -146,8 +146,15 @@ function activate(context) {
     const serverOptions = {
         command: lspPath,
     };
+    // A server without prompt-file support simply never reports diagnostics for
+    // `harn-prompt` documents; syntax highlighting comes from the TextMate
+    // grammar either way, so listing the language here is safe against older
+    // `harn-lsp` builds.
     const clientOptions = {
-        documentSelector: [{ scheme: "file", language: "harn" }],
+        documentSelector: [
+            { scheme: "file", language: "harn" },
+            { scheme: "file", language: "harn-prompt" },
+        ],
     };
     client = new node_1.LanguageClient("harn-lsp", "Harn Language Server", serverOptions, clientOptions);
     client.start().catch((err) => {

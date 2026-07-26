@@ -1033,28 +1033,13 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 }
             }
         },
-        Command::DumpHighlightKeywords(args) => {
-            commands::dump_highlight_keywords::run(&args.output, args.check);
-        }
-        Command::DumpTriggerQuickref(args) => {
-            commands::dump_trigger_quickref::run(&args.output, args.check);
-        }
-        Command::DumpConnectorMatrix(args) => {
-            commands::check::connector_matrix::run_docs(&args.output, &args.sources, args.check);
-        }
-        Command::DumpProtocolArtifacts(args) => {
-            commands::dump_protocol_artifacts::run(
-                &args.output_dir,
-                args.check,
-                args.artifact_version.as_deref(),
-            );
-        }
-        Command::ConnectorSchemaCodegen(args) => {
-            let code = commands::connector_schema_codegen::run(&args);
-            if code != 0 {
-                process::exit(code);
-            }
-        }
+        // Hidden dev-only generators; see commands::generate.
+        Command::DumpHighlightKeywords(_)
+        | Command::DumpPromptGrammar(_)
+        | Command::DumpTriggerQuickref(_)
+        | Command::DumpConnectorMatrix(_)
+        | Command::DumpProtocolArtifacts(_)
+        | Command::ConnectorSchemaCodegen(_) => commands::generate::dispatch(subcommand),
         Command::Time(args) => match args.command {
             TimeCommand::Run(time_args) => commands::time::run(time_args).await,
         },
