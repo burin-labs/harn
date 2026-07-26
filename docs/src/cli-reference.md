@@ -96,9 +96,13 @@ commands. In `isolated` and `granted`, platform SDKs cannot silently fall back
 to home-directory profiles, metadata services, or application-default
 credentials. Supply the required values as grants or choose `inherited`.
 
-The environment policy is separate from the filesystem/process sandbox and
-from approval policy. `--no-sandbox` does not disable the environment policy,
-and an environment grant does not grant file, network, or tool access.
+This policy governs environment *variables* only. It is a different boundary
+from the filesystem and process sandbox, which decides which directories a run
+may touch and what a spawned command may do. See
+[Process sandboxing](./sandboxing.md) for that one. Neither boundary widens the
+other: `--no-sandbox` leaves the environment policy fully in force, and an
+environment grant gives no file, network, or tool access. Approval policy is a
+third, separate thing again.
 
 Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR]`:
 
@@ -146,6 +150,19 @@ observability controls, global rate limits, and the host's
 require a restart to change. A child policy cannot hide or override them. They
 are not session values.
 
+Every declared grant is disclosed on stderr at launch (its name, source kind,
+and exact environment target, if any—never the value) and recorded as a
+non-secret receipt in the `--attest` provenance log.
+
+The disclosure names only a departure from the launcher's own environment.
+`isolated` and `granted` always announce themselves. The default `inherited`
+policy with no grants prints nothing, so a plain `harn run` leaves stderr clean
+for `--summary-fd` and `--rusage-fd` consumers. The sandbox delta line described
+in [Sandboxing](./sandboxing.md) follows the same rule.
+
+Both `--environment-policy` and `--grant` are also accepted by
+[`harn time run`](#harn-time), which shares `harn run`'s confinement surface.
+
 Terminology:
 
 - **Launcher**: the process that starts a Harn session, such as the `harn` CLI
@@ -161,11 +178,6 @@ Terminology:
 - **Sandbox**: the separate file/process/network boundary.
 - **Approval**: permission for a risky operation; it does not add environment
   values.
-
-Every declared grant is disclosed on stderr at launch (its name, source kind,
-and exact environment target, if any—never the value) and recorded as a
-non-secret receipt in the `--attest` provenance log. Both flags are also accepted by
-[`harn time run`](#harn-time), which shares `harn run`'s confinement surface.
 
 ### `--json` event stream
 
