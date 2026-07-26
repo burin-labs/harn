@@ -81,6 +81,11 @@ on:
         required: false
         type: string
         default: ''
+      legacy_provenance_override:
+        description: 'Audited JSON binding exact SHA-256 values for unattested archives from an older release. Empty fails closed.'
+        required: false
+        type: string
+        default: ''
       benchmark_only:
         description: 'Build only the requested targets from the dispatched ref; never sign, package, upload, finalize a release, publish a container, or save caches.'
         required: false
@@ -137,6 +142,7 @@ jobs:
       should_build_binaries: ${{ steps.resolve.outputs.should_build_binaries }}
       should_finalize_release: ${{ steps.resolve.outputs.should_finalize_release }}
       should_publish_container: ${{ steps.resolve.outputs.should_publish_container }}
+      make_latest: ${{ steps.resolve.outputs.make_latest }}
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
@@ -159,6 +165,7 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
           INPUT_TARGETS: ${{ inputs.targets }}
+          INPUT_LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
           INPUT_BENCHMARK_CARGO_BLOAT: ${{ inputs.benchmark_cargo_bloat && 'true' || 'false' }}
           INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'policy' }}
@@ -173,6 +180,7 @@ jobs:
           SHOULD_BUILD_BINARIES=false
           SHOULD_FINALIZE_RELEASE=false
           SHOULD_PUBLISH_CONTAINER=false
+          MAKE_LATEST=false
           BUILD_MODE=""
           RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
           FULL_BUILD_MATRIX='[]'
@@ -251,7 +259,11 @@ jobs:
             rm -rf "$anonymous_docker_config"
             mkdir -p "$anonymous_docker_config"
             MISSING_PUBLIC_CONTAINER_TAGS=()
-            for TAG in "$version" "$major_minor" latest; do
+            CONTAINER_TAGS=("$version")
+            if [[ "$MAKE_LATEST" == "true" ]]; then
+              CONTAINER_TAGS+=("$major_minor" latest)
+            fi
+            for TAG in "${CONTAINER_TAGS[@]}"; do
               IMAGE="ghcr.io/burin-labs/harn:${TAG}"
               if docker --config "$anonymous_docker_config" manifest inspect "$IMAGE" >/dev/null 2>&1; then
                 echo "::notice::Container image $IMAGE is already publicly pullable."
@@ -292,6 +304,12 @@ jobs:
           REQUESTED_TARGET_COUNT="$(jq 'length' <<<"$REQUESTED_TARGETS_JSON")"
           if (( REQUESTED_TARGET_COUNT > 0 )); then
             validate_requested_targets "$REQUESTED_TARGETS_JSON"
+          fi
+          if [[ -n "$INPUT_LEGACY_PROVENANCE_OVERRIDE" ]] &&
+             [[ "$EVENT_NAME" != "workflow_dispatch" || -z "$INPUT_TAG" ||
+                "$INPUT_WARM_CACHE_ONLY" == "true" || "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
+            echo "::error::legacy_provenance_override is only valid for an explicit workflow_dispatch release-tag recovery"
+            exit 1
           fi
           if [[ "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
             echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
@@ -350,6 +368,10 @@ jobs:
           elif [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
             IS_RELEASE=true
             if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+                echo "::error::Release recovery must be dispatched from the main branch so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
+                exit 1
+              fi
               BUILD_MODE=recovery
             else
               BUILD_MODE=primary
@@ -419,6 +441,23 @@ jobs:
           MAJOR_MINOR="$(echo "$VERSION" | awk -F. '{print $1"."$2}')"
 
           if [[ "$IS_RELEASE" == "true" ]]; then
+            LATEST_REPO_TAG="$(
+              git ls-remote --tags origin 'refs/tags/v*' \
+                | awk '{print $2}' \
+                | sed -E 's#^refs/tags/##; s/\^\{\}$//' \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                | sort -Vu \
+                | tail -n1 || true
+            )"
+            if [[ -z "$LATEST_REPO_TAG" ]]; then
+              echo "::error::Could not resolve the repository's latest vX.Y.Z tag"
+              exit 1
+            fi
+            if [[ "$REF" == "$LATEST_REPO_TAG" ]]; then
+              MAKE_LATEST=true
+            else
+              echo "::notice::Recovering historical $REF; preserving GitHub /releases/latest and moving container tags at $LATEST_REPO_TAG."
+            fi
             EXPECTED_ARCHIVES=(
               "harn-aarch64-apple-darwin.tar.gz"
               "harn-aarch64-unknown-linux-gnu.tar.gz"
@@ -510,7 +549,8 @@ jobs:
 
               if release_container_tags_missing "$VERSION" "$MAJOR_MINOR"; then
                 SHOULD_PUBLISH_CONTAINER=true
-                echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Publishing container tags."
+                SHOULD_FINALIZE_RELEASE=true
+                echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Re-verifying release archives before publishing container tags."
               else
                 echo "::notice::All release container tags are publicly pullable; skipping container publish."
               fi
@@ -525,6 +565,7 @@ jobs:
             echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
             echo "should_finalize_release=$SHOULD_FINALIZE_RELEASE"
             echo "should_publish_container=$SHOULD_PUBLISH_CONTAINER"
+            echo "make_latest=$MAKE_LATEST"
             echo "build_mode=$BUILD_MODE"
             echo "runner_profile=$RUNNER_PROFILE"
             echo "build_matrix<<__JSON__"
@@ -545,6 +586,7 @@ jobs:
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
             echo "| Finalize release | $SHOULD_FINALIZE_RELEASE |"
             echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
+            echo "| Move latest tags | $MAKE_LATEST |"
             echo "| Requested targets | \`$REQUESTED_TARGETS_JSON\` |"
             echo "| Build matrix | \`$BUILD_MATRIX\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -639,7 +681,10 @@ jobs:
     # as soon as it finishes (incremental per-arch publish).
     permissions:
       actions: write
+      artifact-metadata: write
+      attestations: write
       contents: write
+      id-token: write
     # Runner labels are resolved from release-runner-policy.json in setup.
     # Warm, primary, recovery, and explicit benchmark capacity are separate
     # policy dimensions; build jobs consume the selected label directly.
@@ -1128,6 +1173,82 @@ jobs:
           path: dist/binary-size-${{ matrix.target }}
           if-no-files-found: ignore
 
+      - name: Describe release archive provenance
+        id: release-provenance
+        if: needs.setup.outputs.is_release == 'true'
+        shell: bash
+        env:
+          BUILD_POLICY_REF: ${{ github.workflow_ref }}
+          BUILD_POLICY_REVISION: ${{ github.workflow_sha }}
+          RELEASE_REF: ${{ needs.setup.outputs.ref }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          if (( ${#archives[@]} != 1 )); then
+            echo "::error::Expected exactly one packaged archive for $RELEASE_TARGET, found ${#archives[@]}."
+            exit 1
+          fi
+          archive="${archives[0]}"
+          archive_name="$(basename "$archive")"
+          archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+          source_commit="$(git rev-parse HEAD)"
+          if [[ "$source_commit" != "$HARN_BUILD_REVISION" ]]; then
+            echo "::error::Checked-out source moved from $HARN_BUILD_REVISION to $source_commit before attestation."
+            exit 1
+          fi
+          jq -n \
+            --arg schema "harn.release_archive_provenance.v1" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$RELEASE_REF" \
+            --arg sourceCommit "$source_commit" \
+            --arg target "$RELEASE_TARGET" \
+            --arg archive "$archive_name" \
+            --arg sha256 "$archive_sha256" \
+            --arg policyWorkflow ".github/workflows/build-release-binaries.yml" \
+            --arg policyRef "$BUILD_POLICY_REF" \
+            --arg policyRevision "$BUILD_POLICY_REVISION" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg job "$GITHUB_JOB" \
+            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{
+              schemaVersion: $schema,
+              repository: $repository,
+              tag: $tag,
+              sourceCommit: $sourceCommit,
+              target: $target,
+              archive: $archive,
+              sha256: $sha256,
+              buildPolicy: {
+                workflow: $policyWorkflow,
+                ref: $policyRef,
+                revision: $policyRevision
+              },
+              workflow: {
+                runId: $runId,
+                runAttempt: $runAttempt,
+                job: $job,
+                url: $runUrl
+              }
+            }' > "$RUNNER_TEMP/release-archive-provenance.json"
+          {
+            echo "archive=$archive"
+            echo "predicate=$RUNNER_TEMP/release-archive-provenance.json"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Attest release archive provenance
+        if: needs.setup.outputs.is_release == 'true'
+        # Recovery runs load current policy from main but build an older tag.
+        # A custom predicate records that checked-out source; the verifier also
+        # pins the signer workflow and certificate-backed policy revision.
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: ${{ steps.release-provenance.outputs.archive }}
+          predicate-type: https://harnlang.com/attestations/release-archive/v1
+          predicate-path: ${{ steps.release-provenance.outputs.predicate }}
+
       - name: Upload artifact (unix)
         if: needs.setup.outputs.is_release == 'true' && runner.os != 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1284,8 +1405,8 @@ jobs:
           # recovery / re-release path isn't.
           tags: |
             type=raw,value=${{ needs.setup.outputs.version }}
-            type=raw,value=${{ needs.setup.outputs.major_minor }}
-            type=raw,value=latest
+            type=raw,value=${{ needs.setup.outputs.major_minor }},enable=${{ needs.setup.outputs.make_latest == 'true' }}
+            type=raw,value=latest,enable=${{ needs.setup.outputs.make_latest == 'true' }}
 
       - name: Build and push container image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -1301,6 +1422,7 @@ jobs:
 
       - name: Verify public container tags
         env:
+          MAKE_LATEST: ${{ needs.setup.outputs.make_latest }}
           VERSION: ${{ needs.setup.outputs.version }}
           MAJOR_MINOR: ${{ needs.setup.outputs.major_minor }}
         run: |
@@ -1310,7 +1432,11 @@ jobs:
           rm -rf "$anonymous_config"
           mkdir -p "$anonymous_config"
 
-          for tag in "$VERSION" "$MAJOR_MINOR" latest; do
+          tags=("$VERSION")
+          if [[ "$MAKE_LATEST" == "true" ]]; then
+            tags+=("$MAJOR_MINOR" latest)
+          fi
+          for tag in "${tags[@]}"; do
             image="ghcr.io/burin-labs/harn:${tag}"
             if ! docker --config "$anonymous_config" manifest inspect "$image" >/dev/null; then
               {
@@ -1342,8 +1468,16 @@ jobs:
       (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
+      attestations: read
       contents: write
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Preserve current release provenance policy
+        run: cp scripts/verify_release_archive_provenance.sh "$RUNNER_TEMP/verify_release_archive_provenance.sh"
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.setup.outputs.ref }}
@@ -1397,6 +1531,23 @@ jobs:
             echo "| Archive count | ${#expected[@]} |"
             echo "| Duration | ${duration}s |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify release archive provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+          args=(
+            --artifacts-dir artifacts
+            --tag "$REF"
+            --repo "$GITHUB_REPOSITORY"
+          )
+          if [[ -n "$LEGACY_PROVENANCE_OVERRIDE" ]]; then
+            args+=(--legacy-override "$LEGACY_PROVENANCE_OVERRIDE")
+          fi
+          bash "$RUNNER_TEMP/verify_release_archive_provenance.sh" "${args[@]}"
 
       - name: Render release notes from changelog
         # This job has no Rust toolchain (it only assembles artifacts), so
@@ -1488,19 +1639,18 @@ jobs:
 
       - name: Finalize GitHub release
         # Every leg has landed. Attach SHA256SUMS + the asset manifest, write
-        # the real notes, and flip the prerelease placeholder created by
-        # prepare_release into the canonical latest release. make_latest here
-        # is what moves /releases/latest (and thus install.sh / `harn upgrade`)
-        # onto this version — only now that checksums exist and all archives
-        # are present. The per-arch archives were already uploaded incrementally
-        # by each build leg; re-listing them here is a harmless idempotent
-        # overwrite that also covers any leg whose inline upload was retried.
+        # the real notes, and clear the prerelease placeholder created by
+        # prepare_release. Only the highest repository semver tag may move
+        # /releases/latest (and thus install.sh / `harn upgrade`); historical
+        # recovery preserves that pointer. The per-arch archives were already
+        # uploaded incrementally by each build leg; re-listing them here is a
+        # harmless idempotent overwrite that also covers any retried upload.
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ needs.setup.outputs.ref }}
           body_path: release-notes.md
           prerelease: false
-          make_latest: true
+          make_latest: ${{ needs.setup.outputs.make_latest }}
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip

@@ -87,6 +87,43 @@ The pinned URL is the one downstream packagers should embed in
 checked-in version files; the latest URL is for tooling that wants to
 follow the moving target.
 
+## Integrity metadata versus build provenance
+
+`SHA256SUMS` and `release-assets.json` are consumer integrity metadata. They
+let a downloader detect corruption or substitution relative to the metadata it
+fetched, but they do not prove which source revision or workflow produced an
+archive.
+
+Every new release archive therefore also has a GitHub artifact attestation with
+predicate type
+`https://harnlang.com/attestations/release-archive/v1`. The signed predicate
+binds the archive digest and filename to the target triple, release tag, peeled
+source commit, workflow run/job, and exact build-policy revision. Release
+finalization verifies that binding for all five archives before regenerating
+either consumer manifest or setting `prerelease: false` / `make_latest: true`.
+Recovery runs may combine archives from multiple workflow runs, but all five
+must resolve to the same GitHub-verified signed tag commit.
+
+Releases through v0.10.40 predate attestations and fail closed by default. A
+recovery operator may provide `legacy_provenance_override` only as an explicit
+workflow-dispatch input. Later releases cannot use the override. The JSON must
+bind the exact tag and peeled source commit, include an audit reason, and list
+the SHA-256 of each unattested archive:
+
+```json
+{
+  "tag": "v0.10.16",
+  "sourceCommit": "ceaa1b048cef75cb1b280cb4bc7213014f4fe755",
+  "reason": "Compared with retained artifacts from the original successful jobs.",
+  "archives": {
+    "harn-aarch64-apple-darwin.tar.gz": "<lowercase sha256>"
+  }
+}
+```
+
+Attested rebuilt archives are still verified normally; the override admits
+only the listed legacy bytes and is surfaced as a workflow warning.
+
 ## Adding a new target triple
 
 1. Add the target and its warm, primary, recovery, standard, and fast runner
