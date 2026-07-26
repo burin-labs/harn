@@ -6,7 +6,7 @@ import "std/session-store"
  * fields printed are deterministic apart from the opaque canonical hashes.
  */
 pipeline default() {
-  const root = path_join(".harn", "tmp", "harn-session-store-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-session-store-" + uuid())
   const sid = "burin.agent_context.memories.project"
   const opts = {root: root, kind_type: "AgentMemory"}
   const first = session_store_append(

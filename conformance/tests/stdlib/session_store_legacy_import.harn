@@ -6,7 +6,7 @@ import "std/session-store"
  * after cutover.
  */
 pipeline default() {
-  const root = path_join(".harn", "tmp", "harn-session-import-" + uuid())
+  const root = path_join(harness.fs.temp_dir(), "harn-session-import-" + uuid())
   const sid = "legacy.public"
   const legacy_dir = path_join(root, ".harn", "session-store")
   const legacy_path = path_join(legacy_dir, sid + ".jsonl")
@@ -49,7 +49,7 @@ pipeline default() {
   __io_println(len(session_store_events(sid, {root: root})))
   __io_println(harness.fs.read_text(legacy_path) == legacy_before)
   __io_println(
-    ends_with(session_store_path(sid, {root: root}), "/" + legacy_path)
+    ends_with(session_store_path(sid, {root: root}), legacy_path)
       && ends_with(
       session_store_database_path({root: root}),
       "/.harn/session-store.sqlite",

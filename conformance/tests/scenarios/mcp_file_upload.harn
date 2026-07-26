@@ -5,7 +5,7 @@ pipeline default() {
   const root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, root))
   const server_path = path_join(root, "conformance/helpers/mcp_file_input_server.harn")
-  const sample_path = path_join(root, ".harn", "mcp-file-upload.txt")
+  const sample_path = path_join(harness.fs.temp_dir(), "mcp-file-upload.txt")
   ensure_parent_dir(sample_path)
   harness.fs.write_text(sample_path, "hello upload")
   const config = harn.mcp.configure(
