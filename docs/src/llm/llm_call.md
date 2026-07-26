@@ -225,6 +225,7 @@ route owners. Do not combine them.
 | `system` | string \| list | System text or ordered `SystemFragment` values. |
 | `messages` | list | Full canonical message history; supersedes the positional prompt. |
 | `session_id` | string | Continue a session opened with `agent_session_open`. |
+| `rate_limit_consumer_id` | string | Stable fairness identity for shared provider quotas; defaults to `session_id`. |
 | `mock_scope` | string | Deterministic mock-fixture scope; real providers ignore it. |
 | `context_profile` | dict | Context-selection profile. |
 | `capabilities` | any | Explicit required capabilities. |

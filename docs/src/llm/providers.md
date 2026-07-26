@@ -1056,6 +1056,22 @@ share one explicit file can set `HARN_LLM_RATE_LIMIT_STATE_PATH`; constrained
 tests or embeddings can disable the durable layer with
 `HARN_LLM_RATE_LIMIT_DURABLE=0`.
 
+Agent sessions sharing that ledger are admitted fairly by
+`rate_limit_consumer_id`, which defaults to `session_id`. Embedding hosts can
+use a stable user or tenant id across otherwise independent sessions. Once a
+route queues, Harn rotates capacity across consumers instead of letting one
+busy consumer repeatedly take the next opening. A queued call emits a
+structured `progress_reported` event and a
+`harn.llm.rate_limit_queue.v1` observability receipt with its queue position,
+expected wait, and that consumer's served/queued/rerouted counters. Calls older
+than one quota window receive starvation priority.
+
+`HARN_LLM_RATE_LIMIT_MAX_WAIT_MS` bounds one queue wait (30 seconds by
+default). When `equivalent_failover` supplies another catalog-equivalent route,
+reaching that threshold produces a typed `rate_limit` routing failure and
+advances to the alternate; without an alternate, Harn preserves the bounded
+wait behavior and attempts the configured provider.
+
 ## Troubleshooting
 
 - **"No API key found"** — Check that the correct environment variable is

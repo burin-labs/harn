@@ -373,6 +373,13 @@ pub(crate) struct LlmCallOptions {
     /// own lifecycle events. `None` for raw `llm_call(...)` invocations
     /// from script context — those have no agent session to attach to.
     pub session_id: Option<String>,
+    /// Stable fairness identity for shared provider rate-limit admission.
+    /// Defaults to `session_id`; embedding hosts may set it explicitly to
+    /// group several independent sessions under one consumer budget.
+    pub rate_limit_consumer_id: Option<String>,
+    /// Internal routing signal: another link remains available if this link
+    /// exceeds its bounded fair-admission wait.
+    pub(crate) rate_limit_reroute_on_timeout: bool,
     /// Mock fixture scope this call declares (`mock_scope` in the options
     /// dict). Routes the call to a scoped fixture bucket when a mock provider
     /// serves it; ignored by real providers. `None` resolves to the default
@@ -537,6 +544,8 @@ impl Default for LlmCallOptions {
             routing_policy: None,
             region: None,
             session_id: None,
+            rate_limit_consumer_id: None,
+            rate_limit_reroute_on_timeout: false,
             mock_scope: None,
             dispatch_provenance: None,
             reminders: None,

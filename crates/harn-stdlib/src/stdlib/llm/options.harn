@@ -94,6 +94,7 @@ pub type LlmCallOptions = {
   system?: string | list<string | SystemFragment>,
   messages?: list,
   session_id?: string,
+  rate_limit_consumer_id?: string,
   mock_scope?: string,
   context_profile?: dict,
   capabilities?: any,

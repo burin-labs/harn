@@ -154,6 +154,9 @@ pub(crate) fn extract_llm_options(
     let session_id = opt_str(&options, "session_id")
         .filter(|value| !value.is_empty())
         .or_else(crate::agent_sessions::current_session_id);
+    let rate_limit_consumer_id = opt_str(&options, "rate_limit_consumer_id")
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| session_id.clone());
     // Mock fixture scope for this call. Consumed only when a mock provider
     // serves the request; real providers ignore it.
     let mock_scope = opt_str(&options, "mock_scope").filter(|value| !value.trim().is_empty());
@@ -705,6 +708,8 @@ pub(crate) fn extract_llm_options(
         routing_policy,
         region: None,
         session_id,
+        rate_limit_consumer_id,
+        rate_limit_reroute_on_timeout: false,
         mock_scope,
         dispatch_provenance,
         reminders,
@@ -1132,6 +1137,26 @@ mod cache_default_tests {
         options.put_str("provider", "mock");
         options.put_str("model", "no-cache-model");
         options
+    }
+
+    #[test]
+    fn rate_limit_consumer_identity_defaults_to_session_and_can_be_overridden() {
+        let mut options = non_caching_route();
+        options.put_str("session_id", "session-a");
+        let session_scoped = opts_with(options);
+        assert_eq!(
+            session_scoped.rate_limit_consumer_id.as_deref(),
+            Some("session-a")
+        );
+
+        let mut options = non_caching_route();
+        options.put_str("session_id", "session-b");
+        options.put_str("rate_limit_consumer_id", "tenant-7");
+        let tenant_scoped = opts_with(options);
+        assert_eq!(
+            tenant_scoped.rate_limit_consumer_id.as_deref(),
+            Some("tenant-7")
+        );
     }
 
     #[test]
