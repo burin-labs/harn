@@ -1,0 +1,63 @@
+// The three automatic-abort policies of `settle_with_abort`, all pinned to
+// `max_concurrent: 1` so the schedule is exact:
+//   - `max_failures` trips the token after that many failures;
+//   - `abort_on` decides which failures count, so a transient error can be
+//     collected while a terminal one stops the run;
+//   - neither option means the form behaves exactly like `parallel settle`.
+import { settle_with_abort } from "std/abort"
+
+pipeline default() {
+  const threshold = settle_with_abort(
+    [1, 2, 3, 4],
+    { item ->
+      if item == 2 {
+        throw "boom"
+      }
+      return item
+    },
+    {max_concurrent: 1, max_failures: 1},
+  )
+  __io_println(threshold.succeeded)
+  __io_println(threshold.failed)
+  __io_println(threshold.abandoned)
+  __io_println(to_string(threshold.aborted))
+  const selective = settle_with_abort(
+    [1, 2, 3, 4],
+    { item ->
+      if item <= 2 {
+        return Err({code: "network", message: "blip"})
+      }
+      if item == 3 {
+        return Err({code: "terminal", message: "hard"})
+      }
+      return item
+    },
+    {
+      max_concurrent: 1,
+      abort_on: fn(err, _index) {
+        if err?.code == "terminal" {
+          return {code: "terminal", message: "decisive failure"}
+        }
+        return nil
+      },
+    },
+  )
+  __io_println(selective.succeeded)
+  __io_println(selective.failed)
+  __io_println(selective.abandoned)
+  __io_println(to_string(selective.aborted))
+  __io_println(selective.reason?.code)
+  const collect = settle_with_abort(
+    [1, 2, 3],
+    { item ->
+      if item == 2 {
+        throw "boom"
+      }
+      return item
+    },
+  )
+  __io_println(collect.succeeded)
+  __io_println(collect.failed)
+  __io_println(collect.abandoned)
+  __io_println(to_string(collect.aborted))
+}

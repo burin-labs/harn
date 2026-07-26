@@ -173,6 +173,138 @@ The return value is a dict with:
 This is useful when you want to process all items and handle failures
 after the fact, rather than aborting on the first error.
 
+### `succeeded` / `failed` count throws, not `Err` returns
+
+A branch counts as failed only when it **throws**. A branch that *returns*
+`Result.Err` returned normally, so `parallel settle` wraps that value like any
+other: it lands in `results` as `Ok(Err(..))` and `succeeded` counts it.
+
+```harn
+const outcome = parallel settle [1, 2, 3] { item ->
+  if item == 2 {
+    return Err({code: "terminal", message: "item 2 failed"})
+  }
+  item * 10
+}
+
+log(outcome.succeeded)  // 3 — not 2
+log(outcome.failed)     // 0 — not 1
+log(outcome.results[1])  // Result.Ok(Result.Err({code: "terminal", ...}))
+```
+
+This matters whenever a branch reports a failing verdict as data rather than by
+throwing — a poll loop returning a terminal status, or anything built on
+`Result`. Do not trust `outcome.failed` in that case; unwrap each result and
+check `is_err` on the inner value, or use
+[`settle_with_abort`](#cooperative-abort-stdabort), which treats a thrown error
+and a returned `Result.Err` identically and flattens both to `Err` in one
+uniform `results` list.
+
+## Cooperative abort: `std/abort`
+
+`parallel settle` is the right form whenever you need every branch's
+structured outcome — but it never stops anything. When branches poll, wait, or
+retry, a sibling reaching a terminal verdict can leave the rest spinning on
+work that no longer matters. The classic case is a release gate that fans out
+across hosted CI lanes: one lane goes red, the run is already doomed, and the
+other lanes keep polling for another hour.
+
+Neither built-in form fits. `parallel` / `parallel each` do cancel siblings,
+but they discard per-branch results and only trigger on a *throw*, not on an
+`Err` return value. `parallel_race` is first-success. `std/abort` supplies the
+missing combination: run everything, record every outcome, and let a branch
+that knows the run is doomed stop the ones that have not started.
+
+```harn,ignore
+import { abort_requested, decisive_error, request_abort, settle_with_abort } from "std/abort"
+
+const outcome = settle_with_abort(lanes, { lane, token ->
+  let polls = 0
+  while polls < 720 {
+    const status = poll_lane(lane)
+    if status == "failed" {
+      // Tell the siblings the run is doomed, then report our own verdict.
+      let _ = request_abort(token, {code: "lane_failed", message: "${lane} went red"})
+      return Err({code: "terminal", message: "${lane} went red"})
+    }
+    if status == "passed" {
+      return lane_proof(lane)
+    }
+    // The branch chooses its own safe checkpoint: right before the next wait.
+    if abort_requested(token) {
+      return Err({code: "stopped_waiting", message: "a sibling lane already failed"})
+    }
+    sleep(10000)
+    polls = polls + 1
+  }
+  return Err({code: "timeout", message: "${lane} never became terminal"})
+}, {max_concurrent: 3})
+
+log(outcome.aborted)                 // true
+log(outcome.reason?.code)            // "lane_failed"
+log(decisive_error(outcome)?.code)   // "terminal" — never the lane that just stopped waiting
+```
+
+`settle_with_abort(items, body, options?)` returns one `Result` per input item
+in source order, so every `std/settled` helper works on `outcome.results`
+unchanged.
+
+| Field | Type | Description |
+|---|---|---|
+| `results` | list | One `Result` per item, in source order |
+| `succeeded` | int | Branches that produced a value |
+| `failed` | int | Branches that threw or returned `Result.Err` |
+| `abandoned` | int | Branches that never started because the token had tripped |
+| `aborted` | bool | Whether the token was tripped |
+| `reason` | `AbortReason?` | Why the run stopped |
+| `abandoned_indexes` | list\<int\> | Positions of the abandoned branches |
+| `token` | `AbortToken` | The token this run used |
+
+A branch fails when it throws **or** returns `Result.Err`. That second case
+matters: plain `parallel settle` records a returned `Result.Err` as
+`Ok(Err(..))` and counts it a success, so a lane that reports a terminal
+outcome as data could never drive an abort policy.
+
+Abort can be requested explicitly, as above, or automatically:
+
+- `max_failures: N` trips the token once `N` branches have failed.
+- `abort_on: fn(error, index) -> AbortReason?` decides which failures are
+  decisive — return `nil` to collect the failure and keep going. Supplying it
+  without `max_failures` means "abort on the first decisive failure". This is
+  how a transient network error can be tolerated while a terminal one stops
+  the run.
+- With neither option set, `settle_with_abort` behaves exactly like `parallel
+  settle`, plus a token any branch may trip.
+
+Report `decisive_error(outcome)` — the first failure that was *not* an
+abandonment — as the cause. A branch that stopped waiting because a sibling
+was already doomed is a consequence of the failure, never its cause, and
+`abandoned_indexes` is what tells the two apart without matching on message
+text.
+
+### This is cooperative, not cancellation
+
+Nothing here preempts a running branch. A branch blocked inside a single long
+call keeps blocking; the abort takes effect at the next point the branch
+itself chooses to look. Two checkpoints come for free:
+
+1. **Before a branch starts.** A branch still queued behind `max_concurrent`
+   when the token trips never runs at all.
+2. **As each branch settles**, which is where the automatic policies are
+   applied.
+
+Everything in between is the branch's own choice of safe stopping point, which
+is why `abort_requested(token)` goes immediately before the next long wait.
+The realistic goal is bounding the waste at one poll interval, not instant
+teardown.
+
+`abort_token()` mints the token on its own for use with `spawn`, `parallel
+each`, or any other structure. It is a plain value over a `task_group`-scoped
+[shared cell](#scoped-shared-state), so it crosses into a child task's
+isolated interpreter like any other value, and `request_abort` is
+first-writer-wins so the recorded cause is stable when several branches fail
+at once.
+
 ## retry
 
 Automatically retry a block that might fail:

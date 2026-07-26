@@ -44,6 +44,8 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Use `for` for straightforward iteration.
 - Use `parallel each` for bounded fan-out work.
 - Use `parallel settle` when collecting settled outcomes matters.
+- Use `settle_with_abort` from `std/abort` when outcomes matter *and*
+  branches poll or wait, so one branch's doomed verdict can stop the rest.
 - Always set `max_concurrent` on broad parallel work.
 - Use triple-quoted strings for long prompts in Harn source.
 - Heredoc syntax is for LLM tool-call argument JSON, not general strings.

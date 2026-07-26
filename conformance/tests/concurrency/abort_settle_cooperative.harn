@@ -1,0 +1,38 @@
+// `settle_with_abort` keeps `parallel settle`'s run-everything collection --
+// one Result per input item, in source order -- while letting a branch that
+// reaches a doomed verdict stop the siblings that have not started yet.
+//
+// The branch decides where its own checkpoints are: here it re-reads the
+// token at the top of its body, which is the shape a poll loop uses between
+// waits. `max_concurrent: 1` pins the schedule so the outcome is exact.
+import { abort_requested, decisive_error, request_abort, settle_with_abort } from "std/abort"
+
+pipeline default() {
+  const outcome = settle_with_abort(
+    [1, 2, 3, 4],
+    { item, token ->
+      if abort_requested(token) {
+        return Err({code: "stopped_waiting", message: "gave up on lane ${item}"})
+      }
+      if item == 2 {
+        let _ = request_abort(token, {code: "doomed", message: "lane 2 is terminal"})
+        return Err({code: "terminal", message: "lane 2 failed"})
+      }
+      return item * 10
+    },
+    {max_concurrent: 1},
+  )
+  __io_println(outcome.succeeded)
+  __io_println(outcome.failed)
+  __io_println(outcome.abandoned)
+  __io_println(to_string(outcome.aborted))
+  __io_println(to_string(outcome.abandoned_indexes))
+  __io_println(outcome.reason?.code)
+  // The abandoned lanes never become the reported cause.
+  __io_println(to_string(decisive_error(outcome)))
+  __io_println(len(outcome.results))
+  __io_println(unwrap(outcome.results[0]))
+  __io_println(unwrap_err(outcome.results[1]).code)
+  __io_println(unwrap_err(outcome.results[2]).code)
+  __io_println(unwrap_err(outcome.results[3]).code)
+}

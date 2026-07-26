@@ -1,0 +1,17 @@
+// A cooperative-abort token is first-writer-wins, so the reported cause is
+// stable no matter how many branches trip it at once. Tokens minted without
+// an explicit key are independent of each other.
+import { abort_reason, abort_requested, abort_token, request_abort } from "std/abort"
+
+pipeline default() {
+  const token = abort_token()
+  __io_println(to_string(abort_requested(token)))
+  __io_println(to_string(abort_reason(token)))
+  __io_println(to_string(request_abort(token, {code: "first", message: "won the race"})))
+  __io_println(to_string(request_abort(token, {code: "second", message: "lost the race"})))
+  __io_println(to_string(abort_requested(token)))
+  __io_println(abort_reason(token)?.code)
+  __io_println(abort_reason(token)?.message)
+  const other = abort_token()
+  __io_println(to_string(abort_requested(other)))
+}
