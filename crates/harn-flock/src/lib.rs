@@ -148,8 +148,10 @@ pub fn lock_with_deadline(
             });
         }
         // Never overshoot the deadline: a caller that budgeted 30s should hear
-        // back at 30s, not at the end of whichever backoff straddles it.
-        let remaining = timeout - waited;
+        // back at 30s, not at the end of whichever backoff straddles it. The
+        // check above already proved `waited < timeout`; saturating says so
+        // without adding a panic path that could never fire.
+        let remaining = timeout.saturating_sub(waited);
         std::thread::sleep(backoff.min(remaining));
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
