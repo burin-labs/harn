@@ -936,7 +936,14 @@ fn report_stray(
         }
         return;
     } else if !sniff.errors.is_empty() {
+        // The fragment was consumed without producing a call, which is the
+        // definition of dropped. Recording it here is what lets the shape
+        // detector see an unrecognized dialect whose body failed the bare-call
+        // sniff — the argument line of a fenced `<tool>` block lands on this
+        // branch, and without the record the block reassembles with an empty
+        // body and the detector rightly stays quiet.
         ctx.errors.extend(sniff.errors);
+        ctx.dropped.push(dropped_fragment);
     } else if !salvage_stray_done(
         trimmed,
         ctx.user_response_parts,

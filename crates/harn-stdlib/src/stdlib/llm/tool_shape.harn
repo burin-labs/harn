@@ -65,12 +65,16 @@ const __TOOL_SHAPE_PROTOCOL_TAGS = [
 /// dialect, short enough not to replay a whole response back at the model.
 const __TOOL_SHAPE_EXCERPT_LIMIT = 240
 
-fn __tool_shape_excerpt(text: string) -> string {
-  const collapsed = trim(text)
+/// Excerpt starting at the structural trigger, so the feedback shows the model
+/// its unrecognized block rather than whatever benign fragment the parser
+/// happened to drop first in the same response.
+fn __tool_shape_excerpt(text: string, at: int) -> string {
+  const prefix = at > 0 ? "…" : ""
+  const collapsed = trim(text.slice(at, len(text)))
   if len(collapsed) <= __TOOL_SHAPE_EXCERPT_LIMIT {
-    return collapsed
+    return prefix + collapsed
   }
-  return collapsed.slice(0, __TOOL_SHAPE_EXCERPT_LIMIT) + "…"
+  return prefix + collapsed.slice(0, __TOOL_SHAPE_EXCERPT_LIMIT) + "…"
 }
 
 /// Does `body` carry arguments, rather than merely naming something?
@@ -95,7 +99,8 @@ fn __tool_shape_body_has_arguments(body: string) -> bool {
 /// `<action>`, and whatever comes next) without naming any of them: the tag name
 /// is captured, not compared against a list, and only the protocol's own tags
 /// are excluded.
-fn __tool_shape_tagged_call(text: string) -> bool {
+/// Returns the char position of the matching open tag, or -1.
+fn __tool_shape_tagged_call(text: string) -> int {
   // Open and close tags are matched separately and paired here, because the
   // regex engine has no backreferences — `</\1>` is not expressible. Pairing in
   // Harn also keeps the tag name available for the protocol-tag exclusion.
@@ -104,17 +109,17 @@ fn __tool_shape_tagged_call(text: string) -> bool {
     if tag == "" || __TOOL_SHAPE_PROTOCOL_TAGS.contains(tag) {
       continue
     }
-    // `end` is a character offset, matching `slice`/`index_of`/`len`.
+    // `start`/`end` are character offsets, matching `slice`/`index_of`/`len`.
     const rest = text.slice(opened?.end ?? 0, len(text))
     const close_at = rest.index_of("</" + tag + ">")
     if close_at < 0 {
       continue
     }
     if __tool_shape_body_has_arguments(rest.slice(0, close_at)) {
-      return true
+      return opened?.start ?? 0
     }
   }
-  return false
+  return -1
 }
 
 /// An object that names a tool and supplies its arguments.
@@ -122,15 +127,19 @@ fn __tool_shape_tagged_call(text: string) -> bool {
 /// This is the native/bare-JSON dialect family: `{"name": ..., "arguments": ...}`
 /// and its spellings. Both halves are required — a `"name"` key alone appears in
 /// plenty of ordinary JSON a model might legitimately be discussing.
-fn __tool_shape_json_call(text: string) -> bool {
+/// Returns the char position of the tool-naming key, or -1.
+fn __tool_shape_json_call(text: string) -> int {
   if !text.contains("{") {
-    return false
+    return -1
   }
-  const names = regex_match("(?i)\"(?:name|tool|tool_name|recipient)\"\\s*:", text)
-  if names == nil {
-    return false
+  const names = regex_captures("(?i)\"(?:name|tool|tool_name|recipient)\"\\s*:", text)
+  if len(names) == 0 {
+    return -1
   }
-  return regex_match("(?i)\"(?:arguments|args|parameters|input|params)\"\\s*:", text) != nil
+  if regex_match("(?i)\"(?:arguments|args|parameters|input|params)\"\\s*:", text) == nil {
+    return -1
+  }
+  return names[0]?.start ?? 0
 }
 
 /// Chat-template markup that carries a callee.
@@ -138,63 +147,75 @@ fn __tool_shape_json_call(text: string) -> bool {
 /// `<function=NAME>`, `<invoke name="NAME">`, and the `[TOOL_CALLS]` /
 /// `<|recipient|>` frame markers are invocation markup by construction — there
 /// is no reading of them that is ordinary prose.
-fn __tool_shape_call_markup(text: string) -> bool {
-  if regex_match("(?i)<(?:function|invoke|tool)\\s*[=\\s][^>]*>", text) != nil {
-    return true
+/// Returns the char position of the markup, or -1.
+fn __tool_shape_call_markup(text: string) -> int {
+  const named = regex_captures("(?i)<(?:function|invoke|tool)\\s*[=\\s][^>]*>", text)
+  if len(named) > 0 {
+    return named[0]?.start ?? 0
   }
-  return regex_match("(?i)\\[TOOL_CALLS\\]|<\\|recipient\\|>|<\\|channel\\|>", text) != nil
+  const framed = regex_captures("(?i)\\[TOOL_CALLS\\]|<\\|recipient\\|>|<\\|channel\\|>", text)
+  if len(framed) > 0 {
+    return framed[0]?.start ?? 0
+  }
+  return -1
 }
 
-fn __tool_shape_of(text: string) -> string {
-  if __tool_shape_call_markup(text) {
-    return "call_markup"
+/// Which shape matched, and where in `text` its structural trigger sits.
+type ToolShapeMatch = { shape: string, at: int }
+
+fn __tool_shape_of(text: string) -> ToolShapeMatch {
+  const markup_at = __tool_shape_call_markup(text)
+  if markup_at >= 0 {
+    return { shape: "call_markup", at: markup_at }
   }
-  if __tool_shape_tagged_call(text) {
-    return "tagged_call_body"
+  const tagged_at = __tool_shape_tagged_call(text)
+  if tagged_at >= 0 {
+    return { shape: "tagged_call_body", at: tagged_at }
   }
-  if __tool_shape_json_call(text) {
-    return "json_name_arguments"
+  const json_at = __tool_shape_json_call(text)
+  if json_at >= 0 {
+    return { shape: "json_name_arguments", at: json_at }
   }
-  return ""
+  return { shape: "", at: -1 }
 }
 
-/// A run of consecutive fragments dropped for the same reason, rejoined.
+/// All dropped fragments of a response, rejoined; reason of the first kept.
 type ToolShapeRun = { text: string, reason: string }
 
-/// Rejoin consecutive fragments that were dropped for the same reason.
+/// Rejoin every dropped fragment of the response, in document order.
 ///
-/// The parser drops at the granularity it scans, which inside a fenced block is
-/// one line at a time. A fenced dialect therefore arrives as `<tool>`,
-/// `look({ ... })`, `</tool>` — three fragments, none of which is an invocation
-/// on its own, though together they plainly are. Reassembling the run before
-/// asking about shape is what lets the detector see the block the model wrote
-/// rather than the slices the scanner happened to cut it into.
+/// The parser drops at the granularity it scans — inside a fenced block that is
+/// one line at a time, and the lines of one block can carry *different* drop
+/// reasons (the tag lines fall out of the tag scanner, the argument line out of
+/// the bare-call sniff). A fenced dialect therefore arrives as `<tool>`,
+/// `look({ ... })`, `</tool>` — fragments none of which is an invocation on its
+/// own, though together they plainly are. Reasons are metadata about *why* each
+/// slice was dropped, not boundaries in what the model wrote, so rejoining
+/// ignores them; splitting on them is exactly what re-shatters the block.
 ///
-/// Fragments arrive in document order, so a run is a contiguous span of the
-/// response and rejoining with newlines reproduces it.
+/// Fragments arrive in document order. Distant fragments of one response do get
+/// joined into a single run, which in principle could assemble a call shape out
+/// of unrelated pieces — but every shape check still requires an
+/// argument-bearing body inside matched structure, and the cost of the rare
+/// contrived match is one bounded feedback line, not a lost call.
 fn __tool_shape_runs(dropped: list<DroppedFragment>) -> list<ToolShapeRun> {
-  let runs = []
-  let current = ""
-  let current_reason = ""
+  let text = ""
+  let reason = ""
   for fragment in dropped {
-    const text = fragment.text
-    if trim(text) == "" {
+    if trim(fragment.text) == "" {
       continue
     }
-    if current != "" && fragment.reason == current_reason {
-      current = current + "\n" + text
-      continue
+    if text == "" {
+      reason = fragment.reason
+    } else {
+      text = text + "\n"
     }
-    if current != "" {
-      runs = runs.appending({ text: current, reason: current_reason })
-    }
-    current = text
-    current_reason = fragment.reason
+    text = text + fragment.text
   }
-  if current != "" {
-    runs = runs.appending({ text: current, reason: current_reason })
+  if text == "" {
+    return []
   }
-  return runs
+  return [{ text: text, reason: reason }]
 }
 
 /// Findings for every run of dropped text that is shaped like a tool call.
@@ -204,14 +225,14 @@ fn __tool_shape_runs(dropped: list<DroppedFragment>) -> list<ToolShapeRun> {
 pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFinding> {
   let findings = []
   for run in __tool_shape_runs(dropped) {
-    const shape = __tool_shape_of(run.text)
-    if shape == "" {
+    const matched = __tool_shape_of(run.text)
+    if matched.shape == "" {
       continue
     }
     findings = findings.appending({
-      shape: shape,
+      shape: matched.shape,
       dropped_reason: run.reason,
-      excerpt: __tool_shape_excerpt(run.text),
+      excerpt: __tool_shape_excerpt(run.text, matched.at),
     })
   }
   return findings
