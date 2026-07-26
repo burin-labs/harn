@@ -12,13 +12,12 @@
 // The negative cases matter just as much: a finding costs the model a
 // corrective turn, so fenced source code and prose about the protocol must
 // stay silent.
-
 import { agent_parse_tool_calls } from "std/agent/primitives"
 import { tool_shape_findings } from "std/llm/tool_shape"
 
 const REGISTRY = {
   _type: "tool_registry",
-  tools: [{ name: "look", description: "look at a file", parameters: {} }],
+  tools: [{name: "look", description: "look at a file", parameters: {}}],
 }
 
 fn shapes(text: string) -> string {
@@ -35,23 +34,20 @@ pipeline main() {
   // not know — dozens of these appeared in raw model bytes with zero parsed
   // calls and, before this, zero violations.
   __io_println(shapes("```\n<tool>\nsearch({ query: \"x\" })\n</tool>\n```"))
-
   // A dialect invented for this test. Nothing in the detector names it; it is
   // caught because it is SHAPED like an invocation. This is the case that makes
   // the fix a class-kill rather than one more allowlist entry.
   __io_println(shapes("```\n<perform_action>\nsearch({ query: \"x\" })\n</perform_action>\n```"))
-
   // The bare/native JSON family, spread across lines inside a fence, naming an
   // unregistered tool.
-  __io_println(shapes("```\n{\n  \"name\": \"search\",\n  \"arguments\": { \"query\": \"x\" }\n}\n```"))
-
+  __io_println(
+    shapes("```\n{\n  \"name\": \"search\",\n  \"arguments\": { \"query\": \"x\" }\n}\n```"),
+  )
   // Fenced source code is not an invocation.
   __io_println(shapes("```rust\nfn main() { println!(\"hi\"); }\n```"))
   __io_println(shapes("```html\n<div class=\"x\">hello</div>\n```"))
-
   // Prose about the protocol carries no arguments and must not fire.
   __io_println(shapes("<assistant_prose>Wrap every call in <tool_call> tags.</assistant_prose>"))
-
   // A well-formed call parses, so there is nothing to flag.
   const good = agent_parse_tool_calls(
     "<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>",
@@ -60,10 +56,13 @@ pipeline main() {
   )
   __io_println(len(good.tool_calls))
   __io_println(shapes("<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>"))
-
   // A fenced call the sniffer can already execute (registered tool) is not a
   // finding — the call ran; feedback would be false.
-  const salvaged = agent_parse_tool_calls("```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```", REGISTRY, "text")
+  const salvaged = agent_parse_tool_calls(
+    "```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```",
+    REGISTRY,
+    "text",
+  )
   __io_println(len(salvaged.tool_calls))
   __io_println(shapes("```\n<tool>\nlook({ file: \"a.rs\" })\n</tool>\n```"))
 }

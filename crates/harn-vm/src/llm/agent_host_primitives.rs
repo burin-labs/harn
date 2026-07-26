@@ -630,9 +630,8 @@ fn attach_hook_reminder_audit(
 /// Parse model text into normalized agent tool-call records.
 ///
 /// `tool_format` selects the text-channel grammar: `"json"` routes to the
-/// fenced-JSON parser, everything else (`"text"`, `"auto"`, nil) uses the
-/// canonical tagged/heredoc grammar. `"native"` never reaches a text parser,
-/// so it also reads as the tagged grammar (defensive default).
+/// fenced-JSON parser; everything else — `"text"`, `"auto"`, nil, and the
+/// never-text `"native"` (defensively) — uses the canonical tagged grammar.
 #[harn_builtin(
     sig = "__host_agent_parse_tool_calls(text: string, tools?: {_type: \"tool_registry\", tools: list}?, tool_format?: string?) -> dict",
     kind = "async",
@@ -678,18 +677,7 @@ async fn host_agent_parse_tool_calls_impl(
         "user_response": parsed.user_response,
         "done_marker": parsed.done_marker,
         "canonical_text": parsed.canonical,
-        // What the parser consumed without producing a call. Whether any of it
-        // was MEANT as a tool call is a dialect question, answered in Harn.
-        "dropped": parsed
-            .dropped
-            .iter()
-            .map(|fragment| {
-                serde_json::json!({
-                    "text": fragment.text,
-                    "reason": fragment.reason.as_str(),
-                })
-            })
-            .collect::<Vec<_>>(),
+        "dropped": parsed.dropped.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
     })))
 }
 

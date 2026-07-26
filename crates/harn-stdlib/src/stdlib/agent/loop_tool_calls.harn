@@ -1,8 +1,8 @@
-import { tool_shape_feedback, tool_shape_findings } from "std/llm/tool_shape"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
+import { tool_shape_feedback, tool_shape_findings } from "std/llm/tool_shape"
 
 // Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
 //

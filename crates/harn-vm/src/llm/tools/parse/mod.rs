@@ -295,6 +295,13 @@ impl DroppedReason {
     }
 }
 
+impl DroppedFragment {
+    /// Wire shape of a dropped fragment, as `std/llm/tool_shape` consumes it.
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({ "text": self.text, "reason": self.reason.as_str() })
+    }
+}
+
 /// Result of parsing a prose-interleaved TS tool-call stream.
 ///
 /// The scanner walks the model's text once and splits it into three
