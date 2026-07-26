@@ -517,7 +517,7 @@ pub fn with_required_reason(opts = nil) {
  * The sink writes one record per invocation and does not buffer.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  */
 pub fn local_receipt_sink(session_id) {
   const fallback = __tool_mw_optional_text(session_id) ?? "session"
@@ -670,9 +670,7 @@ fn __tool_mw_audit_log_config(sink) {
 
 fn __tool_mw_audit_log_emit_local(receipt) {
   const sink = local_receipt_sink(receipt?.session_id)
-  const _ = try {
-    sink(receipt)
-  }
+  return sink(receipt)
 }
 
 fn __tool_mw_audit_log_has_deferred_sink(cfg) -> bool {
@@ -684,9 +682,7 @@ fn __tool_mw_audit_log_flush(cfg, receipt) {
     __tool_mw_audit_log_emit_local(receipt)
   }
   if cfg.sink_fn != nil {
-    const _ = try {
-      cfg.sink_fn(receipt)
-    }
+    cfg.sink_fn(receipt)
   }
 }
 
@@ -718,7 +714,7 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
  * URI as a deep-link to the persisted JSONL line.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  */
 pub fn with_audit_log(sink_or_options) {
   const cfg = __tool_mw_audit_log_config(sink_or_options)
