@@ -128,6 +128,103 @@ pipeline test_extract_indented_blank_line_in_body(task) {
   assert_eq(events[0].content, "const a = 1\n\nconst b = 2\n")
 }
 
+// --- harn-prompt fences -----------------------------------------------------
+@test
+pipeline test_extract_prompt_block(task) {
+  const md = "```harn-prompt\n{{ if x }}a{{ end }}\n```\n"
+  const events = extract_blocks(md)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "block")
+  assert_eq(events[0].mode, "prompt")
+  assert_eq(events[0].content, "{{ if x }}a{{ end }}\n")
+}
+
+@test
+pipeline test_extract_prompt_ignore_block_skipped(task) {
+  const events = extract_blocks("```harn-prompt,ignore\n{{ fragment\n```\n")
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "skip")
+}
+
+@test
+pipeline test_extract_prompt_and_harn_share_one_index(task) {
+  // Temp-file names are keyed on idx, so both languages advance the same
+  // counter and cannot collide within a file.
+  const events = extract_blocks("```harn\nx\n```\n\n```harn-prompt\n{{ y }}\n```\n")
+  assert_eq(events.count, 2)
+  assert_eq(events[0].mode, "parse")
+  assert_eq(events[0].idx, 1)
+  assert_eq(events[1].mode, "prompt")
+  assert_eq(events[1].idx, 2)
+}
+
+@test
+pipeline test_extract_prompt_info_string_must_be_exact(task) {
+  assert_eq(extract_blocks("```harn-prompt extra\nx\n```\n"), [])
+  assert_eq(extract_blocks("```text\n{{ x }}\n```\n"), [])
+}
+
+// --- longer fences ----------------------------------------------------------
+@test
+pipeline test_extract_longer_fence_keeps_inner_backticks(task) {
+  // A template that shows fenced output is itself fenced with four
+  // backticks; the inner ``` lines are body, not the close.
+  const md = "````harn-prompt\n{{ for s in xs }}\n```\n{{ s }}\n```\n{{ end }}\n````\n"
+  const events = extract_blocks(md)
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "block")
+  assert_eq(events[0].mode, "prompt")
+  assert_eq(events[0].content, "{{ for s in xs }}\n```\n{{ s }}\n```\n{{ end }}\n")
+}
+
+@test
+pipeline test_extract_three_tick_block_still_closes_on_longer_fence(task) {
+  // A ``` block closes on any fence at least as long, preserving the
+  // behaviour that predates variable-length fences.
+  const events = extract_blocks("```harn\nx\n````\n")
+  assert_eq(events.count, 1)
+  assert_eq(events[0].kind, "block")
+  assert_eq(events[0].content, "x\n")
+}
+
+// --- fence + mode tables ----------------------------------------------------
+@test
+pipeline test_backtick_run_len(task) {
+  assert_eq(backtick_run_len("```harn"), 3)
+  assert_eq(backtick_run_len("````"), 4)
+  assert_eq(backtick_run_len("no ticks"), 0)
+  assert_eq(backtick_run_len(""), 0)
+}
+
+@test
+pipeline test_fence_mode_and_ownership(task) {
+  assert_eq(fence_mode("harn"), "parse")
+  assert_eq(fence_mode("harn,check"), "check")
+  assert_eq(fence_mode("harn-prompt"), "prompt")
+  assert_eq(fence_mode("text"), "")
+  assert_eq(fence_mode("harn,ignore"), "")
+  assert_eq(fence_is_ignored("harn,ignore"), true)
+  assert_eq(fence_is_ignored("harn-prompt,ignore"), true)
+  assert_eq(fence_is_ignored("harn"), false)
+  assert_eq(fence_is_owned("harn-prompt,ignore"), true)
+  assert_eq(fence_is_owned("bash"), false)
+}
+
+@test
+pipeline test_mode_extension_and_argv(task) {
+  // A prompt block must reach `harn lint` as a .harn.prompt file: the
+  // extension is what routes it to the template parser rather than the
+  // Harn parser.
+  assert_eq(mode_extension("prompt"), ".harn.prompt")
+  assert_eq(mode_extension("parse"), ".harn")
+  assert_eq(mode_extension("check"), ".harn")
+  assert_eq(mode_argv("prompt", "/t/b.harn.prompt"), ["lint", "/t/b.harn.prompt"])
+  assert_eq(mode_argv("check", "/t/b.harn"), ["check", "/t/b.harn"])
+  assert_eq(mode_argv("parse", "/t/b.harn"), ["parse", "--json", "/t/b.harn"])
+  assert_eq(mode_label("prompt"), "harn-prompt")
+  assert_eq(mode_label("parse"), "harn")
+}
+
 // --- leading_ws_len / strip_indent ------------------------------------------
 @test
 pipeline test_leading_ws_len(task) {

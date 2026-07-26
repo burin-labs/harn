@@ -327,7 +327,7 @@ The server exposes `.harn.prompt` files from the project root and from
 installed prompt-library packages in the leased current generation.
 TOML front matter can define display metadata and MCP arguments:
 
-```harn,ignore
+```harn-prompt
 ---
 id = "review"
 description = "Review code"

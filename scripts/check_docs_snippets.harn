@@ -1,16 +1,33 @@
-// Verify every ```harn fenced code block in docs/src/*.md parses cleanly
-// via `harn parse`. Most docs snippets are intentionally partial fragments:
-// the guard keeps them syntactically valid without requiring each fragment to
-// declare every surrounding variable from the prose. Blocks tagged
-// ```harn,check opt into full `harn check` for complete copy/paste examples.
+// Verify every fenced code block in docs/src/*.md that claims to be Harn
+// source or a Harn prompt template is valid, by handing it to the real
+// binary rather than approximating either grammar here.
 //
-// Blocks tagged ```harn,ignore are skipped — use that for intentionally
-// non-syntactic fragments (grammar demos in language-spec.md, etc.).
+// ```harn        parses via `harn parse`. Most docs snippets are intentionally
+//                partial fragments: the guard keeps them syntactically valid
+//                without requiring each fragment to declare every surrounding
+//                variable from the prose.
+// ```harn,check  opts into full `harn check` for complete copy/paste examples.
+// ```harn-prompt lints via `harn lint` on a `.harn.prompt` file, which runs the
+//                prompt-template engine's own parser. Catches the traps a
+//                reader cannot see, notably that `{{ endif }}` is not a closing
+//                tag — it parses as a variable lookup and leaves the `{{ if }}`
+//                unclosed. Both `if` and `for` close with `{{ end }}`.
+//
+// A docs example only has to be *valid*, so this gate runs `harn lint` without
+// `--strict`: a template that does not parse is an error and fails, while the
+// style rules (vendor-identity branching, branch explosion) stay advisory. Doc
+// prose often illustrates exactly the shape a style rule discourages.
+//
+// Blocks tagged ```harn,ignore or ```harn-prompt,ignore are skipped — use those
+// for intentionally non-syntactic fragments (grammar demos in
+// language-spec.md, etc.).
 //
 // A fence may be indented — blocks nested under a list item are checked
 // like any other, with the opening fence's indent stripped from the body.
-// The info string itself is still matched exactly (```harn / ```harn,check
-// / ```harn,ignore): a trailing word or space does not open a checked block.
+// The info string itself is still matched exactly: a trailing word or space
+// does not open a checked block. A fence may also use more than three
+// backticks, which is how a block whose body contains ``` is written; the
+// closing fence must then be at least as long as the opening one.
 //
 // Ported from scripts/check_docs_snippets.sh — same unclosed-fence
 // detection, same FAIL output shape, same summary line and exit codes.
@@ -50,6 +67,78 @@ pub fn strip_indent(line: string, n: int) -> string {
 }
 
 /**
+ * Count of leading backtick characters in `s`. A markdown fence needs at
+ * least three; anything less is ordinary text.
+ */
+pub fn backtick_run_len(s: string) -> int {
+  let i = 0
+  const n = s.len()
+  while i < n {
+    if s.char_at(i) != "`" {
+      break
+    }
+    i = i + 1
+  }
+  return i
+}
+
+/**
+ * How a block with this info string is validated, or "" when the fence is
+ * not one this checker owns (```bash, ```text, ...). The mode decides both
+ * the temp-file extension and the `harn` subcommand, so teaching the checker
+ * a new language means adding one arm here plus its `mode_*` arms below.
+ */
+pub fn fence_mode(info: string) -> string {
+  if info == "harn" {
+    return "parse"
+  }
+  if info == "harn,check" {
+    return "check"
+  }
+  if info == "harn-prompt" {
+    return "prompt"
+  }
+  return ""
+}
+
+/** Whether this info string opens a block the author asked to skip. */
+pub fn fence_is_ignored(info: string) -> bool {
+  return info == "harn,ignore" || info == "harn-prompt,ignore"
+}
+
+/** Whether this info string opens a block this checker tracks at all. */
+pub fn fence_is_owned(info: string) -> bool {
+  return fence_mode(info) != "" || fence_is_ignored(info)
+}
+
+/** Temp-file suffix a block of `mode` must be written to. */
+pub fn mode_extension(mode: string) -> string {
+  if mode == "prompt" {
+    return ".harn.prompt"
+  }
+  return ".harn"
+}
+
+/** The `harn` argv that validates a block of `mode` written to `path`. */
+pub fn mode_argv(mode: string, path: string) -> list<string> {
+  if mode == "check" {
+    return ["check", path]
+  }
+  if mode == "prompt" {
+    return ["lint", path]
+  }
+  return ["parse", "--json", path]
+}
+
+/** Human label for a block of `mode`, used in FAIL output. */
+pub fn mode_label(mode: string) -> string {
+  if mode == "prompt" {
+    return "harn-prompt"
+  }
+  return "harn"
+}
+
+/**
  * Walk `text` with the fence state machine and return the block events in
  * source order:
  *   {kind: "unclosed", open_line}      — a ```harn fence that never closed
@@ -71,35 +160,42 @@ pub fn extract_blocks(text: string) -> list {
   let idx = 0
   let open_line = 0
   let indent = 0
+  let open_ticks = 0
   let body: list<string> = []
   let line_no = 0
   for line in text.lines() {
     line_no = line_no + 1
     const ws = leading_ws_len(line)
-    const info = line.substring(ws, line.len())
-    if info == "```harn" || info == "```harn,check" || info == "```harn,ignore" {
+    const rest = line.substring(ws, line.len())
+    const ticks = backtick_run_len(rest)
+    const is_fence = ticks >= 3
+    const info = if is_fence {
+      rest.substring(ticks, rest.len())
+    } else {
+      ""
+    }
+    if is_fence && fence_is_owned(info) {
       if in_block {
         // Nested or unclosed fence — markdown is malformed. Surface the
         // line where the previous fence opened so the author can find it.
         events = events + [{kind: "unclosed", open_line: open_line}]
       }
       in_block = true
-      skip = info == "```harn,ignore"
-      block_mode = if info == "```harn,check" {
-        "check"
-      } else {
-        "parse"
-      }
+      skip = fence_is_ignored(info)
+      block_mode = fence_mode(info)
       idx = idx + 1
       open_line = line_no
       indent = ws
+      open_ticks = ticks
       body = []
       if skip {
         events = events + [{kind: "skip", idx: idx}]
       }
       continue
     }
-    if info.starts_with("```") && in_block {
+    // A fence closes the open block only when it is at least as long as the
+    // one that opened it, so a ```` block may contain ``` lines verbatim.
+    if is_fence && in_block && ticks >= open_ticks {
       in_block = false
       if !skip {
         events = events
@@ -240,23 +336,15 @@ pipeline main(task) {
         continue
       }
       checked = checked + 1
-      const block_path = "${prefix}_${event.idx}.harn"
+      const block_path = "${prefix}_${event.idx}${mode_extension(event.mode)}"
       harness.fs.write_text(block_path, event.content)
-      const subcommand = if event.mode == "check" {
-        "check"
-      } else {
-        "parse"
-      }
-      const args = if subcommand == "parse" {
-        ["parse", "--json", block_path]
-      } else {
-        ["check", block_path]
-      }
-      const res = harness.process.spawn_captured({cmd: harn_bin, args: args})
+      const res = harness.process.spawn_captured(
+        {cmd: harn_bin, args: mode_argv(event.mode, block_path)},
+      )
       if !res.success {
         failures = failures + 1
         __io_println("")
-        __io_println("FAIL: ${md_file} (harn block #${event.idx})")
+        __io_println("FAIL: ${md_file} (${mode_label(event.mode)} block #${event.idx})")
         __io_println("      temp file: ${block_path}")
         for line in indent_output(res.stdout + res.stderr) {
           __io_println(line)
@@ -266,13 +354,17 @@ pipeline main(task) {
   }
   __io_println("")
   __io_println(
-    "docs snippets: ${checked} checked, ${skipped} skipped (harn,ignore), ${failures} failed",
+    "docs snippets: ${checked} checked, ${skipped} skipped (,ignore), ${failures} failed",
   )
   if failures > 0 {
     __io_println("")
-    __io_println("hint: snippets must parse under `harn parse`. Wrap bare statements")
-    __io_println("      in `pipeline default() { ... }`, fix syntax placeholders,")
-    __io_println("      or tag the block as ```harn,ignore if it's an intentional fragment.")
+    __io_println("hint: ```harn snippets must parse under `harn parse` — wrap bare")
+    __io_println("      statements in `pipeline default() { ... }` or fix syntax")
+    __io_println("      placeholders. ```harn-prompt blocks must parse under the prompt")
+    __io_println("      engine: `if` and `for` both close with `{{ end }}`, and")
+    __io_println("      `{{ endif }}` is a variable lookup, not a closing tag.")
+    __io_println("      Tag a block ```harn,ignore / ```harn-prompt,ignore if it is an")
+    __io_println("      intentional fragment.")
     // exit() bypasses defer, so remove the scratch directory before reporting
     // failure to the calling shell.
     harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_dir]})

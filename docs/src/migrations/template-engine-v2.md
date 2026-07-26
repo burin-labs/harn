@@ -9,7 +9,7 @@ is a strict superset. But many pre-v2 workarounds can now be simplified.
 
 **Before** — mutually-exclusive `{{ if }}` blocks with inverted flags:
 
-```text
+```harn-prompt
 {{if expected_output}}
 Expected: {{expected_output}}
 {{end}}{{if no_expected_output}}
@@ -19,7 +19,7 @@ Expected: {{expected_output}}
 
 **After**:
 
-```text
+```harn-prompt
 {{if expected_output}}
 Expected: {{expected_output}}
 {{else}}
@@ -39,7 +39,7 @@ for sample in samples {
 const prompt = render("enrichment.prompt", {block: block, ...})
 ```
 
-```text
+```harn-prompt
 # enrichment.prompt
 ## Samples
 {{block}}
@@ -51,7 +51,7 @@ const prompt = render("enrichment.prompt", {block: block, ...})
 const prompt = render("enrichment.prompt", {samples: samples, ...})
 ```
 
-````text
+````harn-prompt
 # enrichment.prompt
 ## Samples
 {{for s in samples}}
@@ -68,22 +68,22 @@ When multiple repair-stage prompts share the same boilerplate
 ("self-verification instructions", system rules, etc.), extract the shared
 text into a partial:
 
-```text
+```harn-prompt
 # lib/partials/self-verify.harn.prompt
 Before responding, verify your answer against: {{verification_hint}}
 ```
 
 Call it from each repair stage:
 
-```text
+```harn-prompt
 {{include "partials/self-verify.harn.prompt"}}
 ...stage-specific instructions...
 ```
 
 Pass stage-specific overrides with `with`:
 
-```text
-{{include "partials/self-verify.harn.prompt" with { verification_hint: "compile output" }}}
+```harn-prompt
+{{ include "partials/self-verify.harn.prompt" with { verification_hint: "compile output" } }}
 ```
 
 ## Filters instead of pre-processing
@@ -97,7 +97,7 @@ render("x.prompt", {tags: tags_str})
 
 **After**:
 
-```text
+```harn-prompt
 Tags: {{tags | join: ", " | upper}}
 ```
 
@@ -114,7 +114,7 @@ block.
 side. Use them to keep source templates readable without introducing blank
 lines in the rendered output:
 
-```text
+```harn-prompt
 Items:
 {{- for x in xs -}}
   {{ x }},
