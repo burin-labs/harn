@@ -17,6 +17,10 @@ inputs:
     description: Include Cargo-installed binaries in the cache.
     required: false
     default: "false"
+  target-dir:
+    description: Optional absolute Cargo target directory to cache instead of the workspace-relative default.
+    required: false
+    default: ""
   broad-restore-prefix:
     description: Optional same-version cache key prefix to restore before the precise Swatinem key.
     required: false
@@ -52,9 +56,9 @@ runs:
       continue-on-error: true
       with:
         path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ${{ github.workspace }}/target
+          ${{ env.CARGO_HOME || '~/.cargo' }}/registry
+          ${{ env.CARGO_HOME || '~/.cargo' }}/git
+          ${{ env.CARGO_TARGET_DIR || format('{0}/target', github.workspace) }}
         key: ${{ inputs.broad-restore-prefix }}${{ github.sha }}
         restore-keys: |
           ${{ inputs.broad-restore-prefix }}
@@ -68,4 +72,6 @@ runs:
           || inputs.shared-key }}
         cache-on-failure: ${{ inputs.cache-on-failure }}
         cache-bin: ${{ inputs.cache-bin }}
+        cache-targets: ${{ inputs.target-dir == '' }}
+        cache-directories: ${{ inputs.target-dir }}
         save-if: ${{ inputs.save == 'true' && github.ref == 'refs/heads/main' }}

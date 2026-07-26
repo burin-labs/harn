@@ -84,6 +84,8 @@ jobs:
           # reported zero hits and made this target cache unreachable to PRs.
           shared-key: workspace-windows
           source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
+          target-dir: ${{ env.CARGO_TARGET_DIR }}
+          broad-restore-prefix: v0-rust-workspace-windows-
           cache-on-failure: true
           cache-bin: false
           save: true

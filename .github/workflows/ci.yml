@@ -1266,10 +1266,10 @@ jobs:
       # runner image dropped its D: drive (2025-07-14) and ships no pre-created
       # Dev Drive, so it is created here. Placed before the toolchain and cache
       # steps so CARGO_HOME / CARGO_TARGET_DIR are already redirected when rustup
-      # and Swatinem/rust-cache run — rust-cache follows CARGO_TARGET_DIR, so the
-      # target still round-trips through the shared cache. Kept byte-identical to
-      # the windows-nightly.yml writer so the shared-cache policy's pre-cache
-      # step-sequence comparison keeps matching.
+      # and Swatinem/rust-cache run. The cache invocation below passes the
+      # redirected target explicitly; rust-cache otherwise ignores
+      # CARGO_TARGET_DIR. Kept byte-identical to the windows-nightly.yml writer so
+      # the shared-cache policy's pre-cache step-sequence comparison keeps matching.
       - name: Set up Dev Drive
         if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
         uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
@@ -1289,6 +1289,8 @@ jobs:
           # cannot carry include_str! bytes from a different revision.
           shared-key: workspace-windows
           source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
+          target-dir: ${{ env.CARGO_TARGET_DIR }}
+          broad-restore-prefix: v0-rust-workspace-windows-
           cache-on-failure: true
           cache-bin: false
       - name: Install cargo-nextest

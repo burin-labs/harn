@@ -128,6 +128,10 @@ const CLI_COLD_START_JOB_IF =
 
 const WINDOWS_CACHE_KEY = "workspace-windows"
 
+const WINDOWS_CACHE_TARGET_DIR = "$" + "{{ env.CARGO_TARGET_DIR }}"
+
+const WINDOWS_CACHE_BROAD_RESTORE_PREFIX = "v0-rust-workspace-windows-"
+
 const MACOS_CACHE_KEY = "workspace-macos"
 
 const NATIVE_SOURCE_FINGERPRINT_BODY =
@@ -251,6 +255,21 @@ fn remote_sccache_errors(value, path: string = "") -> list<string> {
   return errors
 }
 
+fn cache_target_input_errors(action, step) -> list<string> {
+  const expected_cache_targets = "$" + "{{ inputs.target-dir == '' }}"
+  const expected_cache_directories = "$" + "{{ inputs.target-dir }}"
+  if trim(action?.inputs?.["target-dir"]?.default ?? "") != ""
+    || trim(
+    step?.with?.["cache-targets"] ?? "",
+  )
+    != expected_cache_targets
+    || trim(step?.with?.["cache-directories"] ?? "")
+    != expected_cache_directories {
+    return ["${ACTION_PATH} must cache an explicit Cargo target directory directly"]
+  }
+  return []
+}
+
 fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
   let errors: list<string> = []
   const steps = action?.runs?.steps ?? []
@@ -289,6 +308,14 @@ fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
     if !(broad_restore[0]?.["continue-on-error"] ?? false) {
       errors = errors + ["${ACTION_PATH} broad fallback must keep cache-service failures non-fatal"]
     }
+    const restore_paths = trim(broad_restore[0]?.with?.path ?? "")
+    if !contains(restore_paths, "env.CARGO_HOME")
+      || !contains(restore_paths, "env.CARGO_TARGET_DIR") {
+      errors = errors
+        + [
+        "${ACTION_PATH} broad fallback must follow the active Cargo home and target directory",
+      ]
+    }
   }
   const step = upstream[0]
   const expected_shared_key = "$"
@@ -299,6 +326,7 @@ fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
     errors = errors
       + ["${ACTION_PATH} must compose source-key into the effective upstream shared-key"]
   }
+  errors = errors + cache_target_input_errors(action, step)
   const save_if = trim(step?.with?.["save-if"] ?? "")
   if !contains(save_if, "inputs.save == 'true'")
     || !contains(
@@ -610,7 +638,12 @@ fn cache_key_inputs(workflow, job) -> list<string> {
     .to_list()
   for step in job?.steps ?? [] {
     if step_uses(step) == "./.github/actions/rust-cache" {
-      inputs = inputs + ["rust-cache-source-key=" + trim(step?.with?.["source-key"] ?? "")]
+      inputs = inputs
+        + [
+        "rust-cache-source-key=" + trim(step?.with?.["source-key"] ?? ""),
+        "rust-cache-target-dir=" + trim(step?.with?.["target-dir"] ?? ""),
+        "rust-cache-broad-restore-prefix=" + trim(step?.with?.["broad-restore-prefix"] ?? ""),
+      ]
       break
     }
     const uses = step_uses(step)
@@ -696,13 +729,41 @@ fn native_shared_cache_errors(
 /** Keep the sole native-Windows cache writer byte-compatible with its restore-only PR consumer. */
 pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
   const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
-  return native_shared_cache_errors(
+  let errors = native_shared_cache_errors(
     ci_workflow,
     nightly_workflow,
     "windows",
     WINDOWS_CACHE_KEY,
     source_key,
   )
+  const consumer_caches = matching_steps(ci_workflow?.jobs?.windows, "./.github/actions/rust-cache")
+  const producer_caches = matching_steps(
+    nightly_workflow?.jobs?.nextest,
+    "./.github/actions/rust-cache",
+  )
+  if len(consumer_caches) == 1 && len(producer_caches) == 1 {
+    const caches = consumer_caches + producer_caches
+    if caches.any(
+      { cache -> return trim(cache?.with?.["target-dir"] ?? "") != WINDOWS_CACHE_TARGET_DIR },
+    ) {
+      errors = errors
+        + [
+        "${WINDOWS_CACHE_KEY} producer and consumer must cache CARGO_TARGET_DIR explicitly",
+      ]
+    }
+    if caches.any(
+      { cache ->
+        return trim(cache?.with?.["broad-restore-prefix"] ?? "")
+          != WINDOWS_CACHE_BROAD_RESTORE_PREFIX
+      },
+    ) {
+      errors = errors
+        + [
+        "${WINDOWS_CACHE_KEY} producer and consumer must restore the latest compatible source-key generation",
+      ]
+    }
+  }
+  return errors
 }
 
 /** Keep the sole native-macOS cache writer byte-compatible with its restore-only PR consumer. */

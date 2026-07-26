@@ -3,10 +3,31 @@ import {
   ci_cache_policy_parse,
   macos_shared_cache_errors,
   setup_harn_cache_action_errors,
+  windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
+}
+
+fn native_source_key() -> string {
+  return gha_expression(
+    "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
+  )
+}
+
+fn windows_cache_inputs(save: bool = false) {
+  return {
+    "shared-key": "workspace-windows",
+    "source-key": native_source_key(),
+    "target-dir": gha_expression("env.CARGO_TARGET_DIR"),
+    "broad-restore-prefix": "v0-rust-workspace-windows-",
+    ...if save {
+      {save: true}
+    } else {
+      {}
+    },
+  }
 }
 
 fn policy() -> CiCachePolicy {
@@ -75,7 +96,10 @@ fn setup_harn_action() {
 
 fn action() {
   return {
-    inputs: {"prune-superseded-release-generations": {default: "false"}},
+    inputs: {
+      "prune-superseded-release-generations": {default: "false"},
+      "target-dir": {default: ""},
+    },
     runs: {
       steps: [
         {
@@ -93,6 +117,13 @@ fn action() {
           if: "inputs.broad-restore-prefix != ''",
           "continue-on-error": true,
           with: {
+            path: gha_expression("env.CARGO_HOME || '~/.cargo'")
+              + "/registry\n"
+              + gha_expression("env.CARGO_HOME || '~/.cargo'")
+              + "/git\n"
+              + gha_expression(
+              "env.CARGO_TARGET_DIR || format('{0}/target', github.workspace)",
+            ),
             key: gha_expression("inputs.broad-restore-prefix") + gha_expression("github.sha"),
             "restore-keys": gha_expression("inputs.broad-restore-prefix"),
           },
@@ -104,6 +135,8 @@ fn action() {
             "shared-key": gha_expression(
               "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
             ),
+            "cache-targets": gha_expression("inputs.target-dir == ''"),
+            "cache-directories": gha_expression("inputs.target-dir"),
             "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
           },
         },
@@ -162,13 +195,16 @@ fn workflows() {
             {uses: "./.github/actions/rust-toolchain"},
             {
               uses: "./.github/actions/rust-cache",
-              with: {
-                "shared-key": "workspace-macos",
-                "source-key": gha_expression(
-                  "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
-                ),
-              },
+              with: {"shared-key": "workspace-macos", "source-key": native_source_key()},
             },
+          ],
+        },
+        windows: {
+          steps: [
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "samypr100/setup-dev-drive@exact-pin"},
+            {uses: "./.github/actions/rust-toolchain"},
+            {uses: "./.github/actions/rust-cache", with: windows_cache_inputs()},
           ],
         },
       },
@@ -188,10 +224,10 @@ fn workflows() {
       jobs: {
         nextest: {
           steps: [
-            {
-              uses: "./.github/actions/rust-cache",
-              with: {"shared-key": "workspace-windows", save: true},
-            },
+            {uses: "actions/checkout@exact-pin"},
+            {uses: "samypr100/setup-dev-drive@exact-pin"},
+            {uses: "./.github/actions/rust-toolchain"},
+            {uses: "./.github/actions/rust-cache", with: windows_cache_inputs(true)},
           ],
         },
       },
@@ -207,9 +243,7 @@ fn workflows() {
               uses: "./.github/actions/rust-cache",
               with: {
                 "shared-key": "workspace-macos",
-                "source-key": gha_expression(
-                  "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
-                ),
+                "source-key": native_source_key(),
                 save: true,
               },
             },
@@ -222,7 +256,52 @@ fn workflows() {
 
 pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(task) {
   assert(ci_cache_policy_parse(policy()) != nil)
-  assert_eq(ci_cache_policy_errors(policy(), action(), node_action(), workflows()), [])
+  const declared = workflows()
+  assert_eq(
+    ci_cache_policy_errors(policy(), action(), node_action(), declared)
+      + windows_shared_cache_errors(
+      declared["ci.yml"],
+      declared["windows-nightly.yml"],
+    ),
+    [],
+  )
+}
+
+pipeline test_windows_shared_cache_targets_dev_drive_and_restores_near_misses(task) {
+  const declared = workflows()
+  assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
+}
+
+pipeline test_windows_shared_cache_rejects_missing_target_mapping_and_fallback(task) {
+  const declared = workflows()
+  const producer = declared["windows-nightly.yml"].jobs.nextest
+  const producer_cache = producer.steps[3]
+  const invalid = {
+    jobs: {
+      nextest: {
+        ...producer,
+        steps: producer.steps.slice(0, 3)
+          + [
+          {
+            ...producer_cache,
+            with: {...producer_cache.with, "target-dir": "", "broad-restore-prefix": ""},
+          },
+        ],
+      },
+    },
+  }
+  const errors = windows_shared_cache_errors(declared["ci.yml"], invalid)
+  assert(
+    errors.contains(
+      "workspace-windows producer and consumer must cache CARGO_TARGET_DIR explicitly",
+    ),
+  )
+  assert(
+    errors.contains(
+      "workspace-windows producer and consumer must restore the latest compatible source-key generation",
+    ),
+  )
+  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
 }
 
 pipeline test_ci_cache_policy_rejects_bypasses_remote_sccache_and_rogue_writers(task) {
