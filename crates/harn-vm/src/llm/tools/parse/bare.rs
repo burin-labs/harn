@@ -416,6 +416,7 @@ pub(crate) fn parse_bare_calls_in_body(
                 recovered_from_stray_count: 0,
                 done_marker: None,
                 canonical: String::new(),
+                dropped: Vec::new(),
             };
         }
     }
@@ -429,6 +430,7 @@ pub(crate) fn parse_bare_calls_in_body(
         recovered_from_stray_count: 0,
         done_marker: None,
         canonical: String::new(),
+        dropped: Vec::new(),
     }
 }
 

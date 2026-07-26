@@ -18,8 +18,9 @@ use super::syntax::{
     parse_ts_call_from, preview_str, render_canonical_call, skip_heredoc_body, strip_thinking_tags,
     CloseScan,
 };
-use super::TextToolParseResult;
+use super::{DroppedFragment, DroppedReason, TextToolParseResult};
 use crate::llm::tools::collect_tool_schemas;
+use crate::text_index::TextIndex;
 use crate::value::VmValue;
 
 mod function_markup;
@@ -78,9 +79,13 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     let mut canonical_parts: Vec<String> = Vec::new();
     let mut done_marker: Option<String> = None;
     let mut recovered_from_stray_count = 0usize;
+    let mut dropped: Vec<DroppedFragment> = Vec::new();
 
     let mut cursor = 0usize;
     let bytes = src.as_bytes();
+    // Fence and line-start positions, resolved once. The scan below asks about
+    // them at nearly every position it visits.
+    let index = TextIndex::build(src);
     // Byte position just past the most recently consumed top-level block.
     // A tag that follows a consumed block with only whitespace between them
     // is structurally top-level even mid-line: value models chain blocks as
@@ -110,6 +115,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         // run has already been consumed as a unit), so a `[[CALL]` here is a
         // structural opener, not argument/heredoc/prose text.
         if let Some(after) = recover_malformed_call_opener(
+            &index,
             src,
             cursor,
             tools_val,
@@ -153,8 +159,14 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts: &mut canonical_parts,
                 done_marker: &mut done_marker,
                 recovered_from_stray_count: &mut recovered_from_stray_count,
+                dropped: &mut dropped,
             };
-            report_stray(&src[start..cursor], tools_val, &mut stray);
+            report_stray(
+                &src[start..cursor],
+                DroppedReason::SalvagedAsProse,
+                tools_val,
+                &mut stray,
+            );
             continue;
         }
 
@@ -168,8 +180,14 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts: &mut canonical_parts,
                 done_marker: &mut done_marker,
                 recovered_from_stray_count: &mut recovered_from_stray_count,
+                dropped: &mut dropped,
             };
-            report_stray(&src[cursor..after], tools_val, &mut stray);
+            report_stray(
+                &src[cursor..after],
+                DroppedReason::SalvagedAsProse,
+                tools_val,
+                &mut stray,
+            );
             cursor = after;
             last_block_end = cursor;
             continue;
@@ -193,8 +211,8 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        if (!adjacent_to_block && !is_top_level_tag_position(src, cursor))
-            || inside_markdown_fence(src, cursor)
+        if (!adjacent_to_block && !index.is_line_leading(src, cursor))
+            || index.inside_markdown_fence(cursor)
         {
             let start = cursor;
             while cursor < bytes.len() && bytes[cursor] != b'\n' {
@@ -209,8 +227,14 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts: &mut canonical_parts,
                 done_marker: &mut done_marker,
                 recovered_from_stray_count: &mut recovered_from_stray_count,
+                dropped: &mut dropped,
             };
-            report_stray(&src[start..cursor], tools_val, &mut stray);
+            report_stray(
+                &src[start..cursor],
+                DroppedReason::FencedNarration,
+                tools_val,
+                &mut stray,
+            );
             continue;
         }
 
@@ -597,6 +621,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         recovered_from_stray_count,
         done_marker,
         canonical: canonical_parts.join("\n\n"),
+        dropped,
     }
 }
 
@@ -854,47 +879,6 @@ pub(super) fn leading_call_name(body: &str, tools_val: Option<&VmValue>) -> Opti
     known.contains(name).then(|| name.to_string())
 }
 
-pub(super) fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
-    let line_start = src[..cursor].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    src[line_start..cursor]
-        .chars()
-        .all(|ch| matches!(ch, ' ' | '\t' | '\r'))
-}
-
-/// Is `cursor` enclosed by a *closed* markdown code fence?
-///
-/// A top-level tag inside a ```` ```lang … ``` ```` block is narration, not a
-/// real block, so the scanner skips it (e.g. an example `<user_response>` shown
-/// in fenced docs). But the cursor only counts as "inside a fence" when the
-/// opening fence is matched by a closing fence *at or after* the cursor.
-///
-/// The earlier implementation just counted ```` ``` ```` markers before the
-/// cursor and called an odd count "inside a fence". That shredded a legitimate
-/// trailing `<tool_call>` whenever an unbalanced ```` ``` ```` appeared earlier
-/// in the response: the open fence with no close had no business swallowing a
-/// later real block. Requiring a matching close ahead makes an unbalanced
-/// *trailing* fence harmless while keeping closed example fences skipped.
-pub(super) fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
-    // Walk fence markers left to right, toggling parity. We only care whether
-    // the fence that is open *at* the cursor is later closed.
-    let mut open_before_cursor = false;
-    let mut scan = 0;
-    while let Some(rel) = src[scan..].find("```") {
-        let pos = scan + rel;
-        if pos >= cursor {
-            // First fence marker at/after the cursor. If a fence was open when
-            // we crossed the cursor, this marker closes it → cursor is inside a
-            // real (closed) fence. Otherwise the cursor sat in open prose.
-            return open_before_cursor;
-        }
-        open_before_cursor = !open_before_cursor;
-        scan = pos + 3;
-    }
-    // No fence marker at/after the cursor: any fence still open here is an
-    // unbalanced trailing fence, so the cursor is not inside a closed fence.
-    false
-}
-
 /// Report stray text that sits outside any recognized top-level tag.
 /// When the stray content contains parseable tool calls, execute them by
 /// routing them through the canonical-call path. Canonical replay carries the
@@ -909,13 +893,23 @@ struct StrayReportContext<'a> {
     canonical_parts: &'a mut Vec<String>,
     done_marker: &'a mut Option<String>,
     recovered_from_stray_count: &'a mut usize,
+    dropped: &'a mut Vec<DroppedFragment>,
 }
 
-fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayReportContext<'_>) {
+fn report_stray(
+    fragment: &str,
+    reason: DroppedReason,
+    tools_val: Option<&VmValue>,
+    ctx: &mut StrayReportContext<'_>,
+) {
     let trimmed = fragment.trim();
     if trimmed.is_empty() {
         return;
     }
+    let dropped_fragment = DroppedFragment {
+        text: trimmed.to_string(),
+        reason,
+    };
     if is_orphaned_tool_call_wrapper_fragment(trimmed) {
         return;
     }
@@ -941,7 +935,14 @@ fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayRepo
             push_assistant_prose(prose, ctx.assistant_prose_parts, ctx.canonical_parts);
         }
     } else if !sniff.errors.is_empty() {
+        // The fragment was consumed without producing a call, which is the
+        // definition of dropped. Recording it here is what lets the shape
+        // detector see an unrecognized dialect whose body failed the bare-call
+        // sniff — the argument line of a fenced `<tool>` block lands on this
+        // branch, and without the record the block reassembles with an empty
+        // body and the detector rightly stays quiet.
         ctx.errors.extend(sniff.errors);
+        ctx.dropped.push(dropped_fragment);
     } else if !salvage_stray_done(
         trimmed,
         ctx.user_response_parts,
@@ -950,6 +951,7 @@ fn report_stray(fragment: &str, tools_val: Option<&VmValue>, ctx: &mut StrayRepo
     ) {
         if should_salvage_stray_prose(trimmed) {
             push_assistant_prose(trimmed, ctx.assistant_prose_parts, ctx.canonical_parts);
+            ctx.dropped.push(dropped_fragment);
         } else {
             ctx.violations.push(format!(
                 "Stray text outside response tags: {:?}. Wrap all prose in \

@@ -2,6 +2,7 @@ import "std/agent/loop_call_resolution"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
+import { tool_shape_feedback, tool_shape_findings } from "std/llm/tool_shape"
 
 // Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
 //
@@ -769,7 +770,14 @@ pub fn __parse_feedback_protocol_violations(parsed, turn_opts) {
   ) {
     return []
   }
-  return parsed?.protocol_violations ?? []
+  const declared = parsed?.protocol_violations ?? []
+  // Text the parser consumed without producing a call, but which is shaped
+  // like an invocation, is a failure of the parse boundary rather than a
+  // choice by the model. Reporting it here is what stops the turn from
+  // reading as "the model declined to act" to stall detection and the
+  // governor downstream.
+  const unparsed = tool_shape_feedback(tool_shape_findings(parsed?.dropped ?? []))
+  return declared + unparsed
 }
 
 pub fn __parse_feedback_diagnostics(parsed, turn_opts) {
