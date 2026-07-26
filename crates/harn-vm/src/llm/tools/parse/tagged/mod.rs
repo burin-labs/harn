@@ -934,7 +934,6 @@ fn report_stray(
         if !prose.is_empty() && should_salvage_stray_prose(prose) {
             push_assistant_prose(prose, ctx.assistant_prose_parts, ctx.canonical_parts);
         }
-        return;
     } else if !sniff.errors.is_empty() {
         // The fragment was consumed without producing a call, which is the
         // definition of dropped. Recording it here is what lets the shape
