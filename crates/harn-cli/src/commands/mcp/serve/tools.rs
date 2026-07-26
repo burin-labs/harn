@@ -877,8 +877,8 @@ impl McpOrchestratorService {
             limit: request.limit,
             grouped_by_trace: request.grouped_by_trace,
         };
-        let ctx = load_local_runtime(&self.local_args()).await?;
-        let records = harn_vm::query_trust_records(&ctx.event_log, &filters)
+        let event_log = self.orchestrator_event_log()?;
+        let records = harn_vm::query_trust_records(&event_log, &filters)
             .await
             .map_err(|error| error.to_string())?;
         let results = if filters.grouped_by_trace {

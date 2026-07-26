@@ -247,6 +247,9 @@ pub(super) fn spawn_log_topic_watchers(
         Ok(log) => log,
         Err(error) => {
             eprintln!("[harn] warning: MCP log stream disabled: {error}");
+            // Still publish, or a waiter blocks forever on watchers that were
+            // never spawned.
+            readiness.publish_expected(0);
             return (None, Vec::new());
         }
     };
@@ -261,10 +264,7 @@ pub(super) fn spawn_log_topic_watchers(
             )
         })
         .collect();
-    readiness
-        .expected
-        .store(watchers.len(), std::sync::atomic::Ordering::SeqCst);
-    readiness.notify.notify_waiters();
+    readiness.publish_expected(watchers.len());
     (Some(event_log), watchers)
 }
 
@@ -285,6 +285,9 @@ fn spawn_log_topic_watcher(
         }
     };
     Some(tokio::spawn(async move {
+        // Both failure arms settle before returning: this watcher is spawned,
+        // so it is counted in `expected`, and a waiter that never hears from it
+        // waits forever.
         let start_from = match event_log.latest(&topic).await {
             Ok(latest) => latest,
             Err(error) => {
@@ -292,6 +295,7 @@ fn spawn_log_topic_watcher(
                     "[harn] warning: MCP log stream cannot read topic {}: {error}",
                     binding.topic
                 );
+                readiness.record_settled();
                 return;
             }
         };
@@ -302,10 +306,11 @@ fn spawn_log_topic_watcher(
                     "[harn] warning: MCP log stream cannot subscribe to topic {}: {error}",
                     binding.topic
                 );
+                readiness.record_settled();
                 return;
             }
         };
-        readiness.record_ready();
+        readiness.record_settled();
         while let Some(item) = stream.next().await {
             let Ok((event_id, event)) = item else {
                 continue;

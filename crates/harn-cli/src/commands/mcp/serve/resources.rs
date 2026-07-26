@@ -434,7 +434,7 @@ impl McpOrchestratorService {
             "[harn] mcp: client={client_identity} tool={tool_name} status={status} trace_id={trace_id}"
         );
 
-        let ctx = load_local_runtime(&self.local_args()).await?;
+        let event_log = self.orchestrator_event_log()?;
         let topic = Topic::new(ACTION_GRAPH_TOPIC).map_err(|error| error.to_string())?;
         let mut headers = BTreeMap::new();
         headers.insert("trace_id".to_string(), trace_id.to_string());
@@ -468,7 +468,7 @@ impl McpOrchestratorService {
             "result": result.as_ref().ok(),
             "error": result.as_ref().err(),
         });
-        ctx.event_log
+        event_log
             .append(
                 &topic,
                 LogEvent::new("action_graph_update", payload).with_headers(headers),
