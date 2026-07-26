@@ -918,9 +918,10 @@ mod tests {
 
         // A caller that names a tree asked for a specific location; an
         // unrelated HARN_STATE_DIR must not relocate its store out of it.
-        let options = json_to_vm_value(&json!({"root": "/workspace"}));
+        let named_root = tempfile::TempDir::new().unwrap();
+        let options = json_to_vm_value(&json!({"root": named_root.path().to_string_lossy()}));
         let named = canonical_store_state_dir(options.as_dict()).unwrap();
-        assert_eq!(named, SessionStoreDir::under_root(Path::new("/workspace")));
+        assert_eq!(named, SessionStoreDir::under_root(named_root.path()));
 
         // The defaulted case is Harn's own state, so it follows HARN_STATE_DIR
         // like every other state consumer.
