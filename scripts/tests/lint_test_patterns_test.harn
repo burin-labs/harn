@@ -35,11 +35,23 @@ pipeline test_test_path_inline_module_names(task) {
 }
 
 @test
+pipeline test_test_path_split_test_module_directories(task) {
+  // A test module split across a directory keeps the module's name on the
+  // directory, not on any file, so classification is per segment.
+  assert_eq(is_test_rs_path("crates/harn-vm/src/vm/tests_runtime/language.rs"), true)
+  assert_eq(is_test_rs_path("crates/harn-vm/src/vm/tests_runtime/mod.rs"), true)
+  assert_eq(is_test_rs_path("crates/harn-vm/src/orchestration/tests/policy.rs"), true)
+  assert_eq(is_test_rs_path("crates/harn-vm/src/llm/api_tests/response.rs"), true)
+}
+
+@test
 pipeline test_test_path_rejects_runtime_and_non_rs(task) {
   assert_eq(is_test_rs_path("crates/harn-vm/src/lib.rs"), false)
   // Inline test-module names only count under a src/ directory.
   assert_eq(is_test_rs_path("crates/harn-vm/benches/tests.rs"), false)
   assert_eq(is_test_rs_path("crates/harn-vm/src/tests.txt"), false)
+  // `latest.rs` ends with "test" but is not a test module.
+  assert_eq(is_test_rs_path("crates/harn-vm/src/latest.rs"), false)
 }
 
 // --- is_runtime_rs_path -----------------------------------------------------
@@ -55,6 +67,18 @@ pipeline test_runtime_path_excludes_tests(task) {
   assert_eq(is_runtime_rs_path("crates/harn-vm/src/cli/tests/mod.rs"), false)
   assert_eq(is_runtime_rs_path("crates/harn-vm/src/agent_sessions_tests.rs"), false)
   assert_eq(is_runtime_rs_path("crates/harn-vm/src/tests_parse.rs"), false)
+}
+
+@test
+pipeline test_runtime_path_excludes_split_test_module_directories(task) {
+  // Splitting a test module into a directory must not reclassify its files
+  // as runtime source and subject them to the runtime-only lints.
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/vm/tests_runtime/concurrency.rs"), false)
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/vm/tests_runtime/mod.rs"), false)
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/orchestration/tests/settlement.rs"), false)
+  assert_eq(is_runtime_rs_path("crates/harn-cli/src/commands/run_tests/basic.rs"), false)
+  // A runtime file whose name merely contains "test" is still runtime.
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/latest.rs"), true)
 }
 
 @test
