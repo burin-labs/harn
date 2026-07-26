@@ -7,7 +7,7 @@ import {
 } from "std/llm/media"
 
 pipeline test(task) {
-  const png_path = "media_helper_fixture.png"
+  const png_path = path_join(harness.fs.temp_dir(), "media_helper_fixture.png")
   harness.fs.write_bytes(
     png_path,
     bytes_from_hex(

@@ -45,6 +45,7 @@ conformance/tests/**/.harn/workflows/
 conformance/tests/**/.harn/*.sqlite
 conformance/tests/**/.harn/*.sqlite-shm
 conformance/tests/**/.harn/*.sqlite-wal
+conformance/tests/**/.harn/*.harn-init.lock
 conformance/tests/**/.harn/test-timings.json
 
 # Shared Claude skill definitions are tracked; local Claude state is not.
@@ -83,18 +84,6 @@ tree-sitter-harn/*.dylib
 tree-sitter-harn/*.so
 tree-sitter-harn/*.dll
 tree-sitter-harn/tree-sitter
-
-# Test artifacts from conformance tests that create fixtures in CWD
-# (project_scan_*, project_deep_scan_*, and polyglot_tree tests in
-# conformance/tests/stdlib/).
-/polyglot_tree/
-/project_scan_catalog/
-/project_scan_empty/
-/project_scan_ignored/
-/project_scan_single/
-/project_deep_scan_ignore/
-/project_deep_scan_ns/
-/project_deep_scan_repo/
 
 # qmode experiment and test-run state.
 experiments/burin-mini/.qmode/
