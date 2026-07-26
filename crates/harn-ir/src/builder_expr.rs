@@ -1,4 +1,5 @@
 use super::*;
+use harn_parser::{Node, SNode};
 
 impl<'a> HandlerIrBuilder<'a> {
     pub(super) fn build_expr(&mut self, node: &SNode, incoming: Vec<NodeId>) -> Vec<NodeId> {
