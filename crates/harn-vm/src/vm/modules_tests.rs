@@ -872,3 +872,77 @@ fn a_planned_module_loads_without_reading_its_source() {
         );
     });
 }
+
+#[test]
+fn a_plan_naming_an_evicted_artifact_falls_back_to_reading() {
+    // A plan is a shortcut to an artifact, not a promise that one exists. The
+    // shared cache directory is bounded and shared across every checkout on the
+    // machine, so an artifact the manifest named can be gone by the next spawn
+    // while the manifest itself still re-checks perfectly clean.
+    //
+    // The failure this guards is silent: the plan hit is the only path that
+    // never reads the file, so if the fallback were missing the module would
+    // simply be absent rather than stale, and the import would fail somewhere
+    // far from here.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    runtime.block_on(async {
+        // Distinctive enough that its digest — and so its filename in the
+        // shared cache directory — cannot collide with another test's module.
+        let body = "pub fn value() { return 55201 }\n";
+        // Distinct entry text as well as a distinct dependency: the shared
+        // cache directory keys entry artifacts on the entry's source hash
+        // alone, so two tests whose entries are byte-identical contend for one
+        // cache identity (see #5591).
+        let entry = temp.path().join("entry.harn");
+        std::fs::write(
+            &entry,
+            "import { value } from \"./value\"\n__io_println(\"evicted-artifact-case\")\n",
+        )
+        .expect("write entry");
+        let dependency = temp.path().join("value.harn");
+        std::fs::write(&dependency, body).expect("write dependency");
+
+        let entry_source = std::fs::read_to_string(&entry).expect("read entry");
+        let cold = bytecode_cache::load(&entry, &entry_source);
+        cold.store(&crate::compile_source(&entry_source).expect("entry compiles"))
+            .expect("store entry chunk and manifest");
+        let mut cold_vm = Vm::new();
+        cold_vm.set_source_dir(temp.path());
+        cold_vm
+            .execute_import("./value", None)
+            .await
+            .expect("cold import succeeds");
+
+        let link_table = bytecode_cache::load(&entry, &entry_source)
+            .link_table()
+            .expect("the seeded entry must resolve into a plan");
+
+        // Evict every artifact the plan could reach for this module.
+        let key = bytecode_cache::CacheKey::from_module_sha256(
+            module_source::read(&dependency)
+                .expect("read dependency")
+                .sha256(),
+        );
+        let _ = std::fs::remove_file(bytecode_cache::cache_dir().join(key.module_filename()));
+        if let Some(adjacent) = bytecode_cache::adjacent_module_cache_path(&dependency) {
+            let _ = std::fs::remove_file(adjacent);
+        }
+
+        let before = module_source::SOURCE_READS.with(|c| c.get());
+        let mut vm = Vm::new();
+        vm.set_source_dir(temp.path());
+        vm.set_graph_link_table(Some(link_table));
+        vm.execute_import("./value", None)
+            .await
+            .expect("an evicted artifact must not fail the import");
+        assert!(
+            module_source::SOURCE_READS.with(|c| c.get()) > before,
+            "a plan whose artifact is gone must fall back to reading the source"
+        );
+    });
+}
