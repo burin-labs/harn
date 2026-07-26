@@ -603,73 +603,18 @@ async fn verify_stripe<L: EventLog + ?Sized>(
         }
     };
 
-    let header = match required_header(headers, signature_header) {
-        Ok(value) => value,
-        Err(error) => {
-            return reject(event_log, provider, style, &error, now, None, Some(window)).await
-        }
-    };
-
-    let mut timestamp = None;
-    let mut provided = Vec::new();
-    for part in header.split(',') {
-        let (key, value) = match part.split_once('=') {
-            Some(pair) => pair,
-            None => continue,
-        };
-        if key == "t" {
-            match value.parse::<i64>() {
-                Ok(raw) => match OffsetDateTime::from_unix_timestamp(raw) {
-                    Ok(parsed) => timestamp = Some(parsed),
-                    Err(error) => {
-                        let error = ConnectorError::InvalidHeader {
-                            name: signature_header.to_string(),
-                            detail: error.to_string(),
-                        };
-                        return reject(event_log, provider, style, &error, now, None, Some(window))
-                            .await;
-                    }
-                },
-                Err(error) => {
-                    let error = ConnectorError::InvalidHeader {
-                        name: signature_header.to_string(),
-                        detail: error.to_string(),
-                    };
-                    return reject(event_log, provider, style, &error, now, None, Some(window))
-                        .await;
-                }
-            }
-        } else if key == version {
-            match hex::decode(value) {
-                Ok(signature) => provided.push(signature),
-                Err(error) => {
-                    let error = ConnectorError::InvalidHeader {
-                        name: signature_header.to_string(),
-                        detail: error.to_string(),
-                    };
-                    return reject(event_log, provider, style, &error, now, None, Some(window))
-                        .await;
-                }
-            }
-        }
-    }
-
-    let timestamp = match timestamp {
-        Some(value) => value,
-        None => {
-            let error = ConnectorError::InvalidHeader {
-                name: signature_header.to_string(),
-                detail: "missing `t=` timestamp component".to_string(),
-            };
-            return reject(event_log, provider, style, &error, now, None, Some(window)).await;
-        }
-    };
-    ensure_timestamp_within_window(event_log, provider, style, timestamp, window, now).await?;
-
-    if provided.is_empty() {
-        let error = ConnectorError::InvalidHeader {
-            name: signature_header.to_string(),
-            detail: format!("missing `{version}=` signature component"),
+    if let Err(error) = super::stripe::verify_stripe_signature_with(
+        body,
+        headers,
+        secret,
+        window,
+        now,
+        signature_header,
+        version,
+    ) {
+        let timestamp = match &error {
+            ConnectorError::TimestampOutOfWindow { timestamp, .. } => Some(*timestamp),
+            _ => None,
         };
         return reject(
             event_log,
@@ -677,35 +622,12 @@ async fn verify_stripe<L: EventLog + ?Sized>(
             style,
             &error,
             now,
-            Some(timestamp),
+            timestamp,
             Some(window),
         )
         .await;
     }
-
-    let mut signed = timestamp.unix_timestamp().to_string().into_bytes();
-    signed.push(b'.');
-    signed.extend_from_slice(body);
-    let expected = hmac_sha256(secret.as_bytes(), &signed);
-    if provided
-        .iter()
-        .any(|signature| secure_eq(&expected, signature))
-    {
-        Ok(())
-    } else {
-        let error =
-            ConnectorError::invalid_signature("no stripe signature matched the raw request body");
-        reject(
-            event_log,
-            provider,
-            style,
-            &error,
-            now,
-            Some(timestamp),
-            Some(window),
-        )
-        .await
-    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1077,7 +999,7 @@ async fn ensure_timestamp_within_window<L: EventLog + ?Sized>(
     Ok(())
 }
 
-fn required_header<'a>(
+pub(super) fn required_header<'a>(
     headers: &'a BTreeMap<String, String>,
     name: &str,
 ) -> Result<&'a str, ConnectorError> {

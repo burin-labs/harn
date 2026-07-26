@@ -1,9 +1,7 @@
 //! Connector traits and shared helpers for inbound event-source providers.
 //!
-//! This lands in `harn-vm` for now because the current dependency surface
-//! (`EventLog`, `SecretProvider`, `TriggerEvent`) already lives here. If the
-//! connector ecosystem grows enough to justify extraction, the module can be
-//! split into a dedicated crate later without changing the high-level contract.
+//! Runtime connector contracts live here alongside their event, secret, and
+//! trigger dependencies.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -34,6 +32,7 @@ pub mod harn_module;
 pub mod hmac;
 pub mod shared;
 pub mod stream;
+mod stripe;
 #[cfg(test)]
 pub(crate) mod test_util;
 pub mod testkit;
@@ -62,6 +61,7 @@ pub use shared::{
     ConnectorBase, CursorPage, HmacSignatureAlgorithm, JwtKeySource, JwtVerificationOptions,
 };
 pub use stream::StreamConnector;
+pub use stripe::verify_stripe_signature;
 use webhook::WebhookProviderProfile;
 pub use webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 
