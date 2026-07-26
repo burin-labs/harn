@@ -207,6 +207,35 @@ fn ensure_git_hooks_installed() {
         .status();
 }
 
+/// Watch the CLI AOT manifest in a way that survives its absence.
+///
+/// A source checkout normally has no release/package payload — the manifest is
+/// generated and git-ignored — and Cargo treats a `rerun-if-changed` path that
+/// does not exist as permanently stale. Naming it unconditionally therefore
+/// reran this build script on every invocation and recompiled `harn-cli` in
+/// full: a measured ~2m12s on every `cargo` call on Windows CI, and the same
+/// staleness on every other platform's fresh checkout.
+///
+/// Watching the containing directory gives Cargo something that exists, so an
+/// absent payload is stable, and creating one changes that directory's mtime
+/// and still triggers the rerun that embeds it. The manifest is watched
+/// directly as well whenever it is present, because regenerating it in place
+/// does not touch the directory's mtime — and a silently stale embedded
+/// payload is the exact failure this watch exists to prevent.
+fn emit_cli_aot_manifest_watches(manifest_path: &Path) {
+    if let Some(generated_dir) = manifest_path.parent() {
+        // Git-ignored, and absent in a fresh checkout. Creating it is what
+        // makes it watchable; the build script already materializes
+        // `portal-dist` the same way.
+        if fs::create_dir_all(generated_dir).is_ok() {
+            println!("cargo:rerun-if-changed={}", generated_dir.display());
+        }
+    }
+    if manifest_path.exists() {
+        println!("cargo:rerun-if-changed={}", manifest_path.display());
+    }
+}
+
 /// Embed an optional release/package CLI AOT payload.
 ///
 /// The generator validates source and compiler freshness while it has the full
@@ -220,7 +249,7 @@ fn emit_cli_script_bytecode() {
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let manifest_path = manifest_dir.join(CLI_AOT_MANIFEST);
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    println!("cargo:rerun-if-changed={}", manifest_path.display());
+    emit_cli_aot_manifest_watches(&manifest_path);
     println!("cargo:rerun-if-env-changed={CLI_AOT_REQUIRED_ENV}");
     let required = cli_aot_required();
     let table = cli_aot_manifest::read_manifest(&manifest_path)
@@ -349,21 +378,50 @@ fn empty_cli_aot_table() -> String {
     )
 }
 
+/// Resolve a package-relative CLI AOT payload to the path Cargo should watch.
+///
+/// The returned path is the plain `manifest_dir` join, never the canonical
+/// form. Canonicalizing is how we check the payload stays inside the package,
+/// but a canonical path must not reach `cargo:rerun-if-changed`: on Windows
+/// `fs::canonicalize` yields a `\\?\` verbatim path, and Cargo cannot match one
+/// against the ordinary path in its fingerprint, so the crate reads as changed
+/// on every invocation and rebuilds in full. That cost a measured ~2m12s per
+/// `cargo` call on Windows CI, on every call, for every job and every
+/// developer.
+///
+/// [`ensure_payload_inside_package`] owns the canonical form and returns
+/// nothing, so there is no canonical path here to emit by accident.
 fn resolve_cli_aot_payload_path(manifest_dir: &Path, relative: &str) -> Result<PathBuf, String> {
     let candidate = Path::new(relative);
     if candidate.is_absolute() {
         return Err(format!("CLI AOT payload path must be relative: {relative}"));
     }
+    let path = manifest_dir.join(candidate);
+    ensure_payload_inside_package(manifest_dir, &path, relative)?;
+    Ok(path)
+}
+
+/// Reject a payload that resolves outside the package once symlinks and `..`
+/// are folded away.
+///
+/// Deliberately returns `()`. The canonical paths are the whole point of the
+/// check and the whole hazard if they escape — see
+/// [`resolve_cli_aot_payload_path`].
+fn ensure_payload_inside_package(
+    manifest_dir: &Path,
+    path: &Path,
+    relative: &str,
+) -> Result<(), String> {
     let root = fs::canonicalize(manifest_dir)
         .map_err(|error| format!("canonicalize {}: {error}", manifest_dir.display()))?;
-    let resolved = fs::canonicalize(manifest_dir.join(candidate))
+    let resolved = fs::canonicalize(path)
         .map_err(|error| format!("canonicalize CLI AOT payload {relative}: {error}"))?;
     if !resolved.starts_with(&root) {
         return Err(format!(
             "CLI AOT payload path escapes the package: {relative}"
         ));
     }
-    Ok(resolved)
+    Ok(())
 }
 
 /// Embed every demo *sibling* file (anything under `assets/demo/<id>/` other
