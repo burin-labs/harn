@@ -259,12 +259,31 @@ arbitrary native tooling, record/replay remains the workhorse.
 
 ## Filesystem overlay semantics
 
-The overlay is a copy-on-write layer in front of a real worktree. The
-sandbox enforcement — `enforce_fs_path` — runs *before* the overlay
-hook, so a write that would normally be rejected by the workspace-root
-policy is still rejected in testbench mode. Reads and writes to paths
-*outside* the overlay's root fall through to the real filesystem; the
-overlay is bounded to the worktree the operator declared.
+The overlay is a copy-on-write layer in front of a real worktree. Reads
+and writes to paths *outside* the overlay's root fall through to the real
+filesystem; the overlay is bounded to the worktree the operator declared.
+
+Sandbox enforcement (`enforce_fs_path`) still applies, but it skips
+accesses the overlay *absorbs* — those served entirely from the in-memory
+layer, which cannot touch the real filesystem. Scoping those against
+`workspace_roots` would reject a mutation that was never going to happen,
+and defeat the overlay in exactly the confined scenarios it exists for.
+
+What counts as absorbed depends on the access, because the overlay does
+not intercept everything inside its root:
+
+| Access | Inside the overlay root | Enforcement |
+|---|---|---|
+| write / delete | always absorbed by the layer | skipped |
+| read, path in the layer | served from memory | skipped |
+| read, path not in the layer | falls through to `std::fs::read` | **enforced** |
+| any access outside the root | real filesystem | **enforced** |
+
+That last read case is the one to keep in mind when writing a confined
+testbench: a case can freely mutate its overlay root, but reading a
+fixture file it has not already written is a genuine disk read. Add the
+overlay root to `read_only_roots` when a case needs to read its own
+fixtures under a policy that would otherwise exclude them.
 
 `OverlayFs::diff()` returns one entry per change. `render_unified_diff`
 formats them as a `git apply`-style hunk list:

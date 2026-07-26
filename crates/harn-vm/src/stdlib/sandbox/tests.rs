@@ -1,6 +1,7 @@
 use super::*;
 use crate::orchestration::{pop_execution_policy, push_execution_policy};
 
+mod overlay_scope;
 mod path_contracts;
 mod process_axis;
 

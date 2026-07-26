@@ -105,6 +105,50 @@ pub(super) fn is_standard_io_device_for_access(path: &Path, access: FsAccess) ->
     }
 }
 
+/// Whether this access is not a workspace filesystem mutation, and so
+/// falls outside workspace-root scoping entirely.
+///
+/// The exemptions are the standard process I/O devices (writing to the
+/// process's own output streams) and anything an active testbench overlay
+/// absorbs (served from memory). Both share one reason: the access cannot
+/// change the workspace, so scoping it would reject something that was
+/// never going to happen.
+///
+/// Used only by [`super::check_fs_path_scope`]. Notably *not* by
+/// `scoped_mutation_target`, which answers a different question — where a
+/// real mutation should land — and must keep treating an overlay path as
+/// out of its hands rather than as an unscoped raw write.
+pub(super) fn access_is_exempt_from_scope(path: &Path, access: FsAccess) -> bool {
+    is_standard_io_device_for_access(&normalize_io_device_path(path), access)
+        || overlay_absorbs_access(path, access)
+}
+
+/// Whether an active testbench overlay serves this access entirely from
+/// its in-memory layer, so the real filesystem is never touched.
+///
+/// This is the sibling of [`is_standard_io_device_for_access`]: both name
+/// an access that is not a workspace filesystem mutation and therefore
+/// falls outside workspace-root scoping. Scoping an absorbed access would
+/// reject a mutation that, by construction, was never going to happen —
+/// and the overlay exists precisely so confined code can simulate edits.
+///
+/// Narrow on purpose. This is not "disable the sandbox when a testbench is
+/// active": the overlay does not intercept everything inside its root. A
+/// read of a path the layer does not hold falls through to the real file,
+/// so it is not absorbed and stays gated like any other read.
+///
+/// The overlay owns the answer — it is the only thing that knows its own
+/// layer — so this routes the access kind to it and nothing more.
+fn overlay_absorbs_access(path: &Path, access: FsAccess) -> bool {
+    let Some(overlay) = crate::testbench::overlay_fs::active_overlay() else {
+        return false;
+    };
+    match access {
+        FsAccess::Read => overlay.absorbs_read(path),
+        FsAccess::Write | FsAccess::Delete => overlay.absorbs_mutation(path),
+    }
+}
+
 fn is_dev_fd_descriptor(path: &Path) -> bool {
     let Some(text) = path.to_str() else {
         return false;
