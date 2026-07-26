@@ -126,6 +126,61 @@ pub fn string_char_count(text: &str) -> usize {
     }
 }
 
+/// Byte offset of char index `char_index`, clamped to the end of `text`.
+///
+/// Harn indexes strings by Unicode scalar, but every underlying operation is
+/// byte-addressed. Converting once, in a single forward pass, is what keeps
+/// char-indexed string methods linear: the natural spelling
+/// (`text.chars().nth(i)`, or collecting a `Vec<char>` to subscript it) is
+/// O(i) or O(n) *per call*, so a scan loop over a string becomes quadratic.
+pub fn char_to_byte_offset(text: &str, char_index: usize) -> usize {
+    if text.is_ascii() {
+        return char_index.min(text.len());
+    }
+    text.char_indices()
+        .nth(char_index)
+        .map(|(offset, _)| offset)
+        .unwrap_or(text.len())
+}
+
+/// Byte range for the half-open char range `[start, end)`, clamped to `text`.
+///
+/// One forward pass for both ends, so slicing costs the distance walked rather
+/// than the length of the whole string, and nothing is allocated on the way.
+pub fn char_range_to_byte_range(text: &str, start: usize, end: usize) -> (usize, usize) {
+    let end = end.max(start);
+    if text.is_ascii() {
+        let len = text.len();
+        return (start.min(len), end.min(len));
+    }
+    // A char index past the end of the string resolves to the end of the
+    // string, which is what leaves both ends clamped without a length probe.
+    let mut start_byte = text.len();
+    let mut end_byte = text.len();
+    for (char_index, (offset, _)) in text.char_indices().enumerate() {
+        if char_index == start {
+            start_byte = offset;
+        }
+        if char_index == end {
+            end_byte = offset;
+            break;
+        }
+    }
+    (start_byte, end_byte.max(start_byte))
+}
+
+/// Char index of the char that begins at `byte_offset`.
+///
+/// Byte-addressed searches (`str::find`) report byte offsets; Harn reports char
+/// indices. ASCII text needs no conversion at all, which is the case that
+/// matters for model output.
+pub fn byte_offset_to_char_index(text: &str, byte_offset: usize) -> usize {
+    if text.is_ascii() {
+        return byte_offset.min(text.len());
+    }
+    text[..byte_offset.min(text.len())].chars().count()
+}
+
 /// Indexed runtime layout for a Harn struct instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructLayout {

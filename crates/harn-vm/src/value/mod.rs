@@ -13,8 +13,9 @@ pub type VmMutex<T> = parking_lot::Mutex<T>;
 
 pub use build::{DictRetain, VmDictExt};
 pub use core::{
-    intern_key, string_char_count, struct_fields_to_map, DictMap, HarnStr, StructInstanceData,
-    StructLayout, VmAsyncBuiltinFn, VmBuiltinFn, VmBuiltinRefId, VmEnumVariant, VmValue,
+    byte_offset_to_char_index, char_range_to_byte_range, char_to_byte_offset, intern_key,
+    string_char_count, struct_fields_to_map, DictMap, HarnStr, StructInstanceData, StructLayout,
+    VmAsyncBuiltinFn, VmBuiltinFn, VmBuiltinRefId, VmEnumVariant, VmValue,
 };
 pub use diff::{diff_values, render_diff, repr, DifferenceKind, ValueDifference};
 pub(crate) use env::Binding;

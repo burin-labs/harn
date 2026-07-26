@@ -345,15 +345,13 @@ fn index_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     // is a char index (or -1 when absent).
     let haystack = args.first().map(|a| a.display()).unwrap_or_default();
     let needle = args.get(1).map(|a| a.display()).unwrap_or_default();
-    let chars: Vec<char> = haystack.chars().collect();
     let from = args.get(2).and_then(|a| a.as_int()).unwrap_or(0).max(0) as usize;
-    let from = from.min(chars.len());
-    let byte_from: usize = chars[..from].iter().map(|c| c.len_utf8()).sum();
+    let byte_from = crate::value::char_to_byte_offset(&haystack, from);
     match haystack[byte_from..].find(&needle) {
-        Some(rel) => {
-            let char_idx = haystack[..byte_from + rel].chars().count();
-            Ok(VmValue::Int(char_idx as i64))
-        }
+        Some(rel) => Ok(VmValue::Int(crate::value::byte_offset_to_char_index(
+            &haystack,
+            byte_from + rel,
+        ) as i64)),
         None => Ok(VmValue::Int(-1)),
     }
 }
@@ -397,10 +395,9 @@ pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
     let len = string_char_count(s) as i64;
     let start = start.clamp(0, len);
     let end = end.unwrap_or(len).clamp(0, len).max(start);
-    s.chars()
-        .skip(start as usize)
-        .take((end - start) as usize)
-        .collect()
+    let (start_byte, end_byte) =
+        crate::value::char_range_to_byte_range(s, start as usize, end as usize);
+    s[start_byte..end_byte].to_string()
 }
 
 #[harn_builtin(

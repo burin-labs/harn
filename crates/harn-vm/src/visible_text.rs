@@ -5,6 +5,7 @@ use crate::llm::tools::{
     TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
     TEXT_TOOL_CALL_OPEN_COMPACT,
 };
+use crate::text_index::TextIndex;
 use regex::Regex;
 
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
@@ -70,36 +71,17 @@ fn user_response_regex() -> &'static Regex {
     })
 }
 
-fn inside_markdown_fence(text: &str, idx: usize) -> bool {
-    let mut count = 0;
-    let mut cursor = 0;
-    while cursor < idx {
-        let Some(pos) = text[cursor..idx].find("```") else {
-            break;
-        };
-        count += 1;
-        cursor += pos + 3;
-    }
-    count % 2 == 1
-}
-
-fn is_top_level_tag_position(text: &str, idx: usize) -> bool {
-    let line_start = text[..idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
-    text[line_start..idx]
-        .chars()
-        .all(|ch| matches!(ch, ' ' | '\t' | '\r'))
-}
-
-fn is_protocol_tag_position(text: &str, idx: usize) -> bool {
-    is_top_level_tag_position(text, idx) && !inside_markdown_fence(text, idx)
+fn is_protocol_tag_position(index: &TextIndex, text: &str, idx: usize) -> bool {
+    index.is_line_leading(text, idx) && !index.inside_markdown_fence(idx)
 }
 
 fn extract_user_response(text: &str) -> Option<String> {
+    let index = TextIndex::build(text);
     let sections: Vec<String> = user_response_regex()
         .captures_iter(text)
         .filter(|caps| {
             caps.get(0)
-                .is_some_and(|m| is_protocol_tag_position(text, m.start()))
+                .is_some_and(|m| is_protocol_tag_position(&index, text, m.start()))
         })
         .filter_map(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
         .filter(|section| !section.is_empty())
@@ -112,13 +94,14 @@ fn extract_user_response(text: &str) -> Option<String> {
 }
 
 fn unwrap_assistant_prose(text: &str) -> String {
+    let index = TextIndex::build(text);
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
     for caps in assistant_prose_regex().captures_iter(text) {
         let Some(block) = caps.get(0) else {
             continue;
         };
-        if !is_protocol_tag_position(text, block.start()) {
+        if !is_protocol_tag_position(&index, text, block.start()) {
             continue;
         }
         out.push_str(&text[last..block.start()]);
@@ -242,6 +225,7 @@ fn strip_internal_json_fences(text: &str) -> String {
 }
 
 fn strip_unclosed_internal_blocks(text: &str) -> String {
+    let index = TextIndex::build(text);
     if let Some(open_idx) = text.rfind("<|tool_call|>") {
         let close_idx = text.rfind("</|tool_call|>");
         if close_idx.is_none_or(|idx| idx < open_idx) {
@@ -251,35 +235,45 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
 
     if let Some(open_idx) = text.rfind(TEXT_TOOL_CALL_OPEN) {
         let close_idx = text.rfind(TEXT_TOOL_CALL_CLOSE);
-        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(&index, text, open_idx)
+            && close_idx.is_none_or(|idx| idx < open_idx)
+        {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind(TEXT_TOOL_CALL_OPEN_COMPACT) {
         let close_idx = text.rfind(TEXT_TOOL_CALL_CLOSE_COMPACT);
-        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(&index, text, open_idx)
+            && close_idx.is_none_or(|idx| idx < open_idx)
+        {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind("<done>") {
         let close_idx = text.rfind("</done>");
-        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(&index, text, open_idx)
+            && close_idx.is_none_or(|idx| idx < open_idx)
+        {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind("<user_response>") {
         let close_idx = text.rfind("</user_response>");
-        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(&index, text, open_idx)
+            && close_idx.is_none_or(|idx| idx < open_idx)
+        {
             return text[..open_idx].to_string();
         }
     }
 
     if let Some(open_idx) = text.rfind("<userresponse>") {
         let close_idx = text.rfind("</userresponse>");
-        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(&index, text, open_idx)
+            && close_idx.is_none_or(|idx| idx < open_idx)
+        {
             return text[..open_idx].to_string();
         }
     }
@@ -293,7 +287,9 @@ fn strip_unclosed_internal_blocks(text: &str) -> String {
 
     if let Some(open_idx) = text.rfind("<tool_result") {
         let close_idx = text.rfind("</tool_result>");
-        if is_protocol_tag_position(text, open_idx) && close_idx.is_none_or(|idx| idx < open_idx) {
+        if is_protocol_tag_position(&index, text, open_idx)
+            && close_idx.is_none_or(|idx| idx < open_idx)
+        {
             return text[..open_idx].to_string();
         }
     }
@@ -341,13 +337,14 @@ fn protocol_residue_regex() -> &'static Regex {
 }
 
 fn strip_protocol_residue(text: &str) -> String {
+    let index = TextIndex::build(text);
     // Fence-aware, matching the rest of this module: a fenced code block may
     // legitimately show `</tool_call>` as an example, so residue inside a
     // markdown fence is preserved; only standalone litter is removed.
     protocol_residue_regex()
         .replace_all(text, |caps: &regex::Captures| {
             let matched = caps.get(0).expect("capture group 0 always present");
-            if inside_markdown_fence(text, matched.start()) {
+            if index.inside_markdown_fence(matched.start()) {
                 matched.as_str().to_string()
             } else {
                 String::new()
@@ -485,11 +482,12 @@ fn strip_partial_marker_suffix(text: &str) -> String {
         "DONE",
         "PLAN_READY",
     ];
+    let index = TextIndex::build(text);
     for marker in MARKERS {
         for len in (1..marker.len()).rev() {
             let prefix = &marker[..len];
             if let Some(stripped) = text.strip_suffix(prefix) {
-                if is_protocol_tag_position(text, stripped.len()) {
+                if is_protocol_tag_position(&index, text, stripped.len()) {
                     return stripped.to_string();
                 }
             }

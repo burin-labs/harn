@@ -582,3 +582,70 @@ fn decimal_truthiness_and_type_name() {
     // Display preserves the stored scale.
     assert_eq!(dec("1.50").display(), "1.50");
 }
+
+/// Reference semantics for char-indexed slicing: materialize the chars and
+/// subscript them. This is what the string methods used to do inline, and what
+/// the byte-offset helpers must remain byte-for-byte equivalent to.
+fn reference_char_slice(text: &str, start: usize, end: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let start = start.min(chars.len());
+    let end = end.max(start).min(chars.len());
+    chars[start..end].iter().collect()
+}
+
+#[test]
+fn char_range_to_byte_range_matches_reference_slicing() {
+    // Mixed widths: 1-byte ASCII, 2-byte, 3-byte, and 4-byte scalars, so an
+    // off-by-one in the byte walk cannot hide behind a uniform encoding.
+    for text in [
+        "",
+        "hello",
+        "héllo wörld",
+        "日本語のテキスト",
+        "a🌍b🌏c",
+        "<tool_call>look({ file: \"münchen.rs\" })</tool_call>",
+    ] {
+        let char_len = text.chars().count();
+        for start in 0..=char_len + 2 {
+            for end in 0..=char_len + 2 {
+                let (start_byte, end_byte) = char_range_to_byte_range(text, start, end);
+                assert!(
+                    text.is_char_boundary(start_byte) && text.is_char_boundary(end_byte),
+                    "{text:?} [{start}..{end}] produced non-boundary byte range \
+                     [{start_byte}..{end_byte}]"
+                );
+                assert_eq!(
+                    &text[start_byte..end_byte],
+                    reference_char_slice(text, start, end),
+                    "{text:?} [{start}..{end}] diverged from char-vector slicing"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn char_offset_conversions_round_trip() {
+    for text in ["", "hello", "héllo wörld", "a🌍b", "日本語"] {
+        let char_len = text.chars().count();
+        for char_index in 0..=char_len + 1 {
+            let byte_offset = char_to_byte_offset(text, char_index);
+            assert!(
+                text.is_char_boundary(byte_offset),
+                "{text:?} char {char_index} produced non-boundary offset {byte_offset}"
+            );
+            // Past the end saturates at the string length rather than wrapping.
+            let expected = text
+                .char_indices()
+                .nth(char_index)
+                .map(|(offset, _)| offset)
+                .unwrap_or(text.len());
+            assert_eq!(byte_offset, expected, "{text:?} char {char_index}");
+            assert_eq!(
+                byte_offset_to_char_index(text, byte_offset),
+                char_index.min(char_len),
+                "{text:?} char {char_index} did not round-trip"
+            );
+        }
+    }
+}

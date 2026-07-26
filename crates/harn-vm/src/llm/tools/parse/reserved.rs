@@ -10,10 +10,8 @@
 
 use super::super::{text_tool_call_block, TEXT_TOOL_CALL_TAG};
 use super::syntax::{match_tool_call_block, render_canonical_call};
-use super::tagged::{
-    inside_markdown_fence, is_top_level_tag_position, leading_call_name, parse_single_tool_call,
-    unclosed_tool_call_open,
-};
+use super::tagged::{leading_call_name, parse_single_tool_call, unclosed_tool_call_open};
+use crate::text_index::TextIndex;
 use crate::value::VmValue;
 
 /// One bracket short of the `[[CALL]]` reserved-token wire opener
@@ -32,6 +30,7 @@ const WIRE_MALFORMED_CALL_OPENER: &str = "[[CALL]";
 /// position, and excludes both the well-formed `[[CALL]]` (whose next byte is `]`,
 /// already canonicalized upstream) and unrelated bracket text such as `[[CALLER]`.
 pub(super) fn recover_malformed_call_opener(
+    index: &TextIndex,
     src: &str,
     cursor: usize,
     tools_val: Option<&VmValue>,
@@ -45,7 +44,7 @@ pub(super) fn recover_malformed_call_opener(
     if tail.starts_with(']') {
         return None;
     }
-    if !is_top_level_tag_position(src, cursor) || inside_markdown_fence(src, cursor) {
+    if !index.is_line_leading(src, cursor) || index.inside_markdown_fence(cursor) {
         return None;
     }
     // Normalize the stub to the canonical opener and reuse the block machinery. The

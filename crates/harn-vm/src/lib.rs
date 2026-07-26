@@ -169,6 +169,7 @@ pub mod clock_mock {
     }
 }
 
+pub(crate) mod text_index;
 pub mod typecheck;
 pub mod value;
 pub mod verification;

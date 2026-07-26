@@ -1,4 +1,6 @@
-use crate::value::{string_char_count, VmError, VmValue};
+use crate::value::{
+    byte_offset_to_char_index, char_range_to_byte_range, string_char_count, VmError, VmValue,
+};
 
 impl crate::vm::Vm {
     pub(super) fn call_string_method(
@@ -49,8 +51,7 @@ impl crate::vm::Vm {
             // "string has no method `slice`" crash class instead of chasing
             // each call site. End index defaults to the char length.
             "slice" => {
-                let chars: Vec<char> = s.chars().collect();
-                let len = chars.len() as i64;
+                let len = string_char_count(s) as i64;
                 let start_raw = args.first().and_then(|a| a.as_int()).unwrap_or(0);
                 let start = if start_raw < 0 {
                     (len + start_raw).max(0) as usize
@@ -67,16 +68,16 @@ impl crate::vm::Vm {
                 } else {
                     len as usize
                 };
-                let end = end.max(start);
+                let (start_byte, end_byte) = char_range_to_byte_range(s, start, end);
                 Ok(VmValue::String(arcstr::ArcStr::from(
-                    chars[start..end].iter().collect::<String>(),
+                    &s[start_byte..end_byte],
                 )))
             }
             "index_of" => {
                 let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
                 let idx = s
                     .find(&*needle)
-                    .map(|byte_pos| s[..byte_pos].chars().count() as i64);
+                    .map(|byte_pos| byte_offset_to_char_index(s, byte_pos) as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }
             "chars" => Ok(VmValue::chars_list(s)),
@@ -129,6 +130,13 @@ impl crate::vm::Vm {
                 let Ok(idx) = usize::try_from(idx) else {
                     return Ok(VmValue::Nil);
                 };
+                if s.is_ascii() {
+                    return Ok(s
+                        .as_bytes()
+                        .get(idx)
+                        .map(|byte| VmValue::char_value(*byte as char))
+                        .unwrap_or(VmValue::Nil));
+                }
                 Ok(s.chars()
                     .nth(idx)
                     .map(VmValue::char_value)
@@ -138,7 +146,7 @@ impl crate::vm::Vm {
                 let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
                 let idx = s
                     .rfind(&*needle)
-                    .map(|byte_pos| s[..byte_pos].chars().count() as i64);
+                    .map(|byte_pos| byte_offset_to_char_index(s, byte_pos) as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }
             "lower" | "to_lower" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),

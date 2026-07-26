@@ -20,6 +20,7 @@ use super::syntax::{
 };
 use super::TextToolParseResult;
 use crate::llm::tools::collect_tool_schemas;
+use crate::text_index::TextIndex;
 use crate::value::VmValue;
 
 mod function_markup;
@@ -81,6 +82,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
 
     let mut cursor = 0usize;
     let bytes = src.as_bytes();
+    // Fence and line-start positions, resolved once. The scan below asks about
+    // them at nearly every position it visits.
+    let index = TextIndex::build(src);
     // Byte position just past the most recently consumed top-level block.
     // A tag that follows a consumed block with only whitespace between them
     // is structurally top-level even mid-line: value models chain blocks as
@@ -110,6 +114,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         // run has already been consumed as a unit), so a `[[CALL]` here is a
         // structural opener, not argument/heredoc/prose text.
         if let Some(after) = recover_malformed_call_opener(
+            &index,
             src,
             cursor,
             tools_val,
@@ -193,8 +198,8 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        if (!adjacent_to_block && !is_top_level_tag_position(src, cursor))
-            || inside_markdown_fence(src, cursor)
+        if (!adjacent_to_block && !index.is_line_leading(src, cursor))
+            || index.inside_markdown_fence(cursor)
         {
             let start = cursor;
             while cursor < bytes.len() && bytes[cursor] != b'\n' {
@@ -852,47 +857,6 @@ pub(super) fn leading_call_name(body: &str, tools_val: Option<&VmValue>) -> Opti
     let name = &trimmed[..name_len];
     let known = known_tool_names_with_implicit(tools_val);
     known.contains(name).then(|| name.to_string())
-}
-
-pub(super) fn is_top_level_tag_position(src: &str, cursor: usize) -> bool {
-    let line_start = src[..cursor].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    src[line_start..cursor]
-        .chars()
-        .all(|ch| matches!(ch, ' ' | '\t' | '\r'))
-}
-
-/// Is `cursor` enclosed by a *closed* markdown code fence?
-///
-/// A top-level tag inside a ```` ```lang … ``` ```` block is narration, not a
-/// real block, so the scanner skips it (e.g. an example `<user_response>` shown
-/// in fenced docs). But the cursor only counts as "inside a fence" when the
-/// opening fence is matched by a closing fence *at or after* the cursor.
-///
-/// The earlier implementation just counted ```` ``` ```` markers before the
-/// cursor and called an odd count "inside a fence". That shredded a legitimate
-/// trailing `<tool_call>` whenever an unbalanced ```` ``` ```` appeared earlier
-/// in the response: the open fence with no close had no business swallowing a
-/// later real block. Requiring a matching close ahead makes an unbalanced
-/// *trailing* fence harmless while keeping closed example fences skipped.
-pub(super) fn inside_markdown_fence(src: &str, cursor: usize) -> bool {
-    // Walk fence markers left to right, toggling parity. We only care whether
-    // the fence that is open *at* the cursor is later closed.
-    let mut open_before_cursor = false;
-    let mut scan = 0;
-    while let Some(rel) = src[scan..].find("```") {
-        let pos = scan + rel;
-        if pos >= cursor {
-            // First fence marker at/after the cursor. If a fence was open when
-            // we crossed the cursor, this marker closes it → cursor is inside a
-            // real (closed) fence. Otherwise the cursor sat in open prose.
-            return open_before_cursor;
-        }
-        open_before_cursor = !open_before_cursor;
-        scan = pos + 3;
-    }
-    // No fence marker at/after the cursor: any fence still open here is an
-    // unbalanced trailing fence, so the cursor is not inside a closed fence.
-    false
 }
 
 /// Report stray text that sits outside any recognized top-level tag.
