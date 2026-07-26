@@ -164,19 +164,18 @@ fn windows_cache_pair() {
   const source_key = gha_expression(
     "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
   )
+  const cache_inputs = {
+    "shared-key": "workspace-windows",
+    "source-key": source_key,
+    "target-dir": gha_expression("env.CARGO_TARGET_DIR"),
+    "broad-restore-prefix": "v0-rust-workspace-windows-",
+  }
   return {
     consumer: {
       env: environment,
       jobs: {
         windows: {
-          steps: [
-            checkout,
-            toolchain,
-            {
-              uses: "./.github/actions/rust-cache",
-              with: {"shared-key": "workspace-windows", "source-key": source_key},
-            },
-          ],
+          steps: [checkout, toolchain, {uses: "./.github/actions/rust-cache", with: cache_inputs}],
         },
       },
     },
@@ -187,10 +186,7 @@ fn windows_cache_pair() {
           steps: [
             checkout,
             toolchain,
-            {
-              uses: "./.github/actions/rust-cache",
-              with: {"shared-key": "workspace-windows", "source-key": source_key, save: true},
-            },
+            {uses: "./.github/actions/rust-cache", with: {...cache_inputs, save: true}},
           ],
         },
       },
