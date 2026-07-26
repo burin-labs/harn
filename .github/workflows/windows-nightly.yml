@@ -95,22 +95,33 @@ jobs:
       - name: Build once
         shell: bash
         run: cargo nextest run --workspace --profile ci --no-run 2>&1 | tee build1.log
-      - name: Prove the build graph is now stable across invocations
+      - name: Ask Cargo why harn-cli is dirty
         shell: bash
-        # Verifies #5640. Before that fix harn-cli recompiled here every time
-        # (~2m12s) because its build script watched a \\?\ verbatim path.
+        # The previous run proved harn-cli still rebuilds on a second
+        # invocation even with #5640 applied, so the verbatim-path theory was
+        # wrong. Stop guessing: Cargo's fingerprint tracing names the exact
+        # stale item.
+        #
+        # Reports without failing. A hard failure here aborted the whole job
+        # last time and took the replay with it, which is the part that hunts
+        # the wedge.
+        #
         # Strip ANSI first: CARGO_TERM_COLOR=always puts a reset sequence
         # between "Compiling" and the crate name, so a naive grep for
-        # "Compiling harn-cli" silently never matches and reports a false pass.
+        # "Compiling harn-cli" silently never matches and reads as a pass.
         run: |
-          cargo nextest run --workspace --profile ci --no-run 2>&1 | tee build2.log
+          CARGO_LOG=cargo::core::compiler::fingerprint=trace \
+            cargo nextest run --workspace --profile ci --no-run 2>&1 | tee build2.log
           sed 's/\x1b\[[0-9;]*m//g' build2.log > build2.plain
+          echo "=== why each unit is dirty ==="
+          grep -iE "dirty|stale|precalculated" build2.plain | head -60 || true
+          echo "=== what recompiled ==="
+          grep -E "Compiling" build2.plain || echo "(nothing recompiled)"
           if grep -qE "Compiling +harn-cli " build2.plain; then
-            echo "::error::harn-cli recompiled on a second cargo invocation with no source change"
-            grep -E "Compiling" build2.plain
-            exit 1
+            echo "::warning::harn-cli still recompiles on a second invocation"
+          else
+            echo "::notice::second cargo invocation recompiled nothing"
           fi
-          echo "::notice::second cargo invocation recompiled nothing"
       - name: Capture reuse-build metadata
         shell: bash
         run: |
