@@ -101,6 +101,11 @@ pipeline main() {
     requested_capabilities: ["review"],
     policy_override: {tools: ["read_note"], side_effect_level: "read_only"},
   }
+  // What matters is that the handoff override does not outlive the dispatch,
+  // which is restoration rather than absence. Comparing against the policy in
+  // force beforehand says that directly, and holds whether or not the runner
+  // has installed a policy of its own.
+  const policy_before = current_policy()
   const record = handoff(payload)
   const mw = with_handoff_artifact()
   const audited = mw(handoff_tool_call(), successful_handoff_result(payload))
@@ -120,5 +125,5 @@ pipeline main() {
   __io_println(invocation?.read_ok)
   __io_println(!invocation?.denied_ok)
   __io_println(invocation?.denied_category == "permission_denied")
-  __io_println(current_policy() == nil)
+  __io_println(current_policy() == policy_before)
 }

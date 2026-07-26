@@ -20,8 +20,13 @@ pipeline default() {
   harness.fs.mkdir(root)
   const in_path = path_join(root, "in.txt")
   const out_path = path_join(base, "outside.txt")
+  // `read_only_roots` is declared, not left empty: `intersect` treats an
+  // empty list as "defer to the caller", so a case that omits it inherits
+  // whatever read scope happens to be ambient and its read-rejection
+  // assertion quietly stops testing anything. Naming the root pins the read
+  // scope to the same directory as the write scope.
   with_execution_policy(
-    {sandbox_profile: "worktree", workspace_roots: [root]},
+    {sandbox_profile: "worktree", workspace_roots: [root], read_only_roots: [root]},
     { ->
       const ok = hostlib_tools_write_file({path: in_path, content: "ok\n"})
       __io_println(ok.bytes_written)
