@@ -21,16 +21,41 @@
 //! Stat identity is already the trust boundary inside a process:
 //! [`crate::module_source`] memoizes reads on `(path, len, mtime_ns)`. This
 //! extends that same decision across process boundaries, matching how Cargo,
-//! Zig and Bazel gate their warm paths. The accepted gap is identical to
-//! theirs: an edit that preserves both length and mtime is not noticed. That
-//! gap is pinned by a test rather than left to prose, so closing it — or
-//! widening it — has to be a deliberate edit and cannot happen by accident.
+//! Zig and Bazel gate their warm paths.
+//!
+//! The gap in a stat-only proof is an edit that preserves both length and
+//! mtime. Most of that gap is not adversarial but mechanical: on a filesystem
+//! storing mtime to the second, a write landing in the same tick as the walk
+//! leaves the recorded identity correct and already stale, which is exactly
+//! what fast automated edits produce. So the manifest records when its walk
+//! began and declines to vouch for any file whose mtime is not safely older
+//! than that — the racily-clean rule Git, make and ccache all apply. The cost
+//! lands only on files written moments before the walk, and declining costs
+//! one full walk that recomputes the key anyway.
+//!
+//! What remains is the deliberate case: a file rewritten long afterwards with
+//! its old length and its old mtime restored. Both halves of that boundary are
+//! pinned by tests, so narrowing it further — or widening it — has to be a
+//! deliberate edit and cannot happen by accident.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::module_source;
+
+/// Wall-clock nanoseconds, on the same epoch as the mtimes it is compared with.
+///
+/// Real wall time is inherent here rather than incidental: the value only has
+/// meaning next to filesystem mtimes, which no in-process clock controls.
+fn now_ns() -> i128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i128)
+        // Before the epoch, or an unreadable clock: claim the walk happened at
+        // the end of time so every file looks racy and nothing is vouched for.
+        .unwrap_or(i128::MAX)
+}
 
 /// One transitively reachable source file, plus the path that must stay absent
 /// for the imports that reached it to keep resolving here.
@@ -74,7 +99,7 @@ pub struct ManifestUnreadable {
 }
 
 /// Everything the entry key's import-graph walk observed, in re-checkable form.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ContextManifest {
     /// Canonical path of the entry file this walk started from.
     ///
@@ -85,16 +110,54 @@ pub struct ContextManifest {
     /// different directories land on one cache file and each would otherwise
     /// find the other's manifest re-checking perfectly clean. See #5591.
     pub entry: PathBuf,
+    /// Wall-clock nanoseconds when the walk that produced this manifest began.
+    ///
+    /// Stats alone cannot prove a file is unchanged if it was written at
+    /// roughly the moment we looked at it: on a filesystem that stores mtime to
+    /// the second, a write landing in the same tick as our read leaves the
+    /// recorded identity byte-for-byte correct and already stale. Anchoring at
+    /// walk *start* makes the rule conservative — anything whose mtime is not
+    /// safely older than this could have changed under us.
+    pub observed_at_ns: i128,
     pub files: Vec<ManifestFile>,
     pub unresolved: Vec<ManifestUnresolved>,
     pub unreadable: Vec<ManifestUnreadable>,
 }
+
+/// How far before [`ContextManifest::observed_at_ns`] a file's mtime must fall
+/// before a stat proves anything.
+///
+/// Sized to the coarsest mtime granularity we can land on rather than to the
+/// one we expect: FAT stores 2s, HFS+/ext3 and some NFS servers 1s, and
+/// Windows' system clock ticks ~15.6ms. Being generous is close to free — it
+/// only widens the window in which a manifest declines to vouch for a file
+/// written moments ago, and declining costs one full walk that recomputes the
+/// key anyway.
+const RACY_MTIME_WINDOW_NS: i128 = 2_000_000_000;
+
+/// Equality is over what the manifest *describes*, not when it was written.
+///
+/// `observed_at_ns` is metadata about the moment we looked, so deriving this
+/// would make two manifests of a provably identical graph compare unequal for
+/// having been walked microseconds apart — nondeterministic equality on a type
+/// whose whole job is deciding whether something changed.
+impl PartialEq for ContextManifest {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry == other.entry
+            && self.files == other.files
+            && self.unresolved == other.unresolved
+            && self.unreadable == other.unreadable
+    }
+}
+
+impl Eq for ContextManifest {}
 
 impl ContextManifest {
     /// An empty manifest anchored at `entry`, ready for a walk's observations.
     pub fn for_entry(entry: PathBuf) -> Self {
         Self {
             entry,
+            observed_at_ns: now_ns(),
             files: Vec::new(),
             unresolved: Vec::new(),
             unreadable: Vec::new(),
@@ -111,7 +174,10 @@ impl ContextManifest {
     /// changed reports `false` and costs a walk.
     pub fn still_valid(&self, entry: &Path) -> bool {
         self.entry == entry
-            && self.files.iter().all(ManifestFile::still_valid)
+            && self
+                .files
+                .iter()
+                .all(|file| file.still_valid(self.observed_at_ns))
             && self
                 .unresolved
                 .iter()
@@ -136,11 +202,19 @@ impl ManifestFile {
         })
     }
 
-    pub(crate) fn still_valid(&self) -> bool {
+    pub(crate) fn still_valid(&self, observed_at_ns: i128) -> bool {
         let Some((len, mtime_ns)) = module_source::stat_identity(&self.path) else {
             return false;
         };
         if len != self.len || mtime_ns != self.mtime_ns {
+            return false;
+        }
+        // Matching stats are only evidence if they could not have been written
+        // in the same unobservable tick as the walk. A file last modified at or
+        // near the walk is racily clean: a later write inside that tick leaves
+        // the identity we recorded intact, so believing it would serve a stale
+        // chunk. Fall back to the full walk, which recomputes the key.
+        if mtime_ns >= observed_at_ns.saturating_sub(RACY_MTIME_WINDOW_NS) {
             return false;
         }
         !self.shadow.as_ref().is_some_and(|shadow| shadow.exists())
@@ -196,6 +270,7 @@ mod tests {
     fn manifest_for(paths: &[PathBuf]) -> ContextManifest {
         ContextManifest {
             entry: anchor(),
+            observed_at_ns: now_ns(),
             files: paths
                 .iter()
                 .map(|p| ManifestFile::observe(p).expect("observe"))
@@ -236,12 +311,54 @@ mod tests {
         set_mtime(path, current + std::time::Duration::from_secs(secs));
     }
 
+    /// Move `path`'s mtime `secs` into the past, clear of the racy window.
+    ///
+    /// A file a test just wrote is, correctly, too new to be vouched for. Tests
+    /// about anything *other* than raciness have to age their fixtures first or
+    /// they all collapse into the same assertion.
+    fn backdate_mtime(path: &Path, secs: u64) {
+        let current = std::fs::metadata(path).unwrap().modified().unwrap();
+        set_mtime(path, current - std::time::Duration::from_secs(secs));
+    }
+
+    /// Comfortably outside [`RACY_MTIME_WINDOW_NS`].
+    const SETTLED_SECS: u64 = 60;
+
     #[test]
     fn an_unchanged_graph_stays_valid() {
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 1 }\n");
+        // Aged past the racy window first: a file written this instant is
+        // deliberately not vouched for, which is the test below.
+        backdate_mtime(&dep, SETTLED_SECS);
         assert!(revalidates(&manifest_for(&[dep])));
+    }
+
+    #[test]
+    fn a_file_written_in_the_same_tick_as_the_walk_is_not_vouched_for() {
+        // The racily-clean rule. Nothing changes between the walk and the
+        // re-check here, and the manifest still refuses -- because on a
+        // filesystem with coarse mtime it *could* have changed without leaving
+        // a trace, and the manifest cannot tell this host from that one.
+        //
+        // This is the half of the stat-only gap that shows up by accident:
+        // codegen, formatters and agents all rewrite files far faster than a
+        // 1s mtime tick. Declining costs one full walk; believing it costs a
+        // silently stale chunk.
+        let tmp = tempfile::tempdir().unwrap();
+        let dep = tmp.path().join("dep.harn");
+        write(&dep, "pub fn v() -> int { return 1 }\n");
+        let manifest = manifest_for(&[dep.clone()]);
+        assert_eq!(
+            module_source::stat_identity(&dep),
+            Some((manifest.files[0].len, manifest.files[0].mtime_ns)),
+            "the stats must still match, or this proves nothing about raciness"
+        );
+        assert!(
+            !revalidates(&manifest),
+            "a file last written within the racy window must not be vouched for"
+        );
     }
 
     #[test]
@@ -277,33 +394,45 @@ mod tests {
     }
 
     #[test]
-    fn a_same_length_edit_under_one_mtime_tick_is_the_documented_gap() {
-        // The stated limit of a stat-only proof, made executable so it is a
-        // decision rather than a footnote: an edit that preserves BOTH length
-        // and mtime is not noticed. Reproduced deterministically by restoring
-        // the original timestamp, because the filesystems where this happens
-        // for real (Windows' ~15.6ms clock tick, 1s-granularity filesystems)
-        // are not the ones CI necessarily runs on.
+    fn a_backdated_same_length_edit_is_the_residual_gap() {
+        // What the racily-clean rule does NOT close, made executable so it is a
+        // decision rather than a footnote: an edit that preserves length and
+        // restores an mtime from well before the walk. The window rule cannot
+        // catch this, because the file's timestamp is exactly the one a
+        // genuinely untouched file would carry.
         //
-        // This is inherited, not introduced by the manifest: `module_source`'s
-        // in-process memo keys on the same `(len, mtime_ns)` identity and has
-        // the same blind spot. If that identity is ever strengthened, this
-        // test should fail and be deleted deliberately — it exists so the
-        // trade-off cannot be changed by accident in either direction.
+        // The distinction from the test above is the whole point of the rule.
+        // There, the collision was mechanical -- a write landing in the same
+        // unobservable tick as the walk -- and that is now caught. Here it
+        // takes deliberately restoring an old timestamp, which is not something
+        // an editor, formatter or codegen step does by accident.
+        //
+        // This much is inherited, not introduced: `module_source`'s in-process
+        // memo keys on the same `(len, mtime_ns)` identity and has the same
+        // blind spot. If that identity is ever strengthened, this test should
+        // fail and be deleted deliberately -- it exists so the trade-off cannot
+        // move in either direction by accident.
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 111 }\n");
+        backdate_mtime(&dep, SETTLED_SECS);
         let original = std::fs::metadata(&dep).unwrap().modified().unwrap();
         let manifest = manifest_for(&[dep.clone()]);
 
         write(&dep, "pub fn v() -> int { return 222 }\n");
         set_mtime(&dep, original);
+        assert_eq!(
+            std::fs::metadata(&dep).unwrap().len(),
+            33,
+            "both versions must be the same byte length or this exercises \
+             the length path instead of the mtime path"
+        );
 
         assert!(
             revalidates(&manifest),
-            "a stat-only manifest cannot notice an edit that preserves both \
-             length and mtime; if this now fails, the identity was \
-             strengthened and this test should be removed on purpose"
+            "a stat-only manifest cannot notice an edit that preserves length \
+             and restores a pre-walk mtime; if this now fails, the identity \
+             was strengthened and this test should be removed on purpose"
         );
     }
 
@@ -326,6 +455,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 1 }\n");
+        backdate_mtime(&dep, SETTLED_SECS);
         let manifest = manifest_for(&[dep]);
         assert!(revalidates(&manifest));
 
@@ -371,6 +501,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 1 }\n");
+        backdate_mtime(&dep, SETTLED_SECS);
         let manifest = manifest_for(&[dep]);
 
         assert!(revalidates(&manifest), "unchanged under its own anchor");

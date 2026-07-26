@@ -73,7 +73,10 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// for a different entry that happens to have identical source bytes; and the
 /// header carries [`CODEGEN_FINGERPRINT`], which the manifest fast path needs
 /// in order to reject a chunk built by another compiler at the same version.
-pub const SCHEMA_VERSION: u32 = 9;
+/// v10: the manifest records when its walk began, so a file written in the
+/// same unobservable mtime tick as the walk is treated as unproven instead of
+/// vouched for by stats that are correct and already stale.
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.

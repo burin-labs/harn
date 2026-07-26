@@ -444,6 +444,12 @@ fn seed_entry_with_manifest(tmp: &Path, dep_body: &str) -> (PathBuf, String) {
     let entry_source = "import \"./dep\"\n__io_println(\"hi\")\n".to_string();
     std::fs::write(&entry, &entry_source).unwrap();
     std::fs::write(tmp.join("dep.harn"), dep_body).unwrap();
+    // A manifest does not vouch for a file written in the same mtime tick as
+    // its walk, so a fixture written microseconds ago is legitimately unproven.
+    // Age both files first, or every test using this helper silently becomes a
+    // test of the racily-clean rule instead of whatever it means to check.
+    age_out_of_racy_window(&entry);
+    age_out_of_racy_window(&tmp.join("dep.harn"));
 
     let (context_hash, manifest) =
         hash_transitive_user_imports_with_manifest(&entry, &entry_source);
@@ -470,6 +476,21 @@ fn seed_entry_with_manifest(tmp: &Path, dep_body: &str) -> (PathBuf, String) {
 
 /// Rewrite `path` with `body` while restoring its previous mtime, so the
 /// file's stat identity is unchanged but its content is not.
+/// Push `path`'s mtime far enough into the past that a stat can prove something
+/// about it, mirroring a checkout that has been sitting on disk rather than one
+/// written this instant.
+fn age_out_of_racy_window(path: &Path) {
+    let current = std::fs::metadata(path).unwrap().modified().unwrap();
+    let times =
+        std::fs::FileTimes::new().set_modified(current - std::time::Duration::from_secs(60));
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_times(times)
+        .unwrap();
+}
+
 fn edit_preserving_stat(path: &Path, body: &str) {
     let before = std::fs::metadata(path).unwrap();
     assert_eq!(
@@ -494,9 +515,13 @@ fn a_valid_manifest_serves_the_chunk_without_walking_the_graph() {
     // length and mtime do not, so the import-graph hash would differ if it
     // were recomputed. A hit therefore means the manifest answered.
     //
-    // This is also the design's one accepted blind spot, stated as a fact
-    // rather than left implicit: the same one Cargo, Zig and Bazel accept,
-    // and the one `module_source`'s in-process read memo already accepts.
+    // This is also the design's one remaining blind spot, stated as a fact
+    // rather than left implicit: the same one Cargo, Zig and Bazel accept, and
+    // the one `module_source`'s in-process read memo already accepts. Note what
+    // it now takes to reach it -- the fixture is aged out of the racy window
+    // and the edit deliberately restores that old timestamp. The accidental
+    // version of this, a write landing in the same tick as the walk, no longer
+    // gets served (see `context_manifest`'s racily-clean tests).
     let tmp = tempfile::tempdir().unwrap();
     let (entry, entry_source) =
         seed_entry_with_manifest(tmp.path(), "pub fn v() -> int { return 111 }\n");
@@ -538,6 +563,10 @@ fn a_directory_shadowed_import_does_not_defeat_the_manifest() {
     )
     .unwrap();
     std::fs::create_dir(tmp.path().join("types")).unwrap();
+    // Aged so the walk can vouch for them; a file written this instant is
+    // deliberately unproven, which is a different test.
+    age_out_of_racy_window(&entry);
+    age_out_of_racy_window(&tmp.path().join("dep.harn"));
 
     let (_hash, manifest) = hash_transitive_user_imports_with_manifest(&entry, &entry_source);
     let manifest = manifest.expect("an unreadable node must not discard the manifest");
@@ -716,6 +745,11 @@ fn seed_shared_identity_entry(dir: &Path, dep_body: &str) -> (PathBuf, String) {
     let entry_source = "import \"./dep\"\n__io_println(\"same\")\n".to_string();
     std::fs::write(&entry, &entry_source).unwrap();
     std::fs::write(dir.join("dep.harn"), dep_body).unwrap();
+    // See `seed_entry_with_manifest`: an unaged fixture is racily clean, so a
+    // manifest correctly declines to vouch for it and the test measures the
+    // racy rule rather than the anchor it means to check.
+    age_out_of_racy_window(&entry);
+    age_out_of_racy_window(&dir.join("dep.harn"));
     (entry, entry_source)
 }
 
