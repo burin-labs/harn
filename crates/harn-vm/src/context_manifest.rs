@@ -6,11 +6,17 @@
 //! spawn — a cold-path algorithm running on the warm path.
 //!
 //! A manifest records what the graph looked like when the key was computed, in
-//! terms cheap enough to re-check: each file's stat identity, and the negative
-//! facts the graph also depends on. Re-checking is stats only. Any mismatch,
-//! any file that cannot be stat'ed, and any manifest that was never written
-//! falls back to the full walk, which recomputes the key from scratch — so a
-//! manifest can only ever save work, never decide a hit on its own.
+//! terms cheap enough to re-check: the entry it was walked from, each file's
+//! stat identity, and the negative facts the graph also depends on. The anchor
+//! is what makes the rest mean anything — the same set of unchanged files
+//! describes a different graph under a different entry, and a cache that names
+//! artifacts by entry source hash alone will hand one entry the other's
+//! manifest.
+//!
+//! Re-checking is stats only. A different anchor, any mismatch, any file that
+//! cannot be stat'ed, and any manifest that was never written all fall back to
+//! the full walk, which recomputes the key from scratch — so a manifest can
+//! only ever save work, never decide a hit on its own.
 //!
 //! Stat identity is already the trust boundary inside a process:
 //! [`crate::module_source`] memoizes reads on `(path, len, mtime_ns)`. This
@@ -68,21 +74,44 @@ pub struct ManifestUnreadable {
 }
 
 /// Everything the entry key's import-graph walk observed, in re-checkable form.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ContextManifest {
+    /// Canonical path of the entry file this walk started from.
+    ///
+    /// Every other field is relative to it: imports resolve against the entry's
+    /// directory, so the same observations describe a different graph under a
+    /// different anchor. The entry-chunk cache names files by entry *source*
+    /// hash alone, deliberately, so two entries with identical bytes in
+    /// different directories land on one cache file and each would otherwise
+    /// find the other's manifest re-checking perfectly clean. See #5591.
+    pub entry: PathBuf,
     pub files: Vec<ManifestFile>,
     pub unresolved: Vec<ManifestUnresolved>,
     pub unreadable: Vec<ManifestUnreadable>,
 }
 
 impl ContextManifest {
-    /// Whether the graph still looks exactly as it did when this manifest was
-    /// written.
+    /// An empty manifest anchored at `entry`, ready for a walk's observations.
+    pub fn for_entry(entry: PathBuf) -> Self {
+        Self {
+            entry,
+            files: Vec::new(),
+            unresolved: Vec::new(),
+            unreadable: Vec::new(),
+        }
+    }
+
+    /// Whether this manifest describes the graph reachable from `entry`, and
+    /// that graph still looks exactly as it did when the manifest was written.
+    ///
+    /// Both halves are load-bearing. The observations alone prove only that
+    /// some set of files is unchanged, not that it is *this* entry's set.
     ///
     /// Conservative in every direction: anything unreadable, ambiguous, or
     /// changed reports `false` and costs a walk.
-    pub fn still_valid(&self) -> bool {
-        self.files.iter().all(ManifestFile::still_valid)
+    pub fn still_valid(&self, entry: &Path) -> bool {
+        self.entry == entry
+            && self.files.iter().all(ManifestFile::still_valid)
             && self
                 .unresolved
                 .iter()
@@ -154,8 +183,19 @@ mod tests {
         std::fs::write(path, body).unwrap();
     }
 
+    /// The entry every manifest in these tests is anchored at.
+    ///
+    /// They vary what the walk observed, not which entry it walked from, so one
+    /// constant anchor keeps the anchor out of their way. What the anchor itself
+    /// decides is pinned by `an_anchor_mismatch_invalidates` and, end to end,
+    /// by `bytecode_cache_tests`.
+    fn anchor() -> PathBuf {
+        PathBuf::from("/harn/tests/entry.harn")
+    }
+
     fn manifest_for(paths: &[PathBuf]) -> ContextManifest {
         ContextManifest {
+            entry: anchor(),
             files: paths
                 .iter()
                 .map(|p| ManifestFile::observe(p).expect("observe"))
@@ -163,6 +203,11 @@ mod tests {
             unresolved: Vec::new(),
             unreadable: Vec::new(),
         }
+    }
+
+    /// Re-checks under the anchor the manifest was built at.
+    fn revalidates(manifest: &ContextManifest) -> bool {
+        manifest.still_valid(&anchor())
     }
 
     /// State a file's mtime outright, so a test can say which version it means
@@ -196,7 +241,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 1 }\n");
-        assert!(manifest_for(&[dep]).still_valid());
+        assert!(revalidates(&manifest_for(&[dep])));
     }
 
     #[test]
@@ -226,7 +271,7 @@ mod tests {
              the length path instead of the mtime path"
         );
         assert!(
-            !manifest.still_valid(),
+            !revalidates(&manifest),
             "an edit of identical length must still invalidate the manifest"
         );
     }
@@ -255,7 +300,7 @@ mod tests {
         set_mtime(&dep, original);
 
         assert!(
-            manifest.still_valid(),
+            revalidates(&manifest),
             "a stat-only manifest cannot notice an edit that preserves both \
              length and mtime; if this now fails, the identity was \
              strengthened and this test should be removed on purpose"
@@ -269,7 +314,7 @@ mod tests {
         write(&dep, "pub fn v() -> int { return 1 }\n");
         let manifest = manifest_for(&[dep.clone()]);
         std::fs::remove_file(&dep).unwrap();
-        assert!(!manifest.still_valid());
+        assert!(!revalidates(&manifest));
     }
 
     #[test]
@@ -282,11 +327,11 @@ mod tests {
         let dep = tmp.path().join("dep.harn");
         write(&dep, "pub fn v() -> int { return 1 }\n");
         let manifest = manifest_for(&[dep]);
-        assert!(manifest.still_valid());
+        assert!(revalidates(&manifest));
 
         std::fs::create_dir(tmp.path().join("dep")).unwrap();
         assert!(
-            !manifest.still_valid(),
+            !revalidates(&manifest),
             "a directory shadowing the module file must invalidate the manifest"
         );
     }
@@ -299,22 +344,39 @@ mod tests {
         let entry = tmp.path().join("entry.harn");
         write(&entry, "import \"./late\"\n");
         let manifest = ContextManifest {
-            files: Vec::new(),
             unresolved: vec![ManifestUnresolved {
                 anchor: entry,
                 import: "./late".to_string(),
             }],
-            unreadable: Vec::new(),
+            ..ContextManifest::for_entry(anchor())
         };
-        assert!(manifest.still_valid());
+        assert!(revalidates(&manifest));
 
         write(
             &tmp.path().join("late.harn"),
             "pub fn l() -> int { return 1 }\n",
         );
         assert!(
-            !manifest.still_valid(),
+            !revalidates(&manifest),
             "an import that now resolves must invalidate the manifest"
+        );
+    }
+
+    #[test]
+    fn an_anchor_mismatch_invalidates() {
+        // Every observation can be immaculate and the manifest still describe
+        // the wrong graph, because which files an import reaches depends on
+        // where the walk started. Nothing else in the manifest can notice that:
+        // the recorded paths are absolute and re-check clean from anywhere.
+        let tmp = tempfile::tempdir().unwrap();
+        let dep = tmp.path().join("dep.harn");
+        write(&dep, "pub fn v() -> int { return 1 }\n");
+        let manifest = manifest_for(&[dep]);
+
+        assert!(revalidates(&manifest), "unchanged under its own anchor");
+        assert!(
+            !manifest.still_valid(Path::new("/harn/tests/elsewhere/entry.harn")),
+            "a manifest must not vouch for an entry it was not walked from"
         );
     }
 
