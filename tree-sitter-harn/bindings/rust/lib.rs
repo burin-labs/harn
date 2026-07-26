@@ -18,9 +18,56 @@ pub const HIGHLIGHTS_QUERY: &str = include_str!("../../queries/highlights.scm");
 /// The language injection query for Harn.
 pub const INJECTIONS_QUERY: &str = include_str!("../../queries/injections.scm");
 
+/// The code-folding query for Harn.
+pub const FOLDS_QUERY: &str = include_str!("../../queries/folds.scm");
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
     use tree_sitter::{Query, QueryCursor, StreamingIterator};
+
+    fn crate_root() -> &'static Path {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    /// Crate-relative paths of the `.scm` files actually present in `queries/`.
+    fn query_files_on_disk() -> BTreeSet<String> {
+        std::fs::read_dir(crate_root().join("queries"))
+            .expect("read queries directory")
+            .map(|entry| entry.expect("read queries entry").path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "scm"))
+            .map(|path| {
+                format!(
+                    "queries/{}",
+                    path.file_name().expect("query file name").to_string_lossy()
+                )
+            })
+            .collect()
+    }
+
+    /// Query paths `tree-sitter.json` advertises for the grammar. Editors read
+    /// this manifest, so anything not listed here does not reach them.
+    fn registered_query_paths() -> BTreeSet<String> {
+        let manifest = std::fs::read_to_string(crate_root().join("tree-sitter.json"))
+            .expect("read tree-sitter.json");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&manifest).expect("parse tree-sitter.json");
+        manifest["grammars"]
+            .as_array()
+            .expect("tree-sitter.json should list grammars")
+            .iter()
+            .flat_map(|grammar| {
+                grammar
+                    .as_object()
+                    .expect("each grammar should be an object")
+                    .values()
+            })
+            .filter_map(|value| value.as_str())
+            .filter(|value| value.ends_with(".scm"))
+            .map(str::to_owned)
+            .collect()
+    }
 
     #[test]
     fn can_load_grammar() {
@@ -30,13 +77,29 @@ mod tests {
             .expect("load Harn parser");
     }
 
+    /// A query file editors never load is dead weight, and a registration with
+    /// no file behind it is broken. Deriving both sides from their real sources
+    /// rather than a hand-listed set means a query added later is covered the
+    /// moment it lands.
+    #[test]
+    fn every_query_file_is_registered() {
+        assert_eq!(query_files_on_disk(), registered_query_paths());
+    }
+
+    /// A renamed or removed node type, field name, or token literal stops a
+    /// query from compiling. Without this the queries are unverified text and
+    /// highlighting, injection, or folding degrades silently in every
+    /// tree-sitter editor.
     #[test]
     fn bundled_queries_compile() {
         let language = super::LANGUAGE.into();
-        tree_sitter::Query::new(&language, super::HIGHLIGHTS_QUERY)
-            .expect("highlight query should compile");
-        tree_sitter::Query::new(&language, super::INJECTIONS_QUERY)
-            .expect("injection query should compile");
+        for relative in query_files_on_disk() {
+            let source =
+                std::fs::read_to_string(crate_root().join(&relative)).expect("read query file");
+            if let Err(error) = Query::new(&language, &source) {
+                panic!("{relative} should compile against the grammar: {error}");
+            }
+        }
     }
 
     #[test]

@@ -121,6 +121,9 @@ Highlight queries are in `tree-sitter-harn/queries/highlights.scm`.
 Language injections, including PostgreSQL highlighting for `sql(...)` and
 `named_sql(...)` template strings from `std/postgres/query`, are in
 `tree-sitter-harn/queries/injections.scm`.
+Structural code folding — declarations, blocks, match arms, multi-line
+collections, block comments, and `"""` strings — is in
+`tree-sitter-harn/queries/folds.scm`.
 
 ## Formatter
 
