@@ -164,8 +164,8 @@ fn __tool_shape_of(text: string) -> string {
 /// most dropped text is genuine narration.
 pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFinding> {
   let findings = []
-  for fragment in dropped ?? [] {
-    const text = fragment?.text ?? ""
+  for fragment in dropped {
+    const text = fragment.text
     if trim(text) == "" {
       continue
     }
@@ -173,9 +173,9 @@ pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFind
     if shape == "" {
       continue
     }
-    findings = push(findings, {
+    findings = findings.appending({
       shape: shape,
-      dropped_reason: fragment?.reason ?? "",
+      dropped_reason: fragment.reason,
       excerpt: __tool_shape_excerpt(text),
     })
   }
@@ -188,11 +188,11 @@ pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFind
 /// that; the shape identifier is for events, not for the model.
 pub fn tool_shape_feedback(findings: list<ToolShapeFinding>) -> list<string> {
   let messages = []
-  for finding in findings ?? [] {
-    messages = push(messages, "unparsed_tool_syntax: text shaped like a tool call was not "
+  for finding in findings {
+    messages = messages.appending("unparsed_tool_syntax: text shaped like a tool call was not "
       + "recognized as one and did not run. Emit every call as "
       + "`<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: "
-      + (finding?.excerpt ?? ""))
+      + finding.excerpt)
   }
   return messages
 }
