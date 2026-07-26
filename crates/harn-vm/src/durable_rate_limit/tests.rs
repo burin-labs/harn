@@ -89,6 +89,57 @@ fn rate_limit_db_uses_wal_journal_mode() {
 }
 
 #[test]
+fn fair_queue_migrates_the_existing_quota_ledger_in_place() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("rate.sqlite");
+    let conn = Connection::open(&path).expect("open sqlite");
+    let legacy = RuntimeSqliteSchema::new(
+        "durable_rate_limit",
+        1,
+        "CREATE TABLE durable_rate_limit_entries (
+            bucket_key TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            units INTEGER NOT NULL CHECK(units >= 0)
+        );
+        CREATE INDEX durable_rate_limit_entries_key_ts_idx
+            ON durable_rate_limit_entries(bucket_key, ts_ms);",
+    );
+    initialize_runtime_sqlite(&conn, Duration::from_secs(5), &legacy)
+        .expect("initialize version-one ledger");
+    conn.execute(
+        "INSERT INTO durable_rate_limit_entries (bucket_key, ts_ms, units)
+         VALUES ('provider:rpm', 1000, 1)",
+        [],
+    )
+    .expect("seed legacy usage");
+    drop(conn);
+
+    let attempt = try_reserve_fair_once(
+        &path,
+        &[bucket("provider:rpm", 2, 1, 60_000)],
+        "provider",
+        "consumer",
+        None,
+        1_001,
+        60_000,
+    )
+    .expect("migrate and reserve");
+    assert!(attempt.acquired);
+    assert_eq!(usage(&path, "provider:rpm"), 2);
+
+    let conn = Connection::open(path).expect("reopen migrated ledger");
+    let version: i64 = conn
+        .query_row(
+            "SELECT version FROM _harn_sqlite_schema_versions
+             WHERE name = 'durable_rate_limit'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read migrated marker");
+    assert_eq!(version, 2);
+}
+
+#[test]
 fn multi_bucket_reservation_is_atomic_when_one_bucket_is_full() {
     let temp = tempfile::tempdir().expect("tempdir");
     let path = temp.path().join("rate.sqlite");
@@ -156,6 +207,136 @@ fn concurrent_threads_do_not_over_reserve_shared_bucket() {
         7
     );
     assert_eq!(usage(&path, "provider:rpm"), 1);
+}
+
+#[test]
+fn fair_queue_serves_a_cold_consumer_before_a_hot_consumer_repeats() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("rate.sqlite");
+    let buckets = vec![bucket("provider:rpm", 1, 1, 1_000)];
+
+    let first_a = try_reserve_fair_once(&path, &buckets, "provider", "a", None, 1_000, 60_000)
+        .expect("first consumer acquires");
+    assert!(first_a.acquired);
+    assert_eq!(first_a.counters.served, 1);
+
+    let queued_a = try_reserve_fair_once(&path, &buckets, "provider", "a", None, 1_001, 60_000)
+        .expect("hot consumer queues");
+    assert!(!queued_a.acquired);
+    assert_eq!(queued_a.snapshot.as_ref().unwrap().queue_position, 1);
+
+    let queued_b = try_reserve_fair_once(&path, &buckets, "provider", "b", None, 1_002, 60_000)
+        .expect("cold consumer queues");
+    assert!(!queued_b.acquired);
+
+    let still_queued_a = try_reserve_fair_once(
+        &path,
+        &buckets,
+        "provider",
+        "a",
+        queued_a.ticket_id,
+        2_000,
+        60_000,
+    )
+    .expect("hot consumer remains queued");
+    assert!(!still_queued_a.acquired);
+    assert_eq!(
+        still_queued_a.snapshot.as_ref().unwrap().queue_position,
+        2,
+        "least-recently-served consumer must move ahead of a repeat caller"
+    );
+
+    let served_b = try_reserve_fair_once(
+        &path,
+        &buckets,
+        "provider",
+        "b",
+        queued_b.ticket_id,
+        2_000,
+        60_000,
+    )
+    .expect("cold consumer acquires");
+    assert!(served_b.acquired);
+    assert_eq!(served_b.counters.served, 1);
+    assert_eq!(served_b.counters.queued, 1);
+    assert_eq!(served_b.counters.rerouted, 0);
+}
+
+#[test]
+fn fair_queue_promotes_a_starving_consumer_ahead_of_new_arrivals() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("rate.sqlite");
+    let buckets = vec![bucket("provider:rpm", 1, 1, 1_000_000)];
+
+    assert!(
+        try_reserve_fair_once(&path, &buckets, "provider", "a", None, 1_000, 60_000)
+            .expect("seed quota")
+            .acquired
+    );
+    let starving = try_reserve_fair_once(&path, &buckets, "provider", "a", None, 1_001, 60_000)
+        .expect("first consumer queues");
+    let newer = try_reserve_fair_once(&path, &buckets, "provider", "b", None, 61_002, 60_000)
+        .expect("new consumer queues");
+    assert_eq!(newer.snapshot.as_ref().unwrap().queue_position, 2);
+
+    let promoted = try_reserve_fair_once(
+        &path,
+        &buckets,
+        "provider",
+        "a",
+        starving.ticket_id,
+        61_002,
+        60_000,
+    )
+    .expect("starving consumer is reconsidered");
+    assert_eq!(promoted.snapshot.as_ref().unwrap().queue_position, 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn fair_queue_reports_backpressure_and_counts_reroute_on_timeout() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("rate.sqlite");
+    let buckets = vec![bucket("provider:rpm", 1, 1, 60_000)];
+    let _clock = crate::stdlib::clock::MockClockGuard::install(1_000);
+
+    let first = acquire_fair_durable_rate_limit(
+        path.clone(),
+        buckets.clone(),
+        "provider".to_string(),
+        "consumer-a".to_string(),
+        None,
+        60_000,
+        false,
+        || false,
+        |_| {},
+    )
+    .await
+    .expect("first consumer acquires");
+    assert!(first.acquired);
+
+    let mut snapshots = Vec::new();
+    let second = acquire_fair_durable_rate_limit(
+        path,
+        buckets,
+        "provider".to_string(),
+        "consumer-b".to_string(),
+        Some(500),
+        60_000,
+        true,
+        || false,
+        |snapshot| snapshots.push(snapshot.clone()),
+    )
+    .await
+    .expect("second consumer times out structurally");
+
+    assert!(!second.acquired);
+    assert!(second.timed_out);
+    assert_eq!(second.waited_ms, 500);
+    assert_eq!(second.counters.queued, 1);
+    assert_eq!(second.counters.rerouted, 1);
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].queue_position, 1);
+    assert_eq!(snapshots[0].expected_wait_ms, 60_000);
 }
 
 #[test]

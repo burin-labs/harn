@@ -29,6 +29,8 @@ use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+mod durable_admission;
+
 const DURABLE_RATE_LIMIT_ENABLED_ENV: &str = "HARN_LLM_RATE_LIMIT_DURABLE";
 const DURABLE_RATE_LIMIT_STATE_PATH_ENV: &str = "HARN_LLM_RATE_LIMIT_STATE_PATH";
 /// Per-acquire ceiling on durable rate-limit backoff. Without it, a single
@@ -49,6 +51,7 @@ const DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV: &str = "HARN_LLM_RATE_LIMIT_MAX_WAIT_M
 /// behavior (debugging only).
 const DURABLE_RATE_LIMIT_MAX_WAIT_MS_DEFAULT: u64 = 30_000;
 const WINDOW_SECS: u64 = 60;
+const FAIR_QUEUE_STARVATION_MS: u64 = 60_000;
 const RATE_LIMIT_ENV_FIELD_SUFFIXES: [&str; 5] =
     ["_RPM", "_TPM", "_INPUT_TPM", "_OUTPUT_TPM", "_CONCURRENCY"];
 
@@ -947,62 +950,6 @@ fn durable_buckets_for_keys(
     buckets
 }
 
-async fn acquire_durable_for_keys(
-    state_path: PathBuf,
-    provider: &str,
-    model: &str,
-    keys: &[String],
-    request: RateLimitRequest,
-) -> Result<(), crate::value::VmError> {
-    let buckets = {
-        let registry = registry().lock().expect("rate limiter mutex poisoned");
-        durable_buckets_for_keys(&registry, keys, request)
-    };
-    if buckets.is_empty() {
-        return Ok(());
-    }
-    let outcome = crate::durable_rate_limit::acquire_durable_rate_limit(
-        state_path,
-        buckets,
-        durable_max_wait_ms(),
-        || false,
-    )
-    .await?;
-    if outcome.waited_ms > 0 {
-        let route = if model.trim().is_empty() {
-            provider.to_string()
-        } else {
-            format!(
-                "{provider}/{}",
-                crate::llm_config::normalize_model_id(model)
-            )
-        };
-        crate::events::log_debug(
-            "llm.rate_limit",
-            &format!(
-                "Durable rate limit for '{}': waited {}ms",
-                route, outcome.waited_ms
-            ),
-        );
-        // The wait was clamped before the quota cleared: proceed to attempt the
-        // provider anyway rather than block longer. A genuine over-quota route
-        // returns a 429 here, which feeds the Retry-After / retry / escalation
-        // path. This is what stops one rate-limited provider from eating the
-        // whole trial wall.
-        if outcome.timed_out {
-            crate::events::log_debug(
-                "llm.rate_limit",
-                &format!(
-                    "Durable rate limit for '{}': wait clamped at {}ms (cap reached); \
-                     proceeding to attempt the provider",
-                    route, outcome.waited_ms
-                ),
-            );
-        }
-    }
-    Ok(())
-}
-
 async fn sleep_after_throttle(provider: &str, model: &str, duration: Duration) {
     let route = if model.trim().is_empty() {
         provider.to_string()
@@ -1027,6 +974,9 @@ async fn acquire_permit_for(
     provider: &str,
     model: &str,
     request: RateLimitRequest,
+    consumer_id: Option<&str>,
+    session_id: Option<&str>,
+    reroute_on_timeout: bool,
 ) -> Result<RateLimitPermit, crate::value::VmError> {
     ensure_initialized_from_config();
     let keys = limiter_keys(provider, model);
@@ -1042,7 +992,17 @@ async fn acquire_permit_for(
                 sleep_after_throttle(provider, model, duration).await;
                 continue;
             }
-            acquire_durable_for_keys(state_path, provider, model, &keys, request).await?;
+            durable_admission::acquire(
+                state_path,
+                provider,
+                model,
+                &keys,
+                request,
+                consumer_id,
+                session_id,
+                reroute_on_timeout,
+            )
+            .await?;
             return Ok(RateLimitPermit { _permits: permits });
         }
     }
@@ -1294,7 +1254,7 @@ pub(crate) fn observe_network_outcome_for_llm_call(
 pub(crate) async fn acquire_permit(
     provider: &str,
 ) -> Result<RateLimitPermit, crate::value::VmError> {
-    acquire_permit_for(provider, "", RateLimitRequest::default()).await
+    acquire_permit_for(provider, "", RateLimitRequest::default(), None, None, false).await
 }
 
 /// Wait until all provider/model buckets allow this LLM request, then record it.
@@ -1307,6 +1267,11 @@ pub(crate) async fn acquire_permit_for_llm_call(
         &opts.provider,
         &opts.model,
         RateLimitRequest::for_llm_call(opts),
+        opts.rate_limit_consumer_id
+            .as_deref()
+            .or(opts.session_id.as_deref()),
+        opts.session_id.as_deref(),
+        opts.rate_limit_reroute_on_timeout,
     )
     .await
 }

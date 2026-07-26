@@ -635,7 +635,7 @@ pub(crate) async fn execute_with_routing(
         let link = policy.chain[idx].clone();
         let link_label = link.display_label();
         let attempt_no = attempts_used + 1;
-        let opts = match auth::link_options_with_auth(&base_opts, policy, &link) {
+        let mut opts = match auth::link_options_with_auth(&base_opts, policy, &link) {
             Ok(opts) => opts,
             Err(snapshot) => {
                 let mut meta = serde_json::Map::new();
@@ -661,6 +661,8 @@ pub(crate) async fn execute_with_routing(
                 continue;
             }
         };
+        opts.rate_limit_reroute_on_timeout =
+            idx + 1 < policy.chain.len() && attempts_used + 1 < max_attempts;
 
         let mut local_attempts: Vec<RoutingAttempt> = Vec::new();
         match check_link_budget(
@@ -708,7 +710,9 @@ pub(crate) async fn execute_with_routing(
             if idx + 1 < policy.chain.len() && attempts_used + 2 <= max_attempts {
                 let backup_link = policy.chain[idx + 1].clone();
                 match auth::link_options_with_auth(&base_opts, policy, &backup_link) {
-                    Ok(backup_opts) => {
+                    Ok(mut backup_opts) => {
+                        backup_opts.rate_limit_reroute_on_timeout =
+                            idx + 2 < policy.chain.len() && attempts_used + 2 < max_attempts;
                         let backup_label = backup_link.display_label();
                         // Do not stream deltas from racing attempts: the loser may
                         // emit text before the winner is known. Callers that need an
