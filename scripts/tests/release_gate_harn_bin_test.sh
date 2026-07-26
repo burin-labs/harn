@@ -488,6 +488,7 @@ fi
 for lane in \
   rust-audit \
   harn-audit \
+  harn-performance \
   generated-audit \
   docs-audit \
   grammar-audit \
@@ -505,6 +506,7 @@ done
 for expected in \
   "cargo clippy --workspace --all-targets -- -D warnings" \
   "make conformance" \
+  "make check-test-case-performance" \
   "package-audit HARN_BIN=" \
   "make smoke-audit"
 do
@@ -526,7 +528,7 @@ for lane in generated-audit docs-audit grammar-audit security-audit smoke-audit;
     exit 1
   fi
 done
-for lane in rust-audit harn-audit package-audit; do
+for lane in rust-audit harn-audit harn-performance package-audit; do
   if grep -Fq "log: $lane" "$tmp_root/audit-residual.txt"; then
     echo "receipt-authorized residual audit unexpectedly ran $lane" >&2
     cat "$tmp_root/audit-residual.txt" >&2
@@ -732,10 +734,23 @@ if [[ -z "$package_audit_line" || "$cli_aot_line" -ge "$package_audit_line" ]]; 
   cat "$audit_record" >&2
   exit 1
 fi
-for lane in rust-audit harn-audit package-audit; do
+for lane in rust-audit harn-audit harn-performance package-audit; do
   if ! grep -Eq "ok: +$lane " "$tmp_root/audit-source-only.txt"; then
     echo "source-only audit omitted contract-owned lane: $lane" >&2
     cat "$tmp_root/audit-source-only.txt" >&2
+    exit 1
+  fi
+done
+performance_line="$(grep -Fn "make check-test-case-performance " "$audit_record" | cut -d: -f1)"
+for completed_lane in \
+  "make test " \
+  "make fmt-harn " \
+  "package-audit HARN_BIN="
+do
+  completed_line="$(grep -Fn "$completed_lane" "$audit_record" | tail -1 | cut -d: -f1)"
+  if [[ -z "$completed_line" || -z "$performance_line" || "$completed_line" -ge "$performance_line" ]]; then
+    echo "source-only audit did not isolate performance after $completed_lane" >&2
+    cat "$audit_record" >&2
     exit 1
   fi
 done
@@ -746,6 +761,28 @@ for lane in generated-audit docs-audit grammar-audit security-audit smoke-audit;
     exit 1
   fi
 done
+
+: > "$audit_record"
+if PATH="$fake_tools:$PATH" \
+  HARN_RELEASE_ROOT="$audit_root" \
+  HARN_BIN="$fake_audit_harn" \
+  TMPDIR="$tmp_root" \
+  FAKE_AUDIT_RECORD="$audit_record" \
+  FAIL_FAKE_MAKE_TARGET=check-test-case-performance \
+  env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    "$release_gate" audit --source-only \
+      > "$tmp_root/audit-source-performance-failure.txt" 2>&1; then
+  echo "injected isolated performance failure unexpectedly passed" >&2
+  exit 1
+fi
+if ! grep -Fq ">>> harn-performance  <<<" \
+  "$tmp_root/audit-source-performance-failure.txt" ||
+  ! grep -Fq -- "-> parallel test-case performance" \
+    "$tmp_root/audit-source-performance-failure.txt"; then
+  echo "isolated performance failure did not name its step and command" >&2
+  cat "$tmp_root/audit-source-performance-failure.txt" >&2
+  exit 1
+fi
 
 fake_publish="$tmp_root/fake-publish.sh"
 cat > "$fake_publish" <<'SH'

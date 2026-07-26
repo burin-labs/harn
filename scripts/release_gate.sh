@@ -273,10 +273,13 @@ run_rust_audit() {
 
 run_harn_audit() {
   time_phase "harn conformance" make conformance
-  time_phase "parallel test-case performance" make check-test-case-performance
   time_phase "protocol conformance" make protocol-conformance
   time_phase "harn lint" make lint-harn
   time_phase "harn fmt --check" make fmt-harn
+}
+
+run_harn_performance_audit() {
+  time_phase "parallel test-case performance" make check-test-case-performance
 }
 
 # Host-platform reproduction of the cross-platform release smoke
@@ -499,6 +502,7 @@ cmd_audit() {
   echo "audit lane log dir: $tmp"
   local -a steps=()
   local -a pids=()
+  local needs_harn_performance=0
 
   # Each step writes its wall-clock duration to `<name>.dur` so the
   # parent can report per-step timings once everyone wraps. That lets
@@ -532,6 +536,9 @@ cmd_audit() {
 
   local lane_idx
   for lane_idx in "${!SELECTED_AUDIT_STEPS[@]}"; do
+    if [[ "${SELECTED_AUDIT_STEPS[$lane_idx]}" == "harn-audit" ]]; then
+      needs_harn_performance=1
+    fi
     launch_step "${SELECTED_AUDIT_STEPS[$lane_idx]}" "${SELECTED_AUDIT_RUNNERS[$lane_idx]}"
   done
 
@@ -550,6 +557,26 @@ cmd_audit() {
       failed=1
     fi
   done
+
+  # The performance ratchet measures wall and CPU time, so running it beside
+  # rust-audit's workspace build/tests and package-audit's extracted-crate
+  # builds measures our own fanout rather than Harn. Mirror audit_gates.sh:
+  # settle every functional lane first, then collect performance evidence on
+  # the otherwise-idle runner.
+  if [[ "$needs_harn_performance" -eq 1 ]]; then
+    local performance_step="harn-performance"
+    local performance_dur=""
+    printf 'log: %-15s (%s)\n' "$performance_step" "$tmp/$performance_step.log"
+    steps+=("$performance_step")
+    if run_step "$performance_step" run_harn_performance_audit; then
+      performance_dur="$([[ -f "$tmp/$performance_step.dur" ]] && cat "$tmp/$performance_step.dur" || echo '?')"
+      printf 'ok: %-15s (%ss)\n' "$performance_step" "$performance_dur"
+    else
+      performance_dur="$([[ -f "$tmp/$performance_step.dur" ]] && cat "$tmp/$performance_step.dur" || echo '?')"
+      printf 'fail: %-13s (%ss)\n' "$performance_step" "$performance_dur"
+      failed=1
+    fi
+  fi
 
   if [[ "$failed" -ne 0 ]]; then
     # ── Failure summary FIRST (so the real cause is at the TOP of the
