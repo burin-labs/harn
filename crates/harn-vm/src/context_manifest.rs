@@ -181,6 +181,14 @@ mod tests {
         write(&dep, "pub fn v() -> int { return 111 }\n");
         let manifest = manifest_for(&[dep.clone()]);
         write(&dep, "pub fn v() -> int { return 222 }\n");
+        let future = std::fs::metadata(&dep).unwrap().modified().unwrap()
+            + std::time::Duration::from_secs(10);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&dep)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(future))
+            .unwrap();
         assert!(
             !manifest.still_valid(),
             "an edit of identical length must still invalidate the manifest"
