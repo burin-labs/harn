@@ -25,6 +25,9 @@ const CARGO_TARGET_ARTIFACT_DIR_NAMES = ["debug", "release"]
 
 const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
 
+/** The only tree whose `.harn` sources the ratchet governs. */
+pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
+
 pub type SourceCount = {path: string, lines: int}
 
 pub type ValidBaselineCount = {kind: "valid", shard_path: string, source_path: string, lines: int}
@@ -139,6 +142,18 @@ fn skip_dir(root: string, rel_dir: string, name: string) -> bool {
     || root_worktree_cargo_target_dir(root, rel_dir, name)
 }
 
+/**
+ * Recursively collect `suffix` files under `rel_dir`, skipping the directories
+ * this script owns rules for.
+ *
+ * Those rules are not the whole story: `walk_dir` refuses on its own to descend
+ * into `target`, `build`, `dist`, `node_modules`, `coverage`, `venv`, and
+ * `__pycache__`, so the inventory's real reach is narrower than the constants
+ * above suggest, and a source tree under one of those names would escape the
+ * ratchet with no diagnostic.
+ * `test_inventory_covers_every_tracked_in_scope_source` is what makes such a
+ * hole loud, by reconciling the inventory against git rather than a fixture.
+ */
 fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
   const dir = if rel_dir == "" {
     root
@@ -177,7 +192,8 @@ fn files_below(root: string, rel_dir: string, suffix: string) -> list<string> {
   return paths
 }
 
-fn is_generated_source(path: string) -> bool {
+/** Whether `path` is a generated source the ratchet must not govern. */
+pub fn is_generated_source(path: string) -> bool {
   for prefix in GENERATED_SOURCE_PREFIXES {
     if path.starts_with(prefix) {
       return true
@@ -195,7 +211,7 @@ pub fn source_files(root: string = "") -> list<string> {
   }
   let paths = files_below(resolved_root, "", ".rs").filter({ path -> !is_generated_source(path) })
     .to_list()
-  for path in files_below(resolved_root, "crates/harn-stdlib/src/stdlib", ".harn") {
+  for path in files_below(resolved_root, STDLIB_SOURCE_DIR, ".harn") {
     paths = paths.appending(path)
   }
   return paths.sorted()

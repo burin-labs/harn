@@ -46,6 +46,10 @@ cd "$repo_root"
 # be reported as the conformance failure rather than hidden inside a make fanout.
 GATES=(
   test-agent-scripts
+  # Was in `make all` but in no workflow, so nothing watched it: the suite sat
+  # red on main for a source-scope regression until someone ran it by hand. A
+  # gate that only fires locally is not a gate.
+  test-harn-scripts
   protocol-conformance
   lint-no-xfail-regression
   lint-actions-harn

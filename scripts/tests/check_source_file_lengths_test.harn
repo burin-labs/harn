@@ -170,7 +170,13 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       write_source(root, ".target-4688/debug/build/pkg/out/generated.rs", 1)
       write_source(root, "target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
       write_source(root, "target-source/src/lib.rs", 1)
-      write_source(root, "crates/app/target-codex0-4942/debug/build/pkg/out/generated.rs", 1)
+      // Below the repo root, a `target-` directory stays in scope even when it
+      // carries a `debug/` artifact dir — only a ROOT `target-*` is treated as
+      // a per-worktree Cargo target. The path deliberately avoids a `build/`
+      // component: `files_below` inherits `walk_dir`'s built-in ignore set, so
+      // no fixture can assert anything about a path under `target/`, `build/`,
+      // `dist/`, `node_modules/`, `coverage/`, `venv/`, or `__pycache__/`.
+      write_source(root, "crates/app/target-codex0-4942/debug/generated.rs", 1)
       write_source(root, "tree-sitter-harn/node_modules/pkg/binding.rs", 1)
       write_text(root, "crates/app/src/not-source.txt", "text\n")
       assert_eq(
@@ -178,7 +184,7 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
         [
           "crates/app/benches/latency.rs",
           "crates/app/src/lib.rs",
-          "crates/app/target-codex0-4942/debug/build/pkg/out/generated.rs",
+          "crates/app/target-codex0-4942/debug/generated.rs",
           "crates/app/tests/integration.rs",
           "crates/harn-stdlib/src/stdlib/agent/loop.harn",
           "perf/src/bin/bench.rs",
@@ -189,6 +195,36 @@ pipeline test_source_scope_includes_tests_benches_and_stdlib_only(task) {
       )
     },
   )
+}
+
+// The inventory walk is bounded by `walk_dir`'s built-in ignore set, which is
+// invisible from this script: a source tree under a directory named `target`,
+// `build`, `dist`, `node_modules`, `coverage`, `venv`, or `__pycache__` is
+// simply never reached, and a file the walk never reaches is a file the ratchet
+// silently stops governing. The synthetic fixtures above cannot catch that,
+// because they can only assert about paths the walk already reaches. Comparing
+// the inventory against git — the one authority on what source this repo
+// actually has — is what makes such a hole loud.
+@test
+pipeline test_inventory_covers_every_tracked_in_scope_source(task) {
+  const tracked = harness.process.spawn_captured(
+    {cmd: "git", args: ["ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
+  )
+  assert_eq(tracked.success, true)
+  const scanned = source_files()
+  let missing: list<string> = []
+  for line in tracked.stdout.lines() {
+    const path = line.trim()
+    if path == "" || is_generated_source(path) {
+      continue
+    }
+    if !scanned.contains(path) {
+      missing = missing.appending(path)
+    }
+  }
+  // A tracked file the inventory never returned. Every entry here is a source
+  // file the length ratchet has silently stopped governing.
+  assert_eq(missing.sorted(), [])
 }
 
 @test
