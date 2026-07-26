@@ -2,272 +2,175 @@
 
 Harn is a programming language and runtime for orchestrating AI agents.
 
-Use this file for repo-local rules. Keep generated files generated. Prefer the
-existing Harn runtime and stdlib over new host glue.
+This file is the repository contract for Codex, Claude, and other coding
+agents. `CLAUDE.md` must remain a symlink to it. The durable design principles
+live in [Engineering principles](docs/src/dev/engineering-principles.md):
+ambitious outcomes behind boring seams, one owner with many projections,
+structure over prose, evidence matched to claims, canonical paths, controllable
+autonomy, cross-surface convergence, and operationally complete launches.
+
+## Ownership
+
+- Harn owns orchestration, transcript lifecycle, replay/eval, delegated-worker
+  lineage, capability policy, and mutation-session audit metadata.
+- Hosts own native presentation, approval UX, concrete file mutations, and
+  undo/redo semantics.
+- Prefer the Harn runtime and stdlib over new host glue.
+- A semantic decision has one owner. CLI, TUI, IDE, headless, and cloud
+  behavior should be projections or adapters, not parallel implementations.
+- Prefer deep modules: small interfaces that hide substantial behavior.
+- Make contracts structural with types, registries, events, generated
+  projections, and drift checks. Prose should explain the contract, not enforce
+  it.
+
+## Working agreement
+
+- Research, implement, verify, recover, and ship autonomously inside the
+  approved scope.
+- Pause for genuine ambiguity, destructive or out-of-scope action, production
+  impact, exceptional spend, or new authority—not routine reversible work.
+- Treat stop, wait, stand down, and pivot as control events. Do not continue
+  stale work after one arrives.
+- Start from the claim and name a plausible falsifier. Match evidence to the
+  claim; test counts alone are not proof.
+- Exercise the canonical user path for product claims and progress,
+  interruption, recovery, and terminal state for liveness claims.
+- Use multiple trials and calibrated graders for stochastic quality claims.
+- "Ship" means landed on the intended main branch with required post-merge or
+  release checks complete.
 
 ## Harn scripts
 
 - Before writing or editing `.harn`, run `harn skill list --json`.
 - Fetch the narrowest guide with `harn skill get <name> --full`.
-- Use `harn-language` for syntax, modules, types, and `llm_call`.
-- Use `harn-orchestration` for triggers, workers, personas, and agent loops.
-- Fallback docs: `docs/llm/harn-quickref.md` and
+- Use `harn-language` for syntax, modules, types, and `llm_call`;
+  `harn-orchestration` for triggers, workers, personas, and agent loops;
+  `harn-testing` for fixtures; and `harn-product-quality` for user-facing flows.
+- Fallback references are `docs/llm/harn-quickref.md` and
   `docs/llm/harn-triggers-quickref.md`.
 - Default new scripts to `fn main(harness: Harness) { ... }`.
 - Route capabilities through `harness.*`.
+- Claude Code gets the same version-matched reminder through
+  `.claude/skills/harn-scripting/SKILL.md`.
 
-Claude Code users get the same reminder through
-`.claude/skills/harn-scripting/SKILL.md`; the full skill content ships in the
-local `harn` binary so it matches the version in use.
+## Setup and resource isolation
 
-## Setup
-
-- Run `make setup` on a fresh clone **and in each new worktree**. It installs
-  hooks, optional developer tools, repo-local Node tooling when available,
-  sccache config, per-worktree Cargo target config when `CODEX_WORKTREE_PATH` is
-  set, and `cargo check --workspace`. A worktree created with `git worktree add`
-  has no `.cargo/config.toml` until setup runs there, so it gets neither the
-  shared target dir nor the compiler wrapper and every build starts cold — long
-  enough that `make gen-*` and `check-*` targets hit the Cargo probe deadline and
-  fail with exit 124 rather than producing anything. `scripts/harn_bin.sh` warns
-  when it sees an unconfigured checkout and prints the two ways past a timeout:
-  `HARN_BIN=<path> HARN_BIN_NO_BUILD=1` to reuse a binary you already built, or
-  `HARN_BIN_CARGO_TIMEOUT_SECONDS=3600` to allow the cold build.
-- `HARN_DEV_TARGET_WORKTREE_PATH` and `CODEX_WORKTREE_PATH` name the worktree a
-  target dir belongs to. Setup ignores either one when it does not name the
-  checkout being set up, and says so: a shell that exports the path of one
-  checkout while you work in a sibling would otherwise give both the same
-  mutable target dir.
-- Build caching is two layers, written into `.cargo/config.toml` by
-  `scripts/dev_setup.sh`:
-  1. **Per-worktree `target-dir`** (`$TMPDIR/harn-target/<parent>-<leaf>`):
-     final binaries and mutable build-script scratch stay isolated per
-     worktree, while the stable path keeps repeated commands incremental.
-     Do not share Cargo `build-dir` or `target-dir` paths across concurrent
-     worktrees: generated `OUT_DIR` contents are mutable. Operators may set
-     `HARN_DEV_BUILD_DIR=<path>` only when they deliberately provide an
-     equivalent serialization boundary.
-  2. **sccache** (`rustc-wrapper`): caches same-path recompiles. Immutable,
-     commit-bound CI artifacts provide cross-run reuse where appropriate.
-     Setup also configures a worktree-relative `SCCACHE_BASEDIRS`, allowing
-     identical sources in different worktrees to share compiler objects.
-  Orphaned per-worktree target dirs are reclaimed by
-  `scripts/prune_stale_targets.sh` (run from setup at most daily).
-- The setup build uses `cargo check --locked --workspace`; dependency drift
-  fails without modifying the checkout.
-- Setup phases are fingerprinted under `.codex/dev-setup/`, so repeated setup
-  is normally a fast no-op. Use `HARN_DEV_SETUP_FORCE=1 make setup` to refresh
-  every phase.
-- Codex app worktrees use `.codex/environments/environment.toml`, which calls
-  `make setup-bootstrap` to configure hooks, sccache, and a private target
-  without compiling a disposable staging checkout. Run `make setup` or
-  `make setup-rust` once in the final task worktree.
-- Claude Code project settings run `scripts/claude-dev-setup-once.sh` on
-  session startup. It delegates to the same setup path once per dependency
-  fingerprint and stores ignored logs under `.claude/dev-setup/`.
-- Use `make test` for workspace Rust tests. It uses `cargo nextest` when
-  available and falls back to `cargo test --workspace`.
-- Use `make test-cargo` only when you need baseline Cargo behavior.
-- Run `make install-hooks` if the repo hook path is not configured.
-- Inspect CLI surface with `cargo run --quiet --bin harn -- --help`.
-- The root `package.json` is repo tooling only. Portal, tree-sitter, and VS Code
-  have their own package manifests.
-- Repo-root portal scripts bootstrap `crates/harn-cli/portal/node_modules`, so
-  `npm run portal:*` works in fresh worktrees.
-- `crates/harn-wasm` is outside the Cargo workspace. Build it with
-  `cd crates/harn-wasm && wasm-pack build`.
-
-Two Claude Code hooks are configured in `.claude/settings.json`: session setup
-(above) and a Bash guard, `scripts/claude_bash_guard.harn`. The guard rejects
-`cargo build/check/clippy/fmt/test/bench` in favour of the Makefile target that
-sets the right environment, and rejects piping a build or test straight into a
-filter, because that throws away every line the filter did not print and the
-only way to get one back is to run the whole thing again. Redirect to a file
-first, then grep the file. `HARN_ALLOW_RAW_CARGO=1` in the command is the escape
-hatch for a genuine one-off.
-
-Keep installed hooks on. The default pre-commit hook runs cheap staged guards
-and a read-only Rust format check; the default pre-push hook enforces signed
-commits, merge-queue safety, and cheap drift guards. Required CI owns compiling,
-testing, Harn formatting/linting, and generated-artifact validation. Set
-`HARN_HOOKS_FULL_LOCAL=1` to opt into the targeted build-backed local gates; add
-`HARN_PREPUSH_FULL_TESTS=1` to run the broader `make test` pre-push gate too.
+- Run `make setup` on a fresh clone and in every new worktree. It installs
+  hooks and tools, configures sccache and a private target directory, then runs
+  `cargo check --locked --workspace`.
+- A raw `git worktree add` has no `.cargo/config.toml`; without setup, cold
+  Cargo probes can time out. Reuse an existing binary with
+  `HARN_BIN=<path> HARN_BIN_NO_BUILD=1` or explicitly allow a cold probe with
+  `HARN_BIN_CARGO_TIMEOUT_SECONDS=3600`.
+- Never share a mutable Cargo `target-dir` or `build-dir` across concurrent
+  worktrees. Setup derives a stable per-worktree target under
+  `$TMPDIR/harn-target/` and configures sccache for cross-worktree object reuse.
+- `HARN_DEV_TARGET_WORKTREE_PATH` and `CODEX_WORKTREE_PATH` must name the
+  checkout being configured. Setup ignores stale sibling-worktree values.
+- Setup phases are fingerprinted under `.codex/dev-setup/`; use
+  `HARN_DEV_SETUP_FORCE=1 make setup` only to refresh them.
+- Codex staging worktrees use `make setup-bootstrap`; run `make setup` or
+  `make setup-rust` in the final task worktree.
+- Claude session startup delegates to the same setup path through
+  `scripts/claude-dev-setup-once.sh`.
+- Keep installed hooks on. Use `HARN_HOOKS_FULL_LOCAL=1` for build-backed local
+  gates and `HARN_PREPUSH_FULL_TESTS=1` for the broader pre-push suite.
+- The Claude Bash guard rejects raw Cargo build/test commands and build output
+  piped directly into filters. Use Make targets; redirect output to a file
+  before filtering. `HARN_ALLOW_RAW_CARGO=1` is the explicit one-off escape.
 
 ## Repository map
 
-- `crates/harn-lexer`: tokenizer and spans.
-- `crates/harn-parser`: AST, parser, and type checker.
-- `crates/harn-stdlib`: embedded Harn stdlib source catalog.
-- `crates/harn-vm`: compiler, VM, stdlib, providers, orchestration, transcripts,
-  bridge, and ACP integration.
-- `crates/harn-cli`: CLI, conformance runner, portal server, MCP/OAuth, A2A/ACP,
+- `crates/harn-lexer`, `crates/harn-parser`: tokens, AST, parser, type checker.
+- `crates/harn-stdlib`, `crates/harn-vm`: embedded stdlib, compiler, VM,
+  providers, orchestration, transcripts, bridge, and ACP.
+- `crates/harn-cli`: CLI, conformance, portal server, MCP/OAuth, A2A/ACP,
   replay, and eval tooling.
-- `crates/harn-lint`, `crates/harn-fmt`: linting and formatting.
-- `crates/harn-lsp`, `crates/harn-dap`: editor and debugger integrations.
+- `crates/harn-lint`, `crates/harn-fmt`, `crates/harn-lsp`,
+  `crates/harn-dap`: language tooling and editor/debugger integration.
 - `crates/harn-cli/portal/`: React/Vite persisted-run UI.
-- `conformance/tests/`: executable language/runtime spec.
-- `spec/chapters/*.md`: canonical language spec, one file per section
-  (`spec/HARN_SPEC.md` is the generated single-file assembly).
-- `docs/src/`: Markdown docs (Diataxis IA), rendered by the `website/` site.
-- `website/`: Vite + React + Tailwind site for harnlang.com; builds to `docs/dist/`.
-- `tree-sitter-harn/`: tree-sitter grammar and tests.
-- `editors/vscode/`: VS Code extension.
+- `conformance/tests/`: executable language/runtime specification.
+- `spec/chapters/*.md`: canonical spec sources.
+- `docs/src/`, `website/`: documentation sources and harnlang.com.
+- `tree-sitter-harn/`, `editors/vscode/`: grammar and VS Code extension.
+- `crates/harn-wasm` is outside the workspace; build it with
+  `(cd crates/harn-wasm && wasm-pack build)`.
 
-## Prompt templates
+## Source ownership and generated files
 
-The `.harn.prompt` / `.prompt` engine used by `render(...)`,
-`render_prompt(...)`, and `template.render` lives in
-`crates/harn-vm/src/stdlib/template.rs`. Do not add another parser or evaluator.
-Host-call and script-call rendering both go through `render_template_result`.
-
-Docs: `docs/src/prompt-templating.md` and `docs/llm/harn-quickref.md`.
-
-Back-compat: pre-v2 `{{name}}` missing-identifier passthrough stays
-byte-for-byte compatible. New constructs (`if`/`elif`/`else`, `for`, `include`,
-filters, `{{# #}}`, `{{ raw }}`, `{{- -}}`) raise parse errors.
-
-## Common commands
-
-- Build: `cargo build`
-- Run: `cargo run --bin harn -- run examples/hello.harn`
-- Type-check: `cargo run --bin harn -- check <path>`
-- Lint: `cargo run --bin harn -- lint <path>`
-- Fix lint where supported: `cargo run --bin harn -- lint --fix <path>`
-- Format check: `cargo run --bin harn -- fmt --check <path>`
-- Workspace tests: `make test`
-- Conformance: `cargo run --bin harn -- test conformance`
-- Targeted conformance: `cargo run --bin harn -- test conformance --filter <name>`
-- Full gate: `make all`
-- Portal: `cargo run --bin harn -- portal`
-- Portal dev loop: `npm run portal:dev`
+- Edit `spec/chapters/*.md`, then run `make sync-language-spec`; do not edit
+  generated `spec/HARN_SPEC.md` or `docs/src/language-spec.md`.
+- Generate `docs/theme/harn-keywords.js` with `make gen-highlight`.
+- Generate protocol artifacts with `make gen-protocol-artifacts`; only
+  `spec/protocol-artifacts/*_test.go` is hand-edited.
+- `scripts/generated_artifacts.toml` is the source of truth for every gen/check
+  pair and every `check-*` preflight classification. A new artifact needs
+  Makefile gen/check targets, a registry entry, `make all`, and CI wiring.
+- Classify checks as `source`, `binary`, or `excluded`. Source checks read
+  committed files; binary checks require a fresh Harn executable.
+- Generated/local paths include `docs/dist/`, `.harn-runs/`, `.harn/`,
+  `.harn/receipts/`, `.claude/`, `.burin/`, `target/`, and `node_modules/`.
+- The prompt-template engine is
+  `crates/harn-vm/src/stdlib/template.rs`. Host and script rendering both use
+  `render_template_result`; do not add another parser or evaluator.
+- Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
+  fail with parse errors. Vocabulary lives in
+  `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with
+  `make gen-prompt-grammar`.
+- Keep stdlib registration authoritative. Register builtins with
+  `#[harn_builtin]`; linter and editor awareness derive from the live stdlib.
+- Public stdlib functions need explicit return types: named closed records,
+  `Result<T, E>`, or typed maps rather than `any` or open `dict`.
 
 ## Verification
 
-- Start with the narrowest check that covers the touched behavior.
-- Before declaring a change clean, run `make check-drift` (a seconds-scale
-  preflight of every source-reading drift/manifest guard, derived from
-  `scripts/generated_artifacts.toml`) and confirm `git status` is empty. After a
-  Rust-registry edit, also rebuild and run `make check-drift-binary` (the
-  binary-semantics guards, which false-pass on a stale binary). These are the fast
-  local subset; `make all` is still the full gate.
-- Before merge, prefer `make all`.
-- Syntax, parser, or keyword changes need conformance coverage plus
-  `make conformance`, `make lint-harn`, `make fmt-harn`, and tree-sitter tests.
-- Docs code blocks under `docs/src/` need `make check-docs-snippets`.
-- Builtin or keyword changes need `make gen-highlight`.
+- Start with the narrowest check through the owning interface.
+- Workspace tests: `make test` (nextest when available).
+- Full gate: `make all`.
+- Before declaring a change clean, run `make check-drift` and inspect
+  `git status`. After Rust registry or executable-semantics changes, rebuild
+  and run `make check-drift-binary`.
+- Syntax/parser/keyword changes need conformance coverage, `make conformance`,
+  `make lint-harn`, `make fmt-harn`, and tree-sitter tests.
+- Docs code blocks need `make check-docs-snippets`.
 - Portal changes need `npm run portal:lint`, `npm run portal:test`, and
   `npm run portal:build`.
 - VS Code changes need `(cd editors/vscode && npm run compile)`.
 - Tree-sitter changes need `(cd tree-sitter-harn && npm test)`.
-
-Do not add `std::thread::sleep`, `tokio::time::sleep`, `Instant::now()`
-polling loops, `SystemTime::now()`, or short `recv_timeout` calls to tests. Use
-`tokio::time::pause()`/`advance()`, `EventLog::subscribe()`, or
-`OrchestratorHarness`. See `docs/src/dev/testing.md`.
-
-## Generated files
-
-- Edit the per-chapter sources in `spec/chapters/*.md`, not the generated
-  `spec/HARN_SPEC.md` (single-file assembly) or `docs/src/language-spec.md`
-  (docs mirror); regenerate both with `make sync-language-spec`.
-- Do not hand-edit `docs/theme/harn-keywords.js`; regenerate with
-  `make gen-highlight`.
-- Do not hand-edit `spec/protocol-artifacts/*` except `*_test.go`. Regenerate
-  with `make gen-protocol-artifacts`, verify with `make check-protocol-artifacts`,
-  and exercise bindings with `make check-bindings`.
-- Generated or local-only paths include `docs/dist/`, `.harn-runs/`, `.harn/`,
-  `.harn/receipts/`, `.claude/`, `.burin/`, `target/`, and `node_modules/`.
-- `scripts/generated_artifacts.toml` is the single source of truth for every
-  gen/check drift pair. Adding a generated artifact means adding a `gen-*`/
-  `check-*` Makefile target *and* a registry entry; `make
-  check-generated-registry` fails until the registry, the `all:` recipe, and
-  the CI workflows agree, so a new drift guard can't silently skip CI. See the
-  registry file header for the checklist.
-- Every `check-*` target must also be classified in the registry's
-  `[preflight.dispatch]` table (`source` reads committed files; `binary`
-  depends on current generator/parser/checker/linter semantics; `excluded`
-  needs a build/toolchain).
-  `make check-generated-registry` fails until it is, so `make check-drift` /
-  `check-drift-binary` (whose members derive from that table) can never silently
-  omit a new guard.
+- Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
+  `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
+  or `OrchestratorHarness`; see `docs/src/dev/testing.md`.
 
 ## Cross-surface changes
 
 - Syntax changes usually touch lexer, parser, spec, tree-sitter, and
-  conformance fixtures.
-- Runtime or builtin changes usually touch `harn-vm`, `harn-cli`, docs,
-  `README.md`, `CHANGELOG.md`, and conformance fixtures.
-- Keep stdlib registration authoritative. Linter and editor builtin awareness
-  derives from the live stdlib.
-- Public functions under `crates/harn-stdlib/src/stdlib/` must declare explicit
-  return types. Use named closed records for finite shapes, `Result<T, E>` for
-  fallible operations, typed maps for open-key data, and avoid papering over
-  missing contracts with `any` or open `dict`.
-- Register new stdlib builtins with `#[harn_builtin]` (see
-  [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-stdlib-builtin)). The legacy
-  `SyncBuiltin` / `AsyncBuiltin` / `BuiltinGroup` / `register_builtin_group`
-  DSL was removed in PR #2575; every builtin now flows through
-  `#[harn_builtin]` + the workspace-global `ALL_BUILTIN_DEFS` linkme slice.
-- Public CLI, builtin, or host-capability changes need user-facing docs and
-  help text.
-- Prompt-template syntax changes also require `conformance/tests/template_*`
-  and `CHANGELOG.md`. Declare any new keyword, filter, or section name in
-  `crates/harn-vm/src/stdlib/template/vocabulary.rs` and run
-  `make gen-prompt-grammar`; the VS Code grammar
-  (`editors/vscode/syntaxes/harn-prompt.tmLanguage.json`) is generated from
-  that vocabulary and `make check-prompt-grammar` fails on drift.
+  conformance.
+- Runtime/builtin changes usually touch VM, CLI, docs, README, changelog, and
+  conformance.
+- Public CLI, builtin, or host-capability changes require user-facing docs and
+  help.
+- Prompt syntax changes require template conformance fixtures, changelog,
+  vocabulary regeneration, and VS Code grammar verification.
+- For autonomous/background edits, prefer worktree-backed execution over
+  ambient working-directory state.
 
-## Trust boundary
+## Editing and changelog
 
-Harn owns orchestration, transcript lifecycle, replay/eval, delegated worker
-lineage, and mutation session audit metadata. Hosts own approval UX, concrete
-file mutations, and undo/redo semantics. For autonomous or background edits,
-prefer worktree-backed execution over ambient cwd state.
-
-## Editing source
-
-Use the simplest editing mechanism that safely fits the change. Prefer
-`std/edit` when structural addressing, cross-file rename semantics, or a
-staged multi-operation preview materially reduces risk. Ordinary repository
-maintenance may use normal patch tools; do not build a temporary Harn driver
-solely to edit a file. The available structural and hash-guarded primitives
-are documented in
-[Precise edits with AST tools](docs/src/cookbook.md#precise-edits-with-ast-tools).
-
-## Changelog fragments
-
-- Non-trivial PRs drop a single fragment file: `changelog.d/<id>.<category>.md`.
-  `<id>` is the PR or issue number, `<category>` is one of `breaking`,
-  `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`. The body
-  is the bullet(s) you would have hand-edited under `### Heading` inside
-  `## Unreleased`.
-- See `changelog.d/README.md` for the format and examples.
-- At release time the fragments are assembled into `## Unreleased` and the
-  fragment files are deleted in the same release commit.
-- The `Changelog fragment` job in the `PR gates` GitHub Actions workflow is
-  the soft gate. It is diff-driven and passes on its own when a PR only
-  touches docs/test/CI paths, so don't add a label preemptively. Add the
-  `no-changelog-needed` label only when the gate fires on a PR that
-  genuinely needs no entry (typos, internal refactors, dep bumps with no
-  user-visible effect); the gate treats that as a pass. Direct edits to
-  `CHANGELOG.md` are also accepted (legacy path).
-- Architecture: the assembler and the per-major archive helper live in
-  `harn-bump-fleet/lib/changelog.harn`; release-time invocation lives in
-  `harn-bump-fleet/release_harn.harn::apply_draft_release_notes`. Bump
-  helpers and tests are versioned with the harn-bump-fleet repo, not here.
+- Use the simplest safe edit. Prefer `std/edit` when structural addressing,
+  cross-file rename semantics, or staged hash-guarded preview reduces risk;
+  normal patch tools are appropriate for ordinary maintenance.
+- Non-trivial PRs add one `changelog.d/<id>.<category>.md` fragment. Categories
+  are `breaking`, `added`, `changed`, `deprecated`, `removed`, `fixed`, and
+  `security`. See `changelog.d/README.md`.
+- Use `no-changelog-needed` only after the soft gate fires on a change with no
+  user-visible impact.
 
 ## Release
 
-- Default live release from a `harn-bump-fleet` checkout:
-  `harn run --no-sandbox release_harn.harn -- --repo <harn-checkout> --mode ship-pr --agent --yes-live-release`
-- The release harness prepares, commits, pushes, tags, opens the PR, and enables
-  auto-merge. It pushes the signed `vX.Y.Z` tag at the pinned release commit
-  before the PR merges; the tag push drives publishing and binary builds.
-- Do not run `./scripts/release_ship.sh --prepare` directly for normal releases;
-  it is an implementation detail of `release_harn.harn`.
-- Recovery helpers: `./scripts/release_ship.sh --finalize`,
-  `./scripts/release_ship.sh --bump patch`, and
-  `./scripts/release_gate.sh <audit|prepare|publish|notes|full> ...`.
-- Dry-run release gate:
-  `./scripts/release_gate.sh full --bump patch --dry-run`
-- Crate publishing dry run: `./scripts/publish.sh --dry-run`
+- Use the release harness from `harn-bump-fleet`:
+  `harn run --no-sandbox release_harn.harn -- --repo <harn-checkout> --mode ship-pr --agent --yes-live-release`.
+- Do not invoke `scripts/release_ship.sh --prepare` directly for normal
+  releases.
+- Dry-run the full release gate with
+  `./scripts/release_gate.sh full --bump patch --dry-run`.
+- Dry-run crate publishing with `./scripts/publish.sh --dry-run`.

@@ -1,104 +1,122 @@
 ---
 name: harn-agent
-short: Autonomous Harn agent workflows and safe task execution.
-description: Use for autonomous Harn agent work, task decomposition, capability boundaries, and host interaction patterns.
-when_to_use: Use when designing autonomous agent sessions, delegated workers, approval boundaries, or host capability usage.
+short: Agent runtime, lifecycle, capabilities, and supervision.
+description: Build controllable agent loops with explicit authority, evidence, and recovery.
+when_to_use: Use when authoring agent_loop, worker, supervisor, completion, or approval behavior.
 ---
 
-# Harn agent
+# Harn agents
 
-Use this skill when designing autonomous Harn sessions, delegated workers, task decomposition, or approval-aware host interactions.
+Use this skill for `agent_loop`, agent sessions, workers, supervisors, tools,
+completion, and lifecycle controls.
 
-Pair it with [[harn-orchestration]] for workflow design and [[harn-diagnostics]] for repair/autonomy decisions.
+Pair it with [[harn-orchestration]] for workflows, [[harn-testing]] for
+deterministic evidence, and [[harn-product-quality]] for user-facing behavior.
 
-## Start here
+## Ownership
 
-- Use `docs/llm/harn-quickref.md` for `agent_loop`.
-- Use the same quickref for tool formats, model options, and prompt templates.
-- Use [[harn-tracing]] when transcripts, replay, or receipts matter.
-- Agent session runtime code is mainly under `crates/harn-vm/src/agent_sessions*`.
-- Bridge behavior lives near `crates/harn-vm/src/bridge.rs`.
-- ACP behavior crosses VM and CLI integration tests.
-- Keep autonomous behavior inspectable.
-- Keep worktree-backed execution preferred for background edits.
+- Harn owns loop, lifecycle, transcript, replay, lineage, and audit semantics.
+- Hosts expose concrete capabilities and native approval UX.
+- Keep semantic policy in the runtime or harness, not duplicated in host prose.
+- Give each behavior one owner and project its state to every client.
+- Prefer a deep agent module with a small typed interface.
+- Do not infer lifecycle state by parsing assistant text.
 
-## Agent loop design
+## Session identity
 
-- Give each loop a concrete task.
-- Give each loop an explicit stop condition.
-- Give each loop a narrow tool surface.
-- Carry a session id when transcript continuity matters.
-- Persist useful transcript deltas.
-- Persist recovery advice when failure can be resumed.
-- Persist mutation-session metadata when edits happen.
-- Keep handoff artifacts structured.
-- For a structured terminal answer, set the agent's canonical `output`
-  contract. It is applied only at finalization; ordinary tool turns stay
-  unconstrained. Read `run.output` and `run.output_valid`.
-- Avoid prose-only protocols for downstream automation.
-- Bound retries and tool-call loops.
+- Give durable work a stable session id.
+- Preserve parent/child lineage for delegated work.
+- Carry workspace anchors and capability scope explicitly.
+- Resume from durable state rather than reconstructing from UI messages.
+- Treat transcript compaction as a state transition with continuity evidence.
+- Keep secrets and provider credentials out of transcripts.
+- Record the initiator and reason for lifecycle transitions.
 
-## Capability boundaries
+## Capabilities and approval
 
-- Shell access should be explicit.
-- Filesystem mutation should be explicit.
-- Network access should be explicit.
-- MCP access should be explicit.
-- Host calls should be explicit.
-- Secrets should stay in host-managed capability stores.
-- Approval UX belongs to hosts.
-- Concrete file mutation belongs to hosts.
-- Undo and redo semantics belong to hosts.
-- Harn should record what happened and why.
+- Grant only the capabilities required for the task.
+- Child policy intersects the parent ceiling; delegation must not widen it.
+- Let agents act autonomously inside approved, reversible scope.
+- Request approval for genuine ambiguity, destructive action, production
+  impact, exceptional spend, or new authority.
+- Do not request approval for every ordinary tool call.
+- Make a rejected or expired approval a typed terminal or waiting state.
+- Route mutations through host-owned capabilities so undo and audit remain
+  native to the product.
 
-## Autonomy and repair
+## Loop design
 
-- Use `harn check` before applying broad edits.
-- Use `harn lint` before merging user-facing Harn code.
-- Use `harn fix --plan` to inspect available repairs.
-- Use `harn fix --apply` only within the permitted safety ceiling.
-- Format-only repairs are safer than semantic rewrites.
-- Capability-affecting repairs should escalate.
-- Cross-file repairs should usually be reviewed.
-- When a diagnostic code is known, use the code, not message scraping.
-- If a tool result is ambiguous, ask for a smaller next step.
-- Do not continue autonomous mutation after a trust-boundary violation.
+- Build options with `AgentLoopOptions`, `agent_options`, or `agent_preset`.
+- Bound iterations, tool duration, concurrency, tokens, and cost.
+- Use adaptive iteration budgets only when progress signals justify extension.
+- Register typed tools with closed input and result shapes.
+- Feed dispatch errors back as structured observations.
+- Use `stop_after_successful_tools` for terminal tools.
+- Prefer lifecycle events and progress records over recurring prose nudges.
+- Keep model routing and fallback policy explicit.
+- Use a completion judge only for a claim it can actually evaluate.
 
-## Delegation patterns
+## Control events
 
-- Split independent read-only investigation from implementation.
-- Give delegated workers a clear file ownership boundary.
-- Tell workers they are not alone in the codebase.
-- Avoid overlapping write sets.
-- Ask explorers specific codebase questions.
-- Ask workers to edit files directly only inside their scope.
-- Keep integration decisions in the coordinating session.
-- Review worker diffs before publishing.
-- Rerun the narrow tests that cover integrated changes.
-- Use [[harn-testing]] to pick the verification level.
+Stop, wait, stand down, and pivot are controls, not suggestions.
 
-## Common gotchas
+- Stop prevents future tool and model work after the current cooperative seam.
+- Wait suspends with durable resume conditions when known.
+- Stand down returns a typed handoff and closes delegated work cleanly.
+- Pivot replaces the active objective and suppresses stale completion.
+- Acknowledge the control and emit the resulting state.
+- Bound long-running tools so a control reaches a turn boundary promptly.
+- Detect double resume and terminal-session resume attempts.
+- Test controls while tools or workers are active.
 
-- Do not assume ambient cwd state is safe for autonomous edits.
-- Do not hide generated files in source changes.
-- Do not widen capabilities to make a test pass.
-- Do not conflate user approval with tool availability.
-- Do not let compaction lose session intent.
-- Do not let retry loops mask real diagnostics.
-- Do not trust stale provider state.
-- Do not record private prompt content in public summaries.
-- Do not drop user or other-agent work when rebasing.
-- Do not commit temporary logging.
+## Progress and liveness
+
+- Emit `agent_progress` after observable progress, not on a timer.
+- Distinguish queued, running, waiting, blocked, stopped, failed, and complete.
+- Persist enough progress to survive reconnect and process restart.
+- Report the next active step and any external dependency.
+- A spinner or recent token is not liveness evidence.
+- Verify forward progress, interruption, recovery, and a terminal state.
+- Do not declare completion while landing, release, or required verification
+  remains.
+
+## Completion
+
+- Define completion against the user outcome, not lack of tool calls.
+- Name a plausible falsifier for the completion claim.
+- Gate on required artifacts, checks, receipts, or landed state.
+- Use deterministic checks before an LLM judge.
+- Calibrate model judges against representative accepted and rejected cases.
+- Cap repeated vetoes and expose the reason for `verify_capped`.
+- Preserve residual risk in the handoff.
+
+## Recovery
+
+- Put retry, backoff, timeout, and fallback policy in a composable caller or
+  harness.
+- Make retry eligibility explicit from typed errors.
+- Use idempotency keys for externally visible operations.
+- Persist checkpoints before irreversible or expensive steps.
+- Prefer worktree-backed autonomous mutation to ambient working-directory state.
+- Make restart, reconnect, and partial-success behavior observable.
+- A lucky prompt is not a recovery strategy.
+
+## Delegation
+
+- Delegate a bounded outcome with scope, budget, evidence, and return contract.
+- Keep the parent responsible for integration and final completion.
+- Use durable coordination channels for replayable cross-agent facts.
+- Use handoffs for one recipient and channels for publish/subscribe.
+- Graceful stop should return a recursive typed handoff.
+- Verify child evidence rather than trusting completion prose.
 
 ## Verify
 
-- Agent session changes: targeted `cargo test -p harn-vm agent`.
-- Bridge or ACP behavior: `cargo test -p harn-cli --test acp_server_cli` when feasible.
-- Orchestration behavior: `cargo test -p harn-vm orchestration`.
-- Repair/autonomy behavior: targeted `harn fix` tests.
-- Transcript changes: targeted replay or record tests.
-- Harn workflow examples: `cargo run --quiet --bin harn -- check <path>`.
-- Conformance changes: `cargo run --quiet --bin harn -- test conformance --filter <name>`.
-- Flake guard for tests: `make lint-test-patterns`.
-- Broad shared behavior: `make test`.
-- Release-facing changes: run the release gate requested by the repo docs.
+- Check the script, lint it, and format-check it.
+- Exercise the loop through its public interface.
+- Test denied capability and approval paths.
+- Test stop, wait, resume, stand-down, and pivot during active work.
+- Inject tool, provider, timeout, and restart failures.
+- Confirm session id, lineage, receipts, and progress survive replay.
+- Verify cost, concurrency, and iteration ceilings.
+- Run the canonical product path when the loop is user-facing.

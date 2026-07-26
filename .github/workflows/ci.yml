@@ -1113,6 +1113,7 @@ jobs:
       # warm HARN_BIN; pure shell/Python guards stay cheap either way.
       - run: make check-receipt-structs
       - run: make check-docs-links
+      - run: make check-agent-guidance
       - run: make check-tree-sitter-keywords
       - run: make check-grammar-fitness
       - run: make check-generated-registry

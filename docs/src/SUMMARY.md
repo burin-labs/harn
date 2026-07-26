@@ -158,6 +158,7 @@
   - [Contributing preset hooks](./contributing/preset-hooks.md)
 - [Context maintenance hooks](./context-maintenance-hooks.md)
 - [Skills](./skills.md)
+- [Engineering principles](./dev/engineering-principles.md)
 - [Personas](./personas.md)
   - [Persona prelude](./personas/prelude.md)
   - [Per-stage tool scoping](./personas/stages.md)
