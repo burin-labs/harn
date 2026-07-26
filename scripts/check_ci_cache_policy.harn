@@ -78,7 +78,7 @@ const STICKY_ONLY_ON_BLACKSMITH = "env.${RUNNER_TIER_ENV} == 'blacksmith'"
 // The coarse rust-cache is the GitHub-hosted fallback's only compiler cache.
 const RUST_CACHE_ONLY_HOSTED = "env.${RUNNER_TIER_ENV} == 'github-hosted'"
 
-// Hang backstop for the archived-behavior consumer lanes. These lanes never
+// Hang backstop for the archived workspace-test consumer lanes. These lanes never
 // compile (the structural checks below pin that directly: archive-only test
 // command, no compiler caches, no compile fan-out), so the timeout only has to
 // cover test execution. Worst observed hosted-runner execution is ~17m on a
@@ -789,11 +789,11 @@ fn persistent_sccache_job_errors(
   return errors
 }
 
-fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string> {
-  const producer = workflow?.jobs?.["rust-builds"]
+fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<string> {
+  const producer = workflow?.jobs?.["rust-checks"]
   const consumer = workflow?.jobs?.[job_name]
   if consumer == nil {
-    return ["ci.yml:${job_name} must define the archived behavior consumer"]
+    return ["ci.yml:${job_name} must define the archived workspace-test consumer"]
   }
   if producer == nil {
     return []
@@ -806,11 +806,11 @@ fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string>
       + ["ci.yml:${job_name} must retain the policy-sized execution runner"]
   }
   const needs = consumer?.needs ?? []
-  if !needs.contains("rust-builds") {
-    errors = errors + ["ci.yml:${job_name} must wait for the behavior artifact producer"]
+  if !needs.contains("rust-checks") {
+    errors = errors + ["ci.yml:${job_name} must wait for the workspace test archive producer"]
   }
   if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
-    errors = errors + ["ci.yml:${job_name} must match rust-builds RUSTFLAGS"]
+    errors = errors + ["ci.yml:${job_name} must match rust-checks RUSTFLAGS"]
   }
   if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
     errors = errors
@@ -827,15 +827,15 @@ fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string>
     > 0 {
     errors = errors + ["ci.yml:${job_name} must not restore compiler caches or build-disk setup"]
   }
-  const restore_step = step_by_name(consumer?.steps ?? [], "Verify portable behavior payload")
+  const restore_step = step_by_name(consumer?.steps ?? [], "Verify workspace test archive")
   if trim(restore_step?.env?.HARN_VERIFY_RUST_RUNTIME ?? "") != "1"
     || !contains(
     trim(restore_step?.run ?? ""),
-    "behavior_artifact.sh restore",
+    "rust_artifact.sh restore-tests",
   ) {
     errors = errors + ["ci.yml:${job_name} must verify the archived Rust runtime contract"]
   }
-  const test_step = step_by_name(consumer?.steps ?? [], "Run full environment-neutral test suite")
+  const test_step = step_by_name(consumer?.steps ?? [], "Run Rust workspace tests")
   const test_command = trim(test_step?.run ?? "")
   if !contains(test_command, "--archive-file")
     || !contains(test_command, "harn-tests.tar.zst")
@@ -855,24 +855,24 @@ fn archived_behavior_consumer_errors(workflow, job_name: string) -> list<string>
 
 fn colocated_rust_proof_errors(workflow) -> list<string> {
   let errors: list<string> = []
-  const rust_job = workflow?.jobs?.["rust-builds"]
-  const build_step = step_by_name(rust_job?.steps ?? [], "Build portable behavior payload")
-  const skip_neutral = trim(build_step?.env?.HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE ?? "")
-  if !contains(skip_neutral, COLOCATED_TESTS_DISABLE_VAR)
-    || !contains(skip_neutral, "!= 'true'") {
+  const rust_job = workflow?.jobs?.["rust-checks"]
+  const archive_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
+  if trim(archive_step?.if ?? "")
+    != "matrix.kind == 'workspace-tests' && vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
+    || !contains(
+    trim(archive_step?.run ?? ""),
+    "rust_artifact.sh build-tests",
+  ) {
     errors = errors
       + [
-      "ci.yml:rust-builds must skip the neutral archive only while co-located tests are active",
+      "ci.yml:rust-checks must build the workspace test archive only for the standalone fallback",
     ]
   }
-  const colocated_step = step_by_name(
-    rust_job?.steps ?? [],
-    "Run full environment-neutral test suite",
-  )
+  const colocated_step = step_by_name(rust_job?.steps ?? [], "Run Rust workspace tests")
   const colocated_command = trim(colocated_step?.run ?? "")
   if trim(colocated_step?.id ?? "") != "release-audit-rust-test"
     || trim(colocated_step?.if ?? "")
-    != "matrix.kind == 'behavior' && vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
+    != "matrix.kind == 'workspace-tests' && vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
     || trim(
     colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "",
   )
@@ -884,7 +884,7 @@ fn colocated_rust_proof_errors(workflow) -> list<string> {
   ) {
     errors = errors
       + [
-      "ci.yml:rust-builds must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-checks must own the exact co-located environment-neutral Rust proof",
     ]
   }
   const rust_test_if = trim(workflow?.jobs?.["rust-test"]?.if ?? "")
@@ -964,14 +964,14 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
     "blacksmith-4vcpu-ubuntu-2404",
     RUST_CACHE_ONLY_HOSTED,
   )
-    + persistent_sccache_job_errors(workflow, "rust-builds", "matrix.runner", RUST_CACHE_ONLY_HOSTED)
-  const rust_job = workflow?.jobs?.["rust-builds"]
+    + persistent_sccache_job_errors(workflow, "rust-checks", "matrix.runner", RUST_CACHE_ONLY_HOSTED)
+  const rust_job = workflow?.jobs?.["rust-checks"]
   const rust_sccache = matching_steps(rust_job, SCCACHE_ACTION)
   if len(rust_sccache) == 1 {
     const sticky_condition = trim(rust_sccache[0]?.with?.sticky ?? "")
     if !contains(sticky_condition, STICKY_ONLY_ON_BLACKSMITH) {
       errors = errors
-        + ["ci.yml:rust-builds sticky storage must stay on the Blacksmith rung"]
+        + ["ci.yml:rust-checks sticky storage must stay on the Blacksmith rung"]
     }
   }
   const matrix = rust_job?.strategy?.matrix?.include ?? []
@@ -979,38 +979,41 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   const runners = matrix.map({ row -> trim(row?.runner ?? "") }).to_list()
   const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
   // Self-hosted routing tiers: the lint leg draws from the general stable
-  // pool; the behavior leg only from the big-labeled workers (one per box)
+  // pool; the workspace-test leg only from the big-labeled workers (one per box)
   // so its 60 GB persistent build workspace cannot starve the small lanes.
   const selfhosted = matrix.map({ row -> to_string(row?.selfhosted ?? "") }).to_list()
-  if kinds != ["lint", "behavior"]
+  if kinds != ["lint", "workspace-tests"]
     || runners
     != [
     "blacksmith-4vcpu-ubuntu-2404",
     "blacksmith-8vcpu-ubuntu-2404",
   ]
-    || cache_keys != ["workspace-lint", "workspace-behavior"]
+    || cache_keys != ["workspace-lint", "workspace-tests"]
     || selfhosted != ["stable", "big"] {
     errors = errors
       + [
-      "ci.yml:rust-builds must keep compile lanes on distinct policy-sized persistent caches",
+      "ci.yml:rust-checks must keep compile lanes on distinct policy-sized persistent caches",
     ]
   }
-  const build_step = step_by_name(rust_job?.steps ?? [], "Build portable behavior payload")
+  const build_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
   // Memory-bounded compile fan-out: 4 rustc jobs on the 8-vCPU hosted
   // runners, 12 on the big self-hosted workers (24 cores / 61 GB).
   const build_jobs_policy = "$"
     + "{{ env.${RUNNER_TIER_ENV} == 'self-hosted' && '12' || '4' }}"
-  if trim(build_step?.if ?? "") != "matrix.kind == 'behavior'"
+  if trim(build_step?.if ?? "")
+    != "matrix.kind == 'workspace-tests' && vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
     || trim(
     build_step?.env?.CARGO_BUILD_JOBS ?? "",
   )
     != build_jobs_policy {
     errors = errors
-      + ["ci.yml:rust-builds behavior build must keep memory-bounded compile fan-out"]
+      + [
+      "ci.yml:rust-checks workspace test archive must keep memory-bounded compile fan-out",
+    ]
   }
-  errors = errors + archived_behavior_consumer_errors(workflow, "rust-test")
+  errors = errors + archived_workspace_test_consumer_errors(workflow, "rust-test")
   errors = errors + colocated_rust_proof_errors(workflow)
-  const allowed = ["package-audit", "rust-builds", "cli-build"]
+  const allowed = ["package-audit", "rust-checks", "rust-check-inputs"]
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     const sccache_steps = matching_steps(job, SCCACHE_ACTION)
     if len(sccache_steps) == 0 {

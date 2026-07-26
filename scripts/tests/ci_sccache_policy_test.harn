@@ -67,18 +67,18 @@ fn workflow() {
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": gha_expression(disable + " && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'"),
-    needs: ["changes", "rust-builds"],
+    needs: ["changes", "rust-checks"],
     if:
-      "needs.changes.outputs.rust == 'true' && needs.rust-builds.result == 'success' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
+      "needs.changes.outputs.rust == 'true' && needs.rust-checks.result == 'success' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
     "timeout-minutes": 35,
     steps: [
       {
-        name: "Verify portable behavior payload",
+        name: "Verify workspace test archive",
         env: {HARN_VERIFY_RUST_RUNTIME: "1"},
-        run: "./scripts/ci/behavior_artifact.sh restore bundle destination sha",
+        run: "./scripts/ci/rust_artifact.sh restore-tests bundle destination sha",
       },
       {
-        name: "Run full environment-neutral test suite",
+        name: "Run Rust workspace tests",
         run:
           "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace",
       },
@@ -97,7 +97,7 @@ fn workflow() {
         "env.HARN_RUNNER_TIER == 'blacksmith'",
         hosted_fallback,
       ),
-      "rust-builds": {
+      "rust-checks": {
         ...rust_with_flags,
         strategy: {
           matrix: {
@@ -109,9 +109,9 @@ fn workflow() {
                 selfhosted: "stable",
               },
               {
-                kind: "behavior",
+                kind: "workspace-tests",
                 runner: "blacksmith-8vcpu-ubuntu-2404",
-                cache_key: "workspace-behavior",
+                cache_key: "workspace-tests",
                 selfhosted: "big",
               },
             ],
@@ -120,22 +120,21 @@ fn workflow() {
         steps: rust_with_flags.steps
           + [
           {
-            name: "Build portable behavior payload",
-            id: "release-audit-behavior-build",
-            if: "matrix.kind == 'behavior'",
+            name: "Build portable workspace test archive",
+            if:
+              "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
             env: {
               CARGO_BUILD_JOBS: gha_expression(
                 "env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4'",
               ),
-              HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: gha_expression(
-                "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0'",
-              ),
             },
+            run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
           },
           {
-            name: "Run full environment-neutral test suite",
+            name: "Run Rust workspace tests",
             id: "release-audit-rust-test",
-            if: "matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+            if:
+              "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
             env: {HARN_LLM_CALLS_DISABLED: "1"},
             run:
               "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(landlock)'",
@@ -204,7 +203,7 @@ pipeline test_accepts_pinned_lane_local_sticky_cache_with_hosted_fallback(task) 
 }
 
 @test
-pipeline test_rejects_recompiling_behavior_consumer(task) {
+pipeline test_rejects_recompiling_workspace_test_consumer(task) {
   const valid = workflow()
   const invalid = {
     ...valid,
@@ -216,7 +215,7 @@ pipeline test_rejects_recompiling_behavior_consumer(task) {
         steps: [
           {uses: "./.github/actions/sccache"},
           {
-            name: "Run full environment-neutral test suite",
+            name: "Run Rust workspace tests",
             env: {CARGO_BUILD_JOBS: "4"},
             run: "cargo nextest run --workspace --profile ci",
           },
@@ -235,24 +234,21 @@ pipeline test_rejects_recompiling_behavior_consumer(task) {
 @test
 pipeline test_rejects_co_location_without_fail_closed_fallback(task) {
   const valid = workflow()
-  const rust_job = valid.jobs["rust-builds"]
+  const rust_job = valid.jobs["rust-checks"]
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-builds": {
+      "rust-checks": {
         ...rust_job,
-        steps: rust_job.steps.filter(
-          { step -> step?.name != "Run full environment-neutral test suite" },
+        steps: rust_job.steps.filter({ step -> step?.name != "Run Rust workspace tests" }).map(
+          { step ->
+            if step?.name != "Build portable workspace test archive" {
+              return step
+            }
+            return {...step, if: "matrix.kind == 'workspace-tests'", run: "cargo build"}
+          },
         )
-          .map(
-            { step ->
-              if step?.name != "Build portable behavior payload" {
-                return step
-              }
-              return {...step, env: {...step.env, HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: "1"}}
-            },
-          )
           .to_list(),
       },
       "rust-test": {...valid.jobs["rust-test"], if: "false"},
@@ -270,12 +266,12 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(task) {
   const errors = ci_sccache_policy_errors(sccache_action(), invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-builds must skip the neutral archive only while co-located tests are active",
+      "ci.yml:rust-checks must build the workspace test archive only for the standalone fallback",
     ),
   )
   assert(
     errors.contains(
-      "ci.yml:rust-builds must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-checks must own the exact co-located environment-neutral Rust proof",
     ),
   )
   assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
@@ -292,7 +288,7 @@ pipeline test_rejects_unpinned_storage_missing_fallback_and_unauthorized_lane(ta
   const invalid_workflow = {
     jobs: {
       "package-audit": {"runs-on": "ubuntu-latest", steps: []},
-      "rust-builds": {"runs-on": "ubuntu-latest", steps: []},
+      "rust-checks": {"runs-on": "ubuntu-latest", steps: []},
       surprise: {steps: [{uses: "./.github/actions/sccache"}]},
     },
   }
@@ -373,14 +369,14 @@ pipeline test_rejects_remote_cache_backend_and_hosted_sccache(task) {
 @test
 pipeline test_rejects_unguarded_selfhosted_routing(task) {
   const valid = workflow()
-  const rust_job = valid.jobs["rust-builds"]
+  const rust_job = valid.jobs["rust-checks"]
   const matrix = rust_job.strategy.matrix.include
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
       "package-audit": {...valid.jobs["package-audit"], "runs-on": "blacksmith-4vcpu-ubuntu-2404"},
-      "rust-builds": {
+      "rust-checks": {
         ...rust_job,
         strategy: {matrix: {include: [matrix[0], {...matrix[1], selfhosted: true}]}},
       },
@@ -394,7 +390,7 @@ pipeline test_rejects_unguarded_selfhosted_routing(task) {
   )
   assert(
     errors.contains(
-      "ci.yml:rust-builds must keep compile lanes on distinct policy-sized persistent caches",
+      "ci.yml:rust-checks must keep compile lanes on distinct policy-sized persistent caches",
     ),
   )
 }

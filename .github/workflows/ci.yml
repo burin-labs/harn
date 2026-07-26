@@ -50,7 +50,7 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-  # Decide whether the heavy Linux Rust lanes (rust-builds, audit-scripts) need
+  # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
   # to run at all.
   #
   # SAFETY PRINCIPLE — prune for PR fast feedback, run comprehensive on the
@@ -417,14 +417,14 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
 
   # The compile-bearing Linux Rust lanes share one matrix job but must complete
-  # independently. A behavior-row infrastructure failure has a hosted fallback;
+  # independently. A workspace-test infrastructure failure has a hosted
+  # fallback;
   # canceling the lint sibling would discard its distinct required proof and
-  # make that fallback incapable of recovering the run. The behavior row is the
-  # one producer: it compiles the suite once on persistent storage and
-  # publishes an exact-SHA nextest archive for execution-only proof consumers.
-  # Consumers execute that compiled archive without requiring cross-job Cargo
-  # target reuse on either Blacksmith or GitHub-hosted runners.
-  rust-builds:
+  # make that fallback incapable of recovering the run. The workspace-test row
+  # normally executes the suite in its warm workspace. A repository-variable
+  # kill-switch can instead publish an exact-SHA nextest archive for the
+  # standalone hosted consumer.
+  rust-checks:
     name: ${{ matrix.name }}
     needs: [changes, runner-availability]
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
@@ -433,12 +433,12 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     # Self-hosted when the leg's probe signal reports an idle runner carrying
     # the leg's label tier, else Blacksmith when enabled, else the free hosted
-    # runner. The lint leg targets the general stable pool; the behavior leg
+    # runner. The lint leg targets the general stable pool; the workspace-test leg
     # targets only the big-labeled workers (one per box, hand-picked for cores
     # and disk headroom) so a 60 GB build workspace can never starve the small
-    # lanes. Since co-location the behavior leg ships only small bundles, so
+    # lanes. Since co-location the workspace-test leg ships no bundle, so
     # residential uplink no longer disqualifies it; if it fails on a box for
-    # any reason, rust-behavior-fallback reruns it on a hosted runner. Merge
+    # any reason, rust-workspace-tests-fallback reruns it on a hosted runner. Merge
     # groups use elastic capacity because their bursty speculative fan-out
     # makes an idle-runner snapshot unsafe as a reservation.
     runs-on: >-
@@ -469,7 +469,7 @@ jobs:
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # See the HARN_RUNNER_TIER comment on `package-audit`. This lane's ladder
       # is matrix-driven, so the tier mirrors both self-hosted arms: the `lint`
-      # leg claims a `harn-ci-stable` worker and the `behavior` leg a
+      # leg claims a `harn-ci-stable` worker and the `workspace-tests` leg a
       # `harn-ci-big` one, and either falling through lands on the same
       # Blacksmith / hosted rung as `runs-on`.
       HARN_RUNNER_TIER: >-
@@ -489,10 +489,10 @@ jobs:
             fetch_depth: 1
             rust_components: clippy
             selfhosted: stable
-          - kind: behavior
-            name: Behavior build
+          - kind: workspace-tests
+            name: Rust workspace tests
             runner: blacksmith-8vcpu-ubuntu-2404
-            cache_key: workspace-behavior
+            cache_key: workspace-tests
             fetch_depth: 1
             rust_components: ""
             # Big-labeled workers only: the compile+suite leg wants cores and a
@@ -501,12 +501,12 @@ jobs:
             selfhosted: big
     outputs:
       # Success markers set only by the leg that ran them; the lint leg never
-      # touches behavior_ok and vice versa, so the matrix legs cannot clobber
-      # each other. rust-behavior-fallback and ci-status key on these to tell
-      # "the behavior leg itself succeeded" apart from "the job group failed
+      # touches workspace_tests_ok and vice versa, so the matrix legs cannot clobber
+      # each other. rust-workspace-tests-fallback and ci-status key on these to tell
+      # "the workspace-test leg itself succeeded" apart from "the job group failed
       # because of the sibling leg".
       lint_ok: ${{ steps.lint-ok.outputs.ok }}
-      behavior_ok: ${{ steps.behavior-ok.outputs.ok }}
+      workspace_tests_ok: ${{ steps.workspace-tests-ok.outputs.ok }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -517,7 +517,7 @@ jobs:
           # entire point of routing this leg to the boxes. Hosted runners are
           # ephemeral so cleaning there is a no-op either way; the box's
           # cleanup cron sweeps targets older than 3 days.
-          clean: ${{ !(matrix.kind == 'behavior' && env.HARN_RUNNER_TIER == 'self-hosted') }}
+          clean: ${{ !(matrix.kind == 'workspace-tests' && env.HARN_RUNNER_TIER == 'self-hosted') }}
       # Hosted-image SDK reclaim only: on a self-hosted box this would rm -rf
       # system paths and docker-prune live local images. Self-hosted disk
       # hygiene is owned by the box's cleanup cron instead. Blacksmith VMs are
@@ -574,17 +574,17 @@ jobs:
         if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
-          # Both legs restore the behavior cache and only the behavior leg
+          # Both legs restore the workspace-test cache and only the workspace-test leg
           # writes it (on main pushes). The lint leg needs no writer of its
           # own: `cargo clippy` compiles dependency crates with plain rustc,
-          # so the behavior cache's dep artifacts are directly reusable and
+          # so the workspace-test cache's dep artifacts are directly reusable and
           # a separate workspace-lint key would only spend cache quota.
-          shared-key: workspace-behavior
+          shared-key: workspace-tests
           cache-on-failure: true
           cache-bin: false
-          save: ${{ matrix.kind == 'behavior' }}
+          save: ${{ matrix.kind == 'workspace-tests' }}
       - name: Install cargo-nextest
-        if: matrix.kind == 'behavior'
+        if: matrix.kind == 'workspace-tests'
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.132
@@ -600,16 +600,11 @@ jobs:
         env:
           RUN_PROMPT_PROSE_RATCHET: ${{ needs.changes.outputs.prompt_prose }}
         run: ./scripts/ci/run_rust_lint_lane.sh
-      # When co-located tests are active (the default), the multi-gigabyte
-      # neutral archive is neither built nor uploaded: the suite executes in
-      # this leg's warm workspace below. The dedicated audit-artifact lane owns
-      # the security archive so a residential self-hosted runner never gates
-      # the suite on an Actions artifact upload. Flipping
-      # HARN_CI_DISABLE_COLOCATED_TESTS to 'true' restores the full
-      # producer/consumer behavior-artifact path.
-      - name: Build portable behavior payload
-        id: release-audit-behavior-build
-        if: matrix.kind == 'behavior'
+      # The normal path runs the suite in this warm workspace and creates no
+      # artifact. This archive exists only for the repository-variable
+      # kill-switch that restores the standalone hosted consumer.
+      - name: Build portable workspace test archive
+        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
           # 4 rustc jobs bound peak memory on the 8-vCPU hosted runners; the
           # big self-hosted workers have 24 cores and 61 GB, where 12 jobs is
@@ -618,22 +613,19 @@ jobs:
           # rung here is also 8 vCPU, and `runner.environment` reports
           # `self-hosted` there, which would hand it the 24-core setting.
           CARGO_BUILD_JOBS: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4' }}
-          HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0' }}
         run: >-
-          ./scripts/ci/behavior_artifact.sh build
-          "$RUNNER_TEMP/harn-behavior.tar.zst"
-          "$RUNNER_TEMP/harn-cli.tar.zst"
-          "$RUNNER_TEMP/harn-security.tar.zst"
+          ./scripts/ci/rust_artifact.sh build-tests
+          "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
       # The workspace test binaries are already compiled and sitting on this
       # runner's disk; executing them here removes the archive-compress →
       # artifact-upload → artifact-download → extract round trip (measured
       # 1.5-16.5 m of pure transfer variance per run) that the standalone
-      # Rust test lane pays. The Landlock escape proof stays excluded — it is
-      # environment-specific and owned by rust-security on GitHub Ubuntu.
-      - name: Run full environment-neutral test suite
+      # archive-mode test lane pays. The Landlock escape proof stays excluded —
+      # it is environment-specific and owned by rust-security on GitHub Ubuntu.
+      - name: Run Rust workspace tests
         id: release-audit-rust-test
-        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
+        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
           CARGO_BUILD_JOBS: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4' }}
           HARN_LLM_CALLS_DISABLED: "1"
@@ -641,27 +633,28 @@ jobs:
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
           -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
-      - name: Start portable behavior payload upload timer
-        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        run: echo "HARN_BEHAVIOR_UPLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
-      - name: Upload portable behavior payload
-        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
+      - name: Start workspace test archive upload timer
+        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
+        run: echo "HARN_WORKSPACE_TEST_UPLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Upload workspace test archive
+        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: harn-behavior.tar.zst
-          path: ${{ runner.temp }}/harn-behavior.tar.zst
+          name: harn-workspace-tests.tar.zst
+          path: ${{ runner.temp }}/harn-workspace-tests.tar.zst
           archive: false
           if-no-files-found: error
           retention-days: 1
-      # The portable CLI and security artifacts are owned by cli-build so this
+      # The portable CLI and security artifacts are owned by
+      # rust-check-inputs, so this
       # compute-heavy lane never uploads from a residential self-hosted runner.
-      - name: Report portable behavior payload upload
-        if: matrix.kind == 'behavior' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
+      - name: Report workspace test archive upload
+        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         run: |
-          duration=$(($(date +%s) - HARN_BEHAVIOR_UPLOAD_STARTED_AT))
-          bytes=$(wc -c < "$RUNNER_TEMP/harn-behavior.tar.zst" | tr -d ' ')
+          duration=$(($(date +%s) - HARN_WORKSPACE_TEST_UPLOAD_STARTED_AT))
+          bytes=$(wc -c < "$RUNNER_TEMP/harn-workspace-tests.tar.zst" | tr -d ' ')
           {
-            echo "### Behavior artifact upload"
+            echo "### Workspace test archive upload"
             echo
             echo "- Duration: ${duration}s"
             echo "- Compressed bytes: ${bytes}"
@@ -680,30 +673,30 @@ jobs:
         id: lint-ok
         if: matrix.kind == 'lint'
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
-      - name: Mark behavior leg success
-        id: behavior-ok
-        if: matrix.kind == 'behavior'
+      - name: Mark workspace test success
+        id: workspace-tests-ok
+        if: matrix.kind == 'workspace-tests'
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
       - name: Summarize and stop sccache
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
-  # Graceful spillover for the self-hosted behavior leg: if the leg did not
+  # Graceful spillover for the self-hosted workspace-test leg: if the leg did not
   # reach its success marker — a box dying mid-run, a stuck queue, or any
   # infra-shaped failure — this job reruns the identical build+suite on a
   # hosted runner. A REAL test failure also lands here and fails a second
   # time (~30 hosted minutes), which is the accepted price for never letting
-  # box health turn into a red build. Skipped whenever the behavior leg
+  # box health turn into a red build. Skipped whenever the workspace-test leg
   # succeeded, wherever it ran.
-  rust-behavior-fallback:
-    name: Behavior build (hosted fallback)
-    needs: [changes, runner-availability, rust-builds]
+  rust-workspace-tests-fallback:
+    name: Rust workspace tests (hosted fallback)
+    needs: [changes, runner-availability, rust-checks]
     if: >-
       always()
       && needs.changes.result == 'success'
       && needs.changes.outputs.rust == 'true'
-      && needs.rust-builds.result != 'cancelled'
-      && needs.rust-builds.outputs.behavior_ok != 'true'
+      && needs.rust-checks.result != 'cancelled'
+      && needs.rust-checks.outputs.workspace_tests_ok != 'true'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 60
     env:
@@ -728,17 +721,15 @@ jobs:
       # Deliberately no sccache/rust-cache: this is a rare disaster-recovery
       # lane where a cold ~20 m compile is acceptable and cache plumbing would
       # only add failure modes.
-      - name: Build portable behavior payload
+      - name: Build portable workspace test archive
+        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
           CARGO_BUILD_JOBS: "4"
-          HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true' && '1' || '0' }}
         run: >-
-          ./scripts/ci/behavior_artifact.sh build
-          "$RUNNER_TEMP/harn-behavior.tar.zst"
-          "$RUNNER_TEMP/harn-cli.tar.zst"
-          "$RUNNER_TEMP/harn-security.tar.zst"
+          ./scripts/ci/rust_artifact.sh build-tests
+          "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
-      - name: Run full environment-neutral test suite
+      - name: Run Rust workspace tests
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
           CARGO_BUILD_JOBS: "4"
@@ -747,21 +738,21 @@ jobs:
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
           -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
-      - name: Upload portable behavior payload
+      - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: harn-behavior.tar.zst
-          path: ${{ runner.temp }}/harn-behavior.tar.zst
+          name: harn-workspace-tests.tar.zst
+          path: ${{ runner.temp }}/harn-workspace-tests.tar.zst
           archive: false
           if-no-files-found: error
           retention-days: 1
-  # Dedicated cloud producer of the portable CLI and security-test artifacts.
+  # Build the portable Harn CLI and security tests once for the checks below.
   # Keeping Actions artifact uploads off the residential self-hosted runners
-  # avoids transfer stalls, while one warm build graph feeds all audit lanes in
-  # parallel with the behavior leg's full suite.
-  cli-build:
-    name: Harn CLI build
+  # avoids transfer stalls, while one warm build graph feeds all checks in
+  # parallel with the workspace-test leg's full suite.
+  rust-check-inputs:
+    name: Build shared Rust check inputs
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
@@ -793,20 +784,18 @@ jobs:
         if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
-          shared-key: workspace-behavior
+          shared-key: workspace-tests
           cache-on-failure: true
           cache-bin: false
       - name: Install cargo-nextest
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.132
-      - name: Build portable audit payloads
+      - name: Build Harn CLI and security tests
         env:
           CARGO_BUILD_JOBS: "4"
-          HARN_BEHAVIOR_SKIP_NEUTRAL_ARCHIVE: "1"
         run: >-
-          ./scripts/ci/behavior_artifact.sh build
-          "$RUNNER_TEMP/unused-behavior.tar.zst"
+          ./scripts/ci/rust_artifact.sh build-check-inputs
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$RUNNER_TEMP/harn-security.tar.zst"
           "$GITHUB_SHA"
@@ -831,31 +820,31 @@ jobs:
         run: ./scripts/ci/finalize_sccache.sh
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
-  # inside the warm Behavior build leg (see rust-builds), so this job skips and
+  # inside the warm Rust workspace tests leg (see rust-checks), so this job skips and
   # no multi-gigabyte archive crosses Actions artifact storage. Setting the
   # repo variable HARN_CI_DISABLE_COLOCATED_TESTS='true' restores this
-  # standalone consumer exactly as it ran before co-location: rust-builds
-  # resumes producing the neutral archive and this job verifies and executes
+  # standalone consumer exactly as it ran before co-location: rust-checks
+  # resumes producing the workspace-test archive and this job verifies and executes
   # it on a fresh hosted runner. ci-status enforces the pairing: a rust-test
   # skip only passes while co-location is active.
   rust-test:
-    name: Rust test
-    needs: [changes, rust-builds, rust-behavior-fallback]
-    # `always()` so a behavior-leg failure that the hosted fallback recovered
-    # does not auto-skip this consumer; the explicit behavior-proof condition
-    # then accepts the payload from whichever producer succeeded.
+    name: Rust workspace tests (archive mode)
+    needs: [changes, rust-checks, rust-workspace-tests-fallback]
+    # `always()` so a workspace-test failure that the hosted fallback recovered
+    # does not auto-skip this consumer; the explicit proof condition
+    # then accepts the archive from whichever producer succeeded.
     if: >-
       always()
       && needs.changes.result == 'success'
       && needs.changes.outputs.rust == 'true'
       && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-      && (needs.rust-builds.outputs.behavior_ok == 'true'
-        || needs.rust-behavior-fallback.result == 'success')
-    # Never self-hosted: this lane downloads the ~8.6 GB behavior payload from
+      && (needs.rust-checks.outputs.workspace_tests_ok == 'true'
+        || needs.rust-workspace-tests-fallback.result == 'success')
+    # Never self-hosted: this lane downloads the ~8.6 GB workspace test archive from
     # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
     # (a routed attempt stalled past the 35 m timeout still mid-download) even
     # though the same boxes pull the GitHub release CDN at ~29 MB/s. Artifact
-    # up/downloads pin the payload lanes to hosted runners until the payload
+    # up/downloads pin this archive lane to hosted runners until the archive
     # itself shrinks or moves.
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
     # Hang backstop, not a performance gate (the perf gate re-measures wall
@@ -864,7 +853,7 @@ jobs:
     timeout-minutes: 35
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      # Match rust-builds RUSTFLAGS. Nested cargo fixtures (hostlib verdict tests)
+      # Match rust-checks RUSTFLAGS. Nested cargo fixtures (hostlib verdict tests)
       # inherit this and must be able to link; mold is not on the image by default.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
     steps:
@@ -882,59 +871,61 @@ jobs:
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.132
-      - name: Start portable behavior payload download timer
-        run: echo "HARN_BEHAVIOR_DOWNLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
-      - name: Download portable behavior payload
+      - name: Start workspace test archive download timer
+        run: echo "HARN_WORKSPACE_TEST_DOWNLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Download workspace test archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: harn-behavior.tar.zst
+          name: harn-workspace-tests.tar.zst
           path: ${{ runner.temp }}
           skip-decompress: true
-      - name: Report portable behavior payload download
+      - name: Report workspace test archive download
         run: |
-          duration=$(($(date +%s) - HARN_BEHAVIOR_DOWNLOAD_STARTED_AT))
-          bytes=$(wc -c < "$RUNNER_TEMP/harn-behavior.tar.zst" | tr -d ' ')
+          duration=$(($(date +%s) - HARN_WORKSPACE_TEST_DOWNLOAD_STARTED_AT))
+          bytes=$(wc -c < "$RUNNER_TEMP/harn-workspace-tests.tar.zst" | tr -d ' ')
           {
-            echo "### Behavior artifact download"
+            echo "### Workspace test archive download"
             echo
             echo "- Duration: ${duration}s"
             echo "- Compressed bytes: ${bytes}"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify portable behavior payload
+      - name: Verify workspace test archive
         env:
           HARN_VERIFY_RUST_RUNTIME: "1"
         run: >-
-          ./scripts/ci/behavior_artifact.sh restore
-          "$RUNNER_TEMP/harn-behavior.tar.zst"
-          "$RUNNER_TEMP/harn-behavior"
+          ./scripts/ci/rust_artifact.sh restore-tests
+          "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
+          "$RUNNER_TEMP/harn-workspace-tests"
           "$GITHUB_SHA"
       # The compressed bundle and its extracted copy are each ~8.4 GiB, and
       # nextest unpacks the inner archive into a third, uncompressed copy.
       # Hosted runners do not reliably fit all three, so drop the bundle the
       # moment the checksummed restore no longer needs it.
-      - name: Drop compressed payload after restore
-        run: rm -f "$RUNNER_TEMP/harn-behavior.tar.zst"
+      - name: Drop compressed archive after restore
+        run: rm -f "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
       # Landlock is the one environment-specific proof owned by rust-security;
       # every other default-suite test remains required here.
-      - name: Run full environment-neutral test suite
+      - name: Run Rust workspace tests
         id: release-audit-rust-test
         env:
           HARN_LLM_CALLS_DISABLED: "1"
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
-          --archive-file "$RUNNER_TEMP/harn-behavior/harn-tests.tar.zst"
+          --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
           -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
 
   rust-security:
     name: Rust security proof
-    needs: [changes, cli-build]
-    if: needs.changes.outputs.rust == 'true' && needs.cli-build.result == 'success'
+    needs: [changes, rust-check-inputs]
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && needs.rust-check-inputs.result == 'success'
     runs-on: ubuntu-latest
     # Hang backstop, not a performance gate. The Landlock proof runs in ~2m,
     # and the single-package security archive it consumes downloads in seconds
-    # (the old path pulled the full ~8.6 GB behavior payload, whose hosted
+    # (the old path pulled the full ~8.6 GB workspace test archive, whose hosted
     # artifact throughput varied from ~1.5m to ~16.5m and forced a 30m cap).
     timeout-minutes: 15
     env:
@@ -963,7 +954,7 @@ jobs:
         env:
           HARN_VERIFY_RUST_RUNTIME: "1"
         run: >-
-          ./scripts/ci/behavior_artifact.sh restore-security
+          ./scripts/ci/rust_artifact.sh restore-security
           "$RUNNER_TEMP/harn-security.tar.zst"
           "$RUNNER_TEMP/harn-security"
           "$GITHUB_SHA"
@@ -978,9 +969,12 @@ jobs:
   harn-audit:
     name: Harn conformance + audit
     # Consumes only the small portable CLI bundle, so it hangs off the fast
-    # dedicated cli-build producer instead of the full behavior compile+suite.
-    needs: [changes, cli-build]
-    if: needs.changes.outputs.rust == 'true' && needs.cli-build.result == 'success'
+    # dedicated rust-check-inputs producer instead of the full workspace
+    # compile+suite.
+    needs: [changes, rust-check-inputs]
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && needs.rust-check-inputs.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -990,10 +984,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # The changelog-history audit runs in audit-scripts; this lane only
-          # needs the checked-out tree and the exact producer payload.
+          # needs the checked-out tree and the exact producer artifact.
           fetch-depth: 1
       # This lane only executes Harn scripts. Download the small CLI artifact,
-      # not the multi-gigabyte nextest archive consumed by Rust test lanes.
+      # not the multi-gigabyte nextest archive consumed in workspace-test archive mode.
       - name: Download portable Harn CLI
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1002,7 +996,7 @@ jobs:
           skip-decompress: true
       - name: Verify portable Harn CLI
         run: >-
-          ./scripts/ci/behavior_artifact.sh restore-cli
+          ./scripts/ci/rust_artifact.sh restore-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
@@ -1040,10 +1034,12 @@ jobs:
 
   audit-scripts:
     name: Audit scripts
-    # Consumes only the small portable CLI bundle from cli-build (see
+    # Consumes only the small portable CLI bundle from rust-check-inputs (see
     # harn-audit).
-    needs: [changes, cli-build]
-    if: needs.changes.outputs.rust == 'true' && needs.cli-build.result == 'success'
+    needs: [changes, rust-check-inputs]
+    if: >-
+      needs.changes.outputs.rust == 'true'
+      && needs.rust-check-inputs.result == 'success'
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
@@ -1059,7 +1055,7 @@ jobs:
           # traverse BASE..HEAD and inspect commit trailers.
           fetch-depth: 0
       # This lane only executes Harn scripts. Download the small CLI artifact,
-      # not the multi-gigabyte nextest archive consumed by Rust test lanes.
+      # not the multi-gigabyte nextest archive consumed in workspace-test archive mode.
       - name: Download portable Harn CLI
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -1068,7 +1064,7 @@ jobs:
           skip-decompress: true
       - name: Verify portable Harn CLI
         run: >-
-          ./scripts/ci/behavior_artifact.sh restore-cli
+          ./scripts/ci/rust_artifact.sh restore-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
@@ -1225,7 +1221,7 @@ jobs:
     env:
       # EXPERIMENT (toggle via the HARN_WINDOWS_LLD repo variable): drive rustc
       # at the toolchain-bundled rust-lld instead of MSVC link.exe — the Windows
-      # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-builds lane uses.
+      # analog of the `-Clink-arg=-fuse-ld=mold` the Linux rust-checks lane uses.
       # link.exe is the Windows warm-path long pole once the dep graph is cached;
       # rust-lld links far faster (community reports ~2x full / ~5x incremental).
       # This is NOT a no-op: rust-lld became the default only on
@@ -1234,7 +1230,7 @@ jobs:
       # ONLY, so the linux flag can't express it. rustc self-resolves the bundled
       # `rust-lld` and injects the `-flavor link` (lld-link) mode for the msvc
       # target. A job-level RUSTFLAGS FULLY REPLACES the workflow-level
-      # `-D warnings` (env vars clobber, they do not merge — see the rust-builds
+      # `-D warnings` (env vars clobber, they do not merge — see the rust-checks
       # gotcha), so `-D warnings` is restated. Kept byte-identical to the
       # windows-nightly.yml writer so the shared-cache policy's consumer/producer
       # input comparison still matches (see scripts/check_ci_cache_policy.harn).
@@ -1729,9 +1725,9 @@ jobs:
         fmt,
         package-audit,
         lint-md,
-        rust-builds,
-        rust-behavior-fallback,
-        cli-build,
+        rust-checks,
+        rust-workspace-tests-fallback,
+        rust-check-inputs,
         rust-test,
         rust-security,
         harn-audit,
@@ -1796,68 +1792,69 @@ jobs:
             fi
           fi
 
-          # The heavy Linux Rust lanes (rust-builds, audit-scripts) skip on a
+          # The heavy Linux Rust lanes (rust-checks, audit-scripts) skip on a
           # docs/website/markdown-only PR (gated by the `changes` job) and run
           # unconditionally on merge_group / push. Treat `skipped` as passing
           # here so branch protection isn't deadlocked when they skip; only an
           # actual failure should fail the gate. (The `changes` job itself stays
           # a hard required-success above, so a filter-job failure still blocks.)
-          rust_builds_result="${{ needs['rust-builds'].result }}"
-          lint_ok="${{ needs['rust-builds'].outputs.lint_ok }}"
-          behavior_ok="${{ needs['rust-builds'].outputs.behavior_ok }}"
-          behavior_fallback_result="${{ needs['rust-behavior-fallback'].result }}"
-          echo "Rust build group: $rust_builds_result (lint_ok=$lint_ok behavior_ok=$behavior_ok fallback=$behavior_fallback_result)"
+          rust_checks_result="${{ needs['rust-checks'].result }}"
+          lint_ok="${{ needs['rust-checks'].outputs.lint_ok }}"
+          workspace_tests_ok="${{ needs['rust-checks'].outputs.workspace_tests_ok }}"
+          workspace_tests_fallback_result="${{ needs['rust-workspace-tests-fallback'].result }}"
+          echo "Rust checks: $rust_checks_result (lint_ok=$lint_ok workspace_tests_ok=$workspace_tests_ok fallback=$workspace_tests_fallback_result)"
 
-          # The behavior proof is satisfied by the leg itself OR its hosted
+          # The workspace-test proof is satisfied by the leg itself OR its hosted
           # fallback rerun; the lint proof has no fallback and must come from
-          # the leg. A failed rust-builds group is therefore tolerable only
+          # the leg. A failed rust-checks group is therefore tolerable only
           # when the lint leg reached its marker and the fallback went green —
           # the graceful-spillover path for a self-hosted box dying mid-run.
-          behavior_proof=false
-          if [ "$behavior_ok" = "true" ] || [ "$behavior_fallback_result" = "success" ]; then
-            behavior_proof=true
+          workspace_tests_proven=false
+          if [ "$workspace_tests_ok" = "true" ] || [ "$workspace_tests_fallback_result" = "success" ]; then
+            workspace_tests_proven=true
           fi
-          if [ "$rust_builds_result" != "success" ] && [ "$rust_builds_result" != "skipped" ]; then
-            if [ "$lint_ok" = "true" ] && [ "$behavior_proof" = "true" ]; then
-              echo "::warning::Behavior leg recovered via hosted fallback; box health needs attention."
+          if [ "$rust_checks_result" != "success" ] && [ "$rust_checks_result" != "skipped" ]; then
+            if [ "$lint_ok" = "true" ] && [ "$workspace_tests_proven" = "true" ]; then
+              echo "::warning::Rust workspace tests recovered via hosted fallback; box health needs attention."
             else
-              echo "::error::Rust build group failed."
+              echo "::error::Rust checks failed."
               exit 1
             fi
           fi
 
           # With co-location active the environment-neutral suite proof lives
-          # INSIDE the Behavior build leg (or its fallback), so a
-          # Rust-lane-relevant run must carry the behavior proof — a skip
+          # INSIDE the Rust workspace tests leg (or its fallback), so a
+          # Rust-lane-relevant run must carry the workspace-test proof — a skip
           # would silently drop the suite proof that rust-test no longer
           # provides.
           if [ "$COLOCATED_TESTS_DISABLED" != "true" ] \
             && [ "${{ needs.changes.outputs.rust }}" = "true" ] \
-            && [ "$behavior_proof" != "true" ]; then
-            echo "::error::Behavior proof missing while it owns the co-located suite proof."
+            && [ "$workspace_tests_proven" != "true" ]; then
+            echo "::error::Rust workspace test proof is missing."
             exit 1
           fi
 
-          cli_build_result="${{ needs['cli-build'].result }}"
-          echo "Harn CLI build: $cli_build_result"
-          if [ "$cli_build_result" != "success" ]; then
-            if [ "$cli_build_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+          rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
+          echo "Shared Rust check inputs: $rust_check_inputs_result"
+          if [ "$rust_check_inputs_result" != "success" ]; then
+            if [ "$rust_check_inputs_result" = "skipped" ] \
+              && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
               :
             else
-              echo "::error::Harn CLI build failed or skipped while Rust proof was required."
+              echo "::error::Rust audit artifact build failed or skipped while Rust proof was required."
               exit 1
             fi
           fi
 
           rust_test_result="${{ needs['rust-test'].result }}"
-          echo "Rust test: $rust_test_result"
+          echo "Rust workspace tests (archive mode): $rust_test_result"
           if [ "$rust_test_result" != "success" ]; then
             if [ "$rust_test_result" = "skipped" ] \
               && { [ "${{ needs.changes.outputs.rust }}" != "true" ] \
                 || [ "$COLOCATED_TESTS_DISABLED" != "true" ]; }; then
               :
             else
-              echo "::error::Rust test failed or skipped while Rust proof was required."
+              echo "::error::Rust workspace tests failed or skipped while the archive-mode proof was required."
               exit 1
             fi
           fi

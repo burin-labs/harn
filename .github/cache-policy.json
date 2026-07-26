@@ -28,8 +28,8 @@
     },
     {
       "workflow": "ci.yml",
-      "job": "rust-builds",
-      "shared_key": "workspace-behavior"
+      "job": "rust-checks",
+      "shared_key": "workspace-tests"
     }
   ]
 }
