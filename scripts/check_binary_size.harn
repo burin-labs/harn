@@ -14,8 +14,9 @@
 // repo, run with `harn run --no-sandbox` (CI keeps everything in-tree).
 // Keep local/standalone checks on the same release ratchet as the binary
 // workflow. The Linux release grew structurally with the AWS SDK credential
-// chain; the workflow's 211 MiB limit is the authoritative policy.
-const DEFAULT_BINARY_SIZE_BUDGET_MB: string = "211.00"
+// chain and embedded CLI AOT payload; the workflow's 212 MiB limit is the
+// authoritative policy.
+const DEFAULT_BINARY_SIZE_BUDGET_MB: string = "212.00"
 
 pub fn default_binary_size_budget_mb() -> string {
   return DEFAULT_BINARY_SIZE_BUDGET_MB
