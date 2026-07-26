@@ -535,7 +535,7 @@ async fn execute_routing_schema_retry_loop(
                     opts.model = result.model.clone();
                     opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
                     let envelope = attach_routing_block(
-                        agent_config::build_llm_call_result(&result, &opts),
+                        agent_config::build_llm_call_result(ctx, &result, &opts).await,
                         &trace,
                         &policy,
                     );
@@ -711,7 +711,7 @@ pub(crate) async fn execute_schema_retry_loop(
         let (vm_result, raw_text, errors) = match call_result {
             Ok(result) => {
                 let raw_text = result.text.clone();
-                let vm_result = agent_config::build_llm_call_result(&result, &opts);
+                let vm_result = agent_config::build_llm_call_result(ctx, &result, &opts).await;
                 if !expects_structured {
                     return Ok(SchemaLoopOutcome {
                         vm_result,

@@ -418,7 +418,12 @@ summary: Listed the workspace\n\
     //    stays empty (native-only) for a text-format result. The merged
     //    `tool_calls` carries the call for unified-view callers, but the
     //    history-feeding native list does not.
-    let vm_result = vm_build_llm_result(&result, None, None, Some(&tools));
+    let vm_result = vm_build_llm_result(
+        &result,
+        None,
+        None,
+        &crate::llm::api::test_text_projection(&result, Some(&tools)),
+    );
     let VmValue::Dict(ref dict) = vm_result else {
         panic!("vm_build_llm_result must return a dict");
     };

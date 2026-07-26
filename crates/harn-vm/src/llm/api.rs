@@ -54,7 +54,12 @@ pub(crate) use response::{
     extract_cache_read_tokens, extract_cache_write_tokens,
     parse_llm_response as parse_llm_response_for_provider, parse_openai_responses_response,
 };
-pub(crate) use result::{vm_build_llm_result, LlmResult, RawProviderToolCall};
+#[cfg(test)]
+pub(crate) use result::test_text_projection;
+pub(crate) use result::{
+    build_llm_text_projection, parse_candidate_text_tools, vm_build_llm_result, LlmResult,
+    LlmTextProjection, RawProviderToolCall,
+};
 pub(crate) use schema_stream::{
     aborted_result_value as schema_stream_aborted_result_value, parse_schema_stream_abort,
     SchemaStreamAbort, StreamSchemaWatch,

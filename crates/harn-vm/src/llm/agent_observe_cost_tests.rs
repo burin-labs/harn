@@ -58,7 +58,12 @@ fn response_event_and_returned_usage_share_priced_cost() {
     assert_eq!(events.len(), 3);
 
     let vm_usage_cost = |result: &crate::llm::api::LlmResult| {
-        let vm_result = crate::llm::api::vm_build_llm_result(result, None, None, None);
+        let vm_result = crate::llm::api::vm_build_llm_result(
+            result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&result, None),
+        );
         let result_dict = vm_result.as_dict().expect("result dict");
         let Some(VmValue::Dict(usage)) = result_dict.get("usage") else {
             panic!("missing usage dict: {result_dict:?}");

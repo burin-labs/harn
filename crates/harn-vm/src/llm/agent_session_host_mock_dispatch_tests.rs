@@ -63,7 +63,12 @@ fn mock_style_native_tool_calls_reach_assistant_envelope() {
         logprobs: Vec::new(),
         telemetry: ProviderTelemetry::default(),
     };
-    let vm_result = vm_build_llm_result(&result, None, None, None);
+    let vm_result = vm_build_llm_result(
+        &result,
+        None,
+        None,
+        &crate::llm::api::test_text_projection(&result, None),
+    );
     let message = vm_to_json(&assistant_message_from_llm_result(&vm_result));
     assert!(
         message["tool_calls"]
