@@ -3599,6 +3599,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-flock"
+version = "0.10.40"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "harn-fmt"
 version = "0.10.40"
 dependencies = [
@@ -3946,6 +3953,7 @@ dependencies = [
 name = "harn-sqlite"
 version = "0.10.40"
 dependencies = [
+ "harn-flock",
  "rusqlite",
  "tempfile",
  "wait-timeout",

@@ -12,9 +12,9 @@ use rusqlite::{params, Connection, OpenFlags};
 use wait_timeout::ChildExt;
 
 use super::{
-    current_journal_mode, initialization_lock_path, initialize_file, initialize_transient,
-    require_file_initialized, require_file_initialized_impl, sqlite_contention,
-    InitializationError, SchemaVersion, SqliteContention,
+    acquire_initialization_lock, current_journal_mode, initialization_lock_path, initialize_file,
+    initialize_transient, require_file_initialized, require_file_initialized_impl,
+    sqlite_contention, InitializationError, SchemaVersion, SqliteContention,
 };
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -67,6 +67,53 @@ fn sqlite_initializer_process_child() {
         .expect("read child row");
     assert_eq!(observed, value);
     println!("DONE");
+}
+
+/// The property this deadline exists for: a sidecar lock nobody releases fails
+/// with the path it waited on, instead of stopping the process.
+///
+/// Without it, a wedged holder was invisible — `File::lock` has no timed form,
+/// so the caller blocked forever and a supervising harness could report only
+/// that the process stopped. One such wedge cost a 120s kill with no
+/// indication of which lock, on a runner that could not be attached to.
+#[test]
+fn a_wedged_sidecar_lock_reports_its_path_instead_of_blocking() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = dir.path().join("runtime.sqlite");
+    let connection = Connection::open(&database).expect("open database");
+    let lock_path =
+        initialization_lock_path::<rusqlite::Error>(&connection).expect("sidecar lock path");
+
+    // A second handle on the same path. Advisory locks are per-handle on
+    // Windows and per-open-file-description under `flock`, so this excludes the
+    // initializer exactly as a separate process would — and is why a single
+    // process can wedge itself.
+    let holder = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .expect("open sidecar lock");
+    holder.lock().expect("hold the sidecar lock");
+
+    let Err(error) =
+        acquire_initialization_lock::<rusqlite::Error>(&connection, Duration::from_millis(50))
+    else {
+        panic!("a held sidecar lock must not be acquired");
+    };
+
+    match error {
+        InitializationError::InitializationLock(inner) => {
+            let rendered = inner.to_string();
+            assert!(
+                rendered.contains(&lock_path.display().to_string()),
+                "the failure must name the contended path: {rendered}"
+            );
+            assert!(rendered.contains("timed out"), "{rendered}");
+        }
+        other => panic!("expected a lock timeout, got {other}"),
+    }
 }
 
 #[test]
