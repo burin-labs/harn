@@ -46,7 +46,13 @@ success-output = "never"
 # handling, MCP server launch, real ProcessHandle, real process tools.
 # Run with `make test-e2e` or
 # `cargo nextest run --profile e2e --run-ignored all`.
-# Triggered nightly, on the `e2e` PR label, and on merge-queue.
+# Triggered by the nightly schedule, `workflow_dispatch`, and the `e2e` PR
+# label — see `.github/workflows/e2e.yml`. NOT on `merge_group`, and the
+# `CI status` aggregate that branch protection requires does not include this
+# job. Nothing here gates a merge: a change can break every test this profile
+# runs, pass all required checks, and ship. #5602 did, and #5642 covers that
+# specific class from the harn-cli lib suite instead. Add coverage that has to
+# hold before merge to a required lane, not here.
 [profile.e2e]
 default-filter = "package(harn-cli) and kind(test)"
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "15s" }
