@@ -1,17 +1,18 @@
 import "std/project"
 
 pipeline test(task) {
-  harness.fs.mkdir("project_scan_single/src")
+  const root = path_join(harness.fs.temp_dir(), "project_scan_single")
+  harness.fs.mkdir(path_join(root, "src"))
   harness.fs.write_text(
-    "project_scan_single/Cargo.toml",
+    path_join(root, "Cargo.toml"),
     "[package]\nname = \"scan-single\"\nversion = \"0.1.0\"\n",
   )
-  harness.fs.write_text("project_scan_single/Cargo.lock", "# lock\n")
+  harness.fs.write_text(path_join(root, "Cargo.lock"), "# lock\n")
   harness.fs.write_text(
-    "project_scan_single/src/lib.rs",
+    path_join(root, "src/lib.rs"),
     "pub fn greet() -> &'static str { \"hi\" }\n",
   )
-  const ev = project_scan("project_scan_single", {tiers: ["ambient", "config"]})
+  const ev = project_scan(root, {tiers: ["ambient", "config"]})
   const catalog = project_catalog()
   const rust_entry = catalog.filter({ entry -> entry.id == "rust" })[0]
   __io_println(ev.path.ends_with("/project_scan_single"))

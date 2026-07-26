@@ -4,11 +4,12 @@
  */
 pipeline default(task) {
   // Write a known file, then read it back via read_file_result.
-  harness.fs.write_text("rfr_fixture.txt", "hello result")
-  const ok = harness.fs.read_text_result("rfr_fixture.txt")
+  const fixture = path_join(harness.fs.temp_dir(), "rfr_fixture.txt")
+  harness.fs.write_text(fixture, "hello result")
+  const ok = harness.fs.read_text_result(fixture)
   __io_println(is_ok(ok))
   __io_println(unwrap(ok))
-  harness.fs.delete("rfr_fixture.txt")
+  harness.fs.delete(fixture)
   // Missing path returns a structured, stable Result.Err.
   const bad = harness.fs.read_text_result("does_not_exist_7f3a.txt")
   __io_println(is_err(bad))

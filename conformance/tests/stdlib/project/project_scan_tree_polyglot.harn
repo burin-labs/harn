@@ -1,19 +1,20 @@
 import "std/project"
 
 pipeline test(task) {
-  harness.fs.mkdir("polyglot_tree/frontend/src")
-  harness.fs.mkdir("polyglot_tree/backend/src")
-  harness.fs.write_text("polyglot_tree/frontend/package.json", "{\"name\":\"frontend\"}\n")
-  harness.fs.write_text("polyglot_tree/frontend/package-lock.json", "{}\n")
-  harness.fs.write_text("polyglot_tree/frontend/tsconfig.json", "{ }\n")
-  harness.fs.write_text("polyglot_tree/frontend/src/app.tsx", "export const App = () => null\n")
+  const root = path_join(harness.fs.temp_dir(), "polyglot_tree")
+  harness.fs.mkdir(path_join(root, "frontend/src"))
+  harness.fs.mkdir(path_join(root, "backend/src"))
+  harness.fs.write_text(path_join(root, "frontend/package.json"), "{\"name\":\"frontend\"}\n")
+  harness.fs.write_text(path_join(root, "frontend/package-lock.json"), "{}\n")
+  harness.fs.write_text(path_join(root, "frontend/tsconfig.json"), "{ }\n")
+  harness.fs.write_text(path_join(root, "frontend/src/app.tsx"), "export const App = () => null\n")
   harness.fs.write_text(
-    "polyglot_tree/backend/Cargo.toml",
+    path_join(root, "backend/Cargo.toml"),
     "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n",
   )
-  harness.fs.write_text("polyglot_tree/backend/Cargo.lock", "# lock\n")
-  harness.fs.write_text("polyglot_tree/backend/src/main.rs", "fn " + "main() {}\n")
-  const tree = project_scan_tree("polyglot_tree", {tiers: ["ambient"], depth: 3})
+  harness.fs.write_text(path_join(root, "backend/Cargo.lock"), "# lock\n")
+  harness.fs.write_text(path_join(root, "backend/src/main.rs"), "fn " + "main() {}\n")
+  const tree = project_scan_tree(root, {tiers: ["ambient"], depth: 3})
   const tree_keys = keys(tree)
   __io_println(tree_keys[0] == ".")
   __io_println(tree_keys[1] == "backend")
