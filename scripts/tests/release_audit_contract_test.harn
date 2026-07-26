@@ -111,10 +111,18 @@ pipeline test_release_audit_contract_and_hosted_receipt(task) {
   assert_eq(accepted.receipt_reused, true)
   assert_eq(accepted.proof_kind, "hosted_platform")
   assert_eq(accepted.lane_names, ["release-metadata"])
+  const advanced_base = release_audit_receipt_plan(
+    cfg,
+    {...receipt(), source: {...receipt().source, remote_sha_after: OTHER_SHA}},
+    SHA,
+    BINARY_SHA,
+  )
+  assert_eq(advanced_base.receipt_reused, true)
+  assert_eq(advanced_base.proof_kind, "hosted_platform")
   assert_eq(
     release_audit_receipt_plan(
       cfg,
-      {...receipt(), source: {...receipt().source, remote_sha_after: OTHER_SHA}},
+      {...receipt(), source: {...receipt().source, sha: OTHER_SHA}},
       SHA,
       BINARY_SHA,
     ).reason,
