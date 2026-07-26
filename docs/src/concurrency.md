@@ -173,6 +173,33 @@ The return value is a dict with:
 This is useful when you want to process all items and handle failures
 after the fact, rather than aborting on the first error.
 
+### `succeeded` / `failed` count throws, not `Err` returns
+
+A branch counts as failed only when it **throws**. A branch that *returns*
+`Result.Err` returned normally, so `parallel settle` wraps that value like any
+other: it lands in `results` as `Ok(Err(..))` and `succeeded` counts it.
+
+```harn
+const outcome = parallel settle [1, 2, 3] { item ->
+  if item == 2 {
+    return Err({code: "terminal", message: "item 2 failed"})
+  }
+  item * 10
+}
+
+log(outcome.succeeded)  // 3 — not 2
+log(outcome.failed)     // 0 — not 1
+log(outcome.results[1])  // Result.Ok(Result.Err({code: "terminal", ...}))
+```
+
+This matters whenever a branch reports a failing verdict as data rather than by
+throwing — a poll loop returning a terminal status, or anything built on
+`Result`. Do not trust `outcome.failed` in that case; unwrap each result and
+check `is_err` on the inner value, or use
+[`settle_with_abort`](#cooperative-abort-stdabort), which treats a thrown error
+and a returned `Result.Err` identically and flattens both to `Err` in one
+uniform `results` list.
+
 ## Cooperative abort: `std/abort`
 
 `parallel settle` is the right form whenever you need every branch's

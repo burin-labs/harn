@@ -109,6 +109,14 @@ failures into a result object with fields:
 | `succeeded` | int | Number of `Ok` results |
 | `failed` | int | Number of `Err` results |
 
+A branch is `Err` only when it **throws**. A branch that *returns*
+`Result.Err` returned normally, so its value is wrapped like any other:
+the entry is `Ok(Err(..))` and `succeeded` counts it. Callers that report
+failing verdicts as data rather than by throwing must therefore inspect
+the inner value instead of trusting `failed`, or use
+`settle_with_abort` from `std/abort`, which treats a thrown error and a
+returned `Result.Err` identically.
+
 All parallel forms accept `with { max_concurrent: N }` before the body:
 
 ```harn
