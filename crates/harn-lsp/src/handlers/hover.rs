@@ -122,6 +122,9 @@ impl HarnLsp {
             Some(s) => s,
             None => return Ok(None),
         };
+        if !state.kind.is_harn() {
+            return Ok(None);
+        }
         let source = state.source.clone();
         let symbols = state.symbols.clone();
         drop(docs);
@@ -236,8 +239,8 @@ impl HarnLsp {
         let source = {
             let docs = self.documents.lock().unwrap();
             match docs.get(uri) {
-                Some(s) => s.source.clone(),
-                None => return Ok(None),
+                Some(s) if s.kind.is_harn() => s.source.clone(),
+                _ => return Ok(None),
             }
         };
 

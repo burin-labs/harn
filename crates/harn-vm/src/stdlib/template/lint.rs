@@ -7,6 +7,7 @@
 //! structure to walk conditionals, sections, and includes.
 
 use super::ast::{BinOp, Expr, Node, PathSeg};
+use super::error::TemplateParseError;
 use super::parser::parse as parse_template;
 use crate::runtime_limits::RuntimeLimits;
 
@@ -14,10 +15,10 @@ const TEMPLATE_LINT_AST_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_a
 
 /// Parse a template source string into a flat list of lintable
 /// constructs (conditionals + sections). Returns `Err` when the
-/// template doesn't parse — callers should surface the underlying
-/// `validate_template_syntax` error to the user before linting.
-pub fn parse(src: &str) -> Result<Vec<LintConstruct>, String> {
-    let nodes = parse_template(src).map_err(|error| error.message())?;
+/// template doesn't parse — callers should surface that failure to the
+/// user before linting.
+pub fn parse(src: &str) -> Result<Vec<LintConstruct>, TemplateParseError> {
+    let nodes = parse_template(src).map_err(TemplateParseError::from)?;
     let mut out = Vec::new();
     walk_nodes(&nodes, &mut out, 0)?;
     Ok(out)
@@ -93,14 +94,22 @@ impl IdentityField {
     }
 }
 
-fn walk_nodes(nodes: &[Node], out: &mut Vec<LintConstruct>, depth: usize) -> Result<(), String> {
+fn walk_nodes(
+    nodes: &[Node],
+    out: &mut Vec<LintConstruct>,
+    depth: usize,
+) -> Result<(), TemplateParseError> {
     for node in nodes {
         walk_node(node, out, depth)?;
     }
     Ok(())
 }
 
-fn walk_node(node: &Node, out: &mut Vec<LintConstruct>, depth: usize) -> Result<(), String> {
+fn walk_node(
+    node: &Node,
+    out: &mut Vec<LintConstruct>,
+    depth: usize,
+) -> Result<(), TemplateParseError> {
     if depth > TEMPLATE_LINT_AST_MAX_DEPTH {
         return Err(lint_depth_error(node));
     }
@@ -156,11 +165,12 @@ fn walk_node(node: &Node, out: &mut Vec<LintConstruct>, depth: usize) -> Result<
     Ok(())
 }
 
-fn lint_depth_error(node: &Node) -> String {
-    let prefix = format!("template lint AST depth exceeded ({TEMPLATE_LINT_AST_MAX_DEPTH} levels)");
-    match node_location(node) {
-        Some((line, col)) => format!("{prefix} at {line}:{col}"),
-        None => prefix,
+fn lint_depth_error(node: &Node) -> TemplateParseError {
+    let (line, col) = node_location(node).unwrap_or((1, 1));
+    TemplateParseError {
+        message: format!("template lint AST depth exceeded ({TEMPLATE_LINT_AST_MAX_DEPTH} levels)"),
+        line,
+        col,
     }
 }
 
@@ -359,8 +369,8 @@ mod tests {
 
         let err = parse(&src).expect_err("depth limit");
 
-        assert!(err.contains("template nesting depth exceeded"));
-        assert!(err.contains(&format!(
+        assert!(err.message.contains("template nesting depth exceeded"));
+        assert!(err.message.contains(&format!(
             "({} levels)",
             RuntimeLimits::DEFAULT.max_template_ast_depth
         )));
@@ -374,8 +384,8 @@ mod tests {
 
         let err = parse(&src).expect_err("depth limit");
 
-        assert!(err.contains("template expression depth exceeded"));
-        assert!(err.contains(&format!(
+        assert!(err.message.contains("template expression depth exceeded"));
+        assert!(err.message.contains(&format!(
             "({} levels)",
             RuntimeLimits::DEFAULT.max_template_ast_depth
         )));

@@ -2,8 +2,10 @@ use harn_parser::analysis::{
     AnalysisDatabase, AnalysisError, SourceId, SourceVersion, TypeCheckConfig,
 };
 use harn_parser::{Node, SNode};
+use harn_vm::stdlib::template::outline::OutlineBlock;
 use tower_lsp::lsp_types::*;
 
+use crate::document_kind::DocumentKind;
 use crate::helpers::{
     diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic,
     span_to_full_range, span_to_range,
@@ -18,10 +20,17 @@ pub(crate) struct DocumentState {
     /// can never consult an index built for older text.
     pub(crate) source: SourceText,
     pub(crate) language_id: String,
+    /// Which language pipeline this document goes through. Fixed when
+    /// the document is first seen; a buffer does not change language.
+    pub(crate) kind: DocumentKind,
     analysis: AnalysisDatabase,
     source_id: SourceId,
     version: SourceVersion,
     pub(crate) cached_ast: Option<Vec<SNode>>,
+    /// Block geometry of a [`DocumentKind::Prompt`] document, cached so
+    /// folding doesn't re-parse the template per request. Empty for
+    /// every other kind, and for a template that doesn't parse.
+    pub(crate) prompt_outline: Vec<OutlineBlock>,
     pub(crate) symbols: Vec<SymbolInfo>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
@@ -33,8 +42,17 @@ pub(crate) struct DocumentState {
 }
 
 impl DocumentState {
+    /// A Harn document, parsed immediately. Tests only: a real document
+    /// arrives either through [`Self::new_for_language_with_rules`] when
+    /// the client opens it, or through [`Self::placeholder`] when the
+    /// client edits one we never saw opened.
+    #[cfg(test)]
     pub(crate) fn new(source: String) -> Self {
-        let mut state = Self::new_unparsed(source, "harn");
+        let mut state = Self::new_unparsed(
+            source,
+            crate::document_kind::HARN_LANGUAGE_ID,
+            DocumentKind::Harn,
+        );
         state.reparse_if_dirty();
         state
     }
@@ -45,12 +63,21 @@ impl DocumentState {
         uri: &Url,
         rule_workspace: &RuleWorkspace,
     ) -> Self {
-        let mut state = Self::new_unparsed(source, language_id);
+        let language_id = language_id.into();
+        let kind = DocumentKind::classify(uri, &language_id);
+        let mut state = Self::new_unparsed(source, language_id, kind);
         state.reparse_if_dirty_with_rules(Some(uri), Some(rule_workspace));
         state
     }
 
-    fn new_unparsed(source: String, language_id: impl Into<String>) -> Self {
+    /// Stand-in for a document the client is editing but never opened.
+    /// Classified from its URI so an edit to a prompt buffer isn't
+    /// briefly run through the Harn pipeline.
+    pub(crate) fn placeholder(uri: &Url) -> Self {
+        Self::new_unparsed(String::new(), "", DocumentKind::classify(uri, ""))
+    }
+
+    fn new_unparsed(source: String, language_id: impl Into<String>, kind: DocumentKind) -> Self {
         let language_id = language_id.into();
         let mut analysis = AnalysisDatabase::new();
         let source_id = SourceId::new("document");
@@ -58,10 +85,12 @@ impl DocumentState {
         Self {
             source: SourceText::new(source),
             language_id,
+            kind,
             analysis,
             source_id,
             version: SourceVersion(1),
             cached_ast: None,
+            prompt_outline: Vec::new(),
             symbols: Vec::new(),
             diagnostics: Vec::new(),
             lint_diagnostics: Vec::new(),
@@ -81,6 +110,9 @@ impl DocumentState {
         self.dirty = true;
     }
 
+    /// Reparse without a workspace, so rule-engine diagnostics are
+    /// skipped. Tests only: the server always has a rule workspace.
+    #[cfg(test)]
     pub(crate) fn reparse_if_dirty(&mut self) {
         self.reparse_if_dirty_with_rules(None, None);
     }
@@ -102,13 +134,21 @@ impl DocumentState {
         self.inlay_hints.clear();
         self.symbols.clear();
         self.cached_ast = None;
+        self.prompt_outline.clear();
 
-        if self.language_id != "harn" {
-            self.append_rule_diagnostics(uri, rule_workspace);
-            self.dirty = false;
-            return;
+        match self.kind {
+            DocumentKind::Harn => self.analyze_harn_program(uri),
+            DocumentKind::Prompt => self.analyze_prompt_template(uri),
+            // The language-agnostic rule engine below is all we have to
+            // offer a document in some other language.
+            DocumentKind::Other => {}
         }
 
+        self.append_rule_diagnostics(uri, rule_workspace);
+        self.dirty = false;
+    }
+
+    fn analyze_harn_program(&mut self, uri: Option<&Url>) {
         let analysis = match self
             .analysis
             .typecheck(&self.source_id, TypeCheckConfig::new())
@@ -126,8 +166,6 @@ impl DocumentState {
                     }
                     AnalysisError::MissingSource(_) => {}
                 }
-                self.append_rule_diagnostics(uri, rule_workspace);
-                self.dirty = false;
                 return;
             }
         };
@@ -243,16 +281,44 @@ impl DocumentState {
                 &lint_options,
             )
         };
+        self.publish_lint_diagnostics(lint_diags);
+
+        self.symbols = build_symbol_table(&program, &self.source);
+        self.cached_ast = Some(program);
+    }
+
+    /// Diagnose a prompt template with exactly the rules `harn lint`
+    /// applies to it — template parse errors plus the
+    /// `template-*` rules — and cache the block outline that folding
+    /// ranges are built from.
+    fn analyze_prompt_template(&mut self, uri: Option<&Url>) {
+        let project_lint = uri
+            .and_then(|uri| uri.to_file_path().ok())
+            .and_then(|path| harn_modules::project_config::load_for_path(&path).ok())
+            .map(|config| config.lint)
+            .unwrap_or_default();
+        let disabled_rules = project_lint.disabled.unwrap_or_default();
+        self.publish_lint_diagnostics(harn_lint::lint_prompt_template(
+            &self.source,
+            project_lint.template_variant_branch_threshold,
+            &disabled_rules,
+        ));
+        // A template that doesn't parse has no trustworthy geometry, and
+        // the parse failure is already among the diagnostics above.
+        self.prompt_outline =
+            harn_vm::stdlib::template::outline::parse(&self.source).unwrap_or_default();
+    }
+
+    fn publish_lint_diagnostics(&mut self, lint_diags: Vec<harn_lint::LintDiagnostic>) {
         for ld in &lint_diags {
             let severity = match ld.severity {
                 harn_lint::LintSeverity::Info => DiagnosticSeverity::INFORMATION,
                 harn_lint::LintSeverity::Warning => DiagnosticSeverity::WARNING,
                 harn_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
             };
-            let range = span_to_range(&ld.span);
             let lint_repair = ld.repair();
             self.diagnostics.push(Diagnostic {
-                range,
+                range: span_to_range(&ld.span),
                 severity: Some(severity),
                 source: Some("harn-lint".to_string()),
                 code: Some(NumberOrString::String(ld.code.to_string())),
@@ -265,11 +331,6 @@ impl DocumentState {
             });
         }
         self.lint_diagnostics = lint_diags;
-
-        self.symbols = build_symbol_table(&program, &self.source);
-        self.cached_ast = Some(program);
-        self.append_rule_diagnostics(uri, rule_workspace);
-        self.dirty = false;
     }
 
     fn append_rule_diagnostics(
@@ -573,6 +634,105 @@ regex = "debugger;"
         assert_eq!(state.rule_diagnostics.len(), 1);
         assert_eq!(state.diagnostics.len(), 1);
         assert_eq!(state.diagnostics[0].source.as_deref(), Some("harn-rules"));
+    }
+
+    fn prompt_document(source: &str) -> DocumentState {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("greet.harn.prompt");
+        write(&path, source);
+        DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn-prompt",
+            &Url::from_file_path(&path).unwrap(),
+            &RuleWorkspace::from_root(temp.path()),
+        )
+    }
+
+    #[test]
+    fn prompt_documents_are_linted_as_templates_not_parsed_as_harn() {
+        // Prose that is nonsense as Harn, plus a directive the template
+        // lint rules have something to say about.
+        let state = prompt_document(concat!(
+            "You are a helpful assistant; answer briefly.\n",
+            "{{ if llm.provider == \"anthropic\" }}\n",
+            "Use XML tags.\n",
+            "{{ end }}\n",
+        ));
+
+        assert!(
+            state.cached_ast.is_none(),
+            "a prompt template is never parsed as a Harn program"
+        );
+        assert_eq!(
+            state.diagnostics.len(),
+            1,
+            "expected only the template lint finding, got {:?}",
+            state
+                .diagnostics
+                .iter()
+                .map(|diag| (&diag.source, &diag.message))
+                .collect::<Vec<_>>()
+        );
+        let diag = &state.diagnostics[0];
+        assert_eq!(diag.source.as_deref(), Some("harn-lint"));
+        assert!(
+            diag.message
+                .starts_with("[template-provider-identity-branch]"),
+            "unexpected message: {}",
+            diag.message
+        );
+        // Anchored on the `{{ if }}` directive, not on the prose above it.
+        assert_eq!(
+            diag.range,
+            Range::new(Position::new(1, 0), Position::new(1, 1))
+        );
+    }
+
+    #[test]
+    fn a_prompt_that_does_not_parse_reports_it_at_the_failing_directive() {
+        let state = prompt_document("intro\n{{ if missing_end }}\nbody\n");
+
+        let diag = state
+            .diagnostics
+            .first()
+            .expect("expected a template parse diagnostic");
+        assert_eq!(diag.source.as_deref(), Some("harn-lint"));
+        assert!(
+            diag.message.contains("missing matching `{{ end }}`"),
+            "unexpected message: {}",
+            diag.message
+        );
+        assert_eq!(diag.range.start, Position::new(1, 0));
+        assert_eq!(
+            diag.severity,
+            Some(DiagnosticSeverity::ERROR),
+            "an unparseable template is an error, not a warning"
+        );
+    }
+
+    #[test]
+    fn a_clean_prompt_produces_no_diagnostics() {
+        let state = prompt_document("Hello {{ name }}, welcome.\n");
+        assert_eq!(state.diagnostics, Vec::new());
+        assert!(state.cached_ast.is_none());
+    }
+
+    #[test]
+    fn a_bare_dot_prompt_file_is_a_template_even_when_mislabelled() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("system.prompt");
+        let source = "Answer in one sentence.\n";
+        write(&path, source);
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            // A client that never learned Harn's prompt language id.
+            "plaintext",
+            &Url::from_file_path(&path).unwrap(),
+            &RuleWorkspace::from_root(temp.path()),
+        );
+
+        assert_eq!(state.kind, crate::document_kind::DocumentKind::Prompt);
+        assert_eq!(state.diagnostics, Vec::new());
     }
 
     #[test]

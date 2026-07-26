@@ -61,6 +61,24 @@ over stdin/stdout using the Language Server Protocol.
 | **On-type formatting** | Reuses `harn-fmt` after semicolons and closing braces for format-as-you-type |
 | **Folding ranges** | Folds declaration bodies, multiline strings/comments, block expressions, and multiline match arms |
 
+### Prompt templates
+
+The server also serves `.harn.prompt` and `.prompt` documents (language id
+`harn-prompt`). They are never parsed as Harn programs — Harn's grammar has
+nothing to say about prompt text, and parsing one as the other produces noise
+instead of diagnostics. Prompt documents get:
+
+| Feature | Description |
+|---------|-------------|
+| **Diagnostics** | Template parse errors plus the same `template-*` lint rules `harn lint` applies, positioned on the directive that caused them. Honours `[lint] disabled` and `[lint] template_variant_branch_threshold` from `harn.toml`. |
+| **Folding ranges** | `{{ if }}`/`{{ elif }}`/`{{ else }}`, `{{ for }}`, `{{ section }}`, `{{ raw }}`, and multi-line `{{# #}}` comments. Ranges come from the same parser that renders the template, so a fold can never disagree with the real block structure. |
+
+The language-specific capabilities above (completion, hover, go-to-definition,
+formatting, semantic tokens, …) do not apply to prompt documents and return
+nothing rather than Harn answers.
+
+See [Prompt templating](prompt-templating.md) for the template language itself.
+
 ### Configuration
 
 Most editors auto-detect the LSP binary. For manual configuration, point

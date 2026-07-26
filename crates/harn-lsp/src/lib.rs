@@ -9,6 +9,7 @@
 mod call_hierarchy;
 mod constants;
 mod document;
+mod document_kind;
 mod folding;
 mod handlers;
 mod helpers;

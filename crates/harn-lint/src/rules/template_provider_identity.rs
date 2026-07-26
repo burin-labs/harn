@@ -12,7 +12,6 @@
 //! 1-to-1 enough to apply blindly; the author has to pick the flag
 //! that matches the branch's intent.
 
-use harn_lexer::Span;
 use harn_parser::DiagnosticCode as Code;
 use harn_vm::stdlib::template::lint::{ConditionShape, IdentityField, LintConstruct};
 
@@ -39,22 +38,7 @@ pub(crate) fn check(constructs: &[LintConstruct], source: &str) -> Vec<LintDiagn
 }
 
 fn make_diagnostic(field: IdentityField, line: usize, col: usize, source: &str) -> LintDiagnostic {
-    let span = match locate_directive(source, line) {
-        Some((start, end, line, column)) => Span {
-            start,
-            end,
-            line,
-            column,
-            end_line: line,
-        },
-        None => Span {
-            start: 0,
-            end: 0,
-            line: line.max(1),
-            column: col.max(1),
-            end_line: line.max(1),
-        },
-    };
+    let span = crate::template_span::directive_span(source, line, col);
     let suggestion_text = suggestion(field);
     let message = format!(
         "branching on `llm.{}` couples the template to vendor identity strings — \
@@ -103,43 +87,6 @@ fn suggestion(field: IdentityField) -> String {
                 .to_string()
         }
     }
-}
-
-/// Find the byte offsets of the `{{ if ... }}` (or `{{ elif ... }}`)
-/// directive on the given line, plus its line/column for the diagnostic
-/// underline. Falls back to the line as a whole when the directive can't
-/// be located (e.g. multi-line wrapping). Returning `None` causes the
-/// caller to emit a span without a byte range.
-fn locate_directive(source: &str, line: usize) -> Option<(usize, usize, usize, usize)> {
-    if line == 0 {
-        return None;
-    }
-    let mut offset = 0usize;
-    for (current_line, src_line) in source.split_inclusive('\n').enumerate() {
-        let line_no = current_line + 1;
-        if line_no == line {
-            for needle in ["{{ if ", "{{if ", "{{ elif ", "{{elif "] {
-                if let Some(rel) = src_line.find(needle) {
-                    let start = offset + rel;
-                    let end_rel = src_line[rel..]
-                        .find("}}")
-                        .map(|idx| rel + idx + 2)
-                        .unwrap_or(src_line.len());
-                    let end = offset + end_rel;
-                    let column = utf8_column_for_byte_offset(src_line, rel).unwrap_or(rel + 1);
-                    return Some((start, end, line_no, column));
-                }
-            }
-            return None;
-        }
-        offset += src_line.len();
-    }
-    None
-}
-
-fn utf8_column_for_byte_offset(line: &str, byte_offset: usize) -> Option<usize> {
-    let prefix = line.get(..byte_offset)?;
-    Some(prefix.chars().count() + 1)
 }
 
 #[cfg(test)]

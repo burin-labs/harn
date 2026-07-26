@@ -15,9 +15,25 @@ pub(super) enum Token {
         body: String,
         line: usize,
         col: usize,
+        /// Byte range of the whole directive, `{{` through `}}`.
+        start: usize,
+        end: usize,
     },
     /// Verbatim content of a `{{ raw }}..{{ endraw }}` block.
-    Raw(String),
+    Raw {
+        content: String,
+        /// Byte range of the whole block, `{{ raw }}` through `{{ endraw }}`.
+        start: usize,
+        end: usize,
+    },
+    /// A `{{# .. #}}` comment. Contributes nothing to the rendered
+    /// output, but the token is emitted so tools that care about source
+    /// geometry (folding ranges) see where comments sit.
+    Comment {
+        /// Byte range of the whole comment, `{{#` through `#}}`.
+        start: usize,
+        end: usize,
+    },
 }
 
 pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
@@ -67,6 +83,10 @@ pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
                 return Err(TemplateError::new(line, col, "unterminated comment"));
             };
             cursor = close_hash + 3;
+            tokens.push(Token::Comment {
+                start: open,
+                end: cursor,
+            });
             continue;
         }
 
@@ -95,7 +115,11 @@ pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
                     TemplateError::new(line, col, "unterminated `{{ raw }}` block")
                 })?;
             let raw_content = src[raw_body_start..raw_end_open].to_string();
-            tokens.push(Token::Raw(raw_content));
+            tokens.push(Token::Raw {
+                content: raw_content,
+                start: open,
+                end: raw_end_close,
+            });
             cursor = raw_end_close;
             continue;
         }
@@ -109,7 +133,13 @@ pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
         let body_end = if trim_after { close_pos - 1 } else { close_pos };
         let body = src[body_start..body_end].trim().to_string();
         let (line, col) = line_col(src, open);
-        tokens.push(Token::Directive { body, line, col });
+        tokens.push(Token::Directive {
+            body,
+            line,
+            col,
+            start: open,
+            end: close_pos + 2,
+        });
         cursor = close_pos + 2;
         pending_trim_left = trim_after;
     }

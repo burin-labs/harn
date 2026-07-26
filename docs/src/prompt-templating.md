@@ -453,6 +453,17 @@ is the recommended way to silence variant-explosion without raising the
 threshold — the section's envelope dispatch lives in one shared place
 instead of being scattered across the prompt.
 
+## In your editor
+
+`harn-lsp` serves `.harn.prompt` and `.prompt` documents directly, so the
+rules above show up as you type rather than only on `harn lint`. Prompt
+documents are parsed by the template engine and never by the Harn parser.
+Alongside diagnostics, the server folds `{{ if }}` / `{{ elif }}` / `{{ else }}`,
+`{{ for }}`, [`{{ section }}`](#logical-sections), [`{{ raw }}`](#raw-blocks),
+and multi-line [`{{# #}}` comments](#comments) — from the same parse the
+renderer uses, so folds always match the real block structure. See
+[Editor integration](editor-integration.md#prompt-templates).
+
 ## Preflight checks
 
 `harn check` parses every template referenced by a literal `render(...)` /

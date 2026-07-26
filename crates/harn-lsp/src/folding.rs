@@ -2,7 +2,10 @@ use std::collections::HashSet;
 
 use harn_lexer::{Lexer, Span, TokenKind};
 use harn_parser::{MatchArm, Node, SNode};
+use harn_vm::stdlib::template::outline::{OutlineBlock, OutlineBlockKind};
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
+
+use crate::source_text::SourceText;
 
 pub(crate) fn build_folding_ranges(source: &str, ast: Option<&[SNode]>) -> Vec<FoldingRange> {
     let mut ranges = Vec::new();
@@ -15,6 +18,58 @@ pub(crate) fn build_folding_ranges(source: &str, ast: Option<&[SNode]>) -> Vec<F
     }
 
     collect_token_ranges(source, &mut ranges, &mut seen);
+    sort_ranges(&mut ranges);
+    ranges
+}
+
+/// Folding ranges for a prompt template, from the block outline the
+/// template parser produced.
+///
+/// Each block runs from the directive that opens it to the directive
+/// that closes it, so an `{{ if }}` chain nests: the chain folds from
+/// `{{ if }}`, and each `{{ elif }}` / `{{ else }}` folds from itself,
+/// all ending at the shared `{{ end }}`.
+pub(crate) fn build_prompt_folding_ranges(
+    source: &SourceText,
+    outline: &[OutlineBlock],
+) -> Vec<FoldingRange> {
+    let mut ranges = Vec::new();
+    let mut seen = HashSet::new();
+
+    for block in outline {
+        let start = source.position(block.start);
+        let end = source.position(block.end);
+        // A block that opens and closes on one line has nothing to hide.
+        if end.line <= start.line {
+            continue;
+        }
+        let kind = match block.kind {
+            OutlineBlockKind::Comment => FoldingRangeKind::Comment,
+            OutlineBlockKind::If
+            | OutlineBlockKind::Elif
+            | OutlineBlockKind::Else
+            | OutlineBlockKind::For
+            | OutlineBlockKind::Section
+            | OutlineBlockKind::Raw => FoldingRangeKind::Region,
+        };
+        if !seen.insert((start.line, end.line, folding_kind_key(Some(&kind)))) {
+            continue;
+        }
+        ranges.push(FoldingRange {
+            start_line: start.line,
+            start_character: Some(start.character),
+            end_line: end.line,
+            end_character: None,
+            kind: Some(kind),
+            collapsed_text: None,
+        });
+    }
+
+    sort_ranges(&mut ranges);
+    ranges
+}
+
+fn sort_ranges(ranges: &mut [FoldingRange]) {
     ranges.sort_by_key(|range| {
         (
             range.start_line,
@@ -22,7 +77,6 @@ pub(crate) fn build_folding_ranges(source: &str, ast: Option<&[SNode]>) -> Vec<F
             range.end_line,
         )
     });
-    ranges
 }
 
 fn collect_token_ranges(
@@ -372,9 +426,10 @@ fn folding_kind_key(kind: Option<&FoldingRangeKind>) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::build_folding_ranges;
+    use super::{build_folding_ranges, build_prompt_folding_ranges};
     use crate::document::DocumentState;
-    use tower_lsp::lsp_types::FoldingRangeKind;
+    use crate::rules::RuleWorkspace;
+    use tower_lsp::lsp_types::{FoldingRangeKind, Url};
 
     #[test]
     fn builds_ranges_for_functions_strings_and_match_arms() {
@@ -415,6 +470,98 @@ mod tests {
                 .iter()
                 .any(|range| range.start_line == 6 && range.end_line == 8),
             "expected large match arm fold, got {ranges:?}"
+        );
+    }
+
+    /// The full block vocabulary of a template, each construct spanning
+    /// more than one line so every one of them is foldable.
+    const PROMPT_SOURCE: &str = concat!(
+        "{{# a long\n",                                          // 0
+        "   comment #}}\n",                                      // 1
+        "{{ section \"task\" }}\n",                              // 2
+        "{{ if llm.capabilities.native_tools }}\n",              // 3
+        "tools\n",                                               // 4
+        "{{ elif llm.capabilities.prefers_xml_scaffolding }}\n", // 5
+        "xml\n",                                                 // 6
+        "{{ else }}\n",                                          // 7
+        "plain\n",                                               // 8
+        "{{ end }}\n",                                           // 9
+        "{{ for item in items }}\n",                             // 10
+        "- {{ item }}\n",                                        // 11
+        "{{ end }}\n",                                           // 12
+        "{{ raw }}\n",                                           // 13
+        "{{literal}}\n",                                         // 14
+        "{{ endraw }}\n",                                        // 15
+        "{{ endsection }}\n",                                    // 16
+    );
+
+    fn prompt_document(source: &str) -> DocumentState {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("greet.harn.prompt");
+        std::fs::write(&path, source).unwrap();
+        DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn-prompt",
+            &Url::from_file_path(&path).unwrap(),
+            &RuleWorkspace::from_root(temp.path()),
+        )
+    }
+
+    #[test]
+    fn folds_every_prompt_block_construct() {
+        let state = prompt_document(PROMPT_SOURCE);
+        let ranges = build_prompt_folding_ranges(&state.source, &state.prompt_outline);
+
+        let actual: Vec<_> = ranges
+            .iter()
+            .map(|range| (range.start_line, range.end_line, range.kind.clone()))
+            .collect();
+        let region = Some(FoldingRangeKind::Region);
+        assert_eq!(
+            actual,
+            vec![
+                (0, 1, Some(FoldingRangeKind::Comment)),
+                (2, 16, region.clone()),  // section .. endsection
+                (3, 9, region.clone()),   // if .. end
+                (5, 9, region.clone()),   // elif .. end
+                (7, 9, region.clone()),   // else .. end
+                (10, 12, region.clone()), // for .. end
+                (13, 15, region),         // raw .. endraw
+            ]
+        );
+    }
+
+    #[test]
+    fn single_line_blocks_are_not_foldable() {
+        let state = prompt_document("{{ if a }}yes{{ else }}no{{ end }}\n");
+        assert!(
+            build_prompt_folding_ranges(&state.source, &state.prompt_outline).is_empty(),
+            "a block that opens and closes on one line hides nothing"
+        );
+    }
+
+    #[test]
+    fn an_unparseable_prompt_folds_nothing() {
+        // No `{{ end }}`: the parse failure is reported as a diagnostic,
+        // and geometry from a half-parsed template would be a guess.
+        let state = prompt_document("{{ if a }}\nbody\n");
+        assert!(state.prompt_outline.is_empty());
+        assert!(build_prompt_folding_ranges(&state.source, &state.prompt_outline).is_empty());
+    }
+
+    #[test]
+    fn harn_documents_keep_their_own_folding() {
+        let state = DocumentState::new("fn f() {\n  log(1)\n}\n".to_string());
+        assert!(
+            state.prompt_outline.is_empty(),
+            "a Harn program has no template outline"
+        );
+        let ranges = build_folding_ranges(&state.source, state.cached_ast.as_deref());
+        assert!(
+            ranges
+                .iter()
+                .any(|range| range.start_line == 0 && range.end_line == 2),
+            "expected the function fold, got {ranges:?}"
         );
     }
 }

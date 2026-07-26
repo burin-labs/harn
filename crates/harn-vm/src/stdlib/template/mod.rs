@@ -37,6 +37,7 @@ mod filters;
 mod lexer;
 pub mod lint;
 pub(crate) mod llm_context;
+pub mod outline;
 mod parser;
 mod render;
 mod sections;
@@ -47,6 +48,7 @@ mod tests;
 use assets::parse_cached;
 pub(crate) use assets::TemplateAsset;
 use error::TemplateError;
+pub use error::TemplateParseError;
 pub use llm_context::{
     current_llm_render_context, pop_llm_render_context, push_llm_render_context, LlmRenderContext,
     LlmRenderContextGuard,
