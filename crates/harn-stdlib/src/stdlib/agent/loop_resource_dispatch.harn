@@ -826,9 +826,7 @@ pub fn __spawn_audit_flushes(tasks, flushes) {
   let out = tasks
   for flush in flushes {
     const task = spawn {
-      let _ = try {
-        flush()
-      }
+      flush()
     }
     out = out.appending(task)
   }
@@ -837,9 +835,7 @@ pub fn __spawn_audit_flushes(tasks, flushes) {
 
 pub fn __drain_audit_flushes(tasks) {
   for task in tasks {
-    let _ = try {
-      await(task)
-    }
+    await(task)
   }
 }
 

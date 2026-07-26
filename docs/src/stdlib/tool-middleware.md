@@ -165,7 +165,11 @@ result event.
 When the local sink is active, the middleware attaches a `file://`
 `receipt_uri` to `result.audit` and to the typed receipt's embedded
 `audit` dict so portal-style hosts can deep-link directly to the
-persisted JSONL line.
+persisted JSONL line. Sink failures are not best-effort: a synchronous
+failure becomes a `tool_middleware_exception` result, and a deferred
+failure stops the agent loop when its background flush is drained. A
+failed local write therefore cannot return a successful result that
+claims a nonexistent `receipt_uri`.
 
 ```harn,ignore
 const caller = compose_tool_callers([
