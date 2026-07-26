@@ -30,6 +30,7 @@ fn harn_dap_bin() -> String {
 /// `recv_timeout` rather than polling a wall clock (which the flaky-test lint
 /// forbids, and rightly so).
 const RECV_BUDGET: Duration = Duration::from_secs(30);
+const STARTUP_BUDGET: Duration = Duration::from_mins(2);
 
 /// A DAP client speaking to a spawned `harn-dap` over its stdio pipes.
 struct DapClient {
@@ -85,8 +86,7 @@ impl DapClient {
 
     /// Block for messages until `pred` matches, returning that message. Fails
     /// the test (rather than hanging forever) if no message arrives within the
-    /// budget or the adapter closes its stdout first — a wedged handshake is
-    /// exactly the failure mode this smoke test must catch.
+    /// budget or the adapter closes its stdout first.
     fn read_until(&mut self, what: &str, pred: impl Fn(&Value) -> bool) -> Value {
         loop {
             match self.rx.recv_timeout(RECV_BUDGET) {
@@ -94,6 +94,25 @@ impl DapClient {
                 Ok(_) => continue,
                 Err(RecvTimeoutError::Timeout) => {
                     panic!("timed out waiting for {what}; adapter produced no matching message")
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("adapter closed stdout before producing {what}")
+                }
+            }
+        }
+    }
+
+    /// Give process startup its own generous budget rather than folding it into
+    /// a per-message deadline. Nextest owns the still-longer outer wedge ceiling
+    /// for this subprocess test; once the adapter responds, `read_until` keeps
+    /// the tighter per-message bound.
+    fn read_until_started(&mut self, what: &str, pred: impl Fn(&Value) -> bool) -> Value {
+        loop {
+            match self.rx.recv_timeout(STARTUP_BUDGET) {
+                Ok(msg) if pred(&msg) => return msg,
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!("timed out waiting for {what} during adapter startup")
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     panic!("adapter closed stdout before producing {what}")
@@ -139,7 +158,7 @@ fn dap_stdio_hits_breakpoint_and_reads_a_local_variable() {
         "initialize",
         json!({ "adapterID": "harn", "linesStartAt1": true, "columnsStartAt1": true }),
     );
-    let init_resp = dap.read_until("initialize response", |m| is_response(m, "initialize"));
+    let init_resp = dap.read_until_started("initialize response", |m| is_response(m, "initialize"));
     assert_eq!(init_resp["success"], json!(true), "initialize must succeed");
     dap.read_until("initialized event", |m| is_event(m, "initialized"));
 

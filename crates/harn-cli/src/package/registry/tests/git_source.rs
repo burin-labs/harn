@@ -1,7 +1,10 @@
 //! Git spec handling and the hardened git environment.
 
-use super::super::git_source::{pick_ls_remote_commit, HardenedGitEnv};
+use super::super::git_source::pick_ls_remote_commit;
 
+#[cfg(unix)]
+use super::super::git_source::HardenedGitEnv;
+#[cfg(unix)]
 use crate::package::*;
 
 #[test]
