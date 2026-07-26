@@ -67,7 +67,7 @@ mod policy;
 mod replace;
 #[cfg(target_os = "windows")]
 mod windows;
-mod workspace_env;
+pub(crate) mod workspace_env;
 #[cfg(all(test, unix))]
 mod workspace_env_integration;
 

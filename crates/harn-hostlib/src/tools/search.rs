@@ -13,6 +13,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkMatch};
+use harn_vm::ignore_policy::{self, IgnorePolicy};
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 use ignore::WalkBuilder;
@@ -57,6 +58,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let case_insensitive = optional_bool(BUILTIN, dict, "case_insensitive", false)?;
     let fixed_strings = optional_bool(BUILTIN, dict, "fixed_strings", false)?;
     let include_hidden = optional_bool(BUILTIN, dict, "include_hidden", false)?;
+    let policy = ignore_policy_arg(dict)?;
     let max_matches = optional_int(BUILTIN, dict, "max_matches", 1000)?;
     let max_line_bytes = optional_int(
         BUILTIN,
@@ -106,18 +108,16 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let exclude_set = build_exclude_globs(exclude_globs)?;
 
     let mut walker = WalkBuilder::new(&path);
-    walker
-        .hidden(!include_hidden)
-        .ignore(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        // Honor `.gitignore` even outside a git repo. The deterministic-tools
-        // surface should match developer expectation: a `.gitignore` next to
-        // the search root filters results regardless of whether `.git/`
-        // exists. (Without this, `ignore` requires a `.git/` ancestor.)
-        .require_git(false)
-        .parents(true);
+    walker.sort_by_file_name(|left, right| left.cmp(right));
+    // The deterministic-tools surface skips exactly what the in-VM builtins
+    // skip; `harn_vm::ignore_policy` is the single owner of that decision.
+    ignore_policy::configure(&mut walker, &path, policy, include_hidden).map_err(|message| {
+        HostlibError::InvalidParameter {
+            builtin: BUILTIN,
+            param: "ignore_policy",
+            message,
+        }
+    })?;
 
     let mut all_rows: Vec<RowWithPath> = Vec::new();
     let mut truncated = false;
@@ -178,6 +178,17 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("matches", VmValue::List(Arc::new(matches))),
         ("truncated", VmValue::Bool(truncated)),
     ]))
+}
+
+fn ignore_policy_arg(dict: &harn_vm::value::DictMap) -> Result<IgnorePolicy, HostlibError> {
+    let Some(raw) = optional_string(BUILTIN, dict, IgnorePolicy::OPTION_KEY)? else {
+        return Ok(IgnorePolicy::default());
+    };
+    IgnorePolicy::parse_for(BUILTIN, &raw).map_err(|message| HostlibError::InvalidParameter {
+        builtin: BUILTIN,
+        param: "ignore_policy",
+        message,
+    })
 }
 
 fn build_matcher(

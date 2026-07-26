@@ -29,7 +29,13 @@
     },
     "context_before": { "type": "integer", "minimum": 0, "default": 0 },
     "context_after": { "type": "integer", "minimum": 0, "default": 0 },
-    "include_hidden": { "type": "boolean", "default": false }
+    "include_hidden": { "type": "boolean", "default": false },
+    "ignore_policy": {
+      "type": "string",
+      "enum": ["none", "builtin", "project"],
+      "default": "project",
+      "description": "How much of the ignore stack applies. `none` walks everything; `builtin` applies Harn's built-in directory defaults; `project` adds `.gitignore`, `.ignore`, and `.agentignore`."
+    }
   },
   "required": ["pattern"],
   "additionalProperties": false

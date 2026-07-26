@@ -82,6 +82,77 @@ matches as `glob(...)`. Patterns are matched against forward-slash paths
 relative to the base directory, and the `background` option returns
 a long-running operation handle.
 
+Every filesystem walk — `glob`, `walk_dir`, `find_text`, `find_evidence`, and
+project scanning — shares one ignore stack, selected per call with
+`ignore_policy`:
+
+| Level | Behavior |
+| --- | --- |
+| `"none"` | Raw walk. Nothing is skipped. |
+| `"builtin"` | Harn's built-in directory defaults only (`.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, `.venv`, `venv`, `__pycache__`, `.hg`, `.svn`, and Harn's own `.harn`, `.harn-runs`, `.harn-tmp`). |
+| `"project"` | The built-in defaults plus `.gitignore`, `.ignore`, and `.agentignore`, in that order of increasing precedence. |
+
+Defaults differ by surface, deliberately:
+
+| Surface | Default |
+| --- | --- |
+| `glob`, `walk_dir`, `find_text`, `find_evidence`, `project_scan`, hostlib `tools/search`, hostlib scanner | `"project"` |
+| `hostlib_fs_watch_subscribe` | `"builtin"` |
+
+Watching applies universal hygiene but not project ignore rules: a recursive
+watch over `node_modules` or `target` exhausts the OS watch budget and delivers
+churn nobody consumes, while a `.gitignore` says to keep a file out of version
+control, which is not the claim that it should change silently — a developer
+editing a
+gitignored file still needs its events, and a dropped event is
+indistinguishable from nothing having happened.
+
+The built-in defaults are the lowest layer, so a project ignore file can take
+them back: a `.gitignore` containing `!dist/` re-includes `dist`. `vendor` is
+deliberately *not* a built-in skip, because committed `go mod vendor` trees are
+tracked source.
+
+Results are deterministic by construction: machine-local ignore sources
+(`core.excludesFile`, `.git/info/exclude`) are never read, and only ignore
+files at or below the walk base participate. Two walks of the same repository
+at the same commit return the same list on any machine.
+
+Project ignore files only apply inside a project — a directory with a `.git`
+(or `.jj`) entry above it, or a sandbox workspace root. Outside one, and inside
+a Harn scratch directory (`harness.fs.workspace_temp_dir()`,
+`harness.fs.mkdtemp_in_workspace()`), a `"project"` walk degrades to
+`"builtin"`. That is what keeps the `*` `.gitignore` Harn writes into its own
+scratch dirs from blanking a walk, while still skipping `node_modules` in an
+unmanaged tree. A `.gitignore` sitting next to a directory that is not a
+checkout no longer filters anything.
+
+## Naming an ignored directory
+
+The walker prunes an ignored directory before any pattern is tested, so *where*
+you name that directory decides whether you can reach it:
+
+```harn
+// Returns nothing: `target` is pruned as a descendant, and the pattern never
+// gets a chance to run against anything inside it.
+harness.fs.glob("target/**/*.rs")
+
+// Returns matches: the walk root is never filtered by the rule that would
+// have ignored it.
+harness.fs.glob("**/*.rs", "target")
+
+// Also returns matches: opt out of the layer that hides it.
+harness.fs.glob("target/**/*.rs", {base: ".", ignore_policy: "builtin"})
+```
+
+This mirrors ripgrep, where `rg --files build` lists files under `build/` even
+when a parent `.gitignore` excludes `build/`. If a glob that used to work now
+returns an empty list, check whether its pattern names an ignored directory
+that should be the `base` instead.
+
+Hidden-file filtering is a separate axis. `glob` and `walk_dir` always list
+dotfiles, so `glob(".github/workflows/*.yml")` works; `find_text` and
+`find_evidence` keep their `include_hidden: false` default.
+
 `harness.fs.find_text(root, pattern, options?)` walks with gitignore-aware
 defaults and searches matching files in the VM. It returns a list of
 `{path, line, col, column, text}` hits by default. Set `mode: "exists"` for a
@@ -89,9 +160,9 @@ boolean short-circuit or `mode: "count"` for an integer count. The search is
 fixed-string by default for lint/source-guard workloads; pass
 `{fixed_strings: false}` to treat `pattern` as a regular expression.
 `preset: "source"` adds common source-tree excludes (`node_modules`, `target`,
-`dist`, `.git`, `.harn-runs`, `vendor`) and a 1 MiB file-size ceiling;
-`preset: "all"` disables hidden-file and ignore filtering. Use `include`,
-`exclude`, `ignore`, or their `*_globs` forms with glob strings or lists for
+`dist`, `.git`, `.harn-runs`) and a 1 MiB file-size ceiling. To search
+everything, pass `{ignore_policy: "none", include_hidden: true}`. Use
+`include`, `exclude`, or their `*_globs` forms with glob strings or lists for
 explicit overrides. Count mode is capped by `max_matches` (default 1000).
 Summary modes can set `parallel: true` and optional `threads` for a parallel
 walker.

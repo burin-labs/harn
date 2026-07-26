@@ -12,8 +12,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use harn_vm::agent_events::{AgentEvent, FsWatchEvent};
+use harn_vm::ignore_policy::{self, IgnorePolicy};
 use harn_vm::VmValue;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::gitignore::Gitignore;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -294,14 +295,31 @@ impl SubscribeRequest {
                 message: "must be >= 0".to_string(),
             });
         }
-        let respect_gitignore = optional_bool(SUBSCRIBE_BUILTIN, dict, "respect_gitignore", false)?;
+        // Watching is the one surface that defaults to `Builtin` rather than
+        // `Project`, because the two halves of the stack answer different
+        // questions here.
+        //
+        // Universal hygiene applies: a recursive watch over `node_modules` or
+        // `target` exhausts the OS watch budget (one inotify watch per
+        // directory on Linux) and delivers churn nobody consumes, which is this
+        // issue's unbounded-cost class in its most expensive form.
+        //
+        // Project ignore files do not apply: `.gitignore` says to keep a file
+        // out of version control, which is not the same claim as staying
+        // silent when it changes. A developer actively editing such a file
+        // still needs
+        // its events, and a dropped event is invisible — indistinguishable from
+        // nothing having happened.
+        //
+        // A subscriber that genuinely wants raw coverage passes
+        // `ignore_policy: "none"`.
+        let ignore_policy = ignore_policy_arg(dict)?.unwrap_or(IgnorePolicy::Builtin);
 
         Ok(Self {
             session_id,
-            gitignore: if respect_gitignore {
-                Some(build_gitignore(&root))
-            } else {
-                None
+            gitignore: match ignore_policy {
+                IgnorePolicy::None => None,
+                policy => Some(ignore_policy::matcher(&root, policy)),
             },
             globs: build_globs(raw_globs.unwrap_or_default())?,
             kinds: parse_kinds(dict)?,
@@ -409,7 +427,21 @@ fn coalesce_events(events: Vec<Event>, filter: &WatchFilter) -> Vec<FsWatchEvent
 impl WatchFilter {
     fn matches_path(&self, path: &Path) -> bool {
         if let Some(gitignore) = &self.gitignore {
-            if gitignore.matched(path, path.is_dir()).is_ignore() {
+            // A watcher is handed leaf paths, so matching the path on its own
+            // would pass every file *inside* an ignored directory — which is
+            // the churn this filter exists to suppress, since a rule like
+            // `node_modules/` only ever matches the directory entry itself.
+            //
+            // The parent-aware matcher asserts its argument is under the
+            // matcher's root, and it strips that root itself. Handing it a
+            // path already relative to the watch root satisfies the assert
+            // without depending on the two roots being spelled identically —
+            // they need not be, since one may be canonicalized.
+            let verdict = match path.strip_prefix(&self.root) {
+                Ok(relative) => gitignore.matched_path_or_any_parents(relative, path.is_dir()),
+                Err(_) => gitignore.matched(path, path.is_dir()),
+            };
+            if verdict.is_ignore() {
                 return false;
             }
         }
@@ -494,17 +526,17 @@ fn build_globs(globs: Vec<String>) -> Result<Option<GlobSet>, HostlibError> {
     })?))
 }
 
-fn build_gitignore(root: &Path) -> Gitignore {
-    let mut builder = GitignoreBuilder::new(root);
-    let gitignore = root.join(".gitignore");
-    if gitignore.exists() {
-        let _ = builder.add(gitignore);
-    }
-    let exclude = root.join(".git").join("info").join("exclude");
-    if exclude.exists() {
-        let _ = builder.add(exclude);
-    }
-    builder.build().unwrap_or_else(|_| Gitignore::empty())
+fn ignore_policy_arg(dict: &harn_vm::value::DictMap) -> Result<Option<IgnorePolicy>, HostlibError> {
+    let Some(raw) = optional_string(SUBSCRIBE_BUILTIN, dict, IgnorePolicy::OPTION_KEY)? else {
+        return Ok(None);
+    };
+    IgnorePolicy::parse_for(SUBSCRIBE_BUILTIN, &raw)
+        .map(Some)
+        .map_err(|message| HostlibError::InvalidParameter {
+            builtin: SUBSCRIBE_BUILTIN,
+            param: "ignore_policy",
+            message,
+        })
 }
 
 fn normalize_glob(glob: &str) -> String {
@@ -574,6 +606,74 @@ mod tests {
             gitignore: None,
             kinds: parse_kinds(&harn_vm::value::DictMap::new()).unwrap(),
         }
+    }
+
+    /// Watching defaults to `builtin`, and the two halves matter
+    /// independently: universal hygiene keeps a recursive watch out of
+    /// dependency and build trees that would exhaust the OS watch budget,
+    /// while project ignore files stay unread so a gitignored file a
+    /// developer is actively editing still reports its changes. A dropped
+    /// event is indistinguishable from no change, so both directions are
+    /// pinned here.
+    #[test]
+    fn watch_default_applies_builtin_hygiene_but_not_project_ignore_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), "tracked-but-ignored.txt\n").unwrap();
+        std::fs::create_dir_all(root.join("node_modules/dep")).unwrap();
+
+        let mut dict = harn_vm::value::DictMap::new();
+        dict.insert(
+            arcstr::ArcStr::from("root"),
+            harn_vm::VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
+        );
+        dict.insert(
+            arcstr::ArcStr::from("session_id"),
+            harn_vm::VmValue::String(arcstr::ArcStr::from("session")),
+        );
+        let request = SubscribeRequest::from_dict(&dict).expect("subscribe request");
+
+        let mut filter = filter(root.clone(), None);
+        filter.gitignore = request.gitignore;
+
+        assert!(
+            !filter.matches_path(&root.join("node_modules/dep/index.js")),
+            "a default watch must not descend dependency trees"
+        );
+        assert!(
+            filter.matches_path(&root.join("tracked-but-ignored.txt")),
+            "a gitignored file still changes, and the subscriber still needs to know"
+        );
+        assert!(filter.matches_path(&root.join("src/main.rs")));
+    }
+
+    /// `ignore_policy: "none"` is the one escape hatch back to raw coverage.
+    #[test]
+    fn watch_ignore_policy_none_watches_everything() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_path_buf();
+        std::fs::create_dir_all(root.join("node_modules/dep")).unwrap();
+
+        let mut dict = harn_vm::value::DictMap::new();
+        dict.insert(
+            arcstr::ArcStr::from("root"),
+            harn_vm::VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
+        );
+        dict.insert(
+            arcstr::ArcStr::from("session_id"),
+            harn_vm::VmValue::String(arcstr::ArcStr::from("session")),
+        );
+        dict.insert(
+            arcstr::ArcStr::from("ignore_policy"),
+            harn_vm::VmValue::String(arcstr::ArcStr::from("none")),
+        );
+        let request = SubscribeRequest::from_dict(&dict).expect("subscribe request");
+        assert!(request.gitignore.is_none());
+
+        let mut filter = filter(root.clone(), None);
+        filter.gitignore = request.gitignore;
+        assert!(filter.matches_path(&root.join("node_modules/dep/index.js")));
     }
 
     #[test]
@@ -670,9 +770,10 @@ mod tests {
     #[test]
     fn gitignore_filter_drops_ignored_paths() {
         let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join(".git")).unwrap();
         std::fs::write(temp.path().join(".gitignore"), "ignored.txt\n").unwrap();
         let mut filter = filter(temp.path().to_path_buf(), None);
-        filter.gitignore = Some(build_gitignore(temp.path()));
+        filter.gitignore = Some(ignore_policy::matcher(temp.path(), IgnorePolicy::Project));
 
         let events = coalesce_events(
             vec![

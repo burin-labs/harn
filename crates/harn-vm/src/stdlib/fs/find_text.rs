@@ -13,9 +13,10 @@ use ignore::{WalkBuilder, WalkState};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 
+use super::ignore_policy::{self, IgnorePolicy};
 use super::{
-    bool_option, int_option, reject_retired_long_running_option, resolve_fs_path,
-    string_list_option, string_option, u64_option, usize_option,
+    bool_option, ignore_policy_option, int_option, reject_retired_long_running_option,
+    resolve_fs_path, string_list_option, string_option, u64_option, usize_option,
 };
 
 #[derive(Clone)]
@@ -24,7 +25,7 @@ struct FindTextOptions {
     max_filesize: Option<u64>,
     follow_symlinks: bool,
     include_hidden: bool,
-    respect_gitignore: bool,
+    ignore_policy: IgnorePolicy,
     case_insensitive: bool,
     fixed_strings: bool,
     preset: FindTextPreset,
@@ -44,11 +45,13 @@ enum FindTextMode {
     Exists,
 }
 
+/// Bundled option defaults. Ignore behavior is *not* a preset concern —
+/// `ignore_policy` owns that axis, so there is exactly one way to spell
+/// "search everything".
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum FindTextPreset {
     Default,
     Source,
-    All,
 }
 
 #[derive(Clone)]
@@ -74,7 +77,7 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
         max_filesize: None,
         follow_symlinks: false,
         include_hidden: false,
-        respect_gitignore: true,
+        ignore_policy: IgnorePolicy::default(),
         case_insensitive: false,
         fixed_strings: true,
         preset: FindTextPreset::Default,
@@ -90,7 +93,6 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
         reject_retired_long_running_option(opts, "find_text")?;
         options.preset = match string_option(opts, "preset").as_deref() {
             Some("source") | Some("sources") => FindTextPreset::Source,
-            Some("all") => FindTextPreset::All,
             Some("default") | None => FindTextPreset::Default,
             Some(other) => {
                 return Err(find_text_error(format!(
@@ -101,9 +103,6 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
         if options.preset == FindTextPreset::Source {
             options.exclude_globs = source_preset_exclude_globs();
             options.max_filesize = Some(1_048_576);
-        } else if options.preset == FindTextPreset::All {
-            options.include_hidden = true;
-            options.respect_gitignore = false;
         }
         if let Some(v) = int_option(opts, "max_depth") {
             if v >= 0 {
@@ -119,8 +118,7 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
         options.include_hidden = bool_option(opts, "include_hidden")
             .or_else(|| bool_option(opts, "hidden"))
             .unwrap_or(options.include_hidden);
-        options.respect_gitignore =
-            bool_option(opts, "respect_gitignore").unwrap_or(options.respect_gitignore);
+        options.ignore_policy = ignore_policy_option(opts, "find_text")?;
         options.case_insensitive = bool_option(opts, "case_insensitive")
             .unwrap_or_else(|| !bool_option(opts, "case_sensitive").unwrap_or(true));
         options.fixed_strings = bool_option(opts, "fixed_strings").unwrap_or(true);
@@ -134,12 +132,6 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
         options
             .exclude_globs
             .extend(string_list_option(opts, "exclude_globs"));
-        options
-            .exclude_globs
-            .extend(string_list_option(opts, "ignore"));
-        options
-            .exclude_globs
-            .extend(string_list_option(opts, "ignore_globs"));
         if let Some(v) = int_option(opts, "max_matches") {
             options.max_matches = usize::try_from(v.max(1)).unwrap_or(usize::MAX);
         }
@@ -163,6 +155,12 @@ fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError>
     Ok(options)
 }
 
+/// Exclude globs the `source` preset adds on top of the ignore stack.
+///
+/// These overlap [`ignore_policy::BUILTIN_IGNORED_DIRS`] on purpose: the
+/// preset must still trim build output when a caller pairs it with
+/// `ignore_policy: "none"`. `vendor/**` is absent for the same reason the
+/// built-in list omits `vendor` — committed `go mod vendor` trees are source.
 fn source_preset_exclude_globs() -> Vec<String> {
     [
         ".git/**",
@@ -170,7 +168,6 @@ fn source_preset_exclude_globs() -> Vec<String> {
         "dist/**",
         "node_modules/**",
         "target/**",
-        "vendor/**",
     ]
     .into_iter()
     .map(str::to_string)
@@ -230,25 +227,28 @@ fn find_text_file_included(
     true
 }
 
-fn find_text_walk_builder(root: &PathBuf, options: &FindTextOptions) -> WalkBuilder {
+fn find_text_walk_builder(
+    root: &PathBuf,
+    options: &FindTextOptions,
+) -> Result<WalkBuilder, VmError> {
     let mut walker = WalkBuilder::new(root);
     walker
-        .hidden(!options.include_hidden)
-        .ignore(options.respect_gitignore)
-        .git_ignore(options.respect_gitignore)
-        .git_global(options.respect_gitignore)
-        .git_exclude(options.respect_gitignore)
-        .require_git(false)
-        .parents(true)
         .follow_links(options.follow_symlinks)
         .sort_by_file_name(|left, right| left.cmp(right));
+    ignore_policy::configure(
+        &mut walker,
+        root,
+        options.ignore_policy,
+        options.include_hidden,
+    )
+    .map_err(find_text_error)?;
     if let Some(max_depth) = options.max_depth {
         walker.max_depth(Some(max_depth));
     }
     if let Some(max_filesize) = options.max_filesize {
         walker.max_filesize(Some(max_filesize));
     }
-    walker
+    Ok(walker)
 }
 
 fn find_text_matcher(pattern: &str, options: &FindTextOptions) -> Result<RegexMatcher, VmError> {
@@ -364,7 +364,7 @@ fn find_text_matches(
     let include_set = build_glob_set(&options.include_globs, "include")?;
     let exclude_set = build_glob_set(&options.exclude_globs, "exclude")?;
 
-    let walker = find_text_walk_builder(root, &options);
+    let walker = find_text_walk_builder(root, &options)?;
 
     let mut hits = Vec::new();
     let mut searcher = SearcherBuilder::new().line_number(true).build();
@@ -438,7 +438,7 @@ fn find_text_summary_sequential(
     let matcher = find_text_matcher(pattern, &options)?;
     let include_set = build_glob_set(&options.include_globs, "include")?;
     let exclude_set = build_glob_set(&options.exclude_globs, "exclude")?;
-    let walker = find_text_walk_builder(root, &options);
+    let walker = find_text_walk_builder(root, &options)?;
     let mut summary = FindTextSummary {
         matched: false,
         count: 0,
@@ -511,7 +511,7 @@ fn find_text_summary_parallel(
         });
     }
 
-    let mut walker = find_text_walk_builder(root, &options);
+    let mut walker = find_text_walk_builder(root, &options)?;
     if let Some(threads) = options.threads {
         walker.threads(threads);
     }

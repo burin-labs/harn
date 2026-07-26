@@ -155,12 +155,12 @@ pub type EvidenceReceipt = {
 }
 
 pub type EvidenceOptions = {
-  preset?: "default" | "source" | "all",
+  preset?: "default" | "source",
   max_depth?: int,
   max_filesize?: int,
   follow_symlinks?: bool,
   include_hidden?: bool,
-  respect_gitignore?: bool,
+  ignore_policy?: "none" | "builtin" | "project",
   case_insensitive?: bool,
   include?: list<string>,
   exclude?: list<string>,

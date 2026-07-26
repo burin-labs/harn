@@ -45,7 +45,7 @@ mod event_log;
 mod external_agent;
 pub(crate) mod files;
 mod flow;
-mod fs;
+pub(crate) mod fs;
 mod git;
 pub(crate) mod git_topology;
 mod grounding;

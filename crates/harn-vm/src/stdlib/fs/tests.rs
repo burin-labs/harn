@@ -1422,3 +1422,101 @@ fn unknown_prompt_asset_is_a_typed_not_found_result() {
     .expect("unknown assets are returned as Result.Err");
     assert_eq!(field(result_error(&result), "kind").display(), "not_found");
 }
+
+/// The long-running branches of `glob` and `walk_dir` must not silently drop
+/// the resolved ignore policy — an async result that differs from the sync
+/// one would be a correctness bug no caller could see.
+///
+/// Both builtins resolve the policy once and hand the same value to the
+/// sync call and to the spawned closure. These assertions pin the two halves
+/// of that: the parsers carry every level through every argument shape, and
+/// the functions the closures call return exactly what the sync path returns.
+#[test]
+fn long_running_walks_resolve_the_same_ignore_policy_as_sync_walks() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join("target")).unwrap();
+    std::fs::write(root.join("src/a.txt"), "a\n").unwrap();
+    std::fs::write(root.join("target/b.txt"), "b\n").unwrap();
+    let root_str = root.to_string_lossy().to_string();
+
+    for (level, expected) in [
+        ("none", IgnorePolicy::None),
+        ("builtin", IgnorePolicy::Builtin),
+        ("project", IgnorePolicy::Project),
+    ] {
+        // `glob(pattern, {base, ignore_policy})`
+        let options = parse_glob_options(&[
+            s("**/*.txt"),
+            dict(vec![
+                ("base", s(&root_str)),
+                ("ignore_policy", s(level)),
+                ("long_running", b(true)),
+            ]),
+        ])
+        .expect("glob options");
+        assert_eq!(options.ignore_policy, expected, "glob dict form: {level}");
+
+        // `glob(pattern, base, {ignore_policy})` — the positional-base shape
+        // reads the option from a different argument slot.
+        let positional = parse_glob_options(&[
+            s("**/*.txt"),
+            s(&root_str),
+            dict(vec![("ignore_policy", s(level)), ("long_running", b(true))]),
+        ])
+        .expect("glob positional options");
+        assert_eq!(
+            positional.ignore_policy, expected,
+            "glob positional form: {level}"
+        );
+
+        let walk_options = parse_walk_dir_options(&[
+            s(&root_str),
+            dict(vec![("ignore_policy", s(level)), ("long_running", b(true))]),
+        ])
+        .expect("walk_dir options");
+        assert_eq!(walk_options.ignore_policy, expected, "walk_dir: {level}");
+
+        // The spawned closures call these exact functions with the resolved
+        // policy, so agreeing here is the async path agreeing.
+        let sync_matches =
+            glob_matches("**/*.txt", &root.to_path_buf(), expected, None).expect("glob");
+        let spawned_matches =
+            glob_matches("**/*.txt", &root.to_path_buf(), options.ignore_policy, None)
+                .expect("glob");
+        assert_eq!(sync_matches, spawned_matches, "glob results: {level}");
+
+        let sync_walk = walk_dir_entries(&root.to_path_buf(), walk_options, None)
+            .expect("walk")
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>();
+        let spawned_walk = walk_dir_entries(&root.to_path_buf(), walk_options, None)
+            .expect("walk")
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>();
+        assert_eq!(sync_walk, spawned_walk, "walk_dir results: {level}");
+
+        // And the level actually changed something, so the assertions above
+        // are not comparing two identically-empty runs.
+        let saw_target = sync_matches.iter().any(|path| path.contains("/target/"));
+        assert_eq!(
+            saw_target,
+            expected == IgnorePolicy::None,
+            "only a raw walk should reach target/: {level}"
+        );
+    }
+}
+
+/// An unknown level is rejected before any walk starts, on every fs surface
+/// and in every argument shape.
+#[test]
+fn unknown_ignore_policy_is_rejected_by_every_fs_option_parser() {
+    let bad = dict(vec![("ignore_policy", s("gitignore"))]);
+    assert!(parse_glob_options(&[s("*"), bad.clone()]).is_err());
+    assert!(parse_glob_options(&[s("*"), s("."), bad.clone()]).is_err());
+    assert!(parse_walk_dir_options(&[s("."), bad]).is_err());
+}

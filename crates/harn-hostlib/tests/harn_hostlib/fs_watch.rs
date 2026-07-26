@@ -44,7 +44,7 @@ fn subscribe_returns_handle_and_unsubscribe_removes_it() {
         ("root", str_value(temp.path().to_string_lossy())),
         ("globs", list(&["*.txt"])),
         ("debounce_ms", VmValue::Int(0)),
-        ("respect_gitignore", VmValue::Bool(true)),
+        ("ignore_policy", str_value("project")),
     ])])
     .expect("subscribe succeeds");
     let subscription_id = response

@@ -18,12 +18,13 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use harn_vm::ignore_policy::IgnorePolicy;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_int, require_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string, str_value,
 };
 
 mod commands;
@@ -91,8 +92,8 @@ impl HostlibCapability for ScannerCapability {
 pub struct ScanProjectOptions {
     /// Include hidden (`.`) entries during walking.
     pub include_hidden: bool,
-    /// Honor `.gitignore`.
-    pub respect_gitignore: bool,
+    /// How much of the shared ignore stack applies.
+    pub ignore_policy: IgnorePolicy,
     /// Hard cap on file count (0 = unlimited).
     pub max_files: usize,
     /// Run `git log` to compute churn scores.
@@ -105,7 +106,7 @@ impl Default for ScanProjectOptions {
     fn default() -> Self {
         Self {
             include_hidden: false,
-            respect_gitignore: true,
+            ignore_policy: IgnorePolicy::default(),
             max_files: 0,
             include_git_history: true,
             repo_map_token_budget: 1200,
@@ -131,7 +132,7 @@ pub fn scan_project_with_git(
     let canonical = canonicalize(root);
     let discover_opts = discover::DiscoverOptions {
         include_hidden: opts.include_hidden,
-        respect_gitignore: opts.respect_gitignore,
+        ignore_policy: opts.ignore_policy,
     };
     let mut discovered = discover::discover_files(&canonical, discover_opts, git);
     let truncated = if opts.max_files > 0 && discovered.len() > opts.max_files {
@@ -232,7 +233,7 @@ pub fn scan_incremental_with_git(
 
     let discover_opts = discover::DiscoverOptions {
         include_hidden: opts.include_hidden,
-        respect_gitignore: opts.respect_gitignore,
+        ignore_policy: opts.ignore_policy,
     };
     let mut current = discover::discover_files(&canonical, discover_opts, git);
     if opts.max_files > 0 && current.len() > opts.max_files {
@@ -554,12 +555,26 @@ fn scan_incremental_handler(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     Ok(scan_result_to_value(&scan.result, Some(&scan.delta)))
 }
 
+fn ignore_policy_arg(
+    builtin: &'static str,
+    dict: &harn_vm::value::DictMap,
+) -> Result<IgnorePolicy, HostlibError> {
+    let Some(raw) = optional_string(builtin, dict, IgnorePolicy::OPTION_KEY)? else {
+        return Ok(IgnorePolicy::default());
+    };
+    IgnorePolicy::parse_for(builtin, &raw).map_err(|message| HostlibError::InvalidParameter {
+        builtin,
+        param: "ignore_policy",
+        message,
+    })
+}
+
 fn parse_options(
     builtin: &'static str,
     dict: &harn_vm::value::DictMap,
 ) -> Result<ScanProjectOptions, HostlibError> {
     let include_hidden = optional_bool(builtin, dict, "include_hidden", false)?;
-    let respect_gitignore = optional_bool(builtin, dict, "respect_gitignore", true)?;
+    let ignore_policy = ignore_policy_arg(builtin, dict)?;
     let max_files = optional_int(builtin, dict, "max_files", 0)?;
     let include_git_history_default = builtin == SCAN_PROJECT_BUILTIN;
     let include_git_history = optional_bool(
@@ -585,7 +600,7 @@ fn parse_options(
     }
     Ok(ScanProjectOptions {
         include_hidden,
-        respect_gitignore,
+        ignore_policy,
         max_files: max_files as usize,
         include_git_history,
         repo_map_token_budget: repo_map_token_budget as usize,

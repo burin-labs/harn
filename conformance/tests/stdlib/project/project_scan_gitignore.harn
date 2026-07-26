@@ -24,7 +24,7 @@ pipeline test(task) {
   const default_tree = project_scan_tree(root, {tiers: ["ambient"], depth: 4})
   const expanded_tree = project_scan_tree(
     root,
-    {tiers: ["ambient"], depth: 4, respect_gitignore: false, include_vendor: true},
+    {tiers: ["ambient"], depth: 4, ignore_policy: "none", include_vendor: true},
   )
   __io_println(default_tree.app.languages[0] == "rust")
   __io_println(!contains(keys(default_tree), "ignored"))
