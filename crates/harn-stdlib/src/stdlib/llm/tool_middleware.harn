@@ -513,7 +513,7 @@ pub fn with_required_reason(opts = nil) {
 /**
  * local_receipt_sink(session_id) -> sink_fn
  *
- * Returns a receipt sink that appends JSONL to `.harn/receipts/<session>.jsonl`.
+ * Returns a receipt sink that appends JSONL to `<state_root>/receipts/<session>.jsonl`.
  * The sink writes one record per invocation and does not buffer.
  *
  * @effects: []
@@ -523,10 +523,8 @@ pub fn local_receipt_sink(session_id) {
   const fallback = __tool_mw_optional_text(session_id) ?? "session"
   return { receipt ->
     const raw_session = __tool_mw_optional_text(receipt?.session_id) ?? fallback
-    const filename = __tool_mw_local_receipt_filename(raw_session)
-    const dir = path_join(".harn", "receipts")
-    harness.fs.mkdir(dir)
-    const path = path_join(dir, filename + ".jsonl")
+    const path = __tool_mw_local_receipt_path(raw_session)
+    harness.fs.mkdir(path_parent(path))
     harness.fs.append(path, json_stringify(receipt) + "\n")
     return path
   }
@@ -536,10 +534,28 @@ fn __tool_mw_local_receipt_filename(session_id_text) -> string {
   return session_id_text.replace("/", "_").replace("\\", "_")
 }
 
-fn __tool_mw_local_receipt_uri(session_id_value) -> string {
+/**
+ * The one place that knows where a local receipt lives.
+ *
+ * `runtime_paths().state_root` is Harn's own runtime state directory, so
+ * receipts follow `HARN_STATE_DIR` along with every other kind of run state
+ * instead of landing in a `.harn` beside whatever directory the agent
+ * happened to start in.
+ */
+fn __tool_mw_local_receipt_path(session_id_value) -> string {
   const raw = __tool_mw_optional_text(session_id_value) ?? "session"
   const filename = __tool_mw_local_receipt_filename(raw)
-  return "file://" + path_join(cwd(), ".harn", "receipts", filename + ".jsonl")
+  return path_join(runtime_paths().state_root, "receipts", filename + ".jsonl")
+}
+
+fn __tool_mw_local_receipt_uri(session_id_value) -> string {
+  const path = __tool_mw_local_receipt_path(session_id_value)
+  // `file://` needs an absolute path. The state root is absolute in every
+  // real run; anchor a relative one so the URI stays resolvable regardless.
+  if path_is_absolute(path) {
+    return "file://" + path
+  }
+  return "file://" + path_join(cwd(), path)
 }
 
 fn __tool_mw_receipt_status(result) -> string {
@@ -688,7 +704,7 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
  * `sink_or_options` accepts:
  *
  *   - callable: sink(receipt)
- *   - "local": append JSONL under `.harn/receipts/<session_id>.jsonl`
+ *   - "local": append JSONL under `<state_root>/receipts/<session_id>.jsonl`
  *   - "cloud": mirror the receipt through the host event bridge
  *   - "both": local append first, then host event bridge
  *   - {sink, redact}: same modes, dropping matching argument keys from args_hash

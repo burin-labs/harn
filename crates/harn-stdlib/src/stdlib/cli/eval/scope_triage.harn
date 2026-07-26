@@ -389,7 +389,7 @@ fn main(harness: Harness) -> int {
   )
   const output_dir = harness.env.get_or("HARN_EVAL_SCOPE_TRIAGE_OUTPUT", "")
   const resolved_output = if trim(output_dir) == "" {
-    ".harn-runs/scope-triage/latest"
+    path_join(runtime_paths().run_root, "scope-triage", "latest")
   } else {
     output_dir
   }

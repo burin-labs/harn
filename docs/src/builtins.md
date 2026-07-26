@@ -710,7 +710,7 @@ filesystem builtins remain supported as thin aliases for existing scripts.
 | `asset_root()` | none | string | Directory used for source-relative asset helpers such as `render(...)` / `render_prompt(...)` |
 | `source_dir()` | none | string | Directory of the currently-executing `.harn` file (falls back to cwd) |
 | `project_root()` | none | string or nil | Nearest ancestor directory containing `harn.toml` |
-| `runtime_paths()` | none | dict | Resolved runtime path model: `{execution_root, asset_root, state_root, run_root, worktree_root}` |
+| `runtime_paths()` | none | `{execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}` | Resolved runtime path model. `state_root` / `run_root` / `worktree_root` honor `HARN_STATE_DIR` / `HARN_RUN_DIR` / `HARN_WORKTREE_DIR`, so ask here instead of writing `.harn` by hand |
 | `date_iso()` | none | string | Current UTC time in ISO 8601 format (e.g., `"2026-03-29T14:30:00.123Z"`) |
 
 For interactive terminal presentation, import `std/tui`. It provides

@@ -21,7 +21,7 @@ fn smoke_tools() {
 
 pipeline default() {
   const session = "smoke-tool-receipts-" + uuid()
-  const receipt_path = path_join(".harn", "receipts", session + ".jsonl")
+  const receipt_path = path_join(runtime_paths().state_root, "receipts", session + ".jsonl")
   if harness.fs.exists(receipt_path) {
     harness.fs.delete(receipt_path)
   }
