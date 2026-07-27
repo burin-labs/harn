@@ -58,6 +58,28 @@ release_gate_stale_out_dir_packages() {
   [[ -s "$output" ]]
 }
 
+release_gate_clean_stale_out_dir_packages() {
+  local operation="$1"
+  local packages="$2"
+  local -a clean_args=(clean)
+  local package
+  while IFS= read -r package; do
+    clean_args+=(-p "$package")
+  done < "$packages"
+
+  local recovery_started recovery_elapsed
+  recovery_started="$(date +%s)"
+  printf 'recovery: stale Cargo build-script outputs detected for %s (packages=%s)\n' \
+    "$operation" "$(paste -sd, "$packages")"
+  if ! cargo "${clean_args[@]}"; then
+    echo "error: package-scoped stale build-script cleanup failed for $operation" >&2
+    return 1
+  fi
+  recovery_elapsed=$(( $(date +%s) - recovery_started ))
+  printf 'recovery: package-scoped Cargo cleanup complete for %s (%ss)\n' \
+    "$operation" "$recovery_elapsed"
+}
+
 release_gate_run_with_stale_out_dir_recovery() {
   local operation="$1"
   shift
@@ -84,22 +106,11 @@ release_gate_run_with_stale_out_dir_recovery() {
     return 1
   fi
 
-  local -a clean_args=(clean)
-  local package
-  while IFS= read -r package; do
-    clean_args+=(-p "$package")
-  done < "$packages"
-  local recovery_started recovery_elapsed
-  recovery_started="$(date +%s)"
-  printf 'recovery: stale Cargo build-script outputs detected (packages=%s)\n' "$(paste -sd, "$packages")"
-  if ! cargo "${clean_args[@]}"; then
+  if ! release_gate_clean_stale_out_dir_packages "$operation" "$packages"; then
     rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    echo "error: package-scoped stale build-script cleanup failed" >&2
     return 1
   fi
-  recovery_elapsed=$(( $(date +%s) - recovery_started ))
-  printf 'recovery: package-scoped Cargo cleanup complete (%ss); retrying %s once\n' \
-    "$recovery_elapsed" "$operation"
+  printf 'recovery: retrying %s once\n' "$operation"
   if "$@" 2> "$retry_diagnostics"; then
     rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
     echo "recovery: $operation succeeded after package-scoped cleanup"
@@ -515,6 +526,8 @@ cmd_audit() {
   echo "audit lane log dir: $tmp"
   local -a steps=()
   local -a pids=()
+  local -a runners=()
+  local -a failed_lane_indices=()
   local needs_harn_performance=0
 
   # Each step writes its wall-clock duration to `<name>.dur` so the
@@ -545,6 +558,7 @@ cmd_audit() {
     run_step "$name" "$@" &
     steps+=("$name")
     pids+=("$!")
+    runners+=("$1")
   }
 
   local lane_idx
@@ -566,7 +580,56 @@ cmd_audit() {
       printf 'ok: %-15s (%ss)\n' "$step" "$dur"
     else
       dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
-      printf 'fail: %-13s (%ss)\n' "$step" "$dur"
+      printf 'fail: %-13s (%ss; recovery classification deferred until siblings settle)\n' \
+        "$step" "$dur"
+      failed_lane_indices+=("$idx")
+    fi
+  done
+
+  # Only recover after every initially launched lane is settled. Cleaning an
+  # implicated package any earlier can invalidate build-script outputs while a
+  # sibling is still compiling or consuming them. The classifier restricts
+  # recovery to missing outputs inside this gate's active Cargo build directory;
+  # ordinary failures receive no cleanup or retry, and malformed paths fail
+  # closed.
+  for idx in "${failed_lane_indices[@]}"; do
+    local step="${steps[$idx]}"
+    local runner="${runners[$idx]}"
+    local first_log="$tmp/$step.first-attempt.log"
+    local packages="$tmp/$step.stale-packages"
+
+    local classification_status=0
+    release_gate_stale_out_dir_packages "$tmp/$step.log" "$packages" || classification_status=$?
+    if [[ "$classification_status" -eq 1 ]]; then
+      echo "recovery: $step failed without a recoverable stale build-script output"
+      failed=1
+      continue
+    fi
+    if [[ "$classification_status" -ne 0 ]]; then
+      echo "error: $step stale-output classification failed closed" >&2
+      failed=1
+      continue
+    fi
+    cp "$tmp/$step.log" "$first_log"
+    if ! release_gate_clean_stale_out_dir_packages "$step" "$packages"; then
+      failed=1
+      continue
+    fi
+
+    echo "recovery: retrying $step once after every initial audit lane settled"
+    run_step "$step" "$runner" &
+    local retry_pid
+    retry_pid=$!
+    if wait "$retry_pid"; then
+      local retry_dur
+      retry_dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
+      printf 'ok: %-15s (%ss retry)\n' "$step" "$retry_dur"
+      echo "recovery: $step succeeded after package-scoped cleanup"
+    else
+      local retry_dur
+      retry_dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
+      printf 'fail: %-13s (%ss retry)\n' "$step" "$retry_dur"
+      echo "error: $step retry failed after package-scoped stale-output cleanup" >&2
       failed=1
     fi
   done
@@ -629,8 +692,13 @@ cmd_audit() {
     echo ""
     echo "=== Full failed-audit logs ==="
     for step in "${steps[@]}"; do
+      if [[ -f "$tmp/$step.first-attempt.log" ]] && [[ -s "$tmp/$step.first-attempt.log" ]]; then
+        echo "--- $step (first attempt, before stale-output recovery) ---"
+        cat "$tmp/$step.first-attempt.log"
+        echo ""
+      fi
       if [[ -f "$tmp/$step.log" ]] && [[ -s "$tmp/$step.log" ]]; then
-        echo "--- $step ---"
+        echo "--- $step (terminal attempt) ---"
         cat "$tmp/$step.log"
         echo ""
       fi
