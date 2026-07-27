@@ -215,7 +215,7 @@ pub(crate) struct TextToolParseResult {
     /// diagnostics. The agent loop replays these to the model as structured
     /// `protocol_violation` feedback so it can self-correct.
     #[serde(rename = "protocol_violations")]
-    pub violations: Vec<String>,
+    pub violations: Vec<crate::llm::ProtocolViolation>,
     /// Body of the `<done>` block when one was emitted, trimmed of
     /// surrounding whitespace. The agent compares this against the
     /// pipeline's configured `done_sentinel` (default `##DONE##`) to

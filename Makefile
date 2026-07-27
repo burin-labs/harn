@@ -335,7 +335,7 @@ fmt-harn-fix:
 		| xargs -0 $(HARN_CMD) fmt
 	@find experiments -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
-	@find scripts -type f -name '*.harn' -print0 \
+	@find scripts -type d -name '.harn*' -prune -o -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt
 	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r $(HARN_CMD) fmt
@@ -349,7 +349,7 @@ fmt-harn:
 		| xargs -0 $(HARN_CMD) fmt --check
 	@find experiments -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
-	@find scripts -type f -name '*.harn' -print0 \
+	@find scripts -type d -name '.harn*' -prune -o -type f -name '*.harn' -print0 \
 		| xargs -0 $(HARN_CMD) fmt --check
 	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r $(HARN_CMD) fmt --check

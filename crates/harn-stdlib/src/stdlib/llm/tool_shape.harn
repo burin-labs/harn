@@ -29,6 +29,8 @@
  * says "wrap calls in <tool_call>" carries no body and matches nothing here.
  * Every check below requires an argument-bearing body, not a name.
  */
+import { ProtocolViolation, protocol_violation } from "std/llm/tool_parse_result"
+
 /** One dropped fragment as reported by the parser. */
 pub type DroppedFragment = {
   /** The text the parser consumed without producing a call. */
@@ -103,6 +105,32 @@ fn __tool_shape_body_has_arguments(body: string) -> bool {
 }
 
 /**
+ * Is `at` inside a code fence that explicitly names a source language?
+ *
+ * An unlabeled fence is commonly a provider wrapper around an attempted call,
+ * so it remains eligible. A labeled fence is an authored example/source block:
+ * treating its contents as executable intent would turn documentation into a
+ * corrective model turn.
+ */
+fn __tool_shape_in_labeled_fence(text: string, at: int) -> bool {
+  const before = text.slice(0, at)
+  const fence_at = before.last_index_of("```")
+  if fence_at < 0 {
+    return false
+  }
+  // The most recent marker is an opening fence only when it names a language;
+  // a closing marker has no suffix. Requiring the marker at line start avoids
+  // interpreting inline backticks as a fence.
+  if fence_at > 0 && before.slice(fence_at - 1, fence_at) != "\n" {
+    return false
+  }
+  const after_marker = before.slice(fence_at + 3, len(before))
+  const newline_at = after_marker.index_of("\n")
+  const label = trim(newline_at >= 0 ? after_marker.slice(0, newline_at) : after_marker)
+  return regex_match("^[A-Za-z][A-Za-z0-9_+.-]*$", label) != nil
+}
+
+/**
  * An angle tag wrapping a body that carries arguments.
  *
  * Catches the whole family of single-tag dialects (`<tool>`, `<call>`,
@@ -116,6 +144,10 @@ fn __tool_shape_tagged_call(text: string) -> int {
   // regex engine has no backreferences — `</\1>` is not expressible. Pairing in
   // Harn also keeps the tag name available for the protocol-tag exclusion.
   for opened in regex_captures("(?is)<([A-Za-z_][A-Za-z0-9_.:-]*)\\b[^>]*>", text) {
+    const at = opened?.start ?? 0
+    if __tool_shape_in_labeled_fence(text, at) {
+      continue
+    }
     const tag = lowercase(trim((opened?.groups ?? [])[0] ?? ""))
     if tag == "" || __TOOL_SHAPE_PROTOCOL_TAGS.contains(tag) {
       continue
@@ -127,7 +159,7 @@ fn __tool_shape_tagged_call(text: string) -> int {
       continue
     }
     if __tool_shape_body_has_arguments(rest.slice(0, close_at)) {
-      return opened?.start ?? 0
+      return at
     }
   }
   return -1
@@ -145,32 +177,52 @@ fn __tool_shape_json_call(text: string) -> int {
   if !text.contains("{") {
     return -1
   }
-  const names = regex_captures("(?i)\"(?:name|tool|tool_name|recipient)\"\\s*:", text)
-  if len(names) == 0 {
-    return -1
-  }
   if regex_match("(?i)\"(?:arguments|args|parameters|input|params)\"\\s*:", text) == nil {
     return -1
   }
-  return names[0]?.start ?? 0
+  for named in regex_captures("(?i)\"(?:name|tool|tool_name|recipient)\"\\s*:", text) {
+    const at = named?.start ?? 0
+    if !__tool_shape_in_labeled_fence(text, at) {
+      return at
+    }
+  }
+  return -1
 }
 
 /**
  * Chat-template markup that carries a callee.
  *
  * `<function=NAME>`, `<invoke name="NAME">`, and the `[TOOL_CALLS]` /
- * `<|recipient|>` frame markers are invocation markup by construction — there
- * is no reading of them that is ordinary prose.
+ * `<|recipient|>` frame markers count only when their body also carries
+ * arguments. The opener alone is common in prose discussing the protocol.
  * Returns the char position of the markup, or -1.
  */
 fn __tool_shape_call_markup(text: string) -> int {
-  const named = regex_captures("(?i)<(?:function|invoke|tool)\\s*[=\\s][^>]*>", text)
-  if len(named) > 0 {
-    return named[0]?.start ?? 0
+  for named in regex_captures("(?i)<(?:function|invoke|tool)\\s*[=\\s][^>]*>", text) {
+    const at = named?.start ?? 0
+    if __tool_shape_in_labeled_fence(text, at) {
+      continue
+    }
+    const body = text.slice(named?.end ?? len(text), len(text))
+    if __tool_shape_body_has_arguments(body)
+      || regex_match("(?i)<parameter(?:\\s|=|>)", body) != nil {
+      return at
+    }
   }
-  const framed = regex_captures("(?i)\\[TOOL_CALLS\\]|<\\|recipient\\|>|<\\|channel\\|>", text)
-  if len(framed) > 0 {
-    return framed[0]?.start ?? 0
+  for framed in regex_captures("(?i)\\[TOOL_CALLS\\]|<\\|recipient\\|>|<\\|channel\\|>", text) {
+    const at = framed?.start ?? 0
+    if __tool_shape_in_labeled_fence(text, at) {
+      continue
+    }
+    const body = text.slice(framed?.end ?? len(text), len(text))
+    if __tool_shape_body_has_arguments(body)
+      || regex_match(
+      "(?i)\"(?:arguments|args|parameters|input|params)\"\\s*:",
+      body,
+    )
+      != nil {
+      return at
+    }
   }
   return -1
 }
@@ -264,6 +316,27 @@ pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFind
 }
 
 /**
+ * Project structural findings into the shared typed violation contract.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn tool_shape_violations(findings: list<ToolShapeFinding>) -> list<ProtocolViolation> {
+  return findings.map(
+    fn(finding) { return protocol_violation(
+      "unparsed_tool_syntax",
+      "unparsed_tool_syntax: text shaped like a tool call was not "
+        + "recognized as one and did not run. Emit every call as "
+        + "`<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: "
+        + finding.excerpt,
+      finding.excerpt,
+      finding.dropped_reason,
+    ) },
+  )
+}
+
+/**
  * Corrective feedback for the model, one line per finding.
  *
  * Phrased as the contract it should have used, because the model can act on
@@ -274,14 +347,5 @@ pub fn tool_shape_findings(dropped: list<DroppedFragment>) -> list<ToolShapeFind
  * @api_stability: experimental
  */
 pub fn tool_shape_feedback(findings: list<ToolShapeFinding>) -> list<string> {
-  let messages = []
-  for finding in findings {
-    messages = messages.appending(
-      "unparsed_tool_syntax: text shaped like a tool call was not "
-        + "recognized as one and did not run. Emit every call as "
-        + "`<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: "
-        + finding.excerpt,
-    )
-  }
-  return messages
+  return tool_shape_violations(findings).map(fn(violation) { return violation.message })
 }

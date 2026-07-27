@@ -632,7 +632,12 @@ pub(crate) fn vm_build_llm_result(
             let violations: Vec<VmValue> = parse
                 .violations
                 .iter()
-                .map(|v| VmValue::String(arcstr::ArcStr::from(v.as_str())))
+                .map(|violation| {
+                    json_to_vm_value(
+                        &serde_json::to_value(violation)
+                            .expect("protocol violation must serialize"),
+                    )
+                })
                 .collect();
             dict.insert(
                 crate::value::intern_key("protocol_violations"),

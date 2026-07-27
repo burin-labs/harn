@@ -21,3 +21,6 @@ write_note
 true
 true
 true
+error
+parse_dropped
+harness

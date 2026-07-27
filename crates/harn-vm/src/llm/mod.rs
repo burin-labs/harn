@@ -58,6 +58,8 @@ mod permission_preview;
 pub(crate) mod permissions;
 pub mod plan;
 pub mod prompt;
+mod protocol_violation;
+pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
 pub mod readiness;
 pub mod reasoning_policy;
 pub(crate) mod reminder_iteration;

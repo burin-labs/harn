@@ -8,6 +8,7 @@
 // `structural_validator_decision` event, and either regenerates with
 // feedback or raises.
 import { agent_emit_event } from "std/agent/state"
+import { protocol_violation_messages } from "std/llm/tool_parse_result"
 import "std/schema"
 
 fn __sv_tool_name() -> string {
@@ -596,7 +597,7 @@ fn __sv_tool_calls_well_formed(payload) {
   // regardless, because those represent broken calls, not wrapper noise.
   const has_dispatchable_calls = len(__sv_list(payload?.tool_calls)) > 0
   const protocol_violations = if should_enforce_text_protocol && !has_dispatchable_calls {
-    __sv_string_list(payload?.protocol_violations)
+    protocol_violation_messages(payload?.protocol_violations ?? [])
   } else {
     []
   }

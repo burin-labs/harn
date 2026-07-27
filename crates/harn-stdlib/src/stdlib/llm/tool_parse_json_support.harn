@@ -13,6 +13,7 @@ import {
   NAME_ALIASES,
   NAME_CHANNEL_MARKERS,
 } from "std/llm/dialects"
+import { protocol_violation } from "std/llm/tool_parse_result"
 
 fn __tool_parse_json_name(value: dict) -> string {
   for key in NAME_ALIASES {
@@ -303,11 +304,14 @@ fn __tool_parse_tool_fence_info(marker: string, info: string) -> dict {
     || has_tool_suffix {
     return {
       tool: true,
-      warning: "protocol_violation: a tool call was emitted in a "
-        + marker
-        + normalized
-        + " fence; the contract requires a bare ```tool fence. "
-        + "Accepted this turn, but switch to ```tool.",
+      warning: protocol_violation(
+        "fence_dialect",
+        "protocol_violation: a tool call was emitted in a "
+          + marker
+          + normalized
+          + " fence; the contract requires a bare ```tool fence. "
+          + "Accepted this turn, but switch to ```tool.",
+      ),
     }
   }
   return {tool: false, warning: nil}
@@ -321,7 +325,7 @@ fn __tool_parse_tool_fence_info(marker: string, info: string) -> dict {
 pub fn json_chunks(text: string) -> dict {
   let bodies: list<string> = []
   let prose: list<string> = []
-  let violations: list<string> = []
+  let violations: list = []
   let active_marker = ""
   let active_tool = false
   let active_body: list<string> = []
@@ -411,9 +415,13 @@ pub fn json_chunks(text: string) -> dict {
     bodies = bodies.appending(outside)
     prose = []
     violations = violations.appending(
-      "protocol_violation: a tool call was emitted as a bare JSON object; the contract "
-        + "requires wrapping each `{ \"name\": ..., \"args\": { ... } }` object in a "
-        + "```tool fence. Accepted this turn, but switch to ```tool.",
+      protocol_violation(
+        "bare_json",
+        "protocol_violation: a tool call was emitted as a bare JSON object; the contract "
+          + "requires wrapping each `{ \"name\": ..., \"args\": { ... } }` object in a "
+          + "```tool fence. Accepted this turn, but switch to ```tool.",
+        outside,
+      ),
     )
   }
   return {bodies: bodies, prose: trim(prose.join("\n")), violations: violations}

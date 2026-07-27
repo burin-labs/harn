@@ -1,6 +1,58 @@
 /** Shared result projection for the text-tool dialect modules. */
 import { IMPLICIT_TOOL_NAMES } from "std/llm/dialects"
 
+/** Stable reason vocabulary for a response-protocol violation. */
+pub type ProtocolViolationKind = "ambiguous_recovery" \
+  | "bare_json" \
+  | "empty_done" \
+  | "fence_dialect" \
+  | "provider_dialect" \
+  | "recovered_dialect" \
+  | "stray_text" \
+  | "unclosed_response" \
+  | "unknown_tag" \
+  | "unparsed_tool_syntax" \
+  | "wrong_tool_format"
+
+/**
+ * A model response violated the selected tool-call protocol.
+ *
+ * `message` is lossless corrective feedback, but consumers branch on `kind`.
+ * Shape-derived violations also carry the bounded source `excerpt` and the
+ * parser's `dropped_reason`, keeping classification structural end to end.
+ */
+pub type ProtocolViolation = {
+  kind: ProtocolViolationKind,
+  message: string,
+  excerpt?: string,
+  dropped_reason?: string,
+}
+
+/**
+ * Construct one typed protocol violation.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn protocol_violation(
+  kind: ProtocolViolationKind,
+  message: string,
+  excerpt: string? = nil,
+  dropped_reason: string? = nil,
+) -> ProtocolViolation {
+  return {kind: kind, message: message, excerpt: excerpt, dropped_reason: dropped_reason}
+}
+
+/**
+ * Render typed violations only at a human/model feedback edge.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn protocol_violation_messages(violations: list<ProtocolViolation>) -> list<string> {
+  return violations.map(fn(violation) { return violation.message })
+}
+
 /**
  * Return the sorted declared and implicit tool names for parser policy.
  * @effects: []

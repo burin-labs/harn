@@ -113,7 +113,7 @@ accounting lives under `usage`. The typed contract is
 | `stop_reason` | string | Provider-native stop vocabulary (`"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"`), kept for forensics — prefer `outcome` |
 | `tool_calls` | `list<LlmToolCall>` | Dispatchable tool calls, merged from the provider-native and text-protocol channels. Always present, possibly empty. |
 | `native_tool_calls` | `list<LlmToolCall>` | Provider-native tool calls only. Always present, possibly empty. |
-| `protocol_violations` | list | Text-protocol violations detected while parsing tool calls |
+| `protocol_violations` | `list<ProtocolViolation>` | Typed text-protocol violations: `{kind, message, excerpt?, dropped_reason?}`. Branch on `kind`; `message` is corrective display text. |
 | `tool_parse_errors` | list | Errors from parsing malformed tool-call payloads |
 | `done_marker` | string | The completion sentinel the model emitted, when one was parsed |
 | `provider_response_id` | string | Provider-native response id when available, such as OpenAI Responses `resp_*` |

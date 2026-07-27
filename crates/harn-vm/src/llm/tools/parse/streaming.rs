@@ -37,6 +37,7 @@
 use std::collections::BTreeSet;
 
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
+use crate::boundary::{BoundaryFailure, BoundaryFailureKind, BoundaryId};
 
 use super::super::{
     TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN,
@@ -76,6 +77,7 @@ enum DetectorState {
     Idle,
     /// Inside a `<tool_call>...` block. Buffering until `</tool_call>`.
     InTaggedBlock {
+        candidate_start: usize,
         body_start: usize,
         close_tag: &'static str,
         tool_call_id: String,
@@ -126,7 +128,16 @@ impl StreamingToolCallDetector {
         let mut events = self.scan();
         match std::mem::replace(&mut self.state, DetectorState::Idle) {
             DetectorState::Idle => {}
-            DetectorState::InTaggedBlock { tool_call_id, .. } => {
+            DetectorState::InTaggedBlock {
+                candidate_start,
+                tool_call_id,
+                ..
+            } => {
+                self.report_dropped_span(
+                    candidate_start,
+                    self.buffer.len(),
+                    "stream ended before the tagged text-tool candidate closed",
+                );
                 events.push(AgentEvent::ToolCallUpdate {
                     session_id: self.session_id.clone(),
                     tool_call_id,
@@ -161,6 +172,11 @@ impl StreamingToolCallDetector {
                         events.push(promote_event(&self.session_id, tool_call_id, name, args));
                     }
                     Err(msg) => {
+                        self.report_dropped_span(
+                            name_start,
+                            self.buffer.len(),
+                            "stream ended with an unparseable bare text-tool candidate",
+                        );
                         events.push(abort_event(&self.session_id, tool_call_id, name, msg));
                     }
                 }
@@ -256,6 +272,7 @@ impl StreamingToolCallDetector {
                         audit: None,
                     });
                     self.state = DetectorState::InTaggedBlock {
+                        candidate_start: j,
                         body_start,
                         close_tag,
                         tool_call_id: id,
@@ -326,12 +343,18 @@ impl StreamingToolCallDetector {
     }
 
     fn scan_tagged(&mut self, events: &mut Vec<AgentEvent>) -> bool {
-        let (body_start, close_tag, tool_call_id) = match &self.state {
+        let (candidate_start, body_start, close_tag, tool_call_id) = match &self.state {
             DetectorState::InTaggedBlock {
+                candidate_start,
                 body_start,
                 close_tag,
                 tool_call_id,
-            } => (*body_start, *close_tag, tool_call_id.clone()),
+            } => (
+                *candidate_start,
+                *body_start,
+                *close_tag,
+                tool_call_id.clone(),
+            ),
             _ => return false,
         };
         // Skip over complete heredoc bodies so a literal `</tool_call>` inside a
@@ -364,6 +387,11 @@ impl StreamingToolCallDetector {
                 events.push(promote_event(&self.session_id, tool_call_id, name, args));
             }
             Err(msg) => {
+                self.report_dropped_span(
+                    candidate_start,
+                    after,
+                    "closed tagged text-tool candidate did not parse",
+                );
                 events.push(abort_event(
                     &self.session_id,
                     tool_call_id,
@@ -379,6 +407,17 @@ impl StreamingToolCallDetector {
         // start, even if the source emitted them adjacently.
         self.at_line_start = true;
         true
+    }
+
+    fn report_dropped_span(&self, start: usize, end: usize, detail: &str) {
+        BoundaryFailure::new(
+            BoundaryId::TextToolParse,
+            BoundaryFailureKind::Unrecognized,
+            detail,
+        )
+        .with_excerpt(&self.buffer[start..end])
+        .in_session(&self.session_id)
+        .report();
     }
 
     fn scan_bare(&mut self, events: &mut Vec<AgentEvent>) -> bool {
@@ -596,6 +635,39 @@ mod tests {
     }
 
     #[test]
+    fn bare_candidate_abort_reports_the_exact_dropped_span() {
+        let captured = crate::boundary::tests::CapturedEvents::install();
+        let source = "edit({ broken: , }";
+        let mut det = detector(&["edit"]);
+
+        let _events = run(&[source], &mut det);
+
+        let failures = captured.boundary_failures();
+        assert_eq!(failures.len(), 1, "failures={failures:#?}");
+        match &failures[0] {
+            AgentEvent::BoundaryFailure {
+                session_id,
+                boundary,
+                kind,
+                excerpt,
+                dropped_count,
+                dropped_bytes,
+                unreported,
+                ..
+            } => {
+                assert_eq!(session_id, "session-1");
+                assert_eq!(*boundary, BoundaryId::TextToolParse);
+                assert_eq!(*kind, BoundaryFailureKind::Unrecognized);
+                assert_eq!(excerpt.as_deref(), Some(source));
+                assert_eq!(*dropped_count, 1);
+                assert_eq!(*dropped_bytes, source.len());
+                assert!(!unreported);
+            }
+            other => panic!("expected BoundaryFailure, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn tagged_candidate_promotes_when_block_closes() {
         let mut det = detector(&["run"]);
         let events = run(
@@ -655,6 +727,30 @@ mod tests {
         assert_eq!(status, ToolCallStatus::Failed);
         assert_eq!(parsing, Some(false));
         assert_eq!(cat, Some(ToolCallErrorCategory::ParseAborted));
+    }
+
+    #[test]
+    fn tagged_candidate_abort_reports_from_the_opening_tag() {
+        let captured = crate::boundary::tests::CapturedEvents::install();
+        let source = "prefix\n<tool_call>\nrun({ command: \"ls\" })";
+        let dropped = "<tool_call>\nrun({ command: \"ls\" })";
+        let mut det = detector(&["run"]);
+
+        let _events = run(&[source], &mut det);
+
+        let failures = captured.boundary_failures();
+        assert_eq!(failures.len(), 1, "failures={failures:#?}");
+        match &failures[0] {
+            AgentEvent::BoundaryFailure {
+                excerpt,
+                dropped_bytes,
+                ..
+            } => {
+                assert_eq!(excerpt.as_deref(), Some(dropped));
+                assert_eq!(*dropped_bytes, dropped.len());
+            }
+            other => panic!("expected BoundaryFailure, got {other:?}"),
+        }
     }
 
     #[test]

@@ -325,6 +325,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"tool_policy_rejected",
 	"host_bridge_unimplemented",
 	"agent_loop_protocol_failure",
+	"parse_dropped",
 	"generic_throw",
 }
 

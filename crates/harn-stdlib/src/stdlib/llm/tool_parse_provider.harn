@@ -12,7 +12,7 @@ import {
   MISTRAL_CALL_MARKER,
 } from "std/llm/dialects"
 import { json_call } from "std/llm/tool_parse_json_support"
-import { provider_result, registry_names } from "std/llm/tool_parse_result"
+import { protocol_violation, provider_result, registry_names } from "std/llm/tool_parse_result"
 
 fn __tool_parse_mistral(text: string, tools) -> dict {
   const marker_at = text.index_of(MISTRAL_CALL_MARKER)
@@ -75,9 +75,12 @@ fn __tool_parse_mistral(text: string, tools) -> dict {
     }
   }
   const violations = len(calls) > 0 ? [
-    "Tool call(s) were emitted with Mistral `[TOOL_CALLS]name[ARGS]{...}` markers. "
-      + "Executed this turn so work moves forward; use "
-      + "`<tool_call>name({ ... })</tool_call>` on subsequent turns.",
+    protocol_violation(
+      "provider_dialect",
+      "Tool call(s) were emitted with Mistral `[TOOL_CALLS]name[ARGS]{...}` markers. "
+        + "Executed this turn so work moves forward; use "
+        + "`<tool_call>name({ ... })</tool_call>` on subsequent turns.",
+    ),
   ] : []
   return provider_result(calls, errors, prose, violations)
 }
