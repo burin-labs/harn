@@ -1,3 +1,9 @@
+# corrupted response tag fragment
+  calls=0 errors=0 violations=1 stray=0
+  vio "Stray text outside response tags: \"_call>_call>\". Wrap all prose in <assistant_prose>...</assistant_prose> or <user_response>...</user_response>, and every tool call in <tool_call>...</tool_call>."
+  prose=""
+  answer=null
+  done=null
 # unknown top level tag
   calls=1 errors=0 violations=2 stray=1
   call edit {"action":"create","content":"x","path":"a.rs"}
