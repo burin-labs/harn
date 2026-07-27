@@ -35,7 +35,7 @@ pub type ReleaseReadiness = {
 }
 
 /** Outcome of writing the new pin and regenerating derived sources. */
-pub type BumpApplyOutcome = {changed: bool, refreshed: list<string>, detail: string}
+pub type BumpApplyOutcome = {ok: bool, changed: bool, refreshed: list<string>, detail: string}
 
 /** One declared validation lane (fmt/check/lint/test/package…) and its verdict. */
 pub type BumpValidationStep = {name: string, ok: bool, detail: string}
@@ -102,6 +102,7 @@ pub type BumpAdapter = {
  */
 pub type BumpOutcome = "not_ready" \
   | "already_current" \
+  | "refresh_failed" \
   | "no_changes" \
   | "validation_failed" \
   | "closed_noop" \
@@ -123,6 +124,8 @@ pub type BumpReceipt = {
   readiness_detail: string,
   changed: bool,
   refreshed: list<string>,
+  refresh_ok: bool,
+  refresh_detail: string,
   validation: BumpValidation,
   changeset: BumpChangeSet,
   lease_recovered: bool,
@@ -198,6 +201,8 @@ fn __bump_receipt_base(options, target, previous, readiness) -> BumpReceipt {
     readiness_detail: readiness.detail,
     changed: false,
     refreshed: [],
+    refresh_ok: true,
+    refresh_detail: "",
     validation: __bump_default_validation(),
     changeset: __bump_empty_changeset(),
     lease_recovered: false,
@@ -242,7 +247,17 @@ pub fn run_bump(options: BumpOptions, adapter: BumpAdapter) -> BumpReceipt {
   }
   // Phase 3 — write the pin and regenerate derived sources (lockfile, codegen).
   const apply = adapter.apply_version(target)
-  receipt = receipt + {changed: apply.changed, refreshed: apply.refreshed}
+  receipt = receipt
+    + {
+    changed: apply.changed,
+    refreshed: apply.refreshed,
+    refresh_ok: apply.ok,
+    refresh_detail: apply.detail,
+  }
+  if !apply.ok {
+    return receipt
+      + {outcome: "refresh_failed", ok: false, notes: ["refresh failed: ${apply.detail}"]}
+  }
   if !apply.changed {
     return receipt
       + {

@@ -6,7 +6,7 @@
 # limited to bootstrap + capability wiring.
 #
 # A consuming repo needs only a tiny trigger wrapper (schedule/dispatch) plus
-# its own single declared validation command. See
+# its own declared refresh and validation commands. See
 # docs/src/dev/reusable-bump-harn-runtime.md for the minimal caller and the
 # security boundary.
 name: Bump Harn Runtime (reusable)
@@ -18,8 +18,18 @@ on:
         description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
         required: false
         type: string
+      refresh-command:
+        description: "Repository-owned regeneration command run after the standard version-file write. Defaults to refreshing the Harn package lock."
+        required: false
+        type: string
+        default: "harn install --locked || harn install"
+      node-version:
+        description: "Optional Node.js version installed before refresh and validation commands."
+        required: false
+        type: string
+        default: ""
       validate-command:
-        description: "The caller's single declared validation entrypoint, run after the pin/lockfile refresh."
+        description: "Repository-owned verification command run after all refresh mutations and before the signed commit."
         required: false
         type: string
         default: ""
@@ -74,6 +84,12 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install caller Node.js toolchain
+        if: inputs.node-version != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
 
       # Resolve which Harn to INSTALL *before* checking out the orchestration,
       # so we can pin that checkout to the exact target release tag. This must
@@ -131,12 +147,24 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
-          HARN_BUMP_VALIDATE: ${{ inputs.validate-command }}
+          HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
+          HARN_BUMP_VALIDATE_COMMAND: ${{ inputs.validate-command }}
+          HARN_BUMP_REFRESH_SENTINEL: ${{ runner.temp }}/harn-bump-refresh-${{ github.run_id }}-${{ github.run_attempt }}.ok
           HARN_BUMP_BRANCH: ${{ inputs.branch }}
           HARN_BUMP_BASE: ${{ inputs.base }}
           HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
         shell: bash
         run: |
           set -euo pipefail
+          # The target release owns std/bump/*. A caller can therefore use a
+          # newer workflow contract with an older compatible target runtime.
+          # The sentinel preserves fail-closed refresh semantics across that
+          # skew: runtimes with BumpApplyOutcome.ok return refresh_failed
+          # directly; older runtimes reach validation, whose first operation
+          # fails unless refresh completed successfully.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          export HARN_BUMP_REFRESH='set -euo pipefail; eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
           harn run --no-sandbox .harn-runtime/scripts/bump_harn_runtime.harn

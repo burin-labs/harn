@@ -29,6 +29,7 @@ fn make_fake(config = {}) {
     ready: true,
     readiness_detail: "harn-cli 0.10.30 published; assets present; release finalized",
     current: "v0.10.29",
+    apply_ok: true,
     apply_changed: true,
     refreshed: ["harn.lock"],
     validation_ok: true,
@@ -57,7 +58,16 @@ fn make_fake(config = {}) {
     base_sha: fn() { return "base000" },
     apply_version: fn(_target) {
       record("apply_version", _target)
-      return {changed: cfg.apply_changed, refreshed: cfg.refreshed, detail: ""}
+      return {
+        ok: cfg.apply_ok,
+        changed: cfg.apply_changed,
+        refreshed: cfg.refreshed,
+        detail: if cfg.apply_ok {
+          ""
+        } else {
+          "repository refresh failed"
+        },
+      }
     },
     run_validation: fn() {
       record("run_validation", nil)
@@ -163,7 +173,18 @@ pipeline test_lockfile_refresh_produces_committed_pr(task) {
   assert(contains(call_names(fake.calls()), "create_signed_commit"))
 }
 
-/** 4. Validation failure: no commit, no PR, ok=false. */
+/** 4. Refresh failure: fail closed before validation, commit, or PR mutation. */
+pipeline test_refresh_failure_blocks_validation_and_commit(task) {
+  const fake = make_fake({apply_ok: false})
+  const receipt = run_bump(opts(), fake.adapter)
+  assert_eq(receipt.outcome, "refresh_failed")
+  assert_eq(receipt.ok, false)
+  assert_eq(receipt.refresh_ok, false)
+  assert(contains(receipt.refresh_detail, "repository refresh failed"))
+  assert_eq(call_names(fake.calls()), ["apply_version"])
+}
+
+/** 5. Validation failure: no commit, no PR, ok=false. */
 pipeline test_validation_failure_blocks_commit(task) {
   const fake = make_fake({validation_ok: false, validation_detail: "harn check failed"})
   const receipt = run_bump(opts(), fake.adapter)
@@ -175,7 +196,7 @@ pipeline test_validation_failure_blocks_commit(task) {
 }
 
 /**
- * 5. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
+ * 6. Stale branch/PR lease: an open PR with auto-merge armed is disarmed
  * BEFORE the branch is reset, then refreshed. Order matters.
  */
 pipeline test_stale_lease_is_disarmed_before_reset(task) {
@@ -200,7 +221,7 @@ pipeline test_stale_lease_is_disarmed_before_reset(task) {
 }
 
 /**
- * 6. Existing PR refresh: an open PR without armed auto-merge is edited in
+ * 7. Existing PR refresh: an open PR without armed auto-merge is edited in
  * place, not recreated, and NOT disarmed.
  */
 pipeline test_existing_pr_is_refreshed_in_place(task) {
@@ -220,7 +241,7 @@ pipeline test_existing_pr_is_refreshed_in_place(task) {
   assert_eq(contains(call_names(fake.calls()), "disable_auto_merge"), false)
 }
 
-/** 7. Successful auto-merge: a fresh bump creates a PR and arms auto-merge. */
+/** 8. Successful auto-merge: a fresh bump creates a PR and arms auto-merge. */
 pipeline test_successful_bump_arms_auto_merge(task) {
   const fake = make_fake({})
   const receipt = run_bump(opts(), fake.adapter)

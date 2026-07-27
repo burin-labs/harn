@@ -293,8 +293,9 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
       // Release tags carry the conventional `v`; .harn-version stores the
       // bare semver accepted by both old and new Harn installers.
       const version = strip_v(target)
-      __shell("printf '%s\\n' '${version}' > ${cfg.version_file}")
+      const write = __shell("printf '%s\\n' '${version}' > ${cfg.version_file}")
       const refresh = __shell(cfg.refresh_command)
+      const ok = (write.success ?? false) && (refresh.success ?? false)
       const changed = !(__git(["git", "diff", "--quiet"]).success ?? false)
       const names = trim(__git(["git", "diff", "--name-only"]).stdout ?? "")
       const refreshed = if names == "" {
@@ -303,12 +304,15 @@ pub fn live_bump_adapter(config: dict = {}) -> BumpAdapter {
         split(names, "\n").filter({ n -> trim(n) != "" }).to_list()
       }
       return {
+        ok: ok,
         changed: changed,
         refreshed: refreshed,
-        detail: if refresh.success ?? false {
+        detail: if !(write.success ?? false) {
+          trim(write.stderr ?? "version-file write failed")
+        } else if refresh.success ?? false {
           "refresh ok"
         } else {
-          trim(refresh.stderr ?? "")
+          trim((refresh.stderr ?? "") + (refresh.stdout ?? ""))
         },
       }
     },

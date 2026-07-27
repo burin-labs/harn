@@ -4,19 +4,20 @@ Every Harn package repo pins the Harn runtime it builds against in a
 `.harn-version` file. Keeping that pin current used to mean copying a large
 `bump-harn.yml` state machine into each repo. Harn now publishes **one**
 reusable workflow so a package needs only a small trigger wrapper plus its own
-declared validation command.
+declared refresh and validation commands.
 
 - Workflow: `.github/workflows/bump-harn.yml` (`workflow_call`).
 - Orchestration: `scripts/bump_harn_runtime.harn` → `std/bump/runtime` (pure
-  state machine) → `std/bump/live` (git via `std/command`, GitHub via the
-  first-party `std/connectors/github` connector).
+  state machine) → `std/bump/live` (git and authenticated `gh` calls via
+  `std/command`).
 - Receipt schema: `harn-bump-runtime-v1` (printed to stdout; key fields also
   land as step outputs and a step-summary block).
 
 ## Minimal caller workflow
 
 Drop this into the consuming repo. The only repo-specific parts are the trigger
-schedule and the single `validate-command`.
+schedule and, when the default lock refresh is insufficient, the
+`refresh-command` and `validate-command`.
 
 ```yaml
 name: Bump Harn Runtime
@@ -39,9 +40,17 @@ jobs:
     uses: burin-labs/harn/.github/workflows/bump-harn.yml@<pinned-sha>
     with:
       version: ${{ inputs.version }}
-      # Your ONE declared validation entrypoint. Runs after the pin + lockfile
-      # refresh; a non-zero exit blocks the commit. Everything the repo needs
-      # verified goes here (fmt/check/lint/tests/package policy).
+      # Optional repository-owned materialization. The target tag is inherited
+      # as HARN_BUMP_TARGET_TAG. All mutations are included in the one signed
+      # commit; a non-zero exit blocks it.
+      refresh-command: |
+        harn install --locked
+        ./scripts/regenerate-derived-sources "$HARN_BUMP_TARGET_TAG"
+      # Optional, when the repository owner commands require Node. The shared
+      # workflow installs this exact version rather than trusting runner state.
+      node-version: "22"
+      # Repository-owned verification runs after every mutation. A non-zero
+      # exit blocks the commit.
       validate-command: |
         set -euo pipefail
         mapfile -t files < <(git ls-files '*.harn')
@@ -56,10 +65,11 @@ jobs:
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 ```
 
-Pin `@<pinned-sha>` to a full commit SHA of `burin-labs/harn`. The reusable
-workflow checks its own repo out at that same SHA to source the orchestration
-script and the checksum-verifying `setup-harn` action, so the whole runtime is
-immutable-pinned by that single ref.
+Pin `@<pinned-sha>` to a full commit SHA of `burin-labs/harn`. That immutable
+ref owns the reusable workflow contract. The workflow then checks Harn out at
+the resolved release tag, so its orchestration script, embedded `std/bump/*`
+modules, checksum-verifying `setup-harn` action, and installed CLI all come
+from the same published version.
 
 ## Idempotency and concurrency
 
@@ -67,6 +77,10 @@ immutable-pinned by that single ref.
   zero mutation.
 - Not yet published: a target whose release is still finalizing is a clean exit
   (`outcome: not_ready`); the next scheduled run picks it up.
+- Refresh failure: the target runtime reports `refresh_failed` before
+  validation or commit. When a compatible older target predates that receipt
+  outcome, the workflow's per-run success sentinel makes validation fail
+  closed instead; neither path can reach a signed commit.
 - Stale heads: an open bump PR with auto-merge armed is **disarmed before** the
   bump branch is reset, so a stale head cannot merge mid-refresh and race a
   duplicate onto the base branch. Concurrent/scheduled reruns are safe.
@@ -90,16 +104,17 @@ release, so this holds in practice.)
   signs it and an org `required_signatures` ruleset is satisfied. A local
   `git commit` + push would land unsigned and be rejected.
 - **Immutable supply chain.** Third-party actions are pinned by full commit SHA.
-  First-party pieces (orchestration script, `setup-harn`) come from the harn
-  checkout at the workflow's own SHA. `setup-harn` verifies the downloaded
-  release archive against its published SHA-256 before installing.
+  The workflow contract is pinned by full Harn commit SHA; first-party runtime
+  pieces (orchestration script, embedded modules, `setup-harn`) come from the
+  resolved immutable release tag. `setup-harn` verifies the downloaded release
+  archive against its published SHA-256 before installing.
 - **No package-domain logic in the shared workflow.** The reusable workflow
-  never encodes a package's build/test knowledge. Repos express everything
-  they need verified through the single `validate-command`; the shared workflow
-  only sequences it. Consumers copy no implementation scripts.
+  never encodes a package's code-generation or build/test knowledge. Repos
+  expose their existing owner commands through `refresh-command` and
+  `validate-command`; the shared workflow only sequences them. Consumers copy
+  no orchestration, release-readiness, signing, branch, or PR machinery.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
-  because it must reach git, the GitHub API (through the `std/connectors/github`
-  connector, authenticated with the App installation token via `configure`), and
-  the caller's validation command. It carries no secret beyond the scoped
+  because it must reach git, the GitHub API through `gh`, and the caller's
+  refresh and validation commands. It carries no secret beyond the scoped
   installation token, which is passed via the environment and never written to
   the repo.
