@@ -70,14 +70,16 @@
   answer=null
   done=null
 # unknown tool in the native lane
-  calls=0 errors=1 violations=0 stray=0
+  calls=0 errors=1 violations=1 stray=0
   err "Unknown tool 'unknown_tool'. Tool calls must be one of: [edit, ledger, load_skill, lookup, read, run, scaffold]."
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"unknown_tool\",\"arguments\":\"{}\"}}]"
   prose=""
   answer=null
   done=null
 # malformed arguments string
-  calls=0 errors=1 violations=0 stray=0
+  calls=0 errors=1 violations=1 stray=0
   err "Could not parse arguments for tool 'edit': expected ident at line 1 column 2. Raw: not valid json {"
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"edit\",\"arguments\":\"not valid json {\"}}]"
   prose=""
   answer=null
   done=null

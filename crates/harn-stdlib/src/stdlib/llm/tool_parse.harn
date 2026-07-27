@@ -8,18 +8,9 @@
  */
 import {
   ARGUMENT_ALIASES,
-  CONTENTLESS_WRAPPER_TAGS,
-  HARMONY_CORRUPTED_OPENERS,
-  HARMONY_FRAME_PREFIX,
-  HARMONY_FRAME_SUFFIX,
-  HARMONY_HEADER_MARKERS,
-  HARMONY_MESSAGE_MARKER,
-  HARMONY_STANDALONE_MARKERS,
-  HARMONY_TOOL_CALL_HEADER_PREFIX,
   HTML_ENTITIES,
   MARKUP_DIALECTS,
   NAME_ALIASES,
-  RESERVED_MALFORMED_CALL_OPENER,
   TAGGED_DIALECT,
 } from "std/llm/dialects"
 import {
@@ -37,9 +28,12 @@ import {
   canonical,
   empty_parse,
   prose_block,
+  protocol_violation,
   provider_result,
   registry_names,
 } from "std/llm/tool_parse_result"
+import { tool_parse_scan_spec } from "std/llm/tool_parse_scan_spec"
+import { tool_shape_findings, tool_shape_violations } from "std/llm/tool_shape"
 
 const TEXT_UNIT_KINDS = ["text", "fenced_line", "harmony_line"]
 
@@ -50,37 +44,6 @@ fn __tool_parse_tag_spellings(canonical: string) -> list<string> {
     }
   }
   return []
-}
-
-fn __tool_parse_scan_spec(tools) -> dict {
-  let block_tags: list<string> = []
-  for canonical in ["assistant_prose", "user_response", "done"] {
-    for spelling in __tool_parse_tag_spellings(canonical) {
-      block_tags = block_tags.appending(spelling)
-    }
-  }
-  let markup_openers: list<dict> = []
-  for dialect in MARKUP_DIALECTS {
-    markup_openers = markup_openers.appending({opener: dialect.opener, close: dialect.close})
-  }
-  return {
-    call_tags: __tool_parse_tag_spellings("tool_call"),
-    block_tags: block_tags,
-    wrapper_tags: CONTENTLESS_WRAPPER_TAGS,
-    markup_openers: markup_openers,
-    reserved_openers: [RESERVED_MALFORMED_CALL_OPENER],
-    harmony: {
-      header_markers: HARMONY_HEADER_MARKERS,
-      standalone_markers: HARMONY_STANDALONE_MARKERS,
-      frame_prefix: HARMONY_FRAME_PREFIX,
-      frame_suffix: HARMONY_FRAME_SUFFIX,
-      message_marker: HARMONY_MESSAGE_MARKER,
-      tool_call_header_prefix: HARMONY_TOOL_CALL_HEADER_PREFIX,
-      corrupted_openers: HARMONY_CORRUPTED_OPENERS,
-    },
-    known_tools: registry_names(tools),
-    strip_thinking: true,
-  }
 }
 
 fn __tool_parse_schema_type(tools, tool_name: string, parameter_name: string) {
@@ -538,11 +501,15 @@ fn __tool_parse_consume_stray(unit, tools, state: dict, bare_candidate = nil) ->
     return state
       + {
       violations: state.violations.appending(
-        "Stray text outside response tags: "
-          + json_stringify(fragment)
-          + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-          + "<user_response>...</user_response>, and every tool call in "
-          + "<tool_call>...</tool_call>.",
+        protocol_violation(
+          "stray_text",
+          "Stray text outside response tags: "
+            + json_stringify(fragment)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+          fragment,
+        ),
       ),
       dropped: state.dropped.appending({text: fragment, reason: "salvaged_as_prose"}),
     }
@@ -582,11 +549,15 @@ fn __tool_parse_consume_stray(unit, tools, state: dict, bare_candidate = nil) ->
     return next
       + {
       violations: next.violations.appending(
-        "Stray text outside response tags: "
-          + json_stringify(text)
-          + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-          + "<user_response>...</user_response>, and every tool call in "
-          + "<tool_call>...</tool_call>.",
+        protocol_violation(
+          "stray_text",
+          "Stray text outside response tags: "
+            + json_stringify(text)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+          text,
+        ),
       ),
       recovered: next.recovered + 1,
       dropped: next.dropped.appending({text: text, reason: reason}),
@@ -626,12 +597,15 @@ fn __tool_parse_pending_unit(unit, state: dict) -> dict {
       pending_response: nil,
       unclosed_response_prose: __tool_parse_tag_spellings("user_response").contains(pending),
       violations: state.violations.appending(
-        "Unclosed <"
-          + pending
-          + "> block. Close it with </"
-          + pending
-          + "> or remove it; only <tool_call>, <assistant_prose>, "
-          + "<user_response>, and <done> are accepted.",
+        protocol_violation(
+          "unclosed_response",
+          "Unclosed <"
+            + pending
+            + "> block. Close it with </"
+            + pending
+            + "> or remove it; only <tool_call>, <assistant_prose>, "
+            + "<user_response>, and <done> are accepted.",
+        ),
       ),
     },
     consumed: false,
@@ -669,8 +643,11 @@ fn __tool_parse_block_unit(unit, tools, state: dict, direct_candidate = nil) -> 
       return state
         + {
         violations: state.violations.appending(
-          "<done> block is empty. Emit the configured done sentinel "
-            + "(default `##DONE##`) inside the block.",
+          protocol_violation(
+            "empty_done",
+            "<done> block is empty. Emit the configured done sentinel "
+              + "(default `##DONE##`) inside the block.",
+          ),
         ),
       }
     }
@@ -734,11 +711,15 @@ fn __tool_parse_tag_unit(unit, state: dict) -> dict {
     return state
       + {
       violations: state.violations.appending(
-        "Stray text outside response tags: "
-          + json_stringify(raw)
-          + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-          + "<user_response>...</user_response>, and every tool call in "
-          + "<tool_call>...</tool_call>.",
+        protocol_violation(
+          "stray_text",
+          "Stray text outside response tags: "
+            + json_stringify(raw)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+          raw,
+        ),
       ),
       recovered: state.recovered + 1,
       dropped: state.dropped.appending({text: raw, reason: "salvaged_as_prose"}),
@@ -747,10 +728,14 @@ fn __tool_parse_tag_unit(unit, state: dict) -> dict {
   return state
     + {
     violations: state.violations.appending(
-      "Unknown top-level tag "
-        + json_stringify(raw)
-        + ". Use <tool_call>, <assistant_prose>, <user_response>, or <done> "
-        + "— no other tags are accepted at the top level.",
+      protocol_violation(
+        "unknown_tag",
+        "Unknown top-level tag "
+          + json_stringify(raw)
+          + ". Use <tool_call>, <assistant_prose>, <user_response>, or <done> "
+          + "— no other tags are accepted at the top level.",
+        raw,
+      ),
     ),
     dropped: state.dropped.appending({text: raw, reason: "salvaged_as_prose"}),
   }
@@ -765,13 +750,16 @@ fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
       calls: state.calls.appending(parsed.call),
       canonical: state.canonical.appending(call_block(parsed.call)),
       violations: state.violations.appending(
-        "Tool call `"
-          + name
-          + "` was emitted as chat-template function markup instead of "
-          + "`<tool_call>"
-          + name
-          + "({ ... })</tool_call>`. Recovered this turn so work moves forward; "
-          + "emit the canonical form on subsequent turns.",
+        protocol_violation(
+          "recovered_dialect",
+          "Tool call `"
+            + name
+            + "` was emitted as chat-template function markup instead of "
+            + "`<tool_call>"
+            + name
+            + "({ ... })</tool_call>`. Recovered this turn so work moves forward; "
+            + "emit the canonical form on subsequent turns.",
+        ),
       ),
     }
   }
@@ -811,7 +799,10 @@ fn __tool_parse_tagged_unit(unit, tools, state: dict, candidates = nil) -> dict 
       calls: next.calls.appending(call),
       canonical: next.canonical.appending(call_block(call)),
       violations: next.violations.appending(
-        "Recovered angle-wrapped tool call; emit it inside <tool_call>...</tool_call>.",
+        protocol_violation(
+          "recovered_dialect",
+          "Recovered angle-wrapped tool call; emit it inside <tool_call>...</tool_call>.",
+        ),
       ),
     }
   }
@@ -868,14 +859,14 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
   if provider_dialect != nil {
     return provider_dialect
   }
-  const scanned = __host_tool_scan_units(text, __tool_parse_scan_spec(tools))
+  const scanned = __host_tool_scan_units(text, tool_parse_scan_spec(tools))
   const bare_candidates = __host_tool_scan_bare_units(scanned.units, tools)
   const known = registry_names(tools)
   const assistant_tags = __tool_parse_tag_spellings("assistant_prose")
   const response_tags = __tool_parse_tag_spellings("user_response")
   let calls: list<dict> = []
   let errors: list<string> = []
-  let violations: list<string> = []
+  let violations: list = []
   let prose_parts: list<string> = []
   let answers: list<string> = []
   let done = nil
@@ -912,11 +903,15 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
       } else if has_response_protocol_fragment(stray_text) {
         const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
         violations = violations.appending(
-          "Stray text outside response tags: "
-            + json_stringify(stray_text)
-            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
-            + "<user_response>...</user_response>, and every tool call in "
-            + "<tool_call>...</tool_call>.",
+          protocol_violation(
+            "stray_text",
+            "Stray text outside response tags: "
+              + json_stringify(stray_text)
+              + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+              + "<user_response>...</user_response>, and every tool call in "
+              + "<tool_call>...</tool_call>.",
+            stray_text,
+          ),
         )
         recovered = recovered + 1
         dropped = dropped.appending({text: stray_text, reason: drop_reason})
@@ -1338,9 +1333,12 @@ fn __tool_parse_envelope(text: string) -> dict {
   if parsed?.result != nil {
     return parsed
   }
-  const violation = "protocol_violation: a tool call was emitted in a chat-template tool envelope "
-    + "while `tool_format` is `json`; accepted this turn, but emit canonical "
-    + "```tool JSON blocks next turn."
+  const violation = protocol_violation(
+    "wrong_tool_format",
+    "protocol_violation: a tool call was emitted in a chat-template tool envelope "
+      + "while `tool_format` is `json`; accepted this turn, but emit canonical "
+      + "```tool JSON blocks next turn.",
+  )
   parsed = parsed
     + {result: provider_result(parsed.calls, [], parsed.prose, [violation])}
   return parsed
@@ -1362,9 +1360,12 @@ fn __tool_parse_json(text: string) -> dict {
     return empty_parse()
       + {
       protocol_violations: [
-        "protocol_violation: `<tool_call>...</tool_call>` markup was emitted while "
-          + "`tool_format` is `json`; wrap each call as a strict JSON object inside "
-          + "a ```tool fence instead.",
+        protocol_violation(
+          "wrong_tool_format",
+          "protocol_violation: `<tool_call>...</tool_call>` markup was emitted while "
+            + "`tool_format` is `json`; wrap each call as a strict JSON object inside "
+            + "a ```tool fence instead.",
+        ),
       ],
       prose: trim(text),
     }
@@ -1460,8 +1461,11 @@ fn __tool_parse_json_error(detail: string) -> string {
 pub fn parse_tool_calls(payload: dict) -> dict {
   const text = to_string(payload?.text ?? "")
   const format = to_string(payload?.tool_format ?? "")
-  if format == "json" {
-    return __tool_parse_json(text)
+  const parsed = if format == "json" {
+    __tool_parse_json(text)
+  } else {
+    __tool_parse_tagged(text, payload?.tools)
   }
-  return __tool_parse_tagged(text, payload?.tools)
+  const unparsed = tool_shape_violations(tool_shape_findings(parsed?.dropped ?? []))
+  return parsed + {protocol_violations: (parsed?.protocol_violations ?? []) + unparsed}
 }

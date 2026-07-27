@@ -41,6 +41,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
     let verify_completion_judge_vetoes = 0
     let step_judge_attempts = 0
     let structural_validator_attempts = 0
+    let last_turn_parse_dropped = false
     let consecutive_text_only = 0
     let turns_since_progress = 0
     let fallback_index = 0
@@ -81,19 +82,15 @@ pub fn __agent_loop_run(message, session, initial_opts) {
       0
     }
     let terminal_callback_continues = 0
-    // Command ledger + hold: a session-scoped registry of long-running
-    // handles the loop owns instead of asking the model to poll. Threaded
-    // through the turn loop like `stall_state`. `command_wait` normalizes all
-    // thresholds and wording once here (harn#4456); a linked host that
-    // predates the feature passes no `command_wait` and gets the defaults.
+    // Session-scoped ownership of long-running handles keeps polling out of the
+    // model loop. Normalize thresholds and wording once here (harn#4456);
+    // linked hosts predating `command_wait` receive the defaults.
     const command_wait = command_wait_normalize(opts?.command_wait)
     let command_ledger = command_ledger_new()
     let command_hold_state = {reentries: 0}
-    // One-shot output cap for the turn immediately after a progress-only hold
-    // digest: deciding "keep waiting" needs no reasoning budget, so the weak
-    // model's laziest completion (say nothing) is the correct one. Nil for a
-    // normal turn and for terminal-result re-entries (acting on results is
-    // uncapped). Cleared after it is applied to exactly one turn.
+    // One-shot output cap after a progress-only hold: deciding "keep waiting"
+    // needs no reasoning budget. Nil for normal/result turns and cleared after
+    // exactly one application.
     let command_hold_cap_tokens = nil
     while true {
       while iteration < current_max {
@@ -444,6 +441,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           turn_opts,
           recovered_batch_drop.feedback,
         )
+        last_turn_parse_dropped = had_parse_errors_base
         const had_blank_name_drop = if fallback_outcome.triggered {
           false
         } else {
@@ -1497,6 +1495,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
           terminal_callback_continues: terminal_callback_continues,
           suspend_result: suspend_result,
           terminal_error: terminal_error,
+          last_turn_parse_dropped: last_turn_parse_dropped,
           stall_state: stall_state,
           successful_tools_seen: successful_tools_seen,
           rejected_tools_seen: rejected_tools_seen,
@@ -1515,6 +1514,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
       budget_exhausted_emitted = terminal_boundary.budget_exhausted_emitted
       budget_decisions = terminal_boundary.budget_decisions
       terminal_callback_continues = terminal_boundary.terminal_callback_continues
+      terminal_error = terminal_boundary.terminal_error
       if terminal_boundary.action == "continue" {
         continue
       }

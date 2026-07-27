@@ -139,7 +139,13 @@ pub(crate) fn structured_output_errors(
     if let Some(VmValue::List(violations)) = dict.get("protocol_violations") {
         let joined = violations
             .iter()
-            .map(VmValue::display)
+            .map(|violation| {
+                violation
+                    .as_dict()
+                    .and_then(|item| item.get("message"))
+                    .map(VmValue::display)
+                    .unwrap_or_else(|| violation.display())
+            })
             .collect::<Vec<_>>()
             .join("; ");
         if !joined.is_empty() {

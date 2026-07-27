@@ -150,7 +150,7 @@ pub fn report(label: string, parsed) -> nil {
     __io_println("  err ${json_stringify(error)}")
   }
   for violation in parsed.protocol_violations {
-    __io_println("  vio ${json_stringify(violation)}")
+    __io_println("  vio ${json_stringify(violation.message)}")
   }
   __io_println("  prose=${json_stringify(parsed.prose)}")
   __io_println("  answer=${json_stringify(parsed.user_response)}")

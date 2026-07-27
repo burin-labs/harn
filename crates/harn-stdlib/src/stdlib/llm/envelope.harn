@@ -9,6 +9,7 @@
 // `crates/harn-vm/src/llm/api/result.rs`) is the single producer; its
 // `envelope_top_level_keys_are_canonical` test and these types must move
 // together.
+import { ProtocolViolation } from "std/llm/tool_parse_result"
 
 // -------------------------------------------------------------------------------------------------
 
@@ -93,7 +94,7 @@ pub type LlmResponse = {
   stop_reason?: string,
   tool_calls: list<LlmToolCall>,
   native_tool_calls: list<LlmToolCall>,
-  protocol_violations?: list<string>,
+  protocol_violations?: list<ProtocolViolation>,
   tool_parse_errors?: list<string>,
   done_marker?: string,
   provider_response_id?: string,

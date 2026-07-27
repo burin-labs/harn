@@ -443,6 +443,7 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
     case toolPolicyRejected = "tool_policy_rejected"
     case hostBridgeUnimplemented = "host_bridge_unimplemented"
     case agentLoopProtocolFailure = "agent_loop_protocol_failure"
+    case parseDropped = "parse_dropped"
     case genericThrow = "generic_throw"
 
     public static let allCases: [Self] = [
@@ -455,6 +456,7 @@ public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
         "tool_policy_rejected",
         "host_bridge_unimplemented",
         "agent_loop_protocol_failure",
+        "parse_dropped",
         "generic_throw",
     ].map { Self(rawValue: $0)! }
 }

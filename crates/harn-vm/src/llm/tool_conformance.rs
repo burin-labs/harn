@@ -258,7 +258,7 @@ pub struct ToolConformanceCase {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parser_errors: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub protocol_violations: Vec<String>,
+    pub protocol_violations: Vec<crate::llm::ProtocolViolation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_sample: Option<String>,
 }

@@ -4,7 +4,8 @@
 //! [`AgentTerminalClass`] — `context_overflow`, `provider_misconfigured`,
 //! `provider_unavailable`, `rate_limited`, `timeout`, `resource_busy`,
 //! `tool_policy_rejected`, `host_bridge_unimplemented`,
-//! `agent_loop_protocol_failure`, or the `generic_throw` fallback. A structured
+//! `agent_loop_protocol_failure`, `parse_dropped`, or the `generic_throw`
+//! fallback. A structured
 //! error envelope (typed `category` /
 //! `reason` / `code` fields) is authoritative; legacy free-text matching is a
 //! Harn-side fallback only. `host_agent_session_finalize` consumes the class
@@ -36,11 +37,12 @@ pub enum AgentTerminalClass {
     ToolPolicyRejected,
     HostBridgeUnimplemented,
     AgentLoopProtocolFailure,
+    ParseDropped,
     GenericThrow,
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
@@ -50,6 +52,7 @@ impl AgentTerminalClass {
         Self::ToolPolicyRejected,
         Self::HostBridgeUnimplemented,
         Self::AgentLoopProtocolFailure,
+        Self::ParseDropped,
         Self::GenericThrow,
     ];
 
@@ -64,6 +67,7 @@ impl AgentTerminalClass {
             Self::ToolPolicyRejected => "tool_policy_rejected",
             Self::HostBridgeUnimplemented => "host_bridge_unimplemented",
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
+            Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
         }
     }
@@ -90,6 +94,7 @@ impl AgentTerminalClass {
             "tool_policy_rejected" => Some(Self::ToolPolicyRejected),
             "host_bridge_unimplemented" => Some(Self::HostBridgeUnimplemented),
             "agent_loop_protocol_failure" => Some(Self::AgentLoopProtocolFailure),
+            "parse_dropped" => Some(Self::ParseDropped),
             "generic_throw" => Some(Self::GenericThrow),
             _ => None,
         }
@@ -173,6 +178,7 @@ pub fn agent_terminal_class(
                 | "permission_denied"
                 | "policy_denied"
                 | "agent_loop_protocol_failure"
+                | "parse_dropped"
         )
     }) {
         return terminal_class_from_exact_signal(final_status)
@@ -308,6 +314,7 @@ fn terminal_class_from_exact_signal(signal: &str) -> Option<AgentTerminalClass> 
             Some(AgentTerminalClass::ToolPolicyRejected)
         }
         "agent_loop_protocol_failure" => Some(AgentTerminalClass::AgentLoopProtocolFailure),
+        "parse_dropped" => Some(AgentTerminalClass::ParseDropped),
         _ => None,
     }
 }
@@ -436,6 +443,7 @@ mod tests {
                 AgentTerminalClass::AgentLoopProtocolFailure,
                 "agent_loop_protocol_failure",
             ),
+            (AgentTerminalClass::ParseDropped, "parse_dropped"),
             (AgentTerminalClass::GenericThrow, "generic_throw"),
         ];
         for (class, wire) in pairs {
@@ -491,6 +499,10 @@ mod tests {
             (
                 json!({"tool_format": "native", "after_tool_result": true}),
                 AgentTerminalClass::AgentLoopProtocolFailure,
+            ),
+            (
+                json!({"terminal_class": "parse_dropped"}),
+                AgentTerminalClass::ParseDropped,
             ),
         ];
         for (error, expected) in cases {

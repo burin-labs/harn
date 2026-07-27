@@ -23,6 +23,9 @@
     // bare `.target`). Their vendored crate READMEs are build output, not docs.
     ".target/**",
     ".target-*/**",
+    // Isolated toolchain builds are generated output, including vendored crate
+    // READMEs copied by build scripts.
+    ".harn-toolchain-cache/**",
     "docs/dist",
     ".worktrees",
     ".burin",
