@@ -6,7 +6,7 @@
 # limited to bootstrap + capability wiring.
 #
 # A consuming repo needs only a tiny trigger wrapper (schedule/dispatch) plus
-# its own single declared validation command. See
+# its own declared refresh and validation commands. See
 # docs/src/dev/reusable-bump-harn-runtime.md for the minimal caller and the
 # security boundary.
 name: Bump Harn Runtime (reusable)
@@ -18,8 +18,13 @@ on:
         description: "Optional Harn tag to bump to (vX.Y.Z). Defaults to the latest published release."
         required: false
         type: string
+      refresh-command:
+        description: "Repository-owned regeneration command run after the standard version-file write. Defaults to refreshing the Harn package lock."
+        required: false
+        type: string
+        default: "harn install --locked || harn install"
       validate-command:
-        description: "The caller's single declared validation entrypoint, run after the pin/lockfile refresh."
+        description: "Repository-owned verification command run after all refresh mutations and before the signed commit."
         required: false
         type: string
         default: ""
@@ -131,6 +136,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
+          HARN_BUMP_REFRESH: ${{ inputs.refresh-command }}
           HARN_BUMP_VALIDATE: ${{ inputs.validate-command }}
           HARN_BUMP_BRANCH: ${{ inputs.branch }}
           HARN_BUMP_BASE: ${{ inputs.base }}
