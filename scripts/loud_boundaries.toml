@@ -43,9 +43,12 @@ title = "Batch text tool-call parsing"
 drops = "Spans the grammar consumed without producing a call (an unrecognized dialect salvaged as prose, narration inside a closed fence), and recorded protocol violations."
 was_silent = true
 event = "agent_event:boundary_failure"
-anchors = ["crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn"]
+anchors = [
+  "crates/harn-stdlib/src/stdlib/agent/loop_tool_calls.harn",
+  "crates/harn-vm/src/llm/tools/parse/streaming.rs",
+]
 test = "conformance/tests/scenarios/agent_loud_boundary_events.harn"
-notes = "Emitted above the parser, not inside crates/harn-vm/src/llm/tools/parse/. The parser is honest but not opinionated: it reports every span it consumed, and ordinary prose is one of them. Only the shape verdict in std/llm/tool_shape can tell narration from an unrecognized dialect, so the event fires where that verdict exists."
+notes = "Batch parsing emits above the parser, where std/llm/tool_shape can distinguish narration from an unrecognized dialect. The streaming detector has stronger evidence—an opened known-tool or tagged candidate—and reports its exact aborted span through the same boundary."
 
 [[boundary]]
 id = "response_content_extraction"
@@ -118,13 +121,6 @@ title = "Stall detection and hard stop"
 event = "agent_event:agent_loop_stall_warning"
 anchors = ["crates/harn-stdlib/src/stdlib/agent/stall_observation.harn"]
 marker = "agent_loop_stall_warning"
-
-[[audited]]
-id = "streaming_tool_detect"
-title = "Streaming tool-call detector abort"
-event = "agent_event:tool_call_update(ParseAborted)"
-anchors = ["crates/harn-vm/src/llm/tools/parse/streaming.rs"]
-marker = "ParseAborted"
 
 [[audited]]
 id = "llm_transport"

@@ -17,7 +17,9 @@ mod host_permission;
 mod side_effect_ceiling;
 mod structured_tool_result;
 mod tool_catalog;
-use denial_results::agent_primitive_denied_tool;
+use denial_results::{
+    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value, DenialEvidence,
+};
 use dispatch_policy::{enforce_dispatch_policies, tool_denial_from_policy};
 use host_permission::{
     emit_permission_event, emit_permission_event_with_policy, request_host_permission,
@@ -314,91 +316,6 @@ fn parse_error_is_truncation(parse_error: &str) -> bool {
     parse_error.contains("EOF while parsing") || parse_error.contains("unexpected end of input")
 }
 
-/// Append a `PermissionDeny` transcript event that carries the structured
-/// [`crate::agent_events::ToolDenial`] alongside the human-readable reason.
-/// Silent no-op for sessions that were never opened.
-fn emit_permission_deny_event(
-    session_id: &str,
-    tool_name: &str,
-    tool_args: &serde_json::Value,
-    denial: &crate::agent_events::ToolDenial,
-    escalated: bool,
-    policy_decision: Option<serde_json::Value>,
-) {
-    if !crate::agent_sessions::exists(session_id) {
-        return;
-    }
-    let event = permissions::permission_deny_transcript_event(
-        tool_name,
-        tool_args,
-        denial,
-        escalated,
-        policy_decision,
-    );
-    let _ = crate::agent_sessions::append_event(session_id, event);
-}
-
-/// Emit the canonical `PermissionDeny` event/result and fill missing paths from tool annotations.
-fn deny_tool_call(
-    session_id: &str,
-    tool_name: &str,
-    tool_call_id: &str,
-    tool_args: &serde_json::Value,
-    mut denial: crate::agent_events::ToolDenial,
-    escalated: bool,
-    policy_decision: Option<serde_json::Value>,
-    schema_repair: Option<serde_json::Value>,
-) -> serde_json::Value {
-    let repair = (denial.gate == crate::agent_events::DenialGate::ToolCeiling)
-        .then(|| agent_tools::embedded_call_repair_result(tool_name, tool_args).or(schema_repair))
-        .flatten();
-    denial = tools::normalize_repaired_denial(denial, repair.as_ref());
-    if denial.denied_paths.is_empty() {
-        denial.denied_paths =
-            crate::orchestration::current_tool_declared_paths(tool_name, tool_args);
-    }
-    emit_permission_deny_event(
-        session_id,
-        tool_name,
-        tool_args,
-        &denial,
-        escalated,
-        policy_decision,
-    );
-    agent_primitive_denied_tool(
-        tool_name,
-        tool_call_id,
-        tool_args,
-        denial.reason.clone(),
-        crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-        Some(&denial),
-        repair,
-    )
-}
-
-/// Canonical denied result converted for direct dispatch return.
-fn deny_tool_call_value(
-    session_id: &str,
-    tool_name: &str,
-    tool_call_id: &str,
-    tool_args: &serde_json::Value,
-    denial: crate::agent_events::ToolDenial,
-    escalated: bool,
-    policy_decision: Option<serde_json::Value>,
-    schema_repair: Option<serde_json::Value>,
-) -> VmValue {
-    json_to_vm_value(&deny_tool_call(
-        session_id,
-        tool_name,
-        tool_call_id,
-        tool_args,
-        denial,
-        escalated,
-        policy_decision,
-        schema_repair,
-    ))
-}
-
 /// Shared base `tool_result` shape for a call that never produced a real
 /// tool outcome. Extended by [`agent_primitive_cancelled_tool`] (preempted
 /// in-flight) and [`agent_primitive_undispatched_tool`] (never dispatched at
@@ -639,7 +556,7 @@ fn attach_hook_reminder_audit(
     runtime_only = true
 )]
 async fn host_agent_parse_tool_calls_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let text = match args.first() {
@@ -661,24 +578,34 @@ async fn host_agent_parse_tool_calls_impl(
         Some(VmValue::String(fmt)) => fmt.to_string(),
         _ => String::new(),
     };
-    let format = tools::TextToolFormat::from_option(&tool_format);
-    let mut parsed = tools::parse_text_tool_calls_in_format(&text, tools.as_ref(), format);
+    let mut parsed = crate::stdlib::harn_entry::call_harn_export_json(
+        &ctx,
+        "std/llm/tool_parse",
+        "parse_tool_calls",
+        "__host_agent_parse_tool_calls",
+        serde_json::json!({
+            "text": text,
+            "tools": tools.as_ref().map(helpers::vm_value_to_json),
+            "tool_format": tool_format,
+        }),
+    )
+    .await?;
+    let calls = parsed
+        .get_mut("tool_calls")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| {
+            VmError::Runtime(
+                "__host_agent_parse_tool_calls: std/llm/tool_parse returned no tool_calls list"
+                    .to_string(),
+            )
+        })?;
     tools::stamp_synthetic_tool_call_ids(
-        &mut parsed.calls,
+        calls,
         crate::agent_sessions::next_text_tool_call_seq_for_parse,
     );
-    Ok(json_to_vm_value(&serde_json::json!({
-        "calls": parsed.calls,
-        "tool_calls": parsed.calls,
-        "tool_parse_errors": parsed.errors,
-        "protocol_violations": parsed.violations,
-        "recovered_from_stray_count": parsed.recovered_from_stray_count,
-        "prose": parsed.prose,
-        "user_response": parsed.user_response,
-        "done_marker": parsed.done_marker,
-        "canonical_text": parsed.canonical,
-        "dropped": parsed.dropped.iter().map(|f| f.to_json()).collect::<Vec<_>>(),
-    })))
+    let stamped_calls = calls.clone();
+    parsed["calls"] = serde_json::Value::Array(stamped_calls);
+    Ok(json_to_vm_value(&parsed))
 }
 
 fn agent_primitive_max_concurrent_tools(options: &crate::value::DictMap) -> usize {
@@ -1082,15 +1009,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     ) {
                         let denial = tool_denial_from_policy(recheck_denial, &tool_name);
                         return Ok(deny_tool_call_value(
+                            Some(&ctx),
                             &session_id,
                             &tool_name,
                             &tool_id,
                             &tool_args,
                             denial,
                             false,
-                            Some(policy_decision),
-                            None,
-                        ));
+                            DenialEvidence::new(Some(policy_decision), None),
+                        )
+                        .await);
                     }
                     approval_status = Some("host_granted");
                     emit_permission_event_with_policy(
@@ -1109,15 +1037,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     policy_decision,
                 } => {
                     return Ok(deny_tool_call_value(
+                        Some(&ctx),
                         &session_id,
                         &tool_name,
                         &tool_id,
                         &tool_args,
                         denial,
                         escalated,
-                        Some(policy_decision),
-                        None,
-                    ));
+                        DenialEvidence::new(Some(policy_decision), None),
+                    )
+                    .await);
                 }
             }
         } else {
@@ -1132,15 +1061,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 None
             };
             return Ok(deny_tool_call_value(
+                Some(&ctx),
                 &session_id,
                 &tool_name,
                 &tool_id,
                 &tool_args,
                 denial,
                 false,
-                None,
-                schema_repair,
-            ));
+                DenialEvidence::new(None, schema_repair),
+            )
+            .await);
         }
     }
 
@@ -1175,15 +1105,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 precheck_denial.human_summary,
             );
             return Ok(deny_tool_call_value(
+                Some(&ctx),
                 &session_id,
                 &tool_name,
                 &tool_id,
                 &tool_args,
                 denial,
                 false,
-                None,
-                None,
-            ));
+                DenialEvidence::new(None, None),
+            )
+            .await);
         }
     }
 
@@ -1269,15 +1200,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     )
                 };
                 return Ok(deny_tool_call_value(
+                    Some(&ctx),
                     &session_id,
                     &tool_name,
                     &tool_id,
                     &tool_args,
                     denial,
                     escalated,
-                    None,
-                    None,
-                ));
+                    DenialEvidence::new(None, None),
+                )
+                .await);
             }
         }
     }
@@ -1343,15 +1275,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 decision.reason,
             );
             return Ok(deny_tool_call_value(
+                Some(&ctx),
                 &session_id,
                 &tool_name,
                 &tool_id,
                 &tool_args,
                 denial,
                 false,
-                Some(decision.receipt),
-                None,
-            ));
+                DenialEvidence::new(Some(decision.receipt), None),
+            )
+            .await);
         }
         Some(decision) if decision.is_ask() => {
             let approval_id = if tool_id.is_empty() {
@@ -1398,15 +1331,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         reason,
                     );
                     return Ok(deny_tool_call_value(
+                        Some(&ctx),
                         &session_id,
                         &tool_name,
                         &tool_id,
                         &tool_args,
                         denial,
                         true,
-                        Some(decision.receipt.clone()),
-                        None,
-                    ));
+                        DenialEvidence::new(Some(decision.receipt.clone()), None),
+                    )
+                    .await);
                 }
                 HostPermissionOutcome::Unavailable => {
                     let (denial_class, repeat_count) =
@@ -1425,15 +1359,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     )
                     .with_denial_class(denial_class, repeat_count);
                     return Ok(deny_tool_call_value(
+                        Some(&ctx),
                         &session_id,
                         &tool_name,
                         &tool_id,
                         &tool_args,
                         denial,
                         true,
-                        Some(decision.receipt.clone()),
-                        None,
-                    ));
+                        DenialEvidence::new(Some(decision.receipt.clone()), None),
+                    )
+                    .await);
                 }
             }
         }
@@ -1464,15 +1399,16 @@ pub(super) async fn host_agent_dispatch_tool_call(
             reason,
         );
         let denied = deny_tool_call(
+            Some(&ctx),
             &session_id,
             &tool_name,
             &tool_id,
             &tool_args,
             denial,
             false,
-            None,
-            None,
-        );
+            DenialEvidence::new(None, None),
+        )
+        .await;
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
         return Ok(json_to_vm_value(&denied));
     }
@@ -2430,7 +2366,7 @@ mod denied_tool_routing_tests {
     //! tool name) coach a retry-with-correction, while TRUE policy/permission
     //! denials keep the don't-retry body. Reverting the split (sending every
     //! category through `denied_tool_result`) fails the recoverable assertions.
-    use super::{agent_primitive_denied_tool, deny_tool_call};
+    use super::{agent_primitive_denied_tool, deny_tool_call, DenialEvidence};
     use crate::agent_events::ToolCallErrorCategory;
 
     #[test]
@@ -2545,7 +2481,8 @@ mod denied_tool_routing_tests {
             tools: vec!["look".to_string(), "search".to_string(), "edit".to_string()],
             ..Default::default()
         });
-        let envelope = deny_tool_call(
+        let envelope = futures::executor::block_on(deny_tool_call(
+            None,
             "",
             "tool_call",
             "call_8",
@@ -2554,9 +2491,8 @@ mod denied_tool_routing_tests {
             ),
             denial,
             false,
-            None,
-            None,
-        );
+            DenialEvidence::new(None, None),
+        ));
         pop_execution_policy();
         let result = &envelope["result"];
         assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
@@ -3016,8 +2952,14 @@ mod parse_tool_call_id_tests {
     }
 
     fn parse_ids(text: &str) -> Vec<String> {
+        let mut vm = crate::vm::Vm::new();
+        crate::register_core_stdlib(&mut vm);
+        crate::stdlib::macros::register_builtin_defs(
+            &mut vm,
+            crate::llm::tools::PARSE_HOST_PRIMITIVE_BUILTINS,
+        );
         let value = futures::executor::block_on(host_agent_parse_tool_calls_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(vm),
             vec![vm_str(text), look_tool_catalog(), vm_str("text")],
         ))
         .expect("parse primitive succeeds");

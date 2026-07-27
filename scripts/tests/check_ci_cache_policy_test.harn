@@ -19,9 +19,7 @@ fn native_source_key() -> string {
 fn windows_cache_inputs(save: bool = false) {
   return {
     "shared-key": "workspace-windows",
-    "source-key": native_source_key(),
     "target-dir": gha_expression("env.CARGO_TARGET_DIR"),
-    "broad-restore-prefix": "v0-rust-workspace-windows-",
     ...if save {
       {save: true}
     } else {
@@ -267,12 +265,12 @@ pipeline test_ci_cache_policy_accepts_declared_main_guarded_writers(task) {
   )
 }
 
-pipeline test_windows_shared_cache_targets_dev_drive_and_restores_near_misses(task) {
+pipeline test_windows_shared_cache_targets_dev_drive_with_one_stable_restore_owner(task) {
   const declared = workflows()
   assert_eq(windows_shared_cache_errors(declared["ci.yml"], declared["windows-nightly.yml"]), [])
 }
 
-pipeline test_windows_shared_cache_rejects_missing_target_mapping_and_fallback(task) {
+pipeline test_windows_shared_cache_rejects_source_partitioning_and_missing_target_mapping(task) {
   const declared = workflows()
   const producer = declared["windows-nightly.yml"].jobs.nextest
   const producer_cache = producer.steps[3]
@@ -284,7 +282,12 @@ pipeline test_windows_shared_cache_rejects_missing_target_mapping_and_fallback(t
           + [
           {
             ...producer_cache,
-            with: {...producer_cache.with, "target-dir": "", "broad-restore-prefix": ""},
+            with: {
+              ...producer_cache.with,
+              "source-key": native_source_key(),
+              "target-dir": "",
+              "broad-restore-prefix": "v0-rust-workspace-windows-",
+            },
           },
         ],
       },
@@ -298,7 +301,7 @@ pipeline test_windows_shared_cache_rejects_missing_target_mapping_and_fallback(t
   )
   assert(
     errors.contains(
-      "workspace-windows producer and consumer must restore the latest compatible source-key generation",
+      "workspace-windows producer and consumer must use one stable native restore namespace",
     ),
   )
   assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))

@@ -289,6 +289,7 @@ where
         .map(str::to_string);
     let output_tokens = approximate_tokens(&collector.text);
     Ok(LlmResult {
+        text_projection: None,
         served_fast: false,
         text: collector.text.clone(),
         tool_calls: Vec::new(),

@@ -1,0 +1,166 @@
+/** Shared result projection for the text-tool dialect modules. */
+import { IMPLICIT_TOOL_NAMES } from "std/llm/dialects"
+
+/** Stable reason vocabulary for a response-protocol violation. */
+pub type ProtocolViolationKind = "ambiguous_recovery" \
+  | "bare_json" \
+  | "empty_done" \
+  | "fence_dialect" \
+  | "provider_dialect" \
+  | "recovered_dialect" \
+  | "stray_text" \
+  | "unclosed_response" \
+  | "unknown_tag" \
+  | "unparsed_tool_syntax" \
+  | "wrong_tool_format"
+
+/**
+ * A model response violated the selected tool-call protocol.
+ *
+ * `message` is lossless corrective feedback, but consumers branch on `kind`.
+ * Shape-derived violations also carry the bounded source `excerpt` and the
+ * parser's `dropped_reason`, keeping classification structural end to end.
+ */
+pub type ProtocolViolation = {
+  kind: ProtocolViolationKind,
+  message: string,
+  excerpt?: string,
+  dropped_reason?: string,
+}
+
+/**
+ * Construct one typed protocol violation.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn protocol_violation(
+  kind: ProtocolViolationKind,
+  message: string,
+  excerpt: string? = nil,
+  dropped_reason: string? = nil,
+) -> ProtocolViolation {
+  return {kind: kind, message: message, excerpt: excerpt, dropped_reason: dropped_reason}
+}
+
+/**
+ * Render typed violations only at a human/model feedback edge.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn protocol_violation_messages(violations: list<ProtocolViolation>) -> list<string> {
+  return violations.map(fn(violation) { return violation.message })
+}
+
+/**
+ * Return the sorted declared and implicit tool names for parser policy.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn registry_names(tools) -> list<string> {
+  let names: list<string> = []
+  if type_of(tools) == "dict" {
+    for entry in tools?.tools ?? [] {
+      const name = trim(to_string(entry?.name ?? ""))
+      if name != "" && !names.contains(name) {
+        names = names.appending(name)
+      }
+    }
+  }
+  for name in IMPLICIT_TOOL_NAMES {
+    if !names.contains(name) {
+      names = names.appending(name)
+    }
+  }
+  return names.sorted()
+}
+
+/**
+ * Construct the complete empty text-tool parse projection.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn empty_parse() -> dict {
+  return {
+    calls: [],
+    tool_calls: [],
+    tool_parse_errors: [],
+    protocol_violations: [],
+    recovered_from_stray_count: 0,
+    prose: "",
+    user_response: nil,
+    done_marker: nil,
+    canonical_text: "",
+    dropped: [],
+  }
+}
+
+/**
+ * Render one canonical tool-call response block.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn call_block(call) -> string {
+  return "<tool_call>\n"
+    + __host_tool_render_call(to_string(call?.name ?? ""), call?.arguments ?? {})
+    + "\n</tool_call>"
+}
+
+/**
+ * Render one canonical assistant-prose response block.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn prose_block(text: string) -> string {
+  return "<assistant_prose>\n" + trim(text) + "\n</assistant_prose>"
+}
+
+/**
+ * Render one canonical user-response block.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn answer_block(text: string) -> string {
+  return "<user_response>\n" + trim(text) + "\n</user_response>"
+}
+
+/**
+ * Join canonical response blocks with the protocol separator.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn canonical(parts: list<string>) -> string {
+  return parts.join("\n\n")
+}
+
+/**
+ * Project a provider-dialect parse into the shared result shape.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn provider_result(calls, errors, prose: string, violations) -> dict {
+  let parts: list<string> = []
+  if trim(prose) != "" {
+    parts = parts.appending(prose_block(prose))
+  }
+  for call in calls {
+    parts = parts.appending(call_block(call))
+  }
+  return empty_parse()
+    + {
+    calls: calls,
+    tool_calls: calls,
+    tool_parse_errors: errors,
+    protocol_violations: violations,
+    prose: trim(prose),
+    canonical_text: canonical(parts),
+  }
+}

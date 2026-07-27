@@ -613,6 +613,7 @@ pub(crate) fn parse_openai_responses_response(
     telemetry.capture_provider_metadata(json);
 
     Ok(LlmResult {
+        text_projection: None,
         text,
         tool_calls,
         raw_tool_calls,
@@ -886,6 +887,7 @@ pub(crate) fn parse_llm_response(
         let telemetry = ProviderTelemetry::from_anthropic_usage(&json["usage"], request_id);
 
         Ok(LlmResult {
+            text_projection: None,
             text,
             tool_calls,
             raw_tool_calls,
@@ -1117,10 +1119,7 @@ pub(crate) fn parse_llm_response(
                 ),
             ));
         }
-        // Deterministic upstream contract-violation backstop. A clean,
-        // tool-offered completion that billed output but committed no visible
-        // text and dispatched no tool call is a billed no-op: the structured
-        // action went only to a hidden reasoning channel or nowhere.
+        // Reject billed tool-offered completions with neither text nor a tool call.
         if is_billed_noncommittal_completion(&CompletionContractSignals {
             stop_reason: stop_reason.as_deref(),
             output_tokens,
@@ -1137,6 +1136,7 @@ pub(crate) fn parse_llm_response(
         }
 
         Ok(LlmResult {
+            text_projection: None,
             text,
             tool_calls,
             raw_tool_calls,

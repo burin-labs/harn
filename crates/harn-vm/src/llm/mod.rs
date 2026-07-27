@@ -58,6 +58,8 @@ mod permission_preview;
 pub(crate) mod permissions;
 pub mod plan;
 pub mod prompt;
+mod protocol_violation;
+pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
 pub mod readiness;
 pub mod reasoning_policy;
 pub(crate) mod reminder_iteration;
@@ -808,7 +810,8 @@ async fn llm_completion_builtin(
             serde_json::json!(result.output_tokens),
         );
     }
-    Ok(vm_build_llm_result(&result, None, None, None))
+    let projection = crate::llm::api::build_llm_text_projection(Some(&_ctx), &result, None).await?;
+    Ok(vm_build_llm_result(&result, None, None, &projection))
 }
 
 /// Execute a channel-based streaming LLM request.
@@ -828,6 +831,7 @@ async fn llm_stream_builtin_wrap(
 pub fn register_llm_builtins(vm: &mut Vm) {
     agent_config::register_agent_control_primitives(vm);
     register_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS);
+    register_builtin_defs(vm, tools::PARSE_HOST_PRIMITIVE_BUILTINS);
     agent_config::register_agent_loop(vm);
     agent_session_host::register_agent_session_host_primitives(vm);
 

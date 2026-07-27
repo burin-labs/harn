@@ -644,6 +644,7 @@ mod tests {
 
     fn priced_outcome(errors: Vec<&str>) -> SchemaLoopOutcome {
         let result = crate::llm::api::LlmResult {
+            text_projection: None,
             text: "{\"decision\":\"wait\"}".to_string(),
             tool_calls: Vec::new(),
             raw_tool_calls: Vec::new(),
@@ -663,7 +664,12 @@ mod tests {
             telemetry: crate::llm::api::ProviderTelemetry::default(),
         };
         SchemaLoopOutcome {
-            vm_result: crate::llm::api::vm_build_llm_result(&result, None, None, None),
+            vm_result: crate::llm::api::vm_build_llm_result(
+                &result,
+                None,
+                None,
+                &crate::llm::api::test_text_projection(&result, None),
+            ),
             raw_text: String::from("{\"decision\":\"wait\"}"),
             errors: errors.into_iter().map(String::from).collect(),
             attempts: 1,

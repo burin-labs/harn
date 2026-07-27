@@ -22,9 +22,25 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
   let terminal_callback_continues = state.terminal_callback_continues
+  let terminal_error = state.terminal_error
   if final_status == "" && state.iteration >= current_max && stop_reason == nil {
     final_status = "budget_exhausted"
     stop_reason = stop_reason ?? "max_iterations"
+  }
+  if terminal_error == nil && state.last_turn_parse_dropped
+    && final_status
+    == "budget_exhausted"
+    && stop_reason
+    == "max_iterations" {
+    final_status = "error"
+    stop_reason = "parse_dropped"
+    terminal_error = {
+      terminal_class: "parse_dropped",
+      category: "harness",
+      reason: "parse_dropped",
+      message:
+        "The final model turn contained tool-shaped output that the text-tool parser dropped.",
+    }
   }
   if __agent_loop_should_spend_reserve(
     state.reserve_cfg,
@@ -120,7 +136,7 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
     }
     stop_reason = reserve_kind + "_failed"
   }
-  if final_status != "" && state.suspend_result == nil && state.terminal_error == nil
+  if final_status != "" && state.suspend_result == nil && terminal_error == nil
     && terminal_callback_continues
     == 0
     && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
@@ -192,5 +208,6 @@ pub fn __agent_loop_terminal_boundary(session, state) -> dict {
     budget_exhausted_emitted: budget_exhausted_emitted,
     budget_decisions: budget_decisions,
     terminal_callback_continues: terminal_callback_continues,
+    terminal_error: terminal_error,
   }
 }

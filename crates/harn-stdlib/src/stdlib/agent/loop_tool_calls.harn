@@ -2,7 +2,7 @@ import "std/agent/loop_call_resolution"
 import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
-import { tool_shape_feedback, tool_shape_findings } from "std/llm/tool_shape"
+import { protocol_violation_messages } from "std/llm/tool_parse_result"
 
 // Tool middleware seam — composable tool_caller (mirrors agent_invoke_llm).
 //
@@ -770,20 +770,13 @@ pub fn __parse_feedback_protocol_violations(parsed, turn_opts) {
   ) {
     return []
   }
-  const declared = parsed?.protocol_violations ?? []
-  // Text the parser consumed without producing a call, but which is shaped
-  // like an invocation, is a failure of the parse boundary rather than a
-  // choice by the model. Reporting it here is what stops the turn from
-  // reading as "the model declined to act" to stall detection and the
-  // governor downstream.
-  const unparsed = tool_shape_feedback(tool_shape_findings(parsed?.dropped ?? []))
-  return declared + unparsed
+  return parsed?.protocol_violations ?? []
 }
 
 pub fn __parse_feedback_diagnostics(parsed, turn_opts) {
   const parse_errors = parsed?.tool_parse_errors ?? []
   const protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
-  return parse_errors + protocol_violations
+  return parse_errors + protocol_violation_messages(protocol_violations)
 }
 
 pub fn __recovered_text_call_dispatch_cap(_turn_opts) -> int {
@@ -825,10 +818,9 @@ pub fn __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts) {
  *
  * The event fires here rather than in the Rust parser because the parser is
  * honest but not opinionated: it reports every span it consumed, and ordinary
- * prose is one of them. Only the shape verdict — computed one layer up, in
- * `std/llm/tool_shape` — can tell a paragraph of narration from a dialect the
- * grammar failed to recognize. Emitting below that verdict would produce an
- * event on every plain-text turn, and a funnel that cries wolf gets muted.
+ * prose is one of them. `std/llm/tool_parse` attaches shape-derived typed
+ * violations at its public boundary; this consumer only routes that structural
+ * verdict through the agent event funnel.
  *
  * One coalesced event per turn: a turn that fences a dozen unrecognized blocks
  * is one loss with a count, not a dozen notifications.
@@ -841,34 +833,28 @@ fn __report_parse_boundary_loss(session_id, parsed, turn_opts) {
     return
   }
   const declared = parsed?.protocol_violations ?? []
-  const findings = if agent_tool_call_paradigm(turn_opts).kind == "text" {
-    tool_shape_findings(parsed?.dropped ?? [])
-  } else {
-    []
-  }
-  const total = len(declared) + len(findings)
+  const unparsed = declared.filter(
+    fn(violation) { return violation.kind == "unparsed_tool_syntax" },
+  )
+  const total = len(declared)
   if total == 0 {
     return
   }
-  const excerpt = if len(findings) > 0 {
-    to_string(findings[0].excerpt)
-  } else {
-    to_string(declared[0])
-  }
+  const excerpt = to_string(declared[0]?.excerpt ?? declared[0].message)
   const _ = try {
     agent_emit_event(
       session_id,
       "boundary_failure",
       {
         boundary: "text_tool_parse",
-        kind: if len(findings) > 0 {
+        kind: if len(unparsed) > 0 {
           "unrecognized"
         } else {
           "dropped"
         },
         detail: "the text tool-call parse boundary lost ${to_string(total)} span(s): "
-          + "${to_string(len(findings))} shaped like a tool call but unrecognized, "
-          + "${to_string(len(declared))} declared protocol violation(s)",
+          + "${to_string(len(unparsed))} shaped like a tool call but unrecognized, "
+          + "${to_string(len(declared) - len(unparsed))} other protocol violation(s)",
         excerpt: excerpt,
         dropped_count: total,
       },

@@ -759,6 +759,7 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
     };
 
     LlmResult {
+        text_projection: None,
         served_fast: false,
         text: mock.text.clone(),
         raw_tool_calls: if mock.raw_tool_calls.is_empty() {
@@ -1198,6 +1199,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
     let content = std::fs::read_to_string(&path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     Some(LlmResult {
+        text_projection: None,
         served_fast: false,
         text: json["text"].as_str().unwrap_or("").to_string(),
         tool_calls: json["tool_calls"].as_array().cloned().unwrap_or_default(),
@@ -1359,6 +1361,7 @@ pub(crate) fn mock_llm_response(
             let tool_name = mock_tool_name(first_tool).unwrap_or("unknown");
             let mock_args = mock_required_args(first_tool);
             let mut result = LlmResult {
+                text_projection: None,
                 served_fast: false,
                 text: String::new(),
                 tool_calls: vec![serde_json::json!({
@@ -1417,6 +1420,7 @@ pub(crate) fn mock_llm_response(
     };
 
     let mut result = LlmResult {
+        text_projection: None,
         served_fast: false,
         text: response.clone(),
         tool_calls: vec![],

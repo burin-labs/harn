@@ -92,9 +92,9 @@ impl OnnxInjectionClassifier {
             .map_err(inference_err)?;
 
         let input_names: Vec<String> = session
-            .inputs
+            .inputs()
             .iter()
-            .map(|input| input.name.clone())
+            .map(|input| input.name().to_owned())
             .filter(|name| KNOWN_INPUTS.contains(&name.as_str()))
             .collect();
         if !input_names.iter().any(|n| n == "input_ids") {
@@ -103,11 +103,11 @@ impl OnnxInjectionClassifier {
             )));
         }
         let output_name = session
-            .outputs
+            .outputs()
             .iter()
-            .find(|o| o.name == "logits")
-            .or_else(|| session.outputs.first())
-            .map(|o| o.name.clone())
+            .find(|o| o.name() == "logits")
+            .or_else(|| session.outputs().first())
+            .map(|o| o.name().to_owned())
             .ok_or_else(|| {
                 GuardError::Inference(format!("model `{model_id}` declares no outputs"))
             })?;

@@ -321,6 +321,11 @@ if ! grep -Fq "xargs -0 env HARN_BIN=\"$fake_harn\" ./scripts/harn_bin.sh -- fmt
   cat "$make_fmt_with_bin" >&2
   exit 1
 fi
+if ! grep -Fq "find scripts -type d -name '.harn*' -prune -o -type f -name '*.harn' -print0" "$make_fmt_with_bin"; then
+  echo "fmt-harn does not prune ignored runtime directories under scripts" >&2
+  cat "$make_fmt_with_bin" >&2
+  exit 1
+fi
 
 make_provider_targets="$tmp_root/make-provider-targets.txt"
 make -C "$repo_root" -n \

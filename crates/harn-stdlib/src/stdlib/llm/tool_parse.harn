@@ -1,0 +1,1471 @@
+/**
+ * std/llm/tool_parse — text-tool dialect composition.
+ *
+ * Rust delimits byte ranges and parses byte-oriented literals. This module
+ * owns what those ranges mean: dialect vocabulary, recovery order, visible
+ * prose, canonical replay, and the rule that every consumed non-call is
+ * recorded as dropped.
+ */
+import {
+  ARGUMENT_ALIASES,
+  HTML_ENTITIES,
+  MARKUP_DIALECTS,
+  NAME_ALIASES,
+  TAGGED_DIALECT,
+} from "std/llm/dialects"
+import {
+  bind_verbatim,
+  has_counted_verbatim,
+  json_call,
+  json_chunks,
+  json_fields,
+} from "std/llm/tool_parse_json_support"
+import { has_response_protocol_fragment } from "std/llm/tool_parse_protocol"
+import { parse_provider_dialect } from "std/llm/tool_parse_provider"
+import {
+  answer_block,
+  call_block,
+  canonical,
+  empty_parse,
+  prose_block,
+  protocol_violation,
+  provider_result,
+  registry_names,
+} from "std/llm/tool_parse_result"
+import { tool_parse_scan_spec } from "std/llm/tool_parse_scan_spec"
+import { tool_shape_findings, tool_shape_violations } from "std/llm/tool_shape"
+
+const TEXT_UNIT_KINDS = ["text", "fenced_line", "harmony_line"]
+
+fn __tool_parse_tag_spellings(canonical: string) -> list<string> {
+  for dialect in TAGGED_DIALECT {
+    if dialect.canonical == canonical {
+      return dialect.spellings
+    }
+  }
+  return []
+}
+
+fn __tool_parse_schema_type(tools, tool_name: string, parameter_name: string) {
+  if type_of(tools) != "dict" {
+    return nil
+  }
+  for entry in tools?.tools ?? [] {
+    if to_string(entry?.name ?? "") == tool_name {
+      return entry?.parameters?.[parameter_name]?.type
+    }
+  }
+  return nil
+}
+
+fn __tool_parse_unframe_markup_value(value: string) -> string {
+  let framed = value
+  if starts_with(framed, "\r\n") {
+    framed = framed.slice(2, len(framed))
+  } else if starts_with(framed, "\n") {
+    framed = framed.slice(1, len(framed))
+  }
+  if ends_with(framed, "\r\n") {
+    framed = framed.slice(0, len(framed) - 2)
+  } else if ends_with(framed, "\n") {
+    framed = framed.slice(0, len(framed) - 1)
+  }
+  return framed
+}
+
+fn __tool_parse_markup_value(raw: string, schema_type) {
+  const framed = __tool_parse_unframe_markup_value(raw)
+  if schema_type == nil || schema_type == "string" {
+    return framed
+  }
+  return try {
+    json_parse(trim(framed))
+  } catch (_) {
+    framed
+  }
+}
+
+fn __tool_parse_markup(body: string, tools) -> dict {
+  const trimmed = trim(body)
+  let opener = ""
+  let close_tag = ""
+  let style = ""
+  if starts_with(trimmed, "<function=") {
+    opener = "<function="
+    close_tag = "</function>"
+    style = "`<function=...>`"
+  } else if starts_with(trimmed, "<invoke name=") {
+    opener = "<invoke name="
+    close_tag = "</invoke>"
+    style = "`<invoke name=...>`"
+  } else {
+    return {matched: false}
+  }
+  const rest = trimmed.slice(len(opener), len(trimmed))
+  const gt = rest.index_of(">")
+  if gt < 0 {
+    const subject = opener == "<function=" ? "a `<function=`" : "an `<invoke name=`"
+    return {
+      matched: true,
+      ok: false,
+      error: "TOOL CALL TRUNCATED: "
+        + subject
+        + " open tag was never closed with `>` — the response appears to have been cut off. "
+        + "The call was NOT executed; re-emit the complete call.",
+    }
+  }
+  const name = trim(regex_replace("^\"|\"$", "", rest.slice(0, gt)))
+  if len(regex_captures("^[A-Za-z0-9_.-]+$", name)) == 0 {
+    return {matched: false}
+  }
+  const known = registry_names(tools)
+  if !known.contains(name) {
+    return {
+      matched: true,
+      ok: false,
+      error: "Unknown tool '"
+        + name
+        + "' in chat-template "
+        + style
+        + " tool-call markup. Available tools: ["
+        + known.slice(0, 20).join(", ")
+        + "]",
+    }
+  }
+  const after_open = rest.slice(gt + 1, len(rest))
+  const close_at = after_open.index_of(close_tag)
+  const inner = close_at >= 0 ? after_open.slice(0, close_at) : after_open
+  const parameter_pattern =
+    "(?s)<parameter(?:=([A-Za-z0-9_][A-Za-z0-9_.-]*)|\\s+name=\"([^\"]+)\"(?:\\s+[A-Za-z_][A-Za-z0-9_.-]*=\"[^\"]*\")*)\\s*>(.*?)</parameter>"
+  let arguments: dict = {}
+  for capture in regex_captures(parameter_pattern, inner) {
+    const groups = capture?.groups ?? []
+    const key = to_string(groups[0] ?? groups[1] ?? "")
+    const raw = to_string(groups[2] ?? "")
+    arguments[key] = __tool_parse_markup_value(raw, __tool_parse_schema_type(tools, name, key))
+  }
+  const leftover = regex_replace(parameter_pattern, "", inner)
+  if contains(leftover, "<parameter") {
+    return {
+      matched: true,
+      ok: false,
+      error: "TOOL CALL TRUNCATED: a `<parameter ...>` block in the "
+        + style
+        + " markup for `"
+        + name
+        + "` was never closed with `</parameter>` — the response appears to have been cut off. "
+        + "The call was NOT executed; re-emit the complete call.",
+    }
+  }
+  if contains(leftover, "<function=") || contains(leftover, "<invoke name=") {
+    return {
+      matched: true,
+      ok: false,
+      error: "The "
+        + style
+        + " markup block for `"
+        + name
+        + "` contained more than one call; emit one call per <tool_call> block.",
+    }
+  }
+  if len(keys(arguments)) == 0 && starts_with(trim(leftover), "{") {
+    const json_source = trim(leftover)
+    const json_len = __host_tool_balanced_json_len(json_source)
+    if json_len == 0 {
+      return {
+        matched: true,
+        ok: false,
+        error: "TOOL CALL TRUNCATED: the JSON arguments object in the "
+          + style
+          + " markup for `"
+          + name
+          + "` was never closed — the response appears to have been cut off. "
+          + "The call was NOT executed; re-emit the complete call.",
+      }
+    }
+    arguments = try {
+      json_parse(json_source.slice(0, json_len))
+    } catch (error) {
+      return {
+        matched: true,
+        ok: false,
+        error: "The "
+          + style
+          + " markup for `"
+          + name
+          + "` had a JSON arguments object that did not parse: "
+          + to_string(error)
+          + ". The call was NOT executed.",
+      }
+    }
+    if type_of(arguments) != "dict" {
+      return {
+        matched: true,
+        ok: false,
+        error: "JSON arguments for tool '"
+          + name
+          + "' in "
+          + style
+          + " markup must be an object, got `"
+          + json_stringify(arguments)
+          + "`.",
+      }
+    }
+    arguments = __host_tool_decode_entities(arguments, HTML_ENTITIES)
+  }
+  return {
+    matched: true,
+    ok: true,
+    call: {id: "tc_fnmarkup_" + name, name: name, arguments: arguments},
+  }
+}
+
+fn __tool_parse_nested_xml(body: string, tools) -> dict {
+  const trimmed = trim(body)
+  const captures = regex_captures("^<([A-Za-z_][A-Za-z0-9_.-]*)>\\s*", trimmed)
+  if len(captures) == 0 {
+    return {matched: false}
+  }
+  const name = to_string(captures[0]?.groups?.[0] ?? "")
+  const after_open = trim(trimmed.slice(captures[0].end, len(trimmed)))
+  if !starts_with(after_open, "{") {
+    return {matched: false}
+  }
+  const known = registry_names(tools)
+  if !known.contains(name) {
+    return {
+      matched: true,
+      ok: false,
+      error: "Unknown tool '"
+        + name
+        + "' in nested XML tool-call body. Available tools: ["
+        + known.slice(0, 20).join(", ")
+        + "]",
+    }
+  }
+  const object_len = __host_tool_balanced_json_len(after_open)
+  if object_len == 0 {
+    return {
+      matched: true,
+      ok: false,
+      error: "<tool_call><"
+        + name
+        + "> body did not contain a complete JSON object. Emit `<tool_call>"
+        + name
+        + "({ ... })</tool_call>` instead.",
+    }
+  }
+  let arguments = try {
+    json_parse(after_open.slice(0, object_len))
+  } catch (error) {
+    return {
+      matched: true,
+      ok: false,
+      error: "<tool_call><"
+        + name
+        + "> body did not parse as a JSON object: "
+        + to_string(error)
+        + ". Emit `<tool_call>"
+        + name
+        + "({ ... })</tool_call>` instead.",
+    }
+  }
+  if type_of(arguments) != "dict" {
+    return {
+      matched: true,
+      ok: false,
+      error: "Nested XML arguments for tool '"
+        + name
+        + "' must be a JSON object, got `"
+        + json_stringify(arguments)
+        + "`.",
+    }
+  }
+  arguments = __host_tool_decode_entities(arguments, HTML_ENTITIES)
+  return {matched: true, ok: true, call: {id: "tc_xml_" + name, name: name, arguments: arguments}}
+}
+
+fn __tool_parse_narration(body: string, tools) -> dict {
+  let rest = trim(body)
+  let prose: list<string> = []
+  for tag in ["assistant_prose", "assistantprose", "thinking", "reasoning"] {
+    const open = "<" + tag + ">"
+    const close = "</" + tag + ">"
+    if starts_with(rest, open) {
+      const close_at = rest.index_of(close)
+      if close_at >= 0 {
+        const text = trim(rest.slice(len(open), close_at))
+        if text != "" {
+          prose = prose.appending(text)
+        }
+        rest = trim(rest.slice(close_at + len(close), len(rest)))
+      }
+    }
+  }
+  if len(prose) > 0 {
+    if rest == "" {
+      return {matched: true, ok: true, call: nil, prose: prose}
+    }
+    const parsed = __tool_parse_call_from_body(rest, tools)
+    return {matched: true, ok: true, call: parsed?.ok ?? false ? parsed?.call : nil, prose: prose}
+  }
+  if rest != ""
+    && !starts_with(rest, "<")
+    && !starts_with(rest, "{")
+    && !starts_with(rest, "[") {
+    const sniffed = __host_tool_scan_bare_calls(rest, tools)
+    if len(sniffed?.calls ?? []) == 0 && len(sniffed?.errors ?? []) == 0 {
+      return {matched: true, ok: true, call: nil, prose: [rest]}
+    }
+  }
+  return {matched: false}
+}
+
+fn __tool_parse_json_call_from_body(source: string, tools) -> dict {
+  const decoded = try {
+    json_parse(source)
+  } catch (error) {
+    return {
+      ok: false,
+      error: "<tool_call> body looked like JSON but did not parse: "
+        + to_string(error)
+        + ". Emit either `name({ ... })` or JSON with `name` and `arguments`.",
+    }
+  }
+  const item = if type_of(decoded) == "list" {
+    if len(decoded) != 1 {
+      return {
+        ok: false,
+        error: "<tool_call> JSON array contained "
+          + to_string(len(decoded))
+          + " calls; emit one call per <tool_call> block.",
+      }
+    }
+    decoded[0]
+  } else {
+    decoded
+  }
+  if type_of(item) != "dict" {
+    return {
+      ok: false,
+      error: "<tool_call> JSON body must be an object, got `" + json_stringify(item) + "`.",
+    }
+  }
+  const name = trim(to_string(item?.name ?? item?.tool_name ?? item?.function?.name ?? ""))
+  if name == "" {
+    return {ok: false, error: "<tool_call> JSON body did not contain a tool name"}
+  }
+  const known = registry_names(tools)
+  if !known.contains(name) {
+    return {
+      ok: false,
+      error: "Unknown tool '" + name + "'. Available tools: [" + known.join(", ") + "]",
+    }
+  }
+  let arguments = item?.arguments
+    ?? item?.parameters
+    ?? item?.args
+    ?? item?.function?.arguments
+    ?? {}
+  if type_of(arguments) == "string" {
+    arguments = try {
+      json_parse(arguments)
+    } catch (error) {
+      return {
+        ok: false,
+        error: "Could not parse JSON string arguments for tool '"
+          + name
+          + "': "
+          + to_string(error),
+      }
+    }
+  }
+  if type_of(arguments) != "dict" {
+    return {
+      ok: false,
+      error: "Tool '"
+        + name
+        + "' arguments must be a JSON object, got `"
+        + json_stringify(arguments)
+        + "`.",
+    }
+  }
+  return {
+    ok: true,
+    call: {
+      id: to_string(item?.id ?? "tc_json"),
+      name: name,
+      arguments: __host_tool_decode_entities(arguments, HTML_ENTITIES),
+    },
+  }
+}
+
+fn __tool_parse_call_from_body(
+  body: string,
+  tools,
+  head_name: string = "",
+  head_sep: string = "",
+  direct_candidate = nil,
+) -> dict {
+  const trimmed = trim(body)
+  if trimmed == "" {
+    return {
+      ok: false,
+      error: "<tool_call> body did not contain a bare `name({ ... })` expression. Got: \"\"",
+    }
+  }
+  if head_name != "" && registry_names(tools).contains(head_name) {
+    const direct = if direct_candidate != nil {
+      direct_candidate
+    } else if head_sep == "(" {
+      __host_tool_parse_call_expr(trimmed, head_name)
+    } else if head_sep == "{" {
+      const parsed = __host_tool_parse_object_literal(
+        trimmed.slice(len(head_name), len(trimmed)),
+        head_name,
+      )
+      parsed + {consumed: len(head_name) + (parsed?.consumed ?? 0)}
+    } else {
+      {ok: false}
+    }
+    if direct?.ok ?? false {
+      const trailing = trim(trimmed.slice(direct.consumed, len(trimmed)))
+      if trailing == "" {
+        return {
+          ok: true,
+          call: {id: "tc_0", name: head_name, arguments: direct.arguments ?? direct.value ?? {}},
+        }
+      }
+    }
+  }
+  const markup = __tool_parse_markup(trimmed, tools)
+  if markup?.matched ?? false {
+    return markup
+  }
+  const nested = __tool_parse_nested_xml(trimmed, tools)
+  if nested?.matched ?? false {
+    return nested
+  }
+  if starts_with(trimmed, "{") || starts_with(trimmed, "[") {
+    return __tool_parse_json_call_from_body(trimmed, tools)
+  }
+  const narration = __tool_parse_narration(trimmed, tools)
+  if narration?.matched ?? false {
+    return narration
+  }
+  const sniffed = __host_tool_scan_bare_calls(trimmed, tools)
+  if len(sniffed?.errors ?? []) > 0 {
+    return {ok: false, error: sniffed.errors[0]}
+  }
+  if len(sniffed?.calls ?? []) == 1 {
+    return {ok: true, call: sniffed.calls[0]}
+  }
+  if len(sniffed?.calls ?? []) > 1 {
+    return {
+      ok: false,
+      error: "<tool_call> body contained "
+        + to_string(len(sniffed.calls))
+        + " calls; emit one call per <tool_call> block.",
+    }
+  }
+  return {
+    ok: false,
+    error: "<tool_call> body did not contain a bare `name({ ... })` expression. Got: "
+      + json_stringify(
+      trimmed,
+    ),
+  }
+}
+
+fn __tool_parse_consume_stray(unit, tools, state: dict, bare_candidate = nil) -> dict {
+  const text = trim(to_string(unit?.text ?? ""))
+  if text == "" {
+    return state
+  }
+  if text == "<tool_call>" {
+    return state
+  }
+  // Protocol-looking response tags in narration are examples or malformed
+  // wrappers, not visible assistant prose. Keep the old tagged-parser
+  // diagnostic at this boundary; a real response block arrives as a `block`
+  // unit and never takes this path.
+  let response_tag_at = -1
+  for spelling in __tool_parse_tag_spellings("user_response") {
+    const found = text.index_of("<" + spelling)
+    if found >= 0 && (response_tag_at < 0 || found < response_tag_at) {
+      response_tag_at = found
+    }
+  }
+  if response_tag_at >= 0 {
+    const fragment = text.slice(response_tag_at, len(text))
+    return state
+      + {
+      violations: state.violations.appending(
+        protocol_violation(
+          "stray_text",
+          "Stray text outside response tags: "
+            + json_stringify(fragment)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+          fragment,
+        ),
+      ),
+      dropped: state.dropped.appending({text: fragment, reason: "salvaged_as_prose"}),
+    }
+  }
+  const reason = unit?.kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+  const sniffed = bare_candidate ?? __host_tool_scan_bare_calls(text, tools)
+  const next = state
+  if len(sniffed?.calls ?? []) > 0 {
+    let calls = next.calls
+    let canonical = next.canonical
+    for call in sniffed.calls {
+      calls = calls.appending(call)
+      canonical = canonical.appending(call_block(call))
+    }
+    const sniffed_prose = trim(to_string(sniffed?.prose ?? ""))
+    let prose = next.prose
+    if sniffed_prose != "" {
+      prose = prose.appending(sniffed_prose)
+      canonical = canonical.appending(prose_block(sniffed_prose))
+    }
+    return next
+      + {
+      calls: calls,
+      canonical: canonical,
+      prose: prose,
+      recovered: next.recovered + len(sniffed.calls),
+    }
+  }
+  if len(sniffed?.errors ?? []) > 0 {
+    return next
+      + {
+      errors: next.errors + sniffed.errors,
+      dropped: next.dropped.appending({text: text, reason: reason}),
+    }
+  }
+  if has_response_protocol_fragment(text) {
+    return next
+      + {
+      violations: next.violations.appending(
+        protocol_violation(
+          "stray_text",
+          "Stray text outside response tags: "
+            + json_stringify(text)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+          text,
+        ),
+      ),
+      recovered: next.recovered + 1,
+      dropped: next.dropped.appending({text: text, reason: reason}),
+    }
+  }
+  return next
+    + {
+    prose: next.prose.appending(text),
+    canonical: next.canonical.appending(prose_block(text)),
+    dropped: next.dropped.appending({text: text, reason: reason}),
+  }
+}
+
+fn __tool_parse_pending_unit(unit, state: dict) -> dict {
+  if state.pending_response == nil {
+    return {state: state, consumed: false}
+  }
+  const kind = to_string(unit?.kind ?? "")
+  if TEXT_UNIT_KINDS.contains(kind) {
+    const body = trim(to_string(unit?.text ?? ""))
+    if body == "" {
+      return {state: state, consumed: true}
+    }
+    return {
+      state: state
+        + {
+        prose: state.prose.appending(body),
+        canonical: state.canonical.appending(prose_block(body)),
+      },
+      consumed: true,
+    }
+  }
+  const pending = to_string(state.pending_response)
+  return {
+    state: state
+      + {
+      pending_response: nil,
+      unclosed_response_prose: __tool_parse_tag_spellings("user_response").contains(pending),
+      violations: state.violations.appending(
+        protocol_violation(
+          "unclosed_response",
+          "Unclosed <"
+            + pending
+            + "> block. Close it with </"
+            + pending
+            + "> or remove it; only <tool_call>, <assistant_prose>, "
+            + "<user_response>, and <done> are accepted.",
+        ),
+      ),
+    },
+    consumed: false,
+  }
+}
+
+fn __tool_parse_block_unit(unit, tools, state: dict, direct_candidate = nil) -> dict {
+  const kind = to_string(unit?.kind ?? "")
+  const tag = to_string(unit?.tag ?? "")
+  if __tool_parse_tag_spellings("assistant_prose").contains(tag) {
+    const body = trim(to_string(unit?.body ?? ""))
+    if body == "" {
+      return state
+    }
+    return state
+      + {
+      prose: state.prose.appending(body),
+      canonical: state.canonical.appending(prose_block(body)),
+    }
+  }
+  if __tool_parse_tag_spellings("user_response").contains(tag) {
+    const body = trim(to_string(unit?.body ?? ""))
+    if body == "" {
+      return state
+    }
+    return state
+      + {
+      answers: state.answers.appending(body),
+      canonical: state.canonical.appending(answer_block(body)),
+    }
+  }
+  if __tool_parse_tag_spellings("done").contains(tag) {
+    const body = trim(to_string(unit?.body ?? ""))
+    if body == "" {
+      return state
+        + {
+        violations: state.violations.appending(
+          protocol_violation(
+            "empty_done",
+            "<done> block is empty. Emit the configured done sentinel "
+              + "(default `##DONE##`) inside the block.",
+          ),
+        ),
+      }
+    }
+    return state
+      + {done: body, canonical: state.canonical.appending("<done>" + body + "</done>")}
+  }
+  const parsed = __tool_parse_call_from_body(
+    to_string(unit?.body ?? ""),
+    tools,
+    to_string(unit?.head_name ?? ""),
+    to_string(unit?.head_sep ?? ""),
+    direct_candidate,
+  )
+  if parsed?.ok ?? false {
+    let calls = state.calls
+    let canonical = state.canonical
+    let prose = state.prose
+    if parsed?.call != nil {
+      calls = calls.appending(parsed.call)
+      canonical = canonical.appending(call_block(parsed.call))
+    }
+    for narration in parsed?.prose ?? [] {
+      prose = prose.appending(narration)
+      canonical = canonical.appending(prose_block(narration))
+    }
+    return state + {calls: calls, canonical: canonical, prose: prose}
+  }
+  let message = to_string(parsed?.error ?? "tool-call parse failed")
+  if kind == "unclosed_block"
+    && !(parsed?.matched ?? false)
+    && !starts_with(message, "TOOL CALL TRUNCATED:") {
+    const head = to_string(unit?.head_name ?? "")
+    message = if head != "" {
+      "TOOL CALL TRUNCATED: `<tool_call>` opening `"
+        + head
+        + "(...)` was never closed — the response appears to have been cut off mid-call "
+        + "(likely the model hit its max output token limit). Re-emit the complete "
+        + "`<tool_call>"
+        + head
+        + "({ ... })</tool_call>` block; for very large arguments, split the work into smaller calls."
+    } else {
+      "TOOL CALL TRUNCATED: a `<tool_call>` block was opened but never closed — "
+        + "the response appears to have been cut off mid-call."
+    }
+  }
+  return state + {errors: state.errors.appending(message)}
+}
+
+fn __tool_parse_tag_unit(unit, state: dict) -> dict {
+  const raw = trim(to_string(unit?.raw ?? unit?.text ?? ""))
+  const name = to_string(unit?.name ?? "")
+  if __tool_parse_tag_spellings("assistant_prose").contains(name)
+    || __tool_parse_tag_spellings(
+    "user_response",
+  )
+    .contains(name)
+    || __tool_parse_tag_spellings("done").contains(name) {
+    return state + {pending_response: name}
+  }
+  if starts_with(raw, "</") {
+    return state
+      + {
+      violations: state.violations.appending(
+        protocol_violation(
+          "stray_text",
+          "Stray text outside response tags: "
+            + json_stringify(raw)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+          raw,
+        ),
+      ),
+      recovered: state.recovered + 1,
+      dropped: state.dropped.appending({text: raw, reason: "salvaged_as_prose"}),
+    }
+  }
+  return state
+    + {
+    violations: state.violations.appending(
+      protocol_violation(
+        "unknown_tag",
+        "Unknown top-level tag "
+          + json_stringify(raw)
+          + ". Use <tool_call>, <assistant_prose>, <user_response>, or <done> "
+          + "— no other tags are accepted at the top level.",
+        raw,
+      ),
+    ),
+    dropped: state.dropped.appending({text: raw, reason: "salvaged_as_prose"}),
+  }
+}
+
+fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
+  const parsed = __tool_parse_markup(to_string(unit?.text ?? ""), tools)
+  if parsed?.ok ?? false {
+    const name = to_string(parsed.call?.name ?? "")
+    return state
+      + {
+      calls: state.calls.appending(parsed.call),
+      canonical: state.canonical.appending(call_block(parsed.call)),
+      violations: state.violations.appending(
+        protocol_violation(
+          "recovered_dialect",
+          "Tool call `"
+            + name
+            + "` was emitted as chat-template function markup instead of "
+            + "`<tool_call>"
+            + name
+            + "({ ... })</tool_call>`. Recovered this turn so work moves forward; "
+            + "emit the canonical form on subsequent turns.",
+        ),
+      ),
+    }
+  }
+  if parsed?.matched ?? false {
+    return state
+      + {
+      errors: state.errors.appending(to_string(parsed?.error ?? "function-markup parse failed")),
+    }
+  }
+  return __tool_parse_consume_stray(unit, tools, state)
+}
+
+fn __tool_parse_tagged_unit(unit, tools, state: dict, candidates = nil) -> dict {
+  let next = state
+  if state.pending_response != nil {
+    const pending = __tool_parse_pending_unit(unit, state)
+    if pending.consumed {
+      return pending.state
+    }
+    next = pending.state
+  }
+  const kind = to_string(unit?.kind ?? "")
+  if TEXT_UNIT_KINDS.contains(kind) {
+    return __tool_parse_consume_stray(unit, tools, next, candidates?.bare)
+  }
+  if kind == "harmony_skip" || kind == "wrapper" || kind == "stray_close" {
+    return next
+  }
+  if kind == "angle_call" {
+    const call = {
+      id: "tc_angle_" + to_string(unit.name),
+      name: unit.name,
+      arguments: unit?.arguments ?? {},
+    }
+    return next
+      + {
+      calls: next.calls.appending(call),
+      canonical: next.canonical.appending(call_block(call)),
+      violations: next.violations.appending(
+        protocol_violation(
+          "recovered_dialect",
+          "Recovered angle-wrapped tool call; emit it inside <tool_call>...</tool_call>.",
+        ),
+      ),
+    }
+  }
+  if kind == "markup" {
+    return __tool_parse_markup_unit(unit, tools, next)
+  }
+  if kind == "block" || kind == "unclosed_block" || kind == "reserved_block" {
+    return __tool_parse_block_unit(unit, tools, next, candidates?.direct)
+  }
+  if kind == "tag" {
+    return __tool_parse_tag_unit(unit, next)
+  }
+  return __tool_parse_consume_stray(unit, tools, next)
+}
+
+fn __tool_parse_tagged_result(state: dict, response_tags: list<string>) -> dict {
+  const prose = state.prose.join("\n\n")
+  const answer = if len(state.answers) > 0 {
+    state.answers.join("\n")
+  } else if response_tags.contains(to_string(state.pending_response ?? "")) {
+    prose
+  } else {
+    nil
+  }
+  const visible_prose = if len(state.violations) > 0
+    && len(state.calls) == 0
+    && answer == nil
+    && !state.unclosed_response_prose {
+    ""
+  } else {
+    answer ?? prose
+  }
+  const recovered_count = if state.recovered > len(state.calls) {
+    len(state.calls)
+  } else {
+    state.recovered
+  }
+  return {
+    calls: state.calls,
+    tool_calls: state.calls,
+    tool_parse_errors: state.errors,
+    protocol_violations: state.violations,
+    recovered_from_stray_count: recovered_count,
+    prose: visible_prose,
+    user_response: answer,
+    done_marker: state.done,
+    canonical_text: __host_tool_render_parts(state.canonical),
+    dropped: state.dropped,
+  }
+}
+
+fn __tool_parse_tagged(text: string, tools) -> dict {
+  const provider_dialect = parse_provider_dialect(text, tools)
+  if provider_dialect != nil {
+    return provider_dialect
+  }
+  const scanned = __host_tool_scan_units(text, tool_parse_scan_spec(tools))
+  const bare_candidates = __host_tool_scan_bare_units(scanned.units, tools)
+  const known = registry_names(tools)
+  const assistant_tags = __tool_parse_tag_spellings("assistant_prose")
+  const response_tags = __tool_parse_tag_spellings("user_response")
+  let calls: list<dict> = []
+  let errors: list<string> = []
+  let violations: list = []
+  let prose_parts: list<string> = []
+  let answers: list<string> = []
+  let done = nil
+  let canonical: list<string> = []
+  let dropped: list<dict> = []
+  let recovered = 0
+  let pending_response = nil
+  let unclosed_response_prose = false
+  for index in range(0, len(scanned.units)) {
+    const unit = scanned.units[index]
+    const candidates = bare_candidates[index]
+    const kind = unit?.kind ?? ""
+    const tag = unit?.tag ?? ""
+    if pending_response == nil && TEXT_UNIT_KINDS.contains(kind) {
+      const stray_text = trim(unit?.text ?? "")
+      if stray_text == "" || stray_text == "<tool_call>" {
+        continue
+      }
+      const sniffed = candidates?.bare ?? {calls: [], errors: [], prose: stray_text}
+      if len(sniffed?.calls ?? []) > 0 {
+        const sniffed_prose = trim(sniffed?.prose ?? "")
+        calls = calls + sniffed.calls
+        canonical = canonical.appending({kind: "bare", calls: sniffed.calls, prose: sniffed_prose})
+        if sniffed_prose != "" {
+          prose_parts = prose_parts.appending(sniffed_prose)
+        }
+        recovered = recovered + len(sniffed.calls)
+      } else if len(sniffed?.errors ?? []) > 0 {
+        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+        for error in sniffed.errors {
+          errors = errors.appending(error)
+        }
+        dropped = dropped.appending({text: stray_text, reason: drop_reason})
+      } else if has_response_protocol_fragment(stray_text) {
+        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+        violations = violations.appending(
+          protocol_violation(
+            "stray_text",
+            "Stray text outside response tags: "
+              + json_stringify(stray_text)
+              + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+              + "<user_response>...</user_response>, and every tool call in "
+              + "<tool_call>...</tool_call>.",
+            stray_text,
+          ),
+        )
+        recovered = recovered + 1
+        dropped = dropped.appending({text: stray_text, reason: drop_reason})
+      } else {
+        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+        prose_parts = prose_parts.appending(stray_text)
+        canonical = canonical.appending({kind: "prose", text: stray_text})
+        dropped = dropped.appending({text: stray_text, reason: drop_reason})
+      }
+      continue
+    }
+    if pending_response == nil && kind == "block" {
+      const body = trim(unit?.body ?? "")
+      if assistant_tags.contains(tag) {
+        if body != "" {
+          prose_parts = prose_parts.appending(body)
+          canonical = canonical.appending({kind: "prose", text: body})
+        }
+        continue
+      }
+      if response_tags.contains(tag) {
+        if body != "" {
+          answers = answers.appending(body)
+          canonical = canonical.appending({kind: "answer", text: body})
+        }
+        continue
+      }
+      const head_name = unit?.head_name ?? ""
+      const direct = candidates?.direct
+      if head_name != "" && known.contains(head_name) && (direct?.ok ?? false) {
+        const trailing = trim(body.slice(direct.consumed, len(body)))
+        if trailing == "" {
+          const call = {
+            id: "tc_0",
+            name: head_name,
+            arguments: direct.arguments ?? direct.value ?? {},
+          }
+          calls = calls.appending(call)
+          canonical = canonical.appending(
+            {kind: "call", name: call.name, arguments: call.arguments ?? {}},
+          )
+          continue
+        }
+      }
+    }
+    const state = __tool_parse_tagged_unit(
+      unit,
+      tools,
+      {
+        calls: calls,
+        errors: errors,
+        violations: violations,
+        prose: prose_parts,
+        answers: answers,
+        done: done,
+        canonical: canonical,
+        dropped: dropped,
+        recovered: recovered,
+        pending_response: pending_response,
+        unclosed_response_prose: unclosed_response_prose,
+      },
+      candidates,
+    )
+    calls = state.calls
+    errors = state.errors
+    violations = state.violations
+    prose_parts = state.prose
+    answers = state.answers
+    done = state.done
+    canonical = state.canonical
+    dropped = state.dropped
+    recovered = state.recovered
+    pending_response = state.pending_response
+    unclosed_response_prose = state.unclosed_response_prose
+  }
+  return __tool_parse_tagged_result(
+    {
+      calls: calls,
+      errors: errors,
+      violations: violations,
+      prose: prose_parts,
+      answers: answers,
+      done: done,
+      canonical: canonical,
+      dropped: dropped,
+      recovered: recovered,
+      pending_response: pending_response,
+      unclosed_response_prose: unclosed_response_prose,
+    },
+    response_tags,
+  )
+}
+
+fn __tool_parse_envelope_error(kind: string, detail: string, prose: string) -> dict {
+  return {
+    matched: true,
+    result: empty_parse()
+      + {
+      tool_parse_errors: [
+        "The `<"
+          + kind
+          + ">` chat-template envelope is malformed: "
+          + detail
+          + ". Re-emit complete calls as canonical ```tool JSON blocks; "
+          + "incomplete entries were not executed.",
+      ],
+      prose: trim(prose),
+    },
+  }
+}
+
+fn __tool_parse_envelope_call(value) -> dict {
+  if type_of(value) != "dict" {
+    return {ok: false, error: "each chat-template tool entry must be a JSON object"}
+  }
+  const fields = json_fields(value)
+  const name = fields.name
+  if name == "" {
+    return {ok: false, error: "a JSON tool object was missing a non-empty name"}
+  }
+  let arguments = fields.arguments
+  let has_arguments = false
+  for alias in ARGUMENT_ALIASES {
+    if value[alias] != nil {
+      has_arguments = true
+    }
+  }
+  if !has_arguments {
+    arguments = {}
+    for key in keys(value) {
+      if !NAME_ALIASES.contains(key) && key != "id" {
+        arguments[key] = value[key]
+      }
+    }
+  }
+  if type_of(arguments) == "string" {
+    arguments = try {
+      json_parse(arguments)
+    } catch (error) {
+      return {ok: false, error: "arguments string did not parse: " + to_string(error)}
+    }
+  }
+  if type_of(arguments) != "dict" {
+    return {ok: false, error: "arguments must be a JSON object"}
+  }
+  return {ok: true, call: {id: "tc_envelope", name: name, arguments: arguments}}
+}
+
+fn __tool_parse_envelope_json_list(
+  kind: string,
+  body: string,
+  close: string,
+  prose: string,
+) -> dict {
+  const source = trim(body)
+  const stream = __host_tool_json_stream(source)
+  if len(stream?.values ?? []) == 0 {
+    const detail =
+      stream?.eof ?? false ? "a JSON tool object ended before its closing `}`" : "expected a JSON tool object, found `"
+      + trim(
+      body,
+    )
+      .slice(0, 80)
+      + "`"
+    return __tool_parse_envelope_error("tool_calls", detail, prose)
+  }
+  let calls: list<dict> = []
+  for row in stream.values {
+    const normalized = __tool_parse_envelope_call(row.value)
+    if !(normalized?.ok ?? false) {
+      return __tool_parse_envelope_error("tool_calls", to_string(normalized.error), prose)
+    }
+    calls = calls.appending(normalized.call)
+  }
+  let after = trim(source.slice(stream.end, len(source)))
+  if starts_with(after, close) {
+    after = trim(after.slice(len(close), len(after)))
+  } else if after != "" {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "expected a JSON tool object, found `" + after.slice(0, 80) + "`",
+      prose,
+    )
+  }
+  return {
+    matched: true,
+    calls: calls,
+    prose: [trim(prose), after].filter(fn(part) { return part != "" }).join("\n"),
+  }
+}
+
+fn __tool_parse_envelope_markers(body: string, prose: string) -> dict {
+  let rest = trim(body)
+  let calls: list<dict> = []
+  let saw_marker = false
+  let marker_active = false
+  let marker_completed = false
+  while rest != "" {
+    if starts_with(rest, "</tool_calls>") {
+      rest = trim(rest.slice(len("</tool_calls>"), len(rest)))
+      break
+    }
+    if starts_with(rest, "<tool>") {
+      if marker_active {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "a `<tool>` marker must be followed by a JSON object before another `<tool>` marker",
+          prose,
+        )
+      }
+      saw_marker = true
+      marker_active = true
+      marker_completed = false
+      rest = trim(rest.slice(len("<tool>"), len(rest)))
+      continue
+    }
+    if starts_with(rest, "</tool>") {
+      if marker_active || !marker_completed {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "found an unmatched `</tool>` close without a preceding `<tool>` marker",
+          prose,
+        )
+      }
+      marker_active = false
+      marker_completed = false
+      rest = trim(rest.slice(len("</tool>"), len(rest)))
+      continue
+    }
+    if !marker_active {
+      if marker_completed && starts_with(rest, "{") {
+        marker_active = true
+      } else {
+        const detail =
+          saw_marker ? "expected a `<tool>` marker before this JSON object" : "the envelope contained no `<tool>` marker"
+        return __tool_parse_envelope_error("tool_calls", detail, prose)
+      }
+    }
+    if !starts_with(rest, "{") {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "expected a JSON tool object, found `" + rest.slice(0, 80) + "`",
+        prose,
+      )
+    }
+    const object_len = __host_tool_balanced_json_len(rest)
+    if object_len == 0 {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "a JSON tool object ended before its closing `}`",
+        prose,
+      )
+    }
+    const decoded = try {
+      json_parse(rest.slice(0, object_len))
+    } catch (error) {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "a JSON tool object did not parse: " + to_string(error),
+        prose,
+      )
+    }
+    const normalized = __tool_parse_envelope_call(decoded)
+    if !(normalized?.ok ?? false) {
+      return __tool_parse_envelope_error("tool_calls", to_string(normalized.error), prose)
+    }
+    calls = calls.appending(normalized.call)
+    marker_active = false
+    marker_completed = true
+    rest = trim(rest.slice(object_len, len(rest)))
+  }
+  if marker_active {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "a `<tool>` marker ended without a complete JSON object",
+      prose,
+    )
+  }
+  if !saw_marker {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "the envelope contained no `<tool>` marker",
+      prose,
+    )
+  }
+  return {
+    matched: true,
+    calls: calls,
+    prose: [trim(prose), rest].filter(fn(p) { return p != "" }).join("\n"),
+  }
+}
+
+fn __tool_parse_envelope_xml(body: string, prose: string) -> dict {
+  let rest = trim(body)
+  let calls: list<dict> = []
+  while rest != "" {
+    if starts_with(rest, "</tool_calls>") {
+      rest = trim(rest.slice(len("</tool_calls>"), len(rest)))
+      break
+    }
+    const opened = regex_captures("^<([A-Za-z_][A-Za-z0-9_.-]*)>", rest)
+    if len(opened) == 0 {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "expected a tool-call tag inside `<tool_calls>`, found `" + rest.slice(0, 60) + "`",
+        prose,
+      )
+    }
+    const name = to_string(opened[0].groups[0])
+    const close = "</" + name + ">"
+    const after_open = rest.slice(opened[0].end, len(rest))
+    const close_at = after_open.index_of(close)
+    const inner = close_at >= 0 ? after_open.slice(0, close_at) : after_open
+    let arguments: dict = {}
+    let argument_rest = trim(inner)
+    while argument_rest != "" {
+      const argument_open = regex_captures("^<([A-Za-z_][A-Za-z0-9_.-]*)>", argument_rest)
+      if len(argument_open) == 0 {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "expected an argument tag inside `<"
+            + name
+            + ">`, found `"
+            + argument_rest.slice(0, 60)
+            + "`",
+          prose,
+        )
+      }
+      const key = to_string(argument_open[0].groups[0])
+      if arguments[key] != nil {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "the `<"
+            + name
+            + ">` call repeated the `<"
+            + key
+            + ">` argument; a call with an ambiguous duplicate argument is not executed",
+          prose,
+        )
+      }
+      const argument_close = "</" + key + ">"
+      const value_source = argument_rest.slice(argument_open[0].end, len(argument_rest))
+      const argument_close_at = value_source.index_of(argument_close)
+      if argument_close_at < 0 {
+        return __tool_parse_envelope_error(
+          "tool_calls",
+          "the `<"
+            + key
+            + ">` argument tag was not closed with `"
+            + argument_close
+            + "` before end of output",
+          prose,
+        )
+      }
+      arguments[key] = trim(value_source.slice(0, argument_close_at))
+      argument_rest = trim(
+        value_source.slice(argument_close_at + len(argument_close), len(value_source)),
+      )
+    }
+    if close_at < 0 {
+      return __tool_parse_envelope_error(
+        "tool_calls",
+        "the `<" + name + ">` call tag was not closed with `" + close + "` before end of output",
+        prose,
+      )
+    }
+    calls = calls.appending({id: "tc_envelope_xml", name: name, arguments: arguments})
+    rest = trim(after_open.slice(close_at + len(close), len(after_open)))
+  }
+  if len(calls) == 0 {
+    return __tool_parse_envelope_error(
+      "tool_calls",
+      "the `<tool_calls>` envelope contained no tool-call tags",
+      prose,
+    )
+  }
+  return {
+    matched: true,
+    calls: calls,
+    prose: [trim(prose), rest].filter(fn(p) { return p != "" }).join("\n"),
+  }
+}
+
+fn __tool_parse_envelope(text: string) -> dict {
+  let opener = ""
+  let kind = ""
+  let at = -1
+  for candidate in [
+    {open: "<tool_calls>", kind: "tool_calls"},
+    {open: "<tool_code>", kind: "tool_code"},
+    {open: "<tool_call>", kind: "tool_call"},
+  ] {
+    const found = text.index_of(candidate.open)
+    if found >= 0 && (at < 0 || found < at) {
+      at = found
+      opener = candidate.open
+      kind = candidate.kind
+    }
+  }
+  if at < 0 {
+    return {matched: false}
+  }
+  const prose = text.slice(0, at)
+  const body = text.slice(at + len(opener), len(text))
+  if kind == "tool_call" && !starts_with(trim(body), "{") {
+    return {matched: false}
+  }
+  let parsed = if kind == "tool_calls" {
+    const leading = trim(body)
+    if starts_with(leading, "<tool>") || starts_with(leading, "{")
+      || starts_with(leading, "</tool>") {
+      __tool_parse_envelope_markers(body, prose)
+    } else {
+      __tool_parse_envelope_xml(body, prose)
+    }
+  } else {
+    __tool_parse_envelope_json_list(kind, body, "</" + kind + ">", prose)
+  }
+  if parsed?.result != nil {
+    return parsed
+  }
+  const violation = protocol_violation(
+    "wrong_tool_format",
+    "protocol_violation: a tool call was emitted in a chat-template tool envelope "
+      + "while `tool_format` is `json`; accepted this turn, but emit canonical "
+      + "```tool JSON blocks next turn.",
+  )
+  parsed = parsed
+    + {result: provider_result(parsed.calls, [], parsed.prose, [violation])}
+  return parsed
+}
+
+fn __tool_parse_json(text: string) -> dict {
+  const envelope = __tool_parse_envelope(text)
+  if envelope?.matched ?? false {
+    if envelope?.result != nil {
+      if len(envelope.result?.tool_parse_errors ?? []) > 0 {
+        return envelope.result + {prose: trim(text)}
+      }
+      return envelope.result
+    }
+    return empty_parse()
+      + {tool_parse_errors: ["chat-template envelope parse failed"], prose: text}
+  }
+  if contains(text, "<tool_call>") {
+    return empty_parse()
+      + {
+      protocol_violations: [
+        protocol_violation(
+          "wrong_tool_format",
+          "protocol_violation: `<tool_call>...</tool_call>` markup was emitted while "
+            + "`tool_format` is `json`; wrap each call as a strict JSON object inside "
+            + "a ```tool fence instead.",
+        ),
+      ],
+      prose: trim(text),
+    }
+  }
+  const chunked = json_chunks(text)
+  let calls: list<dict> = []
+  let errors: list<string> = []
+  for body in chunked.bodies {
+    const source = trim(body)
+    const stream = __host_tool_json_stream(source)
+    let body_calls: list<dict> = []
+    for row in stream?.values ?? [] {
+      const normalized = json_call(row?.value, false)
+      if normalized?.ok ?? false {
+        body_calls = body_calls.appending(normalized.call)
+      } else {
+        errors = errors.appending(normalized.error)
+      }
+    }
+    const trailing = trim(source.slice(stream?.end ?? 0, len(source)))
+    if len(body_calls) > 0
+      && (has_counted_verbatim(body_calls)
+      || starts_with(trailing, "<<")) {
+      const bound = bind_verbatim(body_calls, trailing)
+      if bound?.ok ?? false {
+        body_calls = bound.calls
+      } else {
+        body_calls = []
+        errors = errors.appending(bound.error)
+      }
+    }
+    calls = calls + body_calls
+    if len(stream?.values ?? []) == 0 {
+      const missing_error = if stream?.eof ?? false {
+        "Unterminated ```tool fence opened on line 1 (1-based): the block reached "
+          + "end-of-output with an incomplete JSON object. Re-emit the whole call inside "
+          + "a ```tool ... ``` block and close it with a line that is exactly ```."
+      } else {
+        __tool_parse_json_error(
+          to_string(stream?.error ?? "Tool JSON block did not contain an object.")
+            + " (near `"
+            + source.slice(0, 80)
+            + "`)",
+        )
+      }
+      errors = errors.appending(missing_error)
+    } else if stream?.error != nil && !starts_with(trailing, "<<") {
+      errors = errors.appending(
+        "The ```tool block is not valid JSON: "
+          + to_string(stream.error)
+          + " (near `"
+          + source.slice(0, 80)
+          + "`)"
+          + ". Pass multi-line or code-bearing fields as ordinary JSON string values "
+          + "(escape newlines as \\n, quotes as \\\", backslashes as \\\\); "
+          + "backticks need no escaping.",
+      )
+    } else if stream?.eof ?? false {
+      errors = errors.appending(
+        "Unterminated ```tool fence opened on line 1 (1-based): the block reached "
+          + "end-of-output with an incomplete JSON object. Re-emit the whole call inside "
+          + "a ```tool ... ``` block and close it with a line that is exactly ```.",
+      )
+    }
+  }
+  const canonical = calls.map(fn(call) { return call_block(call) }).join("\n")
+  return empty_parse()
+    + {
+    calls: calls,
+    tool_calls: calls,
+    tool_parse_errors: errors,
+    protocol_violations: chunked.violations,
+    canonical_text: canonical,
+    prose: chunked.prose,
+  }
+}
+
+fn __tool_parse_json_error(detail: string) -> string {
+  return "The ```tool block is not valid JSON: "
+    + detail
+    + ". Pass multi-line or code-bearing fields as ordinary JSON string values "
+    + "(escape newlines as \\n, quotes as \\\", backslashes as \\\\); "
+    + "backticks need no escaping."
+}
+
+/**
+ * Parse one model text response.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn parse_tool_calls(payload: dict) -> dict {
+  const text = to_string(payload?.text ?? "")
+  const format = to_string(payload?.tool_format ?? "")
+  const parsed = if format == "json" {
+    __tool_parse_json(text)
+  } else {
+    __tool_parse_tagged(text, payload?.tools)
+  }
+  const unparsed = tool_shape_violations(tool_shape_findings(parsed?.dropped ?? []))
+  return parsed + {protocol_violations: (parsed?.protocol_violations ?? []) + unparsed}
+}

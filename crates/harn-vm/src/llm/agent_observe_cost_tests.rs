@@ -9,6 +9,7 @@ fn response_event_and_returned_usage_share_priced_cost() {
     crate::llm_config::clear_user_overrides();
 
     let priced = crate::llm::api::LlmResult {
+        text_projection: None,
         text: "priced result".to_string(),
         tool_calls: Vec::new(),
         raw_tool_calls: Vec::new(),
@@ -43,9 +44,9 @@ fn response_event_and_returned_usage_share_priced_cost() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-    dump_llm_response(0, "call-priced", &priced, 1, None, None);
-    dump_llm_response(1, "call-unpriced", &unpriced, 1, None, None);
-    dump_llm_response(2, "call-local", &local, 1, None, None);
+    dump_llm_response(0, "call-priced", &priced, 1, None);
+    dump_llm_response(1, "call-unpriced", &unpriced, 1, None);
+    dump_llm_response(2, "call-local", &local, 1, None);
     pop_llm_transcript_dir();
 
     let transcript =
@@ -58,7 +59,12 @@ fn response_event_and_returned_usage_share_priced_cost() {
     assert_eq!(events.len(), 3);
 
     let vm_usage_cost = |result: &crate::llm::api::LlmResult| {
-        let vm_result = crate::llm::api::vm_build_llm_result(result, None, None, None);
+        let vm_result = crate::llm::api::vm_build_llm_result(
+            result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(result, None),
+        );
         let result_dict = vm_result.as_dict().expect("result dict");
         let Some(VmValue::Dict(usage)) = result_dict.get("usage") else {
             panic!("missing usage dict: {result_dict:?}");

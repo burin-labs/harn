@@ -203,6 +203,7 @@ where
     }
 
     Ok(LlmResult {
+        text_projection: None,
         text,
         raw_tool_calls: Vec::new(),
         tool_calls,

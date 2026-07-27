@@ -448,22 +448,15 @@ pub(super) fn should_emit_context_token_breakdown_checkpoint(
     opts.dispatch_provenance.is_some()
 }
 
-/// Compute the merged (native OR text-parsed) tool calls for the
-/// observability response record. Mirrors the merge in
-/// `crate::llm::api::result::vm_build_llm_result` (provider-native calls
-/// take precedence; otherwise fall back to the calls parsed out of the
-/// inline tagged `<tool_call>` blocks in `result.text`, resolved against
-/// the same `tools` registry the request used so unknown-name calls are
-/// not dropped). By the time the result reaches this function `text` has
-/// already been canonicalized from any `[[CALL]]` wire form back to
-/// `<tool_call>`, so the tagged parser sees the calls.
+/// Record the provider response with the same merged native/text call view
+/// returned to the VM. The observed-call boundary has already attached the
+/// one Harn text projection for this response, so this sink never reparses.
 pub(super) fn dump_llm_response(
     iteration: usize,
     call_id: &str,
     result: &super::api::LlmResult,
     response_ms: u64,
     structural_experiment: Option<&crate::llm::structural_experiments::AppliedStructuralExperiment>,
-    tools: Option<&crate::value::VmValue>,
 ) {
     let structural_experiment = structural_experiment
         .map(serde_json::to_value)
@@ -471,7 +464,7 @@ pub(super) fn dump_llm_response(
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
     let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
-    let parsed_tool_calls = raw_tool_receipts::merged_tool_calls_for_observability(result, tools);
+    let parsed_tool_calls = raw_tool_receipts::merged_tool_calls_for_observability(result);
     let loop_state = decode_loop_state(&result.text);
     let mut event = serde_json::json!({
         "type": "provider_call_response",

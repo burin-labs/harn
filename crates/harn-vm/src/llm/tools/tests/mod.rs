@@ -1,33 +1,17 @@
-//! Unit tests for `crate::llm::tools`: the fenceless TypeScript tool-call
-//! parser, the schema → TypeScript renderer (TypeExpr + ComponentRegistry),
-//! and the argument-normalizer compatibility shims.
+//! Unit tests for provider-native tool schema construction.
 //!
 //! Declared as `#[cfg(test)] mod tests;` in `tools/mod.rs`, so `super::`
-//! names either items defined directly in `mod.rs` or parser symbols
-//! that `mod.rs` re-exports (`pub(crate) use parse::…`,
-//! `pub(crate) use handle_local::…`) for callers outside the tools
-//! module. Either way the flat `use super::{…}` below is accurate.
-
 pub(super) use super::{
     apply_tool_search_native_injection_typed, build_assistant_response_message,
     build_assistant_tool_message, collect_tool_schemas, extract_deferred_tool_names,
-    normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
-    parse_text_tool_calls_with_tools, validate_tool_args, vm_tools_to_native,
+    normalize_tool_args, validate_tool_args, vm_tools_to_native,
 };
 pub(super) use crate::value::VmValue;
 pub(super) use serde_json::json;
 use std::collections::BTreeMap;
 
-mod core_parser;
-mod corpus_conformance;
-mod entity_decode;
-mod function_markup;
-mod heredoc_and_messages;
-mod implicit_call_paren_close;
 mod native_tools;
-mod reserved_token;
-mod string_escape_fidelity;
-mod validation_and_tagged;
+mod non_dialect;
 
 pub(super) fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
     let mut map = BTreeMap::new();
@@ -49,9 +33,8 @@ pub(super) fn vm_list(items: Vec<VmValue>) -> VmValue {
     VmValue::List(std::sync::Arc::new(items))
 }
 
-/// Build a small tool registry containing an `edit` tool with a detailed schema
-/// (enum action, required path, multiple fields). Returned as a VmValue so it
-/// can be passed to `parse_text_tool_calls_with_tools`.
+/// Build a small tool registry containing an `edit` tool with a detailed
+/// schema (enum action, required path, multiple fields).
 pub(super) fn sample_tool_registry() -> VmValue {
     // parameters dict
     let mut params = BTreeMap::new();
@@ -144,13 +127,6 @@ pub(super) fn sample_tool_registry() -> VmValue {
     ]);
 
     vm_dict(&[("tools", vm_list(vec![edit_tool, run_tool]))])
-}
-
-pub(super) fn known_tools_set() -> std::collections::BTreeSet<String> {
-    ["edit", "read", "run", "lookup", "scaffold"]
-        .into_iter()
-        .map(String::from)
-        .collect()
 }
 
 pub(super) fn defer_loading_registry() -> VmValue {

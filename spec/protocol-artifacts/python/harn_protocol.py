@@ -219,6 +219,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "tool_policy_rejected",
     "host_bridge_unimplemented",
     "agent_loop_protocol_failure",
+    "parse_dropped",
     "generic_throw",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
@@ -546,6 +547,7 @@ class AgentTerminalClass(str, Enum):
     TOOL_POLICY_REJECTED = "tool_policy_rejected"
     HOST_BRIDGE_UNIMPLEMENTED = "host_bridge_unimplemented"
     AGENT_LOOP_PROTOCOL_FAILURE = "agent_loop_protocol_failure"
+    PARSE_DROPPED = "parse_dropped"
     GENERIC_THROW = "generic_throw"
 
 

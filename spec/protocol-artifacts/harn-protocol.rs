@@ -787,6 +787,7 @@ pub const AGENT_TERMINAL_CLASS_RESOURCE_BUSY: &str = "resource_busy";
 pub const AGENT_TERMINAL_CLASS_TOOL_POLICY_REJECTED: &str = "tool_policy_rejected";
 pub const AGENT_TERMINAL_CLASS_HOST_BRIDGE_UNIMPLEMENTED: &str = "host_bridge_unimplemented";
 pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_protocol_failure";
+pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
 
 /// Stable terminal classes carried by typed ACP prompt-error data.
@@ -800,6 +801,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "tool_policy_rejected",
     "host_bridge_unimplemented",
     "agent_loop_protocol_failure",
+    "parse_dropped",
     "generic_throw",
 ];
 

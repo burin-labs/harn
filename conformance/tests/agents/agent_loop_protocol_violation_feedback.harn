@@ -166,4 +166,26 @@ pipeline default() {
       __io_println(!contains(retry_messages, "parsed successfully and were dispatched"))
     },
   )
+  // If the retry budget ends on a complete parse drop, terminal ownership is
+  // the harness boundary rather than the model that emitted the lost bytes.
+  with_llm_script(
+    [llm_text("```\n<perform_action>\nsearch({ query: \"lost.txt\" })\n</perform_action>\n```")],
+    { ->
+      const result = agent_loop(
+        "Write lost.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 1,
+          max_nudges: 1,
+          tools: note_tools(),
+        },
+      )
+      __io_println(result.status)
+      __io_println(result.terminal_class)
+      __io_println(result.terminal.owner)
+    },
+  )
 }

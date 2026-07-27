@@ -143,6 +143,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "tool_policy_rejected",
   "host_bridge_unimplemented",
   "agent_loop_protocol_failure",
+  "parse_dropped",
   "generic_throw",
 ] as const
 export type AgentTerminalClass = (typeof AGENT_TERMINAL_CLASSES)[number]
