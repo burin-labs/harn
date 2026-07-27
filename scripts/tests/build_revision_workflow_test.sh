@@ -29,5 +29,9 @@ if ! grep -Fq 'benchmark source resolved to $actual_source_sha; expected $EXPECT
   echo "build_revision_workflow_test: benchmark source mismatches must fail closed" >&2
   exit 1
 fi
+if ! grep -Fq "format('benchmark-{0}', inputs.benchmark_source_sha)" "$release_workflow"; then
+  echo "build_revision_workflow_test: immutable benchmark sources need a source-qualified concurrency lane" >&2
+  exit 1
+fi
 
 echo "build_revision_workflow_test: CI and release builds attest source revisions"

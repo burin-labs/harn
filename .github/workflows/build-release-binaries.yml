@@ -122,10 +122,12 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || inputs.tag || github.ref_name }}
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || inputs.tag || github.ref_name }}
   # Tag-push runs must never be cancelled mid-build (the release waits on
   # their artifacts), and neither should manual workflow_dispatch recovery
-  # runs. Warm-cache-only events ARE safe to cancel inside their own lane:
+  # runs. An immutable-source benchmark has a source-qualified lane so a new
+  # main push cannot cancel a queued or active release gate. Warm-cache-only
+  # events ARE safe to cancel inside their own lane:
   # a newer warm fully supersedes the older one, and the cache it produces
   # will be at least as fresh as the cancelled run's would have been.
   # Scheduled/manual warms deliberately do not share the `main` branch-push
