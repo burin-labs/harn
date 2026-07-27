@@ -83,7 +83,7 @@ Tests satisfy registered capabilities with `host_mock(capability, op,
 `unregistered_ok: true` so typos in real host boundaries fail at registration
 instead of surfacing later as unsupported host calls. Embedders ship richer
 behavior via the async `HostCallBridge` trait described in
-`crates/harn-vm/src/stdlib/host.rs`. ACP installs that bridge and keeps the
+`crates/harn-vm/src/stdlib/host/bridge.rs`. ACP installs that bridge and keeps the
 stdlib `host_call` builtin, so mocks, command-policy preflight, the
 process-handle registry, and the per-turn memo stay on one dispatch path;
 editor-owned terminal builtins (`exec`, `shell`, `run_command`) remain
