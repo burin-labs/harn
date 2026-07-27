@@ -11,8 +11,13 @@ building blocks and recovery tools.
 
 ```bash
 cd ~/projects/harn-bump-fleet
-harn run --no-sandbox release_harn.harn -- \
-  --repo ~/projects/harn --mode ship-pr --agent --yes-live-release
+scripts/with_env.sh harn run --no-sandbox release_harn.harn -- \
+  --repo ~/projects/harn \
+  --mode ship-pr \
+  --at-sha <exact-origin-main-sha> \
+  --expect-pr <required-pr-number> \
+  --agent \
+  --yes-live-release
 ```
 
 `ship-pr` prepares the release content, commits it, pushes the branch, pushes
@@ -55,14 +60,16 @@ treated as the publishing trigger.
 
 ## Before shipping
 
-1. Start from a clean harn worktree and fetch `origin/main`.
+1. Start from a clean harn worktree and fetch `origin/main`. Resolve the exact
+   intended commit, pass it with `--at-sha`, and pass `--expect-pr` once for
+   every prerequisite that must be in the release range.
 2. Inspect pending release content with `git status --short`,
    `git diff --stat`, and enough diff context to summarize it accurately.
 3. Audit the changed behavior. Add Rust tests or `.harn` + `.expected`
    conformance pairs for new user-visible behavior.
 4. Run targeted tests while fixing issues. Before live release mechanics, run
    the gates that cover the touched surface; broad releases normally need
-   `make test` and `cargo run --bin harn -- test conformance`.
+   `make test` and `make conformance`.
 5. Update release-facing docs when the behavior changed: `README.md`,
    `AGENTS.md` / `CLAUDE.md`, `CONTRIBUTING.md`, `docs/src/`,
    `spec/chapters/*.md`, and generated mirrors through their generators.
@@ -101,6 +108,10 @@ treated as the publishing trigger.
 - Do not pass `--squash`, `--merge`, or `--rebase` to `gh pr merge --auto`;
   branch protection chooses the strategy.
 - Do not hand-edit generated files. Edit sources and regenerate.
+- Do not declare the release complete until the signed tag dereferences to the
+  intended release commit, that commit contains the exact `--at-sha` parent and
+  every `--expect-pr` prerequisite, and the tag-keyed publish workflows are
+  terminal.
 - Cross-repo consumers do not wait on a release. For `burin-code`, use
   `./scripts/fetch-harn.sh --local` in that repo to build from
   `~/projects/harn` during iteration.

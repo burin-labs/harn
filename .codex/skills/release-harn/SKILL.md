@@ -11,6 +11,11 @@ Default live command:
 
 ```bash
 cd ~/projects/harn-bump-fleet
-harn run --no-sandbox release_harn.harn -- \
-  --repo ~/projects/harn --mode ship-pr --agent --yes-live-release
+scripts/with_env.sh harn run --no-sandbox release_harn.harn -- \
+  --repo ~/projects/harn \
+  --mode ship-pr \
+  --at-sha <exact-origin-main-sha> \
+  --expect-pr <required-pr-number> \
+  --agent \
+  --yes-live-release
 ```
