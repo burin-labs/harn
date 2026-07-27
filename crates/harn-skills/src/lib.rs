@@ -541,6 +541,26 @@ mod tests {
     }
 
     #[test]
+    fn language_skill_names_authoritative_spec_sources() {
+        let skill = get_embedded_skill("harn-language").expect("language skill");
+        assert!(
+            skill
+                .body
+                .contains("authoritative chapters under `spec/chapters/*.md`"),
+            "harn-language should direct spec edits to the registered source files"
+        );
+        for generated_edit_target in [
+            "Edit `spec/HARN_SPEC.md`",
+            "Edit `docs/src/language-spec.md`",
+        ] {
+            assert!(
+                !skill.body.contains(generated_edit_target),
+                "harn-language must not direct edits to generated projection `{generated_edit_target}`"
+            );
+        }
+    }
+
+    #[test]
     fn skill_cross_links_resolve_to_embedded_skills() {
         let names: BTreeSet<&str> = list_embedded_skills()
             .iter()

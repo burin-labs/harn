@@ -15,7 +15,7 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 
 - Read `docs/llm/harn-quickref.md` before editing `.harn` files.
 - Use `docs/llm/harn-triggers-quickref.md` when trigger manifests are involved.
-- Treat `spec/HARN_SPEC.md` as the canonical language reference.
+- Read `spec/HARN_SPEC.md` as the assembled language reference.
 - Default new script entrypoints to `fn main(harness: Harness) { ... }` and
   route side effects through `harness.*`.
 - Use `harness.fs.mkdtemp_in_workspace(prefix?)` for scratch files that must be
@@ -27,8 +27,10 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - For connector credentials, read canonical ids such as
   `provider/access-token` through `harness.secrets` from a package script; the
   runner scopes the default provider from the nearest `harn.toml`.
-- Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`, for spec changes.
-- Regenerate generated spec docs with `make sync-language-spec`.
+- Edit the authoritative chapters under `spec/chapters/*.md` for spec changes;
+  never hand-edit the generated `spec/HARN_SPEC.md` or
+  `docs/src/language-spec.md` projections.
+- Regenerate and verify every spec projection with `make sync-language-spec`.
 - Check user-visible behavior with conformance fixtures under `conformance/tests/`.
 - Keep examples small enough for agents to copy without hidden setup.
 - Prefer existing syntax and stdlib helpers over new host-side shortcuts.
