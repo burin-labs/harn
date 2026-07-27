@@ -118,7 +118,7 @@ pub(crate) struct PackageVerifySummary {
     pub warnings: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct PackageVerifyCheck {
     pub name: String,
     pub applicable: bool,
@@ -350,18 +350,7 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
                 details,
             });
         } else {
-            checks.push(PackageVerifyCheck {
-                name: "connector contract".to_string(),
-                applicable: false,
-                reached: false,
-                status: "skipped".to_string(),
-                command: Vec::new(),
-                exit_code: None,
-                duration_ms: 0,
-                stdout: String::new(),
-                stderr: String::new(),
-                details,
-            });
+            checks.push(skipped_check("connector contract", false, 0, details));
         }
     }
 
@@ -664,6 +653,22 @@ fn gate_check_from_findings(
     }
 }
 
+fn skipped_check(
+    name: &str,
+    applicable: bool,
+    duration_ms: u64,
+    details: Vec<String>,
+) -> PackageVerifyCheck {
+    PackageVerifyCheck {
+        name: name.to_string(),
+        applicable,
+        status: "skipped".to_string(),
+        duration_ms,
+        details,
+        ..PackageVerifyCheck::default()
+    }
+}
+
 fn run_harn_subcommand(name: &str, cwd: &Path, args: &[&str]) -> PackageVerifyCheck {
     run_harn_subcommand_owned(
         name,
@@ -799,18 +804,12 @@ fn run_package_tests(package_dir: &Path) -> PackageVerifyCheck {
     let started = Instant::now();
     let tests = package_test_files(package_dir);
     if tests.is_empty() {
-        return PackageVerifyCheck {
-            name: "package tests".to_string(),
-            applicable: false,
-            reached: false,
-            status: "skipped".to_string(),
-            command: Vec::new(),
-            exit_code: None,
-            duration_ms: elapsed_ms(started),
-            stdout: String::new(),
-            stderr: String::new(),
-            details: vec!["no runnable tests/*.harn files found".to_string()],
-        };
+        return skipped_check(
+            "package tests",
+            false,
+            elapsed_ms(started),
+            vec!["no runnable tests/*.harn files found".to_string()],
+        );
     }
     let mut check = run_harn_subcommand(
         "package tests",
@@ -846,18 +845,12 @@ fn package_test_files(package_dir: &Path) -> Vec<PathBuf> {
 fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> PackageVerifyCheck {
     let started = Instant::now();
     if !metadata_ok {
-        return PackageVerifyCheck {
-            name: "package install/import smoke".to_string(),
-            applicable: true,
-            reached: false,
-            status: "skipped".to_string(),
-            command: Vec::new(),
-            exit_code: None,
-            duration_ms: elapsed_ms(started),
-            stdout: String::new(),
-            stderr: String::new(),
-            details: vec!["skipped because package metadata did not pass".to_string()],
-        };
+        return skipped_check(
+            "package install/import smoke",
+            true,
+            elapsed_ms(started),
+            vec!["skipped because package metadata did not pass".to_string()],
+        );
     }
     let package_dependency_path = match package_dependency_path(package_dir) {
         Ok(path) => path,
@@ -914,11 +907,14 @@ fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> PackageVer
         );
     };
     if manifest.exports.is_empty() {
-        return gate_check_from_findings(
+        return skipped_check(
             "package install/import smoke",
-            started,
-            vec!["[exports] is required for install/import smoke".to_string()],
-            Vec::new(),
+            false,
+            elapsed_ms(started),
+            vec![
+                "package has no module exports; contribution and rule surfaces are verified by their owning gates"
+                    .to_string(),
+            ],
         );
     }
 
@@ -1050,36 +1046,24 @@ fn validate_doc_examples(package_dir: &Path) -> PackageVerifyCheck {
         }
     }
     if details.is_empty() && failures.is_empty() {
-        return PackageVerifyCheck {
-            name: "doc examples".to_string(),
-            applicable: false,
-            reached: false,
-            status: "skipped".to_string(),
-            command: Vec::new(),
-            exit_code: None,
-            duration_ms: elapsed_ms(started),
-            stdout: String::new(),
-            stderr: String::new(),
-            details: vec!["no Markdown harn examples found".to_string()],
-        };
+        return skipped_check(
+            "doc examples",
+            false,
+            elapsed_ms(started),
+            vec!["no Markdown harn examples found".to_string()],
+        );
     }
     gate_check_from_findings("doc examples", started, failures, details)
 }
 
 fn run_package_docs_check(package_dir: &Path) -> PackageVerifyCheck {
     if !package_dir.join("docs/api.md").is_file() {
-        return PackageVerifyCheck {
-            name: "generated API docs".to_string(),
-            applicable: false,
-            reached: false,
-            status: "skipped".to_string(),
-            command: Vec::new(),
-            exit_code: None,
-            duration_ms: 0,
-            stdout: String::new(),
-            stderr: String::new(),
-            details: vec!["docs/api.md is not part of this package".to_string()],
-        };
+        return skipped_check(
+            "generated API docs",
+            false,
+            0,
+            vec!["docs/api.md is not part of this package".to_string()],
+        );
     }
     run_harn_subcommand(
         "generated API docs",
@@ -1895,6 +1879,22 @@ transient_provider_outage = "Retry after the provider is reachable."
             dependency_path,
             dir.path().canonicalize().unwrap().display().to_string()
         );
+    }
+
+    #[test]
+    fn install_import_smoke_is_inapplicable_without_module_exports() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("harn.toml"),
+            "[package]\nname = \"contribution-only\"\nversion = \"0.1.0\"\n\
+             [[contributes]]\nkind = \"harn.canon\"\nid = \"example\"\n\
+             title = \"Example\"\nmanifest = \"canon-packs.json\"\n",
+        )
+        .unwrap();
+        let check = run_install_import_smoke(dir.path(), true);
+        assert!(!check.applicable && !check.reached);
+        assert_eq!(check.status, "skipped");
+        assert!(check.details[0].contains("no module exports"));
     }
 
     #[tokio::test]
