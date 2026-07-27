@@ -319,6 +319,16 @@ These tests are subject to different rules:
 - Prefer `tokio::time::timeout` over `recv_timeout` even in E2E tests; it
   composes better with async code and gives cleaner error messages.
 
+Nextest's `leak-timeout` is a post-success reaping grace period, not a proof
+that the named test leaked. Under full workspace fan-out on a loaded machine,
+libtest can finish a pure in-process test in milliseconds while neighboring
+binaries delay process teardown past a short window, and nextest attributes
+the `LEAK-FAIL` to whichever fast test completed at the wrong moment. Raise
+the shared grace period in `.config/nextest.toml` (keeping `result = "fail"`)
+when loaded-machine evidence shows false attribution at the current ceiling;
+use a narrowly filtered override with `result = "pass"` only when a specific
+test keeps false-firing after the shared window is already generous.
+
 ## Using `tokio::time::pause()` — common mistakes
 
 ### Multi-thread flavor
