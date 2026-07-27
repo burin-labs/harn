@@ -34,7 +34,7 @@ pub struct JsonEnvelope<T: Serialize> {
     pub warnings: Vec<JsonWarning>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JsonError {
     pub code: String,
     pub message: String,
@@ -45,7 +45,7 @@ pub struct JsonError {
     pub details: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JsonWarning {
     pub code: String,
     pub message: String,
@@ -417,7 +417,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_version: crate::commands::check::LINT_SCHEMA_VERSION,
             description:
                 "Per-file lint diagnostics with severity, fixable/fixed counts, and summary.",
-            schema_json: None,
+            schema_json: Some(crate::commands::check::lint_json_schema()),
         },
         SchemaEntry {
             command: "replay",
@@ -591,5 +591,21 @@ mod tests {
                 entry.command
             );
         }
+    }
+
+    #[test]
+    fn catalog_lint_publishes_schema_json() {
+        let entry = catalog()
+            .into_iter()
+            .find(|entry| entry.command == "lint")
+            .expect("lint schema should be registered");
+        assert_eq!(
+            entry.schema_version,
+            crate::commands::check::LINT_SCHEMA_VERSION
+        );
+        let schema = entry.schema_json.expect("lint schemaJson must be present");
+        assert_eq!(schema["title"], "harn lint --json");
+        assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+        jsonschema::draft202012::meta::validate(&schema).expect("lint schema meta-valid");
     }
 }

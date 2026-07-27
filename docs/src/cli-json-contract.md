@@ -168,6 +168,25 @@ Mirrors the per-file diagnostic shape of `harn check --json` so agent
 consumers can dispatch on a single `CheckDiagnostic` layout regardless
 of whether they invoked `check` or `lint`.
 
+The complete Draft 2020-12 schema is published inline:
+
+```bash
+harn --json-schemas --command lint | jq '.data[0].schemaJson'
+```
+
+Typed Harn consumers should decode through `std/cli/envelope`
+(`decode_lint_json` / `decode_lint_envelope`) rather than re-implementing
+envelope validation. The decoder fails closed on malformed JSON,
+unsupported `schemaVersion` values, invalid severities or spans,
+inconsistent summary aggregates or per-file status, and disagreement
+between process exit status and `ok` when an exit code is supplied.
+
+Diagnostic `span` values are UTF-8 **half-open byte offsets**
+`[start, end)` into the source file. They are byte-accurate across
+multiline and non-ASCII text; they are not character or UTF-16 indexes.
+Empty spans (`start == end`) are valid. By contrast, `data.changed.files[].added_lines`
+ranges are inclusive, one-based physical line numbers.
+
 - `data.summary.fixable` counts diagnostics carrying autofix edits;
   `fixed` is the count actually applied (always `0` when `--fix` is
   not set).
@@ -180,6 +199,9 @@ of whether they invoked `check` or `lint`.
   and inclusive one-based `added_lines` ranges. `data.files[].diagnostics`
   contains matching warning/error diagnostics and all information diagnostics;
   the file statuses and summary counters are recomputed from that filtered set.
+- Soft lint failure (`lint_failed`) keeps `ok: false` while still populating
+  `data` with the report. Hard failures such as `no_lint_targets` use
+  `data: null`.
 
 ```jsonc
 {

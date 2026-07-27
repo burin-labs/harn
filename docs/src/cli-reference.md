@@ -976,6 +976,12 @@ files are recorded but do not create lint targets. Git failures, unsafe paths,
 source contents that differ from the evaluated target revision, unreadable
 sources, and missing or invalid warning/error spans fail closed.
 
+`harn lint --json` emits the schema-v1 envelope documented in the
+[CLI `--json` contract](./cli-json-contract.md#harn-lint---json). Discover the
+complete inline schema with `harn --json-schemas --command lint`, and decode it
+in Harn through `std/cli/envelope`. Diagnostic `span` values are UTF-8
+half-open byte offsets `[start, end)`.
+
 `--require-public-api-types` reports every untyped public function or pipeline
 parameter and return as `HARN-LNT-067`. Set
 `[lint] require_public_api_types = true` in `harn.toml` to apply the same policy

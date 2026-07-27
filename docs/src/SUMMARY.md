@@ -262,6 +262,7 @@
 - [CLI `--json` contract](./cli-json-contract.md)
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
+- [`std/cli/envelope`](./cli-envelope-reference.md)
 - [`std/cli/render`](./cli-render-reference.md)
 - [`std/cli/paths`](./cli-paths-reference.md)
 - [Builtin functions](./builtins.md)

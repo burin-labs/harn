@@ -1,0 +1,49 @@
+import { decode_lint_envelope, decode_lint_json, lint_envelope_schema } from "std/cli/envelope"
+import { assert, assert_eq } from "std/testing"
+
+fn fixture_root(harness: Harness) -> string {
+  const root = project_root() ?? cwd()
+  return path_join(root, "crates/harn-cli/tests/fixtures/lint_json")
+}
+
+fn read_fixture(harness: Harness, kind: string, name: string) -> string {
+  return harness.fs.read_text(path_join(fixture_root(harness), kind, name + ".json"))
+}
+
+pipeline test(task) {
+  assert(type_of(lint_envelope_schema()) == "dict")
+  for name in ["clean_ok", "warning_ok", "multiline_utf8_span", "changed_scope"] {
+    const text = read_fixture(harness, "positive", name)
+    const decoded = decode_lint_json(text, {exit_status: 0})
+    assert(is_ok(decoded), "expected ok for " + name + ": " + json_stringify(decoded))
+    assert_eq(unwrap(decoded).schemaVersion, 1)
+    assert(is_ok(decode_lint_envelope(json_parse(text), {exit_status: 0})))
+  }
+  const failed_text = read_fixture(harness, "positive", "lint_failed_with_data")
+  assert(is_ok(decode_lint_json(failed_text, {exit_status: 1})))
+  const utf8 = unwrap(
+    decode_lint_json(read_fixture(harness, "positive", "multiline_utf8_span"), {exit_status: 0}),
+  )
+  assert_eq(utf8.data.files[0].diagnostics[0].span.start, 11)
+  assert_eq(utf8.data.files[0].diagnostics[0].span.end, 24)
+  assert_eq(unwrap_err(decode_lint_json("{not json", {})).kind, "json_parse")
+  const adversarial = [
+    {name: "unsupported_schema_version", kind: "unsupported_schema_version"},
+    {name: "invalid_severity", kind: "invalid_severity"},
+    {name: "invalid_span", kind: "invalid_span"},
+    {name: "inconsistent_aggregate", kind: "inconsistent_aggregate"},
+    {name: "inconsistent_status", kind: "inconsistent_status"},
+  ]
+  for case in adversarial {
+    const decoded = decode_lint_json(read_fixture(harness, "adversarial", case.name), {})
+    assert(is_err(decoded), "expected err for " + case.name)
+    assert_eq(unwrap_err(decoded).kind, case.kind)
+  }
+  const exit_mismatch = decode_lint_json(
+    read_fixture(harness, "adversarial", "exit_status_mismatch"),
+    {exit_status: 1},
+  )
+  assert(is_err(exit_mismatch))
+  assert_eq(unwrap_err(exit_mismatch).kind, "exit_status_mismatch")
+  harness.stdio.println("ok")
+}

@@ -1,0 +1,509 @@
+// std/cli/envelope — fail-closed decoders for harn-cli JSON envelopes.
+//
+// Emission helpers stay in `std/cli/render`. This module owns consume/decode
+// for public schema-v1 contracts published via `harn --json-schemas`.
+import {
+  SchemaFailure,
+  get_typed_result,
+  parse_json_typed_report,
+  schema_any,
+  schema_bool,
+  schema_closed_object,
+  schema_enum,
+  schema_field,
+  schema_int,
+  schema_list,
+  schema_literal,
+  schema_nullable,
+  schema_string,
+} from "std/schema"
+
+/** Current schema-v1 version for `harn lint --json`. */
+pub const LINT_SCHEMA_VERSION: int = 1
+
+/** Options for lint envelope decode. */
+pub type LintDecodeOptions = {exit_status?: int, expected_schema_version?: int}
+
+/** UTF-8 half-open byte span `[start, end)`. */
+pub type LintByteSpan = {start: int, end: int}
+
+/** One diagnostic in a lint file report. */
+pub type LintDiagnostic = {
+  source: string,
+  severity: string,
+  code?: string,
+  message: string,
+  span?: LintByteSpan,
+  help?: string,
+}
+
+/** Per-file lint report row. */
+pub type LintFileReport = {
+  path: string,
+  status: string,
+  diagnostics: list<LintDiagnostic>,
+  fixable: int,
+  fixed: int,
+}
+
+/** Aggregate counters for a lint report. */
+pub type LintSummary = {
+  ok: int,
+  warnings: int,
+  errors: int,
+  diagnostics: int,
+  fixable: int,
+  fixed: int,
+}
+
+/** Inclusive one-based physical line range under `--changed-from`. */
+pub type LintAddedLineRange = {start: int, end: int}
+
+/** One evaluated changed source path. */
+pub type LintChangedSourceFile = {
+  path: string,
+  previous_path?: string,
+  status: string,
+  added_lines: list<LintAddedLineRange>,
+}
+
+/** Optional changed-line scope attached to a lint report. */
+pub type LintChangedScope = {
+  from: {requested: string, commit: string},
+  to: {requested: string, commit: string},
+  files: list<LintChangedSourceFile>,
+}
+
+/** `data` payload for schema-v1 `harn lint --json`. */
+pub type LintReport = {
+  files: list<LintFileReport>,
+  summary: LintSummary,
+  changed?: LintChangedScope,
+}
+
+/** Canonical lint CLI envelope after successful decode. */
+pub type LintEnvelope = {
+  schemaVersion: int,
+  ok: bool,
+  data: LintReport?,
+  error: {code: string, message: string, details?: unknown}?,
+  warnings: list<{code: string, message: string}>,
+}
+
+/** Fail-closed decode failure for lint envelopes. */
+pub type LintDecodeFailure = {
+  kind: string,
+  message: string,
+  issues: list<{path?: string, message: string, code: string}>,
+}
+
+pub type LintDecodeResult = Result<LintEnvelope, LintDecodeFailure>
+
+fn __non_neg_int() -> any {
+  return schema_int() + {minimum: 0}
+}
+
+fn __positive_int() -> any {
+  return schema_int() + {minimum: 1}
+}
+
+fn __span_schema() -> any {
+  return schema_closed_object({start: __non_neg_int(), end: __non_neg_int()})
+}
+
+fn __diagnostic_schema() -> any {
+  // Severity is structurally a string; semantic validation owns the
+  // info|warning|error vocabulary so Rust and Harn share failure kinds.
+  return schema_closed_object(
+    {
+      source: schema_string() + {min_length: 1},
+      severity: schema_string() + {min_length: 1},
+      code: schema_field(schema_string() + {min_length: 1}, false),
+      message: schema_string(),
+      span: schema_field(__span_schema(), false),
+      help: schema_field(schema_string(), false),
+    },
+  )
+}
+
+fn __file_schema() -> any {
+  return schema_closed_object(
+    {
+      path: schema_string() + {min_length: 1},
+      status: schema_string() + {min_length: 1},
+      diagnostics: schema_list(__diagnostic_schema()),
+      fixable: __non_neg_int(),
+      fixed: __non_neg_int(),
+    },
+  )
+}
+
+fn __summary_schema() -> any {
+  return schema_closed_object(
+    {
+      ok: __non_neg_int(),
+      warnings: __non_neg_int(),
+      errors: __non_neg_int(),
+      diagnostics: __non_neg_int(),
+      fixable: __non_neg_int(),
+      fixed: __non_neg_int(),
+    },
+  )
+}
+
+fn __changed_schema() -> any {
+  const revision = schema_closed_object(
+    {requested: schema_string() + {min_length: 1}, commit: schema_string() + {min_length: 1}},
+  )
+  const added = schema_closed_object({start: __positive_int(), end: __positive_int()})
+  const file = schema_closed_object(
+    {
+      path: schema_string() + {min_length: 1},
+      previous_path: schema_field(schema_string() + {min_length: 1}, false),
+      status: schema_enum(["added", "copied", "deleted", "modified", "renamed"]),
+      added_lines: schema_list(added),
+    },
+  )
+  return schema_closed_object({from: revision, to: revision, files: schema_list(file)})
+}
+
+fn __report_schema() -> any {
+  return schema_closed_object(
+    {
+      files: schema_list(__file_schema()),
+      summary: __summary_schema(),
+      changed: schema_field(__changed_schema(), false),
+    },
+  )
+}
+
+fn __error_schema() -> any {
+  return schema_closed_object(
+    {
+      code: schema_string() + {min_length: 1},
+      message: schema_string() + {min_length: 1},
+      details: schema_any(),
+    },
+  )
+}
+
+fn __warning_schema() -> any {
+  return schema_closed_object({code: schema_string() + {min_length: 1}, message: schema_string()})
+}
+
+/**
+ * Native schema for the schema-v1 `harn lint --json` envelope.
+ *
+ * Diagnostic `span` fields are UTF-8 half-open byte offsets `[start, end)`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn lint_envelope_schema() -> any {
+  return schema_closed_object(
+    {
+      schemaVersion: schema_literal(LINT_SCHEMA_VERSION),
+      ok: schema_bool(),
+      data: schema_nullable(__report_schema()),
+      error: schema_nullable(__error_schema()),
+      warnings: schema_list(__warning_schema()),
+    },
+  )
+}
+
+fn __failure(kind: string, message: string, issues: list) -> LintDecodeFailure {
+  return {kind: kind, message: message, issues: issues}
+}
+
+fn __schema_failure(failure: SchemaFailure) -> LintDecodeFailure {
+  let issues = []
+  for issue in failure.issues ?? [] {
+    issues = issues + [{path: issue.path, message: issue.message, code: issue.code}]
+  }
+  if len(issues) == 0 {
+    for err in failure.errors ?? [] {
+      issues = issues + [{message: err, code: "schema"}]
+    }
+  }
+  return __failure("schema", failure.message, issues)
+}
+
+fn __expected_status(diagnostics: list) -> string {
+  let has_error = false
+  let has_warning = false
+  for diagnostic in diagnostics {
+    if diagnostic.severity == "error" {
+      has_error = true
+    } else if diagnostic.severity == "warning" {
+      has_warning = true
+    }
+  }
+  if has_error {
+    return "error"
+  }
+  if has_warning {
+    return "warning"
+  }
+  return "ok"
+}
+
+fn __validate_envelope_invariants(envelope: LintEnvelope) -> LintDecodeFailure? {
+  if envelope.ok {
+    if envelope.error != nil {
+      return __failure("envelope_invariant", "ok=true requires error=null", [])
+    }
+    if envelope.data == nil {
+      return __failure("envelope_invariant", "ok=true requires a lint report in data", [])
+    }
+  } else if envelope.error == nil {
+    return __failure("envelope_invariant", "ok=false requires an error object", [])
+  }
+  return nil
+}
+
+fn __validate_file(file: LintFileReport, file_index: int) -> LintDecodeFailure? {
+  let diag_index = 0
+  for diagnostic in file.diagnostics {
+    if diagnostic.severity != "info"
+      && diagnostic.severity != "warning"
+      && diagnostic.severity != "error" {
+      return __failure(
+        "invalid_severity",
+        "files["
+          + to_string(file_index)
+          + "].diagnostics["
+          + to_string(diag_index)
+          + "].severity has unsupported value",
+        [],
+      )
+    }
+    if diagnostic.span != nil && diagnostic.span.start > diagnostic.span.end {
+      return __failure(
+        "invalid_span",
+        "files["
+          + to_string(file_index)
+          + "].diagnostics["
+          + to_string(diag_index)
+          + "].span has start > end",
+        [],
+      )
+    }
+    diag_index = diag_index + 1
+  }
+  const expected = __expected_status(file.diagnostics)
+  if file.status != expected {
+    return __failure(
+      "inconsistent_status",
+      "files["
+        + to_string(file_index)
+        + "].status disagrees with diagnostics (expected "
+        + expected
+        + ")",
+      [
+        {
+          path: "files[" + to_string(file_index) + "].status",
+          message: "status mismatch",
+          code: "inconsistent_status",
+        },
+      ],
+    )
+  }
+  return nil
+}
+
+fn __validate_changed(changed: LintChangedScope) -> LintDecodeFailure? {
+  let changed_index = 0
+  for changed_file in changed.files {
+    let range_index = 0
+    for range in changed_file.added_lines {
+      if range.start < 1 || range.end < 1 || range.start > range.end {
+        return __failure(
+          "invalid_span",
+          "changed.files["
+            + to_string(changed_index)
+            + "].added_lines["
+            + to_string(range_index)
+            + "] must be inclusive 1-based with start <= end",
+          [],
+        )
+      }
+      range_index = range_index + 1
+    }
+    changed_index = changed_index + 1
+  }
+  return nil
+}
+
+fn __validate_report(report: LintReport) -> LintDecodeFailure? {
+  let ok_count = 0
+  let warning_count = 0
+  let error_count = 0
+  let diagnostic_count = 0
+  let fixable_count = 0
+  let fixed_count = 0
+  let file_index = 0
+  for file in report.files {
+    const file_failure = __validate_file(file, file_index)
+    if file_failure != nil {
+      return file_failure
+    }
+    if file.status == "ok" {
+      ok_count = ok_count + 1
+    } else if file.status == "warning" {
+      warning_count = warning_count + 1
+    } else if file.status == "error" {
+      error_count = error_count + 1
+    }
+    diagnostic_count = diagnostic_count + len(file.diagnostics)
+    fixable_count = fixable_count + file.fixable
+    fixed_count = fixed_count + file.fixed
+    file_index = file_index + 1
+  }
+  const summary = report.summary
+  if summary.ok != ok_count
+    || summary.warnings != warning_count
+    || summary.errors != error_count
+    || summary.diagnostics != diagnostic_count
+    || summary.fixable != fixable_count
+    || summary.fixed != fixed_count {
+    return __failure(
+      "inconsistent_aggregate",
+      "summary counters disagree with file-derived counts",
+      [],
+    )
+  }
+  if report.changed != nil {
+    return __validate_changed(report.changed)
+  }
+  return nil
+}
+
+fn __validate_exit_status(
+  envelope: LintEnvelope,
+  options: LintDecodeOptions,
+) -> LintDecodeFailure? {
+  if options.exit_status == nil {
+    return nil
+  }
+  const exit_ok = options.exit_status == 0
+  if exit_ok != envelope.ok {
+    return __failure(
+      "exit_status_mismatch",
+      "process exit status "
+        + to_string(options.exit_status)
+        + " disagrees with envelope.ok="
+        + to_string(envelope.ok),
+      [],
+    )
+  }
+  return nil
+}
+
+fn __validate_semantics(envelope: LintEnvelope, options: LintDecodeOptions) -> LintDecodeResult {
+  const expected_version = options.expected_schema_version ?? LINT_SCHEMA_VERSION
+  if envelope.schemaVersion != expected_version {
+    return Err(
+      __failure(
+        "unsupported_schema_version",
+        "unsupported schemaVersion "
+          + to_string(envelope.schemaVersion)
+          + "; expected "
+          + to_string(expected_version),
+        [],
+      ),
+    )
+  }
+  const invariant_failure = __validate_envelope_invariants(envelope)
+  if invariant_failure != nil {
+    return Err(invariant_failure)
+  }
+  if envelope.data != nil {
+    const report_failure = __validate_report(envelope.data)
+    if report_failure != nil {
+      return Err(report_failure)
+    }
+  }
+  const exit_failure = __validate_exit_status(envelope, options)
+  if exit_failure != nil {
+    return Err(exit_failure)
+  }
+  return Ok(envelope)
+}
+
+/**
+ * Decode a parsed lint envelope value.
+ *
+ * Fails closed on unsupported schema versions, invalid severities/spans,
+ * inconsistent aggregates or per-file status, envelope invariants, and
+ * optional process-exit disagreement.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn decode_lint_envelope(value: unknown, options: LintDecodeOptions? = nil) -> LintDecodeResult {
+  const opts = options ?? {}
+  const validated = get_typed_result(value, lint_envelope_schema())
+  if is_err(validated) {
+    const failure = unwrap_err(validated)
+    if type_of(value) == "dict" && value.schemaVersion != nil
+      && value.schemaVersion
+      != (opts
+      .expected_schema_version
+      ?? LINT_SCHEMA_VERSION) {
+      return Err(
+        __failure(
+          "unsupported_schema_version",
+          "unsupported schemaVersion "
+            + to_string(value.schemaVersion)
+            + "; expected "
+            + to_string(opts.expected_schema_version ?? LINT_SCHEMA_VERSION),
+          [],
+        ),
+      )
+    }
+    return Err(__schema_failure(failure))
+  }
+  return __validate_semantics(unwrap(validated), opts)
+}
+
+/**
+ * Parse JSON text and decode a schema-v1 lint envelope.
+ *
+ * Malformed JSON fails with `kind: "json_parse"`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn decode_lint_json(text: string, options: LintDecodeOptions? = nil) -> LintDecodeResult {
+  const opts = options ?? {}
+  const report = parse_json_typed_report(text, lint_envelope_schema())
+  if !report.ok {
+    if report.stage == "json_parse" {
+      return Err(__failure("json_parse", report.message, []))
+    }
+    const parsed = try {
+      json_parse(text ?? "")
+    }
+    if is_ok(parsed) {
+      const value = unwrap(parsed)
+      if type_of(value) == "dict" && value.schemaVersion != nil
+        && value.schemaVersion
+        != (opts
+        .expected_schema_version
+        ?? LINT_SCHEMA_VERSION) {
+        return Err(
+          __failure(
+            "unsupported_schema_version",
+            "unsupported schemaVersion "
+              + to_string(value.schemaVersion)
+              + "; expected "
+              + to_string(opts.expected_schema_version ?? LINT_SCHEMA_VERSION),
+            [],
+          ),
+        )
+      }
+    }
+    return Err(__failure("schema", report.message, report.issues ?? []))
+  }
+  return __validate_semantics(report.value, opts)
+}

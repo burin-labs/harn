@@ -10,6 +10,7 @@ mod fmt;
 mod host_capabilities;
 mod imports;
 mod lint;
+mod lint_json_contract;
 mod lint_report;
 mod mock_host;
 mod outcome;
@@ -41,6 +42,10 @@ pub(crate) use harn_lint::path_is_stdlib_source;
 pub(crate) use host_capabilities::load_host_capabilities;
 pub(crate) use lint::{
     lint_file_inner, lint_fix_file, project_engine_rule_sources, project_native_rule_paths,
+};
+pub use lint_json_contract::{
+    decode_lint_envelope, decode_lint_json, lint_json_schema, DecodedLintEnvelope, LintDecodeError,
+    LintDecodeOptions, LintReportWire,
 };
 pub(crate) use lint_report::{run_lint_json, LintJsonOptions, LintReport, LINT_SCHEMA_VERSION};
 pub(crate) use preflight::is_preflight_allowed;
