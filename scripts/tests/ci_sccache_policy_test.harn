@@ -160,14 +160,9 @@ fn windows_cache_pair() {
   const checkout = {uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"}
   const toolchain = {uses: "./.github/actions/rust-toolchain"}
   const environment = {CARGO_INCREMENTAL: "0", CARGO_TERM_COLOR: "always", RUSTFLAGS: "-D warnings"}
-  const source_key = gha_expression(
-    "hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**')",
-  )
   const cache_inputs = {
     "shared-key": "workspace-windows",
-    "source-key": source_key,
     "target-dir": gha_expression("env.CARGO_TARGET_DIR"),
-    "broad-restore-prefix": "v0-rust-workspace-windows-",
   }
   return {
     consumer: {
@@ -424,7 +419,6 @@ pipeline test_rejects_windows_cache_wrapper_drift(task) {
   )
   assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
   assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
-  assert(errors.any({ error -> error.contains("hashFiles(") }))
 }
 
 @test
@@ -439,11 +433,10 @@ pipeline test_rejects_windows_cache_environment_drift(task) {
   assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
   assert(errors.any({ error -> error.contains("RUSTFLAGS=-D warnings -C target-cpu=native") }))
   assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
-  assert(errors.any({ error -> error.contains("hashFiles(") }))
 }
 
 @test
-pipeline test_rejects_windows_cache_source_fingerprint_drift(task) {
+pipeline test_rejects_windows_cache_source_partitioning(task) {
   const pair = windows_cache_pair()
   const producer_cache = pair.producer.jobs.nextest.steps[2]
   const producer = {
@@ -470,14 +463,14 @@ pipeline test_rejects_windows_cache_source_fingerprint_drift(task) {
   assert_eq(len(errors), 2)
   assert(
     errors.contains(
-      "workspace-windows producer and consumer must use the canonical source fingerprint",
+      "workspace-windows producer and consumer must use one stable native restore namespace",
     ),
   )
   assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
 }
 
 @test
-pipeline test_rejects_paired_windows_cache_source_fingerprint_drift(task) {
+pipeline test_rejects_paired_windows_cache_source_partitioning(task) {
   const pair = windows_cache_pair()
   const drifted_source_key = gha_expression("hashFiles('Cargo.lock')")
   const consumer_cache = pair.consumer.jobs.windows.steps[2]
@@ -518,6 +511,6 @@ pipeline test_rejects_paired_windows_cache_source_fingerprint_drift(task) {
   }
   assert_eq(
     windows_shared_cache_errors(consumer, producer),
-    ["workspace-windows producer and consumer must use the canonical source fingerprint"],
+    ["workspace-windows producer and consumer must use one stable native restore namespace"],
   )
 }
