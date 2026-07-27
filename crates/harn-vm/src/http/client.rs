@@ -1069,8 +1069,7 @@ async fn vm_execute_http_request_with_client(
             "http: URL must start with http:// or https://, got '{url}'"
         )));
     }
-    crate::egress::enforce_url_allowed("http_request", &final_url).await?;
-
+    // http_mock is in-process; match download/stream — egress only for real sockets.
     for attempt in 0..=config.retry.max {
         if let Some(mock_response) = consume_http_mock(
             method,
@@ -1102,7 +1101,7 @@ async fn vm_execute_http_request_with_client(
                 &final_url,
             ));
         }
-
+        crate::egress::enforce_url_allowed("http_request", &final_url).await?;
         let mut req = client.request(parts.method.clone(), &final_url);
         req = req
             .headers(parts.headers.clone())

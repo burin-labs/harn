@@ -803,6 +803,48 @@ async fn ssrf_guard_default_on_blocks_loopback() {
 }
 
 #[tokio::test]
+async fn http_mock_short_circuits_before_explicit_egress_deny() {
+    // Sandboxed CLI hosts (harn models batch, harn run) install
+    // require_explicit_egress_policy_for_host. An in-process http_mock is not
+    // egress — it must answer even when no allowlist is configured. Falsifier:
+    // checking egress before consume_http_mock yields EgressBlocked /
+    // "no egress policy configured" and never records the mock call.
+    let _env = crate::egress::test_env_guard();
+    reset_http_state();
+    let _explicit = crate::egress::require_explicit_egress_policy_for_host();
+    let _ssrf = crate::egress::require_ssrf_guard_for_host();
+    push_http_mock(
+        "POST",
+        "https://azure.example.test/openai/v1/batches",
+        vec![HttpMockResponse::new(200, r#"{"id":"az-batch"}"#)],
+    );
+
+    let result = vm_execute_http_request(
+        "POST",
+        "https://azure.example.test/openai/v1/batches",
+        &crate::value::DictMap::new(),
+    )
+    .await
+    .expect("http_mock must win over default-deny egress");
+    let dict = result.as_dict().expect("response dict");
+    assert_eq!(dict["status"].as_int(), Some(200));
+    assert_eq!(http_mock_calls_snapshot().len(), 1);
+
+    let denied = vm_execute_http_request(
+        "GET",
+        "https://azure.example.test/openai/v1/batches/az-batch",
+        &crate::value::DictMap::new(),
+    )
+    .await
+    .expect_err("unmocked request still needs an egress policy");
+    let msg = denied.to_string();
+    assert!(msg.contains("EgressBlocked"), "{msg}");
+    assert!(msg.contains("no egress policy configured"), "{msg}");
+
+    reset_http_state();
+}
+
+#[tokio::test]
 async fn ssrf_guard_allow_loopback_hatch_permits_capture_server() {
     let _env = crate::egress::test_env_guard();
     reset_http_state();
