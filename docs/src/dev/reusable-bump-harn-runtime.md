@@ -77,6 +77,10 @@ from the same published version.
   zero mutation.
 - Not yet published: a target whose release is still finalizing is a clean exit
   (`outcome: not_ready`); the next scheduled run picks it up.
+- Refresh failure: the target runtime reports `refresh_failed` before
+  validation or commit. When a compatible older target predates that receipt
+  outcome, the workflow's per-run success sentinel makes validation fail
+  closed instead; neither path can reach a signed commit.
 - Stale heads: an open bump PR with auto-merge armed is **disarmed before** the
   bump branch is reset, so a stale head cannot merge mid-refresh and race a
   duplicate onto the base branch. Concurrent/scheduled reruns are safe.

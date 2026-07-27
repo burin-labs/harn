@@ -147,13 +147,24 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           HARN_BUMP_TOKEN: ${{ steps.app-token.outputs.token }}
           HARN_BUMP_TARGET_TAG: ${{ steps.resolve.outputs.version }}
-          HARN_BUMP_REFRESH: ${{ inputs.refresh-command }}
-          HARN_BUMP_VALIDATE: ${{ inputs.validate-command }}
+          HARN_BUMP_REFRESH_COMMAND: ${{ inputs.refresh-command }}
+          HARN_BUMP_VALIDATE_COMMAND: ${{ inputs.validate-command }}
+          HARN_BUMP_REFRESH_SENTINEL: ${{ runner.temp }}/harn-bump-refresh-${{ github.run_id }}-${{ github.run_attempt }}.ok
           HARN_BUMP_BRANCH: ${{ inputs.branch }}
           HARN_BUMP_BASE: ${{ inputs.base }}
           HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
         shell: bash
         run: |
           set -euo pipefail
+          # The target release owns std/bump/*. A caller can therefore use a
+          # newer workflow contract with an older compatible target runtime.
+          # The sentinel preserves fail-closed refresh semantics across that
+          # skew: runtimes with BumpApplyOutcome.ok return refresh_failed
+          # directly; older runtimes reach validation, whose first operation
+          # fails unless refresh completed successfully.
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          export HARN_BUMP_REFRESH='set -euo pipefail; eval "$HARN_BUMP_REFRESH_COMMAND"; printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          # shellcheck disable=SC2016 # expand in the child shell, not here
+          export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
           harn run --no-sandbox .harn-runtime/scripts/bump_harn_runtime.harn
