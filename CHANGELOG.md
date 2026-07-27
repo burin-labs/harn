@@ -9,6 +9,468 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.41
+
+### Breaking
+
+- `glob(...)` and `walk_dir(...)` (and their `harness.fs.*` methods) now honor
+  the project ignore stack by default instead of walking everything. Build
+  output and VCS metadata (`node_modules/`, `target/`, `dist/`, `build/`,
+  `.git/`, Harn's own `.harn-runs/`, and the rest of the built-in list) plus
+  anything `.gitignore`, `.ignore`, or `.agentignore` excludes no longer appear
+  in results. Pass `ignore_policy: "none"` to restore the old raw walk.
+- The `respect_gitignore` option is removed everywhere — `find_text`,
+  `find_evidence`, `project_scan`/`project_deep_scan`, the hostlib scanner
+  builtins, and `hostlib_fs_watch_subscribe`. Use `ignore_policy` instead:
+  `respect_gitignore: false` becomes `ignore_policy: "none"`, and
+  `respect_gitignore: true` is the default. There is no alias and no
+  deprecation shim.
+- `find_text` and `find_evidence` drop `preset: "all"`; write
+  `{ignore_policy: "none", include_hidden: true}`, which says the same thing in
+  the vocabulary every walk shares. They also drop the `ignore` and
+  `ignore_globs` spellings of the exclude-glob option, which now collide with
+  the ignore stack — use `exclude` / `exclude_globs`.
+- `vendor/` is no longer skipped by default anywhere. Committed `go mod vendor`
+  trees are tracked source, and silently dropping them from a search is worse
+  than scanning a directory you did not want.
+- Filesystem walks no longer read machine-local ignore state: a developer's
+  `core.excludesFile` and a checkout's `.git/info/exclude` are ignored, and
+  `.gitignore` files above the enclosing repository root no longer apply. A
+  walk rooted inside a repository still honors that repository's root rules, so
+  the same repository at the same commit enumerates identically on every
+  machine.
+- Project ignore files are honored only inside a project: a directory with a
+  `.git`/`.jj` entry above it, or a sandbox workspace root. A `.gitignore`
+  next to a directory that is not a checkout no longer filters results, and
+  neither does one inside a Harn scratch directory. Both cases fall back to the
+  built-in directory defaults. `hostlib_tools_search` previously honored a
+  `.gitignore` regardless of whether `.git/` existed.
+- `hostlib_fs_watch_subscribe` renames `respect_gitignore` to `ignore_policy`
+  and now defaults to `"builtin"` instead of no filtering. A recursive watch no
+  longer descends `node_modules/`, `target/`, and the rest of the built-in list,
+  which is what exhausts the OS watch budget and delivers churn nobody consumes.
+  It deliberately stops short of `"project"`: a `.gitignore` says to keep a
+  file out of version control, not to stay silent when it changes, and a
+  dropped event is
+  indistinguishable from nothing having happened. Pass `ignore_policy: "none"`
+  for the previous raw behavior.
+
+### Added
+
+- Every filesystem walk — `glob`, `walk_dir`, `find_text`, `find_evidence`,
+  `project_scan`, the hostlib `tools/search` and scanner builtins, and
+  `hostlib_fs_watch_subscribe` — now takes one `ignore_policy` option with the
+  same three levels: `"none"` (raw walk), `"builtin"` (Harn's built-in
+  directory defaults), and `"project"` (the defaults plus project ignore
+  files).
+- `.ignore` (the tool-agnostic ripgrep/fd convention) and `.agentignore` (the
+  cross-tool agent convention) are honored alongside `.gitignore`, in that
+  order of increasing precedence.
+- The built-in directory defaults are the lowest layer rather than a hard
+  filter, so a project ignore file can take them back: a `.gitignore`
+  containing `!dist/` re-includes `dist`.
+- **Anytime-valid sequential eval decisions.** `std/eval/sequential` adds
+  bounded and paired confidence sequences, cumulative trial ladders, realized
+  savings reports, and frozen-family best-arm decisions that remain valid under
+  repeated looks over append-only observations (#5615).
+- Added closed, versioned experiment manifests with frozen case sets,
+  deterministic randomized-block assignment, anytime-valid guardrails, typed
+  decisions, and explicit iterate-to-gate promotion in `std/eval/experiment`.
+- **`harn-lsp` now serves `.harn.prompt` / `.prompt` documents as prompt
+  templates (#5620).** Prompt documents (language id `harn-prompt`, or a
+  `.harn.prompt` / `.prompt` path) are parsed by the template engine and never
+  by the Harn parser, so prose no longer produces syntax errors and
+  `textDocument/formatting` no longer offers to rewrite a prompt as Harn code.
+  They get template parse errors plus the `template-provider-identity-branch`
+  and `template-variant-explosion` lint rules — the same diagnostics `harn
+  lint` reports, honouring `[lint] disabled` and `[lint]
+  template_variant_branch_threshold` from `harn.toml` — and folding ranges for
+  `{{ if }}` / `{{ elif }}` / `{{ else }}`, `{{ for }}`, `{{ section }}`,
+  `{{ raw }}`, and multi-line `{{# #}}` comments. The workspace file watcher
+  now covers prompt files alongside `.harn` sources.
+- **Prompt-template diagnostics carry a real source span.** A template that
+  fails to parse used to report at `0:0` with the position stuffed into the
+  message text; `harn lint` and the language server now both underline the
+  directive that failed. Identity-branch findings anchor on the exact
+  directive rather than the first `{{ if }}` on the line, so two branches
+  sharing a line no longer collapse onto one span.
+- **`harn-lsp` no longer answers Harn-specific requests for documents in
+  other languages.** Folding ranges for, say, an open TypeScript file were
+  previously derived by running Harn's lexer over it; the server now returns
+  nothing and leaves those languages to their own providers. Rule-engine
+  diagnostics for non-Harn documents are unchanged.
+- Added `tree-sitter-harn/queries/folds.scm`, giving tree-sitter editors
+  (Neovim, Helix, Zed) structural code folding for `.harn` files: declarations,
+  blocks, match arms, multi-line collections and argument lists, block comments,
+  and `"""` strings. The query is registered in `tree-sitter.json` and exported
+  from the Rust binding as `FOLDS_QUERY`.
+- New `std/abort` module: cooperative abort across concurrent branches.
+  `parallel` / `parallel each` cancel siblings but discard per-branch results
+  and only trigger on a *throw*; `parallel settle` keeps every outcome but
+  never stops anything; `parallel_race` is first-success. `settle_with_abort`
+  is the missing form — it collects one `Result` per item in source order like
+  `parallel settle`, while letting a branch that reaches a doomed verdict stop
+  the siblings that have not started. A branch fails when it throws *or*
+  returns `Result.Err`, `max_failures` / `abort_on` drive automatic aborts,
+  and `decisive_error(outcome)` reports the first failure that was not an
+  abandonment so a lane that merely stopped waiting is never blamed. The token
+  (`abort_token`, `abort_requested`, `request_abort`) is usable on its own with
+  `spawn` or any other structure. This is cooperative, not cancellation: a
+  branch blocked inside one long call is not interrupted, and the abort lands
+  at the next checkpoint the branch itself checks.
+- The VS Code/Cursor `.harn.prompt` grammar is now generated from the
+  prompt-template engine's own keyword, filter, and section vocabulary
+  (`make gen-prompt-grammar`), and `make check-prompt-grammar` fails when the
+  committed grammar drifts from it.
+- Prompt files gain a language configuration in the VS Code extension:
+  `{{#`/`#}}` as the comment pair, `{{` → `}}` auto-closing and surrounding, and
+  folding for `{{ if }}` / `{{ for }}` / `{{ section }}` / `{{ raw }}` blocks.
+  Opening one now activates the extension, and the language server is offered
+  prompt documents alongside `.harn` scripts.
+- The VS Code extension ships a README and LICENSE.
+- Docs snippet checking now covers prompt templates: a ` ```harn-prompt `
+  fenced block in `docs/src/**` is validated with `harn lint` against the
+  prompt-template engine's own parser, with ` ```harn-prompt,ignore ` to skip
+  one. Fences may also use more than three backticks, so a template whose body
+  contains ``` can be checked. Fixed a `{{ include ... with { ... } }}` example
+  in the v2 migration guide that never parsed.
+- Add `std/llm/dialects`, the data-driven vocabulary used to compose and regression-test text tool-call dialects.
+- Added `harn-flock`, advisory file locks that carry a deadline and name the
+  path they waited on. `std::fs::File::lock` has no timed form, so a caller
+  blocked on a lock nobody will release produces no error and no stack — the
+  process simply stops, and a supervisor can report only that it stopped.
+- Bounded the SQLite sidecar initialization and readiness locks with a 30s
+  budget, tunable through `HARN_SQLITE_LOCK_TIMEOUT_SECONDS`. The critical
+  section they guard is one WAL promotion plus one schema transaction, so
+  expiry means a holder is wedged rather than slow, and it now surfaces as an
+  error naming the lock file instead of an open that never returns.
+- **`harn-lsp` completes and explains prompt-template syntax (#5644).**
+  Inside `{{ }}` in a `.harn.prompt` / `.prompt` document, the leading word
+  offers directive keywords and the names bound by an enclosing `{{ for }}`,
+  text after a `|` offers filters with their signatures, and
+  `{{ section "…" }}` offers the section names the engine accepts. Hover
+  explains a directive or filter and, for a block opener, names the keyword
+  that closes it. Nothing is offered inside a `{{# comment #}}` or a
+  `{{ raw }}` block. **Only real closers are ever suggested**: `{{ endif }}`
+  and `{{ endfor }}` do not exist — both `{{ if }}` and `{{ for }}` close with
+  `{{ end }}`, and writing `{{ endif }}` is a bare variable lookup that renders
+  as literal text while leaving the block unclosed.
+- **The prompt-template filter registry is a single table.** `FILTERS` now
+  carries each filter's name, parameters, required arity, and description
+  alongside its implementation, and `apply_filter` dispatches through it, so
+  the list an editor offers is the list the engine can run. Arity checking and
+  error positioning moved to that one dispatch point instead of being repeated
+  in every filter body, and `vocabulary::filter_names()` derives the
+  spelling-only view the grammar generator uses.
+- **`template::vocabulary` gained the block structure editors need.** Each
+  block keyword now declares whether it opens, divides, or closes a block and
+  which keyword pairs with it, and `vocabulary::block_keywords()` derives the
+  spelling-only list from that table. Recognising a keyword and knowing what
+  closes it were separate facts; they are now one, checked against real parses.
+- **The template block outline reports the names a `{{ for }}` binds**, so
+  tooling can resolve loop variables from the real parse rather than by
+  scanning text.
+- **Unknown filters fail during authoring instead of first render.** `harn lint`
+  and harn-lsp validate every `| filter` against the same registry completion
+  and rendering consume, underline only the unknown name, and offer a safe
+  name-only fix for close misspellings such as `uppr` → `upper`.
+- The VS Code extension ships an icon, so it no longer appears as a grey
+  placeholder on the VS Code Marketplace and Open VSX.
+- `editors/vscode/README.md` documents the two-secret runbook for going live,
+  including the one-time Open VSX namespace claim that publishing fails without.
+- Expose Stripe webhook signature verification as a pure connector helper so
+  gateways can use Harn's canonical implementation without an event log.
+- Every boundary between model-produced bytes and executed action now reports
+  losses through one typed funnel. `AgentEvent::BoundaryFailure` carries the
+  boundary, what happened to the output (`dropped` / `unrecognized` /
+  `truncated` / `killed` / `capped`), an owner in the same vocabulary as
+  `AgentTerminalKind::owner`, and an excerpt of the bytes that died. Hosts
+  receive it over ACP as `_harn/agentEvent` with kind `boundary_failure`, and
+  `.harn` boundaries emit the same event through
+  `agent_emit_event(session, "boundary_failure", {...})`.
+- Six boundaries that used to lose model output silently now emit it: the text
+  tool-call parse handoff (an unrecognized dialect that degraded to prose),
+  provider response ingestion (content blocks, output items, message parts, and
+  completions past `choices[0]` with no handler), visible-text sanitization
+  (assistant prose superseded by a `<user_response>` block), the
+  `__host_agent_emit_event` allowlist (rejections that every stdlib caller's
+  `try { }` swallowed), the rate governor's admission gate (a call that
+  proceeds unreserved after the wait cap), and `agent_chat_loop`'s turn and
+  input caps.
+- `make check-loud-boundaries` keeps the invariant from rotting.
+  `scripts/loud_boundaries.toml` enumerates every boundary, and the gate fails
+  when the `BoundaryId` enum and the registry drift apart, when a registered
+  boundary stops reporting, when a file nobody registered starts reporting one,
+  or when a boundary's test goes missing or inert.
+- Added the `workspace_paths` sandbox profile: Harn's workspace-root path
+  enforcement without OS confinement of subprocesses. It fills the gap for
+  trusted callers — a test runner isolating cases, a build driver invoking a
+  toolchain — that want their own writes confined but must shell out freely.
+  It is not containment for foreign code, since a subprocess it spawns is
+  unconfined.
+- `SandboxProfile` now exposes the two questions a profile answers as named
+  predicates, `enforces_path_scope()` and `confines_processes()`, replacing
+  ad-hoc variant matching that re-derived the distinction at each call site.
+  As a result, a permission error from a subprocess under the `wasi` profile
+  is no longer misreported as an OS sandbox denial: testbench mode intercepts
+  subprocesses before the host spawn path, so nothing there was ever confined.
+
+### Changed
+
+- Warm spawns no longer re-read the module graph to rediscover artifact keys. An
+  entry chunk's context manifest already records every reachable file's SHA-256,
+  and that digest is the only part of a module's artifact cache key that depends
+  on the file — so a lookup the manifest decided now hands the VM a link table
+  and module loading resolves each artifact directly. On a 377-module graph this
+  removes a second read of 5.7 MB of source plus the key derivation it existed
+  for. A module whose artifact was evicted, one the graph never reached, and any
+  guard-verified package bytes all still take the ordinary read-and-compile path.
+- The prepared-module cache keys on the same SHA-256 as the on-disk artifact
+  instead of a second BLAKE3 digest of the same bytes, so a warm module load
+  hashes its source once.
+- **Conformance cases run inside an enforced write root.** Each case now
+  executes under a capability policy whose writable roots are exactly the
+  directories it owns — its per-case state dir and the system temp dir — so a
+  stray write outside them fails with a `HARN-CAP-201` diagnostic naming the
+  path, instead of landing in the repository and surfacing later as a dirty
+  worktree. Reads stay unrestricted, and the profile is `workspace_paths`
+  rather than `worktree`: cases are first-party code and several legitimately
+  shell out, so OS process confinement would deny them without closing the
+  write hole. `sandbox_active_profile()` inside a case therefore reports
+  `workspace_paths` where it previously reported `unrestricted`.
+- `parallel_sweep_with_circuit_breaker` (`std/personas/prelude`) now runs as
+  one cooperative-abort settle instead of fixed batches. The batching existed
+  only to give the sweep somewhere to check the failure count between chunks;
+  it cost pipelining (one slow item stalled its whole chunk) and could not
+  stop inside the chunk that failed. A step that *returns* `Result.Err` now
+  counts as a failure — previously `parallel settle` recorded it as
+  `Ok(Err(..))` and the circuit breaker counted it a success.
+- `parallel_judge` (`std/llm/ensemble`) with `on_error: "fail_fast"` now stops
+  dispatching judges as soon as one fails. It previously ran every judge call
+  to completion and only then threw.
+- **Caller-rooted runtime state paths now have one owner.** The new
+  `runtime_state_paths_under(root)` helper returns Harn's conventional state
+  and worktree roots without applying ambient overrides. Worktree helpers and
+  pattern-learning storage use it for explicit project roots, while ambient
+  pattern-learning storage follows `runtime_paths()` and `HARN_STATE_DIR`.
+- **`runtime_paths()` declares a closed record instead of `dict`.** Its return
+  type is now
+  `{execution_root: string, asset_root: string, state_root: string, run_root: string, worktree_root: string}`,
+  so the checker knows the field names and types. The values are unchanged; a
+  script that reads an undeclared key off the result is now a type error rather
+  than a runtime `nil`.
+- Process spawn failures now preserve a stable I/O `kind` such as `not_found`
+  across direct, hostlib, sandboxed, and unsandboxed command execution.
+- Added launch-oriented engineering principles and a `harn-product-quality`
+  skill, with executable checks that keep Codex and Claude on one repository
+  contract.
+- Package installation now ignores the root `CLAUDE.md` guidance projection,
+  allowing a safe direct link to `AGENTS.md` while source and asset symlinks
+  remain rejected.
+- Make `harn package verify` the canonical package and connector CI contract,
+  with versioned JSON receipts; remove the narrower `harn connector test`
+  command.
+
+### Fixed
+
+- **Hugging Face Qwen 3.6 tool routing now follows live reliability evidence
+  (#3730).** The route prefers remapped tagged-text tools after native calls
+  dispatched only 3/5 times, and live OpenAI-compatible streaming probes now
+  send the required `stream: true` transport flag.
+- Make `harn check` reject literal provider/model/tool-format compositions that Harn's capability registry already
+  knows are unsafe, while preserving audited agent-loop probes and open-world custom routes.
+- Require the automatic `frontier`, `mid`, and `small` routes to resolve to active catalog models with an explicit
+  viable tool protocol.
+- `hostlib_fs_watch_subscribe` now suppresses events for files *inside* an
+  ignored directory, not just for the directory entry itself. Its filter
+  matched each path on its own, and a rule like `node_modules/` only ever
+  matches the directory, so every file beneath it still produced events. The
+  filter now consults parent directories as well, which is what makes the
+  ignore level actually bound watch churn.
+- **Unrecognized tool dialects no longer vanish into prose (#5142).** The text
+  parser recognized tool syntax only for a fixed set of wrapper tags, so any
+  other dialect a model emitted produced zero calls, zero violations, and zero
+  events — and the turn then read downstream as the model declining to act. The
+  parser now reports the text it consumed without producing a call, and
+  `std/llm/tool_shape` flags fragments that are *shaped* like an invocation: a
+  tag wrapping an argument-bearing body, an object naming a tool alongside its
+  arguments, or chat-template markup carrying a callee. Nothing matches a list of
+  dialect names, so a dialect nobody has emitted yet is caught with no code
+  change. Findings join the existing protocol-violation feedback so the model is
+  told its call did not run.
+
+- **An unbalanced code fence no longer strips the agent's answer (#5142).**
+  "Is this offset inside a markdown fence" was implemented twice and the copies
+  had drifted. The parser requires a fence to be closed at or after the offset
+  before it encloses it; `visible_text` still counted fence markers and treated
+  an odd count as "inside". A stray ``` earlier in a response therefore made a
+  later real `<user_response>` look like fenced narration and removed it from the
+  visible answer. Both now share one owner.
+
+- **Response parsing is no longer quadratic in response length (#5142).**
+  The fence check rescanned from the start of the response on every call and the
+  scan loop consulted it at nearly every position, so a 124KB response took
+  28.8ms to parse and grew 14x for every 4x of input. Fence and line-start
+  positions are now resolved once per response.
+
+- **Char-indexed string operations are no longer quadratic (#5142).** `slice`
+  materialized the entire string as a `Vec<char>` on every call regardless of how
+  much of it was being sliced, and `char_at` walked the string from the start on
+  each access, so scanning a string position by position cost time proportional
+  to its length squared — 384ms for a single pass over 31KB. `slice`,
+  `substring`, `char_at`, `index_of`, and `last_index_of` now resolve char
+  indices to byte offsets in one forward pass, with a direct byte path for ASCII.
+  Unicode semantics are unchanged and pinned by equivalence tests against the
+  previous behavior across 1-, 2-, 3-, and 4-byte scalars.
+- `lint`, `fmt`, `check`, `scan`, and `rules` no longer let an ignore file
+  *above* a checkout decide which of the project's own sources exist. Their
+  target discovery configured the `ignore` crate by hand and asked for an
+  upward search for ignore files without giving the crate a repository to bound
+  it against, so a `.gitignore` in any parent directory applied to the
+  repository below it — where git itself would never look. In a checkout nested
+  under a parent that ignores `*`, which is the shape of an agent worktree under
+  `~/.cursor`, every directory target expanded to no files at all. All three
+  walkers now route through `harn_vm::ignore_policy`, the single owner of that
+  decision, which ties the upward search to a version-control anchor. Machine-
+  local ignore sources (`core.excludesFile`, `.git/info/exclude`) are no longer
+  read either, so a directory target enumerates the same set on a laptop and in
+  CI.
+- Stopped the entry-chunk cache from serving a stale import graph after a
+  same-length rewrite that landed inside one filesystem timestamp tick. The
+  context manifest proved validity from `(len, mtime_ns)` alone, so two writes
+  a coarse clock records under one mtime — Windows quantizes to ~15.6ms, and
+  programmatic agent edits are exactly that fast — were byte-identical to the
+  recorded identity. Manifests now record when their capture began and judge a
+  "racily clean" entry by content, in git's sense, re-stamping the artifact so
+  the entry returns to the stats-only fast path on the next spawn.
+- Stopped the entry-chunk cache from serving one script's compiled bytecode to
+  a different script with identical source text. Cache files are named by entry
+  source hash alone, so two `entry.harn` with the same bytes in different
+  directories — two checkouts of one repository, where only one has local edits
+  — share a cache file, and the manifest proving the import graph unchanged did
+  not record which entry it had been walked from. Its stat identities re-checked
+  perfectly clean under the other entry, and the wrong graph's bytecode ran with
+  no error and no diagnostic. Manifests now carry their anchor and only vouch
+  for the entry they describe.
+- Restored within-version compiler-staleness detection for entry chunks. The
+  `CODEGEN_FINGERPRINT` guard reached a lookup only through the context hash,
+  which the manifest fast path adopts rather than recomputes, so a chunk emitted
+  by an earlier build of the same release was replayed after any lexer, parser,
+  IR or codegen edit. The fingerprint is now in the artifact header, where it is
+  checked without walking the graph.
+- **Release performance proof no longer competes with functional audits
+  (#5606).** Source releases now measure the test-case performance ratchet only
+  after parallel conformance, Rust, and package audit workloads finish.
+- Testbench filesystem overlays now work under a capability policy whose
+  `workspace_roots` exclude the overlay root. Scope enforcement ran before the
+  overlay saw the access, so a write the overlay absorbs — one that never
+  reaches disk — was rejected as a sandbox violation, defeating the overlay in
+  exactly the confined scenarios it exists for. The carve-out is bounded to
+  accesses the overlay genuinely serves from memory: a read that would fall
+  through to a real file is still enforced, as is anything outside the overlay
+  root. Because the check lives in `check_fs_path_scope`, every `harness.fs.*`
+  builtin gets it, not just `write_file`.
+- The DAP stdio smoke test no longer mistakes a descheduled child process for a wedged adapter on heavily loaded machines.
+- Stopped the MCP server's log-watcher readiness wait from blocking forever.
+  It returned only once a positive expected count was met, but three reachable
+  paths left that count permanently unmet: a failure to open the auth event log
+  returned before publishing the count at all, a run in which no watcher spawned
+  published zero (and zero was never "enough"), and a watcher that failed to read
+  or subscribe to its topic returned without ever reporting in, while still being
+  counted. Readiness now tracks watchers that have *settled* — subscribed or
+  given up — and the count is published on every exit path, so no combination of
+  failures can stall the wait.
+- Stopped every MCP tool call from building an entire orchestrator VM to append
+  one event. `record_tool_call` runs on every call and constructed a full runtime
+  — stdlib registration, manifest module compile, trigger registration, a fresh
+  database connection — to write a single `action_graph_update` record, and the
+  trust-query handler did the same just to read. Both now share one event log
+  opened at the orchestrator's state root, which is the same database the VM
+  would have installed.
+- Filters in `.harn.prompt` files highlight with any spacing after the pipe.
+  The old grammar required exactly one whitespace character, so `{{ x|upper }}`
+  and `{{ x |  upper }}` were left unhighlighted. Only the engine's real filters
+  highlight as filters now, so a typo like `{{ x | uppercase }}` no longer looks
+  valid in the editor.
+- Stopped the `harn-cli` build script from rerunning, and the crate from
+  recompiling, on every single Cargo invocation. It named the CLI AOT manifest
+  in `cargo:rerun-if-changed` unconditionally, but that manifest is generated
+  and git-ignored, so a fresh checkout does not have one — and Cargo treats a
+  watched path that does not exist as permanently stale. Every `cargo` call
+  rebuilt the crate in full: a measured ~2m12s per call on Windows CI, and the
+  same staleness on any fresh checkout on any platform. The generated directory
+  is watched instead, which exists and whose mtime still changes when a payload
+  appears, and the manifest itself is watched whenever it is present so an
+  in-place regeneration is not missed.
+- **`harn run` keeps stderr clean again on a default run (#5642).** The session
+  environment policy is disclosed only when it departs from the environment the
+  launcher already had, matching the sandbox grant disclosure. The default
+  `inherited` policy carrying no grants now prints nothing, so `--summary-fd`
+  and `--rusage-fd` consumers again receive only their own diagnostics;
+  `isolated`, `granted`, and any run carrying grants still announce themselves.
+- Stopped MCP server startup from blocking forever when the platform
+  filesystem watcher never answers. `notify`'s Windows backend registers a
+  watch by handing the request to its own server thread and blocking on an
+  unacknowledged channel receive with no timeout, on the caller's thread — so a
+  server thread that never acknowledges stopped the whole process with no error
+  and no log line. Registration now happens on a thread the caller can abandon,
+  and a backend that does not answer within ten seconds costs list-change
+  notifications and a warning instead of the server.
+- `make test-harn-scripts` now runs in CI as part of the audit gate battery. It
+  was in `make all` but in no workflow, so a source-scope regression sat red on
+  `main` unnoticed. The source-length ratchet's inventory is additionally
+  reconciled against `git ls-files`, so a source tree landing under a directory
+  the filesystem walker skips (`target`, `build`, `dist`, `node_modules`,
+  `coverage`, `venv`, `__pycache__`) fails loudly instead of silently escaping
+  the ratchet.
+- **Receipt sink failures are no longer silent.** A local or callable
+  `with_audit_log` sink that cannot persist its receipt now produces a
+  `tool_middleware_exception`; with `prefetch_next_turn`, the same failure
+  stops the agent loop when the deferred flush is drained. A successful tool
+  result can no longer carry a `receipt_uri` for a file that was never written.
+- **Relocating Harn's runtime state no longer makes it unwritable from Harn
+  code.** `HARN_STATE_DIR`, `HARN_RUN_DIR`, and `HARN_WORKTREE_DIR` let an
+  operator move Harn's state, run records, and managed worktrees outside the
+  workspace. The runtime wrote there regardless, but `harness.fs.*` is scoped
+  to the workspace, so a relocated state root was readable and not writable —
+  and stdlib features that persist run state had been written to guess a
+  cwd-relative `.harn` instead, silently ignoring the override. The workspace
+  scope now includes Harn's own runtime directories whenever an override puts
+  them outside the workspace. Nothing widens in the default layout, where they
+  already sit inside it.
+- **`with_audit_log({sink: "local"})` writes receipts to the runtime state
+  root.** Receipts land in `<state_root>/receipts/<session_id>.jsonl` and the
+  emitted `receipt_uri` points at the same file, instead of both being built
+  from a literal `.harn` next to whatever directory the agent started in.
+  `local_receipt_sink(session_id)` follows. Runs that set `HARN_STATE_DIR` will
+  find receipts under it rather than in the working directory.
+- **`harn eval scope-triage` defaults its output under `runtime_paths().run_root`**
+  rather than a literal `.harn-runs`, so `HARN_RUN_DIR` applies.
+- The VS Code extension publish workflow now takes its version from the release
+  tag instead of the placeholder in `editors/vscode/package.json`. Packaging the
+  manifest verbatim would have published the same version on every tag,
+  succeeding once and then failing on every later release, since both the VS Code
+  Marketplace and Open VSX reject a version that already exists.
+- The published extension no longer ships its own test suite; `test/**` was
+  missing from `.vscodeignore` and accounted for more than half the package.
+- `ovsx` is pinned as a dev dependency and invoked with `--no-install`, matching
+  how `vsce` is already run, so the publish step no longer resolves an
+  unpinned tool at release time.
+- Make `harn lint --fix` apply machine-applicable fixes in `.harn.prompt` and
+  `.prompt` files instead of only reporting them.
+- Preserve typed missing-program spawn errors when commands run through the
+  macOS `sandbox-exec` backend.
+- Make pre-tag binary-size benchmarks embed the same CLI AOT payload as shipped
+  release binaries, and raise the Linux x86_64 size ratchet to 212 MiB based on
+  the measured 211.49 MiB v0.10.40 artifact.
+
+### Security
+
+- Bind every release archive to its signed source tag and build workflow with
+  GitHub artifact attestations, and fail release recovery closed before
+  publishing metadata or marking a release latest when provenance is missing
+  or inconsistent.
+
 ## v0.10.40
 
 ### Breaking
