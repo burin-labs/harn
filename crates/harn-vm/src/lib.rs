@@ -340,10 +340,12 @@ pub use stdlib::hitl::{
     append_hitl_response, ApprovalRequest, HitlHostResponse, HITL_APPROVALS_TOPIC,
     HITL_DUAL_CONTROL_TOPIC, HITL_ESCALATIONS_TOPIC, HITL_QUESTIONS_TOPIC,
 };
-/// Per-turn memo for turn-stable host reads, shared by every `host_call`
-/// implementation including embedder replacements. See [`stdlib::host::turn_cache`].
+/// Per-turn memo for turn-stable host reads. See [`stdlib::host::turn_cache`].
 pub use stdlib::host::turn_cache as host_turn_cache;
-pub use stdlib::host::{clear_host_call_bridge, set_host_call_bridge, HostCallBridge};
+pub use stdlib::host::{
+    clear_host_call_bridge, dispatch_host_operation, host_call_ready, set_host_call_bridge,
+    HostCallBridge, HostCallDispatchFuture,
+};
 pub use stdlib::http_response::{
     parse_envelope as parse_http_envelope, HttpEnvelope, HttpHeaderValue, WsUpgradeSpec,
     HTTP_RESPONSE_TAG_KEY, HTTP_RESPONSE_TAG_VERSION,

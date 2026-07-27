@@ -263,8 +263,10 @@ async fn ask_host_approval(server_name: &str, params: &JsonValue) -> ApprovalDec
     bridge_params.put_str("server", server_name);
     bridge_params.insert(crate::value::intern_key("params"), json_to_vm_value(params));
 
-    let result = dispatch_mock_host_call("mcp", "sample", &bridge_params)
-        .or_else(|| dispatch_host_call_bridge("mcp", "sample", &bridge_params));
+    let result = match dispatch_mock_host_call("mcp", "sample", &bridge_params) {
+        Some(result) => Some(result),
+        None => dispatch_host_call_bridge("mcp", "sample", &bridge_params).await,
+    };
 
     let raw = match result {
         Some(Ok(value)) => value,
@@ -764,12 +766,12 @@ mod tests {
     }
 
     impl crate::stdlib::host::HostCallBridge for ApproveSamplingBridge {
-        fn dispatch(
-            &self,
-            capability: &str,
-            operation: &str,
-            _params: &crate::value::DictMap,
-        ) -> Result<Option<VmValue>, VmError> {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            _params: &'a crate::value::DictMap,
+        ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
             if capability == "mcp" && operation == "sample" {
                 let mut envelope: crate::value::DictMap = crate::value::DictMap::new();
                 envelope.put_str("action", "accept");
@@ -777,9 +779,9 @@ mod tests {
                     crate::value::intern_key("options"),
                     VmValue::dict(self.overrides.clone()),
                 );
-                Ok(Some(VmValue::dict(envelope)))
+                crate::stdlib::host::host_call_ready(Ok(Some(VmValue::dict(envelope))))
             } else {
-                Ok(None)
+                crate::stdlib::host::host_call_ready(Ok(None))
             }
         }
     }

@@ -191,8 +191,10 @@ pub(crate) async fn dispatch_inbound_elicitation(
         json_to_vm_value(&requested_schema),
     );
 
-    let bridge_result = dispatch_mock_host_call("mcp", "elicit", &bridge_params)
-        .or_else(|| dispatch_host_call_bridge("mcp", "elicit", &bridge_params));
+    let bridge_result = match dispatch_mock_host_call("mcp", "elicit", &bridge_params) {
+        Some(result) => Some(result),
+        None => dispatch_host_call_bridge("mcp", "elicit", &bridge_params).await,
+    };
 
     let envelope_value: JsonValue = match bridge_result {
         Some(Ok(value)) => crate::mcp::vm_value_to_serde(&value),

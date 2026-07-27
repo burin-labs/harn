@@ -33,8 +33,9 @@
 //!
 //! ## Threading
 //!
-//! `dispatch` is sync. It writes the reverse request to a shared stdout
-//! and blocks on a `std::sync::mpsc::Receiver` keyed by request seq. A
+//! `dispatch` is async. It writes the reverse request to a shared stdout
+//! and awaits a `tokio::sync::oneshot` keyed by request seq, so an async
+//! caller on the DAP LocalSet is not blocked on a sync `recv`. A
 //! dedicated stdin reader thread owned by `main.rs` deserializes
 //! incoming DAP frames; responses (those with `type == "response"`) are
 //! routed into the matching pending channel here. Genuine client
@@ -47,12 +48,12 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use harn_vm::{HostCallBridge, VmError, VmValue};
+use harn_vm::{HostCallBridge, HostCallDispatchFuture, VmError, VmValue};
 use serde_json::{json, Value};
+use tokio::sync::oneshot;
 
 use crate::framing::{write_json_frame, SharedWriter};
 use crate::protocol::DapResponse;
@@ -67,7 +68,7 @@ const REVERSE_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 /// deterministically instead of polling.
 #[derive(Debug, Default)]
 pub struct PendingState {
-    pub map: Mutex<BTreeMap<i64, Sender<DapHostCallReply>>>,
+    pub map: Mutex<BTreeMap<i64, oneshot::Sender<DapHostCallReply>>>,
     pub inserted: Condvar,
 }
 
@@ -145,9 +146,9 @@ impl DapHostBridge {
         capability: &str,
         operation: &str,
         params_json: Value,
-    ) -> Result<Receiver<DapHostCallReply>, VmError> {
+    ) -> Result<oneshot::Receiver<DapHostCallReply>, VmError> {
         let req_seq = self.next_seq();
-        let (tx, rx) = channel();
+        let (tx, rx) = oneshot::channel();
         {
             let mut guard = self
                 .pending
@@ -176,74 +177,82 @@ impl DapHostBridge {
         Ok(rx)
     }
 
-    fn await_reply(
+    async fn await_reply(
         &self,
-        rx: Receiver<DapHostCallReply>,
+        rx: oneshot::Receiver<DapHostCallReply>,
         capability: &str,
         operation: &str,
     ) -> Result<DapHostCallReply, VmError> {
-        rx.recv_timeout(REVERSE_REQUEST_TIMEOUT).map_err(|_| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "harnHostCall timed out after {}s ({capability}.{operation})",
-                REVERSE_REQUEST_TIMEOUT.as_secs()
-            ))))
-        })
+        match tokio::time::timeout(REVERSE_REQUEST_TIMEOUT, rx).await {
+            Ok(Ok(reply)) => Ok(reply),
+            Ok(Err(_)) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                format!("harnHostCall cancelled ({capability}.{operation})"),
+            )))),
+            Err(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                format!(
+                    "harnHostCall timed out after {}s ({capability}.{operation})",
+                    REVERSE_REQUEST_TIMEOUT.as_secs()
+                ),
+            )))),
+        }
     }
 }
 
 impl HostCallBridge for DapHostBridge {
-    fn dispatch(
-        &self,
-        capability: &str,
-        operation: &str,
-        params: &harn_vm::value::DictMap,
-    ) -> Result<Option<VmValue>, VmError> {
-        let start = std::time::Instant::now();
-        self.emit_output("host_call", &format!("→ {capability}.{operation}"));
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a harn_vm::value::DictMap,
+    ) -> HostCallDispatchFuture<'a> {
+        Box::pin(async move {
+            let start = std::time::Instant::now();
+            self.emit_output("host_call", &format!("→ {capability}.{operation}"));
 
-        let params_json = vm_dict_to_json(params);
-        let rx = self.send_reverse_request(capability, operation, params_json)?;
-        let reply = self.await_reply(rx, capability, operation)?;
-        let elapsed_ms = start.elapsed().as_millis();
-        if !reply.success {
-            // The client knows the op exists but it failed — surface as a
-            // throwable so user pipelines can `try`/`catch` it.
-            let detail = reply
-                .message
-                .or_else(|| reply.body.as_ref().map(|v| v.to_string()))
-                .unwrap_or_else(|| format!("{capability}.{operation} failed"));
+            let params_json = vm_dict_to_json(params);
+            let rx = self.send_reverse_request(capability, operation, params_json)?;
+            let reply = self.await_reply(rx, capability, operation).await?;
+            let elapsed_ms = start.elapsed().as_millis();
+            if !reply.success {
+                // The client knows the op exists but it failed — surface as a
+                // throwable so user pipelines can `try`/`catch` it.
+                let detail = reply
+                    .message
+                    .or_else(|| reply.body.as_ref().map(|v| v.to_string()))
+                    .unwrap_or_else(|| format!("{capability}.{operation} failed"));
+                self.emit_output(
+                    "host_call",
+                    &format!("✗ {capability}.{operation} ({elapsed_ms}ms): {detail}"),
+                );
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    detail,
+                ))));
+            }
             self.emit_output(
                 "host_call",
-                &format!("✗ {capability}.{operation} ({elapsed_ms}ms): {detail}"),
+                &format!("← {capability}.{operation} ({elapsed_ms}ms)"),
             );
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                detail,
-            ))));
-        }
-        self.emit_output(
-            "host_call",
-            &format!("← {capability}.{operation} ({elapsed_ms}ms)"),
-        );
-        // Convention: success body shape is `{"value": <result>}`. If the
-        // client returned a body without `value`, treat the whole body as
-        // the result. Empty body → Nil (matches ACP `fs/write_text_file`
-        // returning {}).
-        let value = match reply.body {
-            Some(Value::Object(mut map)) => match map.remove("value") {
-                Some(v) => json_to_vm_value(v),
-                None => json_to_vm_value(Value::Object(map)),
-            },
-            Some(other) => json_to_vm_value(other),
-            None => VmValue::Nil,
-        };
-        Ok(Some(value))
+            // Convention: success body shape is `{"value": <result>}`. If the
+            // client returned a body without `value`, treat the whole body as
+            // the result. Empty body → Nil (matches ACP `fs/write_text_file`
+            // returning {}).
+            let value = match reply.body {
+                Some(Value::Object(mut map)) => match map.remove("value") {
+                    Some(v) => json_to_vm_value(v),
+                    None => json_to_vm_value(Value::Object(map)),
+                },
+                Some(other) => json_to_vm_value(other),
+                None => VmValue::Nil,
+            };
+            Ok(Some(value))
+        })
     }
 }
 
 impl DapHostBridge {
     /// Drain every in-flight reverse request and reply with a synthetic
     /// failure carrying `reason` as the message. Called on `disconnect`
-    /// / `terminate` so any DapHostBridge::dispatch call blocking inside
+    /// / `terminate` so any DapHostBridge::dispatch future awaiting
     /// `await_reply` unwinds promptly instead of waiting on the 60s
     /// per-op timeout. The script sees a normal Harn exception that
     /// propagates up and ends the run cleanly.
@@ -277,7 +286,7 @@ impl DapHostBridge {
             Ok(g) => g,
             Err(_) => return,
         };
-        let drained: Vec<(i64, Sender<DapHostCallReply>)> =
+        let drained: Vec<(i64, oneshot::Sender<DapHostCallReply>)> =
             std::mem::take(&mut *guard).into_iter().collect();
         drop(guard);
         for (_seq, tx) in drained {
@@ -467,88 +476,113 @@ mod tests {
         })
     }
 
+    fn run_async<F, Fut>(test: F)
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local.run_until(test()).await;
+        });
+    }
+
     #[test]
     fn dispatch_emits_reverse_request_and_unwraps_value_body() {
-        let (bridge, buf, pending) = rig();
-        let helper = spawn_replier(
-            Arc::clone(&pending),
-            DapHostCallReply {
-                success: true,
-                body: Some(serde_json::json!({"value": "hello"})),
-                message: None,
-            },
-        );
+        run_async(|| async {
+            let (bridge, buf, pending) = rig();
+            let helper = spawn_replier(
+                Arc::clone(&pending),
+                DapHostCallReply {
+                    success: true,
+                    body: Some(serde_json::json!({"value": "hello"})),
+                    message: None,
+                },
+            );
 
-        let mut params = harn_vm::value::DictMap::new();
-        params.insert("path".into(), VmValue::String(arcstr::ArcStr::from("foo")));
-        let result = bridge
-            .dispatch("workspace", "read_text", &params)
-            .expect("dispatch ok")
-            .expect("Some");
-        helper.join().expect("helper panicked");
+            let mut params = harn_vm::value::DictMap::new();
+            params.insert("path".into(), VmValue::String(arcstr::ArcStr::from("foo")));
+            let result = bridge
+                .dispatch("workspace", "read_text", &params)
+                .await
+                .expect("dispatch ok")
+                .expect("Some");
+            helper.join().expect("helper panicked");
 
-        match result {
-            VmValue::String(s) => assert_eq!(&*s, "hello"),
-            other => panic!("expected String, got {other:?}"),
-        }
+            match result {
+                VmValue::String(s) => assert_eq!(&*s, "hello"),
+                other => panic!("expected String, got {other:?}"),
+            }
 
-        let bytes = buf.lock().unwrap().clone();
-        let frame = find_request_frame(&bytes, "harnHostCall");
-        assert_eq!(frame["arguments"]["capability"], "workspace");
-        assert_eq!(frame["arguments"]["operation"], "read_text");
-        assert_eq!(frame["arguments"]["params"]["path"], "foo");
+            let bytes = buf.lock().unwrap().clone();
+            let frame = find_request_frame(&bytes, "harnHostCall");
+            assert_eq!(frame["arguments"]["capability"], "workspace");
+            assert_eq!(frame["arguments"]["operation"], "read_text");
+            assert_eq!(frame["arguments"]["params"]["path"], "foo");
+        });
     }
 
     #[test]
     fn dispatch_failure_throws_with_message() {
-        let (bridge, _buf, pending) = rig();
-        let helper = spawn_replier(
-            Arc::clone(&pending),
-            DapHostCallReply {
-                success: false,
-                body: None,
-                message: Some("not implemented".to_string()),
-            },
-        );
+        run_async(|| async {
+            let (bridge, _buf, pending) = rig();
+            let helper = spawn_replier(
+                Arc::clone(&pending),
+                DapHostCallReply {
+                    success: false,
+                    body: None,
+                    message: Some("not implemented".to_string()),
+                },
+            );
 
-        let result = bridge.dispatch("workspace", "missing_op", &harn_vm::value::DictMap::new());
-        helper.join().expect("helper panicked");
+            let result = bridge
+                .dispatch("workspace", "missing_op", &harn_vm::value::DictMap::new())
+                .await;
+            helper.join().expect("helper panicked");
 
-        match result {
-            Err(VmError::Thrown(VmValue::String(s))) => {
-                assert!(s.contains("not implemented"), "unexpected error: {s}");
+            match result {
+                Err(VmError::Thrown(VmValue::String(s))) => {
+                    assert!(s.contains("not implemented"), "unexpected error: {s}");
+                }
+                other => panic!("expected Thrown('not implemented'), got {other:?}"),
             }
-            other => panic!("expected Thrown('not implemented'), got {other:?}"),
-        }
+        });
     }
 
     #[test]
     fn dispatch_returns_whole_body_when_value_key_missing() {
-        let (bridge, _buf, pending) = rig();
-        let helper = spawn_replier(
-            Arc::clone(&pending),
-            DapHostCallReply {
-                success: true,
-                body: Some(serde_json::json!({"roots": ["/tmp/a"]})),
-                message: None,
-            },
-        );
+        run_async(|| async {
+            let (bridge, _buf, pending) = rig();
+            let helper = spawn_replier(
+                Arc::clone(&pending),
+                DapHostCallReply {
+                    success: true,
+                    body: Some(serde_json::json!({"roots": ["/tmp/a"]})),
+                    message: None,
+                },
+            );
 
-        let result = bridge
-            .dispatch("session", "active_roots", &harn_vm::value::DictMap::new())
-            .expect("dispatch ok")
-            .expect("Some");
-        helper.join().expect("helper panicked");
+            let result = bridge
+                .dispatch("session", "active_roots", &harn_vm::value::DictMap::new())
+                .await
+                .expect("dispatch ok")
+                .expect("Some");
+            helper.join().expect("helper panicked");
 
-        match result {
-            VmValue::Dict(map) => {
-                let roots = map.get("roots").expect("roots key");
-                match roots {
-                    VmValue::List(items) => assert_eq!(items.len(), 1),
-                    other => panic!("expected list, got {other:?}"),
+            match result {
+                VmValue::Dict(map) => {
+                    let roots = map.get("roots").expect("roots key");
+                    match roots {
+                        VmValue::List(items) => assert_eq!(items.len(), 1),
+                        other => panic!("expected list, got {other:?}"),
+                    }
                 }
+                other => panic!("expected Dict, got {other:?}"),
             }
-            other => panic!("expected Dict, got {other:?}"),
-        }
+        });
     }
 }

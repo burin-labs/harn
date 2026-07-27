@@ -1,6 +1,8 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
@@ -12,9 +14,8 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 mod operation_registry;
 mod process_dispatch;
 mod process_exec;
-// Public so embedder `host_call` replacements (e.g. the ACP adapter, which
-// re-registers the builtin and therefore never reaches the dispatch path
-// below) can share this one memo and allowlist. harn#5190.
+// Public so tests and embedders can share the per-turn memo allowlist even
+// when probing host_call outside the stdlib builtin (harn#5190).
 pub mod turn_cache;
 
 use process_dispatch::dispatch_process_exec_with_policy;
@@ -701,6 +702,24 @@ pub fn dispatch_mock_hostlib_call(
     None
 }
 
+/// Boxed future returned by [`HostCallBridge::dispatch`].
+///
+/// Prefer this over `async_trait`: production call sites are already async,
+/// and a hand-rolled boxed future is the smallest seam that lets
+/// `dispatch_host_operation_with_ctx` await a bridge. The future is `Send`
+/// because the stdlib `host_call` builtin is registered through the async
+/// builtin path, which requires `Send` futures even when embedders pin work
+/// to a current-thread `LocalSet`.
+pub type HostCallDispatchFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<VmValue>, VmError>> + Send + 'a>>;
+
+/// Box a ready host-call result for sync bridge implementations.
+pub fn host_call_ready(
+    result: Result<Option<VmValue>, VmError>,
+) -> HostCallDispatchFuture<'static> {
+    Box::pin(async move { result })
+}
+
 /// Embedder-supplied bridge for `host_call` ops.
 ///
 /// Embedders (debug adapters, CLIs, IDE hosts) implement this trait to
@@ -710,18 +729,16 @@ pub fn dispatch_mock_hostlib_call(
 /// `unsupported operation` error)". `Ok(Some(value))` is the result;
 /// `Err(VmError::Thrown(_))` surfaces as a Harn exception.
 ///
-/// The trait is intentionally synchronous. Bridges that need async I/O
-/// (e.g. DAP reverse requests) should drive their own runtime or use a
-/// blocking channel — see `harn-dap`'s `DapHostBridge` for the canonical
-/// pattern. Sync keeps the boundary simple and avoids forcing the entire
-/// dispatch path into an opaque future.
+/// `dispatch` returns a `Send` boxed future so network protocol bridges
+/// (ACP `host/call`, DAP reverse requests) can await without blocking the
+/// caller. Sync bridges can return [`host_call_ready`].
 pub trait HostCallBridge: Send + Sync {
-    fn dispatch(
-        &self,
-        capability: &str,
-        operation: &str,
-        params: &crate::value::DictMap,
-    ) -> Result<Option<VmValue>, VmError>;
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a crate::value::DictMap,
+    ) -> HostCallDispatchFuture<'a>;
 
     fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
         Ok(None)
@@ -760,13 +777,13 @@ pub fn clear_host_call_bridge() {
 /// mock-call check or the built-in fallbacks — useful for callers that
 /// want to treat the bridge as one of several sinks (e.g. inbound MCP
 /// `elicitation/create` requests).
-pub fn dispatch_host_call_bridge(
+pub async fn dispatch_host_call_bridge(
     capability: &str,
     operation: &str,
     params: &crate::value::DictMap,
 ) -> Option<Result<VmValue, VmError>> {
     let bridge = HOST_CALL_BRIDGE.with(|b| b.borrow().clone())?;
-    match bridge.dispatch(capability, operation, params) {
+    match bridge.dispatch(capability, operation, params).await {
         Ok(Some(value)) => Some(Ok(value)),
         Ok(None) => None,
         Err(error) => Some(Err(error)),
@@ -844,7 +861,10 @@ pub(crate) async fn dispatch_host_tool_call_with_ctx(
     Ok(crate::bridge::json_result_to_vm_value(&result))
 }
 
-pub(crate) async fn dispatch_host_operation(
+/// Public entry for canonical `host_call` dispatch without an async-builtin
+/// context. Used by embedder tests and by MCP/host plumbing that already sits
+/// outside a VM builtin frame.
+pub async fn dispatch_host_operation(
     capability: &str,
     operation: &str,
     params: &crate::value::DictMap,
@@ -852,26 +872,20 @@ pub(crate) async fn dispatch_host_operation(
     dispatch_host_operation_with_ctx(None, capability, operation, params).await
 }
 
-/// Canonical `host_call` dispatch — but **not the only one**.
+/// Canonical `host_call` dispatch.
 ///
-/// `HostCallBridge::dispatch` is synchronous, so an embedder whose host is
-/// reached over a network protocol cannot implement it. `harn-serve`'s ACP
-/// adapter therefore re-registers the `host_call` builtin outright
-/// (`adapters/acp/builtins.rs`) and forwards to the editor itself, which means
-/// **everything added to this function is invisible to ACP-hosted sessions** —
-/// and ACP is how the editor runs every agent turn.
+/// Embedders reach this path through the stdlib `host_call` builtin after
+/// installing a [`HostCallBridge`]. ACP installs that bridge and keeps the
+/// stdlib builtin; it no longer re-registers `host_call` by name (harn#5523).
+/// Cross-cutting behaviour added here therefore reaches editor-hosted sessions
+/// automatically — mocks, command-policy preflight, the process-handle
+/// registry, and the per-turn memo included.
 ///
-/// That is not hypothetical: the per-turn memo below shipped in v0.10.38 and did
-/// nothing on that route for its entire life, leaving ~26 `runtime.pipeline_input`
-/// round-trips per turn that it exists to collapse to one
-/// (burin-labs/burin-code#5432). The memo is now shared explicitly via
-/// [`turn_cache::lookup`] / [`turn_cache::store`].
-///
-/// So: when adding cross-cutting behaviour here, decide explicitly whether the
-/// ACP route needs it and wire it there too. The durable repair is an async
-/// bridge trait so that adapter can stop replacing the builtin at all — tracked
-/// separately; until then this duplication is load-bearing, not incidental.
-pub(crate) async fn dispatch_host_operation_with_ctx(
+/// Editor-owned *builtins* (`exec`, `shell`, `run_command`) remain ACP
+/// overrides; that intentional ownership is separate from `host_call` routing.
+/// Direct `host_call("process.exec", ...)` always passes through the policy
+/// gates below and cannot bypass them by going to the editor first.
+pub async fn dispatch_host_operation_with_ctx(
     ctx: Option<&AsyncBuiltinCtx>,
     capability: &str,
     operation: &str,
@@ -925,7 +939,8 @@ pub(crate) async fn dispatch_host_operation_with_ctx(
         // instead of once per shard. harn#5190.
         let dispatched = turn_cache::cached_or(capability, operation, params, || {
             bridge.dispatch(capability, operation, params)
-        })?;
+        })
+        .await?;
         if let Some(value) = dispatched {
             return Ok(value);
         }
@@ -1203,10 +1218,11 @@ mod tests {
     use super::{
         build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
         dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
-        dispatch_mock_host_call, dispatch_mock_hostlib_call, host_has_builtin,
+        dispatch_mock_host_call, dispatch_mock_hostlib_call, host_call_ready, host_has_builtin,
         host_mock_clear_builtin, parse_host_mock, push_host_mock, register_mockable_host_operation,
         register_scoped_mockable_host_operation, reset_host_state, reset_scoped_host_state,
-        set_host_call_bridge, validate_host_mock_registration, HostCallBridge, HostMock,
+        set_host_call_bridge, validate_host_mock_registration, HostCallBridge,
+        HostCallDispatchFuture, HostMock,
     };
     use crate::value::VmDictExt;
 
@@ -1704,13 +1720,13 @@ mod tests {
     struct TestHostToolBridge;
 
     impl HostCallBridge for TestHostToolBridge {
-        fn dispatch(
-            &self,
-            _capability: &str,
-            _operation: &str,
-            _params: &crate::value::DictMap,
-        ) -> Result<Option<VmValue>, VmError> {
-            Ok(None)
+        fn dispatch<'a>(
+            &'a self,
+            _capability: &'a str,
+            _operation: &'a str,
+            _params: &'a crate::value::DictMap,
+        ) -> HostCallDispatchFuture<'a> {
+            host_call_ready(Ok(None))
         }
 
         fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
@@ -1757,24 +1773,24 @@ mod tests {
     }
 
     impl HostCallBridge for CountingProcessExecBridge {
-        fn dispatch(
-            &self,
-            capability: &str,
-            operation: &str,
-            _params: &crate::value::DictMap,
-        ) -> Result<Option<VmValue>, VmError> {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            _params: &'a crate::value::DictMap,
+        ) -> HostCallDispatchFuture<'a> {
             if (capability, operation) != ("process", "exec") {
-                return Ok(None);
+                return host_call_ready(Ok(None));
             }
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Some(VmValue::dict(crate::value::DictMap::from_iter([
+            host_call_ready(Ok(Some(VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     crate::value::intern_key("status"),
                     VmValue::String(arcstr::ArcStr::from("completed".to_string())),
                 ),
                 (crate::value::intern_key("exit_code"), VmValue::Int(0)),
                 (crate::value::intern_key("success"), VmValue::Bool(true)),
-            ]))))
+            ])))))
         }
     }
 

@@ -23,7 +23,7 @@ use harn_serve::{
     DispatchCore, DispatchCoreConfig, DispatchError, NoReplayCache, SiteServer, SiteServerConfig,
     VmConfigurator,
 };
-use harn_vm::{HostCallBridge, Vm, VmError, VmValue};
+use harn_vm::{HostCallBridge, Vm, VmValue};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -140,14 +140,14 @@ fn router_trusting(path: &Path, proxies: &[&str]) -> Router {
 struct HostReplyBridge;
 
 impl HostCallBridge for HostReplyBridge {
-    fn dispatch(
-        &self,
-        capability: &str,
-        operation: &str,
-        _params: &harn_vm::value::DictMap,
-    ) -> Result<Option<VmValue>, VmError> {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        _params: &'a harn_vm::value::DictMap,
+    ) -> harn_vm::HostCallDispatchFuture<'a> {
         if capability != "http_reply" || operation != "build" {
-            return Ok(None);
+            return harn_vm::host_call_ready(Ok(None));
         }
 
         let cookies = VmValue::List(Arc::new(vec![
@@ -178,7 +178,7 @@ impl HostCallBridge for HostReplyBridge {
             ("headers".to_string(), VmValue::dict(headers)),
         ]);
 
-        Ok(Some(VmValue::dict(response)))
+        harn_vm::host_call_ready(Ok(Some(VmValue::dict(response))))
     }
 }
 
