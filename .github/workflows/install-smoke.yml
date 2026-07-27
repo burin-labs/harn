@@ -52,7 +52,7 @@ jobs:
           - platform: macos
             runner: macos-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
 
       # Mirror the documented `cargo install harn-cli`. No `--locked`: a user
@@ -88,7 +88,7 @@ jobs:
           - platform: macos
             runner: macos-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Run the repo's own install.sh (identical to the bytes served at
       # harnlang.com/install.sh) so the GitHub-release download, SHA256
