@@ -4,6 +4,11 @@
 
 use crate::package::*;
 
+// Cache population can include a network fetch, checkout, unpack, and content
+// hash. Ten minutes tolerates a slow source without allowing a dead holder to
+// stop every future install forever.
+const PACKAGE_CACHE_LOCK_TIMEOUT: Duration = Duration::from_mins(10);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PackageCacheMetadata {
     pub(super) version: u32,
@@ -92,8 +97,13 @@ pub(crate) fn acquire_git_cache_lock_in(
     }
     let file = File::create(&path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    file.lock()
-        .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
+    harn_flock::lock_with_deadline(
+        &file,
+        &path,
+        harn_flock::LockMode::Exclusive,
+        PACKAGE_CACHE_LOCK_TIMEOUT,
+    )
+    .map_err(|error| PackageError::Registry(error.to_string()))?;
     Ok(file)
 }
 
@@ -109,8 +119,13 @@ pub(crate) fn acquire_archive_cache_lock_in(
     }
     let file = File::create(&path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    file.lock()
-        .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
+    harn_flock::lock_with_deadline(
+        &file,
+        &path,
+        harn_flock::LockMode::Exclusive,
+        PACKAGE_CACHE_LOCK_TIMEOUT,
+    )
+    .map_err(|error| PackageError::Registry(error.to_string()))?;
     Ok(file)
 }
 

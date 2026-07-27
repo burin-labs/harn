@@ -1,5 +1,8 @@
 use super::*;
 
+// This lock protects one local manifest read-modify-write.
+const MANIFEST_WRITE_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub(crate) fn with_manifest_write_lock<T>(
     manifest_path: &Path,
     operation: impl FnOnce() -> Result<T, PackageError>,
@@ -13,9 +16,13 @@ pub(crate) fn with_manifest_write_lock<T>(
     let lock_path = project_root.join(".harn/package-manifest.lock");
     let lock = harn_modules::package_snapshot::open_lock_file(&lock_path)
         .map_err(|error| PackageError::Lockfile(error.to_string()))?;
-    lock.lock().map_err(|error| {
-        PackageError::Lockfile(format!("failed to lock {}: {error}", lock_path.display()))
-    })?;
+    harn_flock::lock_with_deadline(
+        &lock,
+        &lock_path,
+        harn_flock::LockMode::Exclusive,
+        MANIFEST_WRITE_LOCK_TIMEOUT,
+    )
+    .map_err(|error| PackageError::Lockfile(error.to_string()))?;
     let result = operation();
     let unlock = lock.unlock().map_err(|error| {
         PackageError::Lockfile(format!("failed to unlock {}: {error}", lock_path.display()))

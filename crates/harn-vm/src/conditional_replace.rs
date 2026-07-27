@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -14,6 +15,11 @@ use crate::atomic_io::{
 thread_local! {
     static EXECUTION_LOCK_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
+
+// The critical section performs one local read and one atomic replacement.
+// Thirty seconds leaves ample room for a slow disk without hiding a dead
+// holder indefinitely.
+const CONDITIONAL_REPLACE_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Restores the prior execution-local replacement lock root on drop.
 #[derive(Debug)]
@@ -273,6 +279,10 @@ fn lock_root() -> PathBuf {
 }
 
 pub(crate) fn acquire_lock(path: &Path) -> io::Result<ConditionalReplaceLock> {
+    acquire_lock_with_timeout(path, CONDITIONAL_REPLACE_LOCK_TIMEOUT)
+}
+
+fn acquire_lock_with_timeout(path: &Path, timeout: Duration) -> io::Result<ConditionalReplaceLock> {
     let root = lock_root();
     fs::create_dir_all(&root)?;
     let identity = canonical_lock_identity(path);
@@ -280,13 +290,15 @@ pub(crate) fn acquire_lock(path: &Path) -> io::Result<ConditionalReplaceLock> {
         "{}.lock",
         hex::encode(Sha256::digest(lock_identity_bytes(&identity)))
     );
+    let lock_path = root.join(name);
     let file = OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(root.join(name))?;
-    file.lock()?;
+        .open(&lock_path)?;
+    harn_flock::lock_with_deadline(&file, &lock_path, harn_flock::LockMode::Exclusive, timeout)
+        .map_err(io::Error::other)?;
     Ok(ConditionalReplaceLock { file })
 }
 
@@ -433,6 +445,27 @@ mod tests {
             canonical_lock_identity(&path),
             canonical_lock_identity(&alias)
         );
+    }
+
+    #[test]
+    fn held_replace_lock_reports_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let _locks = scope_conditional_replace_lock_root(dir.path().join("locks"));
+        let path = dir.path().join("state.json");
+        let _holder = acquire_lock_with_timeout(&path, Duration::ZERO).unwrap();
+
+        let error = match acquire_lock_with_timeout(&path, Duration::ZERO) {
+            Ok(_) => panic!("a second lock must not pass the holder"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .to_string()
+                .contains(&dir.path().join("locks").display().to_string()),
+            "{error}"
+        );
+        assert!(error.to_string().contains("timed out"), "{error}");
     }
 
     #[cfg(unix)]

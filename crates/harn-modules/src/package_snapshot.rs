@@ -3,6 +3,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -68,6 +69,12 @@ pub const GENERATION_LOCK_FILE: &str = "harn.lock";
 pub const GENERATION_LEASE_FILE: &str = "lease.lock";
 pub const GENERATION_PACKAGES_DIR: &str = "packages";
 pub const PACKAGE_GENERATION_SCHEMA_VERSION: u32 = 1;
+
+// Publishing includes bounded local garbage collection, while taking a
+// generation lease only spans pointer validation. These are deliberately
+// separate budgets because their critical sections have different ceilings.
+const PACKAGE_PUBLICATION_LOCK_TIMEOUT: Duration = Duration::from_mins(5);
+const PACKAGE_LEASE_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -200,9 +207,15 @@ impl PackageSnapshot {
         }
         require_regular_file(&publication_lock_path)?;
         let publication_lock = open_existing_lock_file(&publication_lock_path)?;
-        publication_lock
-            .lock_shared()
-            .map_err(|error| PackageSnapshotError::io("lock", &publication_lock_path, error))?;
+        harn_flock::lock_with_deadline(
+            &publication_lock,
+            &publication_lock_path,
+            harn_flock::LockMode::Shared,
+            PACKAGE_PUBLICATION_LOCK_TIMEOUT,
+        )
+        .map_err(|error| {
+            PackageSnapshotError::io("lock", &publication_lock_path, io::Error::other(error))
+        })?;
 
         if !pointer_path.is_file() {
             return Ok(None);
@@ -220,9 +233,13 @@ impl PackageSnapshot {
         let lease_path = generation_root.join(GENERATION_LEASE_FILE);
         require_regular_file(&lease_path)?;
         let lease = open_existing_lock_file(&lease_path)?;
-        lease
-            .lock_shared()
-            .map_err(|error| PackageSnapshotError::io("lock", &lease_path, error))?;
+        harn_flock::lock_with_deadline(
+            &lease,
+            &lease_path,
+            harn_flock::LockMode::Shared,
+            PACKAGE_LEASE_LOCK_TIMEOUT,
+        )
+        .map_err(|error| PackageSnapshotError::io("lock", &lease_path, io::Error::other(error)))?;
 
         // The generation lease now protects every immutable artifact below the
         // selected root, so GC no longer needs to be excluded.

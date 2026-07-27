@@ -7,6 +7,7 @@ use harn_modules::package_snapshot::{
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::{
     materialized_hash_matches, validate_package_alias, LockFile, ManifestContext, PackageError,
@@ -15,6 +16,8 @@ use super::{
 const LEGACY_PACKAGES_DIR: &str = ".harn/packages";
 const STAGING_PREFIX: &str = ".staging-";
 const GENERATION_PREFIX: &str = "generation-";
+const PACKAGE_INSTALL_LOCK_TIMEOUT: Duration = Duration::from_mins(30);
+const PACKAGE_PUBLICATION_LOCK_TIMEOUT: Duration = Duration::from_mins(5);
 
 pub(crate) fn publish_package_generation<F>(
     ctx: &ManifestContext,
@@ -161,8 +164,13 @@ pub(crate) fn dependency_package_snapshot(
 fn acquire_package_install_lock(ctx: &ManifestContext) -> Result<File, PackageError> {
     let path = ctx.dir.join(".harn").join("package-install.lock");
     let file = open_lock_file(&path).map_err(|error| PackageError::Lockfile(error.to_string()))?;
-    file.lock()
-        .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
+    harn_flock::lock_with_deadline(
+        &file,
+        &path,
+        harn_flock::LockMode::Exclusive,
+        PACKAGE_INSTALL_LOCK_TIMEOUT,
+    )
+    .map_err(|error| PackageError::Lockfile(error.to_string()))?;
     Ok(file)
 }
 
@@ -173,9 +181,13 @@ fn publish_pointer_and_collect(
     let publication_path = package_publication_lock_path(&ctx.dir);
     let publication = open_lock_file(&publication_path)
         .map_err(|error| PackageError::Lockfile(error.to_string()))?;
-    publication
-        .lock()
-        .map_err(|error| format!("failed to lock {}: {error}", publication_path.display()))?;
+    harn_flock::lock_with_deadline(
+        &publication,
+        &publication_path,
+        harn_flock::LockMode::Exclusive,
+        PACKAGE_PUBLICATION_LOCK_TIMEOUT,
+    )
+    .map_err(|error| PackageError::Lockfile(error.to_string()))?;
 
     let pointer = PackageGenerationPointer::new(generation)
         .map_err(|error| PackageError::Lockfile(error.to_string()))?;

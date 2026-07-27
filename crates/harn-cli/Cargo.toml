@@ -39,6 +39,7 @@ path = "src/main.rs"
 # `name` is needed for model-id pattern matching; harn-vm already enables it,
 # so this costs no additional build.
 harn-glob = { path = "../harn-glob", version = "=0.10.41", default-features = false, features = ["name"] }
+harn-flock = { path = "../harn-flock", version = "=0.10.41" }
 harn-lexer = { path = "../harn-lexer", version = "=0.10.41" }
 harn-parser = { path = "../harn-parser", version = "=0.10.41" }
 harn-ir = { path = "../harn-ir", version = "=0.10.41" }
