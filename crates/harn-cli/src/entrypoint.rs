@@ -2,6 +2,7 @@
 //! `harn` invocation lands in, plus the argument shims and one-off subcommand
 //! runners it owns.
 
+use crate::cli::PackageRegistryCommand;
 use crate::*;
 
 #[allow(clippy::large_stack_frames)] // dispatch entrypoint owns full Args + per-feature locals.
@@ -792,6 +793,14 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                     process::exit(1);
                 }
             }
+            PackageCommand::Registry(registry) => match registry.command {
+                PackageRegistryCommand::Verify(verify) => package::verify_package_registry(
+                    &verify.registry,
+                    verify.remote,
+                    verify.json,
+                    verify.receipt_out.as_deref(),
+                ),
+            },
             PackageCommand::Pack(pack) => package::pack_package(
                 pack.package.as_deref(),
                 pack.output.as_deref(),

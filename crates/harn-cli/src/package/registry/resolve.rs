@@ -269,18 +269,17 @@ fn registry_dependency_table(
         archive,
         tag,
         rev,
-        branch,
         checksum,
+        provenance,
         ..
     } = selected;
     let table = if let Some(git) = git {
         let git = normalize_git_url(&git)?;
-        let rev = if tag.is_some() { None } else { rev };
         DepTable {
             git: Some(git),
             tag,
-            rev,
-            branch,
+            registry_commit: rev,
+            registry_provenance: provenance,
             package,
             registry: Some(registry_source),
             // Store the canonical scoped registry name (e.g. `@burin/notion-sdk`)
@@ -295,6 +294,7 @@ fn registry_dependency_table(
             archive: Some(normalize_archive_url(&archive)?),
             package,
             checksum,
+            registry_provenance: provenance,
             registry: Some(registry_source),
             registry_name: Some(registry_name),
             registry_version: Some(resolved_version),

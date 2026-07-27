@@ -152,10 +152,15 @@ pub(super) fn prepare_publish_plan(
     if remote.is_empty() {
         return Err(PackageError::Ops("--remote cannot be empty".to_string()));
     }
-    let remote_url = git_output(&repo_root, ["remote", "get-url", remote])?
-        .trim()
-        .to_string();
-    let git = normalize_git_url(&remote_url)?;
+    // Prove the operational push remote exists, but publish the package's
+    // declared repository identity. The remote may legitimately be a local
+    // mirror; registry provenance must remain stable and repository-bound.
+    git_output(&repo_root, ["remote", "get-url", remote])?;
+    let repository = package_info
+        .repository
+        .as_deref()
+        .ok_or_else(|| PackageError::Ops("[package].repository is required".to_string()))?;
+    let git = normalize_git_url(repository)?;
     let tag = format!("v{version}");
     ensure_tag_available(&repo_root, remote, &tag)?;
     ensure_changelog_entry(&ctx.dir.join("CHANGELOG.md"), &version)?;
@@ -764,7 +769,6 @@ pub(super) fn render_registry_version_entry(
     push_toml_string_field(&mut out, "git", git)?;
     push_toml_string_field(&mut out, "rev", sha)?;
     push_toml_string_field(&mut out, "tag", tag)?;
-    push_toml_string_field(&mut out, "sha", sha)?;
     push_toml_string_field(&mut out, "package", package_name)?;
     push_toml_string_field(&mut out, "provenance", &provenance)?;
     Ok(out)

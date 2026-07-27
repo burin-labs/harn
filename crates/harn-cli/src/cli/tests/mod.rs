@@ -17,10 +17,10 @@ use super::{
     MergeCaptainCommand, ModelsBatchCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
     OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
     OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
-    PackageScaffoldCommand, PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand,
-    ProviderCatalogCommand, ProviderCommand, PublishArgs, RuleCommand, SessionCommand,
-    SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand, TriggerCommand,
-    TrustCommand, TrustOutcomeArg, TrustTierArg,
+    PackageRegistryCommand, PackageScaffoldCommand, PersonaCommand, ProjectTemplate,
+    ProviderCapabilitiesCommand, ProviderCatalogCommand, ProviderCommand, PublishArgs, RuleCommand,
+    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand,
+    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 pub(crate) use crate::cli::runs::RunsCommand;
 

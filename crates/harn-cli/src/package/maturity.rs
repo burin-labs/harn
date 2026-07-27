@@ -1091,18 +1091,28 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
     #[test]
     fn outdated_reports_registry_provenance_when_index_lists_newer_version() {
         let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        fs::write(
+            repo.join("lib.harn"),
+            "pub fn value() -> string { return \"v1.1.0\" }\n",
+        )
+        .unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "v1.1.0"]);
+        run_git(&repo, &["tag", "v1.1.0"]);
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
         let registry_path = root.join("index.toml");
         let workspace = TestWorkspace::new(root)
             .with_registry_source(registry_path.to_string_lossy().to_string());
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        let rev_100 = run_git(&repo, &["rev-parse", "v1.0.0"]);
+        let rev_110 = run_git(&repo, &["rev-parse", "v1.1.0"]);
         let harn_range = current_harn_range_example();
         fs::write(
             &registry_path,
             format!(
                 r#"
-version = 1
+version = 2
 
 [[package]]
 name = "@burin/acme-lib"
@@ -1110,18 +1120,23 @@ description = "Acme package for tests"
 repository = "{git}"
 license = "MIT"
 harn = "{harn_range}"
+provenance = "{git}"
 
 [[package.version]]
 version = "1.0.0"
 git = "{git}"
-rev = "v1.0.0"
+tag = "v1.0.0"
+rev = "{rev_100}"
 package = "acme-lib"
+provenance = "{git}"
 
 [[package.version]]
 version = "1.1.0"
 git = "{git}"
-rev = "v1.0.0"
+tag = "v1.1.0"
+rev = "{rev_110}"
 package = "acme-lib"
+provenance = "{git}"
 "#
             ),
         )

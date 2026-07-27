@@ -16,6 +16,7 @@ mod inspect;
 mod populate;
 mod resolve;
 mod source;
+mod verify;
 
 #[cfg(test)]
 mod tests;
@@ -33,3 +34,4 @@ pub use self::commands::{
     clean_package_cache, list_package_cache, search_package_registry, search_rule_package_registry,
     show_package_registry_info, verify_package_cache,
 };
+pub use self::verify::verify_package_registry;

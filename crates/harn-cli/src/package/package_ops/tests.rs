@@ -354,25 +354,31 @@ fn publish_dry_run_builds_tag_command_and_index_diff() {
     write_publishable_package(tmp.path());
     write_release_changelog(tmp.path(), "0.1.0");
     let _remote = init_publishable_repo(tmp.path());
-    let index = r#"version = 1
+    let index = r#"version = 2
 
 [[package]]
 name = "acme-lib"
 repository = "https://github.com/acme/acme-lib"
+provenance = "https://github.com/acme/acme-lib"
 
 [[package.version]]
 version = "0.0.1"
 git = "https://github.com/acme/acme-lib"
-rev = "deadbeef"
+tag = "v0.0.1"
+rev = "0123456789abcdef0123456789abcdef01234567"
+provenance = "https://github.com/acme/acme-lib/releases/tag/v0.0.1"
 
 [[package]]
 name = "other-lib"
 repository = "https://github.com/acme/other-lib"
+provenance = "https://github.com/acme/other-lib"
 
 [[package.version]]
 version = "1.0.0"
 git = "https://github.com/acme/other-lib"
-rev = "feedface"
+tag = "v1.0.0"
+rev = "1123456789abcdef0123456789abcdef01234567"
+provenance = "https://github.com/acme/other-lib/releases/tag/v1.0.0"
 "#;
     let index_path = Path::new("harn-package-index.toml");
     let options = PackagePublishOptions {
@@ -401,9 +407,6 @@ rev = "feedface"
     assert!(plan
         .index_diff
         .contains(&format!("+rev = \"{}\"", plan.sha)));
-    assert!(plan
-        .index_diff
-        .contains(&format!("+sha = \"{}\"", plan.sha)));
     let acme_pos = plan
         .updated_index_content
         .find("name = \"acme-lib\"")
@@ -443,7 +446,7 @@ fn rule_publish_marks_pure_rule_pack_in_index() {
     let plan = prepare_publish_plan(
         Some(tmp.path()),
         &options,
-        "version = 1\n".to_string(),
+        "version = 2\n".to_string(),
         "fixture",
         Some(rule_pack),
     )
@@ -475,16 +478,19 @@ fn rule_publish_marks_pure_rule_pack_in_index() {
 
 #[test]
 fn rule_pack_metadata_upsert_marks_existing_package_block() {
-    let content = r#"version = 1
+    let content = r#"version = 2
 
 [[package]]
 name = "@acme/rules"
 repository = "https://github.com/acme/rules"
+provenance = "https://github.com/acme/rules"
 
 [[package.version]]
 version = "0.1.0"
 git = "https://github.com/acme/rules"
 tag = "v0.1.0"
+rev = "2123456789abcdef0123456789abcdef01234567"
+provenance = "https://github.com/acme/rules/releases/tag/v0.1.0"
 "#;
     let metadata = RegistryRulePackInfo {
         rule_count: 1,
@@ -519,7 +525,7 @@ fn publish_preflight_rejects_existing_tag_and_missing_changelog_entry() {
     let missing_changelog = prepare_publish_plan(
         Some(tmp.path()),
         &options,
-        "version = 1\n".to_string(),
+        "version = 2\n".to_string(),
         "fixture",
         None,
     )
@@ -535,7 +541,7 @@ fn publish_preflight_rejects_existing_tag_and_missing_changelog_entry() {
     let existing_tag = prepare_publish_plan(
         Some(tmp.path()),
         &options,
-        "version = 1\n".to_string(),
+        "version = 2\n".to_string(),
         "fixture",
         None,
     )
@@ -565,7 +571,7 @@ fn publish_preflight_rejects_dirty_worktree() {
     let error = prepare_publish_plan(
         Some(tmp.path()),
         &options,
-        "version = 1\n".to_string(),
+        "version = 2\n".to_string(),
         "fixture",
         None,
     )

@@ -290,6 +290,9 @@ write captures:
   release without re-reading the manifest. Registry dependencies may remain in
   `harn.toml` as semver ranges, for example
   `notion-sdk-harn = { version = ">=1.2,<2.0" }`.
+- For registry-v2 Git entries, the immutable commit recorded by the index and
+  the version provenance URL. Installation resolves the declared tag and
+  refuses it if the resulting commit differs from the index.
 
 Path dependencies remain live-linked; their lockfile entry records the
 resolved `path+file://` URI plus the same `package_version` and
@@ -320,6 +323,45 @@ day-to-day automation surface:
   in your repo) against the running Harn. The exit code is non-zero on
   drift, so a downstream that vendors generated TypeScript or Swift
   bindings can fail CI when those bindings would change after a Harn bump.
+
+## Registry v2
+
+Harn accepts one registry format: `version = 2`. A package row must declare a
+repository-bound `provenance` URL. Every Git-backed version declares both the
+public tag and its immutable resolved commit:
+
+```toml
+version = 2
+
+[[package]]
+name = "@acme/widgets"
+repository = "https://github.com/acme/widgets"
+provenance = "https://github.com/acme/widgets"
+
+[[package.version]]
+version = "1.2.3"
+git = "https://github.com/acme/widgets"
+tag = "v1.2.3"
+rev = "0123456789abcdef0123456789abcdef01234567"
+package = "widgets"
+provenance = "https://github.com/acme/widgets/releases/tag/v1.2.3"
+```
+
+Archive versions use `archive` plus a `sha256:` checksum and the same
+repository-bound provenance rule. Mutable `branch` entries, symbolic `rev`
+values, legacy `sha`, mismatched repositories, duplicate content identities,
+and missing provenance fail at the shared parser used by install, search, info,
+and verification.
+
+Run the same authority in registry CI:
+
+```bash
+harn package registry verify harn-package-index.toml --remote \
+  --receipt-out registry-verification.json
+```
+
+Omit `--remote` for deterministic schema-only verification. With `--remote`,
+Harn resolves every Git tag and compares it to the recorded commit.
 
 ## Cross-repo bump workflow
 

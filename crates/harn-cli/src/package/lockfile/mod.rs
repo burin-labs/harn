@@ -18,6 +18,27 @@ mod resolution;
 #[cfg(test)]
 mod tests;
 
+impl super::Dependency {
+    pub(crate) fn registry_provenance(&self) -> Option<RegistryProvenance> {
+        let super::Dependency::Table(table) = self else {
+            return None;
+        };
+        Some(RegistryProvenance {
+            source: table.registry.clone()?,
+            name: table.registry_name.clone()?,
+            version: table.registry_version.clone()?,
+            provenance_url: table.registry_provenance.clone(),
+        })
+    }
+
+    pub(crate) fn registry_commit(&self) -> Option<&str> {
+        match self {
+            super::Dependency::Table(table) => table.registry_commit.as_deref(),
+            super::Dependency::Path(_) => None,
+        }
+    }
+}
+
 // Every consumer of these outside `add` is test-only, so the re-export is
 // unused in a non-test build; same idiom as the `errors` re-export in
 // `package/mod.rs`.

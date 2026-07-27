@@ -88,6 +88,8 @@ pub(crate) enum PackageCommand {
     Check(PackageCheckArgs),
     /// Run the complete package verification contract and emit a receipt.
     Verify(PackageVerifyArgs),
+    /// Verify a package registry index and its immutable identities.
+    Registry(PackageRegistryArgs),
     /// Build an inspectable package artifact directory.
     Pack(PackagePackArgs),
     /// Generate package API docs from exported Harn symbols.
@@ -102,6 +104,34 @@ pub(crate) enum PackageCommand {
     Artifacts(PackageArtifactsArgs),
     /// Scaffold a package from an external source.
     Scaffold(Box<PackageScaffoldArgs>),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageRegistryArgs {
+    #[command(subcommand)]
+    pub command: PackageRegistryCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PackageRegistryCommand {
+    /// Validate registry v2 and optionally resolve every published Git tag.
+    Verify(PackageRegistryVerifyArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageRegistryVerifyArgs {
+    /// Registry index URL or path.
+    #[arg(default_value = "harn-package-index.toml")]
+    pub registry: String,
+    /// Resolve every Git tag and prove it matches the recorded commit SHA.
+    #[arg(long)]
+    pub remote: bool,
+    /// Emit the versioned verification receipt as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Write the versioned JSON receipt to a file.
+    #[arg(long = "receipt-out", value_name = "PATH")]
+    pub receipt_out: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

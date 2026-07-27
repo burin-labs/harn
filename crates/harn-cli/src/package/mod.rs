@@ -21,7 +21,7 @@ const HARN_PACKAGE_REGISTRY_TOKEN_ENV: &str = "HARN_PACKAGE_REGISTRY_TOKEN";
 const DEFAULT_PACKAGE_REGISTRY_URL: &str = "https://packages.harnlang.com/harn-package-index.toml";
 const CACHE_METADATA_VERSION: u32 = 1;
 const LOCK_FILE_VERSION: u32 = 4;
-const REGISTRY_INDEX_VERSION: u32 = 1;
+const REGISTRY_INDEX_VERSION: u32 = 2;
 const PACKAGE_ARCHIVE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const PACKAGE_ARCHIVE_MAX_UNPACKED_BYTES: u64 = 64 * 1024 * 1024;
 const MANIFEST: &str = harn_modules::manifest_walk::MANIFEST_FILENAME;
@@ -71,7 +71,7 @@ pub(crate) use persona_runtime::*;
 pub(crate) use registry::*;
 pub use registry::{
     clean_package_cache, list_package_cache, search_package_registry, search_rule_package_registry,
-    show_package_registry_info, verify_package_cache,
+    show_package_registry_info, verify_package_cache, verify_package_registry,
 };
 pub use skills::*;
 pub(crate) use validation::*;

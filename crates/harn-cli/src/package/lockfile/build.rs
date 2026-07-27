@@ -80,7 +80,8 @@ fn validate_dependency_source_shape(
         && (source_count > 0
             || table.rev.is_some()
             || table.tag.is_some()
-            || table.branch.is_some())
+            || table.branch.is_some()
+            || table.registry_commit.is_some())
     {
         return Err(format!(
             "dependency {alias} uses `version`; do not combine registry version constraints with git, archive, path, tag, rev, or branch"
@@ -98,6 +99,20 @@ fn validate_dependency_source_shape(
         return Err(
             format!("archive dependency {alias} cannot specify tag, rev, or branch").into(),
         );
+    }
+    if let Some(commit) = table.registry_commit.as_deref() {
+        if table.git.is_none()
+            || table.registry.is_none()
+            || table.registry_name.is_none()
+            || table.registry_version.is_none()
+            || table.registry_provenance.is_none()
+            || !is_full_git_commit_sha(commit)
+        {
+            return Err(format!(
+                "dependency {alias} registry_commit requires complete registry provenance, a Git source, and a full commit SHA"
+            )
+            .into());
+        }
     }
     Ok(())
 }
@@ -395,6 +410,14 @@ pub(crate) fn build_lockfile(
                 dependency.tag(),
                 dependency.branch(),
             )?;
+            if let Some(expected) = dependency.registry_commit() {
+                if !commit.eq_ignore_ascii_case(expected) {
+                    return Err(format!(
+                        "registry identity mismatch for {alias}: requested ref resolved to {commit}, but registry v2 records {expected}"
+                    )
+                    .into());
+                }
+            }
             let content_hash = ensure_git_cache_populated_in(
                 workspace,
                 &normalized_url,

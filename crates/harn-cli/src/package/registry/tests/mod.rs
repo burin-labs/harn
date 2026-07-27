@@ -6,3 +6,4 @@ mod git_source;
 mod index;
 mod resolve;
 mod source;
+mod verify;

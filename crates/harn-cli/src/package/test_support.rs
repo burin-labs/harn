@@ -302,11 +302,16 @@ pub(crate) fn write_package_registry_index(
     package_name: &str,
 ) {
     let harn_range = crate::package::current_harn_range_example();
+    let repository = Url::parse(git)
+        .expect("registry fixture URL parses")
+        .to_file_path()
+        .expect("registry fixture is a local repository");
+    let commit = run_git(&repository, &["rev-parse", "v1.0.0"]);
     fs::write(
         path,
         format!(
             r#"
-version = 1
+version = 2
 
 [[package]]
 name = "{registry_name}"
@@ -318,15 +323,16 @@ exports = ["lib"]
 connector_contract = "v1"
 docs_url = "https://docs.example.test/acme"
 checksum = "sha256:index"
-provenance = "https://provenance.example.test/acme"
+provenance = "{git}"
 
 [[package.version]]
 version = "1.0.0"
 git = "{git}"
 tag = "v1.0.0"
+rev = "{commit}"
 package = "{package_name}"
 checksum = "sha256:package"
-provenance = "https://provenance.example.test/acme/1.0.0"
+provenance = "{git}"
 "#
         ),
     )
