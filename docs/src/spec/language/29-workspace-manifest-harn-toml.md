@@ -511,7 +511,7 @@ configured mirror at `/index.toml`. Override per-project via `[registry] url =
 Registry index format:
 
 ```toml
-version = 1
+version = 2
 
 [[package]]
 name = "@burin/notion-sdk"
@@ -529,17 +529,20 @@ provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
 version = "1.2.3"
 git = "https://github.com/burin-labs/notion-sdk-harn"
 tag = "v1.2.3"
+rev = "0123456789abcdef0123456789abcdef01234567"
 package = "notion-sdk-harn"
-checksum = "sha256:..."
 provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
 ```
 
 Package-level metadata includes the registry name, version list,
 description, repository, license, Harn compatibility range, exported
 modules, connector contract compatibility, docs URL, and optional
-checksum/provenance fields. Version entries must specify `git` plus
-exactly one of `tag`, `rev`, or `branch`; `tag` or `rev` is preferred for
-reproducible installs.
+checksum fields. Every package and version must declare repository-bound
+provenance. Git-backed versions must specify `git`, a published `tag`, and the
+tag's resolved full commit SHA in `rev`. Archive-backed versions specify
+`archive` and a `sha256:` checksum. Mutable branches, symbolic revisions,
+mismatched repositories, and duplicate immutable content identities are
+invalid.
 
 Use registry names when developers should discover first-party or
 community packages by capability and stable name. Use direct GitHub refs

@@ -70,30 +70,40 @@ fn install_resolves_registry_version_range_to_highest_matching_tag() {
         TestWorkspace::new(root).with_registry_source(registry_path.display().to_string());
     fs::create_dir_all(root.join(".git")).unwrap();
     let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    let rev_100 = run_git(&repo, &["rev-parse", "v1.0.0"]);
+    let rev_011 = run_git(&repo, &["rev-parse", "v0.1.1"]);
+    let rev_020 = run_git(&repo, &["rev-parse", "v0.2.0"]);
     fs::write(
         &registry_path,
         format!(
             r#"
-version = 1
+version = 2
 
 [[package]]
 name = "acme-lib"
 repository = "{git}"
+provenance = "{git}"
 
 [[package.version]]
 version = "0.1.0"
 git = "{git}"
 tag = "v1.0.0"
+rev = "{rev_100}"
+provenance = "{git}"
 
 [[package.version]]
 version = "0.1.1"
 git = "{git}"
 tag = "v0.1.1"
+rev = "{rev_011}"
+provenance = "{git}"
 
 [[package.version]]
 version = "0.2.0"
 git = "{git}"
 tag = "v0.2.0"
+rev = "{rev_020}"
+provenance = "{git}"
 "#
         ),
     )
@@ -181,12 +191,13 @@ ruleDirs = ["rules"]
         &registry_path,
         format!(
             r#"
-version = 1
+version = 2
 
 [[package]]
 name = "@acme/rules"
 description = "Rule pack"
 repository = "https://github.com/acme/rules"
+provenance = "https://github.com/acme/rules"
 
 [package.rule_pack]
 rule_count = 1
@@ -198,6 +209,7 @@ version = "1.0.0"
 archive = "{archive}"
 package = "acme-rules"
 checksum = "{checksum}"
+provenance = "https://github.com/acme/rules/releases/tag/v1.0.0"
 "#
         ),
     )

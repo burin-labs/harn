@@ -150,6 +150,8 @@ pub(super) fn dependency_manifest_item(
         ("registry", table.registry.as_deref()),
         ("registry_name", table.registry_name.as_deref()),
         ("registry_version", table.registry_version.as_deref()),
+        ("registry_commit", table.registry_commit.as_deref()),
+        ("registry_provenance", table.registry_provenance.as_deref()),
     ] {
         if let Some(value) = value {
             fields.insert(name, value.into());

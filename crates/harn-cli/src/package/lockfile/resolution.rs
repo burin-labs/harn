@@ -50,6 +50,9 @@ pub(crate) fn compatible_locked_entry(
         return Ok(lock.source == source
             && lock.rev_request == requested
             && lock.tag == dependency.tag().map(str::to_string)
+            && dependency
+                .registry_commit()
+                .is_none_or(|expected| lock.commit.as_deref() == Some(expected))
             && lock.commit.is_some()
             && lock.content_hash.is_some());
     }

@@ -62,22 +62,26 @@ fn rule_registry_search_filters_to_rule_pack_metadata() {
     fs::write(
         &registry_path,
         r#"
-version = 1
+version = 2
 
 [[package]]
 name = "@acme/plain"
 description = "Plain package"
 repository = "https://github.com/acme/plain"
+provenance = "https://github.com/acme/plain"
 
 [[package.version]]
 version = "1.0.0"
 git = "https://github.com/acme/plain"
 tag = "v1.0.0"
+rev = "0123456789abcdef0123456789abcdef01234567"
+provenance = "https://github.com/acme/plain/releases/tag/v1.0.0"
 
 [[package]]
 name = "@acme/rules"
 description = "TypeScript and Rust cleanup rules"
 repository = "https://github.com/acme/rules"
+provenance = "https://github.com/acme/rules"
 
 [package.rule_pack]
 rule_count = 3
@@ -88,6 +92,8 @@ safety_summary = ["no-fix:1", "behavior-preserving:2"]
 version = "1.0.0"
 git = "https://github.com/acme/rules"
 tag = "v1.0.0"
+rev = "1123456789abcdef0123456789abcdef01234567"
+provenance = "https://github.com/acme/rules/releases/tag/v1.0.0"
 "#,
     )
     .unwrap();

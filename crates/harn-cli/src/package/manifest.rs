@@ -926,6 +926,12 @@ pub struct DepTable {
     /// Registry version specifier the dependency was added against.
     #[serde(default, alias = "registry-version")]
     pub registry_version: Option<String>,
+    /// Immutable commit recorded by registry v2 for a Git-backed version.
+    #[serde(default, alias = "registry-commit")]
+    pub registry_commit: Option<String>,
+    /// Registry-v2 evidence URL for the selected published version.
+    #[serde(default, alias = "registry-provenance")]
+    pub registry_provenance: Option<String>,
 }
 
 impl Dependency {
@@ -980,21 +986,6 @@ impl Dependency {
             Dependency::Table(t) => t.path.as_deref(),
             Dependency::Path(p) => Some(p.as_str()),
         }
-    }
-
-    pub(crate) fn registry_provenance(&self) -> Option<crate::package::RegistryProvenance> {
-        let Dependency::Table(table) = self else {
-            return None;
-        };
-        let source = table.registry.clone()?;
-        let name = table.registry_name.clone()?;
-        let version = table.registry_version.clone()?;
-        Some(crate::package::RegistryProvenance {
-            source,
-            name,
-            version,
-            provenance_url: None,
-        })
     }
 }
 

@@ -6,6 +6,7 @@ use semver::{Version, VersionReq};
 use crate::package::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PackageRegistryIndex {
     pub(super) version: u32,
     #[serde(default, rename = "package")]
@@ -13,6 +14,7 @@ pub(crate) struct PackageRegistryIndex {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RegistryPackage {
     pub(super) name: String,
     #[serde(default)]
@@ -20,13 +22,13 @@ pub(crate) struct RegistryPackage {
     pub(super) repository: String,
     #[serde(default)]
     pub(super) license: Option<String>,
-    #[serde(default, alias = "harn_version", alias = "harn_version_range")]
+    #[serde(default)]
     pub(super) harn: Option<String>,
     #[serde(default)]
     pub(super) exports: Vec<String>,
-    #[serde(default, alias = "rule-pack", alias = "rulePack")]
+    #[serde(default)]
     pub(super) rule_pack: Option<RegistryRulePackInfo>,
-    #[serde(default, alias = "connector-contract")]
+    #[serde(default)]
     pub(super) connector_contract: Option<String>,
     #[serde(default)]
     pub(super) docs_url: Option<String>,
@@ -39,30 +41,28 @@ pub(crate) struct RegistryPackage {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RegistryRulePackInfo {
     #[serde(default)]
     pub(crate) rule_count: usize,
     #[serde(default)]
     pub(crate) languages: Vec<String>,
-    #[serde(default, alias = "safety-summary", alias = "safetySummary")]
+    #[serde(default)]
     pub(crate) safety_summary: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RegistryPackageVersion {
     pub(super) version: String,
     #[serde(default)]
     pub(super) git: Option<String>,
-    #[serde(default, alias = "archive-url", alias = "archive_url")]
+    #[serde(default)]
     pub(super) archive: Option<String>,
     #[serde(default)]
     pub(super) tag: Option<String>,
     #[serde(default)]
     pub(super) rev: Option<String>,
-    #[serde(default)]
-    pub(super) sha: Option<String>,
-    #[serde(default)]
-    pub(super) branch: Option<String>,
     #[serde(default)]
     pub(super) package: Option<String>,
     #[serde(default)]
@@ -155,6 +155,7 @@ pub(crate) fn validate_package_registry_index(
     index: &mut PackageRegistryIndex,
 ) -> Result<(), PackageError> {
     let mut names = HashSet::new();
+    let mut content_identities = HashSet::new();
     for package in &mut index.packages {
         if !is_valid_registry_package_name(&package.name) {
             return Err(format!(
@@ -176,8 +177,28 @@ pub(crate) fn validate_package_registry_index(
                 package.name
             )
         })?;
+        let package_repository = normalize_git_url(&package.repository)?;
+        let package_provenance = package.provenance.as_deref().ok_or_else(|| {
+            format!(
+                "package registry {source} entry '{}' must specify provenance",
+                package.name
+            )
+        })?;
+        validate_provenance_url(package_provenance, &package_repository).map_err(|error| {
+            format!(
+                "package registry {source} has invalid provenance for '{}': {error}",
+                package.name
+            )
+        })?;
         if let Some(rule_pack) = package.rule_pack.as_mut() {
             normalize_rule_pack_info(rule_pack);
+        }
+        if package.versions.is_empty() {
+            return Err(format!(
+                "package registry {source} entry '{}' must publish at least one immutable version",
+                package.name
+            )
+            .into());
         }
         let mut versions = HashSet::new();
         for version in &package.versions {
@@ -201,24 +222,73 @@ pub(crate) fn validate_package_registry_index(
                     package.name, version.version
                 )
             })?;
+            let provenance = version.provenance.as_deref().ok_or_else(|| {
+                format!(
+                    "package registry {source} entry '{}@{}' must specify provenance",
+                    package.name, version.version
+                )
+            })?;
+            validate_provenance_url(provenance, &package_repository).map_err(|error| {
+                format!(
+                    "package registry {source} has invalid provenance for '{}@{}': {error}",
+                    package.name, version.version
+                )
+            })?;
             match (version.git.as_deref(), version.archive.as_deref()) {
                 (Some(git), None) => {
-                    if selected_git_ref_count(version) != 1 {
-                        return Err(format!(
-                            "package registry {source} entry '{}@{}' must specify tag, rev, or branch; rev may accompany tag as a resolved commit pin",
-                            package.name, version.version
-                        )
-                        .into());
-                    }
-                    normalize_git_url(git).map_err(|error| {
+                    let normalized_git = normalize_git_url(git).map_err(|error| {
                         format!(
                             "package registry {source} has invalid git source for '{}@{}': {error}",
                             package.name, version.version
                         )
                     })?;
+                    if normalized_git != package_repository {
+                        return Err(format!(
+                            "package registry {source} entry '{}@{}' git source must match its package repository",
+                            package.name, version.version
+                        )
+                        .into());
+                    }
+                    let tag = version.tag.as_deref().ok_or_else(|| {
+                        format!(
+                            "package registry {source} entry '{}@{}' must specify a published tag",
+                            package.name, version.version
+                        )
+                    })?;
+                    if tag.trim().is_empty() {
+                        return Err(format!(
+                            "package registry {source} entry '{}@{}' has an empty tag",
+                            package.name, version.version
+                        )
+                        .into());
+                    }
+                    let rev = version.rev.as_deref().ok_or_else(|| {
+                        format!(
+                            "package registry {source} entry '{}@{}' must specify the tag's resolved commit SHA in rev",
+                            package.name, version.version
+                        )
+                    })?;
+                    if !is_full_git_commit_sha(rev) {
+                        return Err(format!(
+                            "package registry {source} entry '{}@{}' rev must be a full 40- or 64-character Git commit SHA",
+                            package.name, version.version
+                        )
+                        .into());
+                    }
+                    let identity = format!(
+                        "git:{normalized_git}:{rev}:{}",
+                        version.package.as_deref().unwrap_or("")
+                    );
+                    if !content_identities.insert(identity) {
+                        return Err(format!(
+                            "package registry {source} reuses immutable content identity for '{}@{}'",
+                            package.name, version.version
+                        )
+                        .into());
+                    }
                 }
                 (None, Some(archive)) => {
-                    if version.tag.is_some() || version.rev.is_some() || version.branch.is_some() {
+                    if version.tag.is_some() || version.rev.is_some() {
                         return Err(format!(
                             "package registry {source} entry '{}@{}' must not combine archive with tag, rev, or branch",
                             package.name, version.version
@@ -243,6 +313,17 @@ pub(crate) fn validate_package_registry_index(
                             package.name, version.version
                         )
                     })?;
+                    let identity = format!(
+                        "archive:{archive}:{checksum}:{}",
+                        version.package.as_deref().unwrap_or("")
+                    );
+                    if !content_identities.insert(identity) {
+                        return Err(format!(
+                            "package registry {source} reuses immutable content identity for '{}@{}'",
+                            package.name, version.version
+                        )
+                        .into());
+                    }
                 }
                 (Some(_), Some(_)) => {
                     return Err(format!(
@@ -280,10 +361,33 @@ fn normalize_rule_pack_info(rule_pack: &mut RegistryRulePackInfo) {
     rule_pack.safety_summary.dedup();
 }
 
-fn selected_git_ref_count(version: &RegistryPackageVersion) -> usize {
-    usize::from(version.tag.is_some())
-        + usize::from(version.tag.is_none() && version.rev.is_some())
-        + usize::from(version.branch.is_some())
+pub(crate) fn is_full_git_commit_sha(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn validate_provenance_url(
+    provenance: &str,
+    normalized_repository: &str,
+) -> Result<(), PackageError> {
+    let provenance =
+        Url::parse(provenance).map_err(|error| format!("must be an absolute URL: {error}"))?;
+    let repository = Url::parse(normalized_repository)
+        .map_err(|error| format!("repository URL is invalid: {error}"))?;
+    let repository_path = repository
+        .path()
+        .trim_end_matches(".git")
+        .trim_end_matches('/');
+    let provenance_path = provenance.path().trim_end_matches('/');
+    if provenance.scheme() != repository.scheme()
+        || provenance.host_str() != repository.host_str()
+        || !(provenance_path == repository_path
+            || provenance_path.starts_with(&format!("{repository_path}/")))
+    {
+        return Err(
+            "must identify the declared package repository or an artifact beneath it".into(),
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn load_package_registry_in(

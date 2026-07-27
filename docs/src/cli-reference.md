@@ -3395,6 +3395,21 @@ Archive versions use `archive = "<url>"` plus `checksum = "sha256:<tree>"`;
 Harn expands `.tar.gz` archives into the package cache and verifies the
 expanded tree hash before writing `harn.lock`.
 
+## harn package registry verify
+
+Validate registry v2, immutable content identities, and repository-bound
+provenance through the same parser used by install, search, and info.
+
+```bash
+harn package registry verify ./harn-package-index.toml --json
+harn package registry verify ./harn-package-index.toml --remote \
+  --receipt-out registry-verification.json
+```
+
+`--remote` additionally resolves every published Git tag and fails if it no
+longer points at the full commit SHA recorded in `rev`. The JSON output and
+optional receipt file use `harn.package_registry_verification.v1`.
+
 ## harn rule publish / search
 
 Publish and discover structural rule packs through the package registry.

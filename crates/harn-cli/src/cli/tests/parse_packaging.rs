@@ -386,6 +386,32 @@ fn test_parses_package_cache_subcommands() {
     assert!(verify.json);
     assert_eq!(verify.receipt_out, Some(PathBuf::from("receipt.json")));
 
+    let cli = Cli::parse_from([
+        "harn",
+        "package",
+        "registry",
+        "verify",
+        "index.toml",
+        "--remote",
+        "--json",
+        "--receipt-out",
+        "registry-receipt.json",
+    ]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Registry(registry) = args.command else {
+        panic!("expected package registry");
+    };
+    let PackageRegistryCommand::Verify(verify) = registry.command;
+    assert_eq!(verify.registry, "index.toml");
+    assert!(verify.remote);
+    assert!(verify.json);
+    assert_eq!(
+        verify.receipt_out,
+        Some(PathBuf::from("registry-receipt.json"))
+    );
+
     let cli = Cli::parse_from(["harn", "package", "pack", "pkg", "--dry-run"]);
     let Command::Package(args) = cli.command.unwrap() else {
         panic!("expected package command");

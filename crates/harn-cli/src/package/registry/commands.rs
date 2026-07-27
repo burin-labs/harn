@@ -202,9 +202,6 @@ pub fn show_package_registry_info(spec: &str, registry: Option<&str>, json: bool
                 if let Some(rev) = version.rev.as_deref() {
                     println!("rev: {rev}");
                 }
-                if let Some(branch) = version.branch.as_deref() {
-                    println!("branch: {branch}");
-                }
                 if let Some(package_name) = version.package.as_deref() {
                     println!("package: {package_name}");
                 }
