@@ -894,9 +894,26 @@ fn a_link_table_naming_an_evicted_artifact_falls_back_to_reading() {
         .build()
         .expect("runtime builds");
     let temp = tempfile::tempdir().expect("tempdir");
-    let (dep, table) = seed_linked_module(temp.path(), "pub fn value() { return 7 }\n");
-    std::fs::remove_file(bytecode_cache::adjacent_module_cache_path(&dep).unwrap())
-        .expect("evict the artifact the table names");
+    // A fixed body can collide with an artifact left in the shared cache by an
+    // earlier run. Use a test-local key so evicting both lookup locations is
+    // deterministic and cannot remove a real user's artifact.
+    let body = format!(
+        "// isolated cache fixture: {}\npub fn value() {{ return 7 }}\n",
+        temp.path().display()
+    );
+    let (dep, table) = seed_linked_module(temp.path(), &body);
+    let key =
+        bytecode_cache::CacheKey::from_module_source(&module_source::ModuleSource::from_text(body));
+    for path in [
+        bytecode_cache::adjacent_module_cache_path(&dep).unwrap(),
+        bytecode_cache::cache_dir().join(key.module_filename()),
+    ] {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("evict {}: {error}", path.display()),
+        }
+    }
 
     runtime.block_on(async {
         let mut vm = Vm::new();
