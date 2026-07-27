@@ -13,7 +13,7 @@ release cadence.
 
 ```sh
 harn add github.com/burin-labs/harn-notion-connector@v0.1.0
-harn connector test . --provider notion --run-poll-tick
+harn package verify . --provider notion --run-poll-tick
 ```
 
 Wire the package through the provider manifest entry:
@@ -56,11 +56,11 @@ webhook and poll sources can share handler code when that is useful.
 
 ```sh
 harn connector check .
-harn connector test . --provider notion --run-poll-tick
+harn package verify . --provider notion --run-poll-tick
 ```
 
 For local development against this repository's CLI:
 
 ```sh
-cargo run --quiet --bin harn -- connector test /path/to/harn-notion-connector --provider notion --run-poll-tick
+cargo run --quiet --bin harn -- package verify /path/to/harn-notion-connector --provider notion --run-poll-tick
 ```

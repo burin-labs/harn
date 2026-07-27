@@ -11,7 +11,7 @@ release cadence.
 
 ```sh
 harn add github.com/burin-labs/harn-github-connector@v0.2.0
-harn connector test . --provider github
+harn package verify . --provider github
 ```
 
 Wire the package through the provider manifest entry:
@@ -58,11 +58,11 @@ comments.
 
 ```sh
 harn connector check .
-harn connector test . --provider github
+harn package verify . --provider github
 ```
 
 For local development against this repository's CLI:
 
 ```sh
-cargo run --quiet --bin harn -- connector test /path/to/harn-github-connector --provider github
+cargo run --quiet --bin harn -- package verify /path/to/harn-github-connector --provider github
 ```

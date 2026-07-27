@@ -11,7 +11,7 @@ Socket Mode policy.
 
 ```sh
 harn add github.com/burin-labs/harn-slack-connector@v0.1.0
-harn connector test . --provider slack
+harn package verify . --provider slack
 ```
 
 Wire the package through the provider manifest entry:
@@ -44,11 +44,11 @@ handlers. The runtime enforces hot-path effect policy for connector exports.
 
 ```sh
 harn connector check .
-harn connector test . --provider slack
+harn package verify . --provider slack
 ```
 
 For local development against this repository's CLI:
 
 ```sh
-cargo run --quiet --bin harn -- connector test /path/to/harn-slack-connector --provider slack
+cargo run --quiet --bin harn -- package verify /path/to/harn-slack-connector --provider slack
 ```

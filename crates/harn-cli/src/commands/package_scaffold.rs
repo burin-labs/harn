@@ -94,11 +94,7 @@ async fn scaffold_openapi_package(args: &PackageScaffoldOpenapiArgs) -> Result<(
     );
     println!("  cd {}", dest.display());
     println!("  harn install");
-    println!("  harn check src/lib.harn");
-    println!("  harn test tests/");
-    println!("  harn package check");
-    println!("  harn package docs --check");
-    println!("  harn package pack --dry-run");
+    println!("  harn package verify");
     Ok(())
 }
 
@@ -536,6 +532,7 @@ harn-openapi = {dependency}
         ),
         ("scripts/regen.harn", regen),
         ("tests/smoke.harn", smoke_test),
+        (".harn-version", format!("{}\n", env!("CARGO_PKG_VERSION"))),
         ("README.md", readme),
         ("LICENSE", "MIT OR Apache-2.0\n".to_string()),
         (
@@ -547,19 +544,22 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  package:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@cargo-binstall
-      - run: cargo binstall harn-cli --no-confirm
-      - run: harn install --locked --offline || harn install
-      - run: harn check src/lib.harn
-      - run: harn test tests/
-      - run: harn package check
-      - run: harn package docs --check
-      - run: harn package pack --dry-run
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+      - uses: burin-labs/harn/.github/actions/setup-harn@e2089cd9628995bf2080cd1515086a891dff34f4
+      - run: harn package verify --receipt-out .harn/receipts/package-verify.json
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: harn-package-verification
+          path: .harn/receipts/package-verify.json
+          if-no-files-found: error
 "
             .to_string(),
         ),
@@ -691,11 +691,7 @@ whole-provider clone with hand-written coverage for unrelated products.
 
 ```bash
 harn install
-harn check src/lib.harn
-harn test tests/
-harn package check
-harn package docs --check
-harn package pack --dry-run
+harn package verify
 ```
 
 ## Regenerate

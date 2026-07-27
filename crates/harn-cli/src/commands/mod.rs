@@ -50,6 +50,7 @@ pub(crate) mod models;
 pub mod orchestrator;
 pub mod pack;
 pub(crate) mod package_scaffold;
+pub(crate) mod package_verify;
 pub(crate) mod parse_tokens;
 pub mod persona;
 pub mod persona_activation;

@@ -786,6 +786,12 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             PackageCommand::Check(check) => {
                 package::check_package(check.package.as_deref(), check.json);
             }
+            PackageCommand::Verify(verify) => {
+                if let Err(error) = commands::package_verify::handle_package_verify(verify).await {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
             PackageCommand::Pack(pack) => package::pack_package(
                 pack.package.as_deref(),
                 pack.output.as_deref(),

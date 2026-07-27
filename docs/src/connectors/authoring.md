@@ -254,7 +254,7 @@ install a narrower host-specific `CapabilityPolicy`.
 Pure-Harn connector packages should run the package-level gate in CI:
 
 ```bash
-harn connector test .
+harn package verify .
 ```
 
 The gate validates package metadata, runs `harn check`, `harn lint`,

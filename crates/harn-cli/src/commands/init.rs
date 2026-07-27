@@ -67,12 +67,14 @@ async fn dispatch_to_script(
     let dir_str = dir.display().to_string();
     let template_id = template_id(template);
     let harn_range = current_harn_range_example();
+    let harn_version = env!("CARGO_PKG_VERSION");
     let name_str = name.unwrap_or("");
     let _name_env = ScopedEnvVar::set("HARN_INIT_NAME", name_str);
     let _project_env = ScopedEnvVar::set("HARN_INIT_PROJECT_NAME", project_name);
     let _dir_env = ScopedEnvVar::set("HARN_INIT_DIR", &dir_str);
     let _template_env = ScopedEnvVar::set("HARN_INIT_TEMPLATE", template_id);
     let _range_env = ScopedEnvVar::set("HARN_INIT_HARN_RANGE", &harn_range);
+    let _version_env = ScopedEnvVar::set("HARN_INIT_HARN_VERSION", harn_version);
     let _mode_env = ScopedEnvVar::set(
         "HARN_INIT_MODE",
         if name.is_some() { "new" } else { "init" },

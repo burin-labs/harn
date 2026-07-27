@@ -11,7 +11,7 @@ normalization, outbound GraphQL calls, fixtures, and release cadence.
 
 ```sh
 harn add github.com/burin-labs/harn-linear-connector@v0.1.0
-harn connector test . --provider linear
+harn package verify . --provider linear
 ```
 
 Wire the package through the provider manifest entry:
@@ -41,11 +41,11 @@ package through connector contract v1 exports.
 
 ```sh
 harn connector check .
-harn connector test . --provider linear
+harn package verify . --provider linear
 ```
 
 For local development against this repository's CLI:
 
 ```sh
-cargo run --quiet --bin harn -- connector test /path/to/harn-linear-connector --provider linear
+cargo run --quiet --bin harn -- package verify /path/to/harn-linear-connector --provider linear
 ```

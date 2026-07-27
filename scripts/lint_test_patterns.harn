@@ -244,7 +244,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // values are user-facing wall-clock state, not VM-scheduled time.
   "crates/harn-cli/src/commands/connect/callback.rs",
   "crates/harn-cli/src/commands/connect/store.rs",
-  "crates/harn-cli/src/commands/connector.rs",
+  // Package verification receipts measure subprocess and in-process gate
+  // elapsed time for CI observability; they do not drive scheduling.
+  "crates/harn-cli/src/commands/package_verify.rs",
   // `harn demo` measures and renders wall-clock elapsed time in the
   // terminal output ("--- demo complete in 180 ms ---") and stamps the
   // demo's run record with the actual host wall-clock instant so users

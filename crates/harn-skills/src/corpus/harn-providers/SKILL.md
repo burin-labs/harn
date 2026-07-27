@@ -109,7 +109,7 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - LLM behavior: targeted VM provider tests.
 - Provider matrix: `harn provider catalog matrix --check`.
 - Connector manifests: package validation tests.
-- Connector package: `harn connector test . --provider <id>`.
+- Connector package: `harn package verify . --provider <id>`.
 - Mock-provider fixtures: targeted conformance or CLI tests.
 - JSON surfaces: `harn --json-schemas --command <command>`.
 - Docs snippets: `make check-docs-snippets` when examples change.
