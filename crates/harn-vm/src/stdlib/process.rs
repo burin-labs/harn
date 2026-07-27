@@ -1131,9 +1131,12 @@ pub(crate) fn session_closed_env_for_command(
 /// non-session path. The base [`session_closed_env`] layers a caller overlay onto.
 /// Session-scoped grants only — command-bound exposures are invisible here.
 pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError> {
-    session_env_with(|environment, lookup| {
-        crate::security::resolve_env(environment, lookup, &resolve_grant_secret)
-    })
+    session_env_with(
+        |grant| grant.for_command().is_none(),
+        |environment, lookup| {
+            crate::security::resolve_env(environment, lookup, &resolve_grant_secret)
+        },
+    )
 }
 
 /// The environment a spawn of `program` should see under the live session
@@ -1141,17 +1144,25 @@ pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError>
 pub(crate) fn session_env_for_command(
     program: &str,
 ) -> Result<Option<BTreeMap<String, String>>, VmError> {
-    session_env_with(|environment, lookup| {
-        crate::security::resolve_env_for_command(
-            environment,
-            program,
-            lookup,
-            &resolve_grant_secret,
-        )
-    })
+    let basename = crate::security::command_basename(program).to_string();
+    session_env_with(
+        move |grant| match grant.for_command() {
+            None => true,
+            Some(expected) => expected == basename,
+        },
+        |environment, lookup| {
+            crate::security::resolve_env_for_command(
+                environment,
+                program,
+                lookup,
+                &resolve_grant_secret,
+            )
+        },
+    )
 }
 
 fn session_env_with(
+    grant_owns_key: impl Fn(&crate::security::SessionGrant) -> bool,
     resolve: impl FnOnce(
         &crate::security::SessionEnvironment,
         &dyn Fn(&str) -> Option<String>,
@@ -1164,10 +1175,16 @@ fn session_env_with(
     let workspace_defaults = workspace_env_defaults();
     let mut env =
         resolve(&environment, &session_env_lookup(&workspace_defaults)).map_err(grant_env_error)?;
-    // Fill gaps only: grants already in `env` (session-scoped or command-bound)
-    // must win over workspace defaults.
+    // Workspace defaults overwrite the allowlist (so toolchain caches stay
+    // workspace-local) but never overwrite a grant that applies to this view.
     for (key, value) in workspace_defaults {
-        env.entry(key).or_insert(value);
+        let grant_owns = environment
+            .grants()
+            .iter()
+            .any(|grant| grant.exposed_env_var() == Some(key.as_str()) && grant_owns_key(grant));
+        if !grant_owns {
+            env.insert(key, value);
+        }
     }
     Ok(Some(env))
 }

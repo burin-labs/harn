@@ -585,7 +585,7 @@ impl SessionEnvironment {
 
     /// Materialize the environment overlay for one spawn of `program`: every
     /// session-scoped `expose_as_env` grant, plus every command-bound grant
-    /// whose `for_command` matches [`command_basename`]`(program)`.
+    /// whose `for_command` matches [`command_basename`] of `program`.
     pub fn env_exposure_for_command(
         &self,
         program: &str,
@@ -1311,14 +1311,11 @@ mod tests {
                 "fw-secret-value".to_string()
             )]
         );
-        assert_eq!(
-            environment
-                .env_exposure_for_command("/usr/local/bin/gh", &resolve_secret)
-                .unwrap()
-                .into_iter()
-                .any(|(var, _)| var == "GH_TOKEN"),
-            true
-        );
+        assert!(environment
+            .env_exposure_for_command("/usr/local/bin/gh", &resolve_secret)
+            .unwrap()
+            .into_iter()
+            .any(|(var, _)| var == "GH_TOKEN"));
         assert_eq!(command_basename("C:\\Tools\\gh.exe"), "gh");
 
         let receipts = environment.receipts();
