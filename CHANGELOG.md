@@ -9,6 +9,135 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.42
+
+### Breaking
+
+- Replace package registry v1 with the fail-closed v2 contract. Published Git
+  versions now require a tag, its full resolved commit SHA, and repository-bound
+  provenance; mutable branches and the redundant `sha` field are rejected.
+  `harn package registry verify` is the single validator and can prove every tag
+  against its remote while emitting a versioned receipt.
+
+### Added
+
+- **Publish the schema-v1 `harn lint --json` contract and a typed decoder
+  (#5053).** `harn --json-schemas --command lint` now returns a complete
+  inline `schemaJson`, and `std/cli/envelope` decodes the envelope through
+  `std/schema` while failing closed on malformed JSON, unsupported schema
+  versions, invalid severities/spans, inconsistent aggregates or per-file
+  status, and exit-status disagreement. Diagnostic spans are documented as
+  UTF-8 half-open byte offsets.
+
+### Changed
+
+- Moved text-tool dialect composition into the Harn stdlib while retaining
+  byte-oriented scanning as narrow host primitives, with one cached parse
+  projection shared by dispatch, observability, replay, and conformance.
+- **Command-bound grant exposure via `,for=COMMAND` (#5549).** A grant may
+  declare `--grant name=source,expose=ENV,for=basename` so the exposed variable
+  reaches only spawns whose executable basename matches (for example
+  `for=gh`). Omitting `,for=` keeps the existing session-scoped behavior for
+  provider keys and `harness.env`. Receipts record the optional `for_command`
+  binding; command-bound grants stay invisible to in-process credential lookup.
+- Raise the Linux x86_64 release-binary ratchet to 213 MiB after the exact
+  v0.10.41 AOT-bearing build measured 212.20 MiB, preserving less than 1 MiB
+  of headroom while keeping the pre-tag gate fail-closed.
+- Project every Harn-owned package scaffold onto the immutable organization
+  package workflow, with merge-queue coverage and a single `CI status` roll-up.
+
+### Fixed
+
+- **Unrecognized tool dialects no longer vanish into prose (#5142).** The text
+  parser recognized tool syntax only for a fixed set of wrapper tags, so any
+  other dialect a model emitted produced zero calls, zero violations, and zero
+  events — and the turn then read downstream as the model declining to act. The
+  parser now reports the text it consumed without producing a call, and
+  `std/llm/tool_shape` flags fragments that are *shaped* like an invocation: a
+  tag wrapping an argument-bearing body, an object naming a tool alongside its
+  arguments, or chat-template markup carrying a callee. Nothing matches a list of
+  dialect names, so a dialect nobody has emitted yet is caught with no code
+  change. Findings join the existing protocol-violation feedback so the model is
+  told its call did not run.
+
+- **An unbalanced code fence no longer strips the agent's answer (#5142).**
+  "Is this offset inside a markdown fence" was implemented twice and the copies
+  had drifted. The parser requires a fence to be closed at or after the offset
+  before it encloses it; `visible_text` still counted fence markers and treated
+  an odd count as "inside". A stray ``` earlier in a response therefore made a
+  later real `<user_response>` look like fenced narration and removed it from the
+  visible answer. Both now share one owner.
+
+- **Response parsing is no longer quadratic in response length (#5142).**
+  The fence check rescanned from the start of the response on every call and the
+  scan loop consulted it at nearly every position, so a 124KB response took
+  28.8ms to parse and grew 14x for every 4x of input. Fence and line-start
+  positions are now resolved once per response.
+
+- **Char-indexed string operations are no longer quadratic (#5142).** `slice`
+  materialized the entire string as a `Vec<char>` on every call regardless of how
+  much of it was being sliced, and `char_at` walked the string from the start on
+  each access, so scanning a string position by position cost time proportional
+  to its length squared — 384ms for a single pass over 31KB. `slice`,
+  `substring`, `char_at`, `index_of`, and `last_index_of` now resolve char
+  indices to byte offsets in one forward pass, with a direct byte path for ASCII.
+  Unicode semantics are unchanged and pinned by equivalence tests against the
+  previous behavior across 1-, 2-, 3-, and 4-byte scalars.
+
+- **Protocol violations stay typed through the runtime boundary (#5142).**
+  Text-tool parsing now returns closed `{kind, message, excerpt?,
+  dropped_reason?}` records, streaming aborts report their exact dropped spans,
+  and a repair loop that exhausts its final parser-dropped turn terminates as the
+  harness-owned `parse_dropped` class instead of blaming the model. Parallel
+  formatter audits also prune ephemeral `.harn*` runtime directories so test
+  fixture cleanup cannot race the source scan.
+- Route ACP `host_call` through canonical dispatch via an async
+  `HostCallBridge` instead of replacing the builtin, so mocks, command
+  policy, process-handle registry, and the per-turn memo cannot silently
+  miss editor-hosted sessions (#5523).
+- `http_request` now consumes in-process `http_mock` fixtures before destination
+  egress checks, matching `http_download` and `http_stream_open`. Sandboxed CLI
+  hosts that default-deny without an allowlist (including `harn models batch`
+  live Azure OpenAI and Bedrock fixture tests) no longer fail with
+  `EgressBlocked` / `no egress policy configured` before the mock can answer.
+- **Nextest no longer treats loaded-machine teardown delay as a leaked
+  harn-fmt test (#5611).** The shared leak grace period is long enough for
+  libtest to reap under full workspace fan-out, while leak detection stays
+  fail-closed for real long-lived subprocesses.
+- Bound every remaining production advisory-file-lock acquisition with a
+  critical-section-specific deadline. A wedged holder now returns an error that
+  names the lock path, requested mode, and elapsed wait instead of silently
+  stopping VM file replacement, package cache population, installation,
+  publication, snapshot acquisition, manifest mutation, persona activation, or
+  command-artifact persistence.
+- **`guard-neural` / `--all-features` builds compile again (#5690).**
+  `harn-guard` enables `ort`'s `tls-rustls` alongside `download-binaries`
+  (defaults stay off), and a structural optional-dep feature contract plus
+  `make check-all-features` keep incomplete off-by-default feature sets from
+  rotting outside default CI.
+- Let `harn package verify` accept contribution- and rule-only packages without
+  `[exports]`; their consumer import smoke is now structurally inapplicable
+  while their owned contribution and packaging gates still run.
+- Allow release recovery to benchmark an immutable source commit under the
+  current `main` workflow policy while verifying the policy and source identities
+  separately.
+- Isolate immutable-source release benchmarks from mutable `main` workflow
+  concurrency so later main pushes cannot cancel a queued or active pre-tag gate.
+- The bundled Harn language skill now directs specification changes to the
+  authoritative per-chapter sources instead of the generated assembled spec.
+- Give the scheduled CLI cold-start budget enough time to compile on a cold cache
+  while preserving a separate five-minute benchmark budget.
+- Correct the repository finish-pass and release skills to use authoritative
+  source files, isolated verification commands, exact release pins, prerequisite
+  assertions, and post-tag ancestry proof.
+- Recover stale Cargo build-script outputs at the shared release AOT preparation
+  boundary, including source-only certification runs that reuse a warmed Harn
+  binary.
+- The release gate now waits for every parallel audit lane to settle before
+  recovering a validated stale Cargo build-script output, then cleans only the
+  implicated packages and retries the failed lane once. Ordinary failures are
+  never retried, and failed recovery retains both attempts' diagnostics.
+
 ## v0.10.41
 
 ### Breaking
