@@ -319,10 +319,6 @@ impl ManifestFile {
         let Ok(text) = std::fs::read_to_string(&self.path) else {
             return false;
         };
-        // A direct read, deliberately not `module_source::read`: that memo is
-        // keyed on the very `(len, mtime_ns)` identity this entry has already
-        // been shown to reproduce, so it would hand back the stale bytes and
-        // agree with itself.
         let mut hasher = Sha256::new();
         hasher.update(text.as_bytes());
         let digest: [u8; 32] = hasher.finalize().into();
