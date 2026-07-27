@@ -1069,7 +1069,11 @@ async fn vm_execute_http_request_with_client(
             "http: URL must start with http:// or https://, got '{url}'"
         )));
     }
-    crate::egress::enforce_url_allowed("http_request", &final_url).await?;
+    // Consume in-process http_mock fixtures before destination egress. Mocks
+    // never open a socket; checking policy first made every sandboxed CLI
+    // fixture (default-deny without an allowlist) fail before the double could
+    // answer. http_download and http_stream_open already short-circuit this way.
+    let mut egress_checked = false;
 
     for attempt in 0..=config.retry.max {
         if let Some(mock_response) = consume_http_mock(
@@ -1101,6 +1105,11 @@ async fn vm_execute_http_request_with_client(
                 mock_response.body,
                 &final_url,
             ));
+        }
+
+        if !egress_checked {
+            crate::egress::enforce_url_allowed("http_request", &final_url).await?;
+            egress_checked = true;
         }
 
         let mut req = client.request(parts.method.clone(), &final_url);
