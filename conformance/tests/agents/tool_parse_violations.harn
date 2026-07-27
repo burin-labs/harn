@@ -12,6 +12,9 @@
 import { probe, sample_registry } from "_tool_parse_probe"
 
 pipeline main() {
+  // A chat template that strips the leading angle bracket from a response tag
+  // still leaves malformed protocol, not harmless assistant narration.
+  probe("corrupted response tag fragment", "_call>_call>", sample_registry())
   // An unrecognized top-level tag is flagged; the known block still executes.
   probe(
     "unknown top level tag",

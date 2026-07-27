@@ -773,7 +773,7 @@ pub(crate) async fn observed_llm_call(
         );
 
         match llm_result {
-            Ok(result) => {
+            Ok(mut result) => {
                 // An unproductive "success" the loop has no action to run on —
                 // either a zero-token empty completion (provider stall) or an
                 // errored-but-actionless turn (`stop_reason == "error"` that
@@ -851,6 +851,8 @@ pub(crate) async fn observed_llm_call(
                     }
                     continue;
                 }
+                super::api::ensure_llm_text_projection(None, &mut result, opts.tools.as_ref())
+                    .await?;
                 let provider_under_throttle = provider_was_throttled_during_call
                     || crate::llm::rate_governor::provider_already_throttled(
                         &opts.provider,
@@ -880,7 +882,6 @@ pub(crate) async fn observed_llm_call(
                         &result,
                         duration_ms,
                         opts.applied_structural_experiment.as_ref(),
-                        opts.tools.as_ref(),
                     );
                     append_provider_call_error_observability(ProviderCallErrorObservation {
                         iteration: iteration.unwrap_or(0),
@@ -945,7 +946,6 @@ pub(crate) async fn observed_llm_call(
                     &result,
                     duration_ms,
                     opts.applied_structural_experiment.as_ref(),
-                    opts.tools.as_ref(),
                 );
                 dump_resolved_dispatch(
                     iteration.unwrap_or(0),

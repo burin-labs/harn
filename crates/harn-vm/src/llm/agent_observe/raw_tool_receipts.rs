@@ -3,12 +3,15 @@
 /// Build the observability-only merged view without mutating request history.
 pub(super) fn merged_tool_calls_for_observability(
     result: &crate::llm::api::LlmResult,
-    tools: Option<&crate::value::VmValue>,
 ) -> Vec<serde_json::Value> {
     if !result.tool_calls.is_empty() {
         return result.tool_calls.clone();
     }
-    crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools).calls
+    result
+        .text_projection
+        .as_deref()
+        .map(|projection| projection.merged_tool_calls(result))
+        .unwrap_or_default()
 }
 
 pub(super) fn project_onto_event(
@@ -38,7 +41,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-        dump_llm_response(0, "call-raw", &result, 42, None, None);
+        dump_llm_response(0, "call-raw", &result, 42, None);
         pop_llm_transcript_dir();
 
         let event = response_event(&dir);
@@ -57,7 +60,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-        dump_llm_response(0, "call-no-raw", &result, 42, None, None);
+        dump_llm_response(0, "call-no-raw", &result, 42, None);
         pop_llm_transcript_dir();
 
         let event = response_event(&dir);

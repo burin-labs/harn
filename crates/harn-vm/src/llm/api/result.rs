@@ -4,7 +4,7 @@
 use crate::value::VmDictExt;
 
 use super::telemetry::ProviderTelemetry;
-use crate::value::VmValue;
+use crate::value::{VmError, VmValue};
 
 fn default_true() -> bool {
     true
@@ -81,6 +81,10 @@ impl From<RawProviderToolCall> for serde_json::Value {
 pub(crate) struct LlmResult {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
+    /// Derived text-channel projection. The observed-call boundary attaches
+    /// this once so transcript observability and VM assembly share one parse.
+    #[serde(skip)]
+    pub text_projection: Option<Box<LlmTextProjection>>,
     /// Provider-native tool-call envelopes before Harn normalizes names and
     /// arguments for dispatch. Transcript-only receipt for format/adapter
     /// forensics; dispatch must keep using `tool_calls`.
@@ -389,17 +393,104 @@ fn build_outcome_dict(kind: LlmOutcomeKind, result: &LlmResult) -> crate::value:
     outcome
 }
 
-struct TextToolProjection {
-    parsed: Option<crate::llm::tools::TextToolParseResult>,
-    public_text: String,
-    visible_text: String,
+/// Text-channel projection of one provider result: the visible text with
+/// inline reasoning split out, plus the text-tool parse of it.
+///
+/// Built ONCE, at the async boundary, and threaded into the sync assembly
+/// below and the observability sink. Which tags and markers mean "tool call"
+/// is a dialect question answered in the Harn stdlib, so the parse can only
+/// happen where an `AsyncBuiltinCtx` exists. Re-deriving it in three sync
+/// helpers is also what made one response text get parsed three times per
+/// provider call.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LlmTextProjection {
+    pub(crate) visible_text_src: String,
+    pub(crate) inline_reasoning: Option<String>,
+    pub(crate) parsed: Option<crate::llm::tools::TextToolParseResult>,
+    pub(crate) public_text: String,
+    pub(crate) visible_text: String,
 }
 
-fn build_text_tool_projection(
+impl LlmTextProjection {
+    /// The merged tool-call view: provider-native calls when present,
+    /// otherwise the calls recovered from the text channel.
+    pub(crate) fn merged_tool_calls(&self, result: &LlmResult) -> Vec<serde_json::Value> {
+        if !result.tool_calls.is_empty() {
+            return result.tool_calls.clone();
+        }
+        self.parsed
+            .as_ref()
+            .map(|parse| parse.calls.clone())
+            .unwrap_or_default()
+    }
+}
+
+pub(crate) async fn build_llm_text_projection(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    result: &LlmResult,
+    tools_val: Option<&VmValue>,
+) -> Result<LlmTextProjection, VmError> {
+    let (visible_text_src, inline_reasoning) = split_inline_reasoning_if_capable(result);
+    let parsed =
+        parse_visible_text_tools(ctx, &visible_text_src, tools_val, &result.tool_calls).await?;
+
+    let has_native_tool_calls = !result.tool_calls.is_empty();
+    let parsed_has_calls = parsed.as_ref().is_some_and(|parse| !parse.calls.is_empty());
+
+    let public_text = match parsed.as_ref() {
+        Some(parse) if !parse.prose.is_empty() => parse.prose.clone(),
+        Some(_) if parsed_has_calls || has_native_tool_calls => String::new(),
+        _ => visible_text_src.clone(),
+    };
+    let visible_text = if parsed_has_calls || has_native_tool_calls || tools_val.is_some() {
+        public_text.clone()
+    } else {
+        crate::visible_text::sanitize_visible_assistant_text(&visible_text_src, false)
+    };
+
+    Ok(LlmTextProjection {
+        visible_text_src,
+        inline_reasoning,
+        parsed,
+        public_text,
+        visible_text,
+    })
+}
+
+pub(crate) async fn ensure_llm_text_projection(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    result: &mut LlmResult,
+    tools_val: Option<&VmValue>,
+) -> Result<(), VmError> {
+    if result.text_projection.is_none() {
+        result.text_projection = Some(Box::new(
+            build_llm_text_projection(ctx, result, tools_val).await?,
+        ));
+    }
+    Ok(())
+}
+
+/// Parse one derived candidate string under the text-tool grammar.
+///
+/// Separate from [`build_llm_text_projection`] because the structured-output
+/// extractor parses strings the provider never sent (tool arguments, public
+/// blocks), so there is no projection to reuse. This and
+/// [`parse_visible_text_tools`] are the two seams the dialect layer is reached
+/// through.
+pub(crate) async fn parse_candidate_text_tools(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    text: &str,
+    tools_val: Option<&VmValue>,
+) -> Result<crate::llm::tools::TextToolParseResult, VmError> {
+    parse_text_tools_with_harn(ctx, text, tools_val, "").await
+}
+
+async fn parse_visible_text_tools(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     visible_text_src: &str,
     tools_val: Option<&VmValue>,
     native_tool_calls: &[serde_json::Value],
-) -> TextToolProjection {
+) -> Result<Option<crate::llm::tools::TextToolParseResult>, VmError> {
     let has_tagged_blocks = [
         "<assistant_prose>",
         "<user_response>",
@@ -410,35 +501,74 @@ fn build_text_tool_projection(
     .any(|tag| visible_text_src.contains(tag));
     let has_text_tool_protocol =
         tools_val.is_some() || !native_tool_calls.is_empty() || has_tagged_blocks;
-    let parsed = has_text_tool_protocol
-        .then(|| crate::llm::tools::parse_text_tool_calls_with_tools(visible_text_src, tools_val));
-
-    let has_native_tool_calls = !native_tool_calls.is_empty();
-    let parsed_has_calls = parsed.as_ref().is_some_and(|parse| !parse.calls.is_empty());
-
-    let public_text = match parsed.as_ref() {
-        Some(parse) if !parse.prose.is_empty() => parse.prose.clone(),
-        Some(_) if parsed_has_calls || has_native_tool_calls => String::new(),
-        _ => visible_text_src.to_string(),
-    };
-    let visible_text = if parsed_has_calls || has_native_tool_calls || tools_val.is_some() {
-        public_text.clone()
-    } else {
-        crate::visible_text::project_visible_assistant_text(visible_text_src)
-    };
-
-    TextToolProjection {
-        parsed,
-        public_text,
-        visible_text,
+    if !has_text_tool_protocol {
+        return Ok(None);
     }
+    parse_text_tools_with_harn(ctx, visible_text_src, tools_val, "")
+        .await
+        .map(Some)
+}
+
+pub(crate) async fn parse_text_tools_with_harn(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    text: &str,
+    tools_val: Option<&VmValue>,
+    tool_format: &str,
+) -> Result<crate::llm::tools::TextToolParseResult, VmError> {
+    // `LlmCallOptions::tools` is a carry-through value at this layer. Older
+    // callers and test fixtures can populate it with a non-registry sentinel;
+    // the superseded Rust parser treated those values as no catalog. Normalize
+    // once here so the Harn parser and its host primitives receive only their
+    // declared tool-registry shape.
+    let tools = tools_val
+        .filter(|value| matches!(value, VmValue::Dict(_)))
+        .map(crate::llm::vm_value_to_json);
+    let standalone;
+    let ctx = match ctx {
+        Some(ctx) => ctx,
+        None => {
+            let mut vm = crate::Vm::new();
+            crate::register_core_stdlib(&mut vm);
+            crate::stdlib::macros::register_builtin_defs(
+                &mut vm,
+                crate::llm::tools::PARSE_HOST_PRIMITIVE_BUILTINS,
+            );
+            standalone = crate::vm::AsyncBuiltinCtx::from_vm(vm);
+            &standalone
+        }
+    };
+    crate::stdlib::harn_entry::call_harn_export_typed(
+        ctx,
+        "std/llm/tool_parse",
+        "parse_tool_calls",
+        "parse text tool calls",
+        serde_json::json!({
+            "text": text,
+            "tools": tools,
+            "tool_format": tool_format,
+        }),
+    )
+    .await
+}
+
+/// Build a projection for tests that assemble a result dict directly.
+///
+/// The parse is pure computation, so driving the async producer with a bare
+/// executor is sound here and keeps tests on the same seam production uses.
+#[cfg(test)]
+pub(crate) fn test_text_projection(
+    result: &LlmResult,
+    tools_val: Option<&VmValue>,
+) -> LlmTextProjection {
+    futures::executor::block_on(build_llm_text_projection(None, result, tools_val))
+        .expect("test text projection")
 }
 
 pub(crate) fn vm_build_llm_result(
     result: &LlmResult,
     parsed_json: Option<VmValue>,
     transcript: Option<VmValue>,
-    tools_val: Option<&VmValue>,
+    projection: &LlmTextProjection,
 ) -> VmValue {
     use crate::stdlib::json_to_vm_value;
 
@@ -446,7 +576,8 @@ pub(crate) fn vm_build_llm_result(
     // text channel. `visible_text_src` is the answer with inline reasoning
     // removed (or the original text unchanged for non-inline routes);
     // `inline_reasoning` is the extracted reasoning to fold into the channel.
-    let (visible_text_src, inline_reasoning) = split_inline_reasoning_if_capable(result);
+    let visible_text_src = projection.visible_text_src.as_str();
+    let inline_reasoning = projection.inline_reasoning.clone();
 
     let mut dict = crate::value::DictMap::new();
     dict.put_str("model", result.model.as_str());
@@ -475,17 +606,10 @@ pub(crate) fn vm_build_llm_result(
     // Keep parsing available for tool-calling responses so llm_call can
     // expose canonical/tool metadata, but do not surface tagged-protocol
     // violations for ordinary plain-text completions with no tools.
-    let projection = build_text_tool_projection(&visible_text_src, tools_val, &result.tool_calls);
-    dict.put_str("raw_text", visible_text_src.as_str());
+    dict.put_str("raw_text", visible_text_src);
     dict.put_str("text", projection.public_text.as_str());
 
-    let merged_tool_calls: Vec<serde_json::Value> = if !result.tool_calls.is_empty() {
-        result.tool_calls.clone()
-    } else if let Some(parse) = projection.parsed.as_ref() {
-        parse.calls.clone()
-    } else {
-        Vec::new()
-    };
+    let merged_tool_calls: Vec<serde_json::Value> = projection.merged_tool_calls(result);
     // Always present (possibly empty) so consumers never branch on key
     // existence to mean "no tool calls".
     let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
@@ -609,6 +733,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         }
     );
     LlmResult {
+        text_projection: None,
         served_fast: false,
         text: text.clone(),
         tool_calls: Vec::new(),
@@ -724,7 +849,12 @@ mod cache_supported_serde_tests {
         result.thinking = Some("plan".to_string());
         result.thinking_summary = Some("summary".to_string());
         result.logprobs = vec![serde_json::json!({"token": "x"})];
-        let value = vm_build_llm_result(&result, None, None, None);
+        let value = vm_build_llm_result(
+            &result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&result, None),
+        );
         let dict = value.as_dict().expect("result dict");
         for key in dict.keys() {
             assert!(
@@ -829,7 +959,12 @@ mod cache_supported_serde_tests {
         result.text = "   \n".to_string();
         result.input_tokens = 100;
         result.output_tokens = 3;
-        let value = vm_build_llm_result(&result, None, None, None);
+        let value = vm_build_llm_result(
+            &result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&result, None),
+        );
         let dict = value.as_dict().expect("result dict");
         let outcome = dict
             .get("outcome")
@@ -905,7 +1040,12 @@ mod cache_supported_serde_tests {
         priced.cache_read_tokens = 800;
         let expected_cost = priced.priced_cost_usd().expect("cache-priced result");
         assert!(expected_cost < uncached_cost);
-        let priced_value = vm_build_llm_result(&priced, None, None, None);
+        let priced_value = vm_build_llm_result(
+            &priced,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&priced, None),
+        );
         let priced_dict = priced_value.as_dict().expect("result dict");
         let Some(VmValue::Dict(priced_usage)) = priced_dict.get("usage") else {
             panic!("missing usage dict: {priced_dict:?}");
@@ -922,7 +1062,12 @@ mod cache_supported_serde_tests {
         unpriced.provider = "nonexistent_provider".to_string();
         unpriced.model = "ghost-model".to_string();
         assert_eq!(unpriced.priced_cost_usd(), None);
-        let unpriced_value = vm_build_llm_result(&unpriced, None, None, None);
+        let unpriced_value = vm_build_llm_result(
+            &unpriced,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&unpriced, None),
+        );
         let unpriced_dict = unpriced_value.as_dict().expect("result dict");
         let Some(VmValue::Dict(unpriced_usage)) = unpriced_dict.get("usage") else {
             panic!("missing usage dict: {unpriced_dict:?}");
@@ -944,7 +1089,12 @@ mod cache_supported_serde_tests {
         zero_priced.provider = "local".to_string();
         zero_priced.model = "no-such-local-model".to_string();
         assert_eq!(zero_priced.priced_cost_usd(), Some(0.0));
-        let zero_priced_value = vm_build_llm_result(&zero_priced, None, None, None);
+        let zero_priced_value = vm_build_llm_result(
+            &zero_priced,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&zero_priced, None),
+        );
         let zero_priced_dict = zero_priced_value.as_dict().expect("result dict");
         let Some(VmValue::Dict(zero_priced_usage)) = zero_priced_dict.get("usage") else {
             panic!("missing usage dict: {zero_priced_dict:?}");
@@ -962,7 +1112,12 @@ mod cache_supported_serde_tests {
             "<tool_call>\nrun({ command: \"echo should-not-run\" })\n</tool_call>".to_string(),
         );
 
-        let value = vm_build_llm_result(&result, None, None, None);
+        let value = vm_build_llm_result(
+            &result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&result, None),
+        );
         let dict = value.as_dict().expect("result dict");
 
         let Some(VmValue::List(tool_calls)) = dict.get("tool_calls") else {
@@ -997,7 +1152,12 @@ mod cache_supported_serde_tests {
         .to_string();
 
         let tools = run_tool_registry();
-        let value = vm_build_llm_result(&result, None, None, Some(&tools));
+        let value = vm_build_llm_result(
+            &result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&result, Some(&tools)),
+        );
         let dict = value.as_dict().expect("result dict");
 
         assert_eq!(dict.get("text").map(VmValue::display).as_deref(), Some(""));
@@ -1048,7 +1208,12 @@ mod cache_supported_serde_tests {
         .to_string();
 
         let tools = run_tool_registry();
-        let value = vm_build_llm_result(&result, None, None, Some(&tools));
+        let value = vm_build_llm_result(
+            &result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&result, Some(&tools)),
+        );
         let dict = value.as_dict().expect("result dict");
 
         assert_eq!(
@@ -1089,7 +1254,12 @@ mod cache_supported_serde_tests {
             "arguments": {"command": "cargo test"},
         })];
 
-        let value = vm_build_llm_result(&result, None, None, None);
+        let value = vm_build_llm_result(
+            &result,
+            None,
+            None,
+            &crate::llm::api::test_text_projection(&result, None),
+        );
         let dict = value.as_dict().expect("result dict");
 
         assert_eq!(dict.get("text").map(VmValue::display).as_deref(), Some(""));

@@ -1,0 +1,153 @@
+/**
+ * Provider-specific text-tool dialects.
+ *
+ * The public function is deliberately nil-or-result so the main tagged
+ * parser has one small dispatch seam and these irregular grammars remain
+ * isolated from its measured per-unit hot path.
+ */
+import {
+  DSML_MARKER,
+  HTML_ENTITIES,
+  MISTRAL_ARGS_MARKER,
+  MISTRAL_CALL_MARKER,
+} from "std/llm/dialects"
+import { json_call } from "std/llm/tool_parse_json_support"
+import { provider_result, registry_names } from "std/llm/tool_parse_result"
+
+fn __tool_parse_mistral(text: string, tools) -> dict {
+  const marker_at = text.index_of(MISTRAL_CALL_MARKER)
+  const prose = marker_at >= 0 ? text.slice(0, marker_at) : text
+  const payload =
+    marker_at >= 0 ? trim(text.slice(marker_at + len(MISTRAL_CALL_MARKER), len(text))) : ""
+  let calls: list<dict> = []
+  let errors: list<string> = []
+  const known = registry_names(tools)
+  if starts_with(payload, "[") || starts_with(payload, "{") {
+    const stream = __host_tool_json_stream(payload)
+    if len(stream?.values ?? []) == 0 {
+      errors = errors.appending(
+        "Mistral [TOOL_CALLS] JSON payload did not parse: "
+          + to_string(
+          stream?.error ?? "empty payload",
+        )
+          + ".",
+      )
+    } else {
+      const root = stream.values[0].value
+      const items = type_of(root) == "list" ? root : [root]
+      for item in items {
+        const normalized = json_call(item, true)
+        if !(normalized?.ok ?? false) {
+          errors = errors.appending(to_string(normalized?.error ?? "invalid Mistral call"))
+          continue
+        }
+        const name = to_string(normalized.call?.name ?? "")
+        if !known.contains(name) {
+          errors = errors.appending(
+            "Unknown tool '" + name + "' in Mistral [TOOL_CALLS] JSON payload.",
+          )
+          continue
+        }
+        calls = calls.appending(normalized.call)
+      }
+    }
+  } else {
+    const args_at = payload.index_of(MISTRAL_ARGS_MARKER)
+    const name = args_at >= 0 ? trim(payload.slice(0, args_at)) : ""
+    if name == "" {
+      errors = errors.appending("Mistral [TOOL_CALLS] marker was missing a tool name.")
+    } else if !known.contains(name) {
+      errors = errors.appending("Unknown tool '" + name + "' in Mistral [TOOL_CALLS] marker.")
+    } else if args_at < 0 {
+      errors = errors.appending(
+        "Mistral [TOOL_CALLS] marker for `" + name + "` was missing [ARGS].",
+      )
+    } else {
+      const arguments = try {
+        json_parse(trim(payload.slice(args_at + len(MISTRAL_ARGS_MARKER), len(payload))))
+      } catch (error) {
+        errors = errors.appending(to_string(error))
+        nil
+      }
+      if type_of(arguments) == "dict" {
+        calls = calls.appending({id: "tc_mistral_0", name: name, arguments: arguments})
+      }
+    }
+  }
+  const violations = len(calls) > 0 ? [
+    "Tool call(s) were emitted with Mistral `[TOOL_CALLS]name[ARGS]{...}` markers. "
+      + "Executed this turn so work moves forward; use "
+      + "`<tool_call>name({ ... })</tool_call>` on subsequent turns.",
+  ] : []
+  return provider_result(calls, errors, prose, violations)
+}
+
+fn __tool_parse_dsml(text: string, tools) -> dict {
+  const invoke_pattern = "(?s)<｜DSML｜invoke\\s+name=\"([^\"]+)\"\\s*>(.*?)</｜DSML｜invoke>"
+  const parameter_pattern =
+    "(?s)<｜DSML｜parameter\\s+name=\"([^\"]+)\"(?:\\s+string=\"(true|false)\")?\\s*>(.*?)</｜DSML｜parameter>"
+  const known = registry_names(tools)
+  let calls: list<dict> = []
+  let errors: list<string> = []
+  for invoke in regex_captures(invoke_pattern, text) {
+    const name = to_string(invoke?.groups?.[0] ?? "")
+    if !known.contains(name) {
+      errors = errors.appending("Unknown tool '" + name + "' in DeepSeek DSML invoke.")
+      continue
+    }
+    const body = to_string(invoke?.groups?.[1] ?? "")
+    let arguments: dict = {}
+    for parameter in regex_captures(parameter_pattern, body) {
+      const key = to_string(parameter?.groups?.[0] ?? "")
+      const as_string = to_string(parameter?.groups?.[1] ?? "true") != "false"
+      const raw = to_string(parameter?.groups?.[2] ?? "")
+      if as_string {
+        arguments[key] = __host_tool_decode_entities(raw, HTML_ENTITIES)
+      } else {
+        arguments[key] = try {
+          json_parse(trim(raw))
+        } catch (error) {
+          errors = errors.appending(
+            "DeepSeek DSML parameter `"
+              + key
+              + "` for `"
+              + name
+              + "` could not parse as JSON: "
+              + to_string(error)
+              + ".",
+          )
+          __host_tool_decode_entities(raw, HTML_ENTITIES)
+        }
+      }
+    }
+    calls = calls.appending(
+      {id: "tc_dsml_" + to_string(len(calls)), name: name, arguments: arguments},
+    )
+  }
+  let prose = regex_replace(
+    "(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>|<｜DSML｜tool_calls>.*?</｜DSML｜tool_calls>",
+    "",
+    text,
+  )
+  const marker_at = prose.index_of(DSML_MARKER)
+  if marker_at >= 0 {
+    prose = prose.slice(0, marker_at)
+  }
+  return provider_result(calls, errors, prose, [])
+}
+
+/**
+ * Parse a provider-specific text-tool dialect, or return nil when none matches.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn parse_provider_dialect(text: string, tools) -> dict? {
+  if contains(text, MISTRAL_CALL_MARKER) {
+    return __tool_parse_mistral(text, tools)
+  }
+  if contains(text, DSML_MARKER) {
+    return __tool_parse_dsml(text, tools)
+  }
+  return nil
+}

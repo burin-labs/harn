@@ -1,90 +1,23 @@
 //! Text tool-call parsing: the reverse-direction wire format used by the
 //! agent loop to read tool invocations back out of a model response.
 //!
-//! Exposes `parse_text_tool_calls_with_tools` + `parse_bare_calls_in_body`
-//! and the `TextToolParseResult` shape; everything else is a local helper
-//! (ident parser, TS literal parser, heredoc skipper, native-JSON fallback).
+//! Rust owns byte-oriented scanning and value parsing. Dialect composition
+//! lives in `std/llm/tool_parse.harn`.
 
-mod adaptive;
 mod bare;
-mod fenced_json;
-mod harmony;
+mod host_primitives;
 mod native_json;
-mod reserved;
+mod scan;
 mod streaming;
 mod syntax;
-mod tagged;
 
-#[cfg(test)]
-pub(crate) use bare::parse_bare_calls_in_body;
-pub(crate) use fenced_json::parse_fenced_json_tool_calls;
-#[cfg(test)]
-pub(crate) use native_json::parse_native_json_tool_calls;
+pub(crate) use host_primitives::PARSE_HOST_PRIMITIVE_BUILTINS;
 pub(crate) use streaming::StreamingToolCallDetector;
 pub(crate) use syntax::ident_length;
 pub(crate) use syntax::render_canonical_call;
 pub(crate) use syntax::unescape_heredoc_body;
 pub(crate) use syntax::unwrap_fully_wrapping_heredoc;
 pub(crate) use syntax::{scan_heredoc, HeredocError};
-pub(crate) use tagged::parse_text_tool_calls_with_tools;
-
-/// Text-channel tool-call formats Harn understands. `tool_format == "native"`
-/// is the provider JSON channel and never reaches a text parser; the two
-/// values here are the text-channel grammars the agent loop can hand to
-/// [`parse_text_tool_calls_in_format`].
-///
-/// This is the EXHAUSTIVE-MATCH GUARD seam (per the harn-bump CI gotchas): a
-/// half-wired `"json"` must fail LOUDLY at the `match` below, never silently
-/// fall back to the tagged/text grammar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TextToolFormat {
-    /// The canonical tagged/heredoc text grammar (`<tool_call> name({...})`).
-    Tagged,
-    /// The fenced-JSON grammar (```` ```tool ```` + a single `{name,args}`).
-    FencedJson,
-    /// Opt-in permissive union: every text-channel lane, plus dialects the
-    /// pinned grammars miss (tool-name-as-key), each accepted only when it maps
-    /// unambiguously to exactly one presented tool. DEFAULT-OFF — no catalog
-    /// route resolves here; reachable only via an explicit `tool_format` pin.
-    Adaptive,
-}
-
-impl TextToolFormat {
-    /// Map a `tool_format` option string to a text-channel grammar.
-    ///
-    /// `"text"` (and the empty/auto default) selects the tagged grammar;
-    /// `"json"` selects fenced-JSON. `"native"` is the provider channel and
-    /// has no text parser — callers must not route it here, so it maps to the
-    /// tagged grammar only as a defensive default (the native path never calls
-    /// this). Any unknown value also defaults to tagged.
-    pub(crate) fn from_option(tool_format: &str) -> Self {
-        match tool_format {
-            "json" => TextToolFormat::FencedJson,
-            "adaptive" => TextToolFormat::Adaptive,
-            // "text", "native", "auto", "", and unknown values all read text.
-            _ => TextToolFormat::Tagged,
-        }
-    }
-}
-
-/// Parse model text into tool calls under the requested text-channel grammar.
-///
-/// The EXHAUSTIVE `match` here is the guard that makes a half-wired `"json"`
-/// fail at compile time if a new [`TextToolFormat`] variant is added without a
-/// parser, rather than silently degrading to the tagged grammar. The
-/// downstream `{ id, name, arguments }` record shape is identical for both
-/// grammars, so the agent loop / feedback / history are untouched.
-pub(crate) fn parse_text_tool_calls_in_format(
-    text: &str,
-    tools_val: Option<&crate::value::VmValue>,
-    format: TextToolFormat,
-) -> TextToolParseResult {
-    match format {
-        TextToolFormat::Tagged => parse_text_tool_calls_with_tools(text, tools_val),
-        TextToolFormat::FencedJson => parse_fenced_json_tool_calls(text),
-        TextToolFormat::Adaptive => adaptive::parse_adaptive_tool_calls(text, tools_val),
-    }
-}
 
 pub(crate) fn stamp_synthetic_tool_call_ids(
     calls: &mut [serde_json::Value],
@@ -258,50 +191,6 @@ fn strip_native_name_provider_suffixes(mut text: &str) -> &str {
     }
 }
 
-/// Text the parser consumed without turning it into a tool call.
-///
-/// The parser deliberately does not decide whether a dropped span was *meant*
-/// to be a tool call. Answering that here is what produced an allowlist of
-/// known wrapper tags with a silent fall-through for everything else: a dialect
-/// nobody had added yet was not "unrecognized tool syntax", it was prose, and
-/// the turn died with no calls, no violations, and no events. The parser's
-/// obligation is to be honest about what it dropped; deciding whether any of it
-/// carried tool intent is policy, and lives above this layer.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DroppedFragment {
-    /// The dropped text itself. Carried rather than referenced by offset
-    /// because the parser rewrites its input before scanning (thinking tags are
-    /// stripped), so an offset would be relative to a string the caller never
-    /// sees.
-    pub text: String,
-    pub reason: DroppedReason,
-}
-
-/// Why a span was consumed without producing a call.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DroppedReason {
-    /// Absorbed into assistant prose as ordinary narration.
-    SalvagedAsProse,
-    /// Skipped as narration inside a closed markdown fence.
-    FencedNarration,
-}
-
-impl DroppedReason {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            DroppedReason::SalvagedAsProse => "salvaged_as_prose",
-            DroppedReason::FencedNarration => "fenced_narration",
-        }
-    }
-}
-
-impl DroppedFragment {
-    /// Wire shape of a dropped fragment, as `std/llm/tool_shape` consumes it.
-    pub(crate) fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({ "text": self.text, "reason": self.reason.as_str() })
-    }
-}
-
 /// Result of parsing a prose-interleaved TS tool-call stream.
 ///
 /// The scanner walks the model's text once and splits it into three
@@ -312,16 +201,12 @@ impl DroppedFragment {
 ///     expression removed, whitespace around the hole collapsed. This is
 ///     what should be shown as "the agent's answer" and replayed back into
 ///     conversation history — tool calls are structured data, not narration.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
 pub(crate) struct TextToolParseResult {
     pub calls: Vec<serde_json::Value>,
+    #[serde(rename = "tool_parse_errors")]
     pub errors: Vec<String>,
     pub prose: String,
-    /// Explicit host-facing response content emitted inside one or more
-    /// `<user_response>...</user_response>` blocks. When present, this is the
-    /// preferred public answer surface and supersedes generic
-    /// `<assistant_prose>` for `prose` rendering.
-    pub user_response: Option<String>,
     /// Protocol-level grammar violations (unknown tags, unclosed tags,
     /// malformed `<done>` contents, ambiguous recovered batches). Harmless
     /// stray prose is canonicalized into prose blocks and a single recovered
@@ -329,11 +214,8 @@ pub(crate) struct TextToolParseResult {
     /// violation. Distinct from `errors`, which carry per-call parse
     /// diagnostics. The agent loop replays these to the model as structured
     /// `protocol_violation` feedback so it can self-correct.
+    #[serde(rename = "protocol_violations")]
     pub violations: Vec<String>,
-    /// Count of calls recovered from top-level stray text rather than a
-    /// recognized call wrapper. The agent loop uses this to bound ambiguous
-    /// recovered batches without parsing diagnostic strings.
-    pub recovered_from_stray_count: usize,
     /// Body of the `<done>` block when one was emitted, trimmed of
     /// surrounding whitespace. The agent compares this against the
     /// pipeline's configured `done_sentinel` (default `##DONE##`) to
@@ -343,11 +225,8 @@ pub(crate) struct TextToolParseResult {
     /// Canonical reconstruction of the response in the tagged grammar.
     /// Used as the assistant's history entry so future turns see the
     /// well-formed shape instead of the raw provider bytes.
+    #[serde(rename = "canonical_text")]
     pub canonical: String,
-    /// Text consumed without producing a call. See [`DroppedFragment`]: this is
-    /// what makes "the parser silently ate something that looked like a tool
-    /// call" an answerable question instead of an invisible one.
-    pub dropped: Vec<DroppedFragment>,
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
 //! Streaming candidate detector for text-mode tool calls (harn#692).
 //!
-//! Today the post-stream parsers (`parse_text_tool_calls_with_tools` and
-//! `parse_bare_calls_in_body`) only run after the full provider response
+//! The post-stream Harn composition only runs after the full provider response
 //! is received, so clients see no progress while the model writes a
 //! 200-line `edit({...})` body. This detector consumes the in-flight
 //! assistant text buffer one delta at a time and emits the candidate

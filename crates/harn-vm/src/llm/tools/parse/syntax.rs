@@ -3,6 +3,42 @@ use std::sync::OnceLock;
 
 use super::super::ts_value_parser::TsValueParser;
 
+/// Byte length of the first balanced `{ ... }` JSON object at the start of
+/// `src`, ignoring braces inside JSON strings.
+pub(super) fn balanced_json_object_len(src: &str) -> Option<usize> {
+    let bytes = src.as_bytes();
+    if bytes.first() != Some(&b'{') {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, &byte) in bytes.iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(idx + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Identifiers a model commonly emits as raw source/test code at the start of a
 /// line — `it(...)`, `expect(...)`, `describe(...)`, `assertServiceCount(...)`,
 /// etc. When one of these appears where a tool call is expected, the real cause

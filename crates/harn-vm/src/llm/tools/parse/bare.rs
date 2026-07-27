@@ -41,10 +41,11 @@ pub(crate) fn parse_bare_calls_in_body(
     text: &str,
     tools_val: Option<&VmValue>,
 ) -> TextToolParseResult {
-    let cleaned = strip_thinking_tags(text);
-    let unwrapped = strip_tool_call_wrappers(cleaned.as_ref());
-    let text = unwrapped.as_ref();
+    let known = bare_tool_names(tools_val);
+    parse_bare_calls_in_body_with_known(text, &known)
+}
 
+pub(super) fn bare_tool_names(tools_val: Option<&VmValue>) -> BTreeSet<String> {
     let mut known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
         .into_iter()
         .map(|schema| schema.name)
@@ -53,11 +54,21 @@ pub(crate) fn parse_bare_calls_in_body(
     // the user-declared tool registry).
     known.insert("ledger".to_string());
     known.insert("load_skill".to_string());
-    let harmony_normalized = normalize_harmony_tool_call_lines(text, &known);
+    known
+}
+
+pub(super) fn parse_bare_calls_in_body_with_known(
+    text: &str,
+    known: &BTreeSet<String>,
+) -> TextToolParseResult {
+    let cleaned = strip_thinking_tags(text);
+    let unwrapped = strip_tool_call_wrappers(cleaned.as_ref());
+    let text = unwrapped.as_ref();
+    let harmony_normalized = normalize_harmony_tool_call_lines(text, known);
     let text = harmony_normalized.as_ref();
 
     if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
-        let result = parse_bare_calls_in_body(unwrapped, tools_val);
+        let result = parse_bare_calls_in_body_with_known(unwrapped, known);
         if !result.calls.is_empty() || !result.errors.is_empty() {
             return result;
         }
@@ -288,7 +299,7 @@ pub(crate) fn parse_bare_calls_in_body(
                                     continue;
                                 }
                             }
-                            errors.push(unknown_tool_feedback(name_str, &known));
+                            errors.push(unknown_tool_feedback(name_str, known));
                             i = k + name_len + 1;
                             at_line_start = false;
                             continue;
@@ -405,18 +416,15 @@ pub(crate) fn parse_bare_calls_in_body(
     // instructions and emit `[{"id":"call_...","function":{...}}]` raw.
     // Parse and execute directly instead of wasting an iteration.
     if calls.is_empty() && errors.is_empty() {
-        let (native_calls, native_errors) = parse_native_json_tool_calls(text, &known);
+        let (native_calls, native_errors) = parse_native_json_tool_calls(text, known);
         if !native_calls.is_empty() || !native_errors.is_empty() {
             return TextToolParseResult {
                 calls: native_calls,
                 errors: native_errors,
                 prose: String::new(),
-                user_response: None,
                 violations: Vec::new(),
-                recovered_from_stray_count: 0,
                 done_marker: None,
                 canonical: String::new(),
-                dropped: Vec::new(),
             };
         }
     }
@@ -425,12 +433,9 @@ pub(crate) fn parse_bare_calls_in_body(
         calls,
         errors,
         prose,
-        user_response: None,
         violations: Vec::new(),
-        recovered_from_stray_count: 0,
         done_marker: None,
         canonical: String::new(),
-        dropped: Vec::new(),
     }
 }
 

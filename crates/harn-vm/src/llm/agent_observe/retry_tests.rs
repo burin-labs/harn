@@ -332,7 +332,8 @@ done: false\n\
 confidence: 0.75\n\
 summary: Listed the workspace\n\
 ## END_LOOP_STATE";
-    let result = LlmResult {
+    let mut result = LlmResult {
+        text_projection: None,
         served_fast: false,
         text: text.to_string(),
         tool_calls: Vec::new(),
@@ -352,6 +353,12 @@ summary: Listed the workspace\n\
         telemetry: ProviderTelemetry::default(),
     };
     let tools = run_tool_registry();
+    futures::executor::block_on(crate::llm::api::ensure_llm_text_projection(
+        None,
+        &mut result,
+        Some(&tools),
+    ))
+    .expect("text projection");
 
     // 1. Observability path: the response record now exposes the parsed
     //    call via the new sidecar, while native `tool_calls` stays empty.
@@ -362,7 +369,7 @@ summary: Listed the workspace\n\
     ));
     install_active_event_log(event_log.clone());
     push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
-    dump_llm_response(0, "call-textfmt", &result, 42, None, Some(&tools));
+    dump_llm_response(0, "call-textfmt", &result, 42, None);
     pop_llm_transcript_dir();
 
     let transcript =
@@ -418,7 +425,12 @@ summary: Listed the workspace\n\
     //    stays empty (native-only) for a text-format result. The merged
     //    `tool_calls` carries the call for unified-view callers, but the
     //    history-feeding native list does not.
-    let vm_result = vm_build_llm_result(&result, None, None, Some(&tools));
+    let vm_result = vm_build_llm_result(
+        &result,
+        None,
+        None,
+        &crate::llm::api::test_text_projection(&result, Some(&tools)),
+    );
     let VmValue::Dict(ref dict) = vm_result else {
         panic!("vm_build_llm_result must return a dict");
     };

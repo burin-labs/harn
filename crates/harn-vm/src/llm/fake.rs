@@ -455,6 +455,7 @@ async fn play_stream(
     });
 
     Ok(LlmResult {
+        text_projection: None,
         served_fast: false,
         text,
         raw_tool_calls: Vec::new(),

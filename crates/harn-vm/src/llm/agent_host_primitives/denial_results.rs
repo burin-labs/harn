@@ -1,5 +1,110 @@
 use crate::agent_events::{ToolCallErrorCategory, ToolDenial, ToolMutationStatus};
 
+pub(super) struct DenialEvidence {
+    pub(super) policy_decision: Option<serde_json::Value>,
+    pub(super) schema_repair: Option<serde_json::Value>,
+}
+
+impl DenialEvidence {
+    pub(super) fn new(
+        policy_decision: Option<serde_json::Value>,
+        schema_repair: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            policy_decision,
+            schema_repair,
+        }
+    }
+}
+
+fn emit_permission_deny_event(
+    session_id: &str,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    denial: &ToolDenial,
+    escalated: bool,
+    policy_decision: Option<serde_json::Value>,
+) {
+    if !crate::agent_sessions::exists(session_id) {
+        return;
+    }
+    let event = super::permissions::permission_deny_transcript_event(
+        tool_name,
+        tool_args,
+        denial,
+        escalated,
+        policy_decision,
+    );
+    let _ = crate::agent_sessions::append_event(session_id, event);
+}
+
+pub(super) async fn deny_tool_call(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    session_id: &str,
+    tool_name: &str,
+    tool_call_id: &str,
+    tool_args: &serde_json::Value,
+    mut denial: ToolDenial,
+    escalated: bool,
+    evidence: DenialEvidence,
+) -> serde_json::Value {
+    let repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
+        Box::pin(super::agent_tools::embedded_call_repair_result(
+            ctx, tool_name, tool_args,
+        ))
+        .await
+        .or(evidence.schema_repair)
+    } else {
+        None
+    };
+    denial = super::tools::normalize_repaired_denial(denial, repair.as_ref());
+    if denial.denied_paths.is_empty() {
+        denial.denied_paths =
+            crate::orchestration::current_tool_declared_paths(tool_name, tool_args);
+    }
+    emit_permission_deny_event(
+        session_id,
+        tool_name,
+        tool_args,
+        &denial,
+        escalated,
+        evidence.policy_decision,
+    );
+    agent_primitive_denied_tool(
+        tool_name,
+        tool_call_id,
+        tool_args,
+        denial.reason.clone(),
+        ToolCallErrorCategory::PermissionDenied,
+        Some(&denial),
+        repair,
+    )
+}
+
+pub(super) async fn deny_tool_call_value(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    session_id: &str,
+    tool_name: &str,
+    tool_call_id: &str,
+    tool_args: &serde_json::Value,
+    denial: ToolDenial,
+    escalated: bool,
+    evidence: DenialEvidence,
+) -> crate::value::VmValue {
+    let denied = deny_tool_call(
+        ctx,
+        session_id,
+        tool_name,
+        tool_call_id,
+        tool_args,
+        denial,
+        escalated,
+        evidence,
+    )
+    .await;
+    crate::stdlib::json_to_vm_value(&denied)
+}
+
 pub(super) fn agent_primitive_denied_tool(
     tool_name: &str,
     tool_call_id: &str,

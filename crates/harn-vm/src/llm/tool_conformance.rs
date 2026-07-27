@@ -1,9 +1,5 @@
 //! One-tool provider conformance probe for local/runtime tool calling.
-//!
-//! The probe is deliberately tiny: define one harmless `echo_marker` tool,
-//! ask the model to call it with a fixed marker, and classify what came back.
-//! The classification is the stable contract eval harnesses consume; the live
-//! HTTP runner is a convenience around that classifier.
+//! Defines one harmless tool with stable fixture classification and a live runner.
 
 use std::collections::BTreeMap;
 
@@ -18,6 +14,8 @@ mod helpers;
 mod request;
 #[path = "tool_conformance_request_contract.rs"]
 mod request_contract;
+#[path = "tool_conformance_parse.rs"]
+mod text_parse;
 #[path = "tool_conformance_types.rs"]
 mod types;
 use super::usage_normalization::extract_probe_usage;
@@ -434,7 +432,7 @@ fn classify_tool_conformance_fixture_with_policy(
     let model = model.into();
     let response = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({ "content": raw }));
     let usage = extract_probe_usage(&provider, &model, &response);
-    let case = classify_tool_probe_response(
+    let case = futures::executor::block_on(classify_tool_probe_response(
         mode,
         &response,
         ToolProbeFormatPolicy {
@@ -446,7 +444,7 @@ fn classify_tool_conformance_fixture_with_policy(
         None,
         None,
         usage,
-    );
+    ));
     report_from_cases(
         provider,
         model,
@@ -1009,6 +1007,7 @@ async fn execute_live_probe_case(
         elapsed,
         usage,
     )
+    .await
 }
 
 fn probe_values_present(calls: &[Value], expected_values: &[String]) -> bool {
@@ -1038,7 +1037,7 @@ fn expected_tool_values(probe_case: ToolProbeCase, expected_value: &str) -> Vec<
     }
 }
 
-fn classify_tool_probe_response(
+async fn classify_tool_probe_response(
     mode: ToolProbeMode,
     response: &Value,
     format_policy: ToolProbeFormatPolicy,
@@ -1099,8 +1098,10 @@ fn classify_tool_probe_response(
 
     let content = extract_content(response);
     let tools = probe_tool_registry();
-    let tagged = crate::llm::tools::parse_text_tool_calls_with_tools(&content, Some(&tools));
-    let fenced = crate::llm::tools::parse_fenced_json_tool_calls(&content);
+    let (tagged, fenced) = match text_parse::parse_text_tool_formats(&content, &tools).await {
+        Ok(parsed) => parsed,
+        Err(error) => return ToolConformanceCase::transport_error(mode, error, elapsed_ms),
+    };
     let requested = match tool_format {
         ToolProbeFormat::Native | ToolProbeFormat::Text => &tagged,
         ToolProbeFormat::Json => &fenced,
@@ -1494,7 +1495,6 @@ fn first_non_empty(value: Option<String>, fallback: &str) -> String {
 fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
     clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
-
 #[cfg(test)]
 #[path = "tool_conformance_tests.rs"]
 mod tests;
