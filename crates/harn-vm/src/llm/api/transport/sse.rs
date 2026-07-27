@@ -1136,6 +1136,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         telemetry = ProviderTelemetry::from_anthropic_usage(&usage, anth_request_id.as_deref());
     }
     Ok(LlmResult {
+        text_projection: None,
         text,
         tool_calls,
         raw_tool_calls,

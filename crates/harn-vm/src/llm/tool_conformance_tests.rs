@@ -1256,7 +1256,7 @@ fn aggregates_openai_streaming_tool_call_deltas() {
                    data: [DONE]\n";
     let response = aggregate_stream_text(raw, "local");
     assert_eq!(response["frames"].as_array().map(Vec::len), Some(2));
-    let case = classify_tool_probe_response(
+    let case = futures::executor::block_on(classify_tool_probe_response(
         ToolProbeMode::Streaming,
         &response,
         ToolProbeFormatPolicy {
@@ -1268,7 +1268,7 @@ fn aggregates_openai_streaming_tool_call_deltas() {
         None,
         None,
         None,
-    );
+    ));
     assert!(case.ok, "{case:?}");
     assert_eq!(
         case.classification,
@@ -1292,7 +1292,7 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
                    event: message_stop\n\
                    data: {\"type\":\"message_stop\"}\n";
     let response = aggregate_stream_text(raw, "anthropic");
-    let case = classify_tool_probe_response(
+    let case = futures::executor::block_on(classify_tool_probe_response(
         ToolProbeMode::Streaming,
         &response,
         ToolProbeFormatPolicy {
@@ -1304,7 +1304,7 @@ fn aggregates_anthropic_streaming_tool_use_deltas() {
         None,
         None,
         None,
-    );
+    ));
     assert!(case.ok, "{case:?}");
     assert_eq!(
         case.classification,

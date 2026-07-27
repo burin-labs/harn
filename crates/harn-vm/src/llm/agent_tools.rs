@@ -59,22 +59,11 @@ pub(super) fn unavailable_tool_result(
     })
 }
 
-/// Detect a "wrapper-as-tool-name" call and build repair-class feedback for
-/// it: the model shipped Harn's text tool-call ENVELOPE down the native
-/// channel — a call literally named `tool_call` (or another generic wrapper
-/// name) whose arguments carry one complete text-format call, e.g. arguments
-/// of `<tool_call>\nlook({ file: "src/main.rs", intent: "read" })\n</tool_call>`.
-/// The embedded call is CORRECT; only the addressing is wrong, so the
-/// feedback must be parse-repair class (name the embedded call, show the
-/// direct invocation), never a terminal denial. Returns `None` unless the
-/// arguments parse as exactly one clean text-format call whose target is not
-/// itself a wrapper and is callable under the active policy, so anything
-/// ambiguous falls back to the unavailable-tool feedback instead.
-///
-/// Corrective feedback only — the call is NOT auto-dispatched: dispatching a
-/// repaired call would bypass the approval flow the original name was gated
-/// through.
-pub(super) fn embedded_call_repair_result(
+/// Build corrective feedback when a native call contains one valid embedded
+/// text-format call. Never dispatches the repaired call, which would bypass
+/// the original call's approval flow.
+pub(super) async fn embedded_call_repair_result(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     tool_name: &str,
     tool_args: &serde_json::Value,
 ) -> Option<serde_json::Value> {
@@ -99,14 +88,16 @@ pub(super) fn embedded_call_repair_result(
     } else {
         embedded_call_payload_text(tool_args)?
     };
-    let tools_json = serde_json::Value::Array(
-        allowed
+    let tools_json = serde_json::json!({
+        "tools": allowed
             .iter()
             .map(|name| serde_json::json!({ "name": name }))
-            .collect(),
-    );
+            .collect::<Vec<_>>(),
+    });
     let tools_val = crate::stdlib::json_to_vm_value(&tools_json);
-    let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(&payload, Some(&tools_val));
+    let parsed = crate::llm::api::parse_text_tools_with_harn(ctx, &payload, Some(&tools_val), "")
+        .await
+        .ok()?;
     if !parsed.errors.is_empty() || parsed.calls.len() != 1 {
         if name_field_payload.is_some() {
             return Some(call_shaped_tool_name_repair_result(
@@ -921,6 +912,15 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    fn embedded_call_repair_result(
+        tool_name: &str,
+        tool_args: &serde_json::Value,
+    ) -> Option<serde_json::Value> {
+        futures::executor::block_on(super::embedded_call_repair_result(
+            None, tool_name, tool_args,
+        ))
+    }
 
     // D5: a permission denial must tell the model what to do instead, not just
     // report `{"error":"permission_denied"}`. The bare object made the model

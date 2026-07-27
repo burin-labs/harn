@@ -4,7 +4,7 @@
 use crate::value::VmDictExt;
 
 use super::telemetry::ProviderTelemetry;
-use crate::value::VmValue;
+use crate::value::{VmError, VmValue};
 
 fn default_true() -> bool {
     true
@@ -81,6 +81,10 @@ impl From<RawProviderToolCall> for serde_json::Value {
 pub(crate) struct LlmResult {
     pub text: String,
     pub tool_calls: Vec<serde_json::Value>,
+    /// Derived text-channel projection. The observed-call boundary attaches
+    /// this once so transcript observability and VM assembly share one parse.
+    #[serde(skip)]
+    pub text_projection: Option<Box<LlmTextProjection>>,
     /// Provider-native tool-call envelopes before Harn normalizes names and
     /// arguments for dispatch. Transcript-only receipt for format/adapter
     /// forensics; dispatch must keep using `tool_calls`.
@@ -398,6 +402,7 @@ fn build_outcome_dict(kind: LlmOutcomeKind, result: &LlmResult) -> crate::value:
 /// happen where an `AsyncBuiltinCtx` exists. Re-deriving it in three sync
 /// helpers is also what made one response text get parsed three times per
 /// provider call.
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LlmTextProjection {
     pub(crate) visible_text_src: String,
     pub(crate) inline_reasoning: Option<String>,
@@ -421,12 +426,13 @@ impl LlmTextProjection {
 }
 
 pub(crate) async fn build_llm_text_projection(
-    _ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     result: &LlmResult,
     tools_val: Option<&VmValue>,
-) -> LlmTextProjection {
+) -> Result<LlmTextProjection, VmError> {
     let (visible_text_src, inline_reasoning) = split_inline_reasoning_if_capable(result);
-    let parsed = parse_visible_text_tools(&visible_text_src, tools_val, &result.tool_calls);
+    let parsed =
+        parse_visible_text_tools(ctx, &visible_text_src, tools_val, &result.tool_calls).await?;
 
     let has_native_tool_calls = !result.tool_calls.is_empty();
     let parsed_has_calls = parsed.as_ref().is_some_and(|parse| !parse.calls.is_empty());
@@ -442,13 +448,26 @@ pub(crate) async fn build_llm_text_projection(
         crate::visible_text::sanitize_visible_assistant_text(&visible_text_src, false)
     };
 
-    LlmTextProjection {
+    Ok(LlmTextProjection {
         visible_text_src,
         inline_reasoning,
         parsed,
         public_text,
         visible_text,
+    })
+}
+
+pub(crate) async fn ensure_llm_text_projection(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    result: &mut LlmResult,
+    tools_val: Option<&VmValue>,
+) -> Result<(), VmError> {
+    if result.text_projection.is_none() {
+        result.text_projection = Some(Box::new(
+            build_llm_text_projection(ctx, result, tools_val).await?,
+        ));
     }
+    Ok(())
 }
 
 /// Parse one derived candidate string under the text-tool grammar.
@@ -459,18 +478,19 @@ pub(crate) async fn build_llm_text_projection(
 /// [`parse_visible_text_tools`] are the two seams the dialect layer is reached
 /// through.
 pub(crate) async fn parse_candidate_text_tools(
-    _ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     text: &str,
     tools_val: Option<&VmValue>,
-) -> crate::llm::tools::TextToolParseResult {
-    crate::llm::tools::parse_text_tool_calls_with_tools(text, tools_val)
+) -> Result<crate::llm::tools::TextToolParseResult, VmError> {
+    parse_text_tools_with_harn(ctx, text, tools_val, "").await
 }
 
-fn parse_visible_text_tools(
+async fn parse_visible_text_tools(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     visible_text_src: &str,
     tools_val: Option<&VmValue>,
     native_tool_calls: &[serde_json::Value],
-) -> Option<crate::llm::tools::TextToolParseResult> {
+) -> Result<Option<crate::llm::tools::TextToolParseResult>, VmError> {
     let has_tagged_blocks = [
         "<assistant_prose>",
         "<user_response>",
@@ -481,8 +501,46 @@ fn parse_visible_text_tools(
     .any(|tag| visible_text_src.contains(tag));
     let has_text_tool_protocol =
         tools_val.is_some() || !native_tool_calls.is_empty() || has_tagged_blocks;
-    has_text_tool_protocol
-        .then(|| crate::llm::tools::parse_text_tool_calls_with_tools(visible_text_src, tools_val))
+    if !has_text_tool_protocol {
+        return Ok(None);
+    }
+    parse_text_tools_with_harn(ctx, visible_text_src, tools_val, "")
+        .await
+        .map(Some)
+}
+
+pub(crate) async fn parse_text_tools_with_harn(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    text: &str,
+    tools_val: Option<&VmValue>,
+    tool_format: &str,
+) -> Result<crate::llm::tools::TextToolParseResult, VmError> {
+    let standalone;
+    let ctx = match ctx {
+        Some(ctx) => ctx,
+        None => {
+            let mut vm = crate::Vm::new();
+            crate::register_core_stdlib(&mut vm);
+            crate::stdlib::macros::register_builtin_defs(
+                &mut vm,
+                crate::llm::tools::PARSE_HOST_PRIMITIVE_BUILTINS,
+            );
+            standalone = crate::vm::AsyncBuiltinCtx::from_vm(vm);
+            &standalone
+        }
+    };
+    crate::stdlib::harn_entry::call_harn_export_typed(
+        ctx,
+        "std/llm/tool_parse",
+        "parse_tool_calls",
+        "parse text tool calls",
+        serde_json::json!({
+            "text": text,
+            "tools": tools_val.map(crate::llm::vm_value_to_json),
+            "tool_format": tool_format,
+        }),
+    )
+    .await
 }
 
 /// Build a projection for tests that assemble a result dict directly.
@@ -495,6 +553,7 @@ pub(crate) fn test_text_projection(
     tools_val: Option<&VmValue>,
 ) -> LlmTextProjection {
     futures::executor::block_on(build_llm_text_projection(None, result, tools_val))
+        .expect("test text projection")
 }
 
 pub(crate) fn vm_build_llm_result(
@@ -666,6 +725,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         }
     );
     LlmResult {
+        text_projection: None,
         served_fast: false,
         text: text.clone(),
         tool_calls: Vec::new(),

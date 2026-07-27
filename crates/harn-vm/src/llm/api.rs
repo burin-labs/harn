@@ -57,8 +57,9 @@ pub(crate) use response::{
 #[cfg(test)]
 pub(crate) use result::test_text_projection;
 pub(crate) use result::{
-    build_llm_text_projection, parse_candidate_text_tools, vm_build_llm_result, LlmResult,
-    LlmTextProjection, RawProviderToolCall,
+    build_llm_text_projection, ensure_llm_text_projection, parse_candidate_text_tools,
+    parse_text_tools_with_harn, vm_build_llm_result, LlmResult, LlmTextProjection,
+    RawProviderToolCall,
 };
 pub(crate) use schema_stream::{
     aborted_result_value as schema_stream_aborted_result_value, parse_schema_stream_abort,

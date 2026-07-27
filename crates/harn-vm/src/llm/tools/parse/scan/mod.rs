@@ -147,8 +147,8 @@ impl<'a> Scan<'a> {
         self.units
     }
 
-    /// One turn of the scan, in the same branch order as the Rust parser this
-    /// stream replaces (`tagged/mod.rs::parse_text_tool_calls_with_tools`).
+    /// One turn of the scan, in the branch order consumed by
+    /// `std/llm/tool_parse.harn`.
     fn step(&mut self) {
         let cursor = self.cursor;
         let bytes = self.src.as_bytes();

@@ -411,12 +411,9 @@ pub(crate) fn parse_bare_calls_in_body(
                 calls: native_calls,
                 errors: native_errors,
                 prose: String::new(),
-                user_response: None,
                 violations: Vec::new(),
-                recovered_from_stray_count: 0,
                 done_marker: None,
                 canonical: String::new(),
-                dropped: Vec::new(),
             };
         }
     }
@@ -425,12 +422,9 @@ pub(crate) fn parse_bare_calls_in_body(
         calls,
         errors,
         prose,
-        user_response: None,
         violations: Vec::new(),
-        recovered_from_stray_count: 0,
         done_marker: None,
         canonical: String::new(),
-        dropped: Vec::new(),
     }
 }
 

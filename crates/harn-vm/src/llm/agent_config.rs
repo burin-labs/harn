@@ -153,7 +153,7 @@ pub(crate) async fn build_llm_call_result(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     result: &super::api::LlmResult,
     opts: &super::api::LlmCallOptions,
-) -> VmValue {
+) -> Result<VmValue, VmError> {
     use super::api::vm_build_llm_result;
     use super::helpers::{expects_structured_output, extract_json};
     use crate::stdlib::json_to_vm_value;
@@ -219,14 +219,18 @@ pub(crate) async fn build_llm_call_result(
         Some("active"),
     );
 
-    // One text-channel projection per provider result, produced here because
-    // this is the innermost point that still has an `AsyncBuiltinCtx`. The
-    // structured-output extractor and the result assembly both read it.
-    let projection = super::api::build_llm_text_projection(ctx, result, opts.tools.as_ref()).await;
+    let owned_projection;
+    let projection = if let Some(projection) = result.text_projection.as_deref() {
+        projection
+    } else {
+        owned_projection =
+            super::api::build_llm_text_projection(ctx, result, opts.tools.as_ref()).await?;
+        &owned_projection
+    };
 
     if expects_structured_output(opts) {
-        let parsed = structured_output_candidates(ctx, result, &projection, opts.tools.as_ref())
-            .await
+        let parsed = structured_output_candidates(ctx, result, projection, opts.tools.as_ref())
+            .await?
             .into_iter()
             .find_map(|candidate| {
                 let json_str = extract_json(&candidate);
@@ -234,10 +238,20 @@ pub(crate) async fn build_llm_call_result(
                     .ok()
                     .map(|jv| json_to_vm_value(&jv))
             });
-        return vm_build_llm_result(result, parsed, Some(transcript), &projection);
+        return Ok(vm_build_llm_result(
+            result,
+            parsed,
+            Some(transcript),
+            projection,
+        ));
     }
 
-    vm_build_llm_result(result, None, Some(transcript), &projection)
+    Ok(vm_build_llm_result(
+        result,
+        None,
+        Some(transcript),
+        projection,
+    ))
 }
 
 async fn structured_output_candidates(
@@ -245,7 +259,7 @@ async fn structured_output_candidates(
     result: &super::api::LlmResult,
     projection: &super::api::LlmTextProjection,
     tools: Option<&crate::value::VmValue>,
-) -> Vec<String> {
+) -> Result<Vec<String>, VmError> {
     let mut candidates = Vec::new();
     push_structured_output_candidate(&mut candidates, result.text.trim().to_string());
 
@@ -281,13 +295,13 @@ async fn structured_output_candidates(
         if candidate == result.text.trim() {
             continue;
         }
-        let parsed = super::api::parse_candidate_text_tools(ctx, &candidate, tools).await;
+        let parsed = super::api::parse_candidate_text_tools(ctx, &candidate, tools).await?;
         if !parsed.prose.is_empty() {
             push_structured_output_candidate(&mut candidates, parsed.prose.trim().to_string());
         }
     }
 
-    candidates
+    Ok(candidates)
 }
 
 fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: String) {
@@ -471,7 +485,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::Hos
             )
             .await?;
 
-            Ok(build_llm_call_result(Some(&ctx), &result, &opts).await)
+            build_llm_call_result(Some(&ctx), &result, &opts).await
         }
     });
 }
@@ -555,6 +569,7 @@ mod tests {
     #[test]
     fn structured_output_candidates_include_tool_call_arguments() {
         let result = crate::llm::api::LlmResult {
+            text_projection: None,
             served_fast: false,
             text: String::new(),
             tool_calls: vec![serde_json::json!({
@@ -581,13 +596,15 @@ mod tests {
 
         let projection = futures::executor::block_on(crate::llm::api::build_llm_text_projection(
             None, &result, None,
-        ));
+        ))
+        .expect("projection");
         let candidates = futures::executor::block_on(structured_output_candidates(
             None,
             &result,
             &projection,
             None,
-        ));
+        ))
+        .expect("structured output candidates");
 
         assert!(candidates
             .iter()

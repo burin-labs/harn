@@ -808,7 +808,7 @@ async fn llm_completion_builtin(
             serde_json::json!(result.output_tokens),
         );
     }
-    let projection = crate::llm::api::build_llm_text_projection(Some(&_ctx), &result, None).await;
+    let projection = crate::llm::api::build_llm_text_projection(Some(&_ctx), &result, None).await?;
     Ok(vm_build_llm_result(&result, None, None, &projection))
 }
 

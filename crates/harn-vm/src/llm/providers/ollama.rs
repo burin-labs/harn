@@ -405,6 +405,7 @@ fn parse_raw_generate_json(
     }
     let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
+        text_projection: None,
         served_fast: false,
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
@@ -510,6 +511,7 @@ async fn parse_raw_generate_stream(
         )))));
     }
     Ok(LlmResult {
+        text_projection: None,
         served_fast: false,
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,

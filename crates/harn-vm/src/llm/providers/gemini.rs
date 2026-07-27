@@ -513,6 +513,7 @@ pub(crate) fn parse_response(
         .filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
     Ok(LlmResult {
+        text_projection: None,
         served_fast: false,
         text,
         raw_tool_calls,

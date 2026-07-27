@@ -25,22 +25,16 @@ pub(crate) use native::{
     apply_tool_search_native_injection_typed, extract_deferred_tool_names, vm_tools_to_native,
 };
 pub(crate) use parse::ident_length;
-pub(crate) use parse::parse_fenced_json_tool_calls;
 pub(crate) use parse::parse_text_tool_argument_payload;
 pub(crate) use parse::parse_text_tool_call_from_native_arguments;
 pub(crate) use parse::parse_text_tool_call_from_native_name;
-pub(crate) use parse::parse_text_tool_calls_in_format;
-pub(crate) use parse::parse_text_tool_calls_with_tools;
 pub(crate) use parse::render_canonical_call;
 pub(crate) use parse::stamp_synthetic_tool_call_ids;
 pub(crate) use parse::unwrap_fully_wrapping_heredoc;
 pub(crate) use parse::NativeToolNameTextCall;
 pub(crate) use parse::StreamingToolCallDetector;
-pub(crate) use parse::TextToolFormat;
 pub(crate) use parse::TextToolParseResult;
 pub(crate) use parse::PARSE_HOST_PRIMITIVE_BUILTINS;
-#[cfg(test)]
-pub(crate) use parse::{parse_bare_calls_in_body, parse_native_json_tool_calls};
 pub(crate) use protocol::{
     assistant_prose_block, text_tool_call_block, text_tool_call_tag_pairs, TEXT_TOOL_CALL_CLOSE,
     TEXT_TOOL_CALL_CLOSE_COMPACT, TEXT_TOOL_CALL_OPEN, TEXT_TOOL_CALL_OPEN_COMPACT,

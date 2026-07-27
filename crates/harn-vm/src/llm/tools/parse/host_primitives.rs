@@ -20,8 +20,9 @@ use crate::value::{VmError, VmValue};
 
 use super::bare::parse_bare_calls_in_body;
 use super::scan::{call_head, scan_units, ScanSpec};
-use super::syntax::{parse_object_literal_from, parse_ts_call_from, render_canonical_call};
-use super::tagged::balanced_json_object_len;
+use super::syntax::{
+    balanced_json_object_len, parse_object_literal_from, parse_ts_call_from, render_canonical_call,
+};
 
 /// The primitives, in the order the composition reaches for them. Registered
 /// from `llm::register_llm_builtins` alongside the other agent-host slices.
