@@ -536,32 +536,8 @@ harn-openapi = {dependency}
         ("README.md", readme),
         ("LICENSE", "MIT OR Apache-2.0\n".to_string()),
         (
-            ".github/workflows/harn-package.yml",
-            r"name: Harn OpenAPI SDK package
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
-permissions:
-  contents: read
-
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-      - uses: burin-labs/harn/.github/actions/setup-harn@e2089cd9628995bf2080cd1515086a891dff34f4
-      - run: harn package verify --receipt-out .harn/receipts/package-verify.json
-      - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: harn-package-verification
-          path: .harn/receipts/package-verify.json
-          if-no-files-found: error
-"
-            .to_string(),
+            ".github/workflows/ci.yml",
+            include_str!("../../assets/scaffold/harn-package-ci.yml").to_string(),
         ),
     ])
 }
@@ -1026,6 +1002,11 @@ paths: {}
         let manifest = fs::read_to_string(out.join("harn.toml")).unwrap();
         assert!(manifest.contains("[exports]\ntiny_sdk = \"src/lib.harn\""));
         assert!(manifest.contains("harn-openapi = { git = "));
+        assert_eq!(
+            fs::read(out.join(".github/workflows/ci.yml")).unwrap(),
+            include_bytes!("../../assets/scaffold/harn-package-ci.yml"),
+            "OpenAPI CI projection drifted"
+        );
 
         install_packages_in(
             &PackageWorkspace::for_test(&out, tmp.path().join(".cache")),

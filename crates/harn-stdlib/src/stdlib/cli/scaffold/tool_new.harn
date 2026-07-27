@@ -237,29 +237,33 @@ fn __render_readme(package_name: string, description: string) -> string {
 }
 
 fn __render_workflow_yaml() -> string {
-  return "name: Harn tool package\n"
+  return "name: CI\n"
     + "\n"
     + "on:\n"
     + "  pull_request:\n"
     + "  push:\n"
     + "    branches: [main]\n"
+    + "  merge_group:\n"
+    + "  workflow_dispatch:\n"
     + "\n"
     + "permissions:\n"
     + "  contents: read\n"
     + "\n"
     + "jobs:\n"
-    + "  verify:\n"
+    + "  package:\n"
+    + "    uses: burin-labs/.github/.github/workflows/harn-package.yml@bcdcf64e5c7021f649432b77fe2e1f9f489c4824\n"
+    + "\n"
+    + "  status:\n"
+    + "    name: CI status\n"
+    + "    if: always()\n"
+    + "    needs: [package]\n"
     + "    runs-on: ubuntu-latest\n"
     + "    steps:\n"
-    + "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6\n"
-    + "      - uses: burin-labs/harn/.github/actions/setup-harn@e2089cd9628995bf2080cd1515086a891dff34f4\n"
-    + "      - run: harn package verify --receipt-out .harn/receipts/package-verify.json\n"
-    + "      - if: always()\n"
-    + "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7\n"
-    + "        with:\n"
-    + "          name: harn-package-verification\n"
-    + "          path: .harn/receipts/package-verify.json\n"
-    + "          if-no-files-found: error\n"
+    + "      - name: Enforce required jobs\n"
+    + "        env:\n"
+    + "          PACKAGE_RESULT: $"
+    + "{{ needs.package.result }}\n"
+    + "        run: test \"$PACKAGE_RESULT\" = success\n"
 }
 
 fn __render_harn_lock(harn_version: string) -> string {
@@ -317,5 +321,5 @@ fn main(harness: Harness) {
   __write(harness, dest, "tests/test_tool.harn", __render_test_harn(name, ident))
   __write(harness, dest, "README.md", __render_readme(name, description))
   __write(harness, dest, "LICENSE", "MIT OR Apache-2.0\n")
-  __write(harness, dest, ".github/workflows/harn-package.yml", __render_workflow_yaml())
+  __write(harness, dest, ".github/workflows/ci.yml", __render_workflow_yaml())
 }
