@@ -32,11 +32,18 @@ cat > "$fake_harn" <<'SH'
 set -euo pipefail
 if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]]; then
   printf 'meta\tfalse\ttest\n'
-  if [[ "${FAKE_AUDIT_LANE:-security}" == "rust" ]]; then
-    printf 'lane\trust-audit\trun_rust_audit\n'
-  else
-    printf 'lane\tsecurity-audit\trun_security_audit\n'
-  fi
+  case "${FAKE_AUDIT_LANE:-security}" in
+    rust)
+      printf 'lane\trust-audit\trun_rust_audit\n'
+      ;;
+    parallel)
+      printf 'lane\trust-audit\trun_rust_audit\n'
+      printf 'lane\tsecurity-audit\trun_security_audit\n'
+      ;;
+    *)
+      printf 'lane\tsecurity-audit\trun_security_audit\n'
+      ;;
+  esac
   exit 0
 fi
 echo "unexpected fake harn invocation: $*" >&2
@@ -46,6 +53,12 @@ chmod +x "$fake_harn"
 
 cat > "$fake_bin/rg" <<'SH'
 #!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${FAKE_SYNC_FIFO:-}" ]]; then
+  read -r token < "$FAKE_SYNC_FIFO"
+  [[ "$token" == "rust-attempt-settled" ]]
+  printf 'security-settled\n' >> "$FAKE_EVENT_RECORD"
+fi
 exit 0
 SH
 chmod +x "$fake_bin/rg"
@@ -88,6 +101,9 @@ case "${1:-}" in
     chmod +x "$CARGO_TARGET_DIR/debug/harn"
     ;;
   clean)
+    if [[ -n "${FAKE_EVENT_RECORD:-}" ]]; then
+      printf 'cargo-clean\n' >> "$FAKE_EVENT_RECORD"
+    fi
     if [[ "$FAKE_CARGO_MODE" == "clean-fails" ]]; then
       echo 'cargo clean failed' >&2
       exit 1
@@ -108,6 +124,28 @@ cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE_MAKE_RECORD"
+if [[ "${1:-}" == "fmt-check" && "${FAKE_MAKE_MODE:-}" == parallel-* ]]; then
+  count=0
+  if [[ -f "$FAKE_CARGO_STATE/fmt-count" ]]; then
+    count=$(<"$FAKE_CARGO_STATE/fmt-count")
+  fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$FAKE_CARGO_STATE/fmt-count"
+  if [[ "$count" -eq 1 ]]; then
+    printf 'rust-first-attempt-settled\n' >> "$FAKE_EVENT_RECORD"
+    printf 'rust-attempt-settled\n' > "$FAKE_SYNC_FIFO"
+    if [[ "$FAKE_MAKE_MODE" != "parallel-ordinary" ]]; then
+      echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/tree-sitter-bb1d5a918bffdfb1/out/stdlib-symbols.txt: No such file or directory (os error 2)" >&2
+    else
+      echo 'error[E0308]: ordinary audit-lane compiler failure' >&2
+    fi
+    exit 2
+  fi
+  if [[ "$FAKE_MAKE_MODE" == "parallel-retry-fails" ]]; then
+    echo 'error[E9999]: audit-lane retry compiler failure' >&2
+    exit 2
+  fi
+fi
 if [[ "${1:-}" == "gen-cli-aot" && "${FAKE_MAKE_MODE:-}" == "stale-aot" ]]; then
   count=0
   if [[ -f "$FAKE_CARGO_STATE/aot-count" ]]; then
@@ -191,7 +229,7 @@ if ! grep -Fxq 'clean -p libsqlite3-sys -p tree-sitter' "$success_state/cargo-re
   cat "$success_state/cargo-record" >&2
   exit 1
 fi
-if ! grep -Fq 'recovery: stale Cargo build-script outputs detected (packages=libsqlite3-sys,tree-sitter)' \
+if ! grep -Fq 'recovery: stale Cargo build-script outputs detected for warm prebuild (packages=libsqlite3-sys,tree-sitter)' \
   "$success_state/output"; then
   echo "stale-output recovery telemetry is missing" >&2
   cat "$success_state/output" >&2
@@ -289,5 +327,104 @@ if [[ ! -f "$aot_target/deps/keep" ]]; then
 fi
 grep -Fq 'recovery: shared CLI AOT preparation succeeded after package-scoped cleanup' \
   "$aot_state/output"
+
+run_parallel_case() {
+  local label="$1"
+  local make_mode="$2"
+  local state="$tmp_root/state-parallel-$label"
+  local target="$tmp_root/target parallel $label"
+  local build="$tmp_root/build parallel $label"
+  local fifo="$state/lane-sync"
+  mkdir -p \
+    "$state" \
+    "$target/deps" \
+    "$build/debug/build/tree-sitter-bb1d5a918bffdfb1/out"
+  mkfifo "$fifo"
+  : > "$state/cargo-record"
+  : > "$state/make-record"
+  : > "$state/event-record"
+  set +e
+  HARN_RELEASE_ROOT="$release_root" \
+    HARN_BIN="$fake_harn" \
+    CARGO_TARGET_DIR="$target" \
+    CARGO_BUILD_BUILD_DIR="$build" \
+    FAKE_AUDIT_LANE=parallel \
+    FAKE_CARGO_MODE=stale-then-success \
+    FAKE_CARGO_RECORD="$state/cargo-record" \
+    FAKE_CARGO_STATE="$state" \
+    FAKE_EVENT_RECORD="$state/event-record" \
+    FAKE_MAKE_MODE="$make_mode" \
+    FAKE_MAKE_RECORD="$state/make-record" \
+    FAKE_SYNC_FIFO="$fifo" \
+    PATH="$fake_bin:$PATH" \
+    "$release_tools/release_gate.sh" audit --source-only > "$state/output" 2>&1
+  local status=$?
+  set -e
+  printf '%s\n' "$status" > "$state/status"
+  printf '%s\n' "$state"
+}
+
+parallel_state=$(run_parallel_case recovery parallel-stale)
+if [[ "$(<"$parallel_state/status")" -ne 0 ]]; then
+  cat "$parallel_state/output" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^fmt-check$' "$parallel_state/make-record")" -ne 2 ]]; then
+  echo "recoverable parallel lane should retry exactly once" >&2
+  cat "$parallel_state/make-record" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^clean -p tree-sitter$' "$parallel_state/cargo-record")" -ne 1 ]]; then
+  echo "parallel recovery should clean only the implicated package once" >&2
+  cat "$parallel_state/cargo-record" >&2
+  exit 1
+fi
+if [[ "$(paste -sd, "$parallel_state/event-record")" != \
+  "rust-first-attempt-settled,security-settled,cargo-clean" ]]; then
+  echo "parallel recovery cleanup ran before every sibling lane settled" >&2
+  cat "$parallel_state/event-record" >&2
+  exit 1
+fi
+if ! grep -Fq 'recovery: retrying rust-audit once after every initial audit lane settled' \
+  "$parallel_state/output"; then
+  echo "parallel recovery telemetry is missing" >&2
+  cat "$parallel_state/output" >&2
+  exit 1
+fi
+
+ordinary_parallel_state=$(run_parallel_case ordinary parallel-ordinary)
+if [[ "$(<"$ordinary_parallel_state/status")" -eq 0 ]]; then
+  echo "ordinary parallel lane failure should remain failed" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^fmt-check$' "$ordinary_parallel_state/make-record")" -ne 1 ]] \
+  || grep -q '^clean ' "$ordinary_parallel_state/cargo-record"; then
+  echo "ordinary parallel lane failure should not retry or clean" >&2
+  cat "$ordinary_parallel_state/make-record" >&2
+  cat "$ordinary_parallel_state/cargo-record" >&2
+  exit 1
+fi
+grep -Fq 'error[E0308]: ordinary audit-lane compiler failure' \
+  "$ordinary_parallel_state/output"
+
+failed_retry_state=$(run_parallel_case failed-retry parallel-retry-fails)
+if [[ "$(<"$failed_retry_state/status")" -eq 0 ]]; then
+  echo "failed parallel recovery retry should remain failed" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^fmt-check$' "$failed_retry_state/make-record")" -ne 2 ]] \
+  || [[ "$(grep -c '^clean -p tree-sitter$' "$failed_retry_state/cargo-record")" -ne 1 ]]; then
+  echo "failed parallel recovery should clean once and retry once" >&2
+  cat "$failed_retry_state/make-record" >&2
+  cat "$failed_retry_state/cargo-record" >&2
+  exit 1
+fi
+grep -Fq 'No such file or directory' "$failed_retry_state/output"
+grep -Fq 'error[E9999]: audit-lane retry compiler failure' \
+  "$failed_retry_state/output"
+grep -Fq -- '--- rust-audit (first attempt, before stale-output recovery) ---' \
+  "$failed_retry_state/output"
+grep -Fq -- '--- rust-audit (terminal attempt) ---' \
+  "$failed_retry_state/output"
 
 echo "release_gate_stale_out_dir_test: ok"
