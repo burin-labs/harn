@@ -33,6 +33,7 @@ import {
   json_chunks,
   json_fields,
 } from "std/llm/tool_parse_json_support"
+import { has_response_protocol_fragment } from "std/llm/tool_parse_protocol"
 
 fn __tool_parse_registry_names(tools) -> list<string> {
   let names: list<string> = []
@@ -59,47 +60,6 @@ fn __tool_parse_tag_spellings(canonical: string) -> list<string> {
     }
   }
   return []
-}
-
-fn __tool_parse_contains_tag_fragment(text: string, spelling: string) -> bool {
-  for prefix in ["<", "</"] {
-    const needle = prefix + spelling
-    let rest = text
-    while true {
-      const found = rest.index_of(needle)
-      if found < 0 {
-        break
-      }
-      const next_at = found + len(needle)
-      if next_at >= len(rest) {
-        return true
-      }
-      const next = rest.slice(next_at, next_at + 1)
-      if next == ">" || trim(next) == "" {
-        return true
-      }
-      rest = rest.slice(next_at, len(rest))
-    }
-  }
-  return false
-}
-
-fn __tool_parse_has_response_protocol_fragment(text: string) -> bool {
-  const lower = text.lower()
-  // Chat templates sometimes strip the leading angle bracket from a response
-  // tag. Preserve the old parser's strict handling of those fragments: they
-  // are malformed protocol, not assistant narration.
-  if contains(lower, "_call>") {
-    return true
-  }
-  for canonical in ["tool_call", "assistant_prose", "user_response", "done"] {
-    for spelling in __tool_parse_tag_spellings(canonical) {
-      if __tool_parse_contains_tag_fragment(lower, spelling) {
-        return true
-      }
-    }
-  }
-  return false
 }
 
 fn __tool_parse_scan_spec(tools) -> dict {
@@ -768,7 +728,7 @@ fn __tool_parse_consume_stray(unit, tools, state: dict) -> dict {
       dropped: next.dropped.appending({text: text, reason: reason}),
     }
   }
-  if __tool_parse_has_response_protocol_fragment(text) {
+  if has_response_protocol_fragment(text) {
     return next
       + {
       violations: next.violations.appending(

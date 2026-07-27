@@ -1495,7 +1495,6 @@ fn first_non_empty(value: Option<String>, fallback: &str) -> String {
 fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
     clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
-
 #[cfg(test)]
 #[path = "tool_conformance_tests.rs"]
 mod tests;

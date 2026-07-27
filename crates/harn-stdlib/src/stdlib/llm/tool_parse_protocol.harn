@@ -1,0 +1,55 @@
+/**
+ * Protocol-fragment recognition for text-tool responses.
+ *
+ * Chat templates can damage only part of a response tag. Keep that
+ * classification policy here so the parser treats those fragments as
+ * malformed protocol instead of visible assistant narration.
+ */
+import { TAGGED_DIALECT } from "std/llm/dialects"
+
+fn __tool_parse_protocol_tag_spellings(canonical: string) -> list<string> {
+  for dialect in TAGGED_DIALECT {
+    if dialect.canonical == canonical {
+      return dialect.spellings
+    }
+  }
+  return []
+}
+
+fn __tool_parse_protocol_contains_tag_fragment(text: string, spelling: string) -> bool {
+  for prefix in ["<", "</"] {
+    const needle = prefix + spelling
+    let rest = text
+    while true {
+      const found = rest.index_of(needle)
+      if found < 0 {
+        break
+      }
+      const next_at = found + len(needle)
+      if next_at >= len(rest) {
+        return true
+      }
+      const next = rest.slice(next_at, next_at + 1)
+      if next == ">" || trim(next) == "" {
+        return true
+      }
+      rest = rest.slice(next_at, len(rest))
+    }
+  }
+  return false
+}
+
+pub fn has_response_protocol_fragment(text: string) -> bool {
+  const lower = text.lower()
+  if contains(lower, "_call>") {
+    return true
+  }
+  for canonical in ["tool_call", "assistant_prose", "user_response", "done"] {
+    for spelling in __tool_parse_protocol_tag_spellings(canonical) {
+      if __tool_parse_protocol_contains_tag_fragment(lower, spelling) {
+        return true
+      }
+    }
+  }
+  return false
+}

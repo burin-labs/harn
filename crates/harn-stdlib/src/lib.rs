@@ -163,6 +163,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/dialects" => "stdlib/llm/dialects.harn",
     "llm/tool_parse" => "stdlib/llm/tool_parse.harn",
     "llm/tool_parse_json_support" => "stdlib/llm/tool_parse_json_support.harn",
+    "llm/tool_parse_protocol" => "stdlib/llm/tool_parse_protocol.harn",
     "llm/scope_classifier" => "stdlib/llm/scope_classifier.harn",
     "llm/refine" => "stdlib/llm/refine.harn",
     "llm/ensemble" => "stdlib/llm/ensemble.harn",
