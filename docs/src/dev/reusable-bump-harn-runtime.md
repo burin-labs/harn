@@ -46,6 +46,9 @@ jobs:
       refresh-command: |
         harn install --locked
         ./scripts/regenerate-derived-sources "$HARN_BUMP_TARGET_TAG"
+      # Optional, when the repository owner commands require Node. The shared
+      # workflow installs this exact version rather than trusting runner state.
+      node-version: "22"
       # Repository-owned verification runs after every mutation. A non-zero
       # exit blocks the commit.
       validate-command: |

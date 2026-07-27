@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: "harn install --locked || harn install"
+      node-version:
+        description: "Optional Node.js version installed before refresh and validation commands."
+        required: false
+        type: string
+        default: ""
       validate-command:
         description: "Repository-owned verification command run after all refresh mutations and before the signed commit."
         required: false
@@ -79,6 +84,12 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install caller Node.js toolchain
+        if: inputs.node-version != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
 
       # Resolve which Harn to INSTALL *before* checking out the orchestration,
       # so we can pin that checkout to the exact target release tag. This must
