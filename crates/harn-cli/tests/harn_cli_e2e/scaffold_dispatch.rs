@@ -146,9 +146,45 @@ fn tool_new_dispatch_is_deterministic() {
         "lib/tools.harn present"
     );
     assert!(
-        harn_snap.contains_key(".github/workflows/harn-package.yml"),
+        harn_snap.contains_key(".github/workflows/ci.yml"),
         "workflow yaml present"
     );
+}
+
+#[test]
+fn package_scaffolds_project_the_canonical_ci_caller() {
+    const EXPECTED: &[u8] = include_bytes!("../../assets/scaffold/harn-package-ci.yml");
+
+    for template in ["package", "connector"] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let output = run_scaffold(&["init", "--template", template], tmp.path());
+        assert!(
+            output.status.success(),
+            "init {template} failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let actual = fs::read(tmp.path().join(".github/workflows/ci.yml"))
+            .unwrap_or_else(|error| panic!("read {template} CI projection: {error}"));
+        assert_eq!(actual, EXPECTED, "{template} CI projection drifted");
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let destination = tmp.path().join("acme-tool");
+    let destination_arg = destination.display().to_string();
+    let output = run_scaffold(
+        &["tool", "new", "acme-tool", "--dir", &destination_arg],
+        tmp.path(),
+    );
+    assert!(
+        output.status.success(),
+        "tool new failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let actual =
+        fs::read(destination.join(".github/workflows/ci.yml")).expect("read tool CI projection");
+    assert_eq!(actual, EXPECTED, "tool CI projection drifted");
 }
 
 #[test]

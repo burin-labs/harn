@@ -37,23 +37,27 @@ dependencies pinned to a version or rev.
 
 ## Set up Harn in GitHub Actions
 
-Keep the required Harn version in `.harn-version`, then use Harn's first-party
-setup action before running native package commands:
+Keep the required Harn version in `.harn-version`. For a package repository,
+call the immutable organization workflow; it owns bootstrap, package
+verification, policy checks, and receipt upload:
 
 ```yaml
-steps:
-  - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-  - uses: burin-labs/harn/.github/actions/setup-harn@<full-commit-sha>
-  - run: harn package verify --receipt-out .harn/receipts/package-verify.json
+jobs:
+  package:
+    uses: burin-labs/.github/.github/workflows/harn-package.yml@<full-commit-sha>
 ```
 
-Pin the action to the full commit for the Harn release you use. The action reads
-`.harn-version` by default, maps the hosted runner to an official Linux, macOS,
-or Windows asset, verifies that archive against the release's `SHA256SUMS`, and
-then adds the binary to `PATH`. A cached archive is reused only after it matches
-the currently published checksum. The action outputs `version`, `target`,
-`path`, `checksum`, `source-url`, `cache-hit`, and the stable
-`harn-bootstrap-v1` `receipt` JSON for audit records or job summaries.
+`harn init --template package`, `harn init --template connector`, `harn tool
+new`, and `harn package scaffold openapi` generate the complete caller,
+including merge-queue coverage and the required `CI status` roll-up. Add
+product-specific jobs beside that call; do not copy its installation or
+verification steps.
+
+The reusable workflow delegates bootstrap to Harn's first-party setup action.
+That action reads `.harn-version`, maps the hosted runner to an official Linux,
+macOS, or Windows asset, verifies the archive against the release's
+`SHA256SUMS`, and adds the binary to `PATH`. A cached archive is reused only
+after it matches the published checksum.
 
 This bootstrap is intentionally host-native: Harn cannot execute until the
 verified Harn binary exists. Package behavior, tests, and orchestration should
