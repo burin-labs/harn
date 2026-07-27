@@ -38,7 +38,7 @@ pub mod provenance;
 pub mod session_environment;
 pub mod stance_judge;
 
-pub use environment_policy::{lookup_env, resolve_env, ENV_ALLOWLIST};
+pub use environment_policy::{lookup_env, resolve_env, resolve_env_for_command, ENV_ALLOWLIST};
 pub use exfil_precision::{
     args_target_endpoints, destination_is_untrusted_originated, extract_endpoints,
     precise_exfil_gate_fires,
@@ -46,8 +46,8 @@ pub use exfil_precision::{
 pub use file_provenance::{command_string, path_arguments, FileProvenanceLedger};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 pub use session_environment::{
-    EnvironmentPolicyError, EnvironmentPolicyKind, GrantReceipt, GrantSource, GrantSourceSpec,
-    GrantSpec, SessionEnvironment, SessionGrant,
+    command_basename, EnvironmentPolicyError, EnvironmentPolicyKind, GrantReceipt, GrantSource,
+    GrantSourceSpec, GrantSpec, SessionEnvironment, SessionGrant,
 };
 
 use crate::value::VmDictExt;

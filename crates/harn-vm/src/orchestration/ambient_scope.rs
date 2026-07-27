@@ -1273,6 +1273,7 @@ mod tests {
                 key: "token".to_string(),
             },
             expose_as_env: Some("GH_TOKEN".to_string()),
+            for_command: None,
         }];
         let granted =
             SessionEnvironment::launch(EnvironmentPolicyKind::Granted, grant_specs, &|_| None)

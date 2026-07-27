@@ -123,6 +123,7 @@ fn explicit_session_env_grant_wins_over_workspace_default() {
                 var: "EXPLICIT_HOME".to_string(),
             },
             expose_as_env: Some("HOME".to_string()),
+            for_command: None,
         }],
         &|name| (name == "EXPLICIT_HOME").then(|| "/caller/home".to_string()),
     )

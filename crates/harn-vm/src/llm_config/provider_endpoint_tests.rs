@@ -83,6 +83,7 @@ fn test_session_environment_governs_provider_endpoint_env() {
                 var: ENDPOINT.to_string(),
             },
             expose_as_env: Some(ENDPOINT.to_string()),
+            for_command: None,
         }],
         &|name| std::env::var(name).ok(),
     )

@@ -705,6 +705,12 @@ of the base ACP specification. Omission means `inherited`.
         "name": "provider_key",
         "source": {"env": {"var": "OPENAI_API_KEY"}},
         "expose_as_env": "OPENAI_API_KEY"
+      },
+      {
+        "name": "gh_token",
+        "source": {"secret_store": {"account": "gh", "key": "token"}},
+        "expose_as_env": "GH_TOKEN",
+        "for_command": "gh"
       }
     ]
   }

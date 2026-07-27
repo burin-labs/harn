@@ -1291,8 +1291,10 @@ pub fn push_process_sandbox_scope(
 /// their own `env` / `env_remove` on top afterward. Sandbox confinement sets no
 /// env vars (wrapper-exec / seccomp / AppContainer), so clearing cannot weaken it.
 macro_rules! close_env_for_session {
-    ($command:expr) => {
-        if let Some(env) = crate::stdlib::process::session_closed_env(std::iter::empty())? {
+    ($command:expr, $program:expr) => {
+        if let Some(env) =
+            crate::stdlib::process::session_closed_env_for_command($program, std::iter::empty())?
+        {
             $command.env_clear();
             for (key, value) in env {
                 $command.env(key, value);
@@ -1312,7 +1314,7 @@ pub fn std_command_for(program: &str, args: &[String]) -> Result<Command, VmErro
             command
         }
     };
-    close_env_for_session!(command);
+    close_env_for_session!(command, program);
     Ok(command)
 }
 
@@ -1330,7 +1332,7 @@ pub fn tokio_command_for(
             command
         }
     };
-    close_env_for_session!(command);
+    close_env_for_session!(command, program);
     Ok(command)
 }
 
@@ -1355,13 +1357,14 @@ pub fn command_output(
         crate::testbench::process_tape::start_recording(program, args, config.cwd.as_deref());
 
     // Callers build `config` several ways, so close it here rather than trust
-    // each: an already-resolved config carries `closed_env`; anything else gets
-    // the profile applied now, its own `env` still winning.
+    // each. Always rebuild through the command-aware resolver when a session
+    // environment is active: an earlier ambient close (`closed_env`) would
+    // otherwise omit `for_command` grants for this executable (harn#5549).
+    // The existing `config.env` is the overlay (caller keys, or a prior ambient
+    // close), and still wins over the base.
     let closed_config;
-    let config = if config.closed_env {
-        config
-    } else if let Some(env) =
-        crate::stdlib::process::session_closed_env(config.env.iter().cloned())?
+    let config = if let Some(env) =
+        crate::stdlib::process::session_closed_env_for_command(program, config.env.iter().cloned())?
     {
         closed_config = ProcessCommandConfig {
             env,

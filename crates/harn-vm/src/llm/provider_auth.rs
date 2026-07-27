@@ -465,6 +465,7 @@ mod tests {
                     var: "LAUNCHER_ANTHROPIC_SECRET".to_string(),
                 },
                 expose_as_env: Some("ANTHROPIC_API_KEY".to_string()),
+                for_command: None,
             }],
             &|name| std::env::var(name).ok(),
         )

@@ -25,8 +25,8 @@
 //! spec is safe to serialize into a session config. The resolved
 //! [`SessionGrant`] may hold a snapshotted secret value, so it is deliberately
 //! **not** `Serialize` and never lands in a record — only [`GrantReceipt`]
-//! ({name, source_kind, exposed_as_env}) is persisted, and it omits even the
-//! secret pointer.
+//! ({name, source_kind, exposed_as_env, for_command}) is persisted, and it
+//! omits even the secret pointer.
 //!
 //! Two non-leakage properties are enforced by the type system:
 //!
@@ -101,6 +101,14 @@ pub struct GrantSpec {
     /// the sole place the exposure default lives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expose_as_env: Option<String>,
+    /// When set with [`Self::expose_as_env`], bind the exposure to spawned
+    /// commands whose executable basename matches this value (for example
+    /// `gh` for `/usr/bin/gh`). Omitted means session-scoped exposure:
+    /// `harness.env`, providers, and every spawned command see the variable.
+    /// Command-scoped grants are invisible in-process by construction — harn's
+    /// own `llm_call` is not an exec (harn#5549).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_command: Option<String>,
 }
 
 impl GrantSpec {
@@ -123,6 +131,33 @@ impl GrantSpec {
                 });
             }
         }
+        let for_command = match self.for_command.as_deref().map(str::trim) {
+            None | Some("") if self.for_command.is_some() => {
+                return Err(EnvironmentPolicyError::EmptyForCommand {
+                    name: name.to_string(),
+                });
+            }
+            None => None,
+            Some(command) => {
+                if self
+                    .expose_as_env
+                    .as_deref()
+                    .map(str::trim)
+                    .is_none_or(|v| v.is_empty())
+                {
+                    return Err(EnvironmentPolicyError::ForWithoutExpose {
+                        name: name.to_string(),
+                    });
+                }
+                if command.contains('/') || command.contains('\\') {
+                    return Err(EnvironmentPolicyError::InvalidForCommand {
+                        name: name.to_string(),
+                        command: command.to_string(),
+                    });
+                }
+                Some(command.to_string())
+            }
+        };
         let source_kind = self.source.kind();
         let source_spec = self.source.clone();
         let resolved_ref = match self.source {
@@ -157,6 +192,7 @@ impl GrantSpec {
             source_kind,
             source_spec,
             expose_as_env: self.expose_as_env.map(|var| var.trim().to_string()),
+            for_command,
             resolved_ref,
         })
     }
@@ -187,6 +223,7 @@ pub struct SessionGrant {
     source_kind: GrantSource,
     source_spec: GrantSourceSpec,
     expose_as_env: Option<String>,
+    for_command: Option<String>,
     resolved_ref: ResolvedRef,
 }
 
@@ -195,6 +232,7 @@ impl SessionGrant {
         self.name == spec.name.trim()
             && self.source_spec == spec.source
             && self.expose_as_env.as_deref() == spec.expose_as_env.as_deref().map(str::trim)
+            && self.for_command.as_deref() == spec.for_command.as_deref().map(str::trim)
     }
     /// The grant's logical name used in receipts and diagnostics.
     pub fn name(&self) -> &str {
@@ -209,6 +247,25 @@ impl SessionGrant {
     /// The process-env variable this grant is exposed as, if any.
     pub fn exposed_env_var(&self) -> Option<&str> {
         self.expose_as_env.as_deref()
+    }
+
+    /// The command basename this exposure is bound to, if any.
+    pub fn for_command(&self) -> Option<&str> {
+        self.for_command.as_deref()
+    }
+
+    /// Whether this grant's exposure is ambient to the whole session (no
+    /// `for_command` binding).
+    fn is_session_scoped(&self) -> bool {
+        self.for_command.is_none()
+    }
+
+    /// Whether this grant's exposure applies to a spawn of `program`.
+    fn applies_to_program(&self, program: &str) -> bool {
+        match self.for_command.as_deref() {
+            None => true,
+            Some(expected) => command_basename(program) == expected,
+        }
     }
 
     /// The `(VAR, value)` pair this grant publishes, or `None` when it declared
@@ -244,8 +301,36 @@ impl SessionGrant {
             name: self.name.clone(),
             source_kind: self.source_kind.as_str().to_string(),
             exposed_as_env: self.expose_as_env.clone(),
+            for_command: self.for_command.clone(),
         }
     }
+}
+
+/// Executable basename used to match a `for_command` grant binding.
+///
+/// `/usr/bin/gh` and `gh` both yield `gh`. Path separators of either style are
+/// recognized so a Windows-style `C:\Tools\gh.exe` still matches `for=gh` when
+/// compared on a Unix host (and vice versa). A trailing `.exe` / `.bat` /
+/// `.cmd` / `.com` suffix is stripped so `gh.exe` matches `for=gh`.
+pub fn command_basename(program: &str) -> &str {
+    let name = program
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(program);
+    strip_windows_executable_suffix(name)
+}
+
+fn strip_windows_executable_suffix(name: &str) -> &str {
+    const SUFFIXES: &[&str] = &[".exe", ".bat", ".cmd", ".com"];
+    for suffix in SUFFIXES {
+        if name.len() > suffix.len()
+            && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+        {
+            return &name[..name.len() - suffix.len()];
+        }
+    }
+    name
 }
 
 /// Which environment policy a session launches under. This is a typed launch
@@ -476,27 +561,45 @@ impl SessionEnvironment {
         self.grants.iter().map(SessionGrant::receipt).collect()
     }
 
-    /// Materialize the process environment overlay for `process.exec`: the
-    /// `(VAR, value)` pairs for every grant that opted into `expose_as_env`.
-    /// Empty for an isolated policy.
+    /// Materialize the session-scoped process environment overlay: the
+    /// `(VAR, value)` pairs for every grant that opted into `expose_as_env`
+    /// without a `for_command` binding. Empty for an isolated policy.
     ///
     /// Callers receive uniform pairs and never see the source kind;
     /// [`SessionGrant::exposure`] owns that branch.
     ///
-    /// Exposure is session-wide: `harness.env`, providers, and every spawned
-    /// command consult the same target mapping.
+    /// This is the ambient mapping consulted by `harness.env`, providers, and
+    /// the base of every spawned command. Command-bound grants
+    /// (`for_command = Some(...)`) are excluded here and added only by
+    /// [`env_exposure_for_command`](Self::env_exposure_for_command) (harn#5549).
     pub fn env_exposure(
         &self,
         resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
     ) -> Result<Vec<(String, String)>, EnvironmentPolicyError> {
         self.grants
             .iter()
+            .filter(|grant| grant.is_session_scoped())
+            .filter_map(|grant| grant.exposure(resolve_secret))
+            .collect()
+    }
+
+    /// Materialize the environment overlay for one spawn of `program`: every
+    /// session-scoped `expose_as_env` grant, plus every command-bound grant
+    /// whose `for_command` matches [`command_basename`]`(program)`.
+    pub fn env_exposure_for_command(
+        &self,
+        program: &str,
+        resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+    ) -> Result<Vec<(String, String)>, EnvironmentPolicyError> {
+        self.grants
+            .iter()
+            .filter(|grant| grant.applies_to_program(program))
             .filter_map(|grant| grant.exposure(resolve_secret))
             .collect()
     }
 
     /// The value this environment exposes under a single environment variable, or
-    /// `None` if no grant targets it.
+    /// `None` if no session-scoped grant targets it.
     ///
     /// The narrow counterpart of [`env_exposure`](Self::env_exposure), for a
     /// consumer resolving one variable — harn's own provider-credential lookup.
@@ -504,6 +607,8 @@ impl SessionEnvironment {
     /// `secret_store` grant: probing an unrelated variable must not reach the
     /// secret store, and one unresolvable grant must not mask an unrelated
     /// credential. Launch validation guarantees at most one matching grant.
+    /// Command-bound grants are invisible here — they are not in-process
+    /// credentials.
     pub fn env_exposure_for(
         &self,
         var: &str,
@@ -512,7 +617,7 @@ impl SessionEnvironment {
         let Some(grant) = self
             .grants
             .iter()
-            .find(|grant| grant.expose_as_env.as_deref() == Some(var))
+            .find(|grant| grant.is_session_scoped() && grant.expose_as_env.as_deref() == Some(var))
         else {
             return Ok(None);
         };
@@ -552,15 +657,17 @@ fn validate_unique_specs(specs: &[GrantSpec]) -> Result<(), EnvironmentPolicyErr
 
 /// A non-secret record of a grant, safe to persist on a session run-record.
 ///
-/// Carries the grant name, source kind, and optional environment target — never
-/// the value or a reversible source reference. `secret_store` account/key
-/// pointers are intentionally omitted.
+/// Carries the grant name, source kind, optional environment target, and
+/// optional command binding — never the value or a reversible source
+/// reference. `secret_store` account/key pointers are intentionally omitted.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantReceipt {
     pub name: String,
     pub source_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exposed_as_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub for_command: Option<String>,
 }
 
 /// Errors raised while validating, resolving, or enforcing session grants. All
@@ -575,6 +682,13 @@ pub enum EnvironmentPolicyError {
     EmptySecretRef { name: String },
     /// An `expose_as_env` target was an empty variable name.
     EmptyExposeVar { name: String },
+    /// A `for_command` binding was an empty command basename.
+    EmptyForCommand { name: String },
+    /// A `for_command` binding was declared without `expose_as_env`.
+    ForWithoutExpose { name: String },
+    /// A `for_command` binding contained a path separator; only a basename is
+    /// accepted.
+    InvalidForCommand { name: String, command: String },
     /// An `env` source referenced a variable absent from the launcher env.
     MissingEnv { name: String, var: String },
     /// A grant was declared on a policy that does not accept grants.
@@ -620,6 +734,24 @@ impl fmt::Display for EnvironmentPolicyError {
                 write!(
                     f,
                     "[environment_policy.empty_exposure_target] grant '{name}' expose target is an empty variable"
+                )
+            }
+            EnvironmentPolicyError::EmptyForCommand { name } => {
+                write!(
+                    f,
+                    "[environment_policy.empty_for_command] grant '{name}' for_command binding is empty; name the command basename (for example 'gh')"
+                )
+            }
+            EnvironmentPolicyError::ForWithoutExpose { name } => {
+                write!(
+                    f,
+                    "[environment_policy.for_without_expose] grant '{name}' declares for_command without expose_as_env; command binding only applies to an exposed environment variable"
+                )
+            }
+            EnvironmentPolicyError::InvalidForCommand { name, command } => {
+                write!(
+                    f,
+                    "[environment_policy.invalid_for_command] grant '{name}' for_command '{command}' must be a command basename, not a path"
                 )
             }
             EnvironmentPolicyError::MissingEnv { name, var } => write!(
@@ -670,6 +802,9 @@ impl EnvironmentPolicyError {
             Self::EmptyEnvVar { .. } => "environment_policy.empty_source_variable",
             Self::EmptySecretRef { .. } => "environment_policy.empty_secret_reference",
             Self::EmptyExposeVar { .. } => "environment_policy.empty_exposure_target",
+            Self::EmptyForCommand { .. } => "environment_policy.empty_for_command",
+            Self::ForWithoutExpose { .. } => "environment_policy.for_without_expose",
+            Self::InvalidForCommand { .. } => "environment_policy.invalid_for_command",
             Self::MissingEnv { .. } => "environment_policy.source_variable_missing",
             Self::PolicyForbidsGrants { .. } => "environment_policy.grants_forbidden",
             Self::DuplicateGrant { .. } => "environment_policy.duplicate_grant",
@@ -692,8 +827,14 @@ impl EnvironmentPolicyError {
             Self::EmptyEnvVar { name }
             | Self::EmptySecretRef { name }
             | Self::EmptyExposeVar { name }
+            | Self::EmptyForCommand { name }
+            | Self::ForWithoutExpose { name }
             | Self::MissingSecret { name } => {
                 object.insert("grant".to_string(), serde_json::json!(name));
+            }
+            Self::InvalidForCommand { name, command } => {
+                object.insert("grant".to_string(), serde_json::json!(name));
+                object.insert("forCommand".to_string(), serde_json::json!(command));
             }
             Self::MissingEnv { name, var } => {
                 object.insert("grant".to_string(), serde_json::json!(name));
@@ -758,6 +899,7 @@ mod tests {
                 var: var.to_string(),
             },
             expose_as_env: expose.map(str::to_string),
+            for_command: None,
         }
     }
 
@@ -769,6 +911,25 @@ mod tests {
                 key: key.to_string(),
             },
             expose_as_env: expose.map(str::to_string),
+            for_command: None,
+        }
+    }
+
+    fn command_grant(
+        name: &str,
+        account: &str,
+        key: &str,
+        expose: &str,
+        for_command: &str,
+    ) -> GrantSpec {
+        GrantSpec {
+            name: name.to_string(),
+            source: GrantSourceSpec::SecretStore {
+                account: account.to_string(),
+                key: key.to_string(),
+            },
+            expose_as_env: Some(expose.to_string()),
+            for_command: Some(for_command.to_string()),
         }
     }
 
@@ -913,11 +1074,13 @@ mod tests {
                     name: "fireworks".to_string(),
                     source_kind: "env".to_string(),
                     exposed_as_env: Some("FIREWORKS_API_KEY".to_string()),
+                    for_command: None,
                 },
                 GrantReceipt {
                     name: "gh_token".to_string(),
                     source_kind: "secret_store".to_string(),
                     exposed_as_env: None,
+                    for_command: None,
                 },
             ]
         );
@@ -1090,5 +1253,111 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("unchanged subset of the parent grants"));
+    }
+
+    #[test]
+    fn command_bound_grant_is_absent_from_session_exposure() {
+        let resolve_secret = |account: &str, key: &str| -> Option<String> {
+            (account == "gh" && key == "token").then(|| "ghp-secret-token".to_string())
+        };
+        let environment = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![
+                env_grant("fireworks", "FIREWORKS_API_KEY", Some("FIREWORKS_API_KEY")),
+                command_grant("gh_token", "gh", "token", "GH_TOKEN", "gh"),
+            ],
+            &env_from(&[("FIREWORKS_API_KEY", "fw-secret-value")]),
+        )
+        .unwrap();
+
+        // Ambient exposure keeps the provider key and hides the command-bound token.
+        let ambient = environment.env_exposure(&resolve_secret).unwrap();
+        assert_eq!(
+            ambient,
+            vec![(
+                "FIREWORKS_API_KEY".to_string(),
+                "fw-secret-value".to_string()
+            )]
+        );
+        assert_eq!(
+            environment
+                .env_exposure_for("GH_TOKEN", &resolve_secret)
+                .unwrap(),
+            None
+        );
+
+        // Only a matching spawn sees GH_TOKEN.
+        let mut for_gh = environment
+            .env_exposure_for_command("gh", &resolve_secret)
+            .unwrap();
+        for_gh.sort();
+        assert_eq!(
+            for_gh,
+            vec![
+                (
+                    "FIREWORKS_API_KEY".to_string(),
+                    "fw-secret-value".to_string()
+                ),
+                ("GH_TOKEN".to_string(), "ghp-secret-token".to_string()),
+            ]
+        );
+        let for_git = environment
+            .env_exposure_for_command("/usr/bin/git", &resolve_secret)
+            .unwrap();
+        assert_eq!(
+            for_git,
+            vec![(
+                "FIREWORKS_API_KEY".to_string(),
+                "fw-secret-value".to_string()
+            )]
+        );
+        assert_eq!(
+            environment
+                .env_exposure_for_command("/usr/local/bin/gh", &resolve_secret)
+                .unwrap()
+                .into_iter()
+                .any(|(var, _)| var == "GH_TOKEN"),
+            true
+        );
+        assert_eq!(command_basename("C:\\Tools\\gh.exe"), "gh");
+
+        let receipts = environment.receipts();
+        assert_eq!(receipts[1].for_command.as_deref(), Some("gh"));
+        assert_eq!(receipts[1].exposed_as_env.as_deref(), Some("GH_TOKEN"));
+    }
+
+    #[test]
+    fn for_command_requires_expose_and_rejects_paths() {
+        let err = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: "gh_token".to_string(),
+                source: GrantSourceSpec::SecretStore {
+                    account: "gh".to_string(),
+                    key: "token".to_string(),
+                },
+                expose_as_env: None,
+                for_command: Some("gh".to_string()),
+            }],
+            &no_env,
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "environment_policy.for_without_expose");
+
+        let err = SessionEnvironment::launch(
+            EnvironmentPolicyKind::Granted,
+            vec![GrantSpec {
+                name: "gh_token".to_string(),
+                source: GrantSourceSpec::SecretStore {
+                    account: "gh".to_string(),
+                    key: "token".to_string(),
+                },
+                expose_as_env: Some("GH_TOKEN".to_string()),
+                for_command: Some("/usr/bin/gh".to_string()),
+            }],
+            &no_env,
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "environment_policy.invalid_for_command");
     }
 }
