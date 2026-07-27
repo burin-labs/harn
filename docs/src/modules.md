@@ -609,14 +609,127 @@ not consume another per-look error budget.
 The ladder schedules spend only. It never authorizes a prune or declaration.
 `arm_decision` permanently divides `delta` by the number of registered arms,
 requires a nonzero practical-equivalence band, and prevents pruning below its
-minimum-trial floor. Its terminal outcomes distinguish a strict `WINNER`, a
-precisely measured `TIED_CONFIRMED`, and an underpowered `UNRESOLVED` result.
+minimum-trial floor. Its terminal outcomes distinguish a candidate `WINNER`, a
+proven `BASELINE` win, a precisely measured `TIED_CONFIRMED`, and an
+underpowered `UNRESOLVED` result.
 
 Sequential inputs must be append-only observations. At each look, prior values
 remain byte-for-byte identical and only newly observed units are appended.
 Mutable per-case aggregates do not meet that contract: project each immutable
 case/trial cell to a stable row before using `paired_delta_cs`, or pass the
 resulting bounded delta vector directly to `bounded_cs`.
+
+### std/eval/experiment
+
+A closed, portable experiment contract composed over `std/schema`, versioned
+artifacts, and `std/eval/sequential`. Harn owns registration, randomized-block
+assignment, family-error allocation, guardrail decisions, and explicit
+iterate-to-gate promotion. Hosts own arm-config validation, execution placement,
+metric projection, persistence location, and notification.
+
+| Function | Description |
+|---|---|
+| `validate_experiment_manifest(value, context)` | Validate the closed schema, cross-field invariants, and host-supported blocking factors once |
+| `register_experiment(manifest)` | Freeze an iterate registration and both resolved case-set snapshots |
+| `plan_assignments(registration, case, trial, block)` | Deterministically randomize one balanced baseline-plus-candidates block |
+| `realize_assignment(plan, arm, observed_block)` | Verify and record the realized arm, host, time slot, and declared block |
+| `decide_experiment(registration, input)` | Apply anytime-valid primary and guardrail decisions under one frozen family budget |
+| `promote_experiment(registration, decision)` | Create a gate registration only from that registration's typed iterate winner |
+| `experiment_registration_descriptor(name?)` | Typed durable descriptor for frozen registration JSON |
+| `experiment_decision_descriptor(name?)` | Typed durable descriptor for decision JSON |
+
+The manifest declares practical effect and risk, not a fixed statistical sample
+size. `max_trials_per_case` and `max_spend_usd` are hard ceilings. Metric bounds
+are required because anytime-valid inference cannot be honest over an
+undeclared support. Percentage alarms are percentages of each paired baseline
+observation; absolute alarms use metric units.
+
+The first ladder rung is the minimum decision floor. Candidate outcomes expose
+primary eliminations as `regressed_on_primary`, so a host scheduler can stop
+those arms without importing execution placement into `std/eval`. A candidate
+whose upper confidence bound is below the practical-equivalence band yields the
+distinct terminal `BASELINE` verdict.
+
+The spend ceiling covers the whole experiment. Promotion carries realized
+iterate spend into the gate registration; it never resets the budget.
+Decision input reports authoritative phase spend separately from paired
+observations, so infrastructure-missing or otherwise unpaired work consumes the
+ceiling without entering the confidence sequence.
+
+Complete manifest:
+
+```json
+{
+  "schema": "harn.experiment.v1",
+  "experiment_id": "portable-cache-policy",
+  "hypothesis": "A bounded cache policy improves success without excess cost.",
+  "owner": "runtime-team",
+  "baseline": {
+    "id": "baseline",
+    "config": {"cache": "off"},
+    "complexity": 0
+  },
+  "candidates": [
+    {
+      "id": "simple",
+      "config": {"cache": "on"},
+      "complexity": 1
+    },
+    {
+      "id": "replicate",
+      "config": {"cache": "on"},
+      "complexity": 2
+    }
+  ],
+  "decision": {
+    "delta": 0.05,
+    "epsilon": 0.1,
+    "ladder": [3, 5, 10, 80]
+  },
+  "metrics": {
+    "primary": {
+      "id": "success",
+      "direction": "up",
+      "bounds": {"lo": 0.0, "hi": 1.0}
+    },
+    "guardrails": [
+      {
+        "id": "cost",
+        "direction": "down",
+        "bounds": {"lo": 0.0, "hi": 5.0},
+        "alarm": {"kind": "absolute", "threshold": 0.1}
+      }
+    ]
+  },
+  "assignment": {
+    "mode": "randomized_block",
+    "seed": "seed-42",
+    "blocking_factors": ["host", "time_slot"]
+  },
+  "splits": {
+    "iterate": {
+      "id": "tune",
+      "digest": "tune-v1",
+      "cases": ["case-a", "case-b"]
+    },
+    "gate": {
+      "id": "holdout",
+      "digest": "holdout-v1",
+      "cases": ["case-z"]
+    },
+    "promotion": "explicit"
+  },
+  "budget": {
+    "max_spend_usd": 10.0,
+    "max_trials_per_case": 80
+  }
+}
+```
+
+Arm IDs are distinct from opaque config values, so byte-identical A/A arms are
+valid. Registration hashes both identities and preserves both configs. Ambient
+host telemetry may optimize placement, but validity depends only on the
+declared randomized blocks and realized assignment receipts.
 
 `eval_pack_run` also supports live-verify eval cases. Set `kind: "live-verify"`
 and provide `task`, `workspace` or `project`, `verify_command`,

@@ -14,7 +14,7 @@ pub type SequentialArm = {id: string, deltas: list<float>, complexity: int}
 
 pub type ArmInterval = {id: string, mean: float, lo: float, hi: float, halfwidth: float, n: int}
 
-pub type SequentialVerdict = "RUNNING" | "WINNER" | "TIED_CONFIRMED" | "UNRESOLVED"
+pub type SequentialVerdict = "RUNNING" | "WINNER" | "BASELINE" | "TIED_CONFIRMED" | "UNRESOLVED"
 
 pub type ArmDecision = {
   intervals: dict<string, ArmInterval>,
@@ -342,12 +342,21 @@ fn __simplest(arms: list<SequentialArm>, kept: list<string>) -> string? {
   return selected
 }
 
-fn __validate_arms(arms: list<SequentialArm>, k_frozen: int, epsilon: float) {
+fn __validate_arms(
+  arms: list<SequentialArm>,
+  k_frozen: int,
+  epsilon: float,
+  lo_bound: float,
+  hi_bound: float,
+) {
   if k_frozen < 1 || len(arms) > k_frozen {
     throw "std/eval/sequential: k_frozen must cover every registered arm"
   }
-  if epsilon <= 0.0 {
-    throw "std/eval/sequential: epsilon must be positive"
+  if !(lo_bound < hi_bound) {
+    throw "std/eval/sequential: lo_bound must be less than hi_bound"
+  }
+  if epsilon <= 0.0 || epsilon >= hi_bound - lo_bound {
+    throw "std/eval/sequential: epsilon must be positive and smaller than the support width"
   }
   let seen: dict<string, bool> = {}
   for arm in arms {
@@ -357,21 +366,26 @@ fn __validate_arms(arms: list<SequentialArm>, k_frozen: int, epsilon: float) {
     if arm.complexity < 0 {
       throw "std/eval/sequential: arm complexity must be non-negative"
     }
-    __require_bounds(arm.deltas, -1.0, 1.0)
+    __require_bounds(arm.deltas, lo_bound, hi_bound)
     seen = seen + {[arm.id]: true}
   }
 }
 
-fn __rank_arms(arms: list<SequentialArm>, per_arm_delta: float) -> ArmRanking {
+fn __rank_arms(
+  arms: list<SequentialArm>,
+  per_arm_delta: float,
+  lo_bound: float,
+  hi_bound: float,
+) -> ArmRanking {
   const first = arms[0]
   if first == nil {
     throw "std/eval/sequential: cannot rank an empty arm list"
   }
   let intervals: dict<string, ArmInterval> = {}
   let leader = first.id
-  let leader_mean = -2.0
+  let leader_mean = lo_bound - (hi_bound - lo_bound)
   for arm in arms {
-    const interval = bounded_cs(arm.deltas, per_arm_delta, -1.0, 1.0)
+    const interval = bounded_cs(arm.deltas, per_arm_delta, lo_bound, hi_bound)
     const named: ArmInterval = interval + {id: arm.id}
     intervals = intervals + {[arm.id]: named}
     if named.mean > leader_mean {
@@ -380,7 +394,7 @@ fn __rank_arms(arms: list<SequentialArm>, per_arm_delta: float) -> ArmRanking {
     }
   }
   let runner_up: string? = nil
-  let runner_mean = -2.0
+  let runner_mean = lo_bound - (hi_bound - lo_bound)
   for arm in arms {
     const interval = intervals[arm.id]
     if interval == nil {
@@ -400,6 +414,8 @@ fn __rank_arms(arms: list<SequentialArm>, per_arm_delta: float) -> ArmRanking {
  * The family budget is permanently split by registered `k_frozen`; removed arms
  * never refund error budget. No arm can be pruned or crowned below
  * `min_trials_per_case`. Input complexity is the caller-owned Occam ordering.
+ * `lo_bound` and `hi_bound` describe the common support of every arm's
+ * observations; the defaults preserve the paired-rate-delta `[-1, 1]` API.
  *
  * @effects: []
  * @errors: [validation]
@@ -412,9 +428,11 @@ pub fn arm_decision(
   n_per_case: int,
   budget_spent: bool,
   min_trials_per_case: int = 3,
+  lo_bound: float = -1.0,
+  hi_bound: float = 1.0,
 ) -> ArmDecision {
   __require_delta(delta)
-  __validate_arms(alive_arms, k_frozen, epsilon)
+  __validate_arms(alive_arms, k_frozen, epsilon, lo_bound, hi_bound)
   if n_per_case < 0 || min_trials_per_case < 1 {
     throw "std/eval/sequential: trial counts must be non-negative with a positive floor"
   }
@@ -431,7 +449,7 @@ pub fn arm_decision(
     }
     return result
   }
-  const ranking = __rank_arms(alive_arms, delta / to_float(k_frozen))
+  const ranking = __rank_arms(alive_arms, delta / to_float(k_frozen), lo_bound, hi_bound)
   const intervals = ranking.intervals
   const leader = ranking.leader
   const runner_up = ranking.runner_up
@@ -444,13 +462,17 @@ pub fn arm_decision(
   let kept: list<string> = []
   let separated = true
   for arm in alive_arms {
-    if arm.id == leader {
-      kept = kept + [arm.id]
-      continue
-    }
     const interval = intervals[arm.id]
     if interval == nil {
       throw "std/eval/sequential: interval projection omitted a registered arm"
+    }
+    if can_decide && interval.hi < 0.0 - epsilon {
+      killed = killed + [arm.id]
+      continue
+    }
+    if arm.id == leader {
+      kept = kept + [arm.id]
+      continue
     }
     const gap = __gap(leader_interval, interval)
     if can_decide && gap.lo > epsilon {
@@ -460,6 +482,19 @@ pub fn arm_decision(
     }
     if !(gap.lo > epsilon) {
       separated = false
+    }
+  }
+  if can_decide && len(killed) == len(alive_arms) {
+    const verdict: SequentialVerdict = "BASELINE"
+    return {
+      intervals: intervals,
+      leader: leader,
+      runner_up: runner_up,
+      killed: killed,
+      kept: [],
+      winner: nil,
+      verdict: verdict,
+      no_decision: false,
     }
   }
   if can_decide && leader_interval.lo > epsilon && separated {
@@ -490,7 +525,14 @@ pub fn arm_decision(
     }
     return result
   }
-  let equivalent = len(kept) > 1
+  let equivalent = len(kept) > 0
+  for arm_id in kept {
+    const interval = intervals[arm_id]
+    if interval == nil
+      || !(interval.lo > 0.0 - epsilon && interval.hi < epsilon) {
+      equivalent = false
+    }
+  }
   for arm in alive_arms {
     if arm.id == leader || !kept.contains(arm.id) {
       continue
