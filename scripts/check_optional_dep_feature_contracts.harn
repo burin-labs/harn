@@ -4,7 +4,6 @@
 // for example `ort` with `download-binaries` but no TLS feature (#5690). That
 // failure mode only appears under `--features neural` / `--all-features`, which
 // default CI does not compile, so a cheap TOML contract is the durable ratchet.
-
 const ORT_TLS_FEATURES = [
   "tls-rustls",
   "tls-rustls-no-provider",
@@ -50,7 +49,8 @@ pub fn ort_download_tls_violations(path: string, dep: any) -> list<string> {
     return [
       path
         + ": ort enables download-binaries with default-features=false but no TLS feature; add exactly one of "
-        + ORT_TLS_FEATURES.join(", "),
+        + ORT_TLS_FEATURES
+        .join(", "),
     ]
   }
   return [

@@ -15,10 +15,7 @@ pipeline test_accepts_download_binaries_when_defaults_remain_on(task) {
 [dependencies]
 ort = { version = "2", features = ["download-binaries"] }
 """
-  assert_eq(
-    optional_dep_feature_contract_violations_from_text("defaults/Cargo.toml", text),
-    [],
-  )
+  assert_eq(optional_dep_feature_contract_violations_from_text("defaults/Cargo.toml", text), [])
 }
 
 @test
@@ -27,10 +24,7 @@ pipeline test_rejects_download_binaries_without_tls(task) {
 [dependencies]
 ort = { version = "2", default-features = false, features = ["download-binaries"] }
 """
-  const violations = optional_dep_feature_contract_violations_from_text(
-    "bad/Cargo.toml",
-    text,
-  )
+  const violations = optional_dep_feature_contract_violations_from_text("bad/Cargo.toml", text)
   assert_eq(violations.count, 1)
   assert(violations[0].contains("no TLS feature"))
 }
@@ -41,10 +35,7 @@ pipeline test_rejects_multiple_tls_features(task) {
 [dependencies]
 ort = { version = "2", default-features = false, features = ["download-binaries", "tls-rustls", "tls-native"] }
 """
-  const violations = optional_dep_feature_contract_violations_from_text(
-    "multi/Cargo.toml",
-    text,
-  )
+  const violations = optional_dep_feature_contract_violations_from_text("multi/Cargo.toml", text)
   assert_eq(violations.count, 1)
   assert(violations[0].contains("multiple TLS features"))
 }
