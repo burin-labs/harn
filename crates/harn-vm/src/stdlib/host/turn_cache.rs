@@ -225,7 +225,7 @@ mod tests {
         HostCallBridge,
     };
     use super::reset;
-    use crate::value::{DictMap, VmError, VmValue};
+    use crate::value::{DictMap, VmValue};
 
     /// [`TURN_EPOCH`] is process-global, so these tests mutate shared state: a
     /// `reset` in one invalidates entries another is mid-assertion about. Cargo
