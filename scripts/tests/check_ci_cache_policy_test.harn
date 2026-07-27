@@ -213,8 +213,8 @@ fn workflows() {
         "cold-start-budget": {
           if:
             "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))",
-          "timeout-minutes": 25,
-          steps: [{name: "Build release harn", "timeout-minutes": 20}],
+          "timeout-minutes": 30,
+          steps: [{name: "Build release harn", "timeout-minutes": 25}],
         },
       },
     },
@@ -646,12 +646,12 @@ pipeline test_ci_cache_policy_rejects_cold_start_pr_trigger(task) {
   )
   assert(
     errors.contains(
-      "cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 25 minutes",
+      "cli-cold-start-budget.yml:cold-start-budget must cap total runtime at 30 minutes",
     ),
   )
   assert(
     errors.contains(
-      "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 20 minutes",
+      "cli-cold-start-budget.yml:cold-start-budget release build step must cap runtime at 25 minutes",
     ),
   )
 }
