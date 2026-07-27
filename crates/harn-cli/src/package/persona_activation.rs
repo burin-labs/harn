@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use harn_modules::personas::{
     PersonaAutonomyTier, PersonaBudget, PersonaManifestEntry, PersonaModelPolicy,
@@ -20,6 +21,11 @@ const ACTIVATION_FILE: &str = "activations.json";
 const ACTIVATION_LOCK_FILE: &str = "activations.lock";
 const PROJECT_MUTATION_LOCK_FILE: &str = ".harn/project-mutation.lock";
 
+// A project mutation can include a complete package install. The activation
+// ledger lock only protects one small JSON read-modify-write.
+const PROJECT_MUTATION_LOCK_TIMEOUT: Duration = Duration::from_mins(30);
+const ACTIVATION_LEDGER_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub(crate) struct ProjectMutationLock {
     _file: File,
 }
@@ -33,8 +39,13 @@ pub(crate) fn acquire_project_mutation_lock(
     let file = open_lock_file(&lock_path)?;
     #[cfg(test)]
     project_mutation_lock_test_probe::before_lock();
-    file.lock()
-        .map_err(|source| io_error("lock", &lock_path, source))?;
+    harn_flock::lock_with_deadline(
+        &file,
+        &lock_path,
+        harn_flock::LockMode::Exclusive,
+        PROJECT_MUTATION_LOCK_TIMEOUT,
+    )
+    .map_err(|source| io_error("lock", &lock_path, io::Error::other(source)))?;
     Ok(ProjectMutationLock { _file: file })
 }
 
@@ -827,8 +838,13 @@ fn mutate_activation_ledger<T>(
     fs::create_dir_all(lock_path.parent().unwrap_or(project_root))
         .map_err(|source| io_error("create", &lock_path, source))?;
     let lock = open_lock_file(&lock_path)?;
-    lock.lock()
-        .map_err(|source| io_error("lock", &lock_path, source))?;
+    harn_flock::lock_with_deadline(
+        &lock,
+        &lock_path,
+        harn_flock::LockMode::Exclusive,
+        ACTIVATION_LEDGER_LOCK_TIMEOUT,
+    )
+    .map_err(|source| io_error("lock", &lock_path, io::Error::other(source)))?;
     let result = (|| {
         let mut ledger = load_activation_ledger(project_root)?;
         let (changed, value) = mutate(&mut ledger);

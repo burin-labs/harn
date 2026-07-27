@@ -23,6 +23,9 @@ const SWEEP_INTERVAL: Duration = Duration::from_hours(1);
 const PRESSURE_GRACE: Duration = Duration::from_mins(5);
 const ARTIFACT_PREFIX: &str = "harn-command-cmd_";
 const ACTIVE_LEASE_FILE: &str = ".active.lock";
+// Command IDs are unique. Contention therefore indicates a stale process or
+// an identity collision, not useful work whose duration should be inherited.
+const ACTIVE_LEASE_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug)]
 struct ArtifactDir {
@@ -230,6 +233,13 @@ fn artifact_dir(artifacts: &CommandArtifacts) -> Option<PathBuf> {
 }
 
 fn mark_artifacts_active(artifacts: &CommandArtifacts) -> Result<(), HostlibError> {
+    mark_artifacts_active_with_timeout(artifacts, ACTIVE_LEASE_LOCK_TIMEOUT)
+}
+
+fn mark_artifacts_active_with_timeout(
+    artifacts: &CommandArtifacts,
+    timeout: Duration,
+) -> Result<(), HostlibError> {
     let Some(dir) = artifact_dir(artifacts) else {
         return Ok(());
     };
@@ -250,7 +260,13 @@ fn mark_artifacts_active(artifacts: &CommandArtifacts) -> Result<(), HostlibErro
             builtin: "hostlib_tools_run_command",
             message: format!("failed to open command artifact lease: {error}"),
         })?;
-    lease.lock().map_err(|error| HostlibError::Backend {
+    harn_flock::lock_with_deadline(
+        &lease,
+        &lease_path,
+        harn_flock::LockMode::Exclusive,
+        timeout,
+    )
+    .map_err(|error| HostlibError::Backend {
         builtin: "hostlib_tools_run_command",
         message: format!("failed to lock command artifact lease: {error}"),
     })?;
@@ -586,6 +602,36 @@ mod tests {
         lease.unlock().unwrap();
         sweep_command_artifact_dirs(temp.path(), Duration::from_secs(5), DEFAULT_MAX_DIRS, now);
         assert!(!active.exists());
+    }
+
+    #[test]
+    fn contended_command_artifact_lease_names_itself() {
+        let temp = tempdir().unwrap();
+        let active = create_artifact_dir(temp.path(), dead_pid(), 100, 1);
+        let artifacts = CommandArtifacts {
+            output_path: active.join("combined.txt"),
+            stdout_path: active.join("stdout.txt"),
+            stderr_path: active.join("stderr.txt"),
+            line_count: 0,
+            byte_count: 0,
+            output_sha256: String::new(),
+        };
+        let lease_path = active.join(ACTIVE_LEASE_FILE);
+        let holder = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lease_path)
+            .unwrap();
+        holder.lock().unwrap();
+
+        let error = mark_artifacts_active_with_timeout(&artifacts, Duration::ZERO).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains(&lease_path.display().to_string()));
+        assert!(error.to_string().contains("timed out"));
     }
 
     #[test]
