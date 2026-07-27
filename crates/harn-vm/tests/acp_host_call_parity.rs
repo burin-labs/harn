@@ -3,46 +3,29 @@
 //!
 //! # Why this exists
 //!
-//! `host_call` has two implementations. harn-vm's canonical dispatch is one;
-//! `harn-serve`'s ACP adapter re-registers the `host_call` builtin outright and
-//! is the other. Registration is by name, so the ACP one *shadows* the stdlib
-//! one entirely — and ACP is how the editor runs every agent turn.
+//! Before harn#5523, `host_call` had two implementations: harn-vm's canonical
+//! dispatch, and an ACP adapter that re-registered the builtin by name and
+//! forwarded straight to `host/call`. That split hid real defects — the
+//! per-turn memo shipped without affecting ACP until it was duplicated.
 //!
-//! That means every branch of the canonical dispatch is, by default, invisible
-//! to the surface that matters most. This has already cost a release: the
-//! per-turn memo (harn#5190/#5207) shipped in v0.10.38 and did nothing on the
-//! ACP route for its entire life. It was found by measuring a slow agent turn
-//! (burin-labs/burin-code#5432), not by CI — and CI could not have found it,
-//! because harn-vm's own turn-cache test drives the dispatch path ACP replaces,
-//! so it passes either way.
+//! ACP now installs a [`harn_vm::HostCallBridge`] and keeps the stdlib
+//! builtin, so Runtime-owned branches below are observed on the editor path.
+//! This census still fails the build when a new call is added without
+//! classifying ownership, and still records intentional Host-owned fallbacks
+//! that ACP may answer first via the bridge.
 //!
-//! The individual gap is fixed (harn#5526). The *class* is not: the next
-//! cross-cutting branch added below silently misses ACP too, and the default
-//! outcome is silence rather than a failure.
-//!
-//! # What this does about it
-//!
-//! `HOST_CALL_CROSS_CUTTING` names every call the canonical dispatch makes,
-//! records who owns its semantics, and records whether the ACP route observes
-//! it *today*. A test asserts the census and the function agree in both
-//! directions, so adding a branch without classifying it fails the build.
-//!
-//! The census is a ledger of the current truth, not an aspiration. An entry
-//! with `acp_observes: false` and a `tracked_by` issue is a known, deliberate
-//! divergence; flipping it to `true` is how the fix proves itself.
-//!
-//! Tracked by harn#5562; the convergence work it defends is harn#5523.
+//! Tracked by harn#5562; convergence landed in harn#5523.
 
 /// Who owns the semantics of a cross-cutting host-call behaviour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemanticsOwner {
     /// The embedder owns this. Over ACP the editor implements the operation
-    /// itself, so the canonical dispatch's version is a fallback for non-ACP
-    /// embedders and the ACP route skipping it is *correct*.
+    /// itself via the host bridge, so the canonical builtin fallback is for
+    /// non-ACP / declining-bridge cases.
     Host,
     /// harn owns this, and an embedder cannot reimplement it correctly because
     /// it depends on runtime state the embedder cannot see (turn boundaries,
-    /// command policy, mock registration). A route that skips it is a defect.
+    /// command policy, mock registration).
     Runtime,
 }
 
@@ -71,46 +54,43 @@ pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
     CrossCuttingBehaviour {
         callee: "dispatch_mock_host_call",
         owner: SemanticsOwner::Runtime,
-        acp_observes: false,
-        tracked_by: Some(5523),
-        rationale: "Host mocks are registered against harn's own registry, which an editor \
-                    cannot see. A mocked operation therefore still reaches the real editor \
-                    over ACP, which is the opposite of what registering a mock asked for.",
+        acp_observes: true,
+        tracked_by: None,
+        rationale: "Host mocks are registered against harn's own registry. ACP keeps the \
+                    stdlib host_call builtin (harn#5523), so mocked ops resolve here instead \
+                    of leaking to the editor.",
     },
     CrossCuttingBehaviour {
         callee: "dispatch_process_exec_with_policy",
         owner: SemanticsOwner::Runtime,
-        acp_observes: false,
-        tracked_by: Some(5523),
-        rationale: "Deny-patterns, approval gating and sandbox decisions are harn's, not the \
-                    editor's. In practice ACP overrides `exec`/`shell`/`run_command` separately \
-                    so ordinary execution is editor-owned by design, but a direct \
-                    `host_call(\"process.exec\", ...)` from Harn code skips harn's gating \
-                    entirely. Security-adjacent: converging this is a behaviour change that \
-                    needs its own testing, which is why #5523 keeps it separate.",
+        acp_observes: true,
+        tracked_by: None,
+        rationale: "Deny-patterns, approval gating and sandbox decisions are harn's. Direct \
+                    `host_call(\"process.exec\", ...)` hits this path on ACP sessions; the \
+                    editor-owned `exec`/`shell`/`run_command` builtins remain separate \
+                    (see harn-serve host_ownership).",
     },
     CrossCuttingBehaviour {
         callee: "dispatch_process_spawn_with_policy",
         owner: SemanticsOwner::Runtime,
-        acp_observes: false,
-        tracked_by: Some(5523),
-        rationale: "Non-blocking sibling of exec, deliberately gated identically. Same \
-                    divergence and the same reason for deferring it.",
+        acp_observes: true,
+        tracked_by: None,
+        rationale: "Non-blocking sibling of exec, gated identically. Observed on ACP because \
+                    host_call is no longer replaced.",
     },
     CrossCuttingBehaviour {
         callee: "crate::stdlib::process_spawn::dispatch",
         owner: SemanticsOwner::Runtime,
-        acp_observes: false,
-        tracked_by: Some(5523),
-        rationale: "poll/wait/kill/release operate on harn's in-process handle registry for an \
-                    already-gated spawn. An editor has no such registry, so these cannot be \
-                    served host-side at all.",
+        acp_observes: true,
+        tracked_by: None,
+        rationale: "poll/wait/kill/release operate on harn's in-process handle registry. ACP \
+                    sessions share that registry through canonical dispatch.",
     },
     CrossCuttingBehaviour {
         callee: "async_builtin_cancel_token",
         owner: SemanticsOwner::Runtime,
-        acp_observes: false,
-        tracked_by: Some(5523),
+        acp_observes: true,
+        tracked_by: None,
         rationale: "Plumbs the caller's cancellation into the spawn registry. Reachable only \
                     through the entry above, so it shares its disposition.",
     },
@@ -119,23 +99,17 @@ pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
         owner: SemanticsOwner::Runtime,
         acp_observes: true,
         tracked_by: None,
-        rationale: "Turn boundaries are harn's; the memo is keyed on an epoch the editor cannot \
-                    observe. This is the entry that was silently false for a whole release \
-                    (harn#5190 shipped, ACP never saw it, found in \
-                    burin-labs/burin-code#5432). harn#5526 hoisted the allowlist and the \
-                    epoch-tagged store into harn-vm so both routes share one owner; \
-                    `acp_observes` is backed by \
-                    `harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs`, which drives \
-                    the ACP route rather than the path ACP replaces.",
+        rationale: "Turn boundaries are harn's; the memo lives inside canonical dispatch. \
+                    ACP observes it by keeping the stdlib builtin (harn#5523). Backed by \
+                    `harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs`.",
     },
     CrossCuttingBehaviour {
         callee: "bridge.dispatch",
         owner: SemanticsOwner::Host,
         acp_observes: true,
         tracked_by: None,
-        rationale: "The embedder's own hook. ACP's equivalent is the `host/call` JSON-RPC \
-                    request, so both routes reach the embedder — by different transports, \
-                    which is the intended difference rather than a divergence.",
+        rationale: "The embedder's own hook. ACP's AcpHostCallBridge issues `host/call` \
+                    JSON-RPC from this seam — same ownership, one dispatch path.",
     },
     CrossCuttingBehaviour {
         callee: "dispatch_builtin_host_operation",
@@ -144,10 +118,10 @@ pub const HOST_CALL_CROSS_CUTTING: &[CrossCuttingBehaviour] = &[
         tracked_by: None,
         rationale: "Fallback catalog (`process.list_shells`, `template.render`, \
                     `interaction.ask`, `project.metadata_*`, `workspace.*`) for embedders that \
-                    do not implement an operation. Over ACP the editor is expected to serve \
-                    these, so bypassing the fallback is correct and needs no tracking issue. \
-                    Listed so that a *new* arm added here is a deliberate `Host` decision \
-                    rather than an unexamined one.",
+                    do not implement an operation. Over ACP the editor usually answers via the \
+                    bridge first, so bypassing the fallback is correct and needs no tracking \
+                    issue. Listed so that a *new* arm added here is a deliberate `Host` \
+                    decision rather than an unexamined one.",
     },
 ];
 
@@ -180,7 +154,7 @@ pub const NON_BEHAVIOURAL_CALLS: &[&str] = &[
 fn dispatch_body() -> String {
     let source = include_str!("../src/stdlib/host.rs");
     let start = source
-        .find("pub(crate) async fn dispatch_host_operation_with_ctx")
+        .find("pub async fn dispatch_host_operation_with_ctx")
         .expect("dispatch_host_operation_with_ctx not found — did it get renamed?");
     let open = source[start..]
         .find(") -> Result<VmValue, VmError> {")
@@ -271,15 +245,10 @@ fn every_call_in_the_canonical_dispatch_is_classified() {
         unclassified.is_empty(),
         "dispatch_host_operation_with_ctx calls {unclassified:?}, which is not in \
          HOST_CALL_CROSS_CUTTING or NON_BEHAVIOURAL_CALLS.\n\n\
-         This is the guard doing its job. A new branch here does NOT reach ACP-hosted \
-         sessions: the ACP adapter re-registers the `host_call` builtin and shadows this \
-         function entirely, so whatever you just added is invisible to the surface the \
-         editor uses for every agent turn.\n\n\
-         Classify it in crates/harn-vm/src/stdlib/host/acp_parity.rs — `SemanticsOwner::Host` \
-         if the embedder is meant to serve it, `SemanticsOwner::Runtime` if it depends on \
-         runtime state an embedder cannot see. For a Runtime entry that ACP does not yet \
-         observe, set `acp_observes: false` with a `tracked_by` issue rather than leaving it \
-         unrecorded. See harn#5562."
+         Classify it here — `SemanticsOwner::Host` if the embedder is meant to serve it, \
+         `SemanticsOwner::Runtime` if it depends on runtime state an embedder cannot see. \
+         After harn#5523 ACP keeps the stdlib host_call builtin, so Runtime entries should \
+         normally set `acp_observes: true`. See harn#5562."
     );
 }
 
@@ -332,11 +301,6 @@ fn runtime_owned_divergences_carry_a_tracking_issue() {
 }
 
 /// The regression that motivated the whole census.
-///
-/// Pinned as its own assertion rather than left implicit in the table: if
-/// someone ever flips this back to `false` to make a test pass, that is the
-/// v0.10.38 defect returning and it should require deleting a test that
-/// says so.
 #[test]
 fn the_per_turn_memo_is_observed_over_acp() {
     let memo = HOST_CALL_CROSS_CUTTING
@@ -346,16 +310,28 @@ fn the_per_turn_memo_is_observed_over_acp() {
     assert_eq!(memo.owner, SemanticsOwner::Runtime);
     assert!(
         memo.acp_observes,
-        "The per-turn memo shipped in v0.10.38 and did nothing on the ACP route for its \
-         entire life (harn#5190 -> burin-labs/burin-code#5432). harn#5526 fixed that. If \
-         this is false again, the ACP route has stopped sharing the memo — see \
+        "The per-turn memo must remain on the ACP route after harn#5523. If this is false \
+         again, ACP has stopped sharing canonical dispatch — see \
          harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs."
     );
 }
 
-/// An entry without a stated reason is a label, not a census. The whole
-/// value here is that the next person can tell a deliberate divergence
-/// from an unexamined one without re-deriving it.
+/// After #5523 every Runtime-owned cross-cutting branch is on the ACP path.
+#[test]
+fn every_runtime_owned_branch_is_observed_over_acp() {
+    for entry in HOST_CALL_CROSS_CUTTING {
+        if entry.owner == SemanticsOwner::Runtime {
+            assert!(
+                entry.acp_observes,
+                "`{}` is Runtime-owned but acp_observes=false — that reopens the dual-route \
+                 defect #5523 closed.",
+                entry.callee
+            );
+        }
+    }
+}
+
+/// An entry without a stated reason is a label, not a census.
 #[test]
 fn every_entry_states_its_reasoning() {
     for entry in HOST_CALL_CROSS_CUTTING {

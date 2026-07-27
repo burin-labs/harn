@@ -1,16 +1,14 @@
-//! Proof that the ACP `host_call` route shares harn-vm's per-turn memo.
+//! Proof that the ACP `host_call` route shares harn-vm's per-turn memo via
+//! canonical dispatch — not a second memo bolted onto a replaced builtin.
 //!
-//! This adapter re-registers the `host_call` builtin, which means the memo
-//! harn-vm applies inside its own dispatch path never sees an ACP-hosted
-//! session. That gap was invisible for exactly as long as it existed: harn-vm's
-//! own turn-cache test passes either way, because it exercises the dispatch path
-//! this adapter replaces. These tests exercise the ACP route itself.
-//!
-//! Regression cover for burin-labs/burin-code#5432, where one agent turn made
-//! 105 `runtime.pipeline_input` round-trips to the editor across 4 iterations —
-//! the ~20-per-turn figure harn#5190 introduced the memo to eliminate.
+//! Before harn#5523, this adapter re-registered `host_call` and the memo
+//! inside `dispatch_host_operation_with_ctx` never saw editor sessions.
+//! These tests install the ACP [`HostCallBridge`] the same way
+//! `register_acp_builtins` does, then drive the public canonical entry so a
+//! regression that reintroduces a shadowed builtin fails here.
 
 use super::*;
+use harn_vm::{dispatch_host_operation, set_host_call_bridge};
 
 fn test_bridge(
     tx: tokio::sync::mpsc::UnboundedSender<String>,
@@ -27,41 +25,48 @@ fn test_bridge(
     })
 }
 
+fn install_acp_host_bridge(bridge: Arc<AcpBridge>) {
+    set_host_call_bridge(Arc::new(super::super::builtins::AcpHostCallBridge::new(
+        bridge,
+        VmValue::List(Arc::new(Vec::new())),
+    )));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn turn_stable_read_is_served_without_an_acp_round_trip() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let server =
         AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx.clone()));
     let bridge = test_bridge(tx, &server);
+    install_acp_host_bridge(bridge);
 
     let params = harn_vm::value::DictMap::new();
     let memoized = VmValue::String(arcstr::ArcStr::from("memoized-input"));
-    harn_vm::host_turn_cache::store_by_name("runtime.pipeline_input", &params, &memoized);
+    harn_vm::host_turn_cache::store("runtime", "pipeline_input", &params, &memoized);
 
     // Bounded on purpose. A memo hit must not touch the wire at all, so this
     // should complete instantly. If the memo is ever bypassed again the call
-    // falls through to a real `call_client` with nothing to answer it, and the
-    // 5-minute `host_call_timeout` would make this guard take five minutes to
-    // report the regression it exists to catch — verified when the negative
-    // control for this test failed in 300s. Fail in seconds instead.
-    let args = VmValue::dict_map(Default::default());
+    // falls through to a real `host/call` with nothing to answer it, and the
+    // 5-minute host_call timeout would make this guard take five minutes to
+    // report the regression it exists to catch. Fail in seconds instead.
     let value = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        super::super::builtins::host_call_via_bridge(&bridge, "runtime.pipeline_input", &args),
+        dispatch_host_operation("runtime", "pipeline_input", &params),
     )
     .await
-    .expect("memo hit must not reach the wire; a timeout here means host_call bypassed the memo")
+    .expect("memo hit must not reach the wire; a timeout here means ACP bypassed canonical memo")
     .expect("memoized host_call");
 
     assert_eq!(
         value.display(),
         "memoized-input",
-        "a warm memo must answer the call"
+        "a warm memo must answer the call through canonical dispatch"
     );
     assert!(
         rx.try_recv().is_err(),
         "a memo hit must not emit a host/call round-trip to the editor"
     );
+    harn_vm::clear_host_call_bridge();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -72,18 +77,17 @@ async fn non_turn_stable_read_still_reaches_the_editor() {
     let server =
         AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx.clone()));
     let bridge = test_bridge(tx, &server);
+    install_acp_host_bridge(bridge);
 
     let params = harn_vm::value::DictMap::new();
-    harn_vm::host_turn_cache::store_by_name(
-        "session.active_roots",
+    harn_vm::host_turn_cache::store(
+        "session",
+        "active_roots",
         &params,
         &VmValue::String(arcstr::ArcStr::from("stale-roots")),
     );
 
-    // Bind the args: `tokio::pin!` keeps this future alive past the end of the
-    // statement, so an inline temporary would be dropped while still borrowed.
-    let args = VmValue::dict_map(Default::default());
-    let call = super::super::builtins::host_call_via_bridge(&bridge, "session.active_roots", &args);
+    let call = dispatch_host_operation("session", "active_roots", &params);
     tokio::pin!(call);
 
     // The call must still go out. Observe the outgoing frame rather than
@@ -94,4 +98,64 @@ async fn non_turn_stable_read_still_reaches_the_editor() {
     };
     assert_eq!(outgoing["method"], "host/call");
     assert_eq!(outgoing["params"]["name"], "session.active_roots");
+    harn_vm::clear_host_call_bridge();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn process_exec_host_call_is_gated_by_command_policy_on_acp_bridge() {
+    // Acceptance for #5523: installing the ACP bridge must not let
+    // host_call("process.exec", ...) bypass harn's deny-patterns.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let server =
+        AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx.clone()));
+    let bridge = test_bridge(tx, &server);
+    install_acp_host_bridge(bridge);
+
+    harn_vm::orchestration::clear_command_policies();
+    harn_vm::orchestration::push_command_policy(harn_vm::orchestration::CommandPolicy {
+        tools: vec!["run".to_string()],
+        workspace_roots: Vec::new(),
+        default_shell_mode: "shell".to_string(),
+        deny_patterns: vec!["cat *".to_string()],
+        require_approval: Default::default(),
+        deny_labels: Default::default(),
+        pre: None,
+        post: None,
+        consent: None,
+        allow_recursive: false,
+    });
+
+    let result = dispatch_host_operation(
+        "process",
+        "exec",
+        &harn_vm::value::DictMap::from_iter([
+            (
+                harn_vm::value::intern_key("mode"),
+                VmValue::String(arcstr::ArcStr::from("shell")),
+            ),
+            (
+                harn_vm::value::intern_key("command"),
+                VmValue::String(arcstr::ArcStr::from("cat Cargo.toml")),
+            ),
+        ]),
+    )
+    .await
+    .expect("process.exec should return a structured denial, not a thrown error");
+
+    harn_vm::orchestration::clear_command_policies();
+    harn_vm::clear_host_call_bridge();
+
+    let dict = result.as_dict().expect("process.exec returns a dict");
+    assert_eq!(
+        dict.get("status").map(VmValue::display).unwrap_or_default(),
+        "blocked",
+        "ACP-bridged host_call(process.exec) must observe command policy; got {result:?}"
+    );
+    assert!(
+        dict.get("reason")
+            .map(VmValue::display)
+            .unwrap_or_default()
+            .contains("cat *"),
+        "blocked result should name the matched policy pattern; got {result:?}"
+    );
 }

@@ -1,56 +1,69 @@
 //! ACP builtin registrations and terminal-exec glue.
 //!
-//! These builtins delegate VM-side capabilities (`log`, `print`, `exec`,
-//! `host_call`, ...) to the ACP client via the `AcpBridge`.
+//! These builtins delegate VM-side presentation and editor-owned execution
+//! (`log`, `print`, `exec`, ...) to the ACP client via the `AcpBridge`.
+//! `host_call` itself is **not** replaced: ACP installs a
+//! [`harn_vm::HostCallBridge`] so every session shares canonical dispatch
+//! (mocks, command policy, process-handle registry, turn memo). See harn#5523.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use harn_vm::{HostCallBridge, HostCallDispatchFuture};
+
 use super::AcpBridge;
 
-/// Serve one `host_call`, front-running the ACP round-trip with the per-turn
-/// memo for turn-stable reads.
+/// ACP embedder bridge for canonical `host_call` dispatch.
 ///
-/// Split out of the builtin closure so the caching contract is reachable from a
-/// test without standing up a VM or completing the `host/capabilities`
-/// handshake that [`register_acp_builtins`] performs.
-///
-/// The memo matters *here* specifically: this adapter REPLACES the stdlib
-/// `host_call` builtin, so the memo harn-vm applies inside its own dispatch path
-/// never sees an ACP-hosted session — and ACP is how the editor runs every agent
-/// turn. harn#5190 measured ~20 identical `runtime.pipeline_input` reads per
-/// turn; without this the ACP path paid every one as a full JSON-RPC round-trip
-/// to the editor instead of an in-process call. Measured at 105 round-trips
-/// across 4 iterations of one real turn (burin-labs/burin-code#5432), which is
-/// what pushed that turn past its wall-clock budget on a loaded runner.
-///
-/// The allowlist and the memo live in harn-vm so the two `host_call` routes
-/// cannot drift apart, and entries there are epoch-tagged so a turn boundary
-/// observed on another thread still invalidates them.
-pub(super) async fn host_call_via_bridge(
-    bridge: &AcpBridge,
-    name: &str,
-    call_args: &harn_vm::VmValue,
-) -> Result<harn_vm::VmValue, harn_vm::VmError> {
-    let params = call_args.as_dict().cloned().unwrap_or_default();
-    if let Some(hit) = harn_vm::host_turn_cache::lookup_by_name(name, &params) {
-        return Ok(hit);
+/// Forwards unhandled capability/operation pairs to the editor over
+/// `host/call`. Runtime-owned ops (`process.exec` policy, spawn registry,
+/// mocks, turn memo) are applied by harn-vm *before* this bridge is
+/// consulted — that is the whole point of not replacing the builtin.
+pub(super) struct AcpHostCallBridge {
+    bridge: Arc<AcpBridge>,
+    prompt_content: harn_vm::VmValue,
+}
+
+impl AcpHostCallBridge {
+    pub(super) fn new(bridge: Arc<AcpBridge>, prompt_content: harn_vm::VmValue) -> Self {
+        Self {
+            bridge,
+            prompt_content,
+        }
     }
-    let args_json = harn_vm::llm::vm_value_to_json(call_args);
-    let result = bridge
-        .call_client(
-            "host/call",
-            serde_json::json!({
-                "sessionId": bridge.session_id,
-                "name": name,
-                "args": args_json,
-            }),
-        )
-        .await?;
-    let value = harn_vm::bridge::json_result_to_vm_value(&result);
-    harn_vm::host_turn_cache::store_by_name(name, &params, &value);
-    Ok(value)
+}
+
+impl HostCallBridge for AcpHostCallBridge {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        params: &'a harn_vm::value::DictMap,
+    ) -> HostCallDispatchFuture<'a> {
+        Box::pin(async move {
+            // Session prompt content is local to the ACP prompt — serve it
+            // without a host round-trip, matching the pre-#5523 short-circuit.
+            if capability == "runtime" && operation == "prompt_content" {
+                return Ok(Some(self.prompt_content.clone()));
+            }
+            let name = format!("{capability}.{operation}");
+            let args = harn_vm::VmValue::dict(params.clone());
+            let args_json = harn_vm::llm::vm_value_to_json(&args);
+            let result = self
+                .bridge
+                .call_client(
+                    "host/call",
+                    serde_json::json!({
+                        "sessionId": self.bridge.session_id,
+                        "name": name,
+                        "args": args_json,
+                    }),
+                )
+                .await?;
+            Ok(Some(harn_vm::bridge::json_result_to_vm_value(&result)))
+        })
+    }
 }
 
 /// Register builtins that delegate to the ACP client (editor).
@@ -111,20 +124,14 @@ pub(super) async fn register_acp_builtins(
         Ok(harn_vm::VmValue::Nil)
     });
 
-    let b = bridge.clone();
-    let local_prompt_content = prompt_content;
-    vm.register_async_builtin("host_call", move |_ctx, args| {
-        let bridge = b.clone();
-        let prompt_content = local_prompt_content.clone();
-        async move {
-            let name = args.first().map(|a| a.display()).unwrap_or_default();
-            if name == "runtime.prompt_content" {
-                return Ok(prompt_content);
-            }
-            let call_args = args.get(1).cloned().unwrap_or(harn_vm::VmValue::Nil);
-            host_call_via_bridge(&bridge, &name, &call_args).await
-        }
-    });
+    // Install the embedder bridge and keep the stdlib `host_call` builtin.
+    // Replacing that builtin by name is what previously detached ACP from
+    // mocks, command policy, the process-handle registry, and (until
+    // harn#5526) the per-turn memo. harn#5523.
+    harn_vm::set_host_call_bridge(Arc::new(AcpHostCallBridge::new(
+        bridge.clone(),
+        prompt_content,
+    )));
 
     let host_capabilities_cache = host_capability_manifest.clone();
     vm.register_builtin("host_capabilities", move |_args, _out| {

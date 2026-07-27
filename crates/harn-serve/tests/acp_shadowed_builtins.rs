@@ -1,19 +1,17 @@
-//! The other half of the host-call divergence guard (harn#5562).
+//! The other half of the host-call divergence guard (harn#5562 / harn#5523).
 //!
-//! `crates/harn-vm/src/stdlib/host/acp_parity.rs` guards the canonical dispatch:
+//! `crates/harn-vm/tests/acp_host_call_parity.rs` guards the canonical dispatch:
 //! it fails when a new cross-cutting branch is added there without recording
-//! whether ACP observes it. That guard is scoped to `host_call`, because
-//! `host_call` is the one host-dispatch builtin this adapter currently shadows.
+//! whether ACP observes it.
 //!
-//! Which leaves the same class open from this side. `register_builtin` inserts
-//! by name, so re-registering a builtin here silently detaches it from
-//! everything harn-vm does inside its own dispatch — with no diagnostic, and no
-//! test failure, exactly as happened to the per-turn memo for a whole release.
-//! Adding `host_tool_call` to the list below would reopen the class for tool
-//! dispatch, and nothing today would say so.
+//! This side declares every builtin the ACP adapter replaces. Growing that set
+//! is a decision that has to be written down — `register_builtin` inserts by
+//! name, so an undeclared replacement silently detaches the stdlib path.
 //!
-//! So: the set of builtins this adapter replaces is declared, not discovered.
-//! Growing it is a decision that has to be written down.
+//! After harn#5523, `host_call` is **not** in this set: ACP installs a
+//! `HostCallBridge` and keeps the stdlib builtin. The drift guard still fails
+//! if a new overlapping host-dispatch builtin is introduced without being
+//! allowlisted here with `shadows_host_dispatch: true`.
 
 /// A builtin the ACP adapter registers over the stdlib's.
 struct ShadowedBuiltin {
@@ -46,13 +44,6 @@ const ACP_SHADOWED_BUILTINS: &[ShadowedBuiltin] = &[
                     dispatch involved.",
     },
     ShadowedBuiltin {
-        name: "host_call",
-        shadows_host_dispatch: true,
-        rationale: "THE one. Replaces `dispatch_host_operation_with_ctx` wholesale. Every branch \
-                    of that function is classified in harn-vm's `acp_parity` census; the memo is \
-                    shared explicitly (harn#5526) and the rest is tracked by harn#5523.",
-    },
-    ShadowedBuiltin {
         name: "host_capabilities",
         shadows_host_dispatch: false,
         rationale: "Serves the manifest captured during the `host/capabilities` handshake. The \
@@ -68,8 +59,8 @@ const ACP_SHADOWED_BUILTINS: &[ShadowedBuiltin] = &[
         name: "run_command",
         shadows_host_dispatch: false,
         rationale: "Execution is editor-owned by design over ACP — the editor owns the terminal, \
-                    approval UX and undo. Deliberate divergence, not an oversight; see the \
-                    `process.exec` row of the harn-vm census for what that costs.",
+                    approval UX and undo. Deliberate divergence from stdlib `run_command`, kept \
+                    distinct from `host_call` routing (see host_ownership.rs).",
     },
     ShadowedBuiltin {
         name: "exec",
@@ -161,7 +152,8 @@ fn every_builtin_the_adapter_replaces_is_declared() {
          the per-turn memo was inert on the ACP route for a full release (harn#5190 -> \
          burin-labs/burin-code#5432).\n\n\
          Declare it here with `shadows_host_dispatch` set honestly. If it is true, the stdlib \
-         version's behaviour needs classifying in harn-vm's `acp_parity` census too. See harn#5562."
+         version's behaviour needs classifying in harn-vm's ACP host_call census too. See \
+         harn#5562 / harn#5523."
     );
 }
 
@@ -180,25 +172,28 @@ fn the_declaration_describes_only_builtins_that_exist() {
     }
 }
 
-/// `host_call` should be the only one, and if that ever stops being true the
-/// change should be deliberate enough to require editing this assertion.
+/// After #5523, no ACP registration may shadow a host-dispatch builtin.
+/// Reintroducing `host_call` (or adding `host_tool_call`) without flipping
+/// this assertion is exactly the defect class the guard exists to catch.
 #[test]
-fn host_call_is_the_only_shadowed_host_dispatch_builtin() {
+fn no_shadowed_host_dispatch_builtin_is_allowlisted() {
     let shadowing: Vec<&str> = ACP_SHADOWED_BUILTINS
         .iter()
         .filter(|entry| entry.shadows_host_dispatch)
         .map(|entry| entry.name)
         .collect();
-    assert_eq!(
-        shadowing,
-        vec!["host_call"],
-        "harn-vm has three host dispatch entry points — `dispatch_host_operation_with_ctx` \
-         (host_call), `dispatch_host_tool_call_with_ctx` (host_tool_call) and \
-         `dispatch_host_tool_list_with_ctx` (host_tool_list) — and this adapter shadows only the \
-         first. The `acp_parity` census in harn-vm covers exactly that one function.\n\n\
-         If tool dispatch is now shadowed too, the divergence class is open for it as well and \
-         the census needs extending to cover the corresponding function before this assertion is \
-         relaxed."
+    assert!(
+        shadowing.is_empty(),
+        "ACP must not replace host-dispatch builtins after harn#5523 (found {shadowing:?}). \
+         Install a HostCallBridge instead, or deliberately extend the census before relaxing \
+         this assertion."
+    );
+    assert!(
+        !registered_builtin_names()
+            .iter()
+            .any(|name| name == "host_call"),
+        "register_acp_builtins must not re-register host_call; that reopens the dual-route \
+         defect tracked by harn#5523"
     );
 }
 

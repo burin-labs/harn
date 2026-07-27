@@ -98,22 +98,23 @@ fn cache_key(capability: &str, operation: &str, params: &DictMap) -> String {
 /// turn-stable read, otherwise run `dispatch` verbatim. A successful
 /// `Ok(Some(value))` from a turn-stable read is memoized for the rest of the
 /// turn; `Ok(None)` (the bridge declined) and errors are never cached.
-pub(crate) fn cached_or<F>(
+pub(crate) async fn cached_or<F, Fut>(
     capability: &str,
     operation: &str,
     params: &DictMap,
     dispatch: F,
 ) -> Result<Option<VmValue>, VmError>
 where
-    F: FnOnce() -> Result<Option<VmValue>, VmError>,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<Option<VmValue>, VmError>>,
 {
     if !is_turn_stable(capability, operation) {
-        return dispatch();
+        return dispatch().await;
     }
     if let Some(cached) = lookup(capability, operation, params) {
         return Ok(Some(cached));
     }
-    let result = dispatch()?;
+    let result = dispatch().await?;
     if let Some(value) = &result {
         store(capability, operation, params, value);
     }
@@ -125,12 +126,9 @@ where
 /// Returns `None` for anything not on the [`is_turn_stable`] allowlist, for a
 /// cold memo, and for an entry written in an earlier turn.
 ///
-/// Exposed because the stdlib `host_call` builtin is **not** the only
-/// implementation of that builtin: an embedder can replace it wholesale (the ACP
-/// adapter in `harn-serve` does, forwarding to the editor over JSON-RPC), and
-/// such a replacement never reaches [`cached_or`] in the dispatch path. Those
-/// implementations must front their own dispatch with this pair so every
-/// `host_call` route shares one memo and one allowlist. harn#5190.
+/// Read API for the turn memo. Prefer going through canonical
+/// [`super::dispatch_host_operation`]; this exists for tests that seed or
+/// inspect the memo directly (harn#5190 / harn#5523).
 pub fn lookup(capability: &str, operation: &str, params: &DictMap) -> Option<VmValue> {
     if !is_turn_stable(capability, operation) {
         return None;
@@ -227,7 +225,7 @@ mod tests {
         HostCallBridge,
     };
     use super::reset;
-    use crate::value::{DictMap, VmError, VmValue};
+    use crate::value::{DictMap, VmValue};
 
     /// [`TURN_EPOCH`] is process-global, so these tests mutate shared state: a
     /// `reset` in one invalidates entries another is mid-assertion about. Cargo
@@ -240,21 +238,21 @@ mod tests {
     }
 
     impl HostCallBridge for CountingRuntimeBridge {
-        fn dispatch(
-            &self,
-            capability: &str,
-            operation: &str,
-            _params: &DictMap,
-        ) -> Result<Option<VmValue>, VmError> {
+        fn dispatch<'a>(
+            &'a self,
+            capability: &'a str,
+            operation: &'a str,
+            _params: &'a DictMap,
+        ) -> super::super::HostCallDispatchFuture<'a> {
             *self
                 .counts
                 .lock()
                 .unwrap()
                 .entry((capability.to_string(), operation.to_string()))
                 .or_insert(0) += 1;
-            Ok(Some(VmValue::String(arcstr::ArcStr::from(format!(
+            super::super::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from(format!(
                 "{capability}.{operation}"
-            )))))
+            ))))))
         }
     }
 

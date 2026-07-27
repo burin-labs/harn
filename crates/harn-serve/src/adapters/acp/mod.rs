@@ -19,6 +19,7 @@ mod core;
 mod dispatch;
 mod events;
 mod execute;
+mod host_ownership;
 mod inject;
 mod integrations;
 mod io;

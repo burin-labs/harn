@@ -3,8 +3,8 @@ use serde_json::Value as JsonValue;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
+use super::bridge::HOST_CALL_BRIDGE;
 use super::process_exec::{dispatch_process_exec_after_policy, process_exec_argv};
-use super::HOST_CALL_BRIDGE;
 
 pub(crate) async fn dispatch_process_exec(
     params: &crate::value::DictMap,
@@ -81,7 +81,7 @@ async fn dispatch_process_exec_with_policy_origin(
 
     let bridge = HOST_CALL_BRIDGE.with(|bridge| bridge.borrow().clone());
     if let Some(bridge) = bridge {
-        if let Some(value) = bridge.dispatch("process", "exec", &params)? {
+        if let Some(value) = bridge.dispatch("process", "exec", &params).await? {
             return crate::orchestration::run_command_policy_postflight_with_ctx(
                 ctx,
                 &params,

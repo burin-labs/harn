@@ -24,7 +24,7 @@ use harn_serve::{
     RouteSpec, SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteServer, SiteServerConfig,
     VmConfigurator,
 };
-use harn_vm::{HostCallBridge, TenantId, Vm, VmError, VmValue};
+use harn_vm::{HostCallBridge, TenantId, Vm, VmValue};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -209,21 +209,21 @@ impl SiteAuth for HeaderAuth {
 struct ContextEchoBridge;
 
 impl HostCallBridge for ContextEchoBridge {
-    fn dispatch(
-        &self,
-        capability: &str,
-        operation: &str,
-        _params: &harn_vm::value::DictMap,
-    ) -> Result<Option<VmValue>, VmError> {
+    fn dispatch<'a>(
+        &'a self,
+        capability: &'a str,
+        operation: &'a str,
+        _params: &'a harn_vm::value::DictMap,
+    ) -> harn_vm::HostCallDispatchFuture<'a> {
         if capability != "embedder" || operation != "auth_context" {
-            return Ok(None);
+            return harn_vm::host_call_ready(Ok(None));
         }
         let rendered = current_auth_context()
             .map(|context| context.to_string())
             .unwrap_or_else(|| "absent".to_string());
-        Ok(Some(VmValue::String(arcstr::ArcStr::from(
+        harn_vm::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from(
             rendered.as_str(),
-        ))))
+        )))))
     }
 }
 
