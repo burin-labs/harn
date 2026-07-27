@@ -97,7 +97,7 @@ fn json_schemas_lint_publishes_complete_schema_json() {
     assert!(!schema.is_null(), "schemaJson must be non-null");
     jsonschema::draft202012::meta::validate(schema).expect("lint schemaJson is draft 2020-12");
     let validator = jsonschema::draft202012::new(schema).expect("lint schemaJson compiles");
-    let clean = include_str!("../fixtures/lint_json/positive/clean_ok.json");
+    let clean = include_str!("../../src/commands/check/lint_json_fixtures/positive/clean_ok.json");
     let clean_value: serde_json::Value = serde_json::from_str(clean).expect("fixture json");
     validator
         .validate(&clean_value)

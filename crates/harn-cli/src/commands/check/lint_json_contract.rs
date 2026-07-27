@@ -605,18 +605,16 @@ mod tests {
 
     #[test]
     fn decoder_accepts_positive_and_rejects_adversarial() {
-        let positive = include_str!("../../../tests/fixtures/lint_json/positive/clean_ok.json");
+        let positive = include_str!("lint_json_fixtures/positive/clean_ok.json");
         decode_lint_json(positive, options_with_exit(0)).expect("clean ok");
 
-        let warning = include_str!("../../../tests/fixtures/lint_json/positive/warning_ok.json");
+        let warning = include_str!("lint_json_fixtures/positive/warning_ok.json");
         decode_lint_json(warning, options_with_exit(0)).expect("warning ok");
 
-        let failed =
-            include_str!("../../../tests/fixtures/lint_json/positive/lint_failed_with_data.json");
+        let failed = include_str!("lint_json_fixtures/positive/lint_failed_with_data.json");
         decode_lint_json(failed, options_with_exit(1)).expect("lint_failed");
 
-        let utf8 =
-            include_str!("../../../tests/fixtures/lint_json/positive/multiline_utf8_span.json");
+        let utf8 = include_str!("lint_json_fixtures/positive/multiline_utf8_span.json");
         let decoded = decode_lint_json(utf8, options_with_exit(0)).expect("utf8 span");
         let span = decoded.data.as_ref().unwrap().files[0].diagnostics[0]
             .span
@@ -624,7 +622,7 @@ mod tests {
         assert_eq!(span.start, 11);
         assert_eq!(span.end, 24);
 
-        let changed = include_str!("../../../tests/fixtures/lint_json/positive/changed_scope.json");
+        let changed = include_str!("lint_json_fixtures/positive/changed_scope.json");
         decode_lint_json(changed, options_with_exit(0)).expect("changed scope");
 
         assert_eq!(
@@ -635,9 +633,7 @@ mod tests {
         );
         assert_eq!(
             decode_lint_json(
-                include_str!(
-                    "../../../tests/fixtures/lint_json/adversarial/unsupported_schema_version.json"
-                ),
+                include_str!("lint_json_fixtures/adversarial/unsupported_schema_version.json"),
                 LintDecodeOptions::default()
             )
             .unwrap_err()
@@ -646,7 +642,7 @@ mod tests {
         );
         assert_eq!(
             decode_lint_json(
-                include_str!("../../../tests/fixtures/lint_json/adversarial/invalid_severity.json"),
+                include_str!("lint_json_fixtures/adversarial/invalid_severity.json"),
                 LintDecodeOptions::default()
             )
             .unwrap_err()
@@ -655,7 +651,7 @@ mod tests {
         );
         assert_eq!(
             decode_lint_json(
-                include_str!("../../../tests/fixtures/lint_json/adversarial/invalid_span.json"),
+                include_str!("lint_json_fixtures/adversarial/invalid_span.json"),
                 LintDecodeOptions::default()
             )
             .unwrap_err()
@@ -664,9 +660,7 @@ mod tests {
         );
         assert_eq!(
             decode_lint_json(
-                include_str!(
-                    "../../../tests/fixtures/lint_json/adversarial/inconsistent_aggregate.json"
-                ),
+                include_str!("lint_json_fixtures/adversarial/inconsistent_aggregate.json"),
                 LintDecodeOptions::default()
             )
             .unwrap_err()
@@ -675,9 +669,7 @@ mod tests {
         );
         assert_eq!(
             decode_lint_json(
-                include_str!(
-                    "../../../tests/fixtures/lint_json/adversarial/inconsistent_status.json"
-                ),
+                include_str!("lint_json_fixtures/adversarial/inconsistent_status.json"),
                 LintDecodeOptions::default()
             )
             .unwrap_err()
@@ -686,9 +678,7 @@ mod tests {
         );
         assert_eq!(
             decode_lint_json(
-                include_str!(
-                    "../../../tests/fixtures/lint_json/adversarial/exit_status_mismatch.json"
-                ),
+                include_str!("lint_json_fixtures/adversarial/exit_status_mismatch.json"),
                 options_with_exit(1)
             )
             .unwrap_err()

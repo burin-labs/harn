@@ -3,7 +3,7 @@ import { assert, assert_eq } from "std/testing"
 
 fn fixture_root(harness: Harness) -> string {
   const root = project_root() ?? cwd()
-  return path_join(root, "crates/harn-cli/tests/fixtures/lint_json")
+  return path_join(root, "crates/harn-cli/src/commands/check/lint_json_fixtures")
 }
 
 fn read_fixture(harness: Harness, kind: string, name: string) -> string {
