@@ -123,6 +123,10 @@ const CLI_COLD_START_JOB = "cold-start-budget"
 
 const CLI_COLD_START_BUILD_STEP = "Build release harn"
 
+const CLI_COLD_START_JOB_TIMEOUT_MINUTES = 30
+
+const CLI_COLD_START_BUILD_TIMEOUT_MINUTES = 25
+
 const CLI_COLD_START_JOB_IF =
   "(github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))"
 
@@ -596,10 +600,10 @@ fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
       "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must skip release manual refs",
     ]
   }
-  if job?.["timeout-minutes"] != 25 {
+  if job?.["timeout-minutes"] != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
     errors = errors
       + [
-      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at 25 minutes",
+      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at ${CLI_COLD_START_JOB_TIMEOUT_MINUTES} minutes",
     ]
   }
   const build_step = step_by_name(job?.steps ?? [], CLI_COLD_START_BUILD_STEP)
@@ -608,10 +612,10 @@ fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
       + [
       "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must build the release harn binary explicitly",
     ]
-  } else if build_step?.["timeout-minutes"] != 20 {
+  } else if build_step?.["timeout-minutes"] != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
     errors = errors
       + [
-      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at 20 minutes",
+      "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at ${CLI_COLD_START_BUILD_TIMEOUT_MINUTES} minutes",
     ]
   }
   return errors

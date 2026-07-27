@@ -42,7 +42,7 @@ jobs:
     # This advisory workflow can run on GitHub-hosted runners before it is part
     # of the required CI aggregate. Keep an explicit ceiling so a wedged release
     # build does not burn the platform default timeout.
-    timeout-minutes: 25
+    timeout-minutes: 30
     # Bench is wall-clock sensitive, so runner noise is the main threat
     # to the budget. This repo runs CI on hosted runners only (public
     # repo: hosted minutes are free, and self-hosted routing contends
@@ -64,7 +64,11 @@ jobs:
           shared-key: cli-cold-start-budget
           cache-bin: false
       - name: Build release harn
-        timeout-minutes: 20
+        # This is benchmark setup, not the startup-performance budget. Hosted
+        # cold builds now sit just beyond 20 minutes, so keep enough bounded
+        # headroom for compilation while the measured bench retains its
+        # separate five-minute ceiling below.
+        timeout-minutes: 25
         run: cargo build --locked --release --bin harn
       - name: Run cold-start bench
         timeout-minutes: 5
