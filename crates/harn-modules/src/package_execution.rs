@@ -586,6 +586,11 @@ fn read_regular_file(path: &Path) -> Result<Vec<u8>, PackageExecutionError> {
 fn excluded_package_name(name: &OsStr) -> bool {
     name == OsStr::new(".git")
         || name == OsStr::new(".gitignore")
+        // CLAUDE.md is a repository-tooling projection of AGENTS.md, not
+        // executable package content. Excluding it lets repositories use the
+        // canonical direct symlink without weakening the blanket rejection of
+        // source or asset symlinks.
+        || name == OsStr::new("CLAUDE.md")
         || name == OsStr::new(CONTENT_HASH_FILE)
         || name == OsStr::new(CACHE_METADATA_FILE)
 }
@@ -918,6 +923,18 @@ mod tests {
 
         compute_package_content_hash(temp.path())
             .expect("a symlink at an excluded path must not invalidate the package");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn content_hash_ignores_claude_guidance_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("AGENTS.md"), "# Package guidance\n").unwrap();
+        fs::write(temp.path().join("lib.harn"), "pub fn value() { 1 }\n").unwrap();
+        std::os::unix::fs::symlink("AGENTS.md", temp.path().join("CLAUDE.md")).unwrap();
+
+        compute_package_content_hash(temp.path())
+            .expect("the Claude guidance projection is not executable package content");
     }
 
     #[cfg(unix)]
