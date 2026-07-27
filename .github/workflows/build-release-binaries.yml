@@ -91,6 +91,16 @@ on:
         required: false
         type: boolean
         default: false
+      benchmark_source_ref:
+        description: 'Optional immutable source ref to build under current-main benchmark policy.'
+        required: false
+        type: string
+        default: ''
+      benchmark_source_sha:
+        description: 'Required exact 40-hex commit when benchmark_source_ref is set.'
+        required: false
+        type: string
+        default: ''
       benchmark_cargo_bloat:
         description: 'Also run the expensive cargo-bloat diagnostics for a benchmark_only dispatch. The hard byte/ELF size gate always runs.'
         required: false
@@ -167,6 +177,8 @@ jobs:
           INPUT_TARGETS: ${{ inputs.targets }}
           INPUT_LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
           INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
+          INPUT_BENCHMARK_SOURCE_REF: ${{ inputs.benchmark_source_ref }}
+          INPUT_BENCHMARK_SOURCE_SHA: ${{ inputs.benchmark_source_sha }}
           INPUT_BENCHMARK_CARGO_BLOAT: ${{ inputs.benchmark_cargo_bloat && 'true' || 'false' }}
           INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'policy' }}
           FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
@@ -315,6 +327,11 @@ jobs:
             echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
             exit 1
           fi
+          if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" ]] &&
+             [[ "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
+            echo "::error::benchmark_source_ref and benchmark_source_sha require benchmark_only=true"
+            exit 1
+          fi
           if [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "::error::benchmark_only is only valid for workflow_dispatch"
@@ -327,6 +344,22 @@ jobs:
             if (( REQUESTED_TARGET_COUNT == 0 )); then
               echo "::error::benchmark_only requires an explicit targets subset"
               exit 1
+            fi
+            if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" ]]; then
+              if [[ -z "$INPUT_BENCHMARK_SOURCE_REF" || -z "$INPUT_BENCHMARK_SOURCE_SHA" ]]; then
+                echo "::error::benchmark_source_ref and benchmark_source_sha must be provided together"
+                exit 1
+              fi
+              if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+                echo "::error::an explicit benchmark source must be dispatched from main so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
+                exit 1
+              fi
+              if [[ ! "$INPUT_BENCHMARK_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::benchmark_source_sha must be an exact lowercase 40-hex commit"
+                exit 1
+              fi
+              REF="$INPUT_BENCHMARK_SOURCE_REF"
+              echo "::notice::Current policy will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
             fi
             BUILD_MODE=benchmark
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
@@ -653,6 +686,18 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
+      - name: Verify benchmark source revision
+        if: needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_source_sha != ''
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.benchmark_source_sha }}
+        run: |
+          actual_source_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "::error::benchmark source resolved to $actual_source_sha; expected $EXPECTED_SOURCE_SHA"
+            exit 1
+          fi
+
       - uses: ./.github/actions/rust-toolchain
         if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'
 
@@ -717,6 +762,18 @@ jobs:
       - name: Attest checked-out source revision
         shell: bash
         run: echo "HARN_BUILD_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Verify benchmark source revision
+        if: needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_source_sha != ''
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.benchmark_source_sha }}
+        run: |
+          actual_source_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "::error::benchmark source resolved to $actual_source_sha; expected $EXPECTED_SOURCE_SHA"
+            exit 1
+          fi
 
       - name: Restore target-independent CLI AOT payload
         if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'
