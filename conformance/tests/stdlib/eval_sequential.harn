@@ -223,6 +223,17 @@ fn test_sequential_decision_contract() {
   )
   require decisive.verdict == "WINNER", "a separated arm can win"
   require decisive.winner == "strong", "the separated leader is returned"
+  const baseline = arm_decision(
+    [{id: "harmful", deltas: negative, complexity: 0}],
+    1,
+    0.05,
+    0.02,
+    5,
+    false,
+  )
+  require baseline.verdict == "BASELINE", "a proven worse candidate selects the baseline"
+  require baseline.killed == ["harmful"], "baseline selection kills the harmful candidate"
+  require baseline.winner == nil, "baseline selection cannot manufacture a candidate winner"
   const tied = arm_decision(
     [
       {id: "complex", deltas: neutral, complexity: 3},

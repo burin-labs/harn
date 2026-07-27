@@ -1,0 +1,232 @@
+/**
+ * Deterministic randomized-block assignment for registered experiments.
+ *
+ * One plan contains every baseline/candidate arm exactly once. Randomization
+ * changes execution order inside a declared block; it never changes balance or
+ * relies on ambient telemetry.
+ */
+import { AssignmentPolicy, ExperimentRegistration } from "std/eval/experiment/contracts"
+
+pub type PlannedAssignment = {arm_id: string, ordinal: int}
+
+pub type AssignmentPlan = {
+  schema: "harn.experiment.assignment-plan.v1",
+  plan_id: string,
+  registration_id: string,
+  phase: "iterate" | "gate",
+  case_id: string,
+  trial_index: int,
+  blocking_values: dict<string, string>,
+  assignments: list<PlannedAssignment>,
+}
+
+pub type RealizedAssignment = {
+  schema: "harn.experiment.realized-assignment.v1",
+  assignment_id: string,
+  plan_id: string,
+  registration_id: string,
+  phase: "iterate" | "gate",
+  case_id: string,
+  trial_index: int,
+  arm_id: string,
+  ordinal: int,
+  blocking_values: dict<string, string>,
+  host?: string,
+  time_slot?: string,
+}
+
+type RankedArm = {arm_id: string, score: int}
+
+fn __registered_arm_ids(registration: ExperimentRegistration) -> list<string> {
+  let ids: list<string> = [registration.baseline.id]
+  for arm in registration.candidates {
+    ids = ids + [arm.id]
+  }
+  return ids
+}
+
+fn __validate_block(
+  policy: AssignmentPolicy,
+  values: dict<string, string>,
+) -> dict<string, string> {
+  let frozen: dict<string, string> = {}
+  for factor in policy.blocking_factors {
+    const value = values[factor]
+    if value == nil || trim(value) == "" {
+      throw "std/eval/experiment: missing blocking value '" + factor + "'"
+    }
+    frozen = frozen + {[factor]: value}
+  }
+  return frozen
+}
+
+fn __ranked_arms(
+  registration: ExperimentRegistration,
+  case_id: string,
+  trial_index: int,
+  block: dict<string, string>,
+) -> list<RankedArm> {
+  let ranked: list<RankedArm> = []
+  for arm_id in __registered_arm_ids(registration) {
+    const identity = {
+      seed: registration.assignment.seed,
+      registration_id: registration.registration_id,
+      phase: registration.phase,
+      case_id: case_id,
+      trial_index: trial_index,
+      blocking_values: block,
+      arm_id: arm_id,
+    }
+    ranked = ranked + [{arm_id: arm_id, score: hash_value(identity)}]
+  }
+  return ranked
+}
+
+fn __take_first(ranked: list<RankedArm>) -> RankedArm {
+  const head = ranked[0]
+  if head == nil {
+    throw "std/eval/experiment: cannot order an empty assignment block"
+  }
+  let first: RankedArm = head
+  for candidate in ranked {
+    if candidate.score < first.score
+      || (candidate.score == first.score
+      && candidate.arm_id < first.arm_id) {
+      first = candidate
+    }
+  }
+  return first
+}
+
+fn __without_arm(ranked: list<RankedArm>, arm_id: string) -> list<RankedArm> {
+  let remaining: list<RankedArm> = []
+  for candidate in ranked {
+    if candidate.arm_id != arm_id {
+      remaining = remaining + [candidate]
+    }
+  }
+  return remaining
+}
+
+fn __randomized_order(ranked: list<RankedArm>) -> list<PlannedAssignment> {
+  let remaining = ranked
+  let assignments: list<PlannedAssignment> = []
+  let ordinal = 0
+  while len(remaining) > 0 {
+    const selected = __take_first(remaining)
+    assignments = assignments + [{arm_id: selected.arm_id, ordinal: ordinal}]
+    remaining = __without_arm(remaining, selected.arm_id)
+    ordinal = ordinal + 1
+  }
+  return assignments
+}
+
+fn __contains_case(registration: ExperimentRegistration, case_id: string) -> bool {
+  return registration.case_set.cases.contains(case_id)
+}
+
+/**
+ * Freeze one balanced randomized execution order for a case/trial block.
+ *
+ * The same registered identity and block produce the same plan on replay.
+ * Every arm appears exactly once, so pruning may save future blocks but cannot
+ * bias a partially represented block.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn plan_assignments(
+  registration: ExperimentRegistration,
+  case_id: string,
+  trial_index: int,
+  blocking_values: dict<string, string>,
+) -> AssignmentPlan {
+  if !__contains_case(registration, case_id) {
+    throw "std/eval/experiment: case is outside the frozen case set"
+  }
+  if trial_index < 0 || trial_index >= registration.budget.max_trials_per_case {
+    throw "std/eval/experiment: trial index is outside the registered ceiling"
+  }
+  const block = __validate_block(registration.assignment, blocking_values)
+  const assignments = __randomized_order(__ranked_arms(registration, case_id, trial_index, block))
+  const identity = {
+    registration_id: registration.registration_id,
+    phase: registration.phase,
+    case_id: case_id,
+    trial_index: trial_index,
+    blocking_values: block,
+    assignments: assignments,
+  }
+  return {
+    schema: "harn.experiment.assignment-plan.v1",
+    plan_id: "expplan-" + to_string(hash_value(identity)),
+    registration_id: registration.registration_id,
+    phase: registration.phase,
+    case_id: case_id,
+    trial_index: trial_index,
+    blocking_values: block,
+    assignments: assignments,
+  }
+}
+
+fn __planned(plan: AssignmentPlan, arm_id: string) -> PlannedAssignment? {
+  for assignment in plan.assignments {
+    if assignment.arm_id == arm_id {
+      return assignment
+    }
+  }
+  return nil
+}
+
+/**
+ * Record the host-observed realization of one planned arm.
+ *
+ * `observed_blocking_values` must match the frozen plan for every declared
+ * factor. Extra host telemetry is intentionally ignored: correctness depends
+ * on declared randomization and blocking, not on observability.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn realize_assignment(
+  plan: AssignmentPlan,
+  arm_id: string,
+  observed_blocking_values: dict<string, string>,
+) -> RealizedAssignment {
+  const planned = __planned(plan, arm_id)
+  if planned == nil {
+    throw "std/eval/experiment: arm is absent from the assignment plan"
+  }
+  for entry in plan.blocking_values {
+    if observed_blocking_values[entry.key] != entry.value {
+      throw "std/eval/experiment: realized blocking value differs from the plan for '"
+        + entry.key
+        + "'"
+    }
+  }
+  const identity = {
+    plan_id: plan.plan_id,
+    arm_id: arm_id,
+    ordinal: planned.ordinal,
+    blocking_values: plan.blocking_values,
+  }
+  let realized: RealizedAssignment = {
+    schema: "harn.experiment.realized-assignment.v1",
+    assignment_id: "expassign-" + to_string(hash_value(identity)),
+    plan_id: plan.plan_id,
+    registration_id: plan.registration_id,
+    phase: plan.phase,
+    case_id: plan.case_id,
+    trial_index: plan.trial_index,
+    arm_id: arm_id,
+    ordinal: planned.ordinal,
+    blocking_values: plan.blocking_values,
+  }
+  if plan.blocking_values["host"] != nil {
+    realized = realized + {host: plan.blocking_values["host"]}
+  }
+  if plan.blocking_values["time_slot"] != nil {
+    realized = realized + {time_slot: plan.blocking_values["time_slot"]}
+  }
+  return realized
+}

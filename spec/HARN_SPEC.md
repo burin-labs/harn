@@ -6975,6 +6975,31 @@ and frozen-family `arm_decision` for repeated-look or data-dependent stopping
 workflows. Sequential observations must be append-only across looks; callers
 must project mutable case aggregates into stable case/trial rows first.
 
+`std/eval/experiment` defines the closed `harn.experiment.v1` manifest and
+composes it with `std/eval/sequential`. Registration freezes arm identity,
+opaque host-owned configs, bounded metrics, the family error budget, assignment
+policy, resolved iterate/gate case sets, and hard spend/trial ceilings into a
+versioned artifact. Assignment MUST use deterministic randomized blocks and
+MUST include `host` whenever host identity is available. Each block contains
+the baseline and every registered candidate exactly once. Promotion carries
+realized iterate spend forward, so the manifest's monetary ceiling applies
+across both phases. Decision input reports authoritative phase spend separately
+from paired observations: unpaired or infrastructure-missing work consumes the
+ceiling but MUST NOT enter the confidence sequence.
+
+The driver permanently splits the family error budget across every registered
+candidate × (primary plus guardrail) cell. A proven guardrail regression removes
+that candidate and vetoes a leading arm with the distinct `GUARDRAIL_VETO`
+verdict. A candidate proven worse than the implicit zero-delta baseline is
+removed, and all candidates so removed produce the distinct terminal `BASELINE`
+verdict. The first ladder rung is the minimum decision floor, and typed candidate
+outcomes expose primary eliminations without owning their execution placement.
+An iterate result never authorizes gate reads: only
+`promote_experiment` may create the gate registration, and it accepts only the
+typed `ITERATE_WINNER` decision for the same frozen registration. Hosts retain
+execution placement, opaque config validation, metric projection, artifact
+location, and notification.
+
 ### Package registry index
 
 `harn package search`, `harn package info`, and registry-name

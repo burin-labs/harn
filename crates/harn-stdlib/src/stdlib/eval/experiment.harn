@@ -1,0 +1,129 @@
+/**
+ * std/eval/experiment — portable controlled-experiment contracts.
+ *
+ * This facade owns experiment validity and decision semantics. Hosts own
+ * execution placement, arm-config validation, persistence location, metric
+ * projection, and user notification.
+ */
+pub import {
+  AssignmentPlan,
+  PlannedAssignment,
+  RealizedAssignment,
+  plan_assignments,
+  realize_assignment,
+} from "std/eval/experiment/assignment"
+pub import {
+  AlarmKind,
+  AssignmentPolicy,
+  CaseSet,
+  ExperimentArm,
+  ExperimentBudget,
+  ExperimentDecisionPolicy,
+  ExperimentGuardrail,
+  ExperimentManifest,
+  ExperimentMetric,
+  ExperimentMetrics,
+  ExperimentPhase,
+  ExperimentRegistration,
+  ExperimentSplitPolicy,
+  ExperimentValidationContext,
+  GuardrailAlarm,
+  MetricBounds,
+  MetricDirection,
+  PromotionReceipt,
+  experiment_manifest_contract,
+  experiment_registration_contract,
+  experiment_registration_descriptor,
+  register_experiment,
+  validate_experiment_manifest,
+} from "std/eval/experiment/contracts"
+pub import {
+  CandidateOutcome,
+  CandidateStatus,
+  ExperimentDecision,
+  ExperimentDecisionInput,
+  ExperimentVerdict,
+  GuardrailOutcome,
+  MetricPair,
+  PairedObservation,
+  decide_experiment,
+  experiment_decision_contract,
+  experiment_decision_descriptor,
+} from "std/eval/experiment/decision"
+
+/**
+ * Explicitly promote an iterate winner onto the frozen gate case set.
+ *
+ * No other verdict can unlock gate data, and gate decisions cannot be promoted
+ * again. The returned receipt links both immutable registrations and the source
+ * decision.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn promote_experiment(
+  registration: ExperimentRegistration,
+  decision: ExperimentDecision,
+) -> {registration: ExperimentRegistration, receipt: PromotionReceipt} {
+  if registration.phase != "iterate"
+    || decision.phase != "iterate"
+    || decision.registration_id != registration.registration_id
+    || decision.verdict != "ITERATE_WINNER"
+    || decision.winner == nil {
+    throw "std/eval/experiment: promotion requires this registration's iterate winner"
+  }
+  let winner: ExperimentArm? = nil
+  for arm in registration.candidates {
+    if arm.id == decision.winner {
+      winner = arm
+    }
+  }
+  if winner == nil {
+    throw "std/eval/experiment: decision winner is not registered"
+  }
+  if decision.spend_usd < registration.prior_spend_usd
+    || decision.spend_usd
+    > registration.budget
+    .max_spend_usd {
+    throw "std/eval/experiment: decision spend is outside the frozen budget"
+  }
+  const identity = {
+    source: registration.registration_id,
+    decision: decision.decision_id,
+    spend_usd: decision.spend_usd,
+    arm: winner.id,
+    gate: registration.gate_case_set,
+  }
+  const gate_registration_id = "expreg-" + to_string(hash_value(identity))
+  const gate_registration: ExperimentRegistration = {
+    schema: "harn.experiment.registration.v1",
+    schema_version: 1,
+    registration_id: gate_registration_id,
+    manifest_digest: registration.manifest_digest,
+    phase: "gate",
+    experiment_id: registration.experiment_id,
+    hypothesis: registration.hypothesis,
+    owner: registration.owner,
+    baseline: registration.baseline,
+    candidates: [winner],
+    decision: registration.decision,
+    metrics: registration.metrics,
+    assignment: registration.assignment,
+    case_set: registration.gate_case_set,
+    gate_case_set: registration.gate_case_set,
+    budget: registration.budget,
+    min_trials_per_case: registration.min_trials_per_case,
+    prior_spend_usd: decision.spend_usd,
+    promoted_from: registration.registration_id,
+    promoted_arm: winner.id,
+  }
+  const receipt: PromotionReceipt = {
+    schema: "harn.experiment.promotion.v1",
+    promotion_id: "expprom-" + to_string(hash_value(identity)),
+    source_registration_id: registration.registration_id,
+    source_decision_id: decision.decision_id,
+    promoted_arm: winner.id,
+    gate_registration_id: gate_registration_id,
+  }
+  return {registration: gate_registration, receipt: receipt}
+}
