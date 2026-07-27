@@ -358,8 +358,7 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
                 for file in &prompt_files {
                     let lint_config = commands::check::load_harn_lint_config(file);
                     let config = package::load_check_config(Some(file));
-                    // Template lint rules carry no autofix edits yet.
-                    let outcome = commands::check::lint_prompt_file_inner(
+                    let outcome = commands::check::lint_prompt_fix_file(
                         file,
                         lint_config.template_variant_branch_threshold,
                         &lint_config.disabled,

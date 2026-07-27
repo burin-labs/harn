@@ -45,7 +45,9 @@ pub(crate) use lint::{
 pub(crate) use lint_report::{run_lint_json, LintJsonOptions, LintReport, LINT_SCHEMA_VERSION};
 pub(crate) use preflight::is_preflight_allowed;
 pub(crate) use script_rules::run_project_script_rules;
-pub(crate) use template_lint::{collect_lint_targets, lint_prompt_file_inner};
+pub(crate) use template_lint::{
+    collect_lint_targets, lint_prompt_file_inner, lint_prompt_fix_file,
+};
 
 /// Collect preflight diagnostics against a caller-owned module graph while
 /// resolving the standalone call's host-capability configuration once.
