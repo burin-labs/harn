@@ -21,7 +21,7 @@ pub struct LintDecodeOptions {
 }
 
 /// Successfully decoded schema-v1 lint envelope.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecodedLintEnvelope {
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
@@ -33,7 +33,7 @@ pub struct DecodedLintEnvelope {
 }
 
 /// Wire shape of `JsonEnvelope.data` for `harn lint --json`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LintReportWire {
     pub files: Vec<LintFileReportWire>,
     pub summary: LintSummaryWire,
@@ -41,7 +41,7 @@ pub struct LintReportWire {
     pub changed: Option<ChangedLintScopeWire>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LintFileReportWire {
     pub path: String,
     pub status: String,
@@ -50,7 +50,7 @@ pub struct LintFileReportWire {
     pub fixed: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LintSummaryWire {
     pub ok: u64,
     pub warnings: u64,
@@ -60,7 +60,7 @@ pub struct LintSummaryWire {
     pub fixed: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckDiagnosticWire {
     pub source: String,
     pub severity: String,
@@ -80,20 +80,20 @@ pub struct CheckSpanWire {
     pub end: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangedLintScopeWire {
     pub from: EvaluatedRevisionWire,
     pub to: EvaluatedRevisionWire,
     pub files: Vec<ChangedSourceFileWire>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvaluatedRevisionWire {
     pub requested: String,
     pub commit: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangedSourceFileWire {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -133,16 +133,31 @@ impl LintDecodeError {
     }
 }
 
+fn non_neg_int_schema() -> Value {
+    json!({ "type": "integer", "minimum": 0 })
+}
+
+fn revision_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["requested", "commit"],
+        "properties": {
+            "requested": { "type": "string", "minLength": 1 },
+            "commit": { "type": "string", "minLength": 1 },
+        }
+    })
+}
+
 /// Complete Draft 2020-12 JSON Schema for the schema-v1 lint envelope.
 pub fn lint_json_schema() -> Value {
-    let non_neg_int = json!({ "type": "integer", "minimum": 0 });
     let span = json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["start", "end"],
         "properties": {
-            "start": non_neg_int.clone(),
-            "end": non_neg_int.clone(),
+            "start": non_neg_int_schema(),
+            "end": non_neg_int_schema(),
         },
         "description": "UTF-8 half-open byte span [start, end)."
     });
@@ -167,8 +182,8 @@ pub fn lint_json_schema() -> Value {
             "path": { "type": "string", "minLength": 1 },
             "status": { "type": "string", "enum": ["ok", "warning", "error"] },
             "diagnostics": { "type": "array", "items": diagnostic },
-            "fixable": non_neg_int.clone(),
-            "fixed": non_neg_int.clone(),
+            "fixable": non_neg_int_schema(),
+            "fixed": non_neg_int_schema(),
         }
     });
     let summary = json!({
@@ -176,12 +191,12 @@ pub fn lint_json_schema() -> Value {
         "additionalProperties": false,
         "required": ["ok", "warnings", "errors", "diagnostics", "fixable", "fixed"],
         "properties": {
-            "ok": non_neg_int.clone(),
-            "warnings": non_neg_int.clone(),
-            "errors": non_neg_int.clone(),
-            "diagnostics": non_neg_int.clone(),
-            "fixable": non_neg_int.clone(),
-            "fixed": non_neg_int.clone(),
+            "ok": non_neg_int_schema(),
+            "warnings": non_neg_int_schema(),
+            "errors": non_neg_int_schema(),
+            "diagnostics": non_neg_int_schema(),
+            "fixable": non_neg_int_schema(),
+            "fixed": non_neg_int_schema(),
         }
     });
     let added_line = json!({
@@ -208,22 +223,13 @@ pub fn lint_json_schema() -> Value {
             "added_lines": { "type": "array", "items": added_line },
         }
     });
-    let revision = json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["requested", "commit"],
-        "properties": {
-            "requested": { "type": "string", "minLength": 1 },
-            "commit": { "type": "string", "minLength": 1 },
-        }
-    });
     let changed = json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["from", "to", "files"],
         "properties": {
-            "from": revision.clone(),
-            "to": revision,
+            "from": revision_schema(),
+            "to": revision_schema(),
             "files": { "type": "array", "items": changed_file },
         }
     });

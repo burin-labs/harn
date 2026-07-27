@@ -34,7 +34,7 @@ pub struct JsonEnvelope<T: Serialize> {
     pub warnings: Vec<JsonWarning>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonError {
     pub code: String,
     pub message: String,
@@ -45,7 +45,7 @@ pub struct JsonError {
     pub details: serde_json::Value,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonWarning {
     pub code: String,
     pub message: String,
