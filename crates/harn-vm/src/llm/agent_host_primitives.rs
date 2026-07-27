@@ -2952,8 +2952,14 @@ mod parse_tool_call_id_tests {
     }
 
     fn parse_ids(text: &str) -> Vec<String> {
+        let mut vm = crate::vm::Vm::new();
+        crate::register_core_stdlib(&mut vm);
+        crate::stdlib::macros::register_builtin_defs(
+            &mut vm,
+            crate::llm::tools::PARSE_HOST_PRIMITIVE_BUILTINS,
+        );
         let value = futures::executor::block_on(host_agent_parse_tool_calls_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(vm),
             vec![vm_str(text), look_tool_catalog(), vm_str("text")],
         ))
         .expect("parse primitive succeeds");

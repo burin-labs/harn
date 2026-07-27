@@ -515,6 +515,14 @@ pub(crate) async fn parse_text_tools_with_harn(
     tools_val: Option<&VmValue>,
     tool_format: &str,
 ) -> Result<crate::llm::tools::TextToolParseResult, VmError> {
+    // `LlmCallOptions::tools` is a carry-through value at this layer. Older
+    // callers and test fixtures can populate it with a non-registry sentinel;
+    // the superseded Rust parser treated those values as no catalog. Normalize
+    // once here so the Harn parser and its host primitives receive only their
+    // declared tool-registry shape.
+    let tools = tools_val
+        .filter(|value| matches!(value, VmValue::Dict(_)))
+        .map(crate::llm::vm_value_to_json);
     let standalone;
     let ctx = match ctx {
         Some(ctx) => ctx,
@@ -536,7 +544,7 @@ pub(crate) async fn parse_text_tools_with_harn(
         "parse text tool calls",
         serde_json::json!({
             "text": text,
-            "tools": tools_val.map(crate::llm::vm_value_to_json),
+            "tools": tools,
             "tool_format": tool_format,
         }),
     )
