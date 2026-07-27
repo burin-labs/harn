@@ -1,0 +1,72 @@
+# Compile gate for off-by-default Cargo feature sets (issue #5690).
+# Default CI lanes omit `guard-neural` / `testbench-wasi` / … so incomplete
+# optional-dep feature flags can rot until someone opts in. This workflow
+# runs `make check-all-features` when feature-bearing manifests change.
+#
+# IMPORTANT: this workflow is NOT yet wired into the required-status set in
+# `ci.yml`'s `CI status` job. It reports a result; promote once the Linux
+# wall-time cost is observed on real PRs. The structural ort TLS contract
+# still runs in the required audit-scripts lane via
+# `make check-optional-dep-feature-contracts`.
+
+name: All features compile
+
+on:
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**/Cargo.toml'
+      - 'perf/**/Cargo.toml'
+      - 'scripts/check_all_features.sh'
+      - 'scripts/check_optional_dep_feature_contracts.harn'
+      - 'scripts/tests/check_all_features_test.sh'
+      - 'scripts/tests/check_optional_dep_feature_contracts_test.harn'
+      - '.github/workflows/all-features.yml'
+      - '.github/scripts/merge-group-path-gate.sh'
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  ORT_SKIP_DOWNLOAD: "1"
+
+jobs:
+  all-features:
+    name: All features compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Resolve merge-group gate scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
+          GATE_NAME: All features compile
+          PATH_PATTERN: '^(Cargo\.(toml|lock)$|crates/.+/Cargo\.toml$|perf/.+/Cargo\.toml$|scripts/check_all_features\.sh$|scripts/check_optional_dep_feature_contracts\.harn$|scripts/tests/check_all_features_test\.sh$|scripts/tests/check_optional_dep_feature_contracts_test\.harn$|\.github/workflows/all-features\.yml$|\.github/scripts/merge-group-path-gate\.sh$)'
+        run: .github/scripts/merge-group-path-gate.sh
+      - uses: ./.github/actions/rust-toolchain
+        if: steps.scope.outputs.run_gate == 'true'
+      - uses: ./.github/actions/rust-cache
+        if: steps.scope.outputs.run_gate == 'true'
+        continue-on-error: true
+        with:
+          # Restore-only consumer. Declared writers in ci.yml own cache saves;
+          # this lane must not mint a new writer key (see check-ci-cache-policy).
+          shared-key: workspace-tests
+          cache-bin: false
+      - name: Compile optional feature sets
+        if: steps.scope.outputs.run_gate == 'true'
+        run: make check-all-features
+      - name: Skip irrelevant merge-group diff
+        if: steps.scope.outputs.run_gate != 'true'
+        run: echo "merge_group diff does not touch optional-feature surfaces; no-op pass."
