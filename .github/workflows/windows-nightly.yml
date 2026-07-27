@@ -82,10 +82,10 @@ jobs:
           # this producer on plain rustc like the PR consumer: RUSTC_WRAPPER is
           # part of rust-cache's environment hash, while runner-local sccache
           # reported zero hits and made this target cache unreachable to PRs.
+          # Keep this key stable across source revisions: rust-cache's native
+          # restore key owns compatible fallback, while Cargo owns invalidation.
           shared-key: workspace-windows
-          source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
           target-dir: ${{ env.CARGO_TARGET_DIR }}
-          broad-restore-prefix: v0-rust-workspace-windows-
           cache-on-failure: true
           cache-bin: false
           save: true

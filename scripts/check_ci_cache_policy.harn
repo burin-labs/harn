@@ -130,8 +130,6 @@ const WINDOWS_CACHE_KEY = "workspace-windows"
 
 const WINDOWS_CACHE_TARGET_DIR = "$" + "{{ env.CARGO_TARGET_DIR }}"
 
-const WINDOWS_CACHE_BROAD_RESTORE_PREFIX = "v0-rust-workspace-windows-"
-
 const MACOS_CACHE_KEY = "workspace-macos"
 
 const NATIVE_SOURCE_FINGERPRINT_BODY =
@@ -708,7 +706,10 @@ fn native_shared_cache_errors(
   }
   const consumer_source_key = trim(consumer_caches[0]?.with?.["source-key"] ?? "")
   const producer_source_key = trim(producer_caches[0]?.with?.["source-key"] ?? "")
-  if consumer_source_key != expected_source_key || producer_source_key != expected_source_key {
+  if expected_source_key != ""
+    && (consumer_source_key != expected_source_key
+    || producer_source_key
+    != expected_source_key) {
     errors = errors
       + ["${cache_key} producer and consumer must use the canonical source fingerprint"]
   }
@@ -728,13 +729,12 @@ fn native_shared_cache_errors(
 
 /** Keep the sole native-Windows cache writer byte-compatible with its restore-only PR consumer. */
 pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
-  const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
   let errors = native_shared_cache_errors(
     ci_workflow,
     nightly_workflow,
     "windows",
     WINDOWS_CACHE_KEY,
-    source_key,
+    "",
   )
   const consumer_caches = matching_steps(ci_workflow?.jobs?.windows, "./.github/actions/rust-cache")
   const producer_caches = matching_steps(
@@ -753,13 +753,16 @@ pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string
     }
     if caches.any(
       { cache ->
-        return trim(cache?.with?.["broad-restore-prefix"] ?? "")
-          != WINDOWS_CACHE_BROAD_RESTORE_PREFIX
+        return trim(cache?.with?.["source-key"] ?? "") != ""
+          || trim(
+          cache?.with?.["broad-restore-prefix"] ?? "",
+        )
+          != ""
       },
     ) {
       errors = errors
         + [
-        "${WINDOWS_CACHE_KEY} producer and consumer must restore the latest compatible source-key generation",
+        "${WINDOWS_CACHE_KEY} producer and consumer must use one stable native restore namespace",
       ]
     }
   }
