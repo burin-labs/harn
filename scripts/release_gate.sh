@@ -58,12 +58,14 @@ release_gate_stale_out_dir_packages() {
   [[ -s "$output" ]]
 }
 
-release_gate_warm_prebuild() {
+release_gate_run_with_stale_out_dir_recovery() {
+  local operation="$1"
+  shift
   local first_diagnostics packages retry_diagnostics
   first_diagnostics="$(mktemp)"
   packages="$(mktemp)"
   retry_diagnostics="$(mktemp)"
-  if cargo build -p harn-cli --bin harn --quiet 2> "$first_diagnostics"; then
+  if "$@" 2> "$first_diagnostics"; then
     rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
     return 0
   fi
@@ -73,12 +75,12 @@ release_gate_warm_prebuild() {
   release_gate_stale_out_dir_packages "$first_diagnostics" "$packages" || classification_status=$?
   if [[ "$classification_status" -eq 1 ]]; then
     rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    echo "error: warm prebuild failed without a recoverable stale build-script output" >&2
+    echo "error: $operation failed without a recoverable stale build-script output" >&2
     return 1
   fi
   if [[ "$classification_status" -ne 0 ]]; then
     rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    echo "error: warm prebuild stale-output classification failed closed" >&2
+    echo "error: $operation stale-output classification failed closed" >&2
     return 1
   fi
 
@@ -96,16 +98,27 @@ release_gate_warm_prebuild() {
     return 1
   fi
   recovery_elapsed=$(( $(date +%s) - recovery_started ))
-  printf 'recovery: package-scoped Cargo cleanup complete (%ss); retrying warm prebuild once\n' "$recovery_elapsed"
-  if cargo build -p harn-cli --bin harn --quiet 2> "$retry_diagnostics"; then
+  printf 'recovery: package-scoped Cargo cleanup complete (%ss); retrying %s once\n' \
+    "$recovery_elapsed" "$operation"
+  if "$@" 2> "$retry_diagnostics"; then
     rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    echo "recovery: warm prebuild succeeded after package-scoped cleanup"
+    echo "recovery: $operation succeeded after package-scoped cleanup"
     return 0
   fi
   cat "$retry_diagnostics" >&2
   rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-  echo "error: warm prebuild retry failed after package-scoped stale-output cleanup" >&2
+  echo "error: $operation retry failed after package-scoped stale-output cleanup" >&2
   return 1
+}
+
+release_gate_warm_prebuild() {
+  release_gate_run_with_stale_out_dir_recovery \
+    "warm prebuild" cargo build -p harn-cli --bin harn --quiet
+}
+
+release_gate_prepare_cli_aot() {
+  release_gate_run_with_stale_out_dir_recovery \
+    "shared CLI AOT preparation" make gen-cli-aot
 }
 
 usage() {
@@ -496,7 +509,7 @@ cmd_audit() {
     fi
   done
   if [[ "$prepare_cli_aot" -eq 1 ]]; then
-    time_phase "prepare shared CLI AOT payload" make gen-cli-aot
+    time_phase "prepare shared CLI AOT payload" release_gate_prepare_cli_aot
   fi
 
   echo "audit lane log dir: $tmp"

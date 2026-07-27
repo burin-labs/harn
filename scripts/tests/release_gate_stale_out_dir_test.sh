@@ -32,7 +32,11 @@ cat > "$fake_harn" <<'SH'
 set -euo pipefail
 if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]]; then
   printf 'meta\tfalse\ttest\n'
-  printf 'lane\tsecurity-audit\trun_security_audit\n'
+  if [[ "${FAKE_AUDIT_LANE:-security}" == "rust" ]]; then
+    printf 'lane\trust-audit\trun_rust_audit\n'
+  else
+    printf 'lane\tsecurity-audit\trun_security_audit\n'
+  fi
   exit 0
 fi
 echo "unexpected fake harn invocation: $*" >&2
@@ -100,6 +104,31 @@ esac
 SH
 chmod +x "$fake_bin/cargo"
 
+cat > "$fake_bin/make" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$FAKE_MAKE_RECORD"
+if [[ "${1:-}" == "gen-cli-aot" && "${FAKE_MAKE_MODE:-}" == "stale-aot" ]]; then
+  count=0
+  if [[ -f "$FAKE_CARGO_STATE/aot-count" ]]; then
+    count=$(<"$FAKE_CARGO_STATE/aot-count")
+  fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$FAKE_CARGO_STATE/aot-count"
+  if [[ "$count" -eq 1 ]]; then
+    echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out/bindgen.rs: No such file or directory (os error 2)" >&2
+    exit 2
+  fi
+fi
+SH
+chmod +x "$fake_bin/make"
+
+cat > "$fake_bin/env" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$fake_bin/env"
+
 run_case() {
   local label="$1"
   local mode="$2"
@@ -114,6 +143,7 @@ run_case() {
     "$build/debug/build/tree-sitter-bb1d5a918bffdfb1/out"
   touch "$target/deps/keep" "$target/incremental/keep"
   : > "$state/cargo-record"
+  : > "$state/make-record"
   set +e
   HARN_RELEASE_ROOT="$release_root" \
     HARN_BIN="$fake_harn" \
@@ -122,6 +152,7 @@ run_case() {
     FAKE_CARGO_MODE="$mode" \
     FAKE_CARGO_RECORD="$state/cargo-record" \
     FAKE_CARGO_STATE="$state" \
+    FAKE_MAKE_RECORD="$state/make-record" \
     PATH="$fake_bin:$PATH" \
     "$release_tools/release_gate.sh" audit > "$state/output" 2>&1
   local status=$?
@@ -207,5 +238,56 @@ if [[ "$(grep -c '^build -p harn-cli --bin harn --quiet$' "$clean_state/cargo-re
   cat "$clean_state/cargo-record" >&2
   exit 1
 fi
+
+aot_state="$tmp_root/state-aot"
+aot_target="$tmp_root/target aot"
+aot_build="$tmp_root/build aot"
+mkdir -p \
+  "$aot_state" \
+  "$aot_target/deps" \
+  "$aot_build/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out"
+touch "$aot_target/deps/keep"
+: > "$aot_state/cargo-record"
+: > "$aot_state/make-record"
+set +e
+HARN_RELEASE_ROOT="$release_root" \
+  HARN_BIN="$fake_harn" \
+  CARGO_TARGET_DIR="$aot_target" \
+  CARGO_BUILD_BUILD_DIR="$aot_build" \
+  FAKE_AUDIT_LANE=rust \
+  FAKE_CARGO_MODE=stale-then-success \
+  FAKE_CARGO_RECORD="$aot_state/cargo-record" \
+  FAKE_CARGO_STATE="$aot_state" \
+  FAKE_MAKE_MODE=stale-aot \
+  FAKE_MAKE_RECORD="$aot_state/make-record" \
+  PATH="$fake_bin:$PATH" \
+  "$release_tools/release_gate.sh" audit --source-only > "$aot_state/output" 2>&1
+aot_status=$?
+set -e
+if [[ "$aot_status" -ne 0 ]]; then
+  cat "$aot_state/output" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^gen-cli-aot$' "$aot_state/make-record")" -ne 2 ]]; then
+  echo "source-only AOT recovery should generate exactly twice" >&2
+  cat "$aot_state/make-record" >&2
+  exit 1
+fi
+if ! grep -Fxq 'clean -p libsqlite3-sys' "$aot_state/cargo-record"; then
+  echo "source-only AOT recovery should clean only the implicated package" >&2
+  cat "$aot_state/cargo-record" >&2
+  exit 1
+fi
+if grep -q '^build ' "$aot_state/cargo-record"; then
+  echo "source-only AOT recovery unexpectedly rebuilt the warm Harn binary" >&2
+  cat "$aot_state/cargo-record" >&2
+  exit 1
+fi
+if [[ ! -f "$aot_target/deps/keep" ]]; then
+  echo "source-only AOT recovery discarded unrelated target artifacts" >&2
+  exit 1
+fi
+grep -Fq 'recovery: shared CLI AOT preparation succeeded after package-scoped cleanup' \
+  "$aot_state/output"
 
 echo "release_gate_stale_out_dir_test: ok"
