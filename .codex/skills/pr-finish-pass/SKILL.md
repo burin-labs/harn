@@ -57,12 +57,15 @@ git rebase origin/main
 
 Resolve conflicts inline. Common conflict rules in this repo:
 
-- `CHANGELOG.md`: keep both sides; preserve the top heading.
+- `changelog.d/*.md`: keep distinct fragments from both sides. Release tooling
+  owns the generated `CHANGELOG.md`.
 - `docs/theme/harn-keywords.js`: regenerate with `make gen-highlight`.
-- `docs/src/language-spec.md`: regenerate via the pre-commit hook (edit
-  `spec/HARN_SPEC.md` instead).
-- `Cargo.lock`: take theirs and re-run `cargo check --workspace`.
-- Any file with both sides reformatted: take one side then `cargo fmt`
+- `spec/HARN_SPEC.md` / `docs/src/language-spec.md`: keep neither generated
+  side. Resolve the editable `spec/chapters/*.md` sources, then run
+  `make sync-language-spec`.
+- `Cargo.lock`: resolve from the merged manifests, then run `make setup-rust`
+  in the worktree.
+- Any file with both sides reformatted: take one side then `make fmt`
   / `make fmt-harn` / portal lint as appropriate.
 
 Then force-push with lease:
@@ -91,10 +94,11 @@ or `continue-on-error`. Common categories:
 
 - **Format / clippy / lint failures:** run `make fmt`, `make lint`,
   `make lint-harn`, `make fmt-harn` and commit the fixes.
-- **Test failures:** reproduce locally with the narrowest possible
-  command (`cargo nextest run -p <crate> <test_name>`) before fixing.
+- **Test failures:** reproduce locally with the narrowest possible command
+  through `./scripts/cargo_with_worktree_build_dir.sh nextest run -p <crate>
+  -E 'test(<test_name>)'` before fixing.
   Read the test, read the code under test, and fix the root cause.
-- **Conformance failures:** `cargo run --bin harn -- test conformance
+- **Conformance failures:** `./scripts/harn_bin.sh -- test conformance
   --filter <name>` reproduces a single case. If a `.expected` file
   needs updating because user-visible behavior intentionally changed,
   do that explicitly — don't blindly accept new output.
@@ -200,7 +204,8 @@ the checklist for every public-surface change:
 
 - **Lexer / parser change** → tree-sitter grammar
   (`tree-sitter-harn/`), VS Code grammar (`editors/vscode/`),
-  conformance tests, `spec/HARN_SPEC.md`, highlight keywords.
+  conformance tests, the owning `spec/chapters/*.md` source, generated
+  language-spec projections, and highlight keywords.
 - **New / changed builtin** → stdlib registration is authoritative,
   but check `harn-lint` builtin awareness, `harn-fmt` formatting,
   `harn-lsp` completion, docs (`docs/src/`), the relevant
@@ -208,8 +213,8 @@ the checklist for every public-surface change:
 - **Type-checker change** → conformance, lint awareness, LSP hover/
   diagnostics, portal display of run records.
 - **Runtime / VM change** → portal record schema, transcripts, replay/
-  eval, DAP variable inspection, ACP/A2A surface if exposed,
-  `CHANGELOG.md`.
+  eval, DAP variable inspection, ACP/A2A surface if exposed, and a
+  `changelog.d/<id>.<category>.md` fragment.
 - **Provider / LLM-call change** → `harn-quickref.md` `llm_call`
   options table, conformance, transcripts.
 - **Prompt-template change** → `crates/harn-vm/src/stdlib/template.rs`
@@ -321,16 +326,16 @@ a "while I'm here" perf rabbit hole that doubles the PR scope.
 After making fixes:
 
 ```bash
-make fmt        # or cargo fmt
+make fmt
 make lint-harn fmt-harn
-cargo nextest run -p <crates touched by the diff>
+./scripts/cargo_with_worktree_build_dir.sh nextest run -p <crate>
 ```
 
 For wider changes:
 
 ```bash
 make test
-cargo run --bin harn -- test conformance --filter <relevant>
+./scripts/harn_bin.sh -- test conformance --filter <relevant>
 ```
 
 Then push (`git push --force-with-lease` if you rewrote history
@@ -360,12 +365,14 @@ chooses the strategy.
 - **Don't bundle "while I'm here" refactors** the user did not ask
   for. Note them in your summary, file follow-ups, move on.
 - **Don't hand-edit generated files** (`docs/src/language-spec.md`,
-  `docs/theme/harn-keywords.js`). Edit the source and regenerate.
+  `spec/HARN_SPEC.md`, `docs/theme/harn-keywords.js`, or `CHANGELOG.md`).
+  Edit `spec/chapters/*.md`, vocabulary sources, or `changelog.d/*`, then
+  regenerate through the owning Make target or release workflow.
 
 ## Source-of-truth references
 
 - `AGENTS.md` / `CLAUDE.md` — repo conventions and command surface
 - `docs/src/dev/testing.md` — deflake patterns and bans
 - `docs/llm/harn-quickref.md` — Harn scripting reference
-- `spec/HARN_SPEC.md` — language spec source of truth
+- `spec/chapters/*.md` — language spec sources
 - `crates/harn-vm/src/stdlib/template.rs` — sole prompt-template engine
