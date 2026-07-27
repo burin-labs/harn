@@ -18,7 +18,7 @@ use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 
-use super::bare::parse_bare_calls_in_body;
+use super::bare::{bare_tool_names, parse_bare_calls_in_body, parse_bare_calls_in_body_with_known};
 use super::scan::{call_head, scan_units, ScanSpec};
 use super::syntax::{
     balanced_json_object_len, parse_object_literal_from, parse_ts_call_from, render_canonical_call,
@@ -35,7 +35,9 @@ pub(crate) const PARSE_HOST_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_TOOL_JSON_STREAM_BUILTIN_DEF,
     &HOST_TOOL_DECODE_ENTITIES_BUILTIN_DEF,
     &HOST_TOOL_RENDER_CALL_BUILTIN_DEF,
+    &HOST_TOOL_RENDER_PARTS_BUILTIN_DEF,
     &HOST_TOOL_SCAN_BARE_CALLS_BUILTIN_DEF,
+    &HOST_TOOL_SCAN_BARE_UNITS_BUILTIN_DEF,
 ];
 
 /// Delimit the top-level structural units of a model response.
@@ -341,6 +343,120 @@ fn host_tool_render_call_builtin(args: &[VmValue], _out: &mut String) -> Result<
     ))
 }
 
+/// Render Harn-selected canonical response parts with one VM crossing.
+///
+/// Policy and ordering stay in `std/llm/tool_parse`: each dict is an explicit
+/// `{kind, ...}` projection, while strings preserve uncommon paths that were
+/// already rendered there.
+#[harn_builtin(
+    sig = "__host_tool_render_parts(parts: list) -> string",
+    category = "agent.host"
+)]
+fn host_tool_render_parts_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    const LABEL: &str = "__host_tool_render_parts(parts)";
+    let parts = match args.first() {
+        Some(VmValue::List(parts)) => parts,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{LABEL}: parts must be a list; got {}",
+                other.type_name()
+            )))
+        }
+        None => return Err(VmError::Runtime(format!("{LABEL}: missing parts"))),
+    };
+    let mut rendered = Vec::with_capacity(parts.len());
+    for part in parts.iter() {
+        if let VmValue::String(text) = part {
+            rendered.push(text.to_string());
+            continue;
+        }
+        let VmValue::Dict(part) = part else {
+            return Err(VmError::Runtime(format!(
+                "{LABEL}: each part must be a string or dict; got {}",
+                part.type_name()
+            )));
+        };
+        let Some(VmValue::String(kind)) = part.get("kind") else {
+            return Err(VmError::Runtime(format!(
+                "{LABEL}: dict part is missing kind"
+            )));
+        };
+        let text = match kind.as_str() {
+            "call" => {
+                let name = match part.get("name") {
+                    Some(VmValue::String(name)) => name.as_str(),
+                    _ => "",
+                };
+                let arguments = part
+                    .get("arguments")
+                    .map_or_else(|| serde_json::json!({}), vm_value_to_json);
+                format!(
+                    "<tool_call>\n{}\n</tool_call>",
+                    render_canonical_call(name, &arguments)
+                )
+            }
+            "bare" => {
+                let Some(VmValue::List(calls)) = part.get("calls") else {
+                    return Err(VmError::Runtime(format!(
+                        "{LABEL}: bare part is missing its calls list"
+                    )));
+                };
+                let mut blocks = Vec::with_capacity(calls.len() + 1);
+                for call in calls.iter() {
+                    let VmValue::Dict(call) = call else {
+                        return Err(VmError::Runtime(format!(
+                            "{LABEL}: canonical call must be a dict"
+                        )));
+                    };
+                    let name = match call.get("name") {
+                        Some(VmValue::String(name)) => name.as_str(),
+                        _ => "",
+                    };
+                    let arguments = call
+                        .get("arguments")
+                        .map_or_else(|| serde_json::json!({}), vm_value_to_json);
+                    blocks.push(format!(
+                        "<tool_call>\n{}\n</tool_call>",
+                        render_canonical_call(name, &arguments)
+                    ));
+                }
+                if let Some(VmValue::String(prose)) = part.get("prose") {
+                    let prose = prose.trim();
+                    if !prose.is_empty() {
+                        blocks.push(format!("<assistant_prose>\n{prose}\n</assistant_prose>"));
+                    }
+                }
+                blocks.join("\n\n")
+            }
+            "prose" => format!(
+                "<assistant_prose>\n{}\n</assistant_prose>",
+                part.get("text")
+                    .map_or_else(String::new, VmValue::display)
+                    .trim()
+            ),
+            "answer" => format!(
+                "<user_response>\n{}\n</user_response>",
+                part.get("text")
+                    .map_or_else(String::new, VmValue::display)
+                    .trim()
+            ),
+            "done" => format!(
+                "<done>{}</done>",
+                part.get("text")
+                    .map_or_else(String::new, VmValue::display)
+                    .trim()
+            ),
+            other => {
+                return Err(VmError::Runtime(format!(
+                    "{LABEL}: unsupported part kind {other:?}"
+                )))
+            }
+        };
+        rendered.push(text);
+    }
+    Ok(VmValue::String(rendered.join("\n\n").into()))
+}
+
 /// Scan a text body for bare `name({ … })` calls, the way the stray sniffer
 /// does. Returns `{calls, errors, prose}`.
 ///
@@ -375,6 +491,101 @@ fn host_tool_scan_bare_calls_builtin(
         "errors": parsed.errors,
         "prose": parsed.prose,
     })))
+}
+
+/// Parse every text-bearing structural unit with one registry projection and
+/// one VM boundary crossing. Results align by index with `units`; non-text
+/// units carry `nil` because Harn still owns which unit kinds are meaningful.
+#[harn_builtin(
+    sig = "__host_tool_scan_bare_units(units: list<dict>, tools?: dict|nil) -> list<dict|nil>",
+    category = "agent.host"
+)]
+fn host_tool_scan_bare_units_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    const LABEL: &str = "__host_tool_scan_bare_units(units, tools?)";
+    let units = match args.first() {
+        Some(VmValue::List(units)) => units,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{LABEL}: units must be a list; got {}",
+                other.type_name()
+            )))
+        }
+        None => return Err(VmError::Runtime(format!("{LABEL}: missing units"))),
+    };
+    let tools = match args.get(1) {
+        Some(VmValue::Nil) | None => crate::stdlib::tools::current_tool_registry(),
+        Some(value @ VmValue::Dict(_)) => Some(value.clone()),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{LABEL}: tools must be a tool registry dict or nil; got {}",
+                other.type_name()
+            )))
+        }
+    };
+    let known = bare_tool_names(tools.as_ref());
+    let results = units
+        .iter()
+        .map(|unit| {
+            let VmValue::Dict(unit) = unit else {
+                return VmValue::Nil;
+            };
+            let Some(VmValue::String(kind)) = unit.get("kind") else {
+                return VmValue::Nil;
+            };
+            if matches!(kind.as_str(), "text" | "fenced_line" | "harmony_line") {
+                let Some(VmValue::String(text)) = unit.get("text") else {
+                    return VmValue::Nil;
+                };
+                // Match the Harn composition boundary exactly. It trims each
+                // structural text unit before invoking the single-unit parser;
+                // retaining separator whitespace here changes model-facing
+                // error excerpts even though the parse decision is identical.
+                let parsed = parse_bare_calls_in_body_with_known(text.trim(), &known);
+                return json_to_vm_value(&serde_json::json!({"bare": {
+                    "calls": parsed.calls,
+                    "errors": parsed.errors,
+                    "prose": parsed.prose,
+                }}));
+            }
+            if matches!(kind.as_str(), "block" | "unclosed_block" | "reserved_block") {
+                let (
+                    Some(VmValue::String(body)),
+                    Some(VmValue::String(name)),
+                    Some(VmValue::String(sep)),
+                ) = (
+                    unit.get("body"),
+                    unit.get("head_name"),
+                    unit.get("head_sep"),
+                )
+                else {
+                    return VmValue::Nil;
+                };
+                let body = body.trim();
+                let direct = if sep.as_str() == "(" {
+                    match parse_ts_call_from(body, name.to_string()) {
+                        Ok((arguments, consumed)) => {
+                            serde_json::json!({"ok": true, "arguments": arguments, "consumed": consumed})
+                        }
+                        Err(error) => serde_json::json!({"ok": false, "error": error}),
+                    }
+                } else {
+                    let argument = &body[name.len()..];
+                    match parse_object_literal_from(argument, name) {
+                        Ok((value, consumed)) => {
+                            serde_json::json!({"ok": true, "value": value, "consumed": name.len() + consumed})
+                        }
+                        Err(error) => serde_json::json!({"ok": false, "error": error}),
+                    }
+                };
+                return json_to_vm_value(&serde_json::json!({"direct": direct}));
+            }
+            VmValue::Nil
+        })
+        .collect();
+    Ok(VmValue::List(std::sync::Arc::new(results)))
 }
 
 fn string_arg(args: &[VmValue], index: usize, field: &str, label: &str) -> Result<String, VmError> {
@@ -615,5 +826,24 @@ mod tests {
                 .contains("Checking now."),
             "{result}"
         );
+    }
+
+    #[test]
+    fn scan_bare_units_matches_the_trimmed_single_unit_boundary() {
+        let registry = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "_type": "tool_registry",
+            "tools": [{"name": "edit", "description": "edit a file", "params": []}],
+        }));
+        let source = "edit({ path: \"main.go\", content: \n";
+        let single = call(
+            host_tool_scan_bare_calls_builtin,
+            &[text(source.trim()), registry.clone()],
+        );
+        let units = crate::stdlib::json_to_vm_value(&serde_json::json!([
+            {"kind": "text", "text": source}
+        ]));
+        let batched = call(host_tool_scan_bare_units_builtin, &[units, registry]);
+
+        assert_eq!(batched[0]["bare"], single);
     }
 }

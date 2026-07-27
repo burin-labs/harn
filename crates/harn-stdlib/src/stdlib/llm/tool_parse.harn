@@ -9,7 +9,6 @@
 import {
   ARGUMENT_ALIASES,
   CONTENTLESS_WRAPPER_TAGS,
-  DSML_MARKER,
   HARMONY_CORRUPTED_OPENERS,
   HARMONY_FRAME_PREFIX,
   HARMONY_FRAME_SUFFIX,
@@ -18,10 +17,7 @@ import {
   HARMONY_STANDALONE_MARKERS,
   HARMONY_TOOL_CALL_HEADER_PREFIX,
   HTML_ENTITIES,
-  IMPLICIT_TOOL_NAMES,
   MARKUP_DIALECTS,
-  MISTRAL_ARGS_MARKER,
-  MISTRAL_CALL_MARKER,
   NAME_ALIASES,
   RESERVED_MALFORMED_CALL_OPENER,
   TAGGED_DIALECT,
@@ -34,24 +30,18 @@ import {
   json_fields,
 } from "std/llm/tool_parse_json_support"
 import { has_response_protocol_fragment } from "std/llm/tool_parse_protocol"
+import { parse_provider_dialect } from "std/llm/tool_parse_provider"
+import {
+  answer_block,
+  call_block,
+  canonical,
+  empty_parse,
+  prose_block,
+  provider_result,
+  registry_names,
+} from "std/llm/tool_parse_result"
 
-fn __tool_parse_registry_names(tools) -> list<string> {
-  let names: list<string> = []
-  if type_of(tools) == "dict" {
-    for entry in tools?.tools ?? [] {
-      const name = trim(to_string(entry?.name ?? ""))
-      if name != "" && !names.contains(name) {
-        names = names.appending(name)
-      }
-    }
-  }
-  for name in IMPLICIT_TOOL_NAMES {
-    if !names.contains(name) {
-      names = names.appending(name)
-    }
-  }
-  return names.sorted()
-}
+const TEXT_UNIT_KINDS = ["text", "fenced_line", "harmony_line"]
 
 fn __tool_parse_tag_spellings(canonical: string) -> list<string> {
   for dialect in TAGGED_DIALECT {
@@ -88,42 +78,9 @@ fn __tool_parse_scan_spec(tools) -> dict {
       tool_call_header_prefix: HARMONY_TOOL_CALL_HEADER_PREFIX,
       corrupted_openers: HARMONY_CORRUPTED_OPENERS,
     },
-    known_tools: __tool_parse_registry_names(tools),
+    known_tools: registry_names(tools),
     strip_thinking: true,
   }
-}
-
-fn __tool_parse_empty() -> dict {
-  return {
-    calls: [],
-    tool_calls: [],
-    tool_parse_errors: [],
-    protocol_violations: [],
-    recovered_from_stray_count: 0,
-    prose: "",
-    user_response: nil,
-    done_marker: nil,
-    canonical_text: "",
-    dropped: [],
-  }
-}
-
-fn __tool_parse_call_block(call) -> string {
-  return "<tool_call>\n"
-    + __host_tool_render_call(to_string(call?.name ?? ""), call?.arguments ?? {})
-    + "\n</tool_call>"
-}
-
-fn __tool_parse_prose_block(text: string) -> string {
-  return "<assistant_prose>\n" + trim(text) + "\n</assistant_prose>"
-}
-
-fn __tool_parse_answer_block(text: string) -> string {
-  return "<user_response>\n" + trim(text) + "\n</user_response>"
-}
-
-fn __tool_parse_canonical(parts: list<string>) -> string {
-  return parts.join("\n\n")
 }
 
 fn __tool_parse_schema_type(tools, tool_name: string, parameter_name: string) {
@@ -198,7 +155,7 @@ fn __tool_parse_markup(body: string, tools) -> dict {
   if len(regex_captures("^[A-Za-z0-9_.-]+$", name)) == 0 {
     return {matched: false}
   }
-  const known = __tool_parse_registry_names(tools)
+  const known = registry_names(tools)
   if !known.contains(name) {
     return {
       matched: true,
@@ -311,7 +268,7 @@ fn __tool_parse_nested_xml(body: string, tools) -> dict {
   if !starts_with(after_open, "{") {
     return {matched: false}
   }
-  const known = __tool_parse_registry_names(tools)
+  const known = registry_names(tools)
   if !known.contains(name) {
     return {
       matched: true,
@@ -401,153 +358,121 @@ fn __tool_parse_narration(body: string, tools) -> dict {
   return {matched: false}
 }
 
-fn __tool_parse_provider_result(calls, errors, prose: string, violations) -> dict {
-  let canonical: list<string> = []
-  if trim(prose) != "" {
-    canonical = canonical.appending(__tool_parse_prose_block(prose))
+fn __tool_parse_json_call_from_body(source: string, tools) -> dict {
+  const decoded = try {
+    json_parse(source)
+  } catch (error) {
+    return {
+      ok: false,
+      error: "<tool_call> body looked like JSON but did not parse: "
+        + to_string(error)
+        + ". Emit either `name({ ... })` or JSON with `name` and `arguments`.",
+    }
   }
-  for call in calls {
-    canonical = canonical.appending(__tool_parse_call_block(call))
-  }
-  return __tool_parse_empty()
-    + {
-    calls: calls,
-    tool_calls: calls,
-    tool_parse_errors: errors,
-    protocol_violations: violations,
-    prose: trim(prose),
-    canonical_text: __tool_parse_canonical(canonical),
-  }
-}
-
-fn __tool_parse_mistral(text: string, tools) -> dict {
-  const marker_at = text.index_of(MISTRAL_CALL_MARKER)
-  const prose = marker_at >= 0 ? text.slice(0, marker_at) : text
-  const payload =
-    marker_at >= 0 ? trim(text.slice(marker_at + len(MISTRAL_CALL_MARKER), len(text))) : ""
-  let calls: list<dict> = []
-  let errors: list<string> = []
-  const known = __tool_parse_registry_names(tools)
-  if starts_with(payload, "[") || starts_with(payload, "{") {
-    const stream = __host_tool_json_stream(payload)
-    if len(stream?.values ?? []) == 0 {
-      errors = errors.appending(
-        "Mistral [TOOL_CALLS] JSON payload did not parse: "
-          + to_string(
-          stream?.error ?? "empty payload",
-        )
-          + ".",
-      )
-    } else {
-      const root = stream.values[0].value
-      const items = type_of(root) == "list" ? root : [root]
-      for item in items {
-        const normalized = json_call(item, true)
-        if !(normalized?.ok ?? false) {
-          errors = errors.appending(to_string(normalized?.error ?? "invalid Mistral call"))
-          continue
-        }
-        const name = to_string(normalized.call?.name ?? "")
-        if !known.contains(name) {
-          errors = errors.appending(
-            "Unknown tool '" + name + "' in Mistral [TOOL_CALLS] JSON payload.",
-          )
-          continue
-        }
-        calls = calls.appending(normalized.call)
+  const item = if type_of(decoded) == "list" {
+    if len(decoded) != 1 {
+      return {
+        ok: false,
+        error: "<tool_call> JSON array contained "
+          + to_string(len(decoded))
+          + " calls; emit one call per <tool_call> block.",
       }
     }
+    decoded[0]
   } else {
-    const args_at = payload.index_of(MISTRAL_ARGS_MARKER)
-    const name = args_at >= 0 ? trim(payload.slice(0, args_at)) : ""
-    if name == "" {
-      errors = errors.appending("Mistral [TOOL_CALLS] marker was missing a tool name.")
-    } else if !known.contains(name) {
-      errors = errors.appending("Unknown tool '" + name + "' in Mistral [TOOL_CALLS] marker.")
-    } else if args_at < 0 {
-      errors = errors.appending(
-        "Mistral [TOOL_CALLS] marker for `" + name + "` was missing [ARGS].",
-      )
-    } else {
-      const arguments = try {
-        json_parse(trim(payload.slice(args_at + len(MISTRAL_ARGS_MARKER), len(payload))))
-      } catch (error) {
-        errors = errors.appending(to_string(error))
-        nil
-      }
-      if type_of(arguments) == "dict" {
-        calls = calls.appending({id: "tc_mistral_0", name: name, arguments: arguments})
+    decoded
+  }
+  if type_of(item) != "dict" {
+    return {
+      ok: false,
+      error: "<tool_call> JSON body must be an object, got `" + json_stringify(item) + "`.",
+    }
+  }
+  const name = trim(to_string(item?.name ?? item?.tool_name ?? item?.function?.name ?? ""))
+  if name == "" {
+    return {ok: false, error: "<tool_call> JSON body did not contain a tool name"}
+  }
+  const known = registry_names(tools)
+  if !known.contains(name) {
+    return {
+      ok: false,
+      error: "Unknown tool '" + name + "'. Available tools: [" + known.join(", ") + "]",
+    }
+  }
+  let arguments = item?.arguments
+    ?? item?.parameters
+    ?? item?.args
+    ?? item?.function?.arguments
+    ?? {}
+  if type_of(arguments) == "string" {
+    arguments = try {
+      json_parse(arguments)
+    } catch (error) {
+      return {
+        ok: false,
+        error: "Could not parse JSON string arguments for tool '"
+          + name
+          + "': "
+          + to_string(error),
       }
     }
   }
-  const violations = len(calls) > 0 ? [
-    "Tool call(s) were emitted with Mistral `[TOOL_CALLS]name[ARGS]{...}` markers. "
-      + "Executed this turn so work moves forward; use "
-      + "`<tool_call>name({ ... })</tool_call>` on subsequent turns.",
-  ] : []
-  return __tool_parse_provider_result(calls, errors, prose, violations)
+  if type_of(arguments) != "dict" {
+    return {
+      ok: false,
+      error: "Tool '"
+        + name
+        + "' arguments must be a JSON object, got `"
+        + json_stringify(arguments)
+        + "`.",
+    }
+  }
+  return {
+    ok: true,
+    call: {
+      id: to_string(item?.id ?? "tc_json"),
+      name: name,
+      arguments: __host_tool_decode_entities(arguments, HTML_ENTITIES),
+    },
+  }
 }
 
-fn __tool_parse_dsml(text: string, tools) -> dict {
-  const invoke_pattern = "(?s)<｜DSML｜invoke\\s+name=\"([^\"]+)\"\\s*>(.*?)</｜DSML｜invoke>"
-  const parameter_pattern =
-    "(?s)<｜DSML｜parameter\\s+name=\"([^\"]+)\"(?:\\s+string=\"(true|false)\")?\\s*>(.*?)</｜DSML｜parameter>"
-  const known = __tool_parse_registry_names(tools)
-  let calls: list<dict> = []
-  let errors: list<string> = []
-  for invoke in regex_captures(invoke_pattern, text) {
-    const name = to_string(invoke?.groups?.[0] ?? "")
-    if !known.contains(name) {
-      errors = errors.appending("Unknown tool '" + name + "' in DeepSeek DSML invoke.")
-      continue
-    }
-    const body = to_string(invoke?.groups?.[1] ?? "")
-    let arguments: dict = {}
-    for parameter in regex_captures(parameter_pattern, body) {
-      const key = to_string(parameter?.groups?.[0] ?? "")
-      const as_string = to_string(parameter?.groups?.[1] ?? "true") != "false"
-      const raw = to_string(parameter?.groups?.[2] ?? "")
-      if as_string {
-        arguments[key] = __host_tool_decode_entities(raw, HTML_ENTITIES)
-      } else {
-        arguments[key] = try {
-          json_parse(trim(raw))
-        } catch (error) {
-          errors = errors.appending(
-            "DeepSeek DSML parameter `"
-              + key
-              + "` for `"
-              + name
-              + "` could not parse as JSON: "
-              + to_string(error)
-              + ".",
-          )
-          __host_tool_decode_entities(raw, HTML_ENTITIES)
-        }
-      }
-    }
-    calls = calls.appending(
-      {id: "tc_dsml_" + to_string(len(calls)), name: name, arguments: arguments},
-    )
-  }
-  let prose = regex_replace(
-    "(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>|<｜DSML｜tool_calls>.*?</｜DSML｜tool_calls>",
-    "",
-    text,
-  )
-  const marker_at = prose.index_of(DSML_MARKER)
-  if marker_at >= 0 {
-    prose = prose.slice(0, marker_at)
-  }
-  return __tool_parse_provider_result(calls, errors, prose, [])
-}
-
-fn __tool_parse_call_from_body(body: string, tools) -> dict {
+fn __tool_parse_call_from_body(
+  body: string,
+  tools,
+  head_name: string = "",
+  head_sep: string = "",
+  direct_candidate = nil,
+) -> dict {
   const trimmed = trim(body)
   if trimmed == "" {
     return {
       ok: false,
       error: "<tool_call> body did not contain a bare `name({ ... })` expression. Got: \"\"",
+    }
+  }
+  if head_name != "" && registry_names(tools).contains(head_name) {
+    const direct = if direct_candidate != nil {
+      direct_candidate
+    } else if head_sep == "(" {
+      __host_tool_parse_call_expr(trimmed, head_name)
+    } else if head_sep == "{" {
+      const parsed = __host_tool_parse_object_literal(
+        trimmed.slice(len(head_name), len(trimmed)),
+        head_name,
+      )
+      parsed + {consumed: len(head_name) + (parsed?.consumed ?? 0)}
+    } else {
+      {ok: false}
+    }
+    if direct?.ok ?? false {
+      const trailing = trim(trimmed.slice(direct.consumed, len(trimmed)))
+      if trailing == "" {
+        return {
+          ok: true,
+          call: {id: "tc_0", name: head_name, arguments: direct.arguments ?? direct.value ?? {}},
+        }
+      }
     }
   }
   const markup = __tool_parse_markup(trimmed, tools)
@@ -559,82 +484,7 @@ fn __tool_parse_call_from_body(body: string, tools) -> dict {
     return nested
   }
   if starts_with(trimmed, "{") || starts_with(trimmed, "[") {
-    const decoded = try {
-      json_parse(trimmed)
-    } catch (error) {
-      return {
-        ok: false,
-        error: "<tool_call> body looked like JSON but did not parse: "
-          + to_string(error)
-          + ". Emit either `name({ ... })` or JSON with `name` and `arguments`.",
-      }
-    }
-    const item = if type_of(decoded) == "list" {
-      if len(decoded) != 1 {
-        return {
-          ok: false,
-          error: "<tool_call> JSON array contained "
-            + to_string(len(decoded))
-            + " calls; emit one call per <tool_call> block.",
-        }
-      }
-      decoded[0]
-    } else {
-      decoded
-    }
-    if type_of(item) != "dict" {
-      return {
-        ok: false,
-        error: "<tool_call> JSON body must be an object, got `" + json_stringify(item) + "`.",
-      }
-    }
-    const name = trim(to_string(item?.name ?? item?.tool_name ?? item?.function?.name ?? ""))
-    if name == "" {
-      return {ok: false, error: "<tool_call> JSON body did not contain a tool name"}
-    }
-    const known = __tool_parse_registry_names(tools)
-    if !known.contains(name) {
-      return {
-        ok: false,
-        error: "Unknown tool '" + name + "'. Available tools: [" + known.join(", ") + "]",
-      }
-    }
-    let arguments = item?.arguments
-      ?? item?.parameters
-      ?? item?.args
-      ?? item?.function?.arguments
-      ?? {}
-    if type_of(arguments) == "string" {
-      arguments = try {
-        json_parse(arguments)
-      } catch (error) {
-        return {
-          ok: false,
-          error: "Could not parse JSON string arguments for tool '"
-            + name
-            + "': "
-            + to_string(error),
-        }
-      }
-    }
-    if type_of(arguments) != "dict" {
-      return {
-        ok: false,
-        error: "Tool '"
-          + name
-          + "' arguments must be a JSON object, got `"
-          + json_stringify(arguments)
-          + "`.",
-      }
-    }
-    return {
-      ok: true,
-      call: {
-        id: to_string(item?.id ?? "tc_json"),
-        name: name,
-        arguments: __host_tool_decode_entities(arguments, HTML_ENTITIES),
-      },
-    }
+    return __tool_parse_json_call_from_body(trimmed, tools)
   }
   const narration = __tool_parse_narration(trimmed, tools)
   if narration?.matched ?? false {
@@ -664,7 +514,7 @@ fn __tool_parse_call_from_body(body: string, tools) -> dict {
   }
 }
 
-fn __tool_parse_consume_stray(unit, tools, state: dict) -> dict {
+fn __tool_parse_consume_stray(unit, tools, state: dict, bare_candidate = nil) -> dict {
   const text = trim(to_string(unit?.text ?? ""))
   if text == "" {
     return state
@@ -698,20 +548,20 @@ fn __tool_parse_consume_stray(unit, tools, state: dict) -> dict {
     }
   }
   const reason = unit?.kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
-  const sniffed = __host_tool_scan_bare_calls(text, tools)
+  const sniffed = bare_candidate ?? __host_tool_scan_bare_calls(text, tools)
   const next = state
   if len(sniffed?.calls ?? []) > 0 {
     let calls = next.calls
     let canonical = next.canonical
     for call in sniffed.calls {
       calls = calls.appending(call)
-      canonical = canonical.appending(__tool_parse_call_block(call))
+      canonical = canonical.appending(call_block(call))
     }
     const sniffed_prose = trim(to_string(sniffed?.prose ?? ""))
     let prose = next.prose
     if sniffed_prose != "" {
       prose = prose.appending(sniffed_prose)
-      canonical = canonical.appending(__tool_parse_prose_block(sniffed_prose))
+      canonical = canonical.appending(prose_block(sniffed_prose))
     }
     return next
       + {
@@ -745,7 +595,7 @@ fn __tool_parse_consume_stray(unit, tools, state: dict) -> dict {
   return next
     + {
     prose: next.prose.appending(text),
-    canonical: next.canonical.appending(__tool_parse_prose_block(text)),
+    canonical: next.canonical.appending(prose_block(text)),
     dropped: next.dropped.appending({text: text, reason: reason}),
   }
 }
@@ -755,7 +605,7 @@ fn __tool_parse_pending_unit(unit, state: dict) -> dict {
     return {state: state, consumed: false}
   }
   const kind = to_string(unit?.kind ?? "")
-  if kind == "text" || kind == "fenced_line" || kind == "harmony_line" {
+  if TEXT_UNIT_KINDS.contains(kind) {
     const body = trim(to_string(unit?.text ?? ""))
     if body == "" {
       return {state: state, consumed: true}
@@ -764,7 +614,7 @@ fn __tool_parse_pending_unit(unit, state: dict) -> dict {
       state: state
         + {
         prose: state.prose.appending(body),
-        canonical: state.canonical.appending(__tool_parse_prose_block(body)),
+        canonical: state.canonical.appending(prose_block(body)),
       },
       consumed: true,
     }
@@ -788,7 +638,7 @@ fn __tool_parse_pending_unit(unit, state: dict) -> dict {
   }
 }
 
-fn __tool_parse_block_unit(unit, tools, state: dict) -> dict {
+fn __tool_parse_block_unit(unit, tools, state: dict, direct_candidate = nil) -> dict {
   const kind = to_string(unit?.kind ?? "")
   const tag = to_string(unit?.tag ?? "")
   if __tool_parse_tag_spellings("assistant_prose").contains(tag) {
@@ -799,7 +649,7 @@ fn __tool_parse_block_unit(unit, tools, state: dict) -> dict {
     return state
       + {
       prose: state.prose.appending(body),
-      canonical: state.canonical.appending(__tool_parse_prose_block(body)),
+      canonical: state.canonical.appending(prose_block(body)),
     }
   }
   if __tool_parse_tag_spellings("user_response").contains(tag) {
@@ -810,7 +660,7 @@ fn __tool_parse_block_unit(unit, tools, state: dict) -> dict {
     return state
       + {
       answers: state.answers.appending(body),
-      canonical: state.canonical.appending(__tool_parse_answer_block(body)),
+      canonical: state.canonical.appending(answer_block(body)),
     }
   }
   if __tool_parse_tag_spellings("done").contains(tag) {
@@ -827,18 +677,24 @@ fn __tool_parse_block_unit(unit, tools, state: dict) -> dict {
     return state
       + {done: body, canonical: state.canonical.appending("<done>" + body + "</done>")}
   }
-  const parsed = __tool_parse_call_from_body(to_string(unit?.body ?? ""), tools)
+  const parsed = __tool_parse_call_from_body(
+    to_string(unit?.body ?? ""),
+    tools,
+    to_string(unit?.head_name ?? ""),
+    to_string(unit?.head_sep ?? ""),
+    direct_candidate,
+  )
   if parsed?.ok ?? false {
     let calls = state.calls
     let canonical = state.canonical
     let prose = state.prose
     if parsed?.call != nil {
       calls = calls.appending(parsed.call)
-      canonical = canonical.appending(__tool_parse_call_block(parsed.call))
+      canonical = canonical.appending(call_block(parsed.call))
     }
     for narration in parsed?.prose ?? [] {
       prose = prose.appending(narration)
-      canonical = canonical.appending(__tool_parse_prose_block(narration))
+      canonical = canonical.appending(prose_block(narration))
     }
     return state + {calls: calls, canonical: canonical, prose: prose}
   }
@@ -907,7 +763,7 @@ fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
     return state
       + {
       calls: state.calls.appending(parsed.call),
-      canonical: state.canonical.appending(__tool_parse_call_block(parsed.call)),
+      canonical: state.canonical.appending(call_block(parsed.call)),
       violations: state.violations.appending(
         "Tool call `"
           + name
@@ -928,15 +784,18 @@ fn __tool_parse_markup_unit(unit, tools, state: dict) -> dict {
   return __tool_parse_consume_stray(unit, tools, state)
 }
 
-fn __tool_parse_tagged_unit(unit, tools, state: dict) -> dict {
-  const pending = __tool_parse_pending_unit(unit, state)
-  if pending.consumed {
-    return pending.state
+fn __tool_parse_tagged_unit(unit, tools, state: dict, candidates = nil) -> dict {
+  let next = state
+  if state.pending_response != nil {
+    const pending = __tool_parse_pending_unit(unit, state)
+    if pending.consumed {
+      return pending.state
+    }
+    next = pending.state
   }
-  const next = pending.state
   const kind = to_string(unit?.kind ?? "")
-  if kind == "text" || kind == "fenced_line" || kind == "harmony_line" {
-    return __tool_parse_consume_stray(unit, tools, next)
+  if TEXT_UNIT_KINDS.contains(kind) {
+    return __tool_parse_consume_stray(unit, tools, next, candidates?.bare)
   }
   if kind == "harmony_skip" || kind == "wrapper" || kind == "stray_close" {
     return next
@@ -950,7 +809,7 @@ fn __tool_parse_tagged_unit(unit, tools, state: dict) -> dict {
     return next
       + {
       calls: next.calls.appending(call),
-      canonical: next.canonical.appending(__tool_parse_call_block(call)),
+      canonical: next.canonical.appending(call_block(call)),
       violations: next.violations.appending(
         "Recovered angle-wrapped tool call; emit it inside <tool_call>...</tool_call>.",
       ),
@@ -960,7 +819,7 @@ fn __tool_parse_tagged_unit(unit, tools, state: dict) -> dict {
     return __tool_parse_markup_unit(unit, tools, next)
   }
   if kind == "block" || kind == "unclosed_block" || kind == "reserved_block" {
-    return __tool_parse_block_unit(unit, tools, next)
+    return __tool_parse_block_unit(unit, tools, next, candidates?.direct)
   }
   if kind == "tag" {
     return __tool_parse_tag_unit(unit, next)
@@ -968,36 +827,11 @@ fn __tool_parse_tagged_unit(unit, tools, state: dict) -> dict {
   return __tool_parse_consume_stray(unit, tools, next)
 }
 
-fn __tool_parse_tagged(text: string, tools) -> dict {
-  if contains(text, MISTRAL_CALL_MARKER) {
-    return __tool_parse_mistral(text, tools)
-  }
-  if contains(text, DSML_MARKER) {
-    return __tool_parse_dsml(text, tools)
-  }
-  const scanned = __host_tool_scan_units(text, __tool_parse_scan_spec(tools))
-  let state: dict = {
-    calls: [],
-    errors: [],
-    violations: [],
-    prose: [],
-    answers: [],
-    done: nil,
-    canonical: [],
-    dropped: [],
-    recovered: 0,
-    pending_response: nil,
-    unclosed_response_prose: false,
-  }
-  for unit in scanned.units {
-    state = __tool_parse_tagged_unit(unit, tools, state)
-  }
+fn __tool_parse_tagged_result(state: dict, response_tags: list<string>) -> dict {
   const prose = state.prose.join("\n\n")
   const answer = if len(state.answers) > 0 {
     state.answers.join("\n")
-  } else if __tool_parse_tag_spellings("user_response").contains(
-    to_string(state.pending_response ?? ""),
-  ) {
+  } else if response_tags.contains(to_string(state.pending_response ?? "")) {
     prose
   } else {
     nil
@@ -1005,12 +839,12 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
   const visible_prose = if len(state.violations) > 0
     && len(state.calls) == 0
     && answer == nil
-    && !(state.unclosed_response_prose ?? false) {
+    && !state.unclosed_response_prose {
     ""
   } else {
     answer ?? prose
   }
-  const recovered = if state.recovered > len(state.calls) {
+  const recovered_count = if state.recovered > len(state.calls) {
     len(state.calls)
   } else {
     state.recovered
@@ -1020,19 +854,166 @@ fn __tool_parse_tagged(text: string, tools) -> dict {
     tool_calls: state.calls,
     tool_parse_errors: state.errors,
     protocol_violations: state.violations,
-    recovered_from_stray_count: recovered,
+    recovered_from_stray_count: recovered_count,
     prose: visible_prose,
     user_response: answer,
     done_marker: state.done,
-    canonical_text: __tool_parse_canonical(state.canonical),
+    canonical_text: __host_tool_render_parts(state.canonical),
     dropped: state.dropped,
   }
+}
+
+fn __tool_parse_tagged(text: string, tools) -> dict {
+  const provider_dialect = parse_provider_dialect(text, tools)
+  if provider_dialect != nil {
+    return provider_dialect
+  }
+  const scanned = __host_tool_scan_units(text, __tool_parse_scan_spec(tools))
+  const bare_candidates = __host_tool_scan_bare_units(scanned.units, tools)
+  const known = registry_names(tools)
+  const assistant_tags = __tool_parse_tag_spellings("assistant_prose")
+  const response_tags = __tool_parse_tag_spellings("user_response")
+  let calls: list<dict> = []
+  let errors: list<string> = []
+  let violations: list<string> = []
+  let prose_parts: list<string> = []
+  let answers: list<string> = []
+  let done = nil
+  let canonical: list<string> = []
+  let dropped: list<dict> = []
+  let recovered = 0
+  let pending_response = nil
+  let unclosed_response_prose = false
+  for index in range(0, len(scanned.units)) {
+    const unit = scanned.units[index]
+    const candidates = bare_candidates[index]
+    const kind = unit?.kind ?? ""
+    const tag = unit?.tag ?? ""
+    if pending_response == nil && TEXT_UNIT_KINDS.contains(kind) {
+      const stray_text = trim(unit?.text ?? "")
+      if stray_text == "" || stray_text == "<tool_call>" {
+        continue
+      }
+      const sniffed = candidates?.bare ?? {calls: [], errors: [], prose: stray_text}
+      if len(sniffed?.calls ?? []) > 0 {
+        const sniffed_prose = trim(sniffed?.prose ?? "")
+        calls = calls + sniffed.calls
+        canonical = canonical.appending({kind: "bare", calls: sniffed.calls, prose: sniffed_prose})
+        if sniffed_prose != "" {
+          prose_parts = prose_parts.appending(sniffed_prose)
+        }
+        recovered = recovered + len(sniffed.calls)
+      } else if len(sniffed?.errors ?? []) > 0 {
+        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+        for error in sniffed.errors {
+          errors = errors.appending(error)
+        }
+        dropped = dropped.appending({text: stray_text, reason: drop_reason})
+      } else if has_response_protocol_fragment(stray_text) {
+        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+        violations = violations.appending(
+          "Stray text outside response tags: "
+            + json_stringify(stray_text)
+            + ". Wrap all prose in <assistant_prose>...</assistant_prose> or "
+            + "<user_response>...</user_response>, and every tool call in "
+            + "<tool_call>...</tool_call>.",
+        )
+        recovered = recovered + 1
+        dropped = dropped.appending({text: stray_text, reason: drop_reason})
+      } else {
+        const drop_reason = kind == "fenced_line" ? "fenced_narration" : "salvaged_as_prose"
+        prose_parts = prose_parts.appending(stray_text)
+        canonical = canonical.appending({kind: "prose", text: stray_text})
+        dropped = dropped.appending({text: stray_text, reason: drop_reason})
+      }
+      continue
+    }
+    if pending_response == nil && kind == "block" {
+      const body = trim(unit?.body ?? "")
+      if assistant_tags.contains(tag) {
+        if body != "" {
+          prose_parts = prose_parts.appending(body)
+          canonical = canonical.appending({kind: "prose", text: body})
+        }
+        continue
+      }
+      if response_tags.contains(tag) {
+        if body != "" {
+          answers = answers.appending(body)
+          canonical = canonical.appending({kind: "answer", text: body})
+        }
+        continue
+      }
+      const head_name = unit?.head_name ?? ""
+      const direct = candidates?.direct
+      if head_name != "" && known.contains(head_name) && (direct?.ok ?? false) {
+        const trailing = trim(body.slice(direct.consumed, len(body)))
+        if trailing == "" {
+          const call = {
+            id: "tc_0",
+            name: head_name,
+            arguments: direct.arguments ?? direct.value ?? {},
+          }
+          calls = calls.appending(call)
+          canonical = canonical.appending(
+            {kind: "call", name: call.name, arguments: call.arguments ?? {}},
+          )
+          continue
+        }
+      }
+    }
+    const state = __tool_parse_tagged_unit(
+      unit,
+      tools,
+      {
+        calls: calls,
+        errors: errors,
+        violations: violations,
+        prose: prose_parts,
+        answers: answers,
+        done: done,
+        canonical: canonical,
+        dropped: dropped,
+        recovered: recovered,
+        pending_response: pending_response,
+        unclosed_response_prose: unclosed_response_prose,
+      },
+      candidates,
+    )
+    calls = state.calls
+    errors = state.errors
+    violations = state.violations
+    prose_parts = state.prose
+    answers = state.answers
+    done = state.done
+    canonical = state.canonical
+    dropped = state.dropped
+    recovered = state.recovered
+    pending_response = state.pending_response
+    unclosed_response_prose = state.unclosed_response_prose
+  }
+  return __tool_parse_tagged_result(
+    {
+      calls: calls,
+      errors: errors,
+      violations: violations,
+      prose: prose_parts,
+      answers: answers,
+      done: done,
+      canonical: canonical,
+      dropped: dropped,
+      recovered: recovered,
+      pending_response: pending_response,
+      unclosed_response_prose: unclosed_response_prose,
+    },
+    response_tags,
+  )
 }
 
 fn __tool_parse_envelope_error(kind: string, detail: string, prose: string) -> dict {
   return {
     matched: true,
-    result: __tool_parse_empty()
+    result: empty_parse()
       + {
       tool_parse_errors: [
         "The `<"
@@ -1361,7 +1342,7 @@ fn __tool_parse_envelope(text: string) -> dict {
     + "while `tool_format` is `json`; accepted this turn, but emit canonical "
     + "```tool JSON blocks next turn."
   parsed = parsed
-    + {result: __tool_parse_provider_result(parsed.calls, [], parsed.prose, [violation])}
+    + {result: provider_result(parsed.calls, [], parsed.prose, [violation])}
   return parsed
 }
 
@@ -1374,14 +1355,11 @@ fn __tool_parse_json(text: string) -> dict {
       }
       return envelope.result
     }
-    return __tool_parse_empty()
-      + {
-      tool_parse_errors: ["chat-template envelope parse failed"],
-      prose: text,
-    }
+    return empty_parse()
+      + {tool_parse_errors: ["chat-template envelope parse failed"], prose: text}
   }
   if contains(text, "<tool_call>") {
-    return __tool_parse_empty()
+    return empty_parse()
       + {
       protocol_violations: [
         "protocol_violation: `<tool_call>...</tool_call>` markup was emitted while "
@@ -1452,8 +1430,8 @@ fn __tool_parse_json(text: string) -> dict {
       )
     }
   }
-  const canonical = calls.map(fn(call) { return __tool_parse_call_block(call) }).join("\n")
-  return __tool_parse_empty()
+  const canonical = calls.map(fn(call) { return call_block(call) }).join("\n")
+  return empty_parse()
     + {
     calls: calls,
     tool_calls: calls,
