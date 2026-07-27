@@ -1356,12 +1356,9 @@ pub fn command_output(
     let recording =
         crate::testbench::process_tape::start_recording(program, args, config.cwd.as_deref());
 
-    // Callers build `config` several ways, so close it here rather than trust
-    // each. Always rebuild through the command-aware resolver when a session
-    // environment is active: an earlier ambient close (`closed_env`) would
-    // otherwise omit `for_command` grants for this executable (harn#5549).
-    // The existing `config.env` is the overlay (caller keys, or a prior ambient
-    // close), and still wins over the base.
+    // Always rebuild through the command-aware resolver when a session env is
+    // active so an earlier ambient `closed_env` cannot omit `for_command`
+    // grants (harn#5549). `config.env` remains the overlay and still wins.
     let closed_config;
     let config = if let Some(env) =
         crate::stdlib::process::session_closed_env_for_command(program, config.env.iter().cloned())?
