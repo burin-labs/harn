@@ -362,6 +362,30 @@ fn test_parses_package_cache_subcommands() {
     assert_eq!(check.package, Some(PathBuf::from("pkg")));
     assert!(check.json);
 
+    let cli = Cli::parse_from([
+        "harn",
+        "package",
+        "verify",
+        "pkg",
+        "--provider",
+        "notion",
+        "--run-poll-tick",
+        "--json",
+        "--receipt-out",
+        "receipt.json",
+    ]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Verify(verify) = args.command else {
+        panic!("expected package verify");
+    };
+    assert_eq!(verify.package, "pkg");
+    assert_eq!(verify.providers, vec!["notion"]);
+    assert!(verify.run_poll_tick);
+    assert!(verify.json);
+    assert_eq!(verify.receipt_out, Some(PathBuf::from("receipt.json")));
+
     let cli = Cli::parse_from(["harn", "package", "pack", "pkg", "--dry-run"]);
     let Command::Package(args) = cli.command.unwrap() else {
         panic!("expected package command");

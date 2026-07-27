@@ -54,13 +54,13 @@ Each package should declare connector contract v1 metadata, ship deterministic
 fixtures, and pass:
 
 ```sh
-harn connector test .
+harn package verify .
 ```
 
 Poll-based packages should also run:
 
 ```sh
-harn connector test . --run-poll-tick
+harn package verify . --run-poll-tick
 ```
 
 ## Provider packages
@@ -92,7 +92,7 @@ surfaces exist and are tested:
 | Rate-limit and cursor pagination behavior | connector clients, `RateLimiterFactory`, `connectors::shared::paginate_cursor`, `std/connectors/shared` |
 | Git forge PR/MR lifecycle event and writeback contract | `std/connectors/shared::git_forge_pull_request_event`, `GitForgePullRequestEvent` generated from `crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn` |
 | Harn connector contract, `NormalizeResult`, `poll_tick`, and effect policy | `crates/harn-vm/src/connectors/harn_module.rs`, `crates/harn-lint/src/tests/connector_effect_policy.rs` |
-| Connector package conformance harness | `harn connector test`, `harn connector check`, and connector contract fixtures |
+| Connector package conformance harness | `harn package verify`, `harn connector check`, and connector contract fixtures |
 | Catalog, examples, and migration guidance | `docs/src/connectors/catalog.md`, `examples/triggers/`, `docs/src/migrations/rust-connectors-to-harn-packages.md` |
 
 Future work should update those newer ownership surfaces, not reopen the old

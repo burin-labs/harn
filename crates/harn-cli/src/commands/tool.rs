@@ -55,10 +55,7 @@ pub(crate) async fn run_new(args: &ToolNewArgs) -> Result<(), PackageError> {
         args.name,
         dest.display()
     );
-    println!("  harn test tests/");
-    println!("  harn package check");
-    println!("  harn package docs --check");
-    println!("  harn package pack --dry-run");
+    println!("  harn package verify");
     Ok(())
 }
 
@@ -77,6 +74,7 @@ async fn dispatch_to_script(
     let _handler_env = ScopedEnvVar::set("HARN_TOOL_HANDLER", handler);
     let _desc_env = ScopedEnvVar::set("HARN_TOOL_DESCRIPTION", description);
     let _range_env = ScopedEnvVar::set("HARN_TOOL_HARN_RANGE", &harn_range);
+    let _version_env = ScopedEnvVar::set("HARN_TOOL_HARN_VERSION", env!("CARGO_PKG_VERSION"));
     let exit = dispatch::dispatch_to_embedded_script(
         "scaffold/tool_new",
         Vec::new(),

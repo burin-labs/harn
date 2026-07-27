@@ -1363,9 +1363,8 @@ harn tool new acme-echo --description "Echo text for tests."
 ```
 
 The generated package includes `[[package.tools]]` metadata, a stable
-`tools` export, package-local dispatch tests, API docs, and CI commands for
-`harn test`, `harn package check`, `harn package docs --check`, and
-`harn package pack --dry-run`.
+`tools` export, package-local dispatch tests, API docs, and a CI call to the
+canonical `harn package verify` contract.
 
 ## harn skill
 
@@ -3326,6 +3325,25 @@ content-hash mismatches, declared host capability gaps, and invalid installed
 package tool/skill metadata. Publish-readiness checks remain under
 `harn package check`, so applications can use doctor without adding package
 metadata that only published libraries need.
+
+## harn package verify
+
+Run the complete package CI contract and emit a versioned receipt.
+
+```bash
+harn package verify
+harn package verify --json
+harn package verify --receipt-out .harn/receipts/package-verify.json
+harn package verify . --provider github --run-poll-tick
+```
+
+The verifier performs a locked install; validates package metadata; checks,
+lints, and format-checks package-owned Harn files; runs package tests; installs
+the package into a temporary consumer and checks each export; validates
+documentation and generated API docs; and dry-runs package packing. Connector
+packages also run their connector metadata and deterministic fixture contract.
+Each receipt check records whether the gate was applicable and reached, plus
+its command, result, timing, and diagnostics.
 
 ## harn package scaffold openapi
 

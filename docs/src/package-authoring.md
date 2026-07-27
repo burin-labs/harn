@@ -9,8 +9,7 @@ tests, and optional connector contracts in `harn.toml`. They use the same
 ```bash
 harn new package acme-tools
 cd acme-tools
-harn test tests/
-harn package check
+harn package verify
 harn package docs
 harn package pack
 ```
@@ -21,8 +20,8 @@ The package template creates:
 - `lib/main.harn` with a documented public function
 - `tests/` smoke tests
 - `README.md`, `LICENSE`, `docs/api.md`
-- CI that installs `harn-cli`, runs tests, checks docs drift, and runs
-  `harn package pack --dry-run`
+- CI that installs the pinned Harn release and runs the canonical
+  `harn package verify` contract
 
 Consumers can add a local package while developing:
 
@@ -45,9 +44,7 @@ setup action before running native package commands:
 steps:
   - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
   - uses: burin-labs/harn/.github/actions/setup-harn@<full-commit-sha>
-  - run: harn check --strict-types $(git ls-files '*.harn')
-  - run: harn test tests/ --parallel
-  - run: harn package check
+  - run: harn package verify --receipt-out .harn/receipts/package-verify.json
 ```
 
 Pin the action to the full commit for the Harn release you use. The action reads
@@ -73,10 +70,7 @@ configuration, and source-build fallback policy.
 ```bash
 harn tool new acme-echo
 cd acme-echo
-harn test tests/
-harn package check
-harn package docs --check
-harn package pack --dry-run
+harn package verify
 ```
 
 The tool template creates a package with a Harn-native registry builder,
@@ -107,11 +101,7 @@ harn package scaffold openapi \
   --out ./acme-sdk-harn
 cd acme-sdk-harn
 harn install
-harn check src/lib.harn
-harn test tests/
-harn package check
-harn package docs --check
-harn package pack --dry-run
+harn package verify
 ```
 
 The OpenAPI scaffold uses `harn-openapi` to generate `src/lib.harn`, stores the
@@ -142,13 +132,13 @@ package-root-relative skill directories containing `SKILL.md`.
 ```bash
 harn new connector echo-connector
 cd echo-connector
-harn connector test .
+harn package verify .
 harn package docs
 harn publish --dry-run
 harn publish
 ```
 
-Connector packages use `harn connector test .` as the CI gate. It runs package
+Connector packages use `harn package verify .` as the CI gate. It runs package
 metadata validation, `harn check`, `harn lint`, `harn fmt --check`, connector
 contract fixtures, package-local fixture tests, install/import smoke tests, and
 standalone Harn doc examples. Use `harn connector check .` when you only need
@@ -220,6 +210,14 @@ because they cannot be reproduced from a registry index. Publishable
 dependencies should use direct git `tag`/`rev` pins or registry `version`
 ranges; `branch` dependencies are accepted with a warning because they are
 moving refs.
+
+`harn package verify` is the owning CI contract. It composes locked dependency
+installation, manifest and publish-readiness validation, Harn check/lint/format
+gates, package tests, consumer install/import smoke coverage, documentation
+drift, package packing, and any applicable connector contract. Use
+`--receipt-out PATH` to persist the versioned JSON receipt; `--json` emits the
+same envelope on standard output. Individual commands remain useful for
+focused local iteration.
 
 ## API docs
 

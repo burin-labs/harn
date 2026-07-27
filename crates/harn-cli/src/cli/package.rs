@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Subcommand};
 
+use super::util::trigger_provider_completion_parser;
+
 #[derive(Debug, Args)]
 pub(crate) struct InstallArgs {
     /// Fail if harn.lock would need to change.
@@ -84,6 +86,8 @@ pub(crate) enum PackageCommand {
     Info(PackageInfoArgs),
     /// Validate a package manifest and publish readiness.
     Check(PackageCheckArgs),
+    /// Run the complete package verification contract and emit a receipt.
+    Verify(PackageVerifyArgs),
     /// Build an inspectable package artifact directory.
     Pack(PackagePackArgs),
     /// Generate package API docs from exported Harn symbols.
@@ -173,6 +177,30 @@ pub(crate) struct PackageCheckArgs {
     /// Emit JSON instead of a human-readable report.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct PackageVerifyArgs {
+    /// Package directory, harn.toml, or file under the package to verify.
+    #[arg(default_value = ".")]
+    pub package: String,
+    /// Restrict connector verification to one provider id. Repeatable.
+    #[arg(
+        long = "provider",
+        value_name = "ID",
+        value_parser = trigger_provider_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub providers: Vec<String>,
+    /// Run connector poll bindings long enough to execute the first poll_tick.
+    #[arg(long = "run-poll-tick")]
+    pub run_poll_tick: bool,
+    /// Emit the versioned verification receipt as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Write the versioned JSON receipt to a file.
+    #[arg(long = "receipt-out", value_name = "PATH")]
+    pub receipt_out: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

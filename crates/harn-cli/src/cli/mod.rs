@@ -95,9 +95,7 @@ pub(crate) use connect::{
     ConnectApiKeyArgs, ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs,
     ConnectLinearArgs, ConnectOAuthArgs, ConnectSetupPlanArgs, ConnectStatusArgs,
 };
-pub(crate) use connector::{
-    ConnectorArgs, ConnectorCheckArgs, ConnectorCommand, ConnectorTestArgs,
-};
+pub(crate) use connector::{ConnectorArgs, ConnectorCheckArgs, ConnectorCommand};
 pub(crate) use contracts::{
     ContractsArgs, ContractsBundleArgs, ContractsCommand, ContractsHostCapabilitiesArgs,
     ContractsOutputArgs,
@@ -179,7 +177,7 @@ pub use pack::{PackArgs, PackCommand, PackRepackArgs, PackUnpackArgs, PackVerify
 pub(crate) use package::{
     AddArgs, InstallArgs, PackageArgs, PackageArtifactsCommand, PackageCacheCommand,
     PackageCommand, PackageScaffoldCommand, PackageScaffoldOpenapiArgs, PackageSearchArgs,
-    PublishArgs, RemoveArgs, UpdateArgs,
+    PackageVerifyArgs, PublishArgs, RemoveArgs, UpdateArgs,
 };
 pub(crate) use parse_tokens::{ParseArgs, TokensArgs};
 pub(crate) use persona::{

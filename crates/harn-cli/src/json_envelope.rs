@@ -201,6 +201,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "package verify",
+            schema_version:
+                crate::commands::package_verify::PACKAGE_VERIFY_SCHEMA_VERSION,
+            description: "Complete package verification receipt with inferred package kinds and per-gate applicability, reachability, and results.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "fmt",
             schema_version: crate::commands::check::FMT_SCHEMA_VERSION,
             description: "Per-file formatting result report for write and check modes.",

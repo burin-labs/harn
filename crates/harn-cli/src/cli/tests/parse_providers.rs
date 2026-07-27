@@ -279,30 +279,6 @@ fn test_parses_mcp_mock_commands() {
 }
 
 #[test]
-fn test_parses_connector_test_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "connector",
-        "test",
-        "pkg",
-        "--provider",
-        "notion",
-        "--run-poll-tick",
-        "--json",
-    ]);
-    let Command::Connector(args) = cli.command.unwrap() else {
-        panic!("expected connector command");
-    };
-    let ConnectorCommand::Test(test) = args.command else {
-        panic!("expected connector test");
-    };
-    assert_eq!(test.package, "pkg");
-    assert_eq!(test.providers, vec!["notion"]);
-    assert!(test.run_poll_tick);
-    assert!(test.json);
-}
-
-#[test]
 fn test_parses_viz_args() {
     let cli = Cli::parse_from(["harn", "viz", "main.harn", "--output", "graph.mmd"]);
 

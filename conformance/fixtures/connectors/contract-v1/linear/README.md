@@ -158,7 +158,7 @@ Run the local contract and fixture suite with:
 
 ```sh
 harn --version
-harn connector test "$(pwd)" --provider linear
+harn package verify "$(pwd)" --provider linear
 ```
 
 That full package gate runs check, lint, format, package install/import smoke,
