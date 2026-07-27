@@ -1,5 +1,22 @@
 use crate::agent_events::{ToolCallErrorCategory, ToolDenial, ToolMutationStatus};
 
+pub(super) struct DenialEvidence {
+    pub(super) policy_decision: Option<serde_json::Value>,
+    pub(super) schema_repair: Option<serde_json::Value>,
+}
+
+impl DenialEvidence {
+    pub(super) fn new(
+        policy_decision: Option<serde_json::Value>,
+        schema_repair: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            policy_decision,
+            schema_repair,
+        }
+    }
+}
+
 fn emit_permission_deny_event(
     session_id: &str,
     tool_name: &str,
@@ -29,13 +46,14 @@ pub(super) async fn deny_tool_call(
     tool_args: &serde_json::Value,
     mut denial: ToolDenial,
     escalated: bool,
-    policy_decision: Option<serde_json::Value>,
-    schema_repair: Option<serde_json::Value>,
+    evidence: DenialEvidence,
 ) -> serde_json::Value {
     let repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
-        super::agent_tools::embedded_call_repair_result(ctx, tool_name, tool_args)
-            .await
-            .or(schema_repair)
+        Box::pin(super::agent_tools::embedded_call_repair_result(
+            ctx, tool_name, tool_args,
+        ))
+        .await
+        .or(evidence.schema_repair)
     } else {
         None
     };
@@ -50,7 +68,7 @@ pub(super) async fn deny_tool_call(
         tool_args,
         &denial,
         escalated,
-        policy_decision,
+        evidence.policy_decision,
     );
     agent_primitive_denied_tool(
         tool_name,
@@ -71,8 +89,7 @@ pub(super) async fn deny_tool_call_value(
     tool_args: &serde_json::Value,
     denial: ToolDenial,
     escalated: bool,
-    policy_decision: Option<serde_json::Value>,
-    schema_repair: Option<serde_json::Value>,
+    evidence: DenialEvidence,
 ) -> crate::value::VmValue {
     let denied = deny_tool_call(
         ctx,
@@ -82,8 +99,7 @@ pub(super) async fn deny_tool_call_value(
         tool_args,
         denial,
         escalated,
-        policy_decision,
-        schema_repair,
+        evidence,
     )
     .await;
     crate::stdlib::json_to_vm_value(&denied)

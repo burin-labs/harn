@@ -17,7 +17,9 @@ mod host_permission;
 mod side_effect_ceiling;
 mod structured_tool_result;
 mod tool_catalog;
-use denial_results::{agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value};
+use denial_results::{
+    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value, DenialEvidence,
+};
 use dispatch_policy::{enforce_dispatch_policies, tool_denial_from_policy};
 use host_permission::{
     emit_permission_event, emit_permission_event_with_policy, request_host_permission,
@@ -1014,8 +1016,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                             &tool_args,
                             denial,
                             false,
-                            Some(policy_decision),
-                            None,
+                            DenialEvidence::new(Some(policy_decision), None),
                         )
                         .await);
                     }
@@ -1043,8 +1044,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         &tool_args,
                         denial,
                         escalated,
-                        Some(policy_decision),
-                        None,
+                        DenialEvidence::new(Some(policy_decision), None),
                     )
                     .await);
                 }
@@ -1068,8 +1068,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 &tool_args,
                 denial,
                 false,
-                None,
-                schema_repair,
+                DenialEvidence::new(None, schema_repair),
             )
             .await);
         }
@@ -1113,8 +1112,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 &tool_args,
                 denial,
                 false,
-                None,
-                None,
+                DenialEvidence::new(None, None),
             )
             .await);
         }
@@ -1209,8 +1207,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                     &tool_args,
                     denial,
                     escalated,
-                    None,
-                    None,
+                    DenialEvidence::new(None, None),
                 )
                 .await);
             }
@@ -1285,8 +1282,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 &tool_args,
                 denial,
                 false,
-                Some(decision.receipt),
-                None,
+                DenialEvidence::new(Some(decision.receipt), None),
             )
             .await);
         }
@@ -1342,8 +1338,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         &tool_args,
                         denial,
                         true,
-                        Some(decision.receipt.clone()),
-                        None,
+                        DenialEvidence::new(Some(decision.receipt.clone()), None),
                     )
                     .await);
                 }
@@ -1371,8 +1366,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                         &tool_args,
                         denial,
                         true,
-                        Some(decision.receipt.clone()),
-                        None,
+                        DenialEvidence::new(Some(decision.receipt.clone()), None),
                     )
                     .await);
                 }
@@ -1412,8 +1406,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             &tool_args,
             denial,
             false,
-            None,
-            None,
+            DenialEvidence::new(None, None),
         )
         .await;
         let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
@@ -2373,7 +2366,7 @@ mod denied_tool_routing_tests {
     //! tool name) coach a retry-with-correction, while TRUE policy/permission
     //! denials keep the don't-retry body. Reverting the split (sending every
     //! category through `denied_tool_result`) fails the recoverable assertions.
-    use super::{agent_primitive_denied_tool, deny_tool_call};
+    use super::{agent_primitive_denied_tool, deny_tool_call, DenialEvidence};
     use crate::agent_events::ToolCallErrorCategory;
 
     #[test]
@@ -2498,8 +2491,7 @@ mod denied_tool_routing_tests {
             ),
             denial,
             false,
-            None,
-            None,
+            DenialEvidence::new(None, None),
         ));
         pop_execution_policy();
         let result = &envelope["result"];
