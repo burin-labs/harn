@@ -1,4 +1,6 @@
-use super::super::template_lint::{collect_lint_targets, lint_prompt_file_inner};
+use super::super::template_lint::{
+    collect_lint_targets, lint_prompt_file_inner, lint_prompt_fix_file,
+};
 use super::unique_temp_dir;
 
 #[test]
@@ -25,6 +27,38 @@ fn flags_unknown_filter() {
     std::fs::write(&file, "{{ name | uppr }}\n").unwrap();
     let outcome = lint_prompt_file_inner(&file, None, &[]);
     assert!(outcome.has_error);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fixes_unknown_filter() {
+    let dir = unique_temp_dir("harn-lint-prompt-fix-unknown-filter");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("sample.harn.prompt");
+    std::fs::write(&file, "{{ name | uppr }}\n").unwrap();
+
+    let outcome = lint_prompt_fix_file(&file, None, &[]);
+
+    assert!(!outcome.has_error);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "{{ name | upper }}\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn leaves_unfixable_unknown_filter_as_an_error() {
+    let dir = unique_temp_dir("harn-lint-prompt-unfixable-unknown-filter");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("sample.harn.prompt");
+    let source = "{{ name | completely_unknown }}\n";
+    std::fs::write(&file, source).unwrap();
+
+    let outcome = lint_prompt_fix_file(&file, None, &[]);
+
+    assert!(outcome.has_error);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

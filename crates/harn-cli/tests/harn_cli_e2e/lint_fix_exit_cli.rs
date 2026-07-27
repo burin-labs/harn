@@ -104,3 +104,25 @@ fn fix_resolves_warning_under_strict() {
         "--fix must clear the warning so --strict passes: {stderr}"
     );
 }
+
+#[test]
+fn fix_applies_prompt_template_filter_suggestion() {
+    let dir = temp_root("prompt-filter");
+    let path = dir.join("sample.harn.prompt");
+    std::fs::write(&path, "{{ name | uppr }}\n").unwrap();
+
+    let (stdout, stderr, code) = run(
+        &dir,
+        &["lint", "--fix", path.file_name().unwrap().to_str().unwrap()],
+    );
+
+    assert_eq!(code, 0, "--fix must apply the prompt fix: {stderr}");
+    assert!(
+        stdout.contains("applied 1 fix(es)"),
+        "--fix should report the applied prompt fix:\n{stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "{{ name | upper }}\n"
+    );
+}
