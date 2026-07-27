@@ -6081,6 +6081,7 @@ checksum = "d7de3af33d24a745ffb8fab904b13478438d1cd52868e6f17735ef6e1f8bf133"
 dependencies = [
  "ort-sys",
  "smallvec",
+ "ureq",
 ]
 
 [[package]]
@@ -9348,9 +9349,12 @@ dependencies = [
  "base64 0.22.1",
  "log",
  "percent-encoding",
+ "rustls",
+ "rustls-pki-types",
  "socks",
  "ureq-proto",
  "utf8-zero",
+ "webpki-roots 1.0.8",
 ]
 
 [[package]]

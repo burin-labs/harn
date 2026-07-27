@@ -58,6 +58,8 @@ exempt_checks = [
   "check-stdlib-strict-types",      # strict-types boundary ratchet over the stdlib, not a mirror
   "check-stdlib-public-return-types", # public stdlib return-type ratchet, not a mirror
   "check-schema-strict",             # zero-baseline strict gate for the std/schema facade, not a mirror
+  "check-optional-dep-feature-contracts", # optional-dep feature completeness ratchet (#5690), not a mirror
+  "check-all-features",             # cargo check --all-features compile gate (#5690), not a mirror
   "check-release-audit-contract",  # validates typed release proof mapping against CI, not a mirror
   "check-generated-registry",       # the auditor itself
   "check-drift",                    # fast preflight aggregator (derives members from [preflight.dispatch])
@@ -459,7 +461,9 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-stdlib-strict-types" = "binary"
 "check-stdlib-public-return-types" = "binary"
 "check-schema-strict" = "binary"
+"check-optional-dep-feature-contracts" = "binary" # Harn TOML contract over Cargo.toml feature sets
 # --- excluded: build/test, external toolchain, cross-repo, runtime fixtures, or perf soak ---
+"check-all-features" = "excluded"             # cargo check --workspace --all-features (build)
 "check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
 "check-run-view-fixtures" = "excluded"        # cargo test -p harn-vm (build + test)
 "check-bindings" = "excluded"                 # go vet/test round-trip (external toolchain)
