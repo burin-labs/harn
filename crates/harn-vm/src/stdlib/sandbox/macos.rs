@@ -69,7 +69,7 @@ impl SandboxBackend for Backend {
         super::apply_process_config(&mut command, config);
         let output = crate::op_interrupt::capture_output_interruptible(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))?;
-        match crate::process_sandbox::wrapped_spawn_io_error(
+        match crate::process_sandbox::macos_wrapped_spawn_io_error(
             output.status.code().unwrap_or(-1),
             &output.stderr,
         ) {

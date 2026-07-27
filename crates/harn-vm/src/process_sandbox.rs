@@ -44,7 +44,10 @@ pub fn wrapped_spawn_io_error(exit_code: i32, stderr: &[u8]) -> Option<std::io::
 }
 
 #[cfg(target_os = "macos")]
-fn macos_wrapped_spawn_io_error(exit_code: i32, stderr: &[u8]) -> Option<std::io::Error> {
+pub(crate) fn macos_wrapped_spawn_io_error(
+    exit_code: i32,
+    stderr: &[u8],
+) -> Option<std::io::Error> {
     const EX_OSERR: i32 = 71;
     const PREFIX: &str = "sandbox-exec: execvp() of '";
     const SUFFIX: &str = "' failed: No such file or directory\n";
