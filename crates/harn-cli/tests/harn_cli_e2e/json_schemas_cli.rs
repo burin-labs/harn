@@ -78,6 +78,33 @@ fn json_schemas_filters_to_single_command() {
 }
 
 #[test]
+fn json_schemas_lint_publishes_complete_schema_json() {
+    let output = Command::new(binary_path())
+        .args(["--json-schemas", "--command", "lint"])
+        .output()
+        .expect("spawn harn --json-schemas --command lint");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let parsed = parse_stdout(&output);
+    let data = assert_envelope(&parsed, CATALOG_SCHEMA_VERSION);
+    let entries = data.as_array().expect("data is an array");
+    assert_eq!(entries.len(), 1, "expected single-entry catalog");
+    assert_eq!(entries[0]["command"], "lint");
+    assert_eq!(entries[0]["schemaVersion"], 1);
+    let schema = entries[0]
+        .get("schemaJson")
+        .expect("lint catalog row must publish schemaJson");
+    assert!(!schema.is_null(), "schemaJson must be non-null");
+    jsonschema::draft202012::meta::validate(schema).expect("lint schemaJson is draft 2020-12");
+    let validator = jsonschema::draft202012::new(schema).expect("lint schemaJson compiles");
+    let clean = include_str!("../../src/commands/check/lint_json_fixtures/positive/clean_ok.json");
+    let clean_value: serde_json::Value = serde_json::from_str(clean).expect("fixture json");
+    validator
+        .validate(&clean_value)
+        .expect("positive fixture validates against published schemaJson");
+}
+
+#[test]
 fn json_schemas_filters_to_models_batch_command() {
     let output = Command::new(binary_path())
         .args(["--json-schemas", "--command", "models batch plan"])

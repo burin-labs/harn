@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "data": {
+    "files": [
+      {
+        "path": "src/agent.harn",
+        "status": "warning",
+        "diagnostics": [
+          {
+            "source": "lint",
+            "severity": "warning",
+            "code": "HARN-LNT-032",
+            "message": "comparison to `false` is redundant",
+            "span": { "start": 128, "end": 142 }
+          },
+          {
+            "source": "lint",
+            "severity": "info",
+            "code": "HARN-LNT-010",
+            "message": "consider a named type",
+            "span": { "start": 20, "end": 24 }
+          }
+        ],
+        "fixable": 1,
+        "fixed": 0
+      }
+    ],
+    "summary": {
+      "ok": 0,
+      "warnings": 1,
+      "errors": 0,
+      "diagnostics": 2,
+      "fixable": 1,
+      "fixed": 0
+    },
+    "changed": {
+      "from": { "requested": "origin/main", "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "to": { "requested": "HEAD", "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      "files": [
+        {
+          "path": "src/agent.harn",
+          "status": "modified",
+          "added_lines": [{ "start": 9, "end": 12 }]
+        }
+      ]
+    }
+  },
+  "error": null,
+  "warnings": []
+}

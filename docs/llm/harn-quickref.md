@@ -25,6 +25,9 @@ logs and progress always go to stderr.
 - Discover supported commands and their current schema versions:
   `harn --json-schemas` (filter with `--command <name>`).
 - Per-command shape reference: `docs/src/cli-json-contract.md`.
+- Decode `harn lint --json` through `std/cli/envelope` (`decode_lint_json`);
+  `harn --json-schemas --command lint` publishes the complete `schemaJson`.
+  Diagnostic spans are UTF-8 half-open byte offsets `[start, end)`.
 - Common pairs an agent will use:
   - `harn version --json` — build metadata (`name`, `version`, `description`, optional build-attested `source_revision`).
   - `harn upgrade --check --json` — resolve target release without downloading.
