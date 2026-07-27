@@ -1,9 +1,21 @@
 //! The single owner of ignore policy for every Harn filesystem walk.
 //!
 //! Every surface that enumerates files — `glob`, `walk_dir`, `find_text`,
-//! `find_evidence`, `project_scan`, `project_enrich`, and the hostlib
-//! `tools/search` builtin — routes its skip decisions through this module so
-//! there is exactly one answer to "is this path interesting?".
+//! `find_evidence`, `project_scan`, `project_enrich`, the hostlib
+//! `tools/search` builtin, and the CLI's own target discovery for `lint`,
+//! `fmt`, `check`, `scan`, and `rules` — routes its skip decisions through
+//! this module so there is exactly one answer to "is this path interesting?".
+//!
+//! Configuring an [`ignore::WalkBuilder`]'s ignore sources anywhere else is
+//! the mistake this module exists to prevent, and divergent answers are the
+//! milder half of why. The flags are not independently choosable: the crate's
+//! upward search for ignore files is bounded only when a repository anchors
+//! it, so `require_git` and `parents` have to be decided together, against
+//! that anchor. The CLI's target discovery once set `require_git(false)` with
+//! `parents(true)` — reasonable-looking in isolation, and enough to let a
+//! `.gitignore` above the checkout decide which of a project's own sources
+//! existed. Under an agent worktree whose parent ignores `*`, every directory
+//! target expanded to nothing.
 //!
 //! # Layer stack
 //!

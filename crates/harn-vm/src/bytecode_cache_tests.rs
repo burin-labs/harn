@@ -659,6 +659,52 @@ fn a_hit_that_needed_a_content_read_re_stamps_the_artifact() {
 }
 
 #[test]
+fn a_manifest_that_decided_the_lookup_hands_back_the_graphs_link_table() {
+    // The manifest's digests are what module loading was re-reading the graph to
+    // rederive, so a lookup the manifest decided must pass them on. The table is
+    // keyed by canonical path because that is the key the module loader holds
+    // when it asks.
+    let tmp = tempfile::tempdir().unwrap();
+    let (entry, entry_source) =
+        seed_entry_with_manifest(tmp.path(), "pub fn v() -> int { return 1 }\n");
+    let dep = tmp.path().join("dep.harn");
+
+    let outcome = load(&entry, &entry_source);
+    assert!(outcome.chunk.is_some(), "the seeded manifest must decide");
+    let table = outcome
+        .link_table
+        .expect("a decided lookup carries a table");
+    assert_eq!(
+        table.content_hash(&module_source::canonical_identity(&dep)),
+        Some(module_source::read(&dep).unwrap().sha256()),
+        "the table must name the dependency by the digest that keys its artifact"
+    );
+}
+
+#[test]
+fn a_lookup_that_had_to_walk_carries_no_link_table() {
+    // Not because the walk's observations are wrong — they are freshly read — but
+    // because the walk has already pulled every file into `module_source`'s memo,
+    // so a table would save no read and only cost a map to build. Withholding it
+    // where it cannot help also keeps the table's presence meaning exactly one
+    // thing: a manifest proved this graph unchanged.
+    let tmp = tempfile::tempdir().unwrap();
+    let (entry, entry_source) =
+        seed_entry_with_manifest(tmp.path(), "pub fn v() -> int { return 1 }\n");
+
+    std::fs::write(
+        tmp.path().join("dep.harn"),
+        "pub fn v() -> int { return 1234567 }\n",
+    )
+    .unwrap();
+
+    assert!(
+        load(&entry, &entry_source).link_table.is_none(),
+        "a stale manifest must not hand out a table"
+    );
+}
+
+#[test]
 fn an_edited_dependency_still_misses() {
     // The manifest must not weaken the ordinary case: a real edit changes
     // length, the manifest rejects it, and the walk that follows finds a

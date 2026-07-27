@@ -276,12 +276,15 @@ fn collect_files(paths: &[String]) -> Vec<PathBuf> {
         let path = Path::new(root);
         if path.is_dir() {
             let mut walker = WalkBuilder::new(path);
-            walker
-                .hidden(false)
-                .git_ignore(true)
-                .git_global(true)
-                .git_exclude(true)
-                .require_git(false);
+            // Same single owner as every other Harn walk. Configuring the
+            // `ignore` crate by hand here left its upward search unbounded,
+            // so an ignore file above the checkout could empty this list.
+            let _ = harn_vm::ignore_policy::configure(
+                &mut walker,
+                path,
+                harn_vm::ignore_policy::IgnorePolicy::Project,
+                true,
+            );
             for entry in walker.build().filter_map(Result::ok) {
                 if entry.file_type().is_some_and(|t| t.is_file()) {
                     out.push(entry.path().to_path_buf());

@@ -312,6 +312,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/module_source.rs"
+statics = ["SOURCE_READS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/observability/execution_scope.rs"
 statics = ["ACTIVE_EXECUTION_SCOPE_STACK"]
 category = "logical_task"

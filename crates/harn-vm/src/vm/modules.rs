@@ -945,79 +945,102 @@ impl Vm {
             }
             self.imported_paths.push(canonical.clone());
 
-            let source = {
-                let _load_span = self.module_load_span();
-                match verified_source {
-                    // Guard-verified package bytes are their own authority and
-                    // never come from the shared on-disk memo.
-                    Some(source) => Arc::new(ModuleSource::from_text(source)),
-                    None => module_source::read(&file_path).map_err(|e| {
-                        // Name the resolution base: relative imports resolve against the
-                        // importing file's dir (or CWD when unset), so an error that
-                        // prints only the joined path leaves the author guessing which
-                        // base was used.
-                        VmError::Runtime(format!(
-                            "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
-                            file_path.display(),
-                            base.display()
-                        ))
-                    })?,
-                }
-            };
-            {
-                let source_cache = Arc::make_mut(&mut self.source_cache);
-                source_cache.insert(canonical.clone(), Arc::clone(source.text()));
-                source_cache.insert(file_path.clone(), Arc::clone(source.text()));
-            }
+            // The link table, when this graph has one, names this module's
+            // artifact from a digest the entry walk already recorded — so the
+            // file is never read. Guard-verified package bytes are excluded:
+            // they are their own authority and deliberately bypass every memo,
+            // and `verified_source` is `Some` exactly when a guard is active.
+            let linked = verified_source
+                .is_none()
+                .then(|| {
+                    let content_hash = self
+                        .graph_link_table
+                        .as_ref()?
+                        .content_hash(canonical.as_path())?;
+                    let _load_span = self.module_load_span();
+                    self.linked_module_artifact(&file_path, &canonical, content_hash)
+                })
+                .flatten();
 
-            let prepared = {
-                let _load_span = self.module_load_span();
-                if bytecode_cache::cache_enabled() {
-                    self.prepared_module_cache.get(&canonical, &source)
-                } else {
-                    None
-                }
-            };
-            let artifact = if let Some(prepared) = prepared {
-                prepared
+            let artifact = if let Some(linked) = linked {
+                linked
             } else {
-                // Disk cache hits skip parse + compile. The scoped prepared
-                // cache additionally skips deserialization and chunk hydration
-                // on later fresh VMs without sharing any runtime module state.
-                let lookup = {
+                let source = {
                     let _load_span = self.module_load_span();
-                    bytecode_cache::load_module(&file_path, &source)
-                };
-                let cached = if let Some(artifact) = lookup.artifact {
-                    artifact
-                } else {
-                    let mut compile_span = self.module_compile_span();
-                    let compiled =
-                        compile_module_artifact_from_source(&file_path, source.as_str())?;
-                    if let Some(span) = &mut compile_span {
-                        span.mark_compile_succeeded();
+                    match verified_source {
+                        // Guard-verified package bytes are their own authority
+                        // and never come from the shared on-disk memo.
+                        Some(source) => Arc::new(ModuleSource::from_text(source)),
+                        None => module_source::read(&file_path).map_err(|e| {
+                            // Name the resolution base: relative imports resolve against
+                            // the importing file's dir (or CWD when unset), so an error
+                            // that prints only the joined path leaves the author guessing
+                            // which base was used.
+                            VmError::Runtime(format!(
+                                "Import error: cannot read '{}' (resolved '{path}' relative to {}): {e}",
+                                file_path.display(),
+                                base.display()
+                            ))
+                        })?,
                     }
-                    drop(compile_span);
-                    if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
-                        if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
-                            eprintln!(
-                                "[harn] module cache write skipped for {}: {err}",
-                                file_path.display()
-                            );
-                        }
-                    }
-                    compiled
                 };
-                let mut prepared = {
-                    let _load_span = self.module_load_span();
-                    Arc::new(PreparedModuleArtifact::from_cached(cached))
-                };
-                if bytecode_cache::cache_enabled() {
-                    prepared =
-                        self.prepared_module_cache
-                            .insert(canonical.clone(), &source, prepared);
+                {
+                    let source_cache = Arc::make_mut(&mut self.source_cache);
+                    source_cache.insert(canonical.clone(), Arc::clone(source.text()));
+                    source_cache.insert(file_path.clone(), Arc::clone(source.text()));
                 }
-                prepared
+
+                let prepared = {
+                    let _load_span = self.module_load_span();
+                    if bytecode_cache::cache_enabled() {
+                        self.prepared_module_cache.get(&canonical, source.sha256())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(prepared) = prepared {
+                    prepared
+                } else {
+                    // Disk cache hits skip parse + compile. The scoped prepared
+                    // cache additionally skips deserialization and chunk hydration
+                    // on later fresh VMs without sharing any runtime module state.
+                    let lookup = {
+                        let _load_span = self.module_load_span();
+                        bytecode_cache::load_module(&file_path, &source)
+                    };
+                    let cached = if let Some(artifact) = lookup.artifact {
+                        artifact
+                    } else {
+                        let mut compile_span = self.module_compile_span();
+                        let compiled =
+                            compile_module_artifact_from_source(&file_path, source.as_str())?;
+                        if let Some(span) = &mut compile_span {
+                            span.mark_compile_succeeded();
+                        }
+                        drop(compile_span);
+                        if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
+                            if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                                eprintln!(
+                                    "[harn] module cache write skipped for {}: {err}",
+                                    file_path.display()
+                                );
+                            }
+                        }
+                        compiled
+                    };
+                    let mut prepared = {
+                        let _load_span = self.module_load_span();
+                        Arc::new(PreparedModuleArtifact::from_cached(cached))
+                    };
+                    if bytecode_cache::cache_enabled() {
+                        prepared = self.prepared_module_cache.insert(
+                            canonical.clone(),
+                            source.sha256(),
+                            prepared,
+                        );
+                    }
+                    prepared
+                }
             };
 
             let module_source_dir = file_path.parent().map(|p| p.to_path_buf());
@@ -1047,6 +1070,38 @@ impl Vm {
 
             Ok(())
         })
+    }
+
+    /// Resolve a module the link table names, without reading its source.
+    ///
+    /// `content_hash` comes from a manifest that was re-checked before the table
+    /// was built, so it describes the bytes currently on disk. That is the whole
+    /// licence for skipping the read: the digest is not being trusted about the
+    /// file's identity, only reused instead of recomputed from bytes already
+    /// proven unchanged.
+    ///
+    /// `None` means the table could not be honoured — most often the artifact was
+    /// evicted from a shared cache directory between spawns. The caller then reads
+    /// and compiles as usual, which is correct, just slower.
+    fn linked_module_artifact(
+        &self,
+        file_path: &Path,
+        canonical: &Path,
+        content_hash: [u8; 32],
+    ) -> Option<Arc<PreparedModuleArtifact>> {
+        if !bytecode_cache::cache_enabled() {
+            return None;
+        }
+        if let Some(prepared) = self.prepared_module_cache.get(canonical, content_hash) {
+            return Some(prepared);
+        }
+        let key = bytecode_cache::CacheKey::from_module_content_hash(content_hash);
+        let artifact = bytecode_cache::load_module_for_key(file_path, key).artifact?;
+        Some(self.prepared_module_cache.insert(
+            canonical.to_path_buf(),
+            content_hash,
+            Arc::new(PreparedModuleArtifact::from_cached(artifact)),
+        ))
     }
 
     /// Bind imports that were deferred because their target module was still

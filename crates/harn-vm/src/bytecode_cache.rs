@@ -51,7 +51,8 @@ use sha2::{Digest, Sha256};
 use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
 use crate::context_manifest::{
-    ContextManifest, ManifestCheck, ManifestFile, ManifestUnreadable, ManifestUnresolved,
+    ContextManifest, GraphLinkTable, ManifestCheck, ManifestFile, ManifestUnreadable,
+    ManifestUnresolved,
 };
 use crate::module_artifact::ModuleArtifact;
 use crate::module_source::{self, ModuleSource};
@@ -130,6 +131,15 @@ pub struct LookupOutcome {
     /// re-check them with stats instead of walking. `None` when the graph holds
     /// something stats cannot describe.
     pub manifest: Option<ContextManifest>,
+    /// The graph's link table, present only when this lookup proved a stored
+    /// manifest current. Hand it to the VM and module loading resolves every
+    /// module the table names without reading its source.
+    ///
+    /// Deliberately absent whenever the walk ran, even though the walk's
+    /// observations are just as accurate: the walk has already read every file
+    /// into [`module_source`]'s memo, so a table would save nothing and cost a
+    /// map to build.
+    pub link_table: Option<Arc<GraphLinkTable>>,
 }
 
 impl LookupOutcome {
@@ -182,8 +192,19 @@ impl CacheKey {
     /// Diagnostic paths are rebound when the artifact is loaded, so adjacent
     /// and packaged artifacts remain relocatable without aliasing attribution.
     pub fn from_module_source(source: &ModuleSource) -> Self {
+        Self::from_module_content_hash(source.sha256())
+    }
+
+    /// As [`from_module_source`](Self::from_module_source), but from a digest
+    /// recorded earlier instead of bytes in hand.
+    ///
+    /// The digest is the only part of a module key that depends on the file;
+    /// every other component is process-global. That asymmetry is what lets a
+    /// validated [`GraphLinkTable`] name a module's artifact without the file
+    /// being read again.
+    pub fn from_module_content_hash(content_hash: [u8; 32]) -> Self {
         Self {
-            source_hash: source.sha256(),
+            source_hash: content_hash,
             context_hash: module_compilation_context_hash(),
             harn_version: HARN_VERSION,
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
@@ -288,6 +309,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
             key,
             chunk: None,
             manifest,
+            link_table: None,
         };
     }
 
@@ -319,6 +341,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
                 return LookupOutcome {
                     key,
                     chunk: Some(candidate.chunk),
+                    link_table: candidate.manifest.as_ref().map(link_table_for),
                     manifest: candidate.manifest,
                 };
             }
@@ -332,6 +355,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
                 return LookupOutcome {
                     key,
                     chunk: Some(candidate.chunk),
+                    link_table: Some(link_table_for(&refreshed)),
                     manifest: Some(refreshed),
                 };
             }
@@ -350,6 +374,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
             key,
             chunk: Some(candidate.chunk),
             manifest,
+            link_table: None,
         };
     }
 
@@ -359,7 +384,15 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
         key,
         chunk: None,
         manifest,
+        link_table: None,
     }
+}
+
+/// Index `manifest` for the module loader. Called only where a re-check has
+/// just proven the manifest current, which is the whole basis for loading the
+/// artifacts it names without reading their sources.
+fn link_table_for(manifest: &ContextManifest) -> Arc<GraphLinkTable> {
+    Arc::new(GraphLinkTable::from_validated(manifest))
 }
 
 /// The import-graph walk, run at most once per lookup and only when a
@@ -423,7 +456,16 @@ pub fn store_at(path: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
 /// Look up the [`ModuleArtifact`] for `source_path` (whose contents are
 /// `source`). Mirrors [`load`] but for the `.harnmod` family.
 pub fn load_module(source_path: &Path, source: &ModuleSource) -> ModuleLookupOutcome {
-    let key = CacheKey::from_module_source(source);
+    load_module_for_key(source_path, CacheKey::from_module_source(source))
+}
+
+/// As [`load_module`], but for a key already known without reading the source.
+///
+/// `artifact` is `None` when nothing is stored under `key` — including when it
+/// was evicted from the shared cache directory. A known key is a shortcut to an
+/// artifact, not a promise that one exists, so a caller that gets `None` must
+/// fall back to reading and compiling.
+pub fn load_module_for_key(source_path: &Path, key: CacheKey) -> ModuleLookupOutcome {
     if !cache_enabled() {
         return ModuleLookupOutcome {
             key,

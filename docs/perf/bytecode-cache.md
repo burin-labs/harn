@@ -188,6 +188,33 @@ returns a [`ModuleArtifact`] (compiled init chunk + per-function
 chunks + import list); the loader then runs the init chunk and mints
 fresh closures bound to a per-process module env.
 
+### Skipping the module source read
+
+That per-import read exists for one reason: to derive the module's
+`source_hash`. Everything else in a module key is process-global. And a
+manifest that re-checked clean already recorded exactly that digest for
+every reachable file, because the walk that wrote it read and hashed them
+all.
+
+So a decided lookup hands the VM a `GraphLinkTable` — canonical path to
+recorded digest — and module loading goes straight to the artifact. On a
+377-module graph that removes the second read of 5.7 MB of source and the
+key derivation that motivated it. The table is only built where a manifest
+decided the lookup; when the walk ran it has already pulled every file
+into `module_source`'s memo, so a table there would save no read.
+
+A table is a shortcut, never an authority:
+
+- it names an artifact, and a module whose artifact was evicted falls back
+  to being read and compiled;
+- a module the graph never reached is not in the table, and is read;
+- guard-verified package bytes are excluded — they are their own authority
+  and deliberately bypass every memo.
+
+The digest doing this work is the same SHA-256 that keys the entry chunk,
+the module artifact, and the prepared-module cache. Converging them means a
+warm module load hashes its source once rather than twice.
+
 `harn precompile <path>` runs the same compile path and writes both
 artifact families directly to disk: `<name>.harnbc` (entry chunk) and
 `<name>.harnmod` (module artifact). Shipping both means the same file

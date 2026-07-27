@@ -21,6 +21,7 @@ use super::lint_report::lint_file_report;
 use super::preflight::{is_preflight_allowed, PreflightDiagnostic};
 
 mod prompt_lint;
+mod target_discovery;
 
 /// Single-file preflight, for tests that have one file and no graph.
 ///
@@ -1177,99 +1178,6 @@ pipeline main() {
             .all(|d| !d.message.contains("unknown host capability")),
         "unexpected host cap diagnostic: {:?}",
         diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn collect_harn_targets_recurses_directories_and_deduplicates() {
-    let dir = unique_temp_dir("harn-check-targets");
-    std::fs::create_dir_all(dir.join("nested")).unwrap();
-    std::fs::create_dir_all(dir.join(".build").join("generated")).unwrap();
-    std::fs::create_dir_all(dir.join(".claude").join("worktrees").join("copy")).unwrap();
-    std::fs::create_dir_all(dir.join(".harn-eval-abc123")).unwrap();
-    std::fs::create_dir_all(dir.join("node_modules").join("pkg")).unwrap();
-    std::fs::write(dir.join("a.harn"), "pipeline a() {}\n").unwrap();
-    std::fs::write(dir.join("site.harn.txt"), "pipeline site() {}\n").unwrap();
-    std::fs::write(dir.join("nested").join("b.harn"), "pipeline b() {}\n").unwrap();
-    std::fs::write(
-        dir.join("nested").join("skipped.harn"),
-        "pipeline skipped() {}\n",
-    )
-    .unwrap();
-    std::fs::write(dir.join("nested").join("skipped.conformance-skip"), "").unwrap();
-    std::fs::write(
-        dir.join("ignored_by_gitignore.harn"),
-        "pipeline ignored() {}\n",
-    )
-    .unwrap();
-    std::fs::write(dir.join(".gitignore"), "ignored_by_gitignore.harn\n").unwrap();
-    std::fs::write(
-        dir.join(".build").join("generated").join("ignored.harn"),
-        "pipeline generated() {}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join(".claude")
-            .join("worktrees")
-            .join("copy")
-            .join("ignored.harn"),
-        "pipeline worktree_copy() {}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join(".harn-eval-abc123").join("ignored.harn"),
-        "pipeline eval_scratch() {}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join(".harn-eval-abc123.harn"),
-        "pipeline eval_scratch_file() {}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join("node_modules").join("pkg").join("ignored.harn"),
-        "pipeline dependency() {}\n",
-    )
-    .unwrap();
-    std::fs::write(dir.join("nested").join("ignore.txt"), "x\n").unwrap();
-
-    let target_dir = dir.display().to_string();
-    let target_file = dir.join("a.harn").display().to_string();
-    let files = collect_harn_targets(&[target_dir.as_str(), target_file.as_str()]);
-
-    assert_eq!(files.len(), 3);
-    assert!(files.contains(&dir.join("a.harn")));
-    assert!(files.contains(&dir.join("site.harn.txt")));
-    assert!(files.contains(&dir.join("nested").join("b.harn")));
-    assert!(!files.contains(&dir.join("ignored_by_gitignore.harn")));
-    assert!(!files.contains(&dir.join("nested").join("skipped.harn")));
-
-    let ignored_file = dir.join("ignored_by_gitignore.harn").display().to_string();
-    let skipped_file = dir
-        .join("nested")
-        .join("skipped.harn")
-        .display()
-        .to_string();
-    let site_snippet = dir.join("site.harn.txt").display().to_string();
-    let explicit_files = collect_harn_targets(&[
-        ignored_file.as_str(),
-        skipped_file.as_str(),
-        site_snippet.as_str(),
-    ]);
-    assert_eq!(
-        explicit_files,
-        vec![
-            dir.join("ignored_by_gitignore.harn"),
-            dir.join("nested").join("skipped.harn"),
-            dir.join("site.harn.txt"),
-        ]
-    );
-    let explicit_generated_dir = dir.join(".harn-eval-abc123").display().to_string();
-    let generated_files = collect_harn_targets(&[explicit_generated_dir.as_str()]);
-    assert_eq!(
-        generated_files,
-        vec![dir.join(".harn-eval-abc123").join("ignored.harn")]
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

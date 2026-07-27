@@ -24,14 +24,13 @@ use sha2::{Digest, Sha256};
 
 /// One module's source text plus the facts callers derive from it.
 ///
-/// Digests are computed lazily because no single caller needs all of them: the
-/// import-graph walk folds the raw text, the artifact cache keys on SHA-256,
-/// and the prepared-module cache keys on BLAKE3.
+/// The digest and the import list are computed lazily because no single caller
+/// needs both: the import-graph walk folds the raw text and reads the imports,
+/// while the caches key on the digest.
 #[derive(Debug)]
 pub struct ModuleSource {
     text: Arc<str>,
     sha256: OnceLock<[u8; 32]>,
-    blake3: OnceLock<[u8; 32]>,
     imports: OnceLock<Vec<Arc<str>>>,
 }
 
@@ -44,7 +43,6 @@ impl ModuleSource {
         Self {
             text: text.into(),
             sha256: OnceLock::new(),
-            blake3: OnceLock::new(),
             imports: OnceLock::new(),
         }
     }
@@ -59,21 +57,18 @@ impl ModuleSource {
         &self.text
     }
 
-    /// SHA-256 over the source bytes — the `source_hash` of both entry-chunk
-    /// and module-artifact cache keys.
+    /// SHA-256 over the source bytes — the `source_hash` of the entry-chunk,
+    /// module-artifact, and prepared-module cache keys, and the digest a
+    /// [`crate::context_manifest::ManifestFile`] records.
+    ///
+    /// One digest for all of them on purpose: a warm module load would otherwise
+    /// hash the same 5.7 MB of source twice.
     pub(crate) fn sha256(&self) -> [u8; 32] {
         *self.sha256.get_or_init(|| {
             let mut hasher = Sha256::new();
             hasher.update(self.text.as_bytes());
             hasher.finalize().into()
         })
-    }
-
-    /// BLAKE3 over the source bytes — the prepared-module cache key digest.
-    pub(crate) fn blake3(&self) -> [u8; 32] {
-        *self
-            .blake3
-            .get_or_init(|| *blake3::hash(self.text.as_bytes()).as_bytes())
     }
 
     /// User (non-stdlib) import paths mentioned by this source, in source
@@ -202,6 +197,16 @@ pub(crate) fn canonical_identity(path: &Path) -> PathBuf {
     }
 }
 
+// A module resolved through the link table and one resolved by reading its file
+// produce the same module — the recorded digest describes the bytes on disk, so
+// nothing in the result tells them apart. Only whether the file was consulted
+// differs, and this counts it. Thread-local so tests running in parallel cannot
+// perturb each other's counts.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SOURCE_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Read `path`'s module source, reusing the process-wide memo when the file is
 /// unchanged since it was last read.
 ///
@@ -211,6 +216,9 @@ pub(crate) fn canonical_identity(path: &Path) -> PathBuf {
 /// reads of a file version this process has already seen. I/O errors are never
 /// memoized: a transient failure must not become sticky.
 pub(crate) fn read(path: &Path) -> io::Result<Arc<ModuleSource>> {
+    #[cfg(test)]
+    SOURCE_READS.with(|c| c.set(c.get() + 1));
+
     let path = canonical_identity(path);
     let Some((len, mtime_ns)) = stat_identity(&path) else {
         // No stat (the file vanished between resolve and read): read directly
@@ -481,16 +489,10 @@ mod tests {
         let text = source.as_str().to_string();
 
         assert_eq!(source.sha256(), source.sha256());
-        assert_eq!(source.blake3(), source.blake3());
         assert_eq!(
             source.sha256(),
             <[u8; 32]>::from(Sha256::digest(text.as_bytes())),
             "the memoized digest must equal a direct SHA-256 of the same bytes"
-        );
-        assert_eq!(
-            source.blake3(),
-            *blake3::hash(text.as_bytes()).as_bytes(),
-            "the memoized digest must equal a direct BLAKE3 of the same bytes"
         );
         assert_eq!(source.imports(), [Arc::<str>::from("./dep")]);
     }

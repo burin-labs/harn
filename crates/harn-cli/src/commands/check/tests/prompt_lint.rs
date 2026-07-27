@@ -70,6 +70,10 @@ fn respects_disabled_rules() {
 #[test]
 fn collects_prompt_targets_from_directories() {
     let dir = unique_temp_dir("harn-lint-prompt-collect");
+    // The `.gitignore` below is only honored inside a project, so the tree
+    // needs the repository marker `harn_vm::ignore_policy` looks for. See
+    // `super::target_discovery`.
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
     std::fs::create_dir_all(dir.join("nested")).unwrap();
     std::fs::create_dir_all(dir.join("target").join("debug")).unwrap();
     std::fs::create_dir_all(dir.join(".harn").join("cache")).unwrap();

@@ -786,3 +786,136 @@ fn an_edited_dependency_is_re_read_rather_than_served_from_the_shared_owner() {
         );
     });
 }
+
+/// A module, its compiled artifact stored where a keyed lookup will find it,
+/// and a link table naming it — the state a warm spawn arrives in.
+///
+/// The artifact goes to the path adjacent to the source rather than the shared
+/// cache directory, so the test neither reads nor writes the developer's cache.
+fn seed_linked_module(
+    temp: &Path,
+    body: &str,
+) -> (PathBuf, Arc<crate::context_manifest::GraphLinkTable>) {
+    let entry = temp.join("entry.harn");
+    std::fs::write(&entry, "import \"./dep\"\n").expect("write entry");
+    let dep = temp.join("dep.harn");
+    std::fs::write(&dep, body).expect("write dep");
+
+    let source = module_source::read(&dep).expect("read dep");
+    let artifact = compile_module_artifact_from_source(&dep, source.as_str()).expect("compile dep");
+    let key = bytecode_cache::CacheKey::from_module_source(&source);
+    bytecode_cache::store_module_at(
+        &bytecode_cache::adjacent_module_cache_path(&dep).expect("adjacent artifact path"),
+        &key,
+        &artifact,
+    )
+    .expect("store dep artifact");
+
+    (dep.clone(), link_table_naming(&entry, &dep))
+}
+
+/// The table a validated manifest over `[dep]`, anchored at `entry`, produces.
+fn link_table_naming(entry: &Path, dep: &Path) -> Arc<crate::context_manifest::GraphLinkTable> {
+    let source = module_source::read(dep).expect("read dep");
+    let canonical = module_source::canonical_identity(dep);
+    let manifest = crate::context_manifest::ContextManifest {
+        files: vec![
+            crate::context_manifest::ManifestFile::observe(&canonical, &source)
+                .expect("observe dep"),
+        ],
+        ..crate::context_manifest::ContextManifest::begin(module_source::canonical_identity(entry))
+    };
+    Arc::new(crate::context_manifest::GraphLinkTable::from_validated(
+        &manifest,
+    ))
+}
+
+fn source_reads() -> u64 {
+    module_source::SOURCE_READS.with(std::cell::Cell::get)
+}
+
+#[test]
+fn a_linked_module_resolves_its_artifact_without_reading_the_source() {
+    // The point of the whole link table. Nothing observable separates a module
+    // resolved through the table from one resolved by reading its file — the
+    // recorded digest describes the bytes on disk, so the artifact is the same
+    // either way. Only whether the source was consulted differs, which is why
+    // the assertion is a read count rather than anything about the module.
+    //
+    // The falsifier is the second half: without the table the same import must
+    // read. Otherwise "zero reads" and "no module was loaded" would look alike.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (dep, table) = seed_linked_module(temp.path(), "pub fn value() { return 1 }\n");
+
+    runtime.block_on(async {
+        let mut linked = Vm::new();
+        linked.set_graph_link_table(Some(table));
+        let before = source_reads();
+        let exports = linked
+            .load_module_exports(&dep)
+            .await
+            .expect("the linked module loads");
+        assert!(
+            exports.contains_key("value"),
+            "the linked module must expose the same exports a read one would"
+        );
+        assert_eq!(
+            source_reads(),
+            before,
+            "a module the link table names must resolve without reading its source"
+        );
+
+        let mut unlinked = Vm::new();
+        let before = source_reads();
+        unlinked
+            .load_module_exports(&dep)
+            .await
+            .expect("the unlinked module loads");
+        assert!(
+            source_reads() > before,
+            "without a link table the same import must read the file, or the \
+             assertion above would hold for a module that never loaded"
+        );
+    });
+}
+
+#[test]
+fn a_link_table_naming_an_evicted_artifact_falls_back_to_reading() {
+    // A table names an artifact; whether one is on disk under that name is a
+    // separate question. Shared cache directories are pruned between spawns, so
+    // this is ordinary rather than exotic, and it must cost a recompile rather
+    // than a failure.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let (dep, table) = seed_linked_module(temp.path(), "pub fn value() { return 7 }\n");
+    std::fs::remove_file(bytecode_cache::adjacent_module_cache_path(&dep).unwrap())
+        .expect("evict the artifact the table names");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        vm.set_graph_link_table(Some(table));
+        let before = source_reads();
+        let exports = vm
+            .load_module_exports(&dep)
+            .await
+            .expect("an evicted artifact must fall back, not fail");
+        let result = vm
+            .call_closure_pub(exports.get("value").expect("value export"), &[])
+            .await;
+        assert!(
+            matches!(result, Ok(VmValue::Int(7))),
+            "the fallback must produce the module the source describes: {result:?}"
+        );
+        assert!(
+            source_reads() > before,
+            "the fallback path is exactly the read the link table was avoiding"
+        );
+    });
+}
