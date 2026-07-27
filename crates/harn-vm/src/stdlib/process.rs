@@ -703,7 +703,7 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let resolved_environment = if spec.env_clear {
         None
     } else {
-        session_closed_env(spec.env.iter().cloned())?
+        session_closed_env_for_command(spec.cmd, spec.env.iter().cloned())?
     };
     if spec.env_clear || resolved_environment.is_some() {
         command.env_clear();
@@ -1083,21 +1083,25 @@ fn process_command_config(
     Ok(config)
 }
 
-/// The single place a live session environment becomes a child environment.
+/// The single place a live session environment becomes a child environment
+/// when the spawn target is not yet known (or is irrelevant).
 ///
 /// Returns `None` when no session environment governs this session — the legacy path, where
 /// children inherit the parent environment and `overlay` is layered on top.
 /// Returns `Some(env)` when a session environment is active: `resolve_env` composes the
-/// allowlisted subset of the parent env plus the policy's granted exposure,
-/// and `overlay` (worktree paths, `HARN_REPLAY`, caller-supplied `env`, ...)
-/// wins over that base. The caller must hand the result to the child with the
+/// allowlisted subset of the parent env plus the policy's *session-scoped*
+/// granted exposure, and `overlay` (worktree paths, `HARN_REPLAY`,
+/// caller-supplied `env`, ...) wins over that base. Command-bound grants are
+/// not included; use [`session_closed_env_for_command`] at a spawn seam that
+/// knows the executable. The caller must hand the result to the child with the
 /// inherited environment CLEARED — a closed env is only closed if nothing
 /// leaks in behind it. An isolated policy contributes no grants, so its child
 /// sees the allowlist alone.
 ///
-/// Every spawn seam must route through here. `resolve_env` is documented as the
-/// single environment builder, and a seam that skips it silently reopens the
-/// credential boundary the profile exists to close (harn#5011).
+/// Every spawn seam that knows its executable must route through
+/// [`session_closed_env_for_command`]. `resolve_env` / `resolve_env_for_command`
+/// are the single environment builders, and a seam that skips them silently
+/// reopens the credential boundary the policy exists to close (harn#5011).
 pub(crate) fn session_closed_env(
     overlay: impl Iterator<Item = (String, String)>,
 ) -> Result<Option<Vec<(String, String)>>, VmError> {
@@ -1108,25 +1112,77 @@ pub(crate) fn session_closed_env(
     Ok(Some(env.into_iter().collect()))
 }
 
+/// Close a child environment for one spawn of `program`.
+///
+/// Like [`session_closed_env`], but also admits grants whose `for_command`
+/// matches the executable basename (harn#5549).
+pub(crate) fn session_closed_env_for_command(
+    program: &str,
+    overlay: impl Iterator<Item = (String, String)>,
+) -> Result<Option<Vec<(String, String)>>, VmError> {
+    let Some(mut env) = session_env_for_command(program)? else {
+        return Ok(None);
+    };
+    env.extend(overlay);
+    Ok(Some(env.into_iter().collect()))
+}
+
 /// The current session's whole effective environment, or `None` on the legacy
 /// non-session path. The base [`session_closed_env`] layers a caller overlay onto.
+/// Session-scoped grants only — command-bound exposures are invisible here.
 pub(crate) fn session_env() -> Result<Option<BTreeMap<String, String>>, VmError> {
+    session_env_with(
+        |grant| grant.for_command().is_none(),
+        |environment, lookup| {
+            crate::security::resolve_env(environment, lookup, &resolve_grant_secret)
+        },
+    )
+}
+
+/// The environment a spawn of `program` should see under the live session
+/// policy: session-scoped grants plus any `for_command` binding that matches.
+pub(crate) fn session_env_for_command(
+    program: &str,
+) -> Result<Option<BTreeMap<String, String>>, VmError> {
+    let basename = crate::security::command_basename(program).to_string();
+    session_env_with(
+        move |grant| match grant.for_command() {
+            None => true,
+            Some(expected) => expected == basename,
+        },
+        |environment, lookup| {
+            crate::security::resolve_env_for_command(
+                environment,
+                program,
+                lookup,
+                &resolve_grant_secret,
+            )
+        },
+    )
+}
+
+fn session_env_with(
+    grant_owns_key: impl Fn(&crate::security::SessionGrant) -> bool,
+    resolve: impl FnOnce(
+        &crate::security::SessionEnvironment,
+        &dyn Fn(&str) -> Option<String>,
+    )
+        -> Result<BTreeMap<String, String>, crate::security::EnvironmentPolicyError>,
+) -> Result<Option<BTreeMap<String, String>>, VmError> {
     let Some(environment) = current_session_environment() else {
         return Ok(None);
     };
     let workspace_defaults = workspace_env_defaults();
-    let mut env = crate::security::resolve_env(
-        &environment,
-        &session_env_lookup(&workspace_defaults),
-        &resolve_grant_secret,
-    )
-    .map_err(grant_env_error)?;
+    let mut env =
+        resolve(&environment, &session_env_lookup(&workspace_defaults)).map_err(grant_env_error)?;
+    // Workspace defaults overwrite the allowlist (so toolchain caches stay
+    // workspace-local) but never overwrite a grant that applies to this view.
     for (key, value) in workspace_defaults {
-        if !environment
+        let grant_owns = environment
             .grants()
             .iter()
-            .any(|grant| grant.exposed_env_var() == Some(key.as_str()))
-        {
+            .any(|grant| grant.exposed_env_var() == Some(key.as_str()) && grant_owns_key(grant));
+        if !grant_owns {
             env.insert(key, value);
         }
     }

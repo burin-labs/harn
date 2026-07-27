@@ -1108,6 +1108,7 @@ mod tests {
                     var: "HARN_LLM_TIMEOUT".to_string(),
                 },
                 expose_as_env: Some("HARN_LLM_TIMEOUT".to_string()),
+                for_command: None,
             }],
             &|name| std::env::var(name).ok(),
         )

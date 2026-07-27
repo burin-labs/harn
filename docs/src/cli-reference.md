@@ -24,7 +24,7 @@ harn run --write-root /path/to/output main.harn
 harn run --read-only-root /path/to/other-repo main.harn
 harn run --sandbox-write-root /path/to/tool-cache main.harn
 harn run --sandbox-read-root /path/to/sdk main.harn
-harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN open_pr.harn
+harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 harn run --environment-policy isolated eval_child.harn
 harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
@@ -104,19 +104,21 @@ other: `--no-sandbox` leaves the environment policy fully in force, and an
 environment grant gives no file, network, or tool access. Approval policy is a
 third, separate thing again.
 
-Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR]`:
+Each `--grant` is `NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]`:
 
 | Part | Meaning |
 |---|---|
 | `NAME` | A unique, non-secret name used in receipts and diagnostics. |
 | `SOURCE` | `env:VAR_NAME` snapshots that launcher variable at session launch. `secret://ACCOUNT/KEY` keeps a live [secret-store](./hostlib/secret_store.md) reference, so rotation and revocation take effect without restarting the session. |
-| `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name to the whole session: `harness.env`, provider configuration, and spawned commands. |
+| `,expose=ENV_VAR` | Optional. Makes the value available under this unique environment name. Without `,for=`, the exposure is session-scoped: `harness.env`, provider configuration, and every spawned command. |
+| `,for=COMMAND` | Optional. Requires `,expose=`. Binds the exposed variable to spawns whose executable basename matches `COMMAND` (for example `gh` for `/usr/bin/gh`). Command-bound grants are invisible in-process — Harn's own `llm_call` is not an exec — so provider keys stay session-scoped by omitting `,for=`. |
 
 ```bash
-# Let gh read one vault-backed token without exposing the launcher's other values.
-harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN open_pr.harn
+# Let only `gh` see a vault-backed token; other process.exec calls do not inherit it.
+harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 
-# Snapshot a provider key from the launcher env, exposed under the same name.
+# Snapshot a provider key from the launcher env, exposed under the same name
+# for this run's model calls and every spawned command.
 harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 ```
 
@@ -129,13 +131,15 @@ environment. Ceiling violations return the stable
 policies.
 
 Here “reproducible” has a precise scope: every prompt, worker, and subprocess
-in one launched session uses the same environment snapshot, independent of
-later launcher mutations. The launcher/host establishes that snapshot, and
-Harn enforces it. This does not claim that two machines have identical
-environments. Use `isolated` or explicit grants when a test or replay must not
-depend on the operator's shell. A live `secret://` source may intentionally
-change after rotation or revocation; its receipt stays stable, but its value is
-not frozen.
+in one launched session uses the same launch-time environment snapshot,
+independent of later launcher mutations. Command-bound grants
+(`,for=COMMAND`) still draw from that snapshot; they only narrow *which*
+spawns receive an exposed variable. The launcher/host establishes the
+snapshot, and Harn enforces it. This does not claim that two machines have
+identical environments. Use `isolated` or explicit grants when a test or
+replay must not depend on the operator's shell. A live `secret://` source may
+intentionally change after rotation or revocation; its receipt stays stable,
+but its value is not frozen.
 
 An `.env` file is not a second policy channel. A launcher may load it before
 starting Harn; then its values are ordinary launcher environment values and

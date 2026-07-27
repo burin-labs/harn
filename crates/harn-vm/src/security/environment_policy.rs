@@ -212,9 +212,35 @@ pub fn resolve_env(
             env.insert((*name).to_string(), value.to_string());
         }
     }
-    // Grants overlay the allowlist. An isolated policy has none, so this is a
-    // no-op there; the empty-grants case IS the isolated environment.
+    // Session-scoped grants overlay the allowlist. An isolated policy has
+    // none, so this is a no-op there; the empty-grants case IS the isolated
+    // environment. Command-bound grants are added only by
+    // [`resolve_env_for_command`].
     for (var, value) in environment.env_exposure(resolve_secret)? {
+        env.insert(var, value);
+    }
+    Ok(env)
+}
+
+/// Build the environment for one spawn of `program` under a policy-governed
+/// session: the allowlisted subset plus session-scoped grants and any
+/// command-bound grants whose `for_command` matches the executable basename.
+pub fn resolve_env_for_command(
+    environment: &SessionEnvironment,
+    program: &str,
+    _env_lookup: &dyn Fn(&str) -> Option<String>,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<BTreeMap<String, String>, EnvironmentPolicyError> {
+    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) {
+        return Ok(environment.launcher_snapshot().clone());
+    }
+    let mut env = BTreeMap::new();
+    for name in ENV_ALLOWLIST {
+        if let Some(value) = environment.launcher_value(name) {
+            env.insert((*name).to_string(), value.to_string());
+        }
+    }
+    for (var, value) in environment.env_exposure_for_command(program, resolve_secret)? {
         env.insert(var, value);
     }
     Ok(env)
@@ -423,6 +449,7 @@ mod tests {
                     var: "FIREWORKS_API_KEY".to_string(),
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
+                for_command: None,
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -431,6 +458,7 @@ mod tests {
                     key: "token".to_string(),
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
+                for_command: None,
             },
         ];
         let environment =
@@ -473,6 +501,7 @@ mod tests {
                     var: "FIREWORKS_API_KEY".to_string(),
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
+                for_command: None,
             },
             GrantSpec {
                 name: "log".to_string(),
@@ -480,6 +509,7 @@ mod tests {
                     var: "RUST_LOG".to_string(),
                 },
                 expose_as_env: Some("RUST_LOG".to_string()),
+                for_command: None,
             },
             GrantSpec {
                 name: "gh".to_string(),
@@ -488,6 +518,7 @@ mod tests {
                     key: "token".to_string(),
                 },
                 expose_as_env: Some("GH_TOKEN".to_string()),
+                for_command: None,
             },
         ];
         let resolve_secret = |account: &str, key: &str| {
@@ -533,6 +564,7 @@ mod tests {
                     var: "FIREWORKS_API_KEY".to_string(),
                 },
                 expose_as_env: Some("FIREWORKS_API_KEY".to_string()),
+                for_command: None,
             },
             GrantSpec {
                 name: "broken".to_string(),
@@ -541,6 +573,7 @@ mod tests {
                     key: "absent".to_string(),
                 },
                 expose_as_env: Some("OTHER_TOKEN".to_string()),
+                for_command: None,
             },
         ];
         let environment =
@@ -617,6 +650,7 @@ mod tests {
                 var: "RUST_LOG".to_string(),
             },
             expose_as_env: Some("RUST_LOG".to_string()),
+            for_command: None,
         }];
         let environment =
             SessionEnvironment::launch(EnvironmentPolicyKind::Granted, specs, &parent).unwrap();

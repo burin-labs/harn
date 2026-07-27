@@ -17,7 +17,7 @@
 //! ## Grant grammar
 //!
 //! ```text
-//! --grant NAME=SOURCE[,expose=ENV_VAR]
+//! --grant NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]
 //!   SOURCE := env:VAR_NAME
 //!           | secret://ACCOUNT/KEY
 //! ```
@@ -25,12 +25,15 @@
 //! `NAME` identifies the grant in receipts and diagnostics. `SOURCE` names where it comes
 //! from — a launcher environment variable (snapshotted at launch) or a
 //! `secret_store` pointer (resolved lazily on exposure). The optional
-//! `,expose=ENV_VAR` suffix makes the value available under `ENV_VAR` to the
-//! whole session, including `harness.env`, providers, and spawned subprocesses.
-//! Without it the grant is carried and receipted but not exposed.
+//! `,expose=ENV_VAR` suffix makes the value available under `ENV_VAR`. Without
+//! `,for=COMMAND` that exposure is session-scoped (`harness.env`, providers,
+//! and every spawned subprocess). With `,for=COMMAND` the variable is bound to
+//! spawns whose executable basename matches `COMMAND` only — for example
+//! `,expose=GH_TOKEN,for=gh` so only `gh` sees the token (harn#5549).
+//! Without `,expose=` the grant is carried and receipted but not exposed.
 //!
 //! ```text
-//! harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN open_pr.harn
+//! harn run --grant gh_token=secret://gh/token,expose=GH_TOKEN,for=gh open_pr.harn
 //! harn run --grant fireworks=env:FIREWORKS_API_KEY,expose=FIREWORKS_API_KEY agent.harn
 //! ```
 
@@ -119,7 +122,7 @@ impl EnvironmentPolicyConfig {
     }
 }
 
-/// Parse one longhand `--grant NAME=SOURCE[,expose=ENV_VAR]` string.
+/// Parse one longhand `--grant NAME=SOURCE[,expose=ENV_VAR][,for=COMMAND]` string.
 fn parse_grant_spec(spec: &str) -> Result<GrantSpec, String> {
     let (name, rest) = spec.split_once('=').ok_or_else(|| {
         format!(
@@ -130,30 +133,55 @@ fn parse_grant_spec(spec: &str) -> Result<GrantSpec, String> {
     if name.is_empty() {
         return Err(format!("invalid --grant '{spec}': the grant name is empty"));
     }
-    // The optional `,expose=ENV` suffix. A source (`env:VAR` / `secret://a/k`)
-    // never contains a comma, so the first comma unambiguously begins options.
-    let (source_str, expose_as_env) = match rest.split_once(',') {
+    // Optional `,expose=ENV` / `,for=COMMAND` suffixes. A source
+    // (`env:VAR` / `secret://a/k`) never contains a comma, so the first comma
+    // unambiguously begins options; further commas separate options.
+    let (source_str, options) = match rest.split_once(',') {
         None => (rest, None),
-        Some((source, options)) => {
-            let expose = options.strip_prefix("expose=").ok_or_else(|| {
-                format!(
-                    "invalid --grant '{spec}': unknown option '{options}' (only ',expose=ENV_VAR' is supported)"
-                )
-            })?;
-            let expose = expose.trim();
-            if expose.is_empty() {
+        Some((source, options)) => (source, Some(options)),
+    };
+    let mut expose_as_env = None;
+    let mut for_command = None;
+    if let Some(options) = options {
+        for option in options.split(',') {
+            let option = option.trim();
+            if let Some(expose) = option.strip_prefix("expose=") {
+                let expose = expose.trim();
+                if expose.is_empty() {
+                    return Err(format!(
+                        "invalid --grant '{spec}': ',expose=' needs a target environment variable name"
+                    ));
+                }
+                if expose_as_env.replace(expose.to_string()).is_some() {
+                    return Err(format!(
+                        "invalid --grant '{spec}': ',expose=' may be declared only once"
+                    ));
+                }
+            } else if let Some(command) = option.strip_prefix("for=") {
+                let command = command.trim();
+                if command.is_empty() {
+                    return Err(format!(
+                        "invalid --grant '{spec}': ',for=' needs a command basename"
+                    ));
+                }
+                if for_command.replace(command.to_string()).is_some() {
+                    return Err(format!(
+                        "invalid --grant '{spec}': ',for=' may be declared only once"
+                    ));
+                }
+            } else {
                 return Err(format!(
-                    "invalid --grant '{spec}': ',expose=' needs a target environment variable name"
+                    "invalid --grant '{spec}': unknown option '{option}' (supported: ',expose=ENV_VAR', ',for=COMMAND')"
                 ));
             }
-            (source, Some(expose.to_string()))
         }
-    };
+    }
     let source = parse_grant_source(source_str, spec)?;
     Ok(GrantSpec {
         name: name.to_string(),
         source,
         expose_as_env,
+        for_command,
     })
 }
 
@@ -248,10 +276,16 @@ fn environment_disclosure(environment: &SessionEnvironment) -> String {
         .iter()
         .map(|receipt| {
             if let Some(target) = receipt.exposed_as_env.as_deref() {
-                format!(
-                    "{} ({}, exposed as {target})",
-                    receipt.name, receipt.source_kind
-                )
+                match receipt.for_command.as_deref() {
+                    Some(command) => format!(
+                        "{} ({}, exposed as {target} for {command})",
+                        receipt.name, receipt.source_kind
+                    ),
+                    None => format!(
+                        "{} ({}, exposed as {target})",
+                        receipt.name, receipt.source_kind
+                    ),
+                }
             } else {
                 format!(
                     "{} ({}, carried, not exposed)",
@@ -262,7 +296,7 @@ fn environment_disclosure(environment: &SessionEnvironment) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "environment policy: {} — session-wide grants: {grants}\n",
+        "environment policy: {} — grants: {grants}\n",
         environment.kind().as_str()
     )
 }
@@ -371,6 +405,22 @@ mod tests {
     fn rejects_unknown_option_and_empty_expose() {
         assert!(parse_grant_spec("t=env:X,bogus=Y").is_err());
         assert!(parse_grant_spec("t=env:X,expose=").is_err());
+    }
+
+    #[test]
+    fn parses_command_bound_exposure() {
+        let g = grant("gh_token=secret://gh/token,expose=GH_TOKEN,for=gh");
+        assert_eq!(g.expose_as_env.as_deref(), Some("GH_TOKEN"));
+        assert_eq!(g.for_command.as_deref(), Some("gh"));
+        let reordered = grant("gh_token=secret://gh/token,for=gh,expose=GH_TOKEN");
+        assert_eq!(reordered.for_command.as_deref(), Some("gh"));
+        assert_eq!(reordered.expose_as_env.as_deref(), Some("GH_TOKEN"));
+    }
+
+    #[test]
+    fn rejects_empty_or_duplicate_for() {
+        assert!(parse_grant_spec("t=env:X,expose=Y,for=").is_err());
+        assert!(parse_grant_spec("t=env:X,expose=Y,for=gh,for=git").is_err());
     }
 
     #[test]
