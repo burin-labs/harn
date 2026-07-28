@@ -52,6 +52,7 @@ pub mod coverage;
 pub(crate) mod durable_rate_limit;
 pub mod duration_parse;
 pub mod egress;
+pub mod environment_registry;
 pub mod event_log;
 pub mod events;
 pub mod external_agent;
@@ -142,11 +143,20 @@ pub mod user_dirs;
 /// Initialize process-wide assets whose construction should happen before an
 /// embedding host enters an async request or VM execution stack.
 ///
-/// Hosts should call this once at startup. The operation is idempotent, and VM
-/// construction retains a fallback for embedders that do not have an explicit
-/// bootstrap phase.
+/// New embedding hosts should call [`initialize_runtime`] instead so startup
+/// also validates the Harn-owned environment namespace. This asset-only
+/// operation remains for compatibility, and VM construction retains it as a
+/// fallback for embedders without an explicit bootstrap phase.
 pub fn initialize_runtime_assets() {
     secret_patterns::initialize_default_secret_patterns();
+}
+
+/// Validate the Harn-owned environment namespace and initialize process-wide
+/// runtime assets through the same bootstrap boundary used by the CLI.
+pub fn initialize_runtime() -> Result<(), environment_registry::EnvironmentValidationError> {
+    environment_registry::validate_startup_environment()?;
+    initialize_runtime_assets();
+    Ok(())
 }
 
 /// Crate-wide deterministic clock mock used by stdlib time builtins, the

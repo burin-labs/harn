@@ -99,6 +99,20 @@ distribution decoupled from local OSS Harn.
 
 Environment overrides are intentionally small and explainable:
 
+Harn validates every `HARN_*` name at process startup against the runtime's
+authoritative registry. Unknown names stop CLI dispatch with a key-only
+diagnostic and, when a close registered name exists, a `did you mean`
+suggestion. Registered scalar shapes such as timeouts and booleans are checked
+at the same boundary; domain-specific values remain checked by their owning
+subsystem. Diagnostic messages never include environment values.
+
+Embedding hosts that need private names should use the structural
+`HARN_EXT_<NAME>` namespace. The suffix must be a nonempty uppercase identifier.
+Runtime-generated model-role, rate-limit, and secret-provider names have their
+own narrower grammars; no broad `HARN_*` prefix bypass exists. Embedders should
+invoke `harn_vm::initialize_runtime()` during bootstrap to apply the same
+validation and process-wide asset initialization as the `harn` CLI.
+
 | Variable | Field |
 |---|---|
 | `HARN_CONFIG_JSON` | Arbitrary JSON config overlay |
