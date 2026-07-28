@@ -297,7 +297,7 @@ pub fn run_guardian_from_env() -> io::Result<()> {
     {
         let event_tx = event_tx.clone();
         std::thread::spawn(move || {
-            let status = payload.wait();
+            let status = wait_for_payload_while_reaping_adopted(payload);
             let _ = event_tx.send(GuardianEvent::PayloadExited(status));
         });
     }
@@ -430,6 +430,31 @@ fn configure_child_reaper() -> io::Result<()> {
 #[cfg(all(unix, not(target_os = "linux")))]
 fn configure_child_reaper() -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(unix)]
+fn wait_for_payload_while_reaping_adopted(payload: Child) -> io::Result<ExitStatus> {
+    let payload_pid = payload.id() as libc::pid_t;
+    // Keep the Child handle alive while waitpid(2) owns reaping. On Linux the
+    // guardian is a subreaper, so detached helpers become its direct children.
+    // Reaping all children here prevents successfully terminated helpers from
+    // remaining as zombies until the conformance payload itself exits.
+    let _payload = payload;
+    loop {
+        let mut status = 0;
+        let waited = unsafe { libc::waitpid(-1, &mut status, 0) };
+        if waited == payload_pid {
+            return Ok(ExitStatus::from_raw(status));
+        }
+        if waited > 0 {
+            continue;
+        }
+        let error = io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EINTR) => continue,
+            _ => return Err(error),
+        }
+    }
 }
 
 #[cfg(unix)]
