@@ -29,6 +29,7 @@ use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
     types, AbiParam, BlockArg, Function, InstBuilder, MemFlagsData, Signature, Type, Value,
 };
+use cranelift_codegen::isa::TargetFrontendConfig;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{FuncId, Linkage, Module};
 
@@ -84,7 +85,7 @@ pub(crate) fn define_scalar_function<M: Module>(
     let mut ctx = module.make_context();
     ctx.func.signature = sig;
     let mut fb_ctx = FunctionBuilderContext::new();
-    lower(&mut ctx.func, &mut fb_ctx, sf)?;
+    lower(&mut ctx.func, &mut fb_ctx, sf, module.target_config())?;
     module
         .define_function(id, &mut ctx)
         .map_err(|e| CodegenError::backend(e.to_string()))?;
@@ -107,6 +108,7 @@ pub(crate) fn lower(
     func: &mut Function,
     fb_ctx: &mut FunctionBuilderContext,
     sf: &ScalarFunction,
+    frontend_config: TargetFrontendConfig,
 ) -> Result<(), CodegenError> {
     let mut builder = FunctionBuilder::new(func, fb_ctx);
 
@@ -218,7 +220,7 @@ pub(crate) fn lower(
     );
 
     builder.seal_all_blocks();
-    builder.finalize();
+    builder.finalize(frontend_config);
     Ok(())
 }
 
@@ -291,7 +293,7 @@ fn lower_instr(
         }
         Instr::Not => {
             let a = stack.pop().unwrap();
-            stack.push(builder.ins().icmp_imm(IntCC::Equal, a, 0));
+            stack.push(builder.ins().icmp_imm_s(IntCC::Equal, a, 0));
         }
         Instr::Pop => {
             stack.pop();
@@ -411,7 +413,7 @@ fn lower_int_add_sub(
     };
     let combined = builder.ins().band(lhs, rhs);
     // Sign bit set (value < 0) means overflow.
-    let overflowed = builder.ins().icmp_imm(IntCC::SignedLessThan, combined, 0);
+    let overflowed = builder.ins().icmp_imm_s(IntCC::SignedLessThan, combined, 0);
     guard_no_overflow(builder, overflowed, overflow_block);
     result
 }
@@ -429,7 +431,7 @@ fn lower_int_mul(
     let high = builder.ins().smulhi(a, b);
     // Arithmetic shift by 63 broadcasts the low half's sign bit across all 64
     // bits; a faithful (non-overflowing) product has `high` equal to it.
-    let sign = builder.ins().sshr_imm(low, 63);
+    let sign = builder.ins().sshr_imm_u(low, 63);
     let overflowed = builder.ins().icmp(IntCC::NotEqual, high, sign);
     guard_no_overflow(builder, overflowed, overflow_block);
     low
@@ -453,7 +455,7 @@ fn lower_idiv(
     faults: FaultBlocks,
     is_div: bool,
 ) -> Value {
-    let is_zero = builder.ins().icmp_imm(IntCC::Equal, b, 0);
+    let is_zero = builder.ins().icmp_imm_s(IntCC::Equal, b, 0);
     let cont = builder.create_block();
     let no_args: Vec<BlockArg> = Vec::new();
     builder
