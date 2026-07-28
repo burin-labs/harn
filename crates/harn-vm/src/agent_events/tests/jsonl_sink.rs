@@ -241,7 +241,7 @@ fn jsonl_sink_redacts_tool_payloads_before_write() {
 }
 
 #[test]
-fn jsonl_sink_skips_text_parsing_candidates() {
+fn jsonl_sink_persists_text_parsing_candidates() {
     use std::io::{BufRead, BufReader};
 
     let dir = std::env::temp_dir().join(format!(
@@ -294,19 +294,27 @@ fn jsonl_sink_skips_text_parsing_candidates() {
 
     assert_eq!(
         sink.event_count(),
-        1,
-        "skipped candidates must not consume indices"
+        3,
+        "every emitted event must consume a durable index"
     );
     let file = std::fs::File::open(&path).unwrap();
     let lines = BufReader::new(file)
         .lines()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(lines.len(), 1);
-    let value: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
-    assert_eq!(value["index"], serde_json::json!(0));
-    assert_eq!(value["tool_call_id"], "call-real");
-    assert!(!lines[0].contains("text-cand-0"));
+    assert_eq!(lines.len(), 3);
+    for (index, line) in lines.iter().enumerate() {
+        let value: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(value["index"], serde_json::json!(index));
+    }
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.contains("text-cand-0"))
+            .count(),
+        2
+    );
+    assert!(lines[2].contains("call-real"));
 
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
