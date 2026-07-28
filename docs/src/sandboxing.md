@@ -39,6 +39,13 @@ Both layers stay in force alongside approval policy, the separate rule set
 that decides which risky operations have to ask a human first. None of the
 three replaces the others, so a path can be refused by any one of them.
 
+On Unix, scoped content writes walk parent directories without following
+symlinks and carry the resulting parent file descriptor into the final file
+open. This defends against user-creatable symlink redirection inside a
+workspace; it does not defend against bind mounts installed by a privileged
+host administrator. The workspace sandbox therefore treats host root access
+as outside its threat model.
+
 ## What a default run can do
 
 A direct `harn run` installs the `worktree` capability policy before the VM
