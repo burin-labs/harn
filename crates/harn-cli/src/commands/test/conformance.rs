@@ -452,6 +452,9 @@ async fn verify_unoptimized_conformance_subprocess(
         .spawn()
         .map_err(|error| format!("unoptimized subprocess launch failed: {error}"))?;
     let pid = child.id();
+    harn_vm::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
+        .await
+        .map_err(|error| format!("record unoptimized subprocess owner group: {error}"))?;
     let _cleanup_registration =
         harn_vm::op_interrupt::register_active_process_cleanup(pid, &cleanup_token, None);
     let stdout = match child.stdout.take() {
@@ -706,16 +709,6 @@ impl ConformanceCaseEvaluation {
             duration_ms,
         }
     }
-}
-
-fn extract_diagnostic_codes(message: &str) -> Vec<String> {
-    let re = Regex::new(r"\bHARN-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b")
-        .expect("diagnostic code regex compiles");
-    let mut codes = BTreeSet::new();
-    for capture in re.find_iter(message) {
-        codes.insert(capture.as_str().to_string());
-    }
-    codes.into_iter().collect()
 }
 
 fn target_triple_label() -> &'static str {

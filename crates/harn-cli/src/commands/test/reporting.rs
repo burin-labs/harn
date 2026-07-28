@@ -1,8 +1,9 @@
 //! User-test report conversion and terminal timing output.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
+use regex::Regex;
 use serde::Serialize;
 
 use crate::test_report::{TestCaseReport, TestOutcome, TestReport};
@@ -12,6 +13,16 @@ use crate::test_timing::DurationSummary;
 use super::{logical_path, UserTestOutputOptions};
 
 pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 2;
+
+pub(super) fn extract_diagnostic_codes(message: &str) -> Vec<String> {
+    let re = Regex::new(r"\bHARN-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b")
+        .expect("diagnostic code regex compiles");
+    let mut codes = BTreeSet::new();
+    for capture in re.find_iter(message) {
+        codes.insert(capture.as_str().to_string());
+    }
+    codes.into_iter().collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

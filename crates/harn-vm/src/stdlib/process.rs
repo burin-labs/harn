@@ -723,6 +723,7 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
         &cleanup_token,
     );
+    crate::op_interrupt::preserve_process_owner_token(&mut command);
 
     let started = Instant::now();
     let cmd = spec.cmd;
@@ -731,6 +732,15 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
             "{label}: failed to spawn '{cmd}': {error}"
         ))))
     })?;
+    if let Err(error) = crate::op_interrupt::record_current_process_owner_group(child.id()) {
+        let _ = crate::op_interrupt::terminate_child_group_with_cleanup_token_report(
+            &mut child,
+            Some(&cleanup_token),
+        );
+        return Err(VmError::Runtime(format!(
+            "{label}: record process owner group: {error}"
+        )));
+    }
 
     if let (Some(payload), Some(mut stdin)) = (spec.stdin, child.stdin.take()) {
         // Children may close stdin early while still producing useful output.
