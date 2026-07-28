@@ -53,6 +53,83 @@ harn run scripts/update_provider_catalog.harn -- --check --update
 The CI gate is wired into `make check-provider-catalog-drift` and runs
 from `make all`.
 
+## Trusted change notices
+
+`scripts/provider_catalog_notice.harn` handles narrow provider change notices
+between broad refresh runs. It consumes a transport-neutral JSON record:
+
+```json
+{
+  "source_id": "provider-pricing-2026-08",
+  "retrieved_at": "2026-07-28T12:00:00Z",
+  "provider": "anthropic",
+  "text": "The original notice text, if available.",
+  "source_url": "https://provider.example/immutable-notice",
+  "provenance": "verified_link"
+}
+```
+
+An email label, webhook, or document-store adapter only needs to write this
+shape. `provenance` is `authenticated`, `verified_link`, `unverified`, or
+`failed`; the latter two fail closed. At least one of `text` or an immutable
+`source_url` is required.
+
+The model is limited to a schema-constrained extraction:
+
+- `price`, `retirement`, `endpoint`, and `capability` are distinct typed
+  variants;
+- provider, model id, effective date, old/new values, and supporting evidence
+  are retained;
+- the model never receives a file mutation tool and never emits TOML.
+
+Deterministic code then resolves exactly one provider and model row in the
+loaded catalog, verifies the old value, finds exactly one owning source table,
+and applies the constrained edit. Missing or duplicate identities are
+rejected. A model absent from an unsupported provider records a no-op; a new
+model on a supported provider produces an incomplete proposal listing context,
+pricing, capability, and routing verification still required.
+Capability edits target the generated capability matrix's owning fragments,
+not legacy model tags. They require one exact `model_match` rule; a
+wildcard-derived family rule is deliberately rejected as ambiguous rather than
+silently changing sibling models.
+
+Use a checked extraction fixture to inspect the plan without an LLM call:
+
+```bash
+harn run scripts/provider_catalog_notice.harn -- \
+  --notice scripts/provider_catalog_notice_fixtures/carried-update.json \
+  --extraction scripts/provider_catalog_notice_fixtures/carried-update.json
+```
+
+For a live extraction, omit `--extraction` and optionally choose `--provider`
+and `--model`. The extraction has a $0.10 per-notice cap. By default the script
+only writes an idempotent local receipt below
+`.harn/provider-catalog-notices/`. `--apply` requires a clean, dedicated
+worktree and runs catalog generation plus drift, artifact, documentation,
+support, and capability checks. `--open-pr` uses a stable branch derived from
+the notice digest, pushes it, and opens a **draft** PR. It never enables merge
+or auto-merge. A repeated notice reuses the same digest and returns an existing
+PR instead of creating another.
+
+```bash
+git worktree add ../harn-provider-notice origin/main
+(
+  cd ../harn-provider-notice
+  make setup
+  harn run scripts/provider_catalog_notice.harn -- \
+    --notice /path/to/notice.json \
+    --repo-root "$PWD" \
+    --apply \
+    --open-pr
+)
+```
+
+The optional cron package in
+`examples/triggers/provider-catalog-notice/` shows how a public adapter can
+place a neutral notice file and invoke this workflow. The scheduler needs only
+the worktree and draft-PR authority granted to that process; private mailbox or
+product state is not part of the workflow contract.
+
 ## Measuring tool-call routes
 
 Catalog tool-support claims can be checked with the spend-capped campaign
