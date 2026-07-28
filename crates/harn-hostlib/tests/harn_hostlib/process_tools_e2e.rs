@@ -166,13 +166,15 @@ fn owner_death_payload_fixture() {
         "process_tools_e2e::owner_death_grandchild_fixture",
         "--nocapture",
     ])
+    .process_group(0)
     .spawn()
     .expect("spawn native grandchild fixture");
     let report = format!(
-        "payload={} pgid={} grandchild={}\n",
+        "payload={} pgid={} grandchild={} grandchild_pgid={}\n",
         std::process::id(),
         unsafe { libc::getpgrp() },
-        grandchild.id()
+        grandchild.id(),
+        grandchild.id(),
     );
     let written = unsafe { libc::write(report_fd, report.as_ptr().cast(), report.len()) };
     assert_eq!(written, report.len() as isize, "write payload handshake");
@@ -303,6 +305,12 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
     let payload_fields = parse_pid_fields(&payload_report);
     assert_eq!(payload_fields["pgid"], worker_pgid);
     assert_ne!(payload_fields["payload"], payload_fields["grandchild"]);
+    assert_eq!(
+        payload_fields["grandchild"],
+        payload_fields["grandchild_pgid"]
+    );
+    assert_ne!(payload_fields["grandchild_pgid"], worker_pgid);
+    cleanup.groups.push(payload_fields["grandchild_pgid"]);
 
     assert_eq!(
         unsafe { libc::kill(-supervisor_pgid, libc::SIGKILL) },
@@ -338,6 +346,15 @@ fn managed_background_group_dies_when_its_supervisor_is_sigkilled() {
         wait_for_native_exit(worker_pid);
     }
     assert_eq!(unsafe { libc::kill(-worker_pgid, 0) }, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    wait_for_native_exit(payload_fields["grandchild"]);
+    assert_eq!(
+        unsafe { libc::kill(-payload_fields["grandchild_pgid"], 0) },
+        -1
+    );
     assert_eq!(
         std::io::Error::last_os_error().raw_os_error(),
         Some(libc::ESRCH)

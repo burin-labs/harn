@@ -85,6 +85,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
         crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
         &cleanup_token,
     );
+    crate::op_interrupt::preserve_process_owner_token(cmd.as_std_mut());
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -96,6 +97,13 @@ pub(super) async fn dispatch_process_exec_after_policy(
         .map_err(|e| VmError::Runtime(format!("host_call process.exec: {e}")))?;
     drop(profile_guard);
     let pid = child.id();
+    crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
+        .await
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "host_call process.exec record owner group: {error}"
+            ))
+        })?;
     let cleanup_registration = crate::op_interrupt::register_active_process_cleanup(
         pid,
         &cleanup_token,

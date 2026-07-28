@@ -40,6 +40,16 @@ use std::time::{Duration, Instant};
 /// a different process group before the parent-edge scan runs.
 pub const PROCESS_CLEANUP_TOKEN_ENV: &str = "HARN_PROCESS_CLEANUP_TOKEN";
 
+/// Marker shared by every process in one externally supervised lifetime.
+///
+/// Individual process operations keep using [`PROCESS_CLEANUP_TOKEN_ENV`] so
+/// cancelling one operation does not terminate its siblings. A native
+/// owner-death guardian sets this second marker on its payload; nested process
+/// boundaries preserve it even when they otherwise replace the environment.
+/// The guardian can therefore find detached grandchildren after the immediate
+/// payload or an intermediate shell has exited.
+pub const PROCESS_OWNER_TOKEN_ENV: &str = "HARN_INTERNAL_PROCESS_OWNER_TOKEN";
+
 /// How long a subprocess gets to exit after SIGTERM before the whole
 /// process group is SIGKILLed. Deliberately longer than the interpreter's
 /// 250ms async-op cancel grace (`CANCEL_GRACE_ASYNC_OP`): child processes
@@ -50,6 +60,190 @@ const SUBPROCESS_KILL_SETTLE: Duration = Duration::from_millis(250);
 
 pub fn new_process_cleanup_token() -> String {
     format!("harn-cleanup-{}", uuid::Uuid::now_v7().simple())
+}
+
+fn owner_process_group_journal(token: &str) -> std::path::PathBuf {
+    let digest = blake3::hash(token.as_bytes()).to_hex();
+    std::env::temp_dir().join(format!("harn-process-owner-{digest}.groups"))
+}
+
+/// Create the owner journal before untrusted payload code can observe its token.
+pub fn initialize_process_owner_group_journal(token: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(owner_process_group_journal(token))
+            .map(|_| ())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = token;
+        Ok(())
+    }
+}
+
+/// Persist the process group created for `pid` in the current owner lifetime.
+///
+/// The native guardian reads this append-only journal after abrupt owner death,
+/// when in-memory cleanup registrations no longer exist. Process groups are the
+/// portable baseline; Linux additionally uses the inherited token to find
+/// descendants that deliberately escape their original group.
+pub fn record_current_process_owner_group(pid: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let Ok(token) = std::env::var(PROCESS_OWNER_TOKEN_ENV) else {
+            return Ok(());
+        };
+        let observed_pgid = unsafe { libc::getpgid(pid as i32) };
+        let pgid = u32::try_from(observed_pgid).unwrap_or(pid);
+        let mut journal = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(owner_process_group_journal(&token))?;
+        journal.write_all(format!("{pgid}\n").as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        Ok(())
+    }
+}
+
+/// Record a Tokio child's owner group or terminate it before returning error.
+pub async fn record_tokio_process_owner_group(
+    child: &mut tokio::process::Child,
+    cleanup_token: &str,
+) -> std::io::Result<()> {
+    let Some(pid) = child.id() else {
+        return Ok(());
+    };
+    if let Err(error) = record_current_process_owner_group(pid) {
+        let _ = signal_pid_tree_group_and_token_with_report(pid, Some(cleanup_token), 9);
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn owner_process_groups(token: &str) -> Vec<u32> {
+    let Ok(contents) = std::fs::read_to_string(owner_process_group_journal(token)) else {
+        return Vec::new();
+    };
+    let mut groups = contents
+        .lines()
+        .filter_map(|line| line.parse::<u32>().ok())
+        .collect::<Vec<_>>();
+    groups.sort_unstable();
+    groups.dedup();
+    groups
+}
+
+/// Remove the current owner lifetime's process-group journal.
+pub fn remove_process_owner_group_journal(token: &str) {
+    let _ = std::fs::remove_file(owner_process_group_journal(token));
+}
+
+/// Preserve an inherited native owner-lifetime marker across an environment
+/// replacement on `command`.
+pub fn preserve_process_owner_token(command: &mut std::process::Command) {
+    if let Some(token) = std::env::var_os(PROCESS_OWNER_TOKEN_ENV).filter(|token| !token.is_empty())
+    {
+        command.env(PROCESS_OWNER_TOKEN_ENV, token);
+    }
+}
+
+/// Return processes still carrying the current native owner-lifetime marker.
+///
+/// The current process is excluded. Conformance uses this as a fail-closed
+/// teardown audit; the guardian remains the authority that cleans the cohort
+/// if the runner itself is interrupted or killed.
+pub fn current_process_owner_survivors() -> Vec<ProcessCleanupChild> {
+    #[cfg(unix)]
+    {
+        let Ok(token) = std::env::var(PROCESS_OWNER_TOKEN_ENV) else {
+            return Vec::new();
+        };
+        let mut survivors = cleanup_token_processes(&token)
+            .into_iter()
+            .filter(|child| child.pid != std::process::id())
+            .collect::<Vec<_>>();
+        let live_groups = live_process_groups();
+        for pgid in owner_process_groups(&token) {
+            if pgid != unsafe { libc::getpgrp() as u32 }
+                && live_groups.contains(&pgid)
+                && !survivors.iter().any(|child| child.pid == pgid)
+            {
+                survivors.push(ProcessCleanupChild::new(
+                    pgid,
+                    None,
+                    1,
+                    Some("<process-group>".to_string()),
+                ));
+            }
+        }
+        survivors.sort_by_key(|child| child.pid);
+        survivors
+    }
+    #[cfg(not(unix))]
+    {
+        Vec::new()
+    }
+}
+
+/// Kill every process carrying the current native owner-lifetime marker.
+///
+/// This is the fail-closed half of [`current_process_owner_survivors`]. It is
+/// intentionally immediate: the suite has completed, so any surviving helper
+/// has violated the contract and must not outlive the terminal report.
+pub fn kill_current_process_owner_survivors() -> ProcessCleanupReport {
+    #[cfg(unix)]
+    {
+        if std::env::var(PROCESS_OWNER_TOKEN_ENV).is_err() {
+            return ProcessCleanupReport::default();
+        }
+        let mut report = ProcessCleanupReport::for_signal(None, 9);
+        let current_pgid = unsafe { libc::getpgrp() };
+        let survivors = current_process_owner_survivors();
+        let mut groups = Vec::new();
+        for child in survivors {
+            if child.command_name.as_deref() == Some("<process-group>") {
+                unsafe {
+                    libc::kill(-(child.pid as i32), 9);
+                }
+                groups.push(child.pid);
+            } else {
+                signal_pid_preserving_group(child.pid, current_pgid, 9);
+            }
+            report.merge_child(child.with_signal(9));
+        }
+        wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
+        wait_for_process_groups_to_exit(&groups, SUBPROCESS_KILL_SETTLE);
+        report.refresh_survivor_status();
+        let live_groups = live_process_groups();
+        for child in &mut report.children {
+            if groups.contains(&child.pid) {
+                child.alive_after_cleanup = Some(live_groups.contains(&child.pid));
+            }
+        }
+        report
+    }
+    #[cfg(not(unix))]
+    {
+        ProcessCleanupReport::default()
+    }
 }
 
 /// Structural evidence collected when Harn kills a child process tree.
@@ -479,6 +673,13 @@ pub fn signal_pid_tree_and_token_preserving_group_with_report(
             signal_pid_preserving_group(child.pid, preserved_pgid, signal);
             report.merge_child(child.with_signal(signal));
         }
+        for pgid in owner_process_groups(cleanup_token) {
+            if pgid != preserved_pgid as u32 {
+                unsafe {
+                    libc::kill(-(pgid as i32), signal);
+                }
+            }
+        }
     }
     signal_pid_preserving_group(pid, preserved_pgid, signal);
     report
@@ -493,6 +694,34 @@ fn signal_pid_preserving_group(pid: u32, preserved_pgid: i32, signal: i32) {
             libc::kill(-pgid, signal);
         }
         libc::kill(pid, signal);
+    }
+}
+
+#[cfg(unix)]
+fn live_process_groups() -> std::collections::HashSet<u32> {
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, false, ProcessRefreshKind::nothing());
+    sys.processes()
+        .iter()
+        .filter(|(_, process)| process_status_can_execute(process.status()))
+        .filter_map(|(pid, _)| {
+            let pgid = unsafe { libc::getpgid(pid.as_u32() as i32) };
+            u32::try_from(pgid).ok()
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn wait_for_process_groups_to_exit(groups: &[u32], timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let live_groups = live_process_groups();
+        if groups.iter().all(|pgid| !live_groups.contains(pgid)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -535,7 +764,10 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
     let mut children = sys
         .processes()
         .iter()
-        .filter(|(_, process)| process_has_cleanup_token(process.environ(), token))
+        .filter(|(_, process)| {
+            process_status_can_execute(process.status())
+                && process_has_cleanup_token(process.environ(), token)
+        })
         .map(|(pid, process)| {
             ProcessCleanupChild::new(
                 pid.as_u32(),
@@ -550,11 +782,17 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
 }
 
 #[cfg(unix)]
+fn process_status_can_execute(status: sysinfo::ProcessStatus) -> bool {
+    status != sysinfo::ProcessStatus::Zombie
+}
+
+#[cfg(unix)]
 fn process_has_cleanup_token(environ: &[std::ffi::OsString], token: &str) -> bool {
-    let expected = format!("{PROCESS_CLEANUP_TOKEN_ENV}={token}");
+    let cleanup = format!("{PROCESS_CLEANUP_TOKEN_ENV}={token}");
+    let owner = format!("{PROCESS_OWNER_TOKEN_ENV}={token}");
     environ
         .iter()
-        .any(|entry| entry.to_string_lossy() == expected)
+        .any(|entry| matches!(entry.to_string_lossy().as_ref(), value if value == cleanup || value == owner))
 }
 
 #[cfg(all(unix, test))]
@@ -1052,6 +1290,37 @@ mod tests {
             &[std::ffi::OsString::from("OTHER=tok-123")],
             token
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_has_cleanup_token_accepts_owner_lifetime_marker() {
+        let token = "owner-123";
+        let env = vec![std::ffi::OsString::from(format!(
+            "{PROCESS_OWNER_TOKEN_ENV}={token}"
+        ))];
+        assert!(process_has_cleanup_token(&env, token));
+        assert!(!process_has_cleanup_token(&env, "owner"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zombie_processes_are_not_lifetime_survivors() {
+        assert!(!process_status_can_execute(sysinfo::ProcessStatus::Zombie));
+        assert!(process_status_can_execute(sysinfo::ProcessStatus::Sleep));
+        assert!(process_status_can_execute(sysinfo::ProcessStatus::Dead));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_journal_initialization_refuses_preexisting_symlink() {
+        let token = new_process_cleanup_token();
+        let journal = owner_process_group_journal(&token);
+        let target = tempfile::NamedTempFile::new().expect("create journal symlink target");
+        std::os::unix::fs::symlink(target.path(), &journal).expect("create owner journal symlink");
+        initialize_process_owner_group_journal(&token)
+            .expect_err("preexisting journal symlink must fail closed");
+        std::fs::remove_file(journal).expect("remove owner journal symlink");
     }
 
     #[cfg(unix)]

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{self, Stdio};
@@ -21,7 +21,10 @@ use crate::test_runner;
 use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness, ExecError};
 
 mod conformance;
+mod process_lifetime;
 mod reporting;
+#[cfg(feature = "hostlib")]
+mod supervisor;
 mod watch;
 
 use conformance::{
@@ -30,11 +33,21 @@ use conformance::{
 
 pub(crate) use reporting::CONFORMANCE_TEST_SCHEMA_VERSION;
 use reporting::{
-    print_per_test_timing, print_test_results, user_test_progress, user_test_report_from_summary,
-    ConformanceJsonOutcome, ConformanceJsonReport, ConformanceJsonResult, ConformanceJsonSummary,
+    extract_diagnostic_codes, print_per_test_timing, print_test_results, user_test_progress,
+    user_test_report_from_summary, ConformanceJsonOutcome, ConformanceJsonReport,
+    ConformanceJsonResult, ConformanceJsonSummary,
 };
 
 pub(crate) async fn run_command(args: TestArgs) {
+    #[cfg(feature = "hostlib")]
+    if supervisor::requires_supervision(&args) && !supervisor::is_payload() {
+        match supervisor::run_current_invocation().await {
+            Ok(0) => return,
+            Ok(code) => process::exit(code),
+            Err(error) => command_error(&error),
+        }
+    }
+
     let operator_approval_grant =
         harn_vm::orchestration::OperatorApprovalGrant::from_cli_operations(
             args.approve_risky.clone(),

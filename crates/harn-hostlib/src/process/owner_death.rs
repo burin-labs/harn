@@ -103,17 +103,24 @@ pub(crate) fn prepare_guardian(
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
-    let (payload, _) = super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?;
+    let (mut payload, _) =
+        super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?;
+    payload.env(
+        harn_vm::op_interrupt::PROCESS_OWNER_TOKEN_ENV,
+        &cleanup_token,
+    );
     let request = PreparedCommand::from_command(
         &payload,
         spec.env_mode == super::EnvMode::Replace,
-        cleanup_token,
+        cleanup_token.clone(),
     );
     let request = serde_json::to_string(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
 
     let executable = std::env::current_exe()
         .map_err(|error| ProcessError::Spawn(format!("resolve guardian executable: {error}")))?;
+    harn_vm::op_interrupt::initialize_process_owner_group_journal(&cleanup_token)
+        .map_err(|error| ProcessError::Spawn(format!("create owner process journal: {error}")))?;
     let mut guardian = Command::new(executable);
     match REEXEC_ARGS.with(|slot| slot.borrow().clone()) {
         Some(args) => {
@@ -247,6 +254,7 @@ pub fn run_guardian_from_env() -> io::Result<()> {
     let request: PreparedCommand = serde_json::from_str(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let (mut payload_command, cleanup_token) = request.into_command();
+    let _journal_cleanup = OwnerJournalCleanup(cleanup_token.clone());
     configure_child_reaper()?;
     let mut payload = match payload_command.spawn() {
         Ok(payload) => payload,
@@ -323,18 +331,31 @@ pub fn run_guardian_from_env() -> io::Result<()> {
                     );
                 wait_for_payload_exit(&event_rx, &mut payload_status)?;
                 reap_adopted_children()?;
+                harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
                 unsafe {
                     libc::kill(-libc::getpgrp(), libc::SIGKILL);
                 }
                 return Err(io::Error::other("guardian process group survived SIGKILL"));
             }
-            GuardianEvent::PayloadExited(status) => payload_status = Some(status?),
+            GuardianEvent::PayloadExited(status) => {
+                payload_status = Some(status?);
+                let _ =
+                    harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
+                        payload_pid,
+                        Some(&cleanup_token),
+                        unsafe { libc::getpgrp() as u32 },
+                        libc::SIGKILL,
+                    );
+                reap_adopted_children()?;
+            }
             GuardianEvent::OutputClosed => open_outputs = open_outputs.saturating_sub(1),
         }
         if let Some(status) = payload_status.filter(|_| open_outputs == 0) {
+            harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
             propagate_exit(status);
         }
     }
+    harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
     Err(io::Error::other(
         "guardian event channels closed unexpectedly",
     ))
@@ -426,6 +447,16 @@ fn reap_adopted_children() -> io::Result<()> {
 #[doc(hidden)]
 pub fn guardian_requested() -> bool {
     std::env::var_os(REQUEST_ENV).is_some()
+}
+
+#[cfg(unix)]
+struct OwnerJournalCleanup(String);
+
+#[cfg(unix)]
+impl Drop for OwnerJournalCleanup {
+    fn drop(&mut self) {
+        harn_vm::op_interrupt::remove_process_owner_group_journal(&self.0);
+    }
 }
 
 #[cfg(unix)]

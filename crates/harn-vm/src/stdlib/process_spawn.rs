@@ -410,6 +410,7 @@ async fn spawn(
         crate::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV,
         &cleanup_token,
     );
+    crate::op_interrupt::preserve_process_owner_token(cmd.as_std_mut());
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -423,6 +424,13 @@ async fn spawn(
     drop(profile_guard);
 
     let pid = child.id();
+    crate::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
+        .await
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "host_call process.spawn record owner group: {error}"
+            ))
+        })?;
     let (handle_id, seq) = next_handle(pid);
 
     let owner_key = owner_cancel_token

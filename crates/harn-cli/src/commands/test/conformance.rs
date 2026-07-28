@@ -452,6 +452,9 @@ async fn verify_unoptimized_conformance_subprocess(
         .spawn()
         .map_err(|error| format!("unoptimized subprocess launch failed: {error}"))?;
     let pid = child.id();
+    harn_vm::op_interrupt::record_tokio_process_owner_group(&mut child, &cleanup_token)
+        .await
+        .map_err(|error| format!("record unoptimized subprocess owner group: {error}"))?;
     let _cleanup_registration =
         harn_vm::op_interrupt::register_active_process_cleanup(pid, &cleanup_token, None);
     let stdout = match child.stdout.take() {
@@ -706,16 +709,6 @@ impl ConformanceCaseEvaluation {
             duration_ms,
         }
     }
-}
-
-fn extract_diagnostic_codes(message: &str) -> Vec<String> {
-    let re = Regex::new(r"\bHARN-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b")
-        .expect("diagnostic code regex compiles");
-    let mut codes = BTreeSet::new();
-    for capture in re.find_iter(message) {
-        codes.insert(capture.as_str().to_string());
-    }
-    codes.into_iter().collect()
 }
 
 fn target_triple_label() -> &'static str {
@@ -1329,6 +1322,33 @@ pub(crate) async fn run_conformance_tests(
                 captured_output: None,
             });
             failed += 1;
+        }
+    }
+
+    if let Some(message) = process_lifetime::surviving_helpers_error() {
+        report.push(TestCaseReport {
+            name: "helper_process_teardown".to_string(),
+            file: "<conformance-runner>".to_string(),
+            classname: "conformance".to_string(),
+            outcome: TestOutcome::Failed,
+            duration_ms: 0,
+            timeout: None,
+            phases: None,
+            message: Some(message.clone()),
+            captured_output: None,
+        });
+        if options.json {
+            json_summary.record(ConformanceJsonOutcome::Fail);
+            json_results.push(ConformanceJsonResult {
+                name: "helper_process_teardown".to_string(),
+                outcome: ConformanceJsonOutcome::Fail,
+                duration_ms: 0,
+                message: Some(message),
+                diagnostic_codes: Vec::new(),
+            });
+        } else {
+            failed += 1;
+            errors.push(message);
         }
     }
 
