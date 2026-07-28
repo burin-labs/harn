@@ -29,9 +29,9 @@
 //! 3. **Ambient audit** — `tool_call` / `tool_call_update` take their
 //!    `audit` from the active mutation session, never the payload.
 //!
-//! The set of accepted `event_type` strings is an explicit allowlist
-//! ([`from_host_special`] + [`HOST_DESERIALIZE_EVENT_TYPES`]) so the
-//! accept/reject boundary is byte-identical to the retired match — many
+//! [`HOST_EVENT_POLICIES`] is the single registry for this boundary. It owns
+//! both which `event_type` strings may enter through the host path and whether
+//! each accepted event is copied into the live transcript journal. Many
 //! `AgentEvent` variants (`worker_update`, `handoff`, `artifact`, …) are
 //! constructed elsewhere and are *not* emittable through this host path.
 
@@ -45,37 +45,102 @@ const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
 const NO_PROGRESS_STREAK_NUDGE_FALLBACK: &str =
     "No progress was detected. Use the next turn to make concrete task progress or explain the remaining blocker.";
 
-/// `event_type` strings that deserialize directly into an [`AgentEvent`]
-/// variant once normalized. Kept as an explicit allowlist so this host
-/// path accepts exactly the set the retired hand-match accepted and
-/// rejects every other variant (which is constructed on non-host paths).
-const HOST_DESERIALIZE_EVENT_TYPES: &[&str] = &[
-    "tool_call",
-    "tool_call_update",
-    "iteration_start",
-    "iteration_end",
-    "judge_decision",
-    "step_judge_decision",
-    "structural_validator_decision",
-    "scope_classifier_verdict",
-    "input_guardrail_verdict",
-    "missing_tool_call_verdict",
-    "budget_exhausted",
-    "budget_circuit_breaker",
-    "progress_reported",
-    "tool_search_query",
-    "tool_search_result",
-    "skill_narrow",
-    "loop_control_decision",
-    "capability_gap",
-    "tool_format_override",
-    "tool_call_audit",
-    "loop_checkpoint",
-    // The loud-boundary funnel (harn#5142). Allowlisted so a `.harn` boundary
-    // — an agent-loop cap, a stdlib filter — reports a drop through the same
-    // typed event as the Rust funnel instead of inventing a parallel one.
-    "boundary_failure",
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HostTranscriptRole {
+    Assistant,
+    Tool,
+}
+
+impl HostTranscriptRole {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Assistant => "assistant",
+            Self::Tool => "tool",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HostEventPolicy {
+    event_type: &'static str,
+    transcript_role: Option<HostTranscriptRole>,
+}
+
+const fn host_event(
+    event_type: &'static str,
+    transcript_role: Option<HostTranscriptRole>,
+) -> HostEventPolicy {
+    HostEventPolicy {
+        event_type,
+        transcript_role,
+    }
+}
+
+const ASSISTANT: Option<HostTranscriptRole> = Some(HostTranscriptRole::Assistant);
+const TOOL: Option<HostTranscriptRole> = Some(HostTranscriptRole::Tool);
+
+/// The one policy registry for events entering through `agent_emit_event`.
+///
+/// A registry row authorizes host deserialization. `transcript_role` controls
+/// whether the same accepted payload is copied into the durable live-session
+/// journal. Keeping both decisions together prevents an event from appearing
+/// registered at its stdlib call site while being silently absent from one of
+/// the runtime's observation surfaces.
+const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
+    host_event("tool_call", ASSISTANT),
+    host_event("tool_call_update", ASSISTANT),
+    host_event("iteration_start", None),
+    host_event("iteration_end", None),
+    host_event("judge_decision", None),
+    host_event("step_judge_decision", None),
+    host_event("structural_validator_decision", None),
+    host_event("scope_classifier_verdict", None),
+    host_event("input_guardrail_verdict", None),
+    host_event("missing_tool_call_verdict", None),
+    host_event("require_successful_tools_violation", ASSISTANT),
+    host_event("final_wrapup", ASSISTANT),
+    host_event("pack_thinking_stripped", ASSISTANT),
+    host_event("self_consistency_tie", ASSISTANT),
+    host_event("code_librarian_query_nl_fallback", ASSISTANT),
+    host_event("budget_exhausted", ASSISTANT),
+    host_event("budget_circuit_breaker", ASSISTANT),
+    host_event("progress_reported", None),
+    host_event("tool_search_query", ASSISTANT),
+    host_event("tool_search_result", TOOL),
+    host_event("skill_narrow", ASSISTANT),
+    host_event("loop_control_decision", None),
+    host_event("capability_gap", None),
+    host_event("tool_format_override", ASSISTANT),
+    host_event("tool_call_audit", TOOL),
+    host_event("loop_checkpoint", ASSISTANT),
+    // The loud-boundary funnel (harn#5142). Registered so a `.harn` boundary
+    // reports a drop through the same typed event as the Rust funnel.
+    host_event("boundary_failure", None),
+    host_event("typed_checkpoint", ASSISTANT),
+    host_event("loop_stuck", ASSISTANT),
+    host_event("reserved_terminal_verify", ASSISTANT),
+    host_event("agent_loop_stall_warning", ASSISTANT),
+    host_event("cache_hit", None),
+    host_event("cache_miss", None),
+    host_event("agent_scratchpad_reorganization", None),
+    host_event("stance_armed", None),
+    host_event("stance_write_access_granted", None),
+    host_event("stance_write_access_denied", None),
+    host_event("stance_disarmed", None),
+    host_event("completion_confirmation_nudge", None),
+    host_event("fenced_call_attempt_nudge", None),
+    host_event("missing_tool_call_nudge", None),
+    host_event("no_progress_streak_nudge", None),
+    host_event("tool_call_blank_name_dropped", None),
+    host_event("llm_auto_continue", None),
+    host_event("context_overflow_recovery", ASSISTANT),
 ];
+
+fn host_event_policy(event_type: &str) -> Option<&'static HostEventPolicy> {
+    HOST_EVENT_POLICIES
+        .iter()
+        .find(|policy| policy.event_type == event_type)
+}
 
 impl AgentEvent {
     /// Build a typed [`AgentEvent`] from a host `emit_event` call.
@@ -88,10 +153,21 @@ impl AgentEvent {
         event_type: &str,
         payload: &Value,
     ) -> Result<AgentEvent, VmError> {
+        if host_event_policy(event_type).is_none() {
+            return Err(reject(
+                session_id,
+                format!("unsupported event type `{event_type}`"),
+                payload,
+            ));
+        }
         if let Some(event) = from_host_special(session_id, event_type, payload) {
             return Ok(event);
         }
         from_host_generic(session_id, event_type, payload)
+    }
+
+    pub(crate) fn host_transcript_role(event_type: &str) -> Option<HostTranscriptRole> {
+        host_event_policy(event_type).and_then(|policy| policy.transcript_role)
     }
 }
 
@@ -263,13 +339,6 @@ fn from_host_generic(
     event_type: &str,
     payload: &Value,
 ) -> Result<AgentEvent, VmError> {
-    if !HOST_DESERIALIZE_EVENT_TYPES.contains(&event_type) {
-        return Err(reject(
-            session_id,
-            format!("unsupported event type `{event_type}`"),
-            payload,
-        ));
-    }
     let mut obj = match payload {
         Value::Object(map) => map.clone(),
         _ => Map::new(),

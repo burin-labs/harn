@@ -102,6 +102,7 @@ pub enum HarnAgentEventKind {
     BoundaryFailure,
     BudgetCircuitBreaker,
     BudgetExhausted,
+    CodeLibrarianQueryNlFallback,
     CompositionChildCall,
     CompositionChildResult,
     CompositionError,
@@ -111,6 +112,7 @@ pub enum HarnAgentEventKind {
     ControlOutcome,
     DaemonWatchdogTripped,
     FeedbackInjected,
+    FinalWrapup,
     HostAttachment,
     HostToolResult,
     InputGuardrailVerdict,
@@ -122,9 +124,12 @@ pub enum HarnAgentEventKind {
     McpAuthRequired,
     McpCatalogChanged,
     McpNotification,
+    PackThinkingStripped,
     ProgressReported,
+    RequireSuccessfulToolsViolation,
     ReservedTerminalVerify,
     ScopeClassifierVerdict,
+    SelfConsistencyTie,
     SessionClosed,
     StructuralValidatorDecision,
     StepJudgeDecision,
@@ -140,6 +145,7 @@ impl HarnAgentEventKind {
             Self::BoundaryFailure => "boundary_failure",
             Self::BudgetCircuitBreaker => "budget_circuit_breaker",
             Self::BudgetExhausted => "budget_exhausted",
+            Self::CodeLibrarianQueryNlFallback => "code_librarian_query_nl_fallback",
             Self::CompositionChildCall => "composition_child_call",
             Self::CompositionChildResult => "composition_child_result",
             Self::CompositionError => "composition_error",
@@ -149,6 +155,7 @@ impl HarnAgentEventKind {
             Self::ControlOutcome => "control_outcome",
             Self::DaemonWatchdogTripped => "daemon_watchdog_tripped",
             Self::FeedbackInjected => "feedback_injected",
+            Self::FinalWrapup => "final_wrapup",
             Self::HostAttachment => "host_attachment",
             Self::HostToolResult => "host_tool_result",
             Self::InputGuardrailVerdict => "input_guardrail_verdict",
@@ -160,9 +167,12 @@ impl HarnAgentEventKind {
             Self::McpAuthRequired => "mcp_auth_required",
             Self::McpCatalogChanged => "mcp_catalog_changed",
             Self::McpNotification => "mcp_notification",
+            Self::PackThinkingStripped => "pack_thinking_stripped",
             Self::ProgressReported => "progress_reported",
+            Self::RequireSuccessfulToolsViolation => "require_successful_tools_violation",
             Self::ReservedTerminalVerify => "reserved_terminal_verify",
             Self::ScopeClassifierVerdict => "scope_classifier_verdict",
+            Self::SelfConsistencyTie => "self_consistency_tie",
             Self::SessionClosed => "session_closed",
             Self::StructuralValidatorDecision => "structural_validator_decision",
             Self::StepJudgeDecision => "step_judge_decision",
@@ -193,6 +203,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "boundary_failure" => Self::BoundaryFailure,
             "budget_circuit_breaker" => Self::BudgetCircuitBreaker,
             "budget_exhausted" => Self::BudgetExhausted,
+            "code_librarian_query_nl_fallback" => Self::CodeLibrarianQueryNlFallback,
             "composition_child_call" => Self::CompositionChildCall,
             "composition_child_result" => Self::CompositionChildResult,
             "composition_error" => Self::CompositionError,
@@ -202,6 +213,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "control_outcome" => Self::ControlOutcome,
             "daemon_watchdog_tripped" => Self::DaemonWatchdogTripped,
             "feedback_injected" => Self::FeedbackInjected,
+            "final_wrapup" => Self::FinalWrapup,
             "host_attachment" => Self::HostAttachment,
             "host_tool_result" => Self::HostToolResult,
             "input_guardrail_verdict" => Self::InputGuardrailVerdict,
@@ -213,9 +225,12 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "mcp_auth_required" => Self::McpAuthRequired,
             "mcp_catalog_changed" => Self::McpCatalogChanged,
             "mcp_notification" => Self::McpNotification,
+            "pack_thinking_stripped" => Self::PackThinkingStripped,
             "progress_reported" => Self::ProgressReported,
+            "require_successful_tools_violation" => Self::RequireSuccessfulToolsViolation,
             "reserved_terminal_verify" => Self::ReservedTerminalVerify,
             "scope_classifier_verdict" => Self::ScopeClassifierVerdict,
+            "self_consistency_tie" => Self::SelfConsistencyTie,
             "session_closed" => Self::SessionClosed,
             "structural_validator_decision" => Self::StructuralValidatorDecision,
             "step_judge_decision" => Self::StepJudgeDecision,
@@ -712,6 +727,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
 pub const HARN_AGENT_EVENT_KIND_BOUNDARY_FAILURE: &str = "boundary_failure";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_CIRCUIT_BREAKER: &str = "budget_circuit_breaker";
 pub const HARN_AGENT_EVENT_KIND_BUDGET_EXHAUSTED: &str = "budget_exhausted";
+pub const HARN_AGENT_EVENT_KIND_CODE_LIBRARIAN_QUERY_NL_FALLBACK: &str = "code_librarian_query_nl_fallback";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_CALL: &str = "composition_child_call";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_CHILD_RESULT: &str = "composition_child_result";
 pub const HARN_AGENT_EVENT_KIND_COMPOSITION_ERROR: &str = "composition_error";
@@ -721,6 +737,7 @@ pub const HARN_AGENT_EVENT_KIND_COMPASS_ROUTING_DECISION: &str = "compass_routin
 pub const HARN_AGENT_EVENT_KIND_CONTROL_OUTCOME: &str = "control_outcome";
 pub const HARN_AGENT_EVENT_KIND_DAEMON_WATCHDOG_TRIPPED: &str = "daemon_watchdog_tripped";
 pub const HARN_AGENT_EVENT_KIND_FEEDBACK_INJECTED: &str = "feedback_injected";
+pub const HARN_AGENT_EVENT_KIND_FINAL_WRAPUP: &str = "final_wrapup";
 pub const HARN_AGENT_EVENT_KIND_HOST_ATTACHMENT: &str = "host_attachment";
 pub const HARN_AGENT_EVENT_KIND_HOST_TOOL_RESULT: &str = "host_tool_result";
 pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail_verdict";
@@ -732,9 +749,12 @@ pub const HARN_AGENT_EVENT_KIND_LOOP_STUCK: &str = "loop_stuck";
 pub const HARN_AGENT_EVENT_KIND_MCP_AUTH_REQUIRED: &str = "mcp_auth_required";
 pub const HARN_AGENT_EVENT_KIND_MCP_CATALOG_CHANGED: &str = "mcp_catalog_changed";
 pub const HARN_AGENT_EVENT_KIND_MCP_NOTIFICATION: &str = "mcp_notification";
+pub const HARN_AGENT_EVENT_KIND_PACK_THINKING_STRIPPED: &str = "pack_thinking_stripped";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
+pub const HARN_AGENT_EVENT_KIND_REQUIRE_SUCCESSFUL_TOOLS_VIOLATION: &str = "require_successful_tools_violation";
 pub const HARN_AGENT_EVENT_KIND_RESERVED_TERMINAL_VERIFY: &str = "reserved_terminal_verify";
 pub const HARN_AGENT_EVENT_KIND_SCOPE_CLASSIFIER_VERDICT: &str = "scope_classifier_verdict";
+pub const HARN_AGENT_EVENT_KIND_SELF_CONSISTENCY_TIE: &str = "self_consistency_tie";
 pub const HARN_AGENT_EVENT_KIND_SESSION_CLOSED: &str = "session_closed";
 pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str = "structural_validator_decision";
 pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision";
@@ -747,6 +767,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "boundary_failure",
     "budget_circuit_breaker",
     "budget_exhausted",
+    "code_librarian_query_nl_fallback",
     "composition_child_call",
     "composition_child_result",
     "composition_error",
@@ -756,6 +777,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "control_outcome",
     "daemon_watchdog_tripped",
     "feedback_injected",
+    "final_wrapup",
     "host_attachment",
     "host_tool_result",
     "input_guardrail_verdict",
@@ -767,9 +789,12 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "mcp_auth_required",
     "mcp_catalog_changed",
     "mcp_notification",
+    "pack_thinking_stripped",
     "progress_reported",
+    "require_successful_tools_violation",
     "reserved_terminal_verify",
     "scope_classifier_verdict",
+    "self_consistency_tie",
     "session_closed",
     "structural_validator_decision",
     "step_judge_decision",

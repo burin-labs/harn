@@ -9,6 +9,133 @@
 
 use harn_vm::agent_events::AgentEvent;
 
+pub(super) fn missing_tool_call_verdict(event: &AgentEvent) -> serde_json::Value {
+    let AgentEvent::MissingToolCallVerdict {
+        iteration,
+        action,
+        original_action,
+        tool_name,
+        confidence,
+        confidence_threshold,
+        evidence,
+        language,
+        classifier_kind,
+        model,
+        error,
+        ..
+    } = event
+    else {
+        return serde_json::json!({});
+    };
+    serde_json::json!({
+        "iteration": iteration,
+        "action": action,
+        "originalAction": original_action,
+        "toolName": tool_name,
+        "confidence": confidence,
+        "confidenceThreshold": confidence_threshold,
+        "evidence": evidence,
+        "language": language,
+        "classifierKind": classifier_kind,
+        "model": model,
+        "error": error,
+    })
+}
+
+pub(super) fn documented_stdlib_event(
+    event: &AgentEvent,
+) -> (&'static str, &str, serde_json::Value) {
+    match event {
+        AgentEvent::RequireSuccessfulToolsViolation {
+            session_id,
+            kind,
+            source,
+            actor,
+            run_id,
+            redacted_summary,
+            recurrence_hints,
+            metadata,
+        } => (
+            "require_successful_tools_violation",
+            session_id,
+            serde_json::json!({
+                "violationKind": kind,
+                "source": source,
+                "actor": actor,
+                "runId": run_id,
+                "redactedSummary": redacted_summary,
+                "recurrenceHints": recurrence_hints,
+                "metadata": metadata,
+            }),
+        ),
+        AgentEvent::FinalWrapup {
+            session_id,
+            final_status,
+            stop_reason,
+            iteration,
+            host_directive,
+            terminal_kind,
+        } => (
+            "final_wrapup",
+            session_id,
+            serde_json::json!({
+                "finalStatus": final_status,
+                "stopReason": stop_reason,
+                "iteration": iteration,
+                "hostDirective": host_directive,
+                "terminalKind": terminal_kind,
+            }),
+        ),
+        AgentEvent::PackThinkingStripped {
+            session_id,
+            model,
+            requested,
+            reason,
+        } => (
+            "pack_thinking_stripped",
+            session_id,
+            serde_json::json!({
+                "model": model,
+                "requested": requested,
+                "reason": reason,
+            }),
+        ),
+        AgentEvent::SelfConsistencyTie {
+            session_id,
+            answer,
+            total,
+            distribution,
+        } => (
+            "self_consistency_tie",
+            session_id,
+            serde_json::json!({
+                "answer": answer,
+                "total": total,
+                "distribution": distribution,
+            }),
+        ),
+        AgentEvent::CodeLibrarianQueryNlFallback {
+            session_id,
+            attempted_cypher,
+            mcts_depth,
+            mcts_expansions,
+            result_count,
+            text,
+        } => (
+            "code_librarian_query_nl_fallback",
+            session_id,
+            serde_json::json!({
+                "attemptedCypher": attempted_cypher,
+                "mctsDepth": mcts_depth,
+                "mctsExpansions": mcts_expansions,
+                "resultCount": result_count,
+                "text": text,
+            }),
+        ),
+        _ => unreachable!("documented_stdlib_event called for unrelated event"),
+    }
+}
+
 /// The loud-boundary funnel (harn#5142). A client that renders this can tell
 /// "the model produced nothing" from "the harness dropped what the model
 /// produced" — the distinction the whole class of bug turned on. `owner`

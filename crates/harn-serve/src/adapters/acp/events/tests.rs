@@ -20,7 +20,7 @@ use super::super::schema::{
 };
 use super::test_support::{self, update_harn_meta};
 use super::{AcpAgentEventSink, AcpOutput};
-
+mod registration_fixtures;
 pub(super) async fn collect_notifications(events: Vec<AgentEvent>) -> Vec<serde_json::Value> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
@@ -374,7 +374,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
     failed_error.error = Some("workspace writes require approval".to_string());
     failed_error.duration_ms = Some(3);
 
-    vec![
+    let mut events = vec![
         AgentEvent::IterationStart {
             session_id: "session-1".to_string(),
             iteration: 0,
@@ -657,13 +657,13 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             }),
             receipt: Some(fixture_tool_call_receipt()),
         },
-    ]
+    ];
+    drop(events.splice(14..14, registration_fixtures::events()));
+    events
 }
 
-/// Harn events without a canonical ACP slot ride on `_harn/agentEvent`.
-/// The fixture pins each kind's wire shape so field-name or payload drift fails
-/// at build time. Every kind must also appear in `HARN_AGENT_EVENT_KINDS`, keeping
-/// the capability advertisement honest.
+/// Pins the wire shape and advertised vocabulary for Harn events that ride on
+/// `_harn/agentEvent` because ACP has no canonical slot.
 #[tokio::test(flavor = "current_thread")]
 async fn agent_event_ext_notification_fixtures_are_pinned() {
     let actual = collect_notifications(agent_event_ext_fixture_events()).await;

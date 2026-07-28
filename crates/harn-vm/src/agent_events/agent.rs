@@ -375,6 +375,59 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// The loop reached a nominal terminal state without successfully calling
+    /// every tool required by policy. This is deliberately distinct from a
+    /// provider/tool execution failure: the run completed, but violated its
+    /// declared actuation contract.
+    RequireSuccessfulToolsViolation {
+        session_id: String,
+        kind: String,
+        source: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+        redacted_summary: String,
+        recurrence_hints: Vec<String>,
+        metadata: serde_json::Value,
+    },
+    /// The loop recorded the extra, tools-disabled terminal answer produced by
+    /// its final-wrap-up turn.
+    FinalWrapup {
+        session_id: String,
+        final_status: String,
+        stop_reason: String,
+        iteration: usize,
+        host_directive: bool,
+        terminal_kind: String,
+    },
+    /// `llm::pack_for` removed an unsupported manual thinking policy while
+    /// lowering options for an adaptive-thinking model.
+    PackThinkingStripped {
+        session_id: String,
+        model: String,
+        requested: String,
+        reason: String,
+    },
+    /// `llm::self_consistency` resolved an equal top vote by its documented
+    /// deterministic lowest-sample-index rule.
+    SelfConsistencyTie {
+        session_id: String,
+        answer: String,
+        total: usize,
+        distribution: serde_json::Value,
+    },
+    /// The code librarian could not satisfy a natural-language query through
+    /// its compiled Cypher path and fell back to bounded graph search.
+    CodeLibrarianQueryNlFallback {
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attempted_cypher: Option<String>,
+        mcts_depth: usize,
+        mcts_expansions: usize,
+        result_count: usize,
+        text: String,
+    },
     TypedCheckpoint {
         session_id: String,
         checkpoint: serde_json::Value,
@@ -995,6 +1048,11 @@ impl AgentEvent {
             | Self::ScopeClassifierVerdict { session_id, .. }
             | Self::InputGuardrailVerdict { session_id, .. }
             | Self::MissingToolCallVerdict { session_id, .. }
+            | Self::RequireSuccessfulToolsViolation { session_id, .. }
+            | Self::FinalWrapup { session_id, .. }
+            | Self::PackThinkingStripped { session_id, .. }
+            | Self::SelfConsistencyTie { session_id, .. }
+            | Self::CodeLibrarianQueryNlFallback { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::HostToolResult { session_id, .. }
