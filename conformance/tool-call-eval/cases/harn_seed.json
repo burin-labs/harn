@@ -271,5 +271,25 @@
     "expected": {"kind": "exact", "name": "inspect", "args": {"what": "release"}},
     "source": "harn:conformance/tests/agents/agent_preset_audit_summary.harn",
     "tags": ["harn_seed", "audit"]
+  },
+  {
+    "id": "serving_concurrency_probe",
+    "prompt": "Echo the adapter serving probe token 'adapter-bound' exactly once.",
+    "tools": [
+      {
+        "name": "echo",
+        "description": "Echo a short probe token.",
+        "parameters": {
+          "msg": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "echo",
+      "args": {"msg": "adapter-bound"}
+    },
+    "source": "harn:promotion:serving_concurrency_probe",
+    "tags": ["harn_seed", "serving", "concurrency", "serving_concurrency_probe"]
   }
 ]

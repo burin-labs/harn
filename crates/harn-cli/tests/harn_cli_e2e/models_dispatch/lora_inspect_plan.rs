@@ -862,8 +862,27 @@ fn models_lora_plan_json_shape_is_stable() {
     );
     let concurrency_probe = probe_command_templates
         .iter()
-        .find(|template| template["case_id"] == "serving_concurrency_probe")
+        .find(|template| {
+            template["case_id"] == "serving_concurrency_probe"
+                && template["route_role"] == "adapter"
+        })
         .expect("serving concurrency probe command template");
+    let concurrency_command = concurrency_probe["command"]
+        .as_array()
+        .expect("serving concurrency argv");
+    for (flag, value) in [
+        ("--filter", "serving_concurrency_probe"),
+        ("--concurrency", "5"),
+        ("--serving-route-role", "adapter"),
+        ("--serving-adapter-sha256", "auto"),
+    ] {
+        assert!(
+            concurrency_command
+                .windows(2)
+                .any(|pair| pair[0] == flag && pair[1] == value),
+            "missing {flag} {value} in {concurrency_command:?}"
+        );
+    }
     assert!(
         concurrency_probe["notes"]
             .as_array()

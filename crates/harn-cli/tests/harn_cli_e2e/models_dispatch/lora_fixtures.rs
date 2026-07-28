@@ -165,13 +165,50 @@ pub(super) fn write_lora_probe_summary_with_trials(
             })
         })
         .collect::<Vec<_>>();
-    let summary = serde_json::json!({
+    let mut summary = serde_json::json!({
         "total_cases": trials,
         "passed_cases": if passed { trials } else { 0 },
         "pass_rate": if passed { 1.0 } else { 0.0 },
         "total_cost_usd": 0.01,
         "cases": cases
     });
+    if case_id == "serving_concurrency_probe" {
+        let base_route = root
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .is_some_and(|name| name.starts_with("BASE_"));
+        let route_role = if base_route { "base" } else { "adapter" };
+        let requested_model = if base_route {
+            "gemma-4-e4b-it"
+        } else {
+            "adapter"
+        };
+        summary["serving_probe"] = serde_json::json!({
+            "schema_version": 1,
+            "route_role": route_role,
+            "requested_provider": "vllm",
+            "requested_model": requested_model,
+            "observed_models": vec![requested_model; trials],
+            "adapter": if base_route {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!({
+                    "id": requested_model,
+                    "path": "/fixtures/adapter",
+                    "sha256": format!("sha256:{}", "a".repeat(64))
+                })
+            },
+            "tool_format": "json",
+            "request_ids": (0..trials).map(|index| format!("request-{index}")).collect::<Vec<_>>(),
+            "concurrency_count": trials,
+            "usage_known": false,
+            "cost_known": true,
+            "parser_contract_passed": true,
+            "route_identity_established": true,
+            "adapter_binding_established": !base_route,
+            "errors": []
+        });
+    }
     fs::write(
         case_dir.join("summary.json"),
         serde_json::to_string_pretty(&summary).expect("summary JSON"),

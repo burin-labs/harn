@@ -257,6 +257,30 @@ pub struct EvalToolCallsArgs {
     /// Stop after N selected cases, useful for smoke runs.
     #[arg(long = "max-cases")]
     pub max_cases: Option<usize>,
+    /// Number of concurrent trials to run for each selected case.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=64))]
+    pub concurrency: u16,
+    /// Route role for a serving-concurrency receipt.
+    #[arg(long = "serving-route-role", value_parser = ["adapter", "base"])]
+    pub serving_route_role: Option<String>,
+    /// Adapter identity recorded by an adapter-loaded serving probe.
+    #[arg(
+        long = "serving-adapter-id",
+        required_if_eq("serving_route_role", "adapter")
+    )]
+    pub serving_adapter_id: Option<String>,
+    /// Adapter artifact path recorded by an adapter-loaded serving probe.
+    #[arg(
+        long = "serving-adapter-path",
+        required_if_eq("serving_route_role", "adapter")
+    )]
+    pub serving_adapter_path: Option<PathBuf>,
+    /// Adapter artifact digest, or `auto` to compute it from the path.
+    #[arg(
+        long = "serving-adapter-sha256",
+        required_if_eq("serving_route_role", "adapter")
+    )]
+    pub serving_adapter_sha256: Option<String>,
     /// Treat missing credentials as an immediate preflight error.
     #[arg(long = "fail-on-unauthorized")]
     pub fail_on_unauthorized: bool,

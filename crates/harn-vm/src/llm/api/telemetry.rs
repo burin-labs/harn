@@ -98,6 +98,11 @@ pub struct ProviderTelemetry {
     /// `LlmResult::model` when an alias / digest is rewritten upstream.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_loaded_model: Option<String>,
+    /// Model identity reported on the provider response. This is kept
+    /// separate from the requested `LlmResult::model` so adapter and routing
+    /// probes can fail closed when a server silently falls back.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_model: Option<String>,
     /// Total resident bytes for the loaded model (Ollama `/api/ps.size`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_memory_bytes: Option<u64>,
@@ -141,6 +146,7 @@ impl ProviderTelemetry {
             client_wall_ms,
             runtime_context_length,
             runtime_loaded_model,
+            response_model,
             runtime_memory_bytes,
             runtime_memory_vram_bytes,
             runtime_keep_alive_until,
@@ -157,6 +163,7 @@ impl ProviderTelemetry {
             && client_wall_ms.is_none()
             && runtime_context_length.is_none()
             && runtime_loaded_model.is_none()
+            && response_model.is_none()
             && runtime_memory_bytes.is_none()
             && runtime_memory_vram_bytes.is_none()
             && runtime_keep_alive_until.is_none()
@@ -276,6 +283,13 @@ impl ProviderTelemetry {
     /// Preserve a non-empty top-level `provider_metadata` object. OpenAI-style
     /// gateways put it on both non-streaming responses and the final SSE frame.
     pub fn capture_provider_metadata(&mut self, response: &serde_json::Value) {
+        if let Some(model) = response
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            self.response_model = Some(model.to_string());
+        }
         if let Some(metadata) = response
             .get("provider_metadata")
             .filter(|value| !value.is_null())
@@ -335,6 +349,9 @@ impl ProviderTelemetry {
         );
         if let Some(ref model) = self.runtime_loaded_model {
             dict.put_str("runtime_loaded_model", model.as_str());
+        }
+        if let Some(ref model) = self.response_model {
+            dict.put_str("response_model", model.as_str());
         }
         insert_opt_u64(&mut dict, "runtime_memory_bytes", self.runtime_memory_bytes);
         insert_opt_u64(
@@ -603,6 +620,7 @@ mod tests {
     #[test]
     fn gateway_provider_metadata_is_preserved_without_schema_coupling() {
         let response = serde_json::json!({
+            "model": "served-adapter",
             "provider_metadata": {
                 "gateway": {
                     "routing": {
@@ -624,11 +642,16 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("openai")
         );
+        assert_eq!(telemetry.response_model.as_deref(), Some("served-adapter"));
         assert!(!telemetry.is_empty());
         let value = telemetry
             .as_vm_dict()
             .expect("metadata makes telemetry visible");
         let dict = value.as_dict().expect("dict body");
         assert!(dict.get("provider_metadata").is_some());
+        assert_eq!(
+            dict.get("response_model").map(VmValue::display).as_deref(),
+            Some("served-adapter")
+        );
     }
 }

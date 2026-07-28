@@ -738,6 +738,7 @@ pub(super) struct LoraEvaluationRecipeInput<'a> {
     pub(super) base_model: &'a str,
     pub(super) provider: &'a str,
     pub(super) request_model: &'a str,
+    pub(super) adapter_artifact_path: &'a str,
     pub(super) tool_format: &'a str,
     pub(super) eval_dataset: &'a str,
     pub(super) trainer_identity: Option<&'a TrainerIdentityCheck>,
@@ -751,6 +752,7 @@ pub(super) fn lora_evaluation_recipe(input: LoraEvaluationRecipeInput<'_>) -> Ev
         base_model,
         provider,
         request_model,
+        adapter_artifact_path,
         tool_format,
         eval_dataset,
         trainer_identity,
@@ -788,6 +790,7 @@ pub(super) fn lora_evaluation_recipe(input: LoraEvaluationRecipeInput<'_>) -> Ev
         base_model,
         provider,
         request_model,
+        adapter_artifact_path,
         tool_format,
         eval_dataset,
         minimum_trials,
@@ -823,6 +826,7 @@ pub(super) fn refresh_lora_promotion_evidence(
     let base_model = evidence.base_route.model.clone();
     let provider = evidence.base_route.provider.clone();
     let request_model = evidence.adapter_route.model.clone();
+    let adapter_artifact_path = evidence.adapter_artifact_path.clone();
     let tool_format = evidence.adapter_route.tool_format.clone();
     let eval_dataset = evidence.eval_dataset.clone();
     let minimum_trials = evidence.minimum_trials;
@@ -831,6 +835,7 @@ pub(super) fn refresh_lora_promotion_evidence(
         base_model: &base_model,
         provider: &provider,
         request_model: &request_model,
+        adapter_artifact_path: &adapter_artifact_path,
         tool_format: &tool_format,
         eval_dataset: &eval_dataset,
         minimum_trials,
@@ -864,6 +869,7 @@ pub(super) fn lora_promotion_evidence_contract(
             model: input.request_model.to_string(),
             tool_format: input.tool_format.to_string(),
         },
+        adapter_artifact_path: input.adapter_artifact_path.to_string(),
         trainer_identity: input.trainer_identity.cloned(),
         trainer_environment: input.trainer_environment.cloned(),
         eval_dataset: input.eval_dataset.to_string(),
@@ -1012,6 +1018,7 @@ pub(super) struct PromotionEvidenceInput<'a> {
     pub(super) base_model: &'a str,
     pub(super) provider: &'a str,
     pub(super) request_model: &'a str,
+    pub(super) adapter_artifact_path: &'a str,
     pub(super) tool_format: &'a str,
     pub(super) eval_dataset: &'a str,
     pub(super) minimum_trials: u64,

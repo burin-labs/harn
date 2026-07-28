@@ -322,6 +322,7 @@ pub(super) struct PromotionEvidenceContract {
     pub(super) lora_contract_id: String,
     pub(super) base_route: PromotionRoute,
     pub(super) adapter_route: PromotionRoute,
+    pub(super) adapter_artifact_path: String,
     pub(super) trainer_identity: Option<TrainerIdentityCheck>,
     pub(super) trainer_environment: Option<TrainerEnvironmentCheck>,
     pub(super) eval_dataset: String,
