@@ -103,6 +103,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "io" => "stdlib/stdlib_io.harn",
     "net" => "stdlib/stdlib_net.harn",
     "command" => "stdlib/stdlib_command.harn",
+    "command/results" => "stdlib/command/results.harn",
     "runner_pool" => "stdlib/stdlib_runner_pool.harn",
     "verification_types" => "stdlib/verification_types.harn",
     "verification_core" => "stdlib/verification_core.harn",

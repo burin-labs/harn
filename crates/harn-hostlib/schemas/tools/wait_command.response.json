@@ -5,6 +5,7 @@
   "type": "object",
   "properties": {
     "command_id": { "type": "string" },
+    "cwd": { "type": "string" },
     "status": {
       "type": "string",
       "enum": ["completed", "running", "timed_out", "killed", "blocked", "spawn_failed"]

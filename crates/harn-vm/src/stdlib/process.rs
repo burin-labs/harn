@@ -141,6 +141,20 @@ pub fn execution_root_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Resolve the directory an omitted process `cwd` inherits on the active path.
+///
+/// Sandboxed execution may deliberately choose the first launchable workspace
+/// root when the host process cwd is outside the capability ceiling. Keep that
+/// policy decision in the sandbox owner so process adapters can report the
+/// exact cwd they will pass to the child without reimplementing it.
+pub fn inherited_process_cwd() -> Result<PathBuf, VmError> {
+    if let Some((policy, _profile)) = crate::stdlib::sandbox::active_sandbox_policy() {
+        crate::stdlib::sandbox::policy_process_cwd(&policy)
+    } else {
+        Ok(execution_root_path())
+    }
+}
+
 pub fn project_root_path() -> Option<PathBuf> {
     current_execution_context().and_then(|context| {
         let project_root = context.project_root?;

@@ -1,6 +1,7 @@
 import {
   CommandResult,
   CommandStepReceipt,
+  command_failure_text,
   command_json,
   command_json_step,
   command_result_fail,
@@ -16,7 +17,7 @@ fn json_runner(text) {
 }
 
 fn fail_runner(code, stderr) {
-  return { _spec, _options -> return command_result_fail(code, stderr) }
+  return { _spec, _options -> return command_result_fail(code, stderr, {cwd: "/workspace"}) }
 }
 
 fn no_newline_echo(text) {
@@ -36,6 +37,7 @@ pipeline default() {
     success: true,
     status: "completed",
     exit_code: 0,
+    cwd: "/workspace",
     classification: {kind: "clean"},
     adapter: "mock",
   }
@@ -63,6 +65,9 @@ pipeline default() {
   assert_eq(failed_record.ok, false)
   assert_eq(failed_record.error.category, "command_failed")
   assert_eq(failed_record.step.exit_code, 7)
+  assert_eq(failed_record.error.cwd, "/workspace")
+  assert_eq(failed_record.step.cwd, "/workspace")
+  assert(contains(command_failure_text(failed_record.step), "cwd=/workspace"))
   assert(contains(failed_record.error.message, "denied"))
   const malformed = command_json(["bad-json"], {runner: json_runner("{ nope"), result: "record"})
   assert_eq(malformed.ok, false)

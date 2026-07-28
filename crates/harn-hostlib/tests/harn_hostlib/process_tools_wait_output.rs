@@ -123,6 +123,7 @@ async fn matches_split_literal_and_preserves_offsets() {
     let (controller, _guard) = install_running();
     let started = start_background();
     let handle_id = string(&started, "handle_id");
+    let cwd = string(&started, "cwd");
     controller.append_stdout(b"prefix re");
     tokio::task::yield_now().await;
     controller.append_stdout(b"ady suffix");
@@ -140,6 +141,11 @@ async fn matches_split_literal_and_preserves_offsets() {
     assert_eq!(int(&event, "match_start"), 7);
     assert_eq!(int(&event, "match_end"), 12);
     assert_eq!(int(&event, "next_offset"), 12);
+    let result = event
+        .get("result")
+        .and_then(VmValue::as_dict)
+        .expect("matched event result");
+    assert_eq!(string(result, "cwd"), cwd);
     finish(&controller, &handle_id);
 }
 

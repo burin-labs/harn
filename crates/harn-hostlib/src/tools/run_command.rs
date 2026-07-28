@@ -22,6 +22,7 @@ use harn_vm::VmValue;
 use std::time::Duration;
 
 use crate::error::HostlibError;
+use crate::tools::args::to_agent_path;
 use crate::tools::payload::{
     optional_bool, optional_dict, optional_env_mode, optional_string, optional_string_list,
     optional_string_map, optional_timeout, optional_u64, parse_argv_program, require_dict_arg,
@@ -57,6 +58,14 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
     let audit_id = map
         .and_then(|value| dict_string(value, "audit_id"))
         .unwrap_or_else(|| format!("audit_{command_id}"));
+    let cwd = map
+        .and_then(|value| value.get("request"))
+        .and_then(VmValue::as_dict)
+        .and_then(|request| dict_string(request, "cwd"))
+        .and_then(|requested| proc::parse_cwd(NAME, Some(&requested)).ok().flatten())
+        .or_else(|| proc::resolve_effective_cwd(NAME, None).ok())
+        .map(to_agent_path)
+        .unwrap_or_default();
 
     let mut sandbox = harn_vm::value::DictMap::new();
     sandbox.put_str("kind", proc::sandbox_kind());
@@ -67,6 +76,7 @@ pub(crate) fn policy_blocked_response(response: VmValue) -> VmValue {
 
     let mut builder = ResponseBuilder::new()
         .str("command_id", command_id)
+        .str("cwd", cwd)
         .str("status", status)
         .nil("pid")
         .nil("process_group_id")
@@ -291,6 +301,7 @@ fn initial_background_snapshot(
         info.pid,
         info.process_group_id,
         info.started_at.clone(),
+        &info.cwd,
         info.command_display.clone(),
         info.snapshot_binding.as_ref(),
     ) {

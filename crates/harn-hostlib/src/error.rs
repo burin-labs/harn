@@ -65,6 +65,11 @@ pub enum HostlibError {
         kind: &'static str,
         /// Human-readable OS error.
         message: String,
+        /// Canonical caller-selected directory, absent when the command
+        /// inherited its directory from the active execution context.
+        requested_cwd: Option<String>,
+        /// Canonical directory in which the spawn was attempted.
+        cwd: String,
     },
 
     /// A path the builtin resolved fell outside the session's workspace
@@ -154,6 +159,12 @@ impl From<HostlibError> for VmError {
         };
         let builtin = err.builtin();
         let is_process_spawn = matches!(&err, HostlibError::ProcessSpawn { .. });
+        let process_cwd = match &err {
+            HostlibError::ProcessSpawn {
+                requested_cwd, cwd, ..
+            } => Some((requested_cwd.clone(), cwd.clone())),
+            _ => None,
+        };
         let message = err.to_string();
 
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
@@ -164,6 +175,15 @@ impl From<HostlibError> for VmError {
             dict.put_str("error", "io_error");
             dict.put_str("operation", "process_spawn");
             dict.put_str("category", "environment");
+        }
+        if let Some((requested_cwd, cwd)) = process_cwd {
+            match requested_cwd {
+                Some(requested_cwd) => dict.put_str("requested_cwd", requested_cwd),
+                None => {
+                    dict.insert(harn_vm::value::intern_key("requested_cwd"), VmValue::Nil);
+                }
+            }
+            dict.put_str("cwd", cwd);
         }
         if let Some(path) = path {
             dict.put_str("path", path);
@@ -185,6 +205,8 @@ mod tests {
             builtin: "hostlib_tools_run_command",
             kind: "not_found",
             message: "No such file or directory".to_string(),
+            requested_cwd: Some("/workspace/project".to_string()),
+            cwd: "/workspace/project".to_string(),
         };
         let VmError::Thrown(VmValue::Dict(fields)) = VmError::from(error) else {
             panic!("expected a structured thrown value");
@@ -194,6 +216,11 @@ mod tests {
         assert_eq!(field("kind").as_deref(), Some("not_found"));
         assert_eq!(field("operation").as_deref(), Some("process_spawn"));
         assert_eq!(field("category").as_deref(), Some("environment"));
+        assert_eq!(
+            field("requested_cwd").as_deref(),
+            Some("/workspace/project")
+        );
+        assert_eq!(field("cwd").as_deref(), Some("/workspace/project"));
         assert_eq!(
             field("builtin").as_deref(),
             Some("hostlib_tools_run_command")

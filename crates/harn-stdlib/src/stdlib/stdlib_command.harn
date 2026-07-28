@@ -1,17 +1,7 @@
 import { prompt_cap } from "std/agent/truncation"
+pub import { CommandResult, command_result_fail, command_result_ok } from "std/command/results"
 import { write_stderr, write_stdout } from "std/io"
 import { shell_quote } from "std/runtime"
-
-/** Common fields guaranteed by normalized command results. */
-pub type CommandResult = {
-  success: bool,
-  ok: bool,
-  status: string,
-  exit_code: int?,
-  stdout: string,
-  stderr: string,
-  ...rest,
-}
 
 /** One output-match, exit, or timeout event for a background command. */
 pub type CommandOutputMatch = {
@@ -34,6 +24,7 @@ pub type CommandStepReceipt = {
   success: bool,
   status: string,
   exit_code?: int?,
+  cwd: string,
   classification?: unknown,
   recovery_hint?: string,
 }
@@ -197,6 +188,7 @@ fn __command_normalize_result(result) -> CommandResult {
     success: success,
     status: status,
     exit_code: raw?.exit_code,
+    cwd: raw?.cwd ?? "",
     timed_out: raw?.timed_out ?? (raw?.status == "timed_out"),
     command_id: raw?.command_id,
     handle_id: raw?.handle_id,
@@ -640,7 +632,7 @@ fn __command_step_from_result(name, spec, result, options, attempts) {
     name: name,
     argv: __command_spec_field(spec, "argv"),
     command: __command_spec_field(spec, "command") ?? normalized?.command,
-    cwd: __command_spec_field(spec, "cwd"),
+    cwd: normalized.cwd,
     success: normalized.success,
     ok: normalized.ok,
     status: normalized.status,
@@ -672,6 +664,7 @@ fn __command_result_summary(step) {
     ok: step.ok,
     status: step.status,
     exit_code: step.exit_code,
+    cwd: step.cwd,
     timed_out: step.timed_out,
     command_id: step.command_id,
     handle_id: step.handle_id,
@@ -1063,7 +1056,11 @@ pub fn command_failure_text(result, options = nil) -> string {
   const max_stdout = opts?.max_stdout_chars ?? 8000
   const max_stderr = opts?.max_stderr_chars ?? 4000
   const {status = "failed", exit_code = result?.status} = result ?? {}
-  let lines = ["status=" + to_string(status) + " exit=" + to_string(exit_code)]
+  let heading = "status=" + to_string(status) + " exit=" + to_string(exit_code)
+  if trim(result?.cwd ?? "") != "" {
+    heading = heading + " cwd=" + result.cwd
+  }
+  let lines = [heading]
   if trim(result?.stdout ?? "") != "" {
     lines = lines + ["stdout:", prompt_cap(result.stdout, max_stdout, "stdout")]
   }
@@ -1109,6 +1106,7 @@ fn __command_json_error(category, label, message, step, extra = nil) {
     message: message,
     status: step?.status,
     exit_code: step?.exit_code,
+    cwd: step?.cwd,
     stderr: step?.stderr,
     tail: step?.failure_tail ?? step?.tail,
   }
@@ -1458,43 +1456,5 @@ pub fn command_try(attempts, options = nil) -> dict {
     fallback_total: total,
     status: last?.status ?? "no_attempts",
     error: last?.error ?? {category: "no_attempts", message: "command_try: no attempts supplied"},
-  }
-}
-
-/**
- * Build a normalized successful command-result dict for tests and harness adapters.
- *
- * @effects: []
- * @errors: []
- */
-pub fn command_result_ok(stdout: string = "", extra = nil) -> CommandResult {
-  const base = extra ?? {}
-  return base
-    + {
-    success: true,
-    ok: true,
-    status: "completed",
-    exit_code: 0,
-    stdout: stdout,
-    stderr: "",
-  }
-}
-
-/**
- * Build a normalized failed command-result dict for tests and harness adapters.
- *
- * @effects: []
- * @errors: []
- */
-pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> CommandResult {
-  const base = extra ?? {}
-  return base
-    + {
-    success: false,
-    ok: false,
-    status: "failed",
-    exit_code: exit_code,
-    stdout: base?.stdout ?? "",
-    stderr: stderr,
   }
 }

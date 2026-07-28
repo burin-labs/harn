@@ -24,7 +24,10 @@ pipeline default() {
   __io_println(command.error)
   __io_println(command.kind)
   __io_println(command.category)
+  require command.requested_cwd == nil, "omitted cwd remains structurally distinct"
+  require trim(command.cwd) != "", "spawn error carries effective cwd"
   const nonzero = command_run(nonzero_command())
   __io_println(nonzero.exit_code)
   __io_println(nonzero.success)
+  require trim(nonzero.cwd) != "", "nonzero command result carries effective cwd"
 }
