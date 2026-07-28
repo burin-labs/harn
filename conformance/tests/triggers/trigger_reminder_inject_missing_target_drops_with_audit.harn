@@ -18,7 +18,7 @@ pipeline test(task) {
     {
       id: "trigger-reminder-inject-missing-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: ReminderInject(
         {target: "does-not-exist-" + unique, body: "Should never be injected."},
       ),
@@ -35,7 +35,7 @@ pipeline test(task) {
   )
   const dispatch = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
   __io_println(dispatch.status == "dispatched")
   __io_println(dispatch.result?.status == "dropped")

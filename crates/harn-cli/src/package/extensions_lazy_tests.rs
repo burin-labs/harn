@@ -17,11 +17,11 @@ handlers = "lib.harn"
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 tier = "suggest"
 match = {{ events = ["issues.opened"] }}
 handler = "{handler}"
-secrets = {{ signing_secret = "github/webhook-secret" }}
+secrets = {{ signing_secret = "webhook/signing-secret" }}
 "#,
     );
     write_trigger_project(root, &manifest, Some(module_source))
@@ -63,12 +63,12 @@ handlers = "lib.harn"
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 tier = "suggest"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 handler = "handlers::on_new_issue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#;
     write_trigger_project(root, manifest, Some(module_source))
 }
@@ -87,21 +87,21 @@ handlers = "lib.harn"
 [[triggers]]
 id = "first-local-handler"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 tier = "suggest"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 
 [[triggers]]
 id = "second-invalid-predicate"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 tier = "suggest"
 match = { events = ["issues.edited"] }
 when = "handlers::should_handle"
 handler = "worker://issues"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#;
     write_trigger_project(root, manifest, Some(module_source))
 }

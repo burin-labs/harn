@@ -26,7 +26,7 @@ pipeline test(task) {
         {
           id: "llm-predicate-budget-" + unique,
           kind: "issue.opened",
-          provider: "github",
+          provider: "webhook",
           handler: handler,
           when: classify,
           when_budget: {max_cost_usd: 0.001, tokens_max: 500, timeout: "5s"},
@@ -42,7 +42,7 @@ pipeline test(task) {
       )
       const fire: DispatchHandle = trigger_fire(
         handle,
-        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
+        {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-budget-" + unique}},
       )
       const budget_events = trigger_inspect_lifecycle("predicate.budget_exceeded").filter(
         { entry -> entry?.headers?.trigger_id == handle.id },

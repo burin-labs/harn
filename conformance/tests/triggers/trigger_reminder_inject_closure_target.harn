@@ -20,7 +20,7 @@ pipeline test(task) {
     {
       id: "trigger-reminder-inject-closure-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: ReminderInject(
         {
           target: { event ->
@@ -46,7 +46,7 @@ pipeline test(task) {
   const to_acme = trigger_fire(
     handle,
     {
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       tenant_id: "acme",
       headers: {x_delivery: "evt-acme-" + unique},
@@ -55,7 +55,7 @@ pipeline test(task) {
   const to_widget = trigger_fire(
     handle,
     {
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       tenant_id: "widget",
       headers: {x_delivery: "evt-widget-" + unique},

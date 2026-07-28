@@ -1785,11 +1785,11 @@ handlers = "lib.harn"
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
 budget = { daily_cost_usd = 5.0, max_concurrent = 10 }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         )
         .expect("write manifest");
@@ -1812,7 +1812,7 @@ pub fn on_new_issue(event: TriggerEvent) {
             .find(|check| check.label == "trigger:github-new-issue")
             .expect("trigger check");
         assert_eq!(trigger.status, DoctorStatus::Ok);
-        assert!(trigger.detail.contains("webhook via github"));
+        assert!(trigger.detail.contains("webhook via webhook"));
         assert!(trigger.detail.contains("handler=local"));
         assert!(trigger.detail.contains("state=active"));
         assert!(trigger.detail.contains("version=1"));

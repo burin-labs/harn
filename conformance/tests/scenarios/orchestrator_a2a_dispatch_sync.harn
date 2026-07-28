@@ -37,7 +37,7 @@ pipeline test(task) {
     {
       id: trigger_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: "a2a://127.0.0.1:" + port + "/triage",
       allow_cleartext: true,
       when: nil,
@@ -56,7 +56,7 @@ pipeline test(task) {
     handle,
     {
       id: "evt-" + unique,
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       trace_id: trace_id,
       headers: {x_delivery: "evt-" + unique},

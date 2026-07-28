@@ -6,9 +6,8 @@
 //
 // These structs are generated from canonical Harn `type` declarations so a
 // connector's normalized-event JSON matches the Rust struct by construction.
-// This file currently coexists with the hand-written `GitHubEventPayload`
-// family in `payloads.rs`; switching the trigger boundary to produce these
-// typed payloads is a separate follow-up.
+// Runtime ingress preserves package-owned ExtensionProviderPayload values;
+// these native types are tooling projections of the Harn schema.
 
 use std::collections::BTreeMap;
 

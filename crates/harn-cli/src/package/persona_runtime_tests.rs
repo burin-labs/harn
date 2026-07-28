@@ -86,11 +86,11 @@ fn activated_persona_predicate_extensions(root: &Path) -> (PathBuf, RuntimeExten
 [[triggers]]
 id = "review-events"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["pull_request.opened"] }
 when = "workflow::should_handle"
 handler = "persona://reviewer"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
     );
     update_installed_persona_workflow(root, &anchor, PREDICATE_WORKFLOW);
@@ -321,14 +321,14 @@ filter = "payload.draft == false"
 [[triggers]]
 id = "observer-events"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issue_opened"] }
 handler = "persona://observer"
 
 [[triggers]]
 id = "unrelated-worker"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["pr_opened"] }
 handler = "worker://review-queue"
 "#,
@@ -507,7 +507,7 @@ auditors = { path = "vendor/auditors" }
 [[triggers]]
 id = "shared-event"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["pr_opened"] }
 handler = "persona://reviewer"
 "#,
@@ -876,10 +876,10 @@ name = "consumer"
 [[triggers]]
 id = "installed-reviewer-pr-opened"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["pr_opened"] }
 handler = "persona://agents/reviewer"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         false,
     );

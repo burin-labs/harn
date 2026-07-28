@@ -75,7 +75,7 @@ pipeline test(task) {
     {
       id: "graph-local-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: local_handler,
       when: pass_when,
       retry: nil,
@@ -92,7 +92,7 @@ pipeline test(task) {
     {
       id: "graph-worker-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: "worker://graph-" + unique,
       when: nil,
       retry: nil,
@@ -109,7 +109,7 @@ pipeline test(task) {
     {
       id: "graph-retry-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: failing_handler,
       when: nil,
       retry: {max: 2, backoff: "immediate"},
@@ -126,7 +126,7 @@ pipeline test(task) {
     {
       id: "graph-a2a-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: "a2a://127.0.0.1:" + port + "/triage",
       allow_cleartext: true,
       when: nil,
@@ -143,7 +143,7 @@ pipeline test(task) {
   const local_fire: DispatchHandle = trigger_fire(
     local_handle,
     {
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       trace_id: local_trace,
       headers: {x_delivery: "evt-local-" + unique},
@@ -152,7 +152,7 @@ pipeline test(task) {
   const worker_fire: DispatchHandle = trigger_fire(
     worker_handle,
     {
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       trace_id: worker_trace,
       headers: {x_delivery: "evt-worker-" + unique},
@@ -161,7 +161,7 @@ pipeline test(task) {
   const retry_fire: DispatchHandle = trigger_fire(
     retry_handle,
     {
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       trace_id: retry_trace,
       headers: {x_delivery: "evt-retry-" + unique},
@@ -170,7 +170,7 @@ pipeline test(task) {
   const a2a_fire: DispatchHandle = trigger_fire(
     a2a_handle,
     {
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       trace_id: a2a_trace,
       headers: {x_delivery: "evt-a2a-" + unique},

@@ -67,12 +67,11 @@ type GitForgePullRequestEvent = {
 
 // GITHUB. The provider-schema generator is exercised end-to-end for GitHub,
 // alongside the forge-agnostic records above. Keep the GitHub records a
-// faithful mirror of the `GitHubEventPayload` family in
-// `crates/harn-vm/src/triggers/event/payloads.rs`.
+// stable native tooling projection of the package-owned payload schema.
 /**
  * Stable common block shared by every GitHub normalized event. The generator
  * recognizes a field named `common` whose type is a record and emits it as a
- * `#[serde(flatten)]` field, matching the hand-written `GitHubEventCommon`.
+ * `#[serde(flatten)]` field in the generated Rust projection.
  */
 type GitHubEventCommon = {
   event: string,

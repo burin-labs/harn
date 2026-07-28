@@ -70,23 +70,6 @@ pub(super) async fn normalize_request(
 
     let signature_status = match context.route.signature_mode {
         SignatureMode::Unsigned => harn_vm::SignatureStatus::Unsigned,
-        SignatureMode::GitHub => {
-            let secret =
-                load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
-            harn_vm::connectors::hmac::verify_hmac_signed(
-                context.event_log.as_ref(),
-                &provider,
-                harn_vm::connectors::HmacSignatureStyle::github(),
-                body,
-                normalized_headers,
-                &secret,
-                None,
-                received_at,
-            )
-            .await
-            .map_err(HttpError::from_connector)?;
-            harn_vm::SignatureStatus::Verified
-        }
         SignatureMode::Standard => {
             let secret =
                 load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
@@ -104,48 +87,13 @@ pub(super) async fn normalize_request(
             .map_err(HttpError::from_connector)?;
             harn_vm::SignatureStatus::Verified
         }
-        SignatureMode::Slack => {
-            let secret =
-                load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
-            harn_vm::connectors::hmac::verify_hmac_signed(
-                context.event_log.as_ref(),
-                &provider,
-                harn_vm::connectors::HmacSignatureStyle::slack(),
-                body,
-                normalized_headers,
-                &secret,
-                Some(time::Duration::minutes(5)),
-                received_at,
-            )
-            .await
-            .map_err(HttpError::from_connector)?;
-            harn_vm::SignatureStatus::Verified
-        }
-        SignatureMode::Notion => {
-            let secret =
-                load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
-            harn_vm::connectors::hmac::verify_hmac_signed(
-                context.event_log.as_ref(),
-                &provider,
-                harn_vm::connectors::HmacSignatureStyle::notion(),
-                body,
-                normalized_headers,
-                &secret,
-                None,
-                received_at,
-            )
-            .await
-            .map_err(HttpError::from_connector)?;
-            harn_vm::SignatureStatus::Verified
-        }
     };
 
-    let provider_kind = provider_event_kind(&provider, normalized_headers, &normalized_body);
-    let trigger_kind = trigger_event_kind(&provider, normalized_headers, &normalized_body);
-    let dedupe_key = dedupe_key(&provider, normalized_headers, &normalized_body, body);
+    let trigger_kind = webhook_event_kind(&normalized_body);
+    let dedupe_key = webhook_dedupe_key(normalized_headers, &normalized_body, body);
     let provider_payload = harn_vm::ProviderPayload::normalize(
         &provider,
-        &provider_kind,
+        &trigger_kind,
         normalized_headers,
         normalized_body,
     )
@@ -202,23 +150,6 @@ fn connector_normalize_result_to_request(
     match result {
         harn_vm::ConnectorNormalizeResult::Event(event) => {
             let mut event = *event;
-            if let Some(challenge) = slack_url_verification_challenge(&event) {
-                return Ok(NormalizedRequest::Immediate {
-                    response: (
-                        StatusCode::OK,
-                        [("content-type", "text/plain; charset=utf-8")],
-                        challenge,
-                    )
-                        .into_response(),
-                    events: Vec::new(),
-                });
-            }
-            if let Some(response) = notion_subscription_verification_response(&event) {
-                return Ok(NormalizedRequest::Immediate {
-                    response,
-                    events: Vec::new(),
-                });
-            }
             event.trace_id = trace_id;
             apply_tenant_scope(vec![event], tenant_scope).map(NormalizedRequest::Events)
         }
@@ -601,152 +532,43 @@ fn normalize_body(body: &[u8], headers: &BTreeMap<String, String>) -> JsonValue 
     })
 }
 
-fn provider_event_kind(
-    provider: &harn_vm::ProviderId,
-    headers: &BTreeMap<String, String>,
-    body: &JsonValue,
-) -> String {
-    match provider.as_str() {
-        "github" => header_value(headers, "x-github-event")
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "webhook".to_string()),
-        "a2a-push" => "push".to_string(),
-        _ => body
-            .get("type")
-            .and_then(JsonValue::as_str)
-            .or_else(|| body.get("event").and_then(JsonValue::as_str))
-            .unwrap_or("webhook")
-            .to_string(),
-    }
+fn webhook_event_kind(body: &JsonValue) -> String {
+    body.get("type")
+        .and_then(JsonValue::as_str)
+        .or_else(|| body.get("event").and_then(JsonValue::as_str))
+        .unwrap_or("webhook")
+        .to_string()
 }
 
-fn trigger_event_kind(
-    provider: &harn_vm::ProviderId,
-    headers: &BTreeMap<String, String>,
-    body: &JsonValue,
-) -> String {
-    if provider.as_str() == "github" {
-        let event = header_value(headers, "x-github-event").unwrap_or("webhook");
-        if let Some(action) = body.get("action").and_then(JsonValue::as_str) {
-            return format!("{event}.{action}");
-        }
-        return event.to_string();
-    }
-    provider_event_kind(provider, headers, body)
-}
-
-fn dedupe_key(
-    provider: &harn_vm::ProviderId,
+fn webhook_dedupe_key(
     headers: &BTreeMap<String, String>,
     body: &JsonValue,
     raw_body: &[u8],
 ) -> String {
-    match provider.as_str() {
-        "github" => header_value(headers, "x-github-delivery")
-            .map(ToString::to_string)
-            .unwrap_or_else(|| fallback_body_digest(raw_body)),
-        "webhook" => header_value(headers, "webhook-id")
-            .map(ToString::to_string)
-            .or_else(|| {
-                body.get("id")
-                    .and_then(JsonValue::as_str)
-                    .map(ToString::to_string)
-            })
-            .unwrap_or_else(|| fallback_body_digest(raw_body)),
-        _ => header_value(headers, "x-a2a-delivery")
-            .map(ToString::to_string)
-            .unwrap_or_else(|| fallback_body_digest(raw_body)),
-    }
+    header_value(headers, "webhook-id")
+        .map(ToString::to_string)
+        .or_else(|| {
+            body.get("id")
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| fallback_body_digest(raw_body))
 }
 
 fn infer_occurred_at(payload: &harn_vm::ProviderPayload) -> Option<OffsetDateTime> {
-    let harn_vm::ProviderPayload::Known(payload) = payload else {
+    let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Webhook(
+        payload,
+    )) = payload
+    else {
         return None;
     };
-    let raw = match payload {
-        harn_vm::triggers::event::KnownProviderPayload::GitHub(payload) => github_raw(payload),
-        harn_vm::triggers::event::KnownProviderPayload::Slack(payload) => slack_raw(payload),
-        harn_vm::triggers::event::KnownProviderPayload::Webhook(payload) => &payload.raw,
-        harn_vm::triggers::event::KnownProviderPayload::A2aPush(payload) => &payload.raw,
-        _ => return None,
-    };
-    raw.get("timestamp")
+    payload
+        .raw
+        .get("timestamp")
         .and_then(JsonValue::as_str)
         .and_then(|value| {
             OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
         })
-}
-
-fn github_raw(payload: &harn_vm::triggers::event::GitHubEventPayload) -> &JsonValue {
-    match payload {
-        harn_vm::triggers::event::GitHubEventPayload::Issues(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::PullRequest(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::IssueComment(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::PullRequestReview(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::Push(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::WorkflowRun(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::DeploymentStatus(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::CheckRun(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::CheckSuite(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::Status(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::MergeGroup(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::Installation(inner) => &inner.common.raw,
-        harn_vm::triggers::event::GitHubEventPayload::InstallationRepositories(inner) => {
-            &inner.common.raw
-        }
-        harn_vm::triggers::event::GitHubEventPayload::Other(common) => &common.raw,
-    }
-}
-
-fn slack_raw(payload: &harn_vm::triggers::event::SlackEventPayload) -> &JsonValue {
-    match payload {
-        harn_vm::triggers::event::SlackEventPayload::Message(inner) => &inner.common.raw,
-        harn_vm::triggers::event::SlackEventPayload::AppMention(inner) => &inner.common.raw,
-        harn_vm::triggers::event::SlackEventPayload::ReactionAdded(inner) => &inner.common.raw,
-        harn_vm::triggers::event::SlackEventPayload::AppHomeOpened(inner) => &inner.common.raw,
-        harn_vm::triggers::event::SlackEventPayload::AssistantThreadStarted(inner) => {
-            &inner.common.raw
-        }
-        harn_vm::triggers::event::SlackEventPayload::Other(common) => &common.raw,
-    }
-}
-
-fn slack_url_verification_challenge(event: &harn_vm::TriggerEvent) -> Option<String> {
-    let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Slack(
-        payload,
-    )) = &event.provider_payload
-    else {
-        return None;
-    };
-    if event.kind != "url_verification" {
-        return None;
-    }
-    slack_raw(payload)
-        .get("challenge")
-        .and_then(JsonValue::as_str)
-        .map(ToString::to_string)
-}
-
-fn notion_subscription_verification_response(event: &harn_vm::TriggerEvent) -> Option<Response> {
-    let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Notion(
-        payload,
-    )) = &event.provider_payload
-    else {
-        return None;
-    };
-    if event.kind != "subscription.verification" {
-        return None;
-    }
-    Some(
-        (
-            StatusCode::OK,
-            axum::Json(json!({
-                "status": "handshake_captured",
-                "verification_token": payload.verification_token,
-            })),
-        )
-            .into_response(),
-    )
 }
 
 pub(super) fn header_value<'a>(

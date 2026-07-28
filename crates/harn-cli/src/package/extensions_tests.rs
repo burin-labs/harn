@@ -203,7 +203,7 @@ fn trigger_manifest_entries_round_trip_through_toml() {
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 autonomy_tier = "act_with_approval"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
@@ -213,7 +213,7 @@ dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "high"
 budget = { max_cost_usd = 0.001, max_tokens = 500, hourly_cost_usd = 1.0, daily_cost_usd = 5.0, max_concurrent = 10, on_budget_exhausted = "retry_later" }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 filter = "event.kind"
 
 [[triggers]]
@@ -237,7 +237,7 @@ fn trigger_manifest_entries_parse_dlq_alerts() {
 [[triggers]]
 id = "cake-classifier"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 handler = "handlers::classify"
 
 [[triggers.dlq_alerts]]
@@ -267,7 +267,7 @@ fn trigger_manifest_entries_round_trip_flow_control_tables() {
 [[triggers]]
 id = "github-priority"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
 concurrency = { key = "event.headers.tenant", max = 2 }
@@ -276,16 +276,16 @@ rate_limit = { period = "1h", max = 1000 }
 debounce = { key = "event.headers.pr_id", period = "30s" }
 singleton = { key = "event.headers.repo" }
 priority = { key = "event.headers.tier", order = ["gold", "silver", "bronze"] }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 
 [[triggers]]
 id = "github-batch"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
 batch = { key = "event.headers.repo", size = 50, timeout = "30s" }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#;
     let parsed: TriggerTables = toml::from_str(source).expect("trigger tables parse");
     let encoded = toml::to_string(&parsed).expect("trigger tables encode");
@@ -361,7 +361,7 @@ name = "workspace"
 [[triggers]]
 id = "workspace-trigger"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "worker://workspace-queue"
 "#,
@@ -411,7 +411,7 @@ daily_cost_usd = 5.0
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 tier = "suggest"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
@@ -421,7 +421,7 @@ dedupe_key = "event.dedupe_key"
 retry = { max = 7, backoff = "svix", retention_days = 7 }
 priority = "normal"
 budget = { max_cost_usd = 0.002, max_tokens = 250, hourly_cost_usd = 1.0, daily_cost_usd = 5.0, max_autonomous_decisions_per_hour = 25, max_autonomous_decisions_per_day = 100, max_concurrent = 10, on_budget_exhausted = "fail" }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 filter = "event.kind"
 "#,
         Some(
@@ -433,7 +433,7 @@ pub fn on_new_issue(event: TriggerEvent) {
 }
 
 pub fn should_handle(event: TriggerEvent) -> Result<bool, string> {
-  return Result.Ok(event.provider == "github")
+  return Result.Ok(event.provider == "webhook")
 }
 "#,
         ),
@@ -510,7 +510,7 @@ handlers = "lib.harn"
 [[triggers]]
 id = "github-flow-control"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
 concurrency = { key = "event.headers.tenant", max = 2 }
@@ -519,7 +519,7 @@ rate_limit = { period = "1h", max = 1000 }
 debounce = { key = "event.headers.pr_id", period = "30s" }
 singleton = { key = "event.headers.repo" }
 priority = { key = "event.headers.tier", order = ["gold", "silver", "bronze"] }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         Some(
             r#"
@@ -614,11 +614,11 @@ handlers = "lib.harn"
 [[triggers]]
 id = "github-batch"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
 batch = { key = "event.headers.repo", size = 50, timeout = "30s" }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         Some(
             r#"
@@ -755,9 +755,9 @@ handlers = "lib.harn"
 [[triggers]]
 id = "github-new-issue"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 handler = "handlers::on_new_issue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         Some(
             r#"
@@ -830,11 +830,11 @@ async fn collect_manifest_triggers_accepts_a2a_allow_cleartext() {
 [[triggers]]
 id = "local-a2a"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "a2a://127.0.0.1:8787/triage"
 allow_cleartext = true
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -945,10 +945,10 @@ receipts = "required"
 [[triggers]]
 id = "merge-captain-pr-opened"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["pr_opened"] }
 handler = "persona://merge_captain"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -1122,18 +1122,18 @@ async fn collect_manifest_triggers_rejects_duplicate_ids() {
 [[triggers]]
 id = "duplicate"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "worker://queue-a"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 
 [[triggers]]
 id = "duplicate"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.edited"] }
 handler = "worker://queue-b"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -1179,11 +1179,11 @@ async fn collect_manifest_triggers_rejects_non_bool_allow_cleartext() {
 [[triggers]]
 id = "bad-allow-cleartext-type"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "a2a://127.0.0.1:8787/triage"
 allow_cleartext = "yes"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -1211,11 +1211,11 @@ handlers = "lib.harn"
 [[triggers]]
 id = "priority-without-concurrency"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_new_issue"
 priority = { key = "event.headers.tier", order = ["gold", "silver"] }
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         Some(
             r#"
@@ -1243,11 +1243,11 @@ async fn collect_manifest_triggers_rejects_allow_cleartext_on_non_a2a_handler() 
 [[triggers]]
 id = "bad-allow-cleartext-target"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "worker://queue"
 allow_cleartext = true
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -1269,12 +1269,12 @@ async fn collect_manifest_triggers_rejects_unsupported_provider_kind() {
 [[triggers]]
 id = "bad-kind"
 kind = "cron"
-provider = "github"
+provider = "webhook"
 match = { events = ["cron.tick"] }
 handler = "worker://queue"
 schedule = "0 9 * * *"
 timezone = "UTC"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -1296,7 +1296,7 @@ async fn collect_manifest_triggers_rejects_missing_required_provider_secret() {
 [[triggers]]
 id = "missing-secret"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "worker://queue"
 "#,
@@ -1326,10 +1326,10 @@ handlers = "lib.harn"
 [[triggers]]
 id = "missing-handler"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::missing"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         Some(
             r#"
@@ -1407,11 +1407,11 @@ async fn collect_manifest_triggers_rejects_invalid_dedupe_expression() {
 [[triggers]]
 id = "bad-dedupe"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "worker://queue"
 dedupe_key = "["
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -1431,10 +1431,10 @@ async fn collect_manifest_triggers_rejects_zero_retention_days() {
 [[triggers]]
 id = "bad-retention"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "worker://queue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 retry = { retention_days = 0 }
 "#,
         None,
@@ -1458,7 +1458,7 @@ async fn collect_manifest_triggers_rejects_secret_namespace_mismatch() {
 [[triggers]]
 id = "bad-secret"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "worker://queue"
 secrets = { signing_secret = "slack/webhook-secret" }
@@ -1487,11 +1487,11 @@ handlers = "lib.harn"
 [[triggers]]
 id = "bad-when"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 handler = "worker://queue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         Some(
             r#"
@@ -1521,11 +1521,11 @@ async fn collect_manifest_triggers_rejects_when_budget_without_when() {
 [[triggers]]
 id = "bad-when-budget"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 when_budget = { timeout = "5s" }
 handler = "worker://queue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         None,
     );
@@ -1553,12 +1553,12 @@ handlers = "lib.harn"
 [[triggers]]
 id = "bad-when-timeout"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 when = "handlers::should_handle"
 when_budget = { timeout = "soon" }
 handler = "worker://queue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
         Some(
             r#"

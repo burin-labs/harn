@@ -21,7 +21,7 @@ pipeline test(task) {
     {
       id: agent_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       autonomy_tier: "act_auto",
       handler: handle_issue,
       when: nil,
@@ -37,12 +37,12 @@ pipeline test(task) {
   )
   const fired: DispatchHandle = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  const records: list<TrustRecord> = trust_query({agent: agent_id, action: "github.issue.opened"})
+  const records: list<TrustRecord> = trust_query({agent: agent_id, action: "webhook.issue.opened"})
   __io_println(fired.status == "dispatched" && fired.error == nil)
   __io_println(fired.result?.agent == agent_id)
-  __io_println(fired.result?.action == "github.issue.opened")
+  __io_println(fired.result?.action == "webhook.issue.opened")
   __io_println(fired.result?.autonomy_tier == "act_auto")
   __io_println(len(records) == 1)
   __io_println(records[0]?.schema == "opentrustgraph/v0.1")

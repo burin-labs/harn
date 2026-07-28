@@ -1081,7 +1081,7 @@ mod tests {
                 "description": "Classifies Slack follow-up.",
                 "goal": "Classify every incoming message.",
                 "template": "hybrid-classify-then-act",
-                "external": {"provider": "slack", "event": "slack.message"},
+                "external": {"provider": "webhook", "event": "webhook.message"},
             })
             .to_string(),
         )
@@ -1097,17 +1097,17 @@ mod tests {
         .unwrap();
         let triggers = manifest["triggers"].as_array().unwrap();
         assert_eq!(triggers.len(), 1);
-        assert_eq!(triggers[0]["provider"].as_str(), Some("slack"));
+        assert_eq!(triggers[0]["provider"].as_str(), Some("webhook"));
         assert_eq!(triggers[0]["kind"].as_str(), Some("webhook"));
         assert_eq!(
             triggers[0]["match"]["events"][0].as_str(),
-            Some("slack.message")
+            Some("webhook.message")
         );
         assert!(triggers[0].get("schedule").is_none());
         assert!(triggers[0].get("timezone").is_none());
         assert_eq!(
             triggers[0]["secrets"]["signing_secret"].as_str(),
-            Some("slack/signing_secret")
+            Some("webhook/signing_secret")
         );
         assert_eq!(
             triggers[0]["handler"].as_str(),

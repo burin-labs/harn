@@ -2,6 +2,6 @@ pipeline test(task) {
   const result = trigger_test_harness("webhook_dedupe_blocks_duplicates")
   __io_println(result.ok)
   __io_println(len(result.emitted) == 1)
-  __io_println(result.emitted[0].dedupe_key == "delivery-123")
+  __io_println(result.emitted[0].dedupe_key == "msg_p5jXN8AQM9LWM0D4loKWxJek")
   __io_println(result.details.first_appended && !result.details.second_appended)
 }

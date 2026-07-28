@@ -48,8 +48,7 @@ pub(super) async fn run_connect_github(args: &ConnectGithubArgs) -> Result<(), S
     stored.push(metadata_id.to_string());
 
     if let Some(private_key_file) = args.private_key_file.as_ref() {
-        let app_id = args
-            .app_id
+        args.app_id
             .as_ref()
             .ok_or_else(|| "--app-id is required with --private-key-file".to_string())?;
         let private_key = std::fs::read(private_key_file).map_err(|error| {
@@ -58,7 +57,7 @@ pub(super) async fn run_connect_github(args: &ConnectGithubArgs) -> Result<(), S
                 private_key_file.display()
             )
         })?;
-        let key_id = SecretId::new("github", format!("app-{app_id}/private-key"));
+        let key_id = SecretId::new("github", "app-private-key");
         provider
             .put(&key_id, SecretBytes::from(private_key))
             .await

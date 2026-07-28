@@ -90,8 +90,8 @@ connector = {{ harn = "./echo_connector.harn" }}
         );
     }
     assert!(
-        harn_vm::provider_metadata("github").is_some(),
-        "builtin providers survive package loads"
+        harn_vm::provider_metadata("webhook").is_some(),
+        "core providers survive package loads"
     );
 
     harn_vm::reset_provider_catalog();

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::json;
 use time::OffsetDateTime;
 
-use super::{GenericWebhookConnector, WebhookProviderProfile, WebhookSignatureVariant};
+use super::{GenericWebhookConnector, WebhookSignatureVariant};
 use crate::connectors::{
     Connector, ConnectorCtx, ConnectorError, ConnectorRegistry, InboxIndex, MetricsRegistry,
     RateLimiterFactory, RawInbound, TriggerBinding,
@@ -427,50 +427,6 @@ async fn postprocess_drops_duplicate_delivery_key() {
         duplicate,
         crate::connectors::PostNormalizeOutcome::DuplicateDropped
     ));
-}
-
-#[tokio::test]
-async fn github_profile_normalizes_events_under_the_github_provider() {
-    let mut binding = TriggerBinding::new(ProviderId::from("github"), "webhook", "github.test");
-    binding.config = json!({
-        "match": { "path": "/hooks/github" },
-        "secrets": { "signing_secret": "github/test-signing-secret" },
-        "webhook": {}
-    });
-
-    let harness = TestHarness::with_connector(
-        binding,
-        "github",
-        "It's a Secret to Everybody",
-        GenericWebhookConnector::with_profile(WebhookProviderProfile::new(
-            ProviderId::from("github"),
-            "GitHubEventPayload",
-            WebhookSignatureVariant::GitHub,
-        )),
-    )
-    .await;
-
-    let event = harness
-        .connector
-        .normalize_inbound(raw_inbound(
-            BTreeMap::from([
-                (
-                    "X-Hub-Signature-256".to_string(),
-                    "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
-                        .to_string(),
-                ),
-                ("X-GitHub-Delivery".to_string(), "delivery-123".to_string()),
-                ("X-GitHub-Event".to_string(), "ping".to_string()),
-                ("Content-Type".to_string(), "application/json".to_string()),
-            ]),
-            b"Hello, World!",
-            OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(event.provider.as_str(), "github");
-    assert_eq!(event.provider_payload.provider(), "github");
 }
 
 #[test]

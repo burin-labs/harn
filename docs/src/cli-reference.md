@@ -2362,7 +2362,7 @@ Provider-specific OAuth flags:
 
 The GitHub command captures GitHub App installation metadata. If `--app-id` and
 `--private-key-file` are supplied, it stores the private key as
-`github/app-<app-id>/private-key`. If `--webhook-secret` or
+`github/app-private-key`. If `--webhook-secret` or
 `--webhook-secret-file` is supplied, it stores `github/webhook-secret`.
 
 ## harn connect linear

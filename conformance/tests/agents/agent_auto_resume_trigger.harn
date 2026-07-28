@@ -12,7 +12,7 @@ pipeline main() {
             name: "agent_await_resumption",
             arguments: {
               reason: "waiting on review",
-              conditions: {trigger: {kind: "review.approved", provider: "github"}},
+              conditions: {trigger: {kind: "review.approved", provider: "webhook"}},
             },
           },
         ],
@@ -34,7 +34,7 @@ pipeline main() {
       const fired: DispatchHandle = trigger_fire(
         trigger_handle,
         {
-          provider: "github",
+          provider: "webhook",
           kind: "review.approved",
           payload: {decision: "approved"},
           headers: {x_delivery: "auto-resume-conformance"},

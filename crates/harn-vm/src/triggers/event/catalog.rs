@@ -6,9 +6,8 @@ use serde_json::Value as JsonValue;
 
 use super::core::ProviderId;
 use super::normalize::{
-    a2a_push_payload, cron_payload, email_payload, github_payload, kafka_payload, linear_payload,
-    nats_payload, notion_payload, postgres_cdc_payload, pulsar_payload, slack_payload,
-    webhook_payload, websocket_payload,
+    a2a_push_payload, cron_payload, email_payload, kafka_payload, nats_payload,
+    postgres_cdc_payload, pulsar_payload, webhook_payload, websocket_payload,
 };
 use super::payloads::ProviderPayload;
 
@@ -158,8 +157,8 @@ impl ProviderCatalog {
 
     /// Add `schemas` to this catalog without disturbing what is already in it.
     ///
-    /// A contribution is skipped when its id belongs to a builtin schema — a
-    /// package cannot redefine `github` — and when it re-registers a provider
+    /// A contribution is skipped when its id belongs to a core schema — a
+    /// package cannot redefine `webhook` — and when it re-registers a provider
     /// under the schema name already recorded for it, which is what reloading
     /// the same manifest looks like. Anything else is a real disagreement
     /// about what a provider id means, and is reported rather than settled by
@@ -369,187 +368,8 @@ fn required_secret(name: &str, namespace: &str) -> ProviderSecretRequirement {
     }
 }
 
-fn outbound_method(name: &str) -> ProviderOutboundMethod {
-    ProviderOutboundMethod {
-        name: name.to_string(),
-    }
-}
-
-fn optional_secret(name: &str, namespace: &str) -> ProviderSecretRequirement {
-    ProviderSecretRequirement {
-        name: name.to_string(),
-        required: false,
-        namespace: namespace.to_string(),
-    }
-}
-
 fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
     vec![
-        Arc::new(BuiltinProviderSchema {
-            provider_id: "github",
-            harn_schema_name: "GitHubEventPayload",
-            metadata: provider_metadata_entry(
-                "github",
-                &["webhook"],
-                "GitHubEventPayload",
-                &[
-                    "github.pr.list",
-                    "github.pr.view",
-                    "github.pr.edit",
-                    "github.pr.checks",
-                    "github.pr.merge",
-                    "github.pr.enable_auto_merge",
-                    "github.pr.comment",
-                    "github.actions.workflow_dispatch",
-                    "github.actions.runs",
-                    "github.actions.run",
-                    "github.actions.logs",
-                    "github.release.view",
-                    "github.release.latest",
-                    "github.release.assets",
-                    "github.merge_queue.entries",
-                    "github.merge_queue.enqueue",
-                    "github.issue.create",
-                    "github.issue.comment",
-                    "github.branch.protection",
-                    "api_call",
-                    "issues.create_comment",
-                    "issues.create",
-                    "issues.create_with_template",
-                    "issues.update",
-                    "issues.add_labels",
-                    "pulls.list",
-                    "pulls.list_with_checks",
-                    "pulls.get",
-                    "pulls.update",
-                    "pulls.merge",
-                    "pulls.merge_safe",
-                    "pulls.create_review_comment",
-                    "pulls.get_diff",
-                    "pulls.list_files",
-                    "pulls.list_reviews",
-                    "repos.get_content",
-                    "repos.get_text",
-                    "repos.get_latest_release",
-                    "repos.list_release_assets",
-                    "repos.get_branch_protection",
-                    "git.delete_ref",
-                    "actions.workflow_dispatch",
-                    "actions.workflow_runs.list",
-                    "actions.workflow_run.get",
-                    "check_runs.create",
-                    "check_runs.update",
-                    "graphql",
-                ],
-                hmac_signature_metadata(
-                    "github",
-                    "X-Hub-Signature-256",
-                    None,
-                    Some("X-GitHub-Delivery"),
-                    None,
-                    "hex",
-                ),
-                vec![required_secret("signing_secret", "github")],
-                ProviderRuntimeMetadata::Placeholder,
-            ),
-            normalize: github_payload,
-        }),
-        Arc::new(BuiltinProviderSchema {
-            provider_id: "slack",
-            harn_schema_name: "SlackEventPayload",
-            metadata: provider_metadata_entry(
-                "slack",
-                &["webhook"],
-                "SlackEventPayload",
-                &[
-                    "post_message",
-                    "update_message",
-                    "add_reaction",
-                    "open_view",
-                    "user_info",
-                    "api_call",
-                    "upload_file",
-                ],
-                hmac_signature_metadata(
-                    "slack",
-                    "X-Slack-Signature",
-                    Some("X-Slack-Request-Timestamp"),
-                    None,
-                    Some(300),
-                    "hex",
-                ),
-                vec![required_secret("signing_secret", "slack")],
-                ProviderRuntimeMetadata::Placeholder,
-            ),
-            normalize: slack_payload,
-        }),
-        Arc::new(BuiltinProviderSchema {
-            provider_id: "linear",
-            harn_schema_name: "LinearEventPayload",
-            metadata: {
-                let mut metadata = provider_metadata_entry(
-                    "linear",
-                    &["webhook"],
-                    "LinearEventPayload",
-                    &[],
-                    hmac_signature_metadata(
-                        "linear",
-                        "Linear-Signature",
-                        None,
-                        Some("Linear-Delivery"),
-                        Some(75),
-                        "hex",
-                    ),
-                    vec![
-                        required_secret("signing_secret", "linear"),
-                        optional_secret("access_token", "linear"),
-                    ],
-                    ProviderRuntimeMetadata::Placeholder,
-                );
-                metadata.outbound_methods = vec![
-                    outbound_method("list_issues"),
-                    outbound_method("update_issue"),
-                    outbound_method("create_comment"),
-                    outbound_method("search"),
-                    outbound_method("graphql"),
-                ];
-                metadata
-            },
-            normalize: linear_payload,
-        }),
-        Arc::new(BuiltinProviderSchema {
-            provider_id: "notion",
-            harn_schema_name: "NotionEventPayload",
-            metadata: {
-                let mut metadata = provider_metadata_entry(
-                    "notion",
-                    &["webhook", "poll"],
-                    "NotionEventPayload",
-                    &[],
-                    hmac_signature_metadata(
-                        "notion",
-                        "X-Notion-Signature",
-                        None,
-                        None,
-                        None,
-                        "hex",
-                    ),
-                    vec![required_secret("verification_token", "notion")],
-                    ProviderRuntimeMetadata::Placeholder,
-                );
-                metadata.outbound_methods = vec![
-                    outbound_method("get_page"),
-                    outbound_method("update_page"),
-                    outbound_method("append_blocks"),
-                    outbound_method("query_database"),
-                    outbound_method("search"),
-                    outbound_method("create_comment"),
-                    outbound_method("api_call"),
-                ];
-                metadata
-            },
-            normalize: notion_payload,
-        }),
         Arc::new(BuiltinProviderSchema {
             provider_id: "cron",
             harn_schema_name: "CronEventPayload",

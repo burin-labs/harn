@@ -19,8 +19,18 @@ const DEFAULT_CONNECTOR_MATRIX_SOURCE: &str = "conformance/fixtures/connectors/c
 pub(crate) struct ConnectorCapabilityMatrixRow {
     pub provider: String,
     pub package: String,
+    pub package_version: String,
+    pub harn_version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    pub auth_type: String,
+    pub required_secrets: Vec<String>,
+    pub setup_command: Vec<String>,
+    pub validation_command: Vec<String>,
+    pub fixture_count: usize,
+    pub verified_fixture: bool,
+    pub reject_fixture: bool,
+    pub dedupe_fixture: bool,
     pub webhook: bool,
     pub oauth: bool,
     pub rate_limit: bool,
@@ -92,21 +102,34 @@ pub(crate) fn generate_markdown(rows: &[ConnectorCapabilityMatrixRow]) -> String
         "This table is generated from connector package manifests. A checked feature means the package declares support for that connector surface; missing support highlights either an intentional scope boundary or a package gap.\n\n",
     );
     out.push_str("Regenerate with `make gen-connector-matrix` and verify with `make check-connector-matrix`.\n\n");
-    out.push_str(
-        "| Provider | Package | Webhook | OAuth | Rate limit | Pagination | GraphQL | Streaming |\n",
-    );
-    out.push_str("|---|---|---:|---:|---:|---:|---:|---:|\n");
+    out.push_str("| Provider | Package version | Harn floor | Auth | Secrets | Setup | Validate | Package gate | Capabilities |\n");
+    out.push_str("|---|---|---|---|---|---|---|---|---|\n");
     for row in rows {
+        let capabilities = [
+            ("webhook", row.webhook),
+            ("oauth", row.oauth),
+            ("rate-limit", row.rate_limit),
+            ("pagination", row.pagination),
+            ("graphql", row.graphql),
+            ("streaming", row.streaming),
+        ]
+        .into_iter()
+        .filter_map(|(name, enabled)| enabled.then_some(name))
+        .collect::<Vec<_>>()
+        .join(", ");
         out.push_str(&format!(
-            "| `{}` | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| `{}` | {} `{}` | `{}` | `{}` | {} | `{}` | `{}` | `harn package verify . --provider {}` ({} fixtures) | {} |\n",
             row.provider,
             package_cell(row),
-            yes_no(row.webhook),
-            yes_no(row.oauth),
-            yes_no(row.rate_limit),
-            yes_no(row.pagination),
-            yes_no(row.graphql),
-            yes_no(row.streaming),
+            row.package_version,
+            row.harn_version,
+            row.auth_type,
+            markdown_list(&row.required_secrets),
+            shell_command(&row.setup_command),
+            shell_command(&row.validation_command),
+            row.provider,
+            row.fixture_count,
+            capabilities,
         ));
     }
     out
@@ -265,24 +288,68 @@ fn rows_from_manifest(
         .package
         .as_ref()
         .and_then(|package| package.repository.clone());
+    let package_version = manifest
+        .package
+        .as_ref()
+        .and_then(|package| package.version.clone())
+        .unwrap_or_else(|| "-".to_string());
+    let harn_version = manifest
+        .package
+        .as_ref()
+        .and_then(|package| package.harn.clone())
+        .unwrap_or_else(|| "unspecified".to_string());
     manifest
         .providers
         .iter()
-        .map(|provider| row_from_provider(&package, repository.clone(), manifest_path, provider))
+        .map(|provider| {
+            row_from_provider(
+                &package,
+                &package_version,
+                &harn_version,
+                repository.clone(),
+                manifest_path,
+                provider,
+                &manifest.connector_contract.fixtures,
+            )
+        })
         .collect()
 }
 
 fn row_from_provider(
     package: &str,
+    package_version: &str,
+    harn_version: &str,
     repository: Option<String>,
     manifest_path: &Path,
     provider: &crate::package::ProviderManifestEntry,
+    fixtures: &[crate::package::ConnectorContractFixture],
 ) -> ConnectorCapabilityMatrixRow {
     let capabilities = provider.capabilities;
+    let setup = provider.setup.clone().unwrap_or_default();
+    let fixtures = fixtures
+        .iter()
+        .filter(|fixture| fixture.provider == provider.id)
+        .collect::<Vec<_>>();
     ConnectorCapabilityMatrixRow {
         provider: provider.id.as_str().to_string(),
         package: package.to_string(),
+        package_version: package_version.to_string(),
+        harn_version: harn_version.to_string(),
         repository,
+        auth_type: setup.auth_type.unwrap_or_else(|| "unspecified".to_string()),
+        required_secrets: setup.required_secrets,
+        setup_command: setup.setup_command,
+        validation_command: setup.validation_command,
+        fixture_count: fixtures.len(),
+        verified_fixture: fixtures
+            .iter()
+            .any(|fixture| fixture.expect_signature_state.as_deref() == Some("verified")),
+        reject_fixture: fixtures
+            .iter()
+            .any(|fixture| fixture.expect_type.as_deref() == Some("reject")),
+        dedupe_fixture: fixtures
+            .iter()
+            .any(|fixture| fixture.expect_dedupe_key.is_some()),
         webhook: capabilities.webhook,
         oauth: capabilities.oauth,
         rate_limit: capabilities.rate_limit,
@@ -401,6 +468,26 @@ fn yes_no(value: bool) -> &'static str {
     }
 }
 
+fn shell_command(command: &[String]) -> String {
+    if command.is_empty() {
+        "-".to_string()
+    } else {
+        command.join(" ")
+    }
+}
+
+fn markdown_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "-".to_string()
+    } else {
+        values
+            .iter()
+            .map(|value| format!("`{value}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,7 +541,27 @@ capabilities = { webhook = true, oauth = true, rate_limit = true }
         let rows = vec![ConnectorCapabilityMatrixRow {
             provider: "acme".to_string(),
             package: "harn-acme-connector".to_string(),
+            package_version: "0.1.0".to_string(),
+            harn_version: ">=0.10,<0.11".to_string(),
             repository: None,
+            auth_type: "api-key".to_string(),
+            required_secrets: vec!["acme/token".to_string()],
+            setup_command: vec![
+                "harn".to_string(),
+                "connect".to_string(),
+                "acme".to_string(),
+            ],
+            validation_command: vec![
+                "harn".to_string(),
+                "connect".to_string(),
+                "status".to_string(),
+                "--connector".to_string(),
+                "acme".to_string(),
+            ],
+            fixture_count: 3,
+            verified_fixture: true,
+            reject_fixture: true,
+            dedupe_fixture: true,
             webhook: true,
             oauth: false,
             rate_limit: true,
@@ -467,12 +574,10 @@ capabilities = { webhook = true, oauth = true, rate_limit = true }
         let markdown = generate_markdown(&rows);
         assert!(markdown.contains("Connector parity matrix"));
         assert!(markdown.contains("Source of truth"));
-        assert!(markdown.contains(
-            "| Provider | Package | Webhook | OAuth | Rate limit | Pagination | GraphQL | Streaming |"
-        ));
-        assert!(
-            markdown.contains("| `acme` | `harn-acme-connector` | yes | no | yes | no | no | no |")
-        );
+        assert!(markdown.contains("| Provider | Package version | Harn floor | Auth |"));
+        assert!(markdown.contains("`harn-acme-connector` `0.1.0`"));
+        assert!(markdown.contains("`harn connect status --connector acme`"));
+        assert!(markdown.contains("`harn package verify . --provider acme` (3 fixtures)"));
     }
 
     #[test]

@@ -28,7 +28,7 @@ pipeline test(task) {
     {
       id: trigger_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: flaky_handler,
       retry: {max: 1, backoff: "immediate"},
       when: nil,
@@ -44,7 +44,7 @@ pipeline test(task) {
   )
   const fired: DispatchHandle = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: delivery}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: delivery}},
   )
   __io_println(fired.status == "dlq" && contains(fired.error ?? "", "replay-fail:issue.opened"))
   const before: list<DlqEntry> = trigger_inspect_dlq()

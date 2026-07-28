@@ -110,14 +110,10 @@ This table is generated from `std/triggers::list_providers()` / `ProviderCatalog
 | `a2a-push` | `a2a-push` | `A2aPushPayload` | builtin `a2a-push` | none | - | - |
 | `cron` | `cron` | `CronEventPayload` | builtin `cron` | none | - | - |
 | `email` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `github` | `webhook` | `GitHubEventPayload` | placeholder | HMAC `github`, header `X-Hub-Signature-256`, sha256/hex, id `X-GitHub-Delivery` | `github/signing_secret` (required) | `github.pr.list`, `github.pr.view`, `github.pr.edit`, `github.pr.checks`, `github.pr.merge`, `github.pr.enable_auto_merge`, `github.pr.comment`, `github.actions.workflow_dispatch`, `github.actions.runs`, `github.actions.run`, `github.actions.logs`, `github.release.view`, `github.release.latest`, `github.release.assets`, `github.merge_queue.entries`, `github.merge_queue.enqueue`, `github.issue.create`, `github.issue.comment`, `github.branch.protection`, `api_call`, `issues.create_comment`, `issues.create`, `issues.create_with_template`, `issues.update`, `issues.add_labels`, `pulls.list`, `pulls.list_with_checks`, `pulls.get`, `pulls.update`, `pulls.merge`, `pulls.merge_safe`, `pulls.create_review_comment`, `pulls.get_diff`, `pulls.list_files`, `pulls.list_reviews`, `repos.get_content`, `repos.get_text`, `repos.get_latest_release`, `repos.list_release_assets`, `repos.get_branch_protection`, `git.delete_ref`, `actions.workflow_dispatch`, `actions.workflow_runs.list`, `actions.workflow_run.get`, `check_runs.create`, `check_runs.update`, `graphql` |
 | `kafka` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `linear` | `webhook` | `LinearEventPayload` | placeholder | HMAC `linear`, header `Linear-Signature`, sha256/hex, id `Linear-Delivery`, 75s tolerance | `linear/signing_secret` (required), `linear/access_token` (optional) | `list_issues`, `update_issue`, `create_comment`, `search`, `graphql` |
 | `nats` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `notion` | `webhook`, `poll` | `NotionEventPayload` | placeholder | HMAC `notion`, header `X-Notion-Signature`, sha256/hex | `notion/verification_token` (required) | `get_page`, `update_page`, `append_blocks`, `query_database`, `search`, `create_comment`, `api_call` |
 | `postgres-cdc` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
 | `pulsar` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
-| `slack` | `webhook` | `SlackEventPayload` | placeholder | HMAC `slack`, header `X-Slack-Signature`, sha256/hex, ts `X-Slack-Request-Timestamp`, 300s tolerance | `slack/signing_secret` (required) | `post_message`, `update_message`, `add_reaction`, `open_view`, `user_info`, `api_call`, `upload_file` |
 | `webhook` | `webhook` | `GenericWebhookPayload` | builtin `webhook` / `standard` signatures | HMAC `standard`, header `webhook-signature`, sha256/base64, ts `webhook-timestamp`, id `webhook-id`, 300s tolerance | `webhook/signing_secret` (required) | - |
 | `websocket` | `stream` | `StreamEventPayload` | builtin `stream` | none | - | - |
 
@@ -158,7 +154,7 @@ Required exports for a pure-Harn connector package:
 | `activate(bindings)` | No | Runs on manifest activation/reload. |
 | `shutdown()` | No | Cleanup on reload or process shutdown. |
 
-`normalize_inbound(raw)` must return one of these tagged shapes: `{ type: "event", event }`, `{ type: "batch", events }`, `{ type: "immediate_response", immediate_response, event?, events? }`, or `{ type: "reject", status, body? }`. Direct legacy event dicts are transitional only; new packages should use the tagged shape.
+`normalize_inbound(raw)` must return one of these tagged shapes: `{ type: "event", event }`, `{ type: "batch", events }`, `{ type: "immediate_response", immediate_response, event?, events? }`, or `{ type: "reject", status, body? }`. Direct legacy event dicts are rejected.
 
 Connector-only builtins available during connector export execution: `secret_get`, `event_log_emit`, and `metrics_inc`. The hot-path `normalize_inbound` effect policy rejects network calls, LLM calls, process execution, host calls, MCP calls, and ambient filesystem/project access.
 

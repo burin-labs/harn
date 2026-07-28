@@ -34,7 +34,7 @@ pipeline test(task) {
     {
       id: trigger_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: SpawnToPool({pool: pool_name, task_factory: task_factory}),
       when: nil,
       retry: nil,
@@ -51,15 +51,15 @@ pipeline test(task) {
   // Third should be evicted by drop_newest, leaving the result as rejected.
   const warmup = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "warmup-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "warmup-" + unique}},
   )
   const queued = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "queued-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "queued-" + unique}},
   )
   const newest = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "newest-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "newest-" + unique}},
   )
   __io_println(warmup.status == "dispatched")
   __io_println(queued.status == "dispatched")

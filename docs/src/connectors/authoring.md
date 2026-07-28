@@ -1,12 +1,8 @@
 # Connector authoring
 
-Custom connectors can now be authored in two ways:
-
-- Rust implementations that implement `harn_vm::connectors::Connector`
-- `.harn` modules loaded through `[[providers]]` manifest entries
-
-The initial surface lives in `crates/harn-vm/src/connectors/` because the
-supporting abstractions it depends on today already live in `harn-vm`:
+Provider connectors are `.harn` packages loaded through `[[providers]]`
+manifest entries. Rust owns only the provider-neutral runtime substrate in
+`crates/harn-vm/src/connectors/`:
 
 - `EventLog` for audit and durable event plumbing
 - `SecretProvider` for signing secrets and outbound tokens
@@ -22,11 +18,11 @@ discovery surface for provider metadata. Each provider entry carries:
 
 - the normalized payload schema name exposed through `std/triggers`
 - supported trigger kinds such as `webhook` or `cron`
-- outbound method names (empty today for the built-in providers)
+- outbound method names declared by the owning package
 - required secrets, including the namespace each secret must live under
 - signature verification strategy metadata
-- runtime connector metadata indicating whether the provider is backed by a
-  built-in connector or a placeholder implementation
+- runtime connector metadata indicating whether a core transport is built in
+  or a package supplies the provider implementation
 
 Harn also exposes that same catalog to scripts through
 `import "std/triggers"` and `list_providers()`, so connector metadata has one
@@ -329,7 +325,7 @@ Fixture fields:
 | `expect_kind` | Optional expected normalized event kind |
 | `expect_dedupe_key` | Optional exact normalized event dedupe key |
 | `expect_signature_state` | Optional normalized signature state: `verified`, `unsigned`, or `failed` |
-| `expect_payload_contains` | Optional TOML/JSON subset that must be present in the serialized `provider_payload`; use this for Rust-shape parity fixtures |
+| `expect_payload_contains` | Optional TOML/JSON subset that must be present in the serialized package-owned `provider_payload` |
 | `expect_response_status` | Optional HTTP status expected for `immediate_response` or `reject` results |
 | `expect_response_body` | Optional exact body expected for `immediate_response` or `reject` results |
 | `expect_event_count` | Optional expected number of normalized events |
@@ -470,102 +466,25 @@ the trigger inbox envelope path, and persists `cursor`/`state` so the next
 tick sees them. Shutdown requests cancel future ticks and prevent long-running
 poll exports from blocking clean orchestrator shutdown.
 
-## Rust connectors
-
-A connector implementation owns two concerns:
-
-- Inbound normalization: verify the provider request, preserve the raw bytes,
-  and normalize into `TriggerEvent`.
-- Outbound callbacks: expose provider APIs through a `ConnectorClient`.
-
-The runtime-facing surface is:
-
-```rust
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use harn_vm::connectors::{
-    Connector, ConnectorClient, ConnectorCtx, ConnectorError, ProviderPayloadSchema,
-    RawInbound, TriggerBinding, TriggerKind,
-};
-use harn_vm::{ProviderId, TriggerEvent};
-use serde_json::Value as JsonValue;
-
-struct ExampleConnector {
-    provider_id: ProviderId,
-    kinds: Vec<TriggerKind>,
-    client: Arc<ExampleClient>,
-}
-
-struct ExampleClient;
-
-#[async_trait]
-impl ConnectorClient for ExampleClient {
-    async fn call(
-        &self,
-        method: &str,
-        args: JsonValue,
-    ) -> Result<JsonValue, harn_vm::ClientError> {
-        let _ = (method, args);
-        Ok(JsonValue::Null)
-    }
-}
-
-#[async_trait]
-impl Connector for ExampleConnector {
-    fn provider_id(&self) -> &ProviderId {
-        &self.provider_id
-    }
-
-    fn kinds(&self) -> &[TriggerKind] {
-        &self.kinds
-    }
-
-    async fn init(&mut self, _ctx: ConnectorCtx) -> Result<(), ConnectorError> {
-        Ok(())
-    }
-
-    async fn activate(
-        &self,
-        _bindings: &[TriggerBinding],
-    ) -> Result<harn_vm::ActivationHandle, ConnectorError> {
-        Ok(harn_vm::ActivationHandle::new(self.provider_id.clone(), 0))
-    }
-
-    async fn normalize_inbound(&self, raw: RawInbound) -> Result<TriggerEvent, ConnectorError> {
-        let _payload = raw.json_body()?;
-        todo!("map the provider request into TriggerEvent")
-    }
-
-    fn payload_schema(&self) -> ProviderPayloadSchema {
-        ProviderPayloadSchema::named("ExamplePayload")
-    }
-
-    fn client(&self) -> Arc<dyn ConnectorClient> {
-        self.client.clone()
-    }
-}
-```
-
 ## HMAC verification helper
 
-Webhook-style connectors should reuse
-`harn_vm::connectors::verify_hmac_signed(...)` instead of open-coding HMAC
-checks. The helper enforces these non-negotiable rules:
+Webhook-style packages should reuse `verify_hmac_signature(...)` from
+`std/connectors/shared` instead of open-coding HMAC checks. The helper enforces
+these non-negotiable rules:
 
 - verification happens against the raw request body bytes
 - signature comparisons use constant-time equality
-- timestamped schemes reject outside a caller-provided window
-- rejection paths write an audit event to the `audit.signature_verify` topic
+- legacy HMAC-SHA1 is rejected unless the package opts in explicitly
 
-The helper supports the raw-body HMAC header styles used by first-party
-connector packages and generic webhook intake:
+The package still owns provider-specific signed-message construction,
+timestamp-window and nonce/delivery-id replay checks, and rejection audit
+events. Exercise valid, expired/replayed, malformed, and wrong-secret cases in
+contract fixtures.
 
-- GitHub: `X-Hub-Signature-256: sha256=<hex>`
-- Notion: `X-Notion-Signature: sha256=<hex>`
-- Stripe: `Stripe-Signature: t=<unix>,v1=<hex>[,v1=<hex>...]`
-- Standard Webhooks: `webhook-id`, `webhook-timestamp`, and
-  `webhook-signature: v1,<base64>`
+The helper accepts a hexadecimal digest with an optional `sha256=` or `sha1=`
+prefix. Packages assemble any provider-specific timestamped signed message
+before calling it. The core `webhook` transport separately owns its Standard
+Webhooks signature adapter.
 
 Harn-authored connector packages can import `std/connectors/shared` for the
 package-level equivalent helpers:
@@ -586,11 +505,9 @@ import {
 } from "std/connectors/shared"
 ```
 
-Use the Rust `verify_hmac_signed(...)` path for runtime HTTP ingress when you
-need timestamp-window checks, audit events, or a provider-specific signed
-message format. Use `std/connectors/shared` inside Harn package exports for
-local HMAC checks, JWT/JWKS verification, outbound HTTP policy, OAuth2 token
-refresh, package-local token buckets, and cursor pagination.
+Use `std/connectors/shared` inside package exports for HMAC checks, JWT/JWKS
+verification, outbound HTTP policy, OAuth2 token refresh, package-local token
+buckets, and cursor pagination.
 Existing providers that still sign with HMAC-SHA1 must call
 `verify_hmac_signature(..., "sha1", {allow_legacy_sha1: true})`; new
 connectors should use SHA-256 or a provider-specific verifier.

@@ -1,14 +1,12 @@
 //! `harn connector-schema-codegen` — generate the Rust normalized-event
 //! structs from the canonical Harn schema module.
 //!
-//! Today the normalized-event Rust structs (the `GitHubEventPayload` family in
-//! `crates/harn-vm/src/triggers/event/payloads.rs`) are hand-written, and
-//! `.harn` connectors emit JSON that the boundary wraps untyped. This command
-//! inverts the source of truth: the canonical schema is authored ONCE as Harn
+//! Connector normalized-event schemas are authored once as Harn
 //! `type` declarations (`crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn`,
 //! embedded as [`harn_stdlib::CONNECTOR_EVENT_SCHEMAS_SOURCE`]) and the Rust
-//! structs are generated from them, so a connector's output matches the Rust
-//! struct by construction.
+//! projections are generated from them for tooling that needs native schema
+//! types. Runtime ingress keeps package-owned extension payloads instead of
+//! re-normalizing them through Rust.
 //!
 //! It mirrors `pg_codegen`'s read -> parse -> emit -> write/check flow and the
 //! `dump-protocol-artifacts` gen + CI-staleness-check workflow. `--check`
@@ -101,9 +99,8 @@ const HEADER: &str = "\
 //
 // These structs are generated from canonical Harn `type` declarations so a
 // connector's normalized-event JSON matches the Rust struct by construction.
-// This file currently coexists with the hand-written `GitHubEventPayload`
-// family in `payloads.rs`; switching the trigger boundary to produce these
-// typed payloads is a separate follow-up.
+// Runtime ingress preserves package-owned ExtensionProviderPayload values;
+// these native types are tooling projections of the Harn schema.
 
 ";
 
