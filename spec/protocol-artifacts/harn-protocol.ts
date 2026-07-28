@@ -212,6 +212,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "session_closed",
   "structural_validator_decision",
   "step_judge_decision",
+  "tool_batch_disposition",
   "tool_call_audit",
   "tool_format_override",
   "typed_checkpoint",

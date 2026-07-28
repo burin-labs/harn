@@ -146,6 +146,62 @@ pub fn agent_tool_audit_event_schema() {
 }
 
 /**
+ * Typed disposition/timing receipt for one call proposed in a model tool batch.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_batch_disposition_receipt_schema() -> dict {
+  const nullable_number = schema_union([schema_int(), schema_float(), schema_literal(nil)])
+  const nullable_string = schema_nullable(schema_string())
+  return schema_object(
+    {
+      schema: schema_literal("harn.agent_tool_batch_disposition.v1"),
+      batch_id: __agent_event_digest_schema(),
+      source_batch_id: schema_nullable(__agent_event_digest_schema()),
+      call_index: __agent_event_nonnegative_int_schema(),
+      tool_call_id: schema_string(),
+      tool_name: schema_string() + {min_length: 1},
+      phase: schema_enum(
+        ["observation", "mutation", "process_verification", "terminal", "provider_native"],
+      ),
+      selected_phase: schema_enum(
+        ["observation", "mutation", "process_verification", "terminal", "provider_native"],
+      ),
+      disposition: schema_enum(["executed", "deferred", "skipped_after_blocking_result"]),
+      proposal_status: schema_enum(["new", "re_proposed"]),
+      reason: schema_string() + {min_length: 1},
+      planned_at_ms: __agent_event_number_schema(),
+      started_at_ms: nullable_number,
+      finished_at_ms: nullable_number,
+      duration_ms: nullable_number,
+      blocking_tool_call_id: nullable_string,
+      blocking_tool_name: nullable_string,
+      blocking_mutation_status: nullable_string,
+    },
+    {additional_properties: false},
+  )
+}
+
+/**
+ * Agent event carrying a tool-batch disposition receipt.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_batch_disposition_event_schema() -> dict {
+  return schema_object(
+    {
+      type: schema_literal("tool_batch_disposition"),
+      receipt: agent_tool_batch_disposition_receipt_schema(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
  * Schema for typed checkpoint events used by control, replay, and eval
  * diagnostics.
  *

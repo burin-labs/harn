@@ -639,6 +639,11 @@ fn __done_judge_due(opts, payload, completion_proposed) {
 }
 
 fn __completion_result(opts, payload, stop_reason) {
+  const batch_state = opts?._tool_batch_dependency_state
+  const deferred = batch_state?.deferred_signatures ?? []
+  if len(deferred) > 0 {
+    return {kind: "continue", done_judge_due: false, pending_tool_batch_effects: true}
+  }
   const verify_due = opts?.verify_completion != nil || opts?.verify_completion_judge != nil
   const done_due = __done_judge_due(opts, payload, true)
   if verify_due || done_due {

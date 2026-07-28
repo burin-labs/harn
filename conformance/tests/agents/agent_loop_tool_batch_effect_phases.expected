@@ -1,0 +1,8 @@
+phased.status=done
+phased.executed=6
+phased.deferred=11
+phased.reproposed=11
+blocked.status=done
+blocked.skipped=2
+blocked.verify_calls=1
+blocked.done_calls=1

@@ -569,6 +569,52 @@ fn from_host_rejects_non_host_and_unknown_event_types() {
         .expect_err("unknown event type rejected");
 }
 
+#[test]
+fn from_host_accepts_typed_tool_batch_disposition_receipts() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "tool_batch_disposition",
+        &json!({
+            "receipt": {
+                "schema": "harn.agent_tool_batch_disposition.v1",
+                "batch_id": "a".repeat(64),
+                "source_batch_id": null,
+                "call_index": 1,
+                "tool_call_id": "call-2",
+                "tool_name": "edit",
+                "phase": "mutation",
+                "selected_phase": "observation",
+                "disposition": "deferred",
+                "proposal_status": "new",
+                "reason": "effect_phase_boundary",
+                "planned_at_ms": 12.0,
+                "started_at_ms": null,
+                "finished_at_ms": null,
+                "duration_ms": null,
+                "blocking_tool_call_id": null,
+                "blocking_tool_name": null,
+                "blocking_mutation_status": null
+            }
+        }),
+    )
+    .expect("tool_batch_disposition is host-emittable");
+
+    match event {
+        AgentEvent::ToolBatchDisposition {
+            session_id,
+            receipt,
+        } => {
+            assert_eq!(session_id, "s1");
+            assert_eq!(receipt.tool_name, "edit");
+            assert_eq!(
+                receipt.disposition,
+                super::agent::ToolBatchDisposition::Deferred
+            );
+        }
+        other => panic!("expected ToolBatchDisposition, got {other:?}"),
+    }
+}
+
 // --- Loud-boundary funnel (harn#5142) ------------------------------------
 
 /// A `.harn` boundary reports through the same typed event as the Rust funnel,

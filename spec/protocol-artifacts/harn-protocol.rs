@@ -133,6 +133,7 @@ pub enum HarnAgentEventKind {
     SessionClosed,
     StructuralValidatorDecision,
     StepJudgeDecision,
+    ToolBatchDisposition,
     ToolCallAudit,
     ToolFormatOverride,
     TypedCheckpoint,
@@ -176,6 +177,7 @@ impl HarnAgentEventKind {
             Self::SessionClosed => "session_closed",
             Self::StructuralValidatorDecision => "structural_validator_decision",
             Self::StepJudgeDecision => "step_judge_decision",
+            Self::ToolBatchDisposition => "tool_batch_disposition",
             Self::ToolCallAudit => "tool_call_audit",
             Self::ToolFormatOverride => "tool_format_override",
             Self::TypedCheckpoint => "typed_checkpoint",
@@ -234,6 +236,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "session_closed" => Self::SessionClosed,
             "structural_validator_decision" => Self::StructuralValidatorDecision,
             "step_judge_decision" => Self::StepJudgeDecision,
+            "tool_batch_disposition" => Self::ToolBatchDisposition,
             "tool_call_audit" => Self::ToolCallAudit,
             "tool_format_override" => Self::ToolFormatOverride,
             "typed_checkpoint" => Self::TypedCheckpoint,
@@ -758,6 +761,7 @@ pub const HARN_AGENT_EVENT_KIND_SELF_CONSISTENCY_TIE: &str = "self_consistency_t
 pub const HARN_AGENT_EVENT_KIND_SESSION_CLOSED: &str = "session_closed";
 pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str = "structural_validator_decision";
 pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision";
+pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_DISPOSITION: &str = "tool_batch_disposition";
 pub const HARN_AGENT_EVENT_KIND_TOOL_CALL_AUDIT: &str = "tool_call_audit";
 pub const HARN_AGENT_EVENT_KIND_TOOL_FORMAT_OVERRIDE: &str = "tool_format_override";
 pub const HARN_AGENT_EVENT_KIND_TYPED_CHECKPOINT: &str = "typed_checkpoint";
@@ -798,6 +802,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "session_closed",
     "structural_validator_decision",
     "step_judge_decision",
+    "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
     "typed_checkpoint",

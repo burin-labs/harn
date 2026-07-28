@@ -112,6 +112,7 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("capability_gap", None),
     host_event("tool_format_override", ASSISTANT),
     host_event("tool_call_audit", TOOL),
+    host_event("tool_batch_disposition", TOOL),
     host_event("loop_checkpoint", ASSISTANT),
     // The loud-boundary funnel (harn#5142). Registered so a `.harn` boundary
     // reports a drop through the same typed event as the Rust funnel.

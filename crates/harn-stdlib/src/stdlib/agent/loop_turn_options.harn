@@ -6,10 +6,14 @@ import "std/agent/loop_tool_calls"
 import { AgentStallState } from "std/agent/stall_types"
 
 pub fn __sync_tool_search_state(opts, turn_opts) {
-  if turn_opts?._tool_search_client == nil {
-    return opts
+  let synced = opts
+  if turn_opts?._tool_search_client != nil {
+    synced = synced + {_tool_search_client: turn_opts._tool_search_client}
   }
-  return opts + {_tool_search_client: turn_opts._tool_search_client}
+  if turn_opts?._tool_batch_dependency_state != nil {
+    synced = synced + {_tool_batch_dependency_state: turn_opts._tool_batch_dependency_state}
+  }
+  return synced
 }
 
 // A successful annotated workspace mutation advances the repair write epoch.

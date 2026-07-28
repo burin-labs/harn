@@ -42,6 +42,7 @@ fn fanout_tools() {
         return "echoed:" + to_string(args?.msg ?? "")
       },
       parameters: {msg: {type: "string"}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
     },
   )
 }

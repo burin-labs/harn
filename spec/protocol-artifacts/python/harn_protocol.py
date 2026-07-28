@@ -278,6 +278,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "session_closed",
     "structural_validator_decision",
     "step_judge_decision",
+    "tool_batch_disposition",
     "tool_call_audit",
     "tool_format_override",
     "typed_checkpoint",
