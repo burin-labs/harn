@@ -1,3 +1,4 @@
+import { agent_feedback_emit } from "std/agent/feedback"
 import {
   agent_monologue_actuation_config,
   agent_monologue_actuation_initial_state,
@@ -12,11 +13,7 @@ import {
   AgentStallWarning,
 } from "std/agent/stall_types"
 import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
-import {
-  agent_emit_event,
-  agent_session_inject_feedback,
-  agent_session_totals,
-} from "std/agent/state"
+import { agent_emit_event, agent_session_totals } from "std/agent/state"
 import { verification_gate_input } from "std/verification"
 
 /**
@@ -505,10 +502,21 @@ pub fn agent_stall_inject_feedback(
   const wants_feedback = config.inject_feedback ?? true
   const should_feedback = wants_feedback && state.feedback_count < config.max_feedback
   if should_feedback {
-    agent_session_inject_feedback(
+    agent_feedback_emit(
       session_id,
-      "stall_diagnostics",
-      __agent_stall_feedback_text(warning),
+      [
+        {
+          kind: "stall_diagnostics",
+          content: __agent_stall_feedback_text(warning),
+          source: "stall_detector",
+          reason: warning.pattern,
+          action: if warning.hard_stop {
+            "stop"
+          } else {
+            "continue"
+          },
+        },
+      ],
     )
     return state + {feedback_count: state.feedback_count + 1}
   }
@@ -730,6 +738,42 @@ pub fn __agent_stall_observe_no_progress(
     next_state.hard_stop,
     config,
     config.no_progress_messages,
+  )
+  const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+  next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
+  return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
+}
+
+/**
+ * Fold repeated unparseable turns through the shared bounded recovery ladder.
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_stall_observe_parse_rejection(
+  session_id: string,
+  iteration: int,
+  config: AgentStallConfig,
+  state: AgentStallState,
+  defer_feedback: bool,
+) -> AgentStallObservation {
+  let next_state = __agent_stall_reset_action(state)
+  next_state = next_state + {parse_rejection_streak: next_state.parse_rejection_streak + 1}
+  if next_state.parse_rejection_streak < config.repeat_parse_rejection {
+    next_state = __agent_stall_register_recovery(next_state)
+    return __agent_stall_observation(next_state, nil, config, false)
+  }
+  next_state = __agent_stall_register_trip(next_state, config)
+  const warning = __agent_stall_warning_record(
+    iteration,
+    "",
+    {},
+    "parse_rejection",
+    "repeated_parse_rejection",
+    next_state.parse_rejection_streak,
+    next_state.consecutive_trips,
+    next_state.hard_stop,
+    config,
+    config.repeat_parse_rejection,
   )
   const emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
   next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
@@ -980,20 +1024,20 @@ pub fn __agent_stall_observe_core(
       hard_stop: false,
     }
   }
-  // A turn whose tool calls were all dropped by the parser carries real intent
-  // (it tried to act); the malformed-call path already injected purpose-built
-  // parse-guidance feedback. Treat it as a neutral recovery turn so it does NOT
-  // count toward the no-progress monologue streak — otherwise the loop nags the
-  // model to "emit one well-formed tool call" when it already did, just with a
-  // malformed body. Gated purely on the syntactic parse-error signal.
+  // Parse rejection is an observed failure state in its own right. Keep it out
+  // of the generic no-progress monologue detector, but feed it through the same
+  // bounded warning/feedback/hard-stop ladder so recovery does not depend on a
+  // successfully parsed call.
   if had_parse_errors {
-    return __agent_stall_observation(
-      __agent_stall_register_recovery(__agent_stall_reset_action(state)),
-      nil,
+    return __agent_stall_observe_parse_rejection(
+      session_id,
+      iteration,
       config,
-      false,
+      state,
+      defer_feedback,
     )
   }
+  const active_state = state + {parse_rejection_streak: 0}
   // Soft progress-report tools (e.g. `agent_progress`) report status without
   // advancing task state, so they are excluded from the real-action stream: a
   // turn whose only call is such a report is treated as no-progress.
@@ -1010,19 +1054,19 @@ pub fn __agent_stall_observe_core(
         session_id,
         iteration,
         config,
-        state,
+        active_state,
         defer_feedback,
         turn_stop_reason,
       )
     }
     return __agent_stall_observation(
-      __agent_stall_register_recovery(__agent_stall_reset_action(state)),
+      __agent_stall_register_recovery(__agent_stall_reset_action(active_state)),
       nil,
       config,
       false,
     )
   }
-  let next_state = state + {no_progress_streak: 0}
+  let next_state = active_state + {no_progress_streak: 0}
   let emitted_warning = nil
   let feedback_deferred = false
   for call in substantive_calls {

@@ -1,3 +1,4 @@
+import { agent_feedback_emit } from "std/agent/feedback"
 import {
   __completion_gate_apply_budget,
   __completion_gate_classify_writes,
@@ -9,11 +10,7 @@ import {
 } from "std/agent/judge_internals"
 import { __with_prompt_fragment } from "std/agent/preflight"
 import { completion_judge_user_prompt } from "std/agent/prompts"
-import {
-  agent_emit_event,
-  agent_session_inject_feedback,
-  agent_session_messages,
-} from "std/agent/state"
+import { agent_emit_event, agent_session_messages } from "std/agent/state"
 
 // Conservative default cap on how many times the completion-judge LLM may
 // veto a proposed completion within one session. Each veto is a paid model
@@ -42,6 +39,50 @@ fn __session_tool_names(messages) {
     }
   }
   return __unique_names(names)
+}
+
+fn __judge_tool_schemas(opts) {
+  const registry = opts?.tools
+  const entries = if type_of(registry) == "dict" {
+    registry?.tools ?? []
+  } else if type_of(registry) == "list" {
+    registry
+  } else {
+    []
+  }
+  let schemas = []
+  for entry in entries {
+    const function = entry?.function
+    const name = to_string(entry?.name ?? function?.name ?? "")
+    if name == "" {
+      continue
+    }
+    schemas = schemas.appending(
+      {
+        name: name,
+        description: to_string(entry?.description ?? function?.description ?? ""),
+        parameters: entry?.parameters ?? function?.parameters ?? {},
+        returns: entry?.returns ?? entry?.output_schema ?? {},
+      },
+    )
+  }
+  return schemas
+}
+
+fn __judge_knowledge_state(messages, text) -> string {
+  let tool_evidence = []
+  for message in messages {
+    if message?.role == "tool" {
+      tool_evidence = tool_evidence.appending(
+        {
+          name: message?.name ?? "",
+          content: message?.content ?? "",
+          tool_call_id: message?.tool_call_id ?? "",
+        },
+      )
+    }
+  }
+  return "sha256:" + sha256(json_stringify({latest_text: text, tool_evidence: tool_evidence}))
 }
 
 fn __judge_string_list(value) {
@@ -107,7 +148,25 @@ fn __judge_payload(session, opts, stop_reason, text, iteration) {
     all_tools_used: join(tool_names, ", "),
     successful_tools_used: join(tool_names, ", "),
     iteration: iteration,
+    knowledge_state: __judge_knowledge_state(messages, text),
   }
+}
+
+fn __judge_stable_prefix(judge_cfg, opts, payload, system, schema) -> string {
+  const rubric = trim(to_string(judge_cfg?.rubric ?? opts?.rubric ?? ""))
+  const rubric_block = if rubric == "" {
+    ""
+  } else {
+    "\n\nCompletion rubric:\n" + rubric
+  }
+  return system
+    + "\n\nStable completion goal:\n"
+    + payload.task
+    + rubric_block
+    + "\n\nAvailable tool schemas:\n"
+    + json_stringify(__judge_tool_schemas(opts))
+    + "\n\nRequired verdict schema:\n"
+    + json_stringify(schema)
 }
 
 fn __judge_invoke_closure(verify_completion, payload) {
@@ -147,7 +206,6 @@ fn __judge_invoke_closure(verify_completion, payload) {
 
 fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   const system = judge_cfg?.system ?? ""
-  const user = completion_judge_user_prompt(payload)
   const schema = {
     type: "object",
     properties: {
@@ -175,13 +233,15 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
     },
     required: ["verdict"],
   }
+  const stable_prefix = __judge_stable_prefix(judge_cfg, opts, payload, system, schema)
+  const user = completion_judge_user_prompt(payload)
   const ran = __judge_run_checkpoint(
     harness,
     judge_cfg,
     opts,
     payload,
     "agent.completion_judge",
-    system,
+    stable_prefix,
     user,
     schema,
   )
@@ -485,17 +545,32 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
       __emit_judge_decision(session.session_id, iteration, verdict)
     }
   }
+  let feedback_composition = nil
   if verdict.vetoed
     && verdict?.feedback != nil
     && verdict.feedback != ""
     && !(opts?._defer_judge_feedback ?? false) {
-    agent_session_inject_feedback(session.session_id, "verify_completion", verdict.feedback)
+    feedback_composition = agent_feedback_emit(
+      session.session_id,
+      [
+        {
+          kind: "verify_completion",
+          content: verdict.feedback,
+          source: verdict?.trigger ?? "completion_judge",
+          reason: "judge_veto",
+          action: "continue",
+          next_step: verdict?.next_step ?? "",
+        },
+      ],
+      {history: opts?._feedback_history ?? {}, knowledge_state: payload.knowledge_state},
+    )
   }
   return verdict
     + {
     verify_completion_judge_invoked: completion_judge_invoked,
     verify_completion_judge_cap_reached: completion_judge_cap_reached,
     done_judge_cap_reached: done_judge_cap_reached,
+    feedback_history: feedback_composition?.history ?? opts?._feedback_history ?? {},
   }
 }
 

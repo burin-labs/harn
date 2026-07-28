@@ -67,6 +67,13 @@ pub fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
       + " form a NEW hypothesis about the root cause, or report the specific blocker instead"
       + " of acting reflexively."
   }
+  if pattern == "repeated_parse_rejection" {
+    return "Content repair: tool-shaped output was rejected by the active parser "
+      + count
+      + " turns in a row. Stop repeating the same malformed envelope. Re-read the latest "
+      + "parse diagnostic and emit exactly one minimal call in the session's active tool "
+      + "format; if the intended action cannot be represented, report that blocker instead."
+  }
   const core = if pattern == "repeated_same_observation" {
     "the action `" + warning.tool_name + "` produced the same observation " + count
       + " times in a row"

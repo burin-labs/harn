@@ -73,3 +73,52 @@ pipeline test_parse_feedback_is_counted_once(task) {
     },
   )
 }
+
+pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(task) {
+  const malformed = llm_text("<tool_call>\nadd({ left: })\n</tool_call>")
+  with_llm_script(
+    [
+      malformed,
+      malformed,
+      llm_text("<tool_call>\nadd({ left: 1, right: 2 })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const session = "parse-feedback-recovery-" + uuid()
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        session_id: session,
+        tools: parse_feedback_tools(),
+        tool_format: "text",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        done_judge: nil,
+        max_iterations: 5,
+        stall_diagnostics: {
+          enabled: true,
+          repeat_parse_rejection: 2,
+          inject_feedback: true,
+          max_feedback: 1,
+          hard_stop_after_trips: 3,
+        },
+      }
+      const captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Add one and two, then finish.", nil, opts) },
+      )
+      assert_eq(captured.result.status, "done")
+      assert_eq(captured.result.tools.successful, ["add"])
+      const warnings = captured.events.filter(
+        { event ->
+          event.type == "agent_loop_stall_warning"
+            && event?.warning?.pattern
+            == "repeated_parse_rejection"
+        },
+      )
+      assert_eq(len(warnings), 1)
+      const retry_messages = json_stringify(llm_mock_calls()[2].messages)
+      assert(contains(retry_messages, "Content repair"))
+      assert(contains(retry_messages, "active tool format"))
+    },
+  )
+}

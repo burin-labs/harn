@@ -14,6 +14,15 @@ fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
 }
 
+fn checkpoint_of(events, schema) {
+  for event in events {
+    if event?.type == "typed_checkpoint" && event?.checkpoint?.schema == schema {
+      return event.checkpoint
+    }
+  }
+  return {}
+}
+
 fn run_capped() {
   with_llm_script(
     [
@@ -46,6 +55,7 @@ fn run_capped() {
         ) },
       )
       const result = captured.result
+      const terminal = checkpoint_of(captured.events, "harn.agent_terminal.v1")
       __io_println("capped.status=${result.status}")
       __io_println("capped.stop_reason=${result.stop_reason}")
       __io_println("capped.invocations=${result.completion_judge.invocations}")
@@ -54,6 +64,8 @@ fn run_capped() {
       __io_println("capped.cap_reached=${result.completion_judge.cap_reached}")
       __io_println("capped.judge_decisions=${len(events_of(captured.events, "judge_decision"))}")
       __io_println("capped.calls=${len(llm_mock_calls())}")
+      __io_println("capped.terminal_kind=${terminal.terminal.kind}")
+      __io_println("capped.terminal_reason=${terminal.terminal.reason}")
     },
   )
 }

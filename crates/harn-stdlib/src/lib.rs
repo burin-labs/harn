@@ -186,6 +186,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "llm/faithfulness" => "stdlib/llm/faithfulness.harn",
     "llm/optimize" => "stdlib/llm/optimize.harn",
     "agent/events" => "stdlib/agent/events.harn",
+    "agent/feedback" => "stdlib/agent/feedback.harn",
     "agent/completions" => "stdlib/agent/completions.harn",
     "agent/transcript" => "stdlib/agent/transcript.harn",
     "agent/artifacts" => "stdlib/agent/artifacts.harn",

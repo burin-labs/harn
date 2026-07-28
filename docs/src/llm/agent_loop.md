@@ -124,6 +124,18 @@ next_step, trigger, escalation_recommended?, escalation_target?}`.
 `verify_completion` closures, `verify_completion_judge`,
 and `done_judge` all use this event, so harnesses can measure completion-gate
 class fire rates from structured fields instead of parsing feedback prose.
+Structured completion judges keep the task, rubric, tool schemas, and verdict
+schema in a stable system prefix while per-turn transcript evidence stays in the
+user message. Each invocation emits a `harn.completion_judge_cache.v1` typed
+checkpoint with the stable-prefix hash and cache read/write token counts.
+Repeated judge feedback with the same `next_step` is not reinjected until the
+latest assistant or tool evidence changes.
+
+Parser, stall, and completion-judge feedback pass through the same deterministic
+composer. Its `harn.agent_feedback_composition.v1` typed checkpoint records the
+surviving reason-coded messages and every suppression (duplicate,
+stop/continue contradiction, or unchanged next step) before model-visible
+feedback is injected.
 
 Nested `llm` fields:
 
@@ -410,7 +422,7 @@ Same as `llm_call`, plus additional options:
 | `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
 | `stop_after_successful_tools` | `list<string>` | nil | Stop after a tool-calling turn whose successful results include one of these tool names. Useful for workflow-owned verify loops such as `["edit", "scaffold"]` |
 | `require_successful_tools` | `list<string\|list<string>>` | nil | Mark a cleanly completed loop `status = "failed"` unless every required tool succeeds at least once. A nested list is an OR group, e.g. `["run_command", ["read_command_output", "read_command_output_tail"]]`. Keeps action stages honest when attempted effects were rejected, errored, or skipped |
-| `stall_diagnostics` | bool/dict | nil | Detect adjacent repeated tool calls with the same name and identical arguments. `true` enables conservative defaults (`threshold: 3`, one feedback nudge, argument digests only). Dict options include `enabled`, `threshold`, `inject_feedback`, `max_feedback`, `exempt_tools`/`allow_repeated_tools`, `include_arguments`, and repair knobs either flat or under `repair_diagnostics` |
+| `stall_diagnostics` | bool/dict | nil | Detect adjacent repeated tool calls with the same name and identical arguments. `true` enables conservative defaults (`threshold: 3`, one feedback nudge, argument digests only). Dict options include `enabled`, `threshold`, `inject_feedback`, `max_feedback`, `exempt_tools`/`allow_repeated_tools`, `include_arguments`, `repeat_parse_rejection` (default `2`, the consecutive fully rejected tool turns before bounded content-repair recovery engages), and repair knobs either flat or under `repair_diagnostics` |
 | `skills` | skill_registry or list | nil | Skill registry exposed to the match-and-activate lifecycle phase. See [Skills lifecycle](#skills-lifecycle) |
 | `skill_match` | dict | `{strategy: "metadata", top_n: 1, sticky: true}` | Match configuration — `strategy` (`"metadata"` \| `"host"` \| `"embedding"`), `top_n`, `sticky` |
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |

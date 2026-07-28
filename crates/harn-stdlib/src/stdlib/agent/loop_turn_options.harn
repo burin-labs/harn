@@ -3,6 +3,7 @@ import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
+import { AgentStallState } from "std/agent/stall_types"
 
 pub fn __sync_tool_search_state(opts, turn_opts) {
   if turn_opts?._tool_search_client == nil {
@@ -464,7 +465,7 @@ pub fn __agent_loop_apply_stall_judge_veto(
   turn_llm_opts,
   iteration,
   loop_start_ms,
-) -> dict {
+) -> AgentStallState {
   const recovery = trim(to_string(stall_verdict?.feedback ?? ""))
   if len(tool_calls) > 0 {
     agent_session_record_undispatched_tool_results(
@@ -476,7 +477,19 @@ pub fn __agent_loop_apply_stall_judge_veto(
   }
   let next_stall_state = stall_state
   if recovery != "" {
-    agent_session_inject_feedback(session_id, "verify_completion", recovery)
+    agent_feedback_emit(
+      session_id,
+      [
+        {
+          kind: "verify_completion",
+          content: recovery,
+          source: stall_verdict?.trigger ?? "completion_judge",
+          reason: "stall_judge_veto",
+          action: "continue",
+          next_step: stall_verdict?.next_step ?? "",
+        },
+      ],
+    )
   } else if stall_observation.feedback_deferred {
     next_stall_state = agent_stall_inject_feedback(
       session_id,

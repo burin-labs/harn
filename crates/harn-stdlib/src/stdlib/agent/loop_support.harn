@@ -7,6 +7,11 @@ pub import {
 } from "std/agent/control"
 pub import { agent_daemon_snapshot, agent_daemon_step } from "std/agent/daemon"
 pub import {
+  agent_feedback_compose,
+  agent_feedback_emit,
+  agent_feedback_tool_example,
+} from "std/agent/feedback"
+pub import {
   __agent_input_guardrail_fail_open,
   __agent_input_guardrail_normalize,
 } from "std/agent/guardrails"
