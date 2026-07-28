@@ -1408,7 +1408,7 @@ fn sandboxed_process_config(
     if let Some(cwd) = resolved.cwd.as_ref() {
         enforce_process_cwd_for_policy(cwd, policy)?;
     } else {
-        resolved.cwd = Some(default_process_cwd_for_policy(policy)?);
+        resolved.cwd = Some(policy_process_cwd(policy)?);
     }
     neutralize_rustc_wrapper(&mut resolved.env);
     inject_workspace_process_env(&mut resolved.env, policy);
@@ -1475,7 +1475,7 @@ pub fn deterministic_message_locale_env() -> Vec<(String, String)> {
 /// effect. Kept as a named constant so both spawn paths stay in sync.
 pub const MESSAGE_LOCALE_OVERRIDE_ENV: &str = "LC_ALL";
 
-fn default_process_cwd_for_policy(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
+pub(crate) fn policy_process_cwd(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
     let roots = normalized_workspace_roots(policy);
     let current = std::env::current_dir().map_err(|error| {
         VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(

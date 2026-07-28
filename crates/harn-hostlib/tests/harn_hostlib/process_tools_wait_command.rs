@@ -85,6 +85,7 @@ fn wait_command_waits_for_live_handle_result_and_consumes_feedback() {
     req.insert("background".into(), VmValue::Bool(true));
     let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&start, "handle_id");
+    let cwd = require_str(&start, "cwd");
 
     let wait_handle_id = handle_id.clone();
     let wait_session_id = session_id.clone();
@@ -103,6 +104,7 @@ fn wait_command_waits_for_live_handle_result_and_consumes_feedback() {
     assert_eq!(require_str(&waited, "status"), "completed");
     assert_eq!(require_str(&waited, "feedback_kind"), "tool_result");
     assert_eq!(require_str(&waited, "handle_id"), handle_id);
+    assert_eq!(require_str(&waited, "cwd"), cwd);
     assert_eq!(require_str(&waited, "stdout"), "direct\n");
 
     let leftover = harn_vm::orchestration::agent_inbox::drain(&session_id);

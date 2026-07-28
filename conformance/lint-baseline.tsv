@@ -140,7 +140,7 @@
 1	scenarios/tool_surface_validate.harn	__CHECK_FAILED__
 6	stdlib/agent_best_of_n.harn	HARN-LNT-016
 1	stdlib/agent_best_of_n.harn	HARN-LNT-025
-37	stdlib/command_json_helpers.harn	HARN-LNT-025
+40	stdlib/command_json_helpers.harn	HARN-LNT-025
 8	stdlib/command_output_tail.harn	HARN-LNT-025
 25	stdlib/command_step_basic.harn	HARN-LNT-025
 25	stdlib/command_step_retry_logic.harn	HARN-LNT-025

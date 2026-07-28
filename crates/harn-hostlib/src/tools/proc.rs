@@ -64,6 +64,7 @@ pub(crate) struct SpawnRequest {
 #[derive(Debug, Clone)]
 pub(crate) struct SpawnOutcome {
     pub(crate) command_id: String,
+    pub(crate) cwd: PathBuf,
     pub(crate) status: CommandStatus,
     pub(crate) pid: Option<u32>,
     pub(crate) process_group_id: Option<u32>,
@@ -140,9 +141,11 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     let started = std::time::Instant::now();
     let started_at = now_rfc3339();
     let command_id = next_command_id();
+    let requested_cwd = req.cwd.as_ref().map(to_agent_path);
+    let effective_cwd = resolve_effective_cwd(req.builtin, req.cwd.as_deref())?;
 
     let mut env = req.env.clone();
-    apply_toolchain_path(req.cwd.as_deref(), &mut env, req.env_mode);
+    apply_toolchain_path(Some(&effective_cwd), &mut env, req.env_mode);
     let file_capture = match req.capture.transport {
         CaptureTransport::Pipe => None,
         CaptureTransport::File => Some(FileCapture::new(req.builtin)?),
@@ -152,7 +155,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         builtin: req.builtin,
         program: req.program.clone(),
         args: req.args.clone(),
-        cwd: req.cwd.clone(),
+        cwd: Some(effective_cwd.clone()),
         env,
         env_remove: req.env_remove.clone(),
         env_mode: req.env_mode,
@@ -167,8 +170,9 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
             .map(FileCapture::output_capture)
             .unwrap_or(OutputCapture::Pipe),
     };
-    let mut handle = process_handle::spawn_process(spec)
-        .map_err(|e| process_error_to_hostlib(req.builtin, e))?;
+    let mut handle = process_handle::spawn_process(spec).map_err(|error| {
+        process_error_to_hostlib(req.builtin, requested_cwd.as_deref(), &effective_cwd, error)
+    })?;
 
     let pid = handle.pid();
     let process_group_id = handle.process_group_id();
@@ -286,6 +290,8 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         {
             return Err(process_error_to_hostlib(
                 req.builtin,
+                requested_cwd.as_deref(),
+                &effective_cwd,
                 ProcessError::SpawnIo {
                     kind: harn_vm::value::io_error_kind_str(&error),
                     message: error.to_string(),
@@ -298,6 +304,7 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     Ok(SpawnOutcome {
         command_id,
+        cwd: effective_cwd,
         status: command_status,
         pid,
         process_group_id,
@@ -494,7 +501,12 @@ pub(crate) fn apply_toolchain_path(
     toolchain_path::normalize_child_env(&effective_cwd, env, env_mode);
 }
 
-pub(crate) fn process_error_to_hostlib(builtin: &'static str, err: ProcessError) -> HostlibError {
+pub(crate) fn process_error_to_hostlib(
+    builtin: &'static str,
+    requested_cwd: Option<&str>,
+    effective_cwd: &Path,
+    err: ProcessError,
+) -> HostlibError {
     match err {
         ProcessError::InvalidArgv(message) => HostlibError::InvalidParameter {
             builtin,
@@ -521,6 +533,8 @@ pub(crate) fn process_error_to_hostlib(builtin: &'static str, err: ProcessError)
             builtin,
             kind,
             message,
+            requested_cwd: requested_cwd.map(str::to_string),
+            cwd: to_agent_path(effective_cwd),
         },
         ProcessError::CatastrophicFloor(message) => {
             HostlibError::CatastrophicFloor { builtin, message }
@@ -535,6 +549,7 @@ pub(crate) fn build_response(
 ) -> VmValue {
     let mut builder = ResponseBuilder::new()
         .str("command_id", outcome.command_id.clone())
+        .str("cwd", to_agent_path(&outcome.cwd))
         .str("status", outcome.status.as_str())
         .int("duration_ms", outcome.duration.as_millis() as i64)
         .int("exit_code", outcome.exit_code as i64)
@@ -690,6 +705,7 @@ pub(crate) fn running_response(
     pid: u32,
     process_group_id: Option<u32>,
     started_at: String,
+    cwd: &Path,
     command_display: String,
     snapshot_binding: Option<&harn_vm::value::DictMap>,
 ) -> VmValue {
@@ -702,6 +718,7 @@ pub(crate) fn running_response(
     );
     let mut builder = ResponseBuilder::new()
         .str("command_id", command_id.clone())
+        .str("cwd", to_agent_path(cwd))
         .str("status", CommandStatus::Running.as_str())
         .int("pid", pid as i64)
         .str("handle_id", handle_id)
@@ -862,6 +879,32 @@ pub(crate) fn parse_cwd(
             message: format!("failed to canonicalize cwd `{raw}`: {error}"),
         })?;
     Ok(Some(canonical))
+}
+
+/// Resolve the directory the child will actually execute in.
+///
+/// `parse_cwd` canonicalizes explicit request values. When the caller omits
+/// `cwd`, materialize the inherited directory before spawning so the child,
+/// result envelope, and typed spawn error all share one authoritative fact.
+pub(crate) fn resolve_effective_cwd(
+    builtin: &'static str,
+    requested: Option<&Path>,
+) -> Result<PathBuf, HostlibError> {
+    if let Some(requested) = requested {
+        return Ok(requested.to_path_buf());
+    }
+    let current = harn_vm::stdlib::process::inherited_process_cwd().map_err(|error| {
+        HostlibError::Backend {
+            builtin,
+            message: format!("failed to resolve inherited cwd: {error}"),
+        }
+    })?;
+    current
+        .canonicalize()
+        .map_err(|error| HostlibError::Backend {
+            builtin,
+            message: format!("failed to canonicalize inherited cwd: {error}"),
+        })
 }
 
 #[cfg(test)]

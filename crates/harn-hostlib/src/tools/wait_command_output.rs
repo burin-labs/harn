@@ -236,7 +236,7 @@ pub(crate) async fn handle(args: Vec<VmValue>) -> Result<VmValue, HostlibError> 
         .unwrap_or_default();
     let mut matcher = Matcher::new(&pattern, regex, from_offset)?;
 
-    if let Some(feed) = super::long_running::output_feed_for_handle(&handle_id) {
+    if let Some((feed, cwd)) = super::long_running::output_context_for_handle(&handle_id) {
         let timeout = async move {
             match timeout_ms {
                 Some(ms) => tokio::time::sleep(Duration::from_millis(ms)).await,
@@ -265,7 +265,7 @@ pub(crate) async fn handle(args: Vec<VmValue>) -> Result<VmValue, HostlibError> 
                             source,
                             &pattern,
                             Some((start, end, &bytes[start..end])),
-                            running_result(&handle_id, &state),
+                            running_result(&handle_id, &cwd, &state),
                         ),
                         false,
                     ))
@@ -294,7 +294,7 @@ pub(crate) async fn handle(args: Vec<VmValue>) -> Result<VmValue, HostlibError> 
                         source,
                         &pattern,
                         None,
-                        running_result_from_feed(&handle_id, &feed),
+                        running_result_from_feed(&handle_id, &cwd, &feed),
                     ));
                 }
             }
@@ -313,21 +313,30 @@ pub(crate) async fn handle(args: Vec<VmValue>) -> Result<VmValue, HostlibError> 
     })
 }
 
-fn running_result_from_feed(handle_id: &str, feed: &super::long_running::OutputFeed) -> VmValue {
+fn running_result_from_feed(
+    handle_id: &str,
+    cwd: &std::path::Path,
+    feed: &super::long_running::OutputFeed,
+) -> VmValue {
     let state = feed
         .state
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
-    running_result(handle_id, &state)
+    running_result(handle_id, cwd, &state)
 }
 
-fn running_result(handle_id: &str, state: &super::long_running::OutputState) -> VmValue {
+fn running_result(
+    handle_id: &str,
+    cwd: &std::path::Path,
+    state: &super::long_running::OutputState,
+) -> VmValue {
     let mut result = harn_vm::value::DictMap::new();
     result.put_str("handle_id", handle_id);
     result.put_str("status", "running");
     result.insert("completed".into(), VmValue::Bool(false));
     result.insert("timed_out".into(), VmValue::Bool(false));
     result.insert("exit_code".into(), VmValue::Nil);
+    result.put_str("cwd", crate::tools::args::to_agent_path(cwd));
     result.put_str("stdout", String::from_utf8_lossy(&state.stdout));
     result.put_str("stderr", String::from_utf8_lossy(&state.stderr));
     result.put_str("combined", String::from_utf8_lossy(&state.combined));

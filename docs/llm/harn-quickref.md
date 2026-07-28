@@ -335,7 +335,8 @@ absence.
   provider command values with `argv`, `command`, or `cmd` fields.
 - `command_json(spec, opts?)` parses stdout as JSON, returns `nil` for empty
   output only with `allow_empty: true`, and supports `result: "record"` for
-  `{ok:false,error,step}` instead of throwing.
+  `{ok:false,error,step}` instead of throwing. Command results and structured
+  errors carry the canonical effective `cwd`, including when it was inherited.
 - `command_json_step(name, spec, opts?)` preserves `command_step` retry,
   classify, recovery, artifact, and attempt fields, then adds `json` or
   `parse_error`.

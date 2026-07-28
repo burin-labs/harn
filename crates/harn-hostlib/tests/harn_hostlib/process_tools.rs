@@ -19,6 +19,8 @@
 
 #![cfg(unix)]
 
+mod cwd;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -413,23 +415,6 @@ fn run_command_pipes_stdin_into_child() {
     assert!(captured[0].use_stdin, "stdin should be wired up in spec");
 
     assert_eq!(controller.stdin_written(), b"from-stdin");
-}
-
-#[test]
-fn run_command_runs_in_supplied_cwd() {
-    let (spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
-
-    let dir = tempdir().unwrap();
-    let mut req = dict();
-    req.insert("argv".into(), vlist_str(&["bash", "-c", "pwd"]));
-    req.insert("cwd".into(), vstr(dir.path().to_str().unwrap()));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
-
-    assert_eq!(require_int(&resp, "exit_code"), 0);
-    let captured = spawner.captured();
-    assert_eq!(captured.len(), 1);
-    let canon_cwd = std::fs::canonicalize(dir.path()).unwrap();
-    assert_eq!(captured[0].cwd.as_ref().unwrap(), &canon_cwd);
 }
 
 #[test]

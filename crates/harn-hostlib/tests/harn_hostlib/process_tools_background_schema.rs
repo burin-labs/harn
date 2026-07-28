@@ -144,6 +144,7 @@ fn run_command_background_after_snapshot_satisfies_response_schema() {
     let resp = require_dict(resp_value);
     assert_eq!(require_str(&resp, "status"), "running");
     assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
+    assert!(!require_str(&resp, "cwd").is_empty());
     assert_snapshot_binding(&resp);
     cancel_handle(&require_str(&resp, "handle_id"));
 }
@@ -173,6 +174,7 @@ fn run_command_background_after_progress_overlay_satisfies_response_schema() {
     let resp = require_dict(resp_value);
     assert_eq!(require_str(&resp, "status"), "running");
     assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
+    assert!(!require_str(&resp, "cwd").is_empty());
     assert_snapshot_binding(&resp);
     assert!(
         require_int(&resp, "duration_ms") < wait_ms,

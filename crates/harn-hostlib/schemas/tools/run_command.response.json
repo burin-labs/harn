@@ -5,6 +5,10 @@
   "type": "object",
   "properties": {
     "command_id": { "type": "string" },
+    "cwd": {
+      "type": "string",
+      "description": "Canonical effective working directory, normalized with forward-slash separators."
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -82,6 +86,7 @@
   },
   "required": [
     "command_id",
+    "cwd",
     "status",
     "pid",
     "process_group_id",

@@ -1439,20 +1439,25 @@ compact recovery context:
 | `shell_command_from_argv(argv)` | Render argv as safe shell text, unwrapping shell wrappers such as `["bash", "-lc", "cmd"]` to the script payload |
 | `shell_command_from_value(value)` | Normalize string, argv-list, or dict-shaped provider command values into shell text using `argv`, `command`, or `cmd` fields |
 | `command_output_text(result, stream?)` | Extract stdout, stderr, combined output, tail, or failure tail from a command result |
-| `command_failure_text(result, options?)` | Render a compact failure block with status, exit code, and capped stdout/stderr |
+| `command_failure_text(result, options?)` | Render a compact failure block with status, exit code, effective cwd, and capped stdout/stderr |
 | `command_result_ok(stdout?, extra?)` | Build a normalized success result for tests and harness adapters |
 | `command_result_fail(exit_code?, stderr?, extra?)` | Build a normalized failure result for tests and harness adapters |
 
 If the OS cannot start the requested program, `command_run` throws
 `{error: "io_error", kind, message, category: "environment", operation:
-"process_spawn"}`. A missing executable has `kind: "not_found"` in both
+"process_spawn", requested_cwd, cwd}`. `requested_cwd` is `nil` when the
+caller omitted it; `cwd` is always the normalized effective directory where
+the spawn was attempted. A missing executable has `kind: "not_found"` in both
 sandboxed and unsandboxed execution. Other spawn failures and ordinary nonzero
 exit results remain distinct.
 
 `CommandResult` names the common normalized result fields,
 `CommandOutputMatch` names the matched range and latest command state, and
 `CommandStepReceipt` names the portable command-step fields used by durable
-audit and recovery artifacts. All preserve additional adapter-owned fields.
+audit and recovery artifacts. Host-backed `CommandResult.cwd` records the
+canonical effective directory even when the caller did not pass `cwd`;
+structured `command_json(..., {result: "record"})` failures carry the same
+field. All preserve additional adapter-owned fields.
 
 Readiness checks start with `{background: true}`, wait on
 `command_wait_for_output`, and use `defer` with `command_cancel` so the process

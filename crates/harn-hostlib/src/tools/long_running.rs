@@ -203,6 +203,8 @@ struct HandleEntry {
     command_display: String,
     /// RFC 3339 spawn timestamp, for `list_handles` elapsed reporting.
     started_at: String,
+    /// Canonical directory in which the child executes.
+    cwd: PathBuf,
 }
 
 #[derive(Default)]
@@ -243,6 +245,8 @@ pub struct LongRunningHandleInfo {
     pub handle_id: String,
     /// RFC 3339 timestamp of the spawn.
     pub started_at: String,
+    /// Canonical directory in which the child executes.
+    pub cwd: PathBuf,
     /// Raw child process id reported by the platform.
     pub pid: u32,
     /// Child process group id when the platform exposes it.
@@ -301,6 +305,7 @@ struct WaiterContext {
     handle_id: String,
     session_id: String,
     started_at: String,
+    cwd: PathBuf,
     process_group_id: Option<u32>,
     command_display: String,
     progress_interval: Option<Duration>,
@@ -315,6 +320,7 @@ struct ProgressThreadContext {
     handle_id: String,
     session_id: String,
     started_at: String,
+    cwd: PathBuf,
     command_display: String,
     process_group_id: Option<u32>,
     output_path: PathBuf,
@@ -340,6 +346,7 @@ impl LongRunningHandleInfo {
             command_id,
             handle_id,
             started_at,
+            cwd,
             pid,
             process_group_id,
             command_display,
@@ -351,6 +358,7 @@ impl LongRunningHandleInfo {
             pid,
             process_group_id,
             started_at,
+            &cwd,
             command_display,
             snapshot_binding.as_ref(),
         )
@@ -398,13 +406,15 @@ pub(crate) fn spawn_long_running_with_options(
     env: BTreeMap<String, String>,
     options: LongRunningSpawnOptions,
 ) -> Result<LongRunningHandleInfo, HostlibError> {
+    let requested_cwd = cwd.as_ref().map(to_agent_path);
+    let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
     let mut env = env;
-    proc::apply_toolchain_path(cwd.as_deref(), &mut env, options.env_mode);
+    proc::apply_toolchain_path(Some(&effective_cwd), &mut env, options.env_mode);
     let spec = SpawnSpec {
         builtin,
         program: program.clone(),
         args: args.clone(),
-        cwd,
+        cwd: Some(effective_cwd.clone()),
         env,
         env_remove: options.env_remove.clone(),
         env_mode: options.env_mode,
@@ -413,8 +423,9 @@ pub(crate) fn spawn_long_running_with_options(
         owner_death: OwnerDeathPolicy::KillContainment,
         output_capture: process_handle::OutputCapture::Pipe,
     };
-    let handle = process_handle::spawn_process(spec)
-        .map_err(|e| proc::process_error_to_hostlib(builtin, e))?;
+    let handle = process_handle::spawn_process(spec).map_err(|error| {
+        proc::process_error_to_hostlib(builtin, requested_cwd.as_deref(), &effective_cwd, error)
+    })?;
 
     let pid = handle.pid().unwrap_or(0);
     let process_group_id = handle.process_group_id();
@@ -452,6 +463,7 @@ pub(crate) fn spawn_long_running_with_options(
                 lease: options.lease,
                 command_display: command_display.clone(),
                 started_at: started_at.clone(),
+                cwd: effective_cwd.clone(),
             },
         );
     }
@@ -461,6 +473,7 @@ pub(crate) fn spawn_long_running_with_options(
         handle_id: handle_id.clone(),
         session_id: options.session_id,
         started_at: started_at.clone(),
+        cwd: effective_cwd.clone(),
         process_group_id,
         command_display: command_display.clone(),
         progress_interval: options.progress_interval,
@@ -485,6 +498,7 @@ pub(crate) fn spawn_long_running_with_options(
         command_id,
         handle_id,
         started_at,
+        cwd: effective_cwd,
         pid,
         process_group_id,
         command_display,
@@ -558,6 +572,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
                 handle_id: context.handle_id.clone(),
                 session_id: context.session_id.clone(),
                 started_at: context.started_at.clone(),
+                cwd: context.cwd.clone(),
                 command_display: context.command_display.clone(),
                 process_group_id: context.process_group_id,
                 output_path: planned.output_path.clone(),
@@ -654,6 +669,10 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     payload.insert(
         "started_at".into(),
         serde_json::Value::String(context.started_at),
+    );
+    payload.insert(
+        "cwd".into(),
+        serde_json::Value::String(to_agent_path(&context.cwd)),
     );
     payload.insert(
         "ended_at".into(),
@@ -842,6 +861,7 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "status": CommandStatus::Running.as_str(),
                 "command_or_op_descriptor": &context.command_display,
                 "started_at": &context.started_at,
+                "cwd": to_agent_path(&context.cwd),
                 "ended_at": null,
                 "duration_ms": context.started.elapsed().as_millis() as i64,
                 "exit_code": null,
@@ -916,13 +936,22 @@ pub(crate) fn snapshot_binding_for_handle(handle_id: &str) -> Option<harn_vm::va
         .and_then(|entry| entry.snapshot_binding.clone())
 }
 
-pub(crate) fn output_feed_for_handle(handle_id: &str) -> Option<Arc<OutputFeed>> {
+pub(crate) fn cwd_for_handle(handle_id: &str) -> Option<PathBuf> {
     HANDLE_STORE
         .lock()
         .expect("long-running handle store poisoned")
         .entries
         .get(handle_id)
-        .map(|entry| entry.output_feed.clone())
+        .map(|entry| entry.cwd.clone())
+}
+
+pub(crate) fn output_context_for_handle(handle_id: &str) -> Option<(Arc<OutputFeed>, PathBuf)> {
+    HANDLE_STORE
+        .lock()
+        .expect("long-running handle store poisoned")
+        .entries
+        .get(handle_id)
+        .map(|entry| (entry.output_feed.clone(), entry.cwd.clone()))
 }
 
 pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {

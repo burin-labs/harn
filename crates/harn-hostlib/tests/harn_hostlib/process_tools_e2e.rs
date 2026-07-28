@@ -455,11 +455,19 @@ fn real_run_command_echoes_stdout_and_reports_exit_zero() {
     assert!(!require_bool(&resp, "timed_out"));
 }
 
-fn assert_missing_process_error(error: HostlibError) {
+fn assert_missing_process_error(error: HostlibError, expected_requested_cwd: Option<&str>) {
     match error {
-        HostlibError::ProcessSpawn { kind, message, .. } => {
+        HostlibError::ProcessSpawn {
+            kind,
+            message,
+            requested_cwd,
+            cwd,
+            ..
+        } => {
             assert_eq!(kind, "not_found");
             assert!(!message.is_empty());
+            assert_eq!(requested_cwd.as_deref(), expected_requested_cwd);
+            assert!(!cwd.is_empty());
         }
         other => panic!("expected typed process-spawn error, got {other:?}"),
     }
@@ -473,7 +481,7 @@ fn real_run_command_reports_missing_program_as_typed_not_found() {
         vlist_str(&["harn-command-that-does-not-exist-5662"]),
     );
     let error = call("hostlib_tools_run_command", req).expect_err("missing program must fail");
-    assert_missing_process_error(error);
+    assert_missing_process_error(error, None);
 }
 
 #[test]
@@ -497,16 +505,36 @@ fn real_run_command_reports_sandboxed_missing_program_as_typed_not_found() {
     let error = call("hostlib_tools_run_command", req).expect_err("missing program must fail");
     pop_execution_policy();
 
-    assert_missing_process_error(error);
+    assert_missing_process_error(
+        error,
+        Some(
+            workspace
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref(),
+        ),
+    );
 }
 
 #[test]
 fn real_run_command_preserves_genuine_exit_71_as_a_result() {
+    let workspace = tempfile::tempdir().expect("workspace");
     let mut req = dict();
-    req.insert("argv".into(), vlist_str(&["sh", "-c", "exit 71"]));
+    req.insert(
+        "argv".into(),
+        vlist_str(&["sh", "-c", "printf denied >&2; exit 71"]),
+    );
+    req.insert("cwd".into(), vstr(&workspace.path().to_string_lossy()));
     let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_int(&response, "exit_code"), 71);
     assert_eq!(require_str(&response, "status"), "completed");
+    assert_eq!(require_str(&response, "stderr"), "denied");
+    assert_eq!(
+        require_str(&response, "cwd"),
+        workspace.path().canonicalize().unwrap().to_string_lossy()
+    );
     assert!(!require_bool(&response, "timed_out"));
 }
 
