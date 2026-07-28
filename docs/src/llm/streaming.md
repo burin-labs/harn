@@ -85,8 +85,8 @@ Streaming transports emit text deltas as soon as the provider sends them. Native
 tool-call streams also surface partial argument deltas in agent trace events:
 `raw_input` when the bytes parse as JSON, or `raw_input_partial` while the JSON
 object is still incomplete. Harn sends these intermediate states to live agent
-event subscribers. Headless sessions persist the settled tool-call arguments and
-lifecycle events without storing each intermediate argument state.
+event subscribers and persists them for deterministic replay, including in
+headless sessions.
 
 Final token usage is recorded after the provider response completes. Read it
 from the `llm_call` / `agent_loop` result, from `llm_usage()`, or from the

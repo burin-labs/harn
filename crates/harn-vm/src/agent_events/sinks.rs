@@ -8,42 +8,10 @@ use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic}
 
 use super::AgentEvent;
 
-fn should_persist_event(event: &AgentEvent) -> bool {
-    match event {
-        // Text-mode parsing candidates are live UX signals, not durable tool-call
-        // lifecycle records for replay/audit consumers.
-        AgentEvent::ToolCall { parsing, .. } | AgentEvent::ToolCallUpdate { parsing, .. } => {
-            if parsing.is_some() {
-                return false;
-            }
-            if let AgentEvent::ToolCallUpdate {
-                status: super::ToolCallStatus::Pending,
-                raw_input,
-                raw_input_partial,
-                ..
-            } = event
-            {
-                if raw_input.is_some() || raw_input_partial.is_some() {
-                    // The settled ToolCall that follows carries the complete input.
-                    // Partial states are durable only when they describe a live view.
-                    return super::registry::session_has_live_subscriber(event.session_id());
-                }
-            }
-            true
-        }
-        _ => true,
-    }
-}
-
 /// External consumers of the event stream (e.g. the harn-cli ACP server,
 /// which translates events into JSON-RPC notifications).
 pub trait AgentEventSink: Send + Sync {
     fn handle_event(&self, event: &AgentEvent);
-
-    /// Whether this sink is a durable record rather than a live consumer.
-    fn is_persistence_sink(&self) -> bool {
-        false
-    }
 
     /// Wait until every event accepted before this call has reached the sink's
     /// durable boundary. Synchronous sinks are complete when `handle_event`
@@ -60,6 +28,7 @@ pub type AgentEventSinkFlush<'a> =
 pub struct AgentEventSinkError {
     sink: &'static str,
     message: String,
+    dropped_events: u64,
 }
 
 impl AgentEventSinkError {
@@ -67,6 +36,15 @@ impl AgentEventSinkError {
         Self {
             sink,
             message: error.to_string(),
+            dropped_events: 0,
+        }
+    }
+
+    fn dropped_event(sink: &'static str, error: impl std::fmt::Display) -> Self {
+        Self {
+            sink,
+            message: error.to_string(),
+            dropped_events: 1,
         }
     }
 
@@ -77,15 +55,32 @@ impl AgentEventSinkError {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    /// Number of emitted events known not to have crossed the durable boundary.
+    pub fn dropped_events(&self) -> u64 {
+        self.dropped_events
+    }
 }
 
 impl std::fmt::Display for AgentEventSinkError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} sink flush failed: {}", self.sink, self.message)
+        write!(f, "{} sink flush failed: {}", self.sink, self.message)?;
+        if self.dropped_events > 0 {
+            write!(f, " ({} dropped events)", self.dropped_events)?;
+        }
+        Ok(())
     }
 }
 
 impl std::error::Error for AgentEventSinkError {}
+
+fn record_sink_failure(first_error: &mut Option<AgentEventSinkError>, error: AgentEventSinkError) {
+    if let Some(first) = first_error {
+        first.dropped_events = first.dropped_events.saturating_add(error.dropped_events);
+    } else {
+        *first_error = Some(error);
+    }
+}
 
 /// Envelope written to `event_log.jsonl` (#103). Wraps the raw
 /// `AgentEvent` with monotonic index + timestamp + frame depth so
@@ -126,6 +121,7 @@ struct JsonlEventSinkState {
     index: u64,
     bytes_written: u64,
     rotation: u32,
+    first_error: Option<AgentEventSinkError>,
 }
 
 impl JsonlEventSink {
@@ -153,6 +149,7 @@ impl JsonlEventSink {
                 index: 0,
                 bytes_written: 0,
                 rotation: 0,
+                first_error: None,
             }),
             base_path,
         }))
@@ -160,13 +157,16 @@ impl JsonlEventSink {
 
     /// Flush any buffered writes. Called on session shutdown; the
     /// Drop impl calls this too but on early panic it may not run.
-    pub fn flush(&self) -> std::io::Result<()> {
+    pub fn flush(&self) -> Result<(), AgentEventSinkError> {
         use std::io::Write as _;
-        self.state
-            .lock()
-            .expect("jsonl sink mutex poisoned")
-            .writer
-            .flush()
+        let mut state = self.state.lock().expect("jsonl sink mutex poisoned");
+        if let Err(error) = state.writer.flush() {
+            record_sink_failure(
+                &mut state.first_error,
+                AgentEventSinkError::new("jsonl_event", error),
+            );
+        }
+        state.first_error.clone().map_or(Ok(()), Err)
     }
 
     /// Current event index — primarily for tests and the "how many
@@ -214,15 +214,12 @@ impl JsonlEventSink {
 pub struct EventLogSink {
     dispatch: EventLogSinkDispatch,
     session_id: String,
+    first_error: Arc<Mutex<Option<AgentEventSinkError>>>,
 }
 
 enum EventLogSinkDispatch {
     Async(tokio::sync::mpsc::UnboundedSender<EventLogSinkCommand>),
-    Blocking {
-        log: Arc<AnyEventLog>,
-        topic: Topic,
-        first_error: Mutex<Option<AgentEventSinkError>>,
-    },
+    Blocking { log: Arc<AnyEventLog>, topic: Topic },
 }
 
 enum EventLogSinkCommand {
@@ -238,20 +235,23 @@ impl EventLogSink {
             crate::event_log::sanitize_topic_component(&session_id)
         ))
         .expect("session id should sanitize to a valid topic");
+        let first_error = Arc::new(Mutex::new(None));
         let dispatch = if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-            handle.spawn(run_event_log_sink_worker(log, topic, receiver));
-            EventLogSinkDispatch::Async(sender)
-        } else {
-            EventLogSinkDispatch::Blocking {
+            handle.spawn(run_event_log_sink_worker(
                 log,
                 topic,
-                first_error: Mutex::new(None),
-            }
+                receiver,
+                first_error.clone(),
+            ));
+            EventLogSinkDispatch::Async(sender)
+        } else {
+            EventLogSinkDispatch::Blocking { log, topic }
         };
         Arc::new(Self {
             dispatch,
             session_id,
+            first_error,
         })
     }
 
@@ -259,26 +259,30 @@ impl EventLogSink {
         match &self.dispatch {
             EventLogSinkDispatch::Async(sender) => {
                 let (reply, response) = tokio::sync::oneshot::channel();
-                sender
-                    .send(EventLogSinkCommand::Flush(reply))
-                    .map_err(|_| {
+                if sender.send(EventLogSinkCommand::Flush(reply)).is_err() {
+                    return Err(self.latched_error().unwrap_or_else(|| {
                         AgentEventSinkError::new("event_log", "append worker is unavailable")
-                    })?;
-                response.await.map_err(|_| {
-                    AgentEventSinkError::new("event_log", "append worker stopped before flush")
-                })?
+                    }));
+                }
+                response.await.unwrap_or_else(|_| {
+                    Err(self.latched_error().unwrap_or_else(|| {
+                        AgentEventSinkError::new("event_log", "append worker stopped before flush")
+                    }))
+                })
             }
-            EventLogSinkDispatch::Blocking {
-                log, first_error, ..
-            } => {
-                let append_error = first_error
-                    .lock()
-                    .expect("event-log sink error mutex poisoned")
-                    .clone();
+            EventLogSinkDispatch::Blocking { log, .. } => {
+                let append_error = self.latched_error();
                 let flush_result = flush_event_log(log.clone()).await;
                 append_error.map_or(flush_result, Err)
             }
         }
+    }
+
+    fn latched_error(&self) -> Option<AgentEventSinkError> {
+        self.first_error
+            .lock()
+            .expect("event-log sink error mutex poisoned")
+            .clone()
     }
 
     #[cfg(test)]
@@ -300,18 +304,27 @@ async fn run_event_log_sink_worker(
     log: Arc<AnyEventLog>,
     topic: Topic,
     mut receiver: tokio::sync::mpsc::UnboundedReceiver<EventLogSinkCommand>,
+    first_error: Arc<Mutex<Option<AgentEventSinkError>>>,
 ) {
-    let mut first_error = None;
     while let Some(command) = receiver.recv().await {
         match command {
             EventLogSinkCommand::Append(record) => {
                 if let Err(error) = log.append(&topic, record).await {
-                    first_error.get_or_insert_with(|| AgentEventSinkError::new("event_log", error));
+                    record_sink_failure(
+                        &mut first_error
+                            .lock()
+                            .expect("event-log sink error mutex poisoned"),
+                        AgentEventSinkError::dropped_event("event_log", error),
+                    );
                 }
             }
             EventLogSinkCommand::Flush(reply) => {
                 let flush_result = flush_event_log(log.clone()).await;
-                let result = first_error.clone().map_or(flush_result, Err);
+                let append_error = first_error
+                    .lock()
+                    .expect("event-log sink error mutex poisoned")
+                    .clone();
+                let result = append_error.map_or(flush_result, Err);
                 let _ = reply.send(result);
             }
         }
@@ -349,13 +362,17 @@ async fn flush_event_log(log: Arc<AnyEventLog>) -> Result<(), AgentEventSinkErro
 
 impl AgentEventSink for JsonlEventSink {
     fn handle_event(&self, event: &AgentEvent) {
-        if !should_persist_event(event) {
-            return;
-        }
         use std::io::Write as _;
         let mut state = self.state.lock().expect("jsonl sink mutex poisoned");
+        if state.first_error.is_some() {
+            let error = AgentEventSinkError::dropped_event(
+                "jsonl_event",
+                "sink unavailable after an earlier persistence failure",
+            );
+            record_sink_failure(&mut state.first_error, error);
+            return;
+        }
         let index = state.index;
-        state.index += 1;
         let emitted_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -366,48 +383,68 @@ impl AgentEventSink for JsonlEventSink {
             frame_depth: None,
             event: event.clone(),
         };
-        let Ok(mut envelope_json) = serde_json::to_value(&envelope) else {
-            return;
+        let mut envelope_json = match serde_json::to_value(&envelope) {
+            Ok(value) => value,
+            Err(error) => {
+                record_sink_failure(
+                    &mut state.first_error,
+                    AgentEventSinkError::dropped_event("jsonl_event", error),
+                );
+                return;
+            }
         };
         crate::redact::current_policy().redact_json_in_place(&mut envelope_json);
-        if let Ok(line) = serde_json::to_string(&envelope_json) {
-            // One line, newline-terminated — JSON Lines spec.
-            // Errors here are swallowed on purpose; a failing write
-            // must never crash the agent loop, and the run record
-            // itself is a secondary artifact.
-            if state
-                .writer
-                .write_all(line.as_bytes())
-                .and_then(|_| state.writer.write_all(b"\n"))
-                .is_ok()
-            {
-                state.bytes_written += line.len() as u64 + 1;
-                let _ = state.writer.flush();
-                let _ = self.rotate_if_needed(&mut state);
+        let mut line = match serde_json::to_vec(&envelope_json) {
+            Ok(line) => line,
+            Err(error) => {
+                record_sink_failure(
+                    &mut state.first_error,
+                    AgentEventSinkError::dropped_event("jsonl_event", error),
+                );
+                return;
             }
+        };
+        line.push(b'\n');
+        if let Err(error) = state
+            .writer
+            .write_all(&line)
+            .and_then(|_| state.writer.flush())
+        {
+            record_sink_failure(
+                &mut state.first_error,
+                AgentEventSinkError::dropped_event("jsonl_event", error),
+            );
+            return;
+        }
+        state.index += 1;
+        state.bytes_written += line.len() as u64;
+        if let Err(error) = self.rotate_if_needed(&mut state) {
+            record_sink_failure(
+                &mut state.first_error,
+                AgentEventSinkError::new("jsonl_event", error),
+            );
         }
     }
 
     fn flush(&self) -> AgentEventSinkFlush<'_> {
-        Box::pin(async move {
-            JsonlEventSink::flush(self)
-                .map_err(|error| AgentEventSinkError::new("jsonl_event", error))
-        })
-    }
-
-    fn is_persistence_sink(&self) -> bool {
-        true
+        Box::pin(async move { JsonlEventSink::flush(self) })
     }
 }
 
 impl AgentEventSink for EventLogSink {
     fn handle_event(&self, event: &AgentEvent) {
-        if !should_persist_event(event) {
-            return;
-        }
         let event_json = match serde_json::to_value(event) {
             Ok(value) => value,
-            Err(_) => return,
+            Err(error) => {
+                record_sink_failure(
+                    &mut self
+                        .first_error
+                        .lock()
+                        .expect("event-log sink error mutex poisoned"),
+                    AgentEventSinkError::dropped_event("event_log", error),
+                );
+                return;
+            }
         };
         let event_kind = event_json
             .get("type")
@@ -425,18 +462,28 @@ impl AgentEventSink for EventLogSink {
         record.redact_in_place(&crate::redact::current_policy());
         match &self.dispatch {
             EventLogSinkDispatch::Async(sender) => {
-                let _ = sender.send(EventLogSinkCommand::Append(record));
+                if sender.send(EventLogSinkCommand::Append(record)).is_err() {
+                    record_sink_failure(
+                        &mut self
+                            .first_error
+                            .lock()
+                            .expect("event-log sink error mutex poisoned"),
+                        AgentEventSinkError::dropped_event(
+                            "event_log",
+                            "append worker is unavailable",
+                        ),
+                    );
+                }
             }
-            EventLogSinkDispatch::Blocking {
-                log,
-                topic,
-                first_error,
-            } => {
+            EventLogSinkDispatch::Blocking { log, topic } => {
                 if let Err(error) = futures::executor::block_on(log.append(topic, record)) {
-                    let mut slot = first_error
-                        .lock()
-                        .expect("event-log sink error mutex poisoned");
-                    slot.get_or_insert_with(|| AgentEventSinkError::new("event_log", error));
+                    record_sink_failure(
+                        &mut self
+                            .first_error
+                            .lock()
+                            .expect("event-log sink error mutex poisoned"),
+                        AgentEventSinkError::dropped_event("event_log", error),
+                    );
                 }
             }
         }
@@ -444,10 +491,6 @@ impl AgentEventSink for EventLogSink {
 
     fn flush(&self) -> AgentEventSinkFlush<'_> {
         Box::pin(EventLogSink::flush(self))
-    }
-
-    fn is_persistence_sink(&self) -> bool {
-        true
     }
 }
 

@@ -70,7 +70,7 @@ fn redacts_tool_payloads_before_append() {
 }
 
 #[test]
-fn skips_text_parsing_candidates() {
+fn persists_text_parsing_candidates() {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
     let sink = EventLogSink::new(log.clone(), "s");
     sink.handle_event(&AgentEvent::ToolCall {
@@ -104,10 +104,10 @@ fn skips_text_parsing_candidates() {
 
     let topic = Topic::new("observability.agent_events.s").unwrap();
     let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
-    assert_eq!(events.len(), 1);
-    let persisted = serde_json::to_string(&events[0].1).unwrap();
+    assert_eq!(events.len(), 2);
+    let persisted = serde_json::to_string(&events).unwrap();
     assert!(persisted.contains("call-real"));
-    assert!(!persisted.contains("text-cand-0"));
+    assert!(persisted.contains("text-cand-0"));
 }
 
 fn partial_tool_args(session_id: &str) -> AgentEvent {
@@ -132,7 +132,7 @@ fn partial_tool_args(session_id: &str) -> AgentEvent {
 }
 
 #[test]
-fn skips_partial_tool_args_without_a_live_subscriber() {
+fn persists_partial_tool_args_without_a_live_subscriber() {
     let session_id = "headless-stream";
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
     let sink = EventLogSink::new(log.clone(), session_id);
@@ -152,10 +152,11 @@ fn skips_partial_tool_args_without_a_live_subscriber() {
     let topic = Topic::new("observability.agent_events.headless-stream").unwrap();
     let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
     clear_session_sinks(session_id);
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].1.kind, "tool_call");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].1.kind, "tool_call_update");
+    assert_eq!(events[1].1.kind, "tool_call");
     assert_eq!(
-        events[0].1.payload["event"]["raw_input"]["path"],
+        events[1].1.payload["event"]["raw_input"]["path"],
         "src/lib.rs"
     );
 }
@@ -329,6 +330,8 @@ async fn flush_and_clear_removes_sinks_after_append_failure() {
 
     assert_eq!(error.sink(), "event_log");
     assert!(error.message().contains("readonly") || error.message().contains("read-only"));
+    assert_eq!(error.dropped_events(), 1);
+    assert!(error.to_string().contains("1 dropped events"));
     assert_eq!(session_external_sink_count(session_id), 0);
 }
 
