@@ -14,6 +14,14 @@ const PRESERVED_GIT_ENV: &[&str] = &[
     "COMSPEC",
     "PATHEXT",
 ];
+const CANONICAL_CHECKOUT_CONFIG: &[&str] = &[
+    "-c",
+    "core.autocrlf=false",
+    "-c",
+    "core.eol=lf",
+    "-c",
+    "core.symlinks=false",
+];
 
 pub(crate) fn manifest_has_git_dependencies(manifest: &Manifest) -> bool {
     manifest.dependencies.values().any(Dependency::requires_git)
@@ -346,8 +354,13 @@ pub(crate) fn clone_git_commit_to(
             fs::remove_dir_all(&fallback_dir)
                 .map_err(|error| format!("failed to remove {}: {error}", fallback_dir.display()))?;
         }
+        let fallback_dir_arg = fallback_dir.to_string_lossy();
         let clone = git_output(
-            ["clone", url, fallback_dir.to_string_lossy().as_ref()],
+            CANONICAL_CHECKOUT_CONFIG.iter().copied().chain([
+                "clone",
+                url,
+                fallback_dir_arg.as_ref(),
+            ]),
             // `fallback_dir` is an absolute destination — no working tree needed.
             Cwd::Detached,
         )?;
@@ -358,7 +371,13 @@ pub(crate) fn clone_git_commit_to(
             )
             .into());
         }
-        let checkout = git_output(["checkout", commit], Cwd::In(&fallback_dir))?;
+        let checkout = git_output(
+            CANONICAL_CHECKOUT_CONFIG
+                .iter()
+                .copied()
+                .chain(["checkout", commit]),
+            Cwd::In(&fallback_dir),
+        )?;
         if !checkout.status.success() {
             return Err(format!(
                 "failed to checkout {commit} in {}: {}",
@@ -377,7 +396,13 @@ pub(crate) fn clone_git_commit_to(
             )
         })?;
     } else {
-        let checkout = git_output(["checkout", "--detach", "FETCH_HEAD"], Cwd::In(dest))?;
+        let checkout = git_output(
+            CANONICAL_CHECKOUT_CONFIG
+                .iter()
+                .copied()
+                .chain(["checkout", "--detach", "FETCH_HEAD"]),
+            Cwd::In(dest),
+        )?;
         if !checkout.status.success() {
             return Err(format!(
                 "failed to checkout FETCH_HEAD in {}: {}",

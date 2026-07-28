@@ -91,12 +91,15 @@ write_paths windows_selector scripts/ci/affected_crate_args.sh
 assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/windows_selector"
 assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/windows_selector"
 
-write_paths package_paths \
-  crates/harn-modules/src/package_execution.rs \
+write_paths package_content_hash crates/harn-modules/src/package_execution/content_hash.rs
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/package_content_hash"
+assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/package_content_hash"
+
+write_paths other_package_paths \
   crates/harn-modules/src/package_imports.rs \
   crates/harn-modules/src/package_snapshot.rs
-assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/package_paths"
-assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/package_paths"
+assert_plan true --platform windows --event pull_request --changed-files "$tmp_dir/other_package_paths"
+assert_plan false --platform macos --event pull_request --changed-files "$tmp_dir/other_package_paths"
 
 write_paths swift_protocol_paths \
   crates/harn-cli/src/commands/dump_protocol_artifacts/swift.rs \

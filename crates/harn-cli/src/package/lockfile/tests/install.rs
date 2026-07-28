@@ -44,6 +44,66 @@ acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
 }
 
 #[test]
+fn install_migrates_v4_git_hashes_to_canonical_v2() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project_tmp = tempfile::tempdir().unwrap();
+    let root = project_tmp.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
+"#
+        ),
+    )
+    .unwrap();
+
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let lock_path = root.join(LOCK_FILE);
+    let current = LockFile::load(&lock_path).unwrap().unwrap();
+    let entry = current.find("acme-lib").unwrap();
+    let canonical_hash = entry.content_hash.as_deref().unwrap();
+    assert!(is_canonical_content_hash(canonical_hash));
+    let cache_dir = git_cache_dir_in(
+        workspace.env(),
+        &entry.source,
+        entry.commit.as_deref().unwrap(),
+    )
+    .unwrap();
+    let v4_hash = compute_archive_content_hash(&cache_dir).unwrap();
+    assert!(!is_canonical_content_hash(&v4_hash));
+    let v4_lock = fs::read_to_string(&lock_path)
+        .unwrap()
+        .replace("version = 5", "version = 4")
+        .replace(canonical_hash, &v4_hash);
+    fs::write(&lock_path, &v4_lock).unwrap();
+
+    let locked_error = install_packages_in(workspace.env(), true, None, false).unwrap_err();
+    assert!(
+        locked_error
+            .to_string()
+            .contains("run `harn install` and commit the migrated lockfile"),
+        "{locked_error}"
+    );
+    assert_eq!(fs::read_to_string(&lock_path).unwrap(), v4_lock);
+
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let migrated = LockFile::load(&lock_path).unwrap().unwrap();
+    let migrated_entry = migrated.find("acme-lib").unwrap();
+    assert_eq!(migrated.version, LOCK_FILE_VERSION);
+    assert_eq!(migrated_entry.commit, entry.commit);
+    assert_eq!(migrated_entry.content_hash.as_deref(), Some(canonical_hash));
+}
+
+#[test]
 fn install_resolves_registry_version_range_to_highest_matching_tag() {
     let (_repo_tmp, repo, _branch) = create_git_package_repo();
     fs::write(
@@ -176,7 +236,7 @@ ruleDirs = ["rules"]
         "pub fn rule() -> string { return \"no todo\" }\n",
     )
     .unwrap();
-    let checksum = compute_content_hash(&package_root).unwrap();
+    let checksum = compute_archive_content_hash(&package_root).unwrap();
 
     let project_tmp = tempfile::tempdir().unwrap();
     let root = project_tmp.path();

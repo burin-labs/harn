@@ -13,7 +13,7 @@ pub(crate) fn create_test_package_generation(root: &Path) -> PathBuf {
     let packages_root = generation_root.join(GENERATION_PACKAGES_DIR);
     fs::create_dir_all(&packages_root).unwrap();
     let lock_body =
-        b"version = 4\ngenerator_version = \"test\"\nprotocol_artifact_version = \"test\"\n";
+        b"version = 5\ngenerator_version = \"test\"\nprotocol_artifact_version = \"test\"\n";
     fs::write(generation_root.join(GENERATION_LOCK_FILE), lock_body).unwrap();
     fs::write(generation_root.join(GENERATION_LEASE_FILE), []).unwrap();
     let digest = harn_modules::package_snapshot::package_lock_digest(lock_body);

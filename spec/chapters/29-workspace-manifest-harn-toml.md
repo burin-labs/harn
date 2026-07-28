@@ -547,7 +547,7 @@ community packages by capability and stable name. Use direct GitHub refs
 for local dogfood, private repositories, unreleased commits, or temporary
 pins that are not ready for the shared index.
 
-`harn.lock` is a typed TOML file with `version = 4` and one `[[package]]`
+`harn.lock` is a typed TOML file with `version = 5` and one `[[package]]`
 entry per dependency. Each git entry records:
 
 - `source`
@@ -563,9 +563,23 @@ entry per dependency. Each git entry records:
 - `permissions`
 - `host_requirements`
 
-`content_hash` is a SHA-256 over the cached package tree. Harn verifies
-that hash whenever it reuses a cached package or prepares a package
-generation. `manifest_digest` separately hashes the resolved
+Git `content_hash` values use the versioned `sha256-v2:<hex>` canonical tree
+identity. V2 sorts NFC-normalized UTF-8 relative paths by their slash-separated
+byte representation, ignores executable permission bits, materializes Git
+symlink blobs as ordinary files containing their target text on every host,
+rejects filesystem symlinks introduced after checkout, and normalizes CRLF or CR
+in UTF-8 text to LF while preserving binary bytes exactly. Excluded cache and
+repository-tooling paths are part of the V2 contract; changing that projection
+requires a new hash version.
+
+Harn verifies the hash whenever it reuses a cached package or prepares a package
+generation. Lockfiles through version 4 used an unversioned `sha256:<hex>` Git
+projection. Run `harn install` once to migrate those entries and commit the
+version 5 lockfile; `--locked` and `--offline` fail closed until that migration
+is committed. Archive dependencies retain their publisher-supplied
+`sha256:<hex>` expanded-tree checksum.
+
+`manifest_digest` separately hashes the resolved
 package manifest so audit and host policy can detect package-surface drift
 without re-hashing the full tree. `provenance`, `exports`, `permissions`, and
 `host_requirements` mirror the resolved package's declared source,

@@ -49,7 +49,7 @@ version = "0.1.0"
     assert!(entry
         .content_hash
         .as_deref()
-        .is_some_and(|hash| hash.starts_with("sha256:")));
+        .is_some_and(is_canonical_content_hash));
     assert!(current_packages_dir(root)
         .join(alias)
         .join("lib.harn")

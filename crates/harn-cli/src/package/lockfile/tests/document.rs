@@ -16,7 +16,10 @@ fn lock_file_round_trips_typed_schema() {
             tag: Some("v1.0.0".to_string()),
             rev_request: Some("v1.0.0".to_string()),
             commit: Some("0123456789abcdef0123456789abcdef01234567".to_string()),
-            content_hash: Some("sha256:deadbeef".to_string()),
+            content_hash: Some(
+                "sha256-v2:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                    .to_string(),
+            ),
             package_version: Some("1.0.0".to_string()),
             harn_compat: Some(">=0.8,<0.9".to_string()),
             provenance: Some("https://github.com/acme/acme-lib/releases/tag/v1.0.0".to_string()),
@@ -43,4 +46,24 @@ fn lock_file_round_trips_typed_schema() {
     lock.save(&path).unwrap();
     let loaded = LockFile::load(&path).unwrap().unwrap();
     assert_eq!(loaded, lock);
+}
+
+#[test]
+fn lock_file_v5_rejects_unversioned_git_hashes_on_write() {
+    let mut lock = LockFile::default();
+    lock.packages.push(LockEntry {
+        name: "acme-lib".to_string(),
+        source: "git+https://github.com/acme/acme-lib".to_string(),
+        content_hash: Some(
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+        ),
+        ..LockEntry::default()
+    });
+
+    let error = lock.encode().unwrap_err();
+
+    assert!(
+        error.to_string().contains("unversioned Git content hash"),
+        "{error}"
+    );
 }

@@ -4,7 +4,7 @@ use super::super::git_source::pick_ls_remote_commit;
 
 #[cfg(unix)]
 use super::super::git_source::HardenedGitEnv;
-#[cfg(unix)]
+use crate::package::test_support::{create_git_package_repo, run_git};
 use crate::package::*;
 
 #[test]
@@ -80,4 +80,32 @@ fn hardened_git_env_scrubs_ambient_git_credentials_and_config() {
     assert!(!vars.contains_key("GIT_CONFIG_COUNT"));
     assert!(!vars.contains_key("GIT_CONFIG_KEY_0"));
     assert!(!vars.contains_key("GIT_CONFIG_VALUE_0"));
+}
+
+#[test]
+fn clone_normalizes_git_symlink_materialization() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    fs::write(repo.join("alias.harn"), "lib.harn").unwrap();
+    let blob = run_git(&repo, &["hash-object", "-w", "alias.harn"]);
+    let cache_info = format!("120000,{blob},alias.harn");
+    run_git(
+        &repo,
+        &["update-index", "--add", "--cacheinfo", &cache_info],
+    );
+    run_git(&repo, &["commit", "-m", "add symlink"]);
+    let commit = run_git(&repo, &["rev-parse", "HEAD"]);
+    let clone_tmp = tempfile::tempdir().unwrap();
+    let dest = clone_tmp.path().join("clone");
+    let url = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+
+    clone_git_commit_to(&url, &commit, &dest).unwrap();
+
+    assert!(fs::symlink_metadata(dest.join("alias.harn"))
+        .unwrap()
+        .file_type()
+        .is_file());
+    assert_eq!(
+        fs::read_to_string(dest.join("alias.harn")).unwrap(),
+        "lib.harn"
+    );
 }

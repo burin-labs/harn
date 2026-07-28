@@ -441,7 +441,7 @@ mod tests {
         create_test_package_generation(root);
         write_test_generation_lock(
             root,
-            "version = 4\n\n[[package]]\nname = \"stale\"\nsource = \"path+/tmp/stale\"\n",
+            "version = 5\n\n[[package]]\nname = \"stale\"\nsource = \"path+/tmp/stale\"\n",
         );
 
         let error = ensure_dependencies_materialized(&anchor).unwrap_err();

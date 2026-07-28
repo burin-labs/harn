@@ -179,7 +179,12 @@ pub(crate) fn build_lockfile(
                 )?
             {
                 let mut entry = existing_lock.clone();
-                if entry.source.starts_with("git+") && entry.content_hash.is_none() {
+                if entry.source.starts_with("git+")
+                    && entry
+                        .content_hash
+                        .as_deref()
+                        .is_none_or(|hash| !is_canonical_content_hash(hash))
+                {
                     let url = entry.source.trim_start_matches("git+");
                     let commit = entry
                         .commit

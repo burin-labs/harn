@@ -1,6 +1,7 @@
 use std::sync::Barrier;
 
 use super::*;
+use crate::package::is_canonical_content_hash;
 use crate::package::test_support::*;
 use crate::package::{LockFile, MANIFEST};
 
@@ -45,7 +46,7 @@ fn activation_attenuates_and_pins_the_installed_policy_idempotently() {
         activation.exported_policy_digest,
         activation.effective_policy_digest
     );
-    assert!(activation.package.content_hash.starts_with("sha256:"));
+    assert!(is_canonical_content_hash(&activation.package.content_hash));
     assert_eq!(activation.package.alias, "agents");
 
     let root = load_root_persona_catalog(Some(&manifest)).unwrap();
@@ -171,7 +172,7 @@ fn activation_observes_unhashed_content_and_rejects_invalid_or_tampered_packages
     .unwrap()
     .activation
     .unwrap();
-    assert!(activation.package.content_hash.starts_with("sha256:"));
+    assert!(is_canonical_content_hash(&activation.package.content_hash));
 
     lock.packages[0].content_hash = Some(" ".to_string());
     write_lock(missing_hash.path(), &lock);

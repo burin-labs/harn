@@ -921,21 +921,18 @@ async fn installed_persona_catalog_is_qualified_sorted_and_directly_resolvable()
     let provenance = installed.installed_provenance().unwrap();
     assert_eq!(provenance.package_alias, "agents");
     assert_eq!(provenance.package_version.as_deref(), Some("1.2.3"));
-    assert!(provenance
-        .content_hash
-        .as_deref()
-        .unwrap()
-        .starts_with("sha256:"));
+    assert!(is_canonical_content_hash(
+        provenance.content_hash.as_deref().unwrap()
+    ));
 
     let payload = crate::commands::persona::list_payload(Some(&tmp.path().join(MANIFEST))).unwrap();
     assert_eq!(payload[0]["id"], "agents/archivist");
     assert_eq!(payload[0]["source"]["package_alias"], "agents");
     assert_eq!(payload[0]["source"]["kind"], "installed_package");
     assert_eq!(payload[0]["source"]["package_version"], "1.2.3");
-    assert!(payload[0]["source"]["content_hash"]
-        .as_str()
-        .unwrap()
-        .starts_with("sha256:"));
+    assert!(is_canonical_content_hash(
+        payload[0]["source"]["content_hash"].as_str().unwrap()
+    ));
     assert_eq!(payload[0]["source"]["integrity"], "ok");
     let inspect = crate::commands::persona::inspect_payload(
         Some(&tmp.path().join(MANIFEST)),
