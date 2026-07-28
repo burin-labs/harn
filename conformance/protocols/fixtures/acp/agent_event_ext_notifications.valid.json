@@ -299,6 +299,86 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "actor": "implementer",
+        "kind": "require_successful_tools_violation",
+        "metadata": {
+          "iterations": 2,
+          "missing_required_tools": [
+            "edit"
+          ],
+          "successful_tool_names": []
+        },
+        "recurrenceHints": [
+          "missing_required_tools=1"
+        ],
+        "redactedSummary": "agent_loop completed without invoking edit",
+        "runId": "run-1",
+        "sessionId": "session-1",
+        "source": "agent_loop.require_successful_tools",
+        "violationKind": "tool_gap"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "finalStatus": "max_iterations",
+        "hostDirective": false,
+        "iteration": 4,
+        "kind": "final_wrapup",
+        "sessionId": "session-1",
+        "stopReason": "iteration_limit",
+        "terminalKind": "max_iterations"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "kind": "pack_thinking_stripped",
+        "model": "claude-opus-adaptive",
+        "reason": "claude_opus_adaptive",
+        "requested": "high",
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "answer": "alpha",
+        "distribution": [
+          {
+            "answer": "alpha",
+            "count": 2
+          },
+          {
+            "answer": "beta",
+            "count": 2
+          }
+        ],
+        "kind": "self_consistency_tie",
+        "sessionId": "session-1",
+        "total": 4
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "attemptedCypher": null,
+        "kind": "code_librarian_query_nl_fallback",
+        "mctsDepth": 3,
+        "mctsExpansions": 9,
+        "resultCount": 2,
+        "sessionId": "session-1",
+        "text": "where is session recovery implemented?"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
         "checkpoint": {
           "stage": "verify",
           "type": "stage_gate"

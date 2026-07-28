@@ -446,6 +446,120 @@ fn from_host_deserializes_budget_events() {
 }
 
 #[test]
+fn documented_stdlib_events_are_typed_and_journaled() {
+    let required_tools = AgentEvent::from_host_payload(
+        "s1",
+        "require_successful_tools_violation",
+        &json!({
+            "kind": "tool_gap",
+            "source": "agent_loop.require_successful_tools",
+            "actor": "implementer",
+            "run_id": "s1",
+            "redacted_summary": "missing edit",
+            "recurrence_hints": ["missing_required_tools=1"],
+            "metadata": {
+                "missing_required_tools": ["edit"],
+                "successful_tool_names": [],
+                "iterations": 2,
+            },
+        }),
+    )
+    .expect("require_successful_tools_violation");
+    assert!(matches!(
+        required_tools,
+        AgentEvent::RequireSuccessfulToolsViolation {
+            actor: Some(ref actor),
+            ..
+        } if actor == "implementer"
+    ));
+
+    let final_wrapup = AgentEvent::from_host_payload(
+        "s1",
+        "final_wrapup",
+        &json!({
+            "final_status": "max_iterations",
+            "stop_reason": "iteration_limit",
+            "iteration": 4,
+            "host_directive": false,
+            "terminal_kind": "max_iterations",
+        }),
+    )
+    .expect("final_wrapup");
+    assert!(matches!(
+        final_wrapup,
+        AgentEvent::FinalWrapup { iteration: 4, .. }
+    ));
+
+    let thinking = AgentEvent::from_host_payload(
+        "s1",
+        "pack_thinking_stripped",
+        &json!({
+            "model": "claude-opus-adaptive",
+            "requested": "high",
+            "reason": "claude_opus_adaptive",
+        }),
+    )
+    .expect("pack_thinking_stripped");
+    assert!(matches!(
+        thinking,
+        AgentEvent::PackThinkingStripped { ref requested, .. } if requested == "high"
+    ));
+
+    let tie = AgentEvent::from_host_payload(
+        "s1",
+        "self_consistency_tie",
+        &json!({
+            "answer": "alpha",
+            "total": 4,
+            "distribution": [
+                {"answer": "alpha", "count": 2},
+                {"answer": "beta", "count": 2},
+            ],
+        }),
+    )
+    .expect("self_consistency_tie");
+    assert!(matches!(
+        tie,
+        AgentEvent::SelfConsistencyTie { total: 4, .. }
+    ));
+
+    let fallback = AgentEvent::from_host_payload(
+        "s1",
+        "code_librarian_query_nl_fallback",
+        &json!({
+            "attempted_cypher": null,
+            "mcts_depth": 3,
+            "mcts_expansions": 9,
+            "result_count": 2,
+            "text": "where is session recovery implemented?",
+        }),
+    )
+    .expect("code_librarian_query_nl_fallback");
+    assert!(matches!(
+        fallback,
+        AgentEvent::CodeLibrarianQueryNlFallback {
+            attempted_cypher: None,
+            mcts_depth: 3,
+            ..
+        }
+    ));
+
+    for event_type in [
+        "require_successful_tools_violation",
+        "final_wrapup",
+        "pack_thinking_stripped",
+        "self_consistency_tie",
+        "code_librarian_query_nl_fallback",
+    ] {
+        assert_eq!(
+            AgentEvent::host_transcript_role(event_type).map(|role| role.as_str()),
+            Some("assistant"),
+            "{event_type} must use the same registry for host acceptance and journaling",
+        );
+    }
+}
+
+#[test]
 fn from_host_rejects_non_host_and_unknown_event_types() {
     // A real `AgentEvent` variant that is never emitted through the host
     // path stays rejected (parity with the retired match's allowlist).

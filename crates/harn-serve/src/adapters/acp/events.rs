@@ -1271,37 +1271,18 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
-            AgentEvent::MissingToolCallVerdict {
+            AgentEvent::MissingToolCallVerdict { session_id, .. } => self.emit_agent_event_ext(
+                "missing_tool_call_verdict",
                 session_id,
-                iteration,
-                action,
-                original_action,
-                tool_name,
-                confidence,
-                confidence_threshold,
-                evidence,
-                language,
-                classifier_kind,
-                model,
-                error,
-            } => {
-                self.emit_agent_event_ext(
-                    "missing_tool_call_verdict",
-                    session_id,
-                    serde_json::json!({
-                        "iteration": iteration,
-                        "action": action,
-                        "originalAction": original_action,
-                        "toolName": tool_name,
-                        "confidence": confidence,
-                        "confidenceThreshold": confidence_threshold,
-                        "evidence": evidence,
-                        "language": language,
-                        "classifierKind": classifier_kind,
-                        "model": model,
-                        "error": error,
-                    }),
-                );
+                ext_payloads::missing_tool_call_verdict(event),
+            ),
+            AgentEvent::RequireSuccessfulToolsViolation { .. }
+            | AgentEvent::FinalWrapup { .. }
+            | AgentEvent::PackThinkingStripped { .. }
+            | AgentEvent::SelfConsistencyTie { .. }
+            | AgentEvent::CodeLibrarianQueryNlFallback { .. } => {
+                let (kind, session_id, payload) = ext_payloads::documented_stdlib_event(event);
+                self.emit_agent_event_ext(kind, session_id, payload);
             }
             AgentEvent::TypedCheckpoint {
                 session_id,

@@ -164,35 +164,10 @@ async fn host_agent_emit_event(
     let payload = super::vm_to_json(&payload_value);
     let event =
         crate::agent_events::AgentEvent::from_host_payload(&session_id, &event_type, &payload)?;
-    if matches!(
-        event_type.as_str(),
-        "tool_search_query"
-            | "tool_search_result"
-            | "tool_call"
-            | "tool_call_update"
-            | "typed_checkpoint"
-            | "skill_narrow"
-            | "agent_loop_stall_warning"
-            | "tool_format_override"
-            | "tool_call_audit"
-            | "budget_exhausted"
-            | "budget_circuit_breaker"
-            | "loop_stuck"
-            | "reserved_terminal_verify"
-            | "context_overflow_recovery"
-            | "loop_checkpoint"
-    ) {
-        let role = if matches!(
-            event_type.as_str(),
-            "tool_search_result" | "tool_call_audit"
-        ) {
-            "tool"
-        } else {
-            "assistant"
-        };
+    if let Some(role) = crate::agent_events::AgentEvent::host_transcript_role(event_type.as_str()) {
         let transcript_event = super::super::helpers::transcript_event(
             &event_type,
-            role,
+            role.as_str(),
             "internal",
             "",
             Some(payload),

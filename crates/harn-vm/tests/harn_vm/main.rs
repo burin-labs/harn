@@ -50,6 +50,7 @@ mod runtime_introspection;
 mod sandbox_hardened;
 mod session_environment_leak;
 mod skill_activation_evidence_conformance;
+mod stdlib_event_registration;
 mod thread_local_audit;
 mod tool_call_cancellation;
 mod tool_calling_bootcamp;
