@@ -667,6 +667,7 @@ pub(super) struct ProviderCallErrorObservation<'a> {
     pub(super) category: &'a crate::value::ErrorCategory,
     pub(super) classified: &'a super::api::LlmErrorInfo,
     pub(super) message: &'a str,
+    pub(super) stream_failure: Option<&'a crate::value::ProviderStreamFailure>,
     pub(super) retryable: bool,
     pub(super) failover_eligible: bool,
     pub(super) attempt_count: Option<usize>,
@@ -684,6 +685,7 @@ pub(super) fn append_provider_call_error_observability(
         category,
         classified,
         message,
+        stream_failure,
         retryable,
         failover_eligible,
         attempt_count,
@@ -719,5 +721,71 @@ pub(super) fn append_provider_call_error_observability(
             serde_json::json!(attempt_count),
         );
     }
+    if let Some(failure) = stream_failure {
+        fields.insert("source".to_string(), serde_json::json!("provider_stream"));
+        fields.insert(
+            "phase".to_string(),
+            serde_json::json!(failure.phase.as_str()),
+        );
+        fields.insert(
+            "deadline".to_string(),
+            failure
+                .deadline
+                .map(|deadline| serde_json::json!(deadline.as_str()))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        fields.insert("partial".to_string(), serde_json::json!(failure.partial));
+    }
     append_llm_observability_entry("provider_call_error", fields);
+}
+
+#[cfg(test)]
+mod stream_failure_observability_tests {
+    use super::*;
+
+    #[test]
+    fn provider_error_receipt_projects_stream_phase_and_deadline() {
+        let transcript_dir = tempfile::tempdir().expect("transcript tempdir");
+        push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
+        let opts = crate::llm::api::options::base_opts("openai");
+        let category = crate::value::ErrorCategory::Timeout;
+        let classified =
+            crate::llm::api::classify_llm_error(category.clone(), "idle deadline elapsed");
+        let failure = crate::value::ProviderStreamFailure {
+            provider: "openai".to_string(),
+            phase: crate::value::ProviderStreamPhase::Streaming,
+            reason: crate::value::ProviderStreamFailureReason::Deadline,
+            deadline: Some(crate::value::ProviderStreamDeadline::Idle),
+            partial: true,
+            detail: "idle deadline elapsed".to_string(),
+        };
+
+        append_provider_call_error_observability(ProviderCallErrorObservation {
+            iteration: 1,
+            call_id: "call-stream-timeout",
+            attempt: 1,
+            status: "error",
+            opts: &opts,
+            category: &category,
+            classified: &classified,
+            message: "idle deadline elapsed",
+            stream_failure: Some(&failure),
+            retryable: true,
+            failover_eligible: false,
+            attempt_count: None,
+        });
+        pop_llm_transcript_dir();
+
+        let receipt: serde_json::Value = serde_json::from_str(
+            std::fs::read_to_string(transcript_dir.path().join("llm_transcript.jsonl"))
+                .expect("provider error receipt")
+                .trim(),
+        )
+        .expect("valid provider error receipt");
+        assert_eq!(receipt["type"], "provider_call_error");
+        assert_eq!(receipt["source"], "provider_stream");
+        assert_eq!(receipt["phase"], "streaming");
+        assert_eq!(receipt["deadline"], "idle");
+        assert_eq!(receipt["partial"], true);
+    }
 }

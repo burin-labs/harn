@@ -25,6 +25,7 @@ use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry
 use super::thinking::ThinkingStreamSplitter;
 
 mod capture;
+mod liveness;
 mod ndjson;
 mod sse;
 
@@ -514,6 +515,7 @@ async fn vm_call_llm_api_with_body_inner(
             // Build a fresh schema watch per attempt so an Ollama-retry
             // restart doesn't see chunks from the previous run.
             let schema_watch = super::schema_stream::StreamSchemaWatch::from_payload(opts);
+            let deadline_policy = liveness::StreamDeadlinePolicy::from_payload(opts);
             if is_sse {
                 return vm_call_llm_api_sse_from_response(
                     response,
@@ -524,6 +526,7 @@ async fn vm_call_llm_api_with_body_inner(
                     opts.session_id.as_deref(),
                     schema_watch,
                     tools_offered,
+                    deadline_policy,
                     RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
                 )
                 .await;
@@ -536,6 +539,7 @@ async fn vm_call_llm_api_with_body_inner(
                 unload_grace,
                 &mut ollama_warmup_gate,
                 schema_watch,
+                deadline_policy,
                 RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
             )
             .await

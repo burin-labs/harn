@@ -165,7 +165,15 @@ async fn ollama_ndjson_requires_done_frame() {
     )
     .await
     .expect_err("truncated Ollama stream should fail");
-    assert!(err.to_string().contains("unexpected EOF before done=true"));
+    let failure = err
+        .provider_stream_failure()
+        .expect("typed provider stream failure");
+    assert_eq!(
+        failure.reason,
+        crate::value::ProviderStreamFailureReason::PrematureEof
+    );
+    assert_eq!(failure.phase, crate::value::ProviderStreamPhase::Streaming);
+    assert!(failure.partial);
 }
 
 #[tokio::test]

@@ -248,6 +248,38 @@ async fn anthropic_stream_error_closes_announced_tool_before_returning_error() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn premature_eof_closes_every_announced_tool_call() {
+    let body = concat!(
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_eof\",\"name\":\"edit\"}}\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\"}}\n",
+    );
+    let session_id = fresh_session_id("anth-eof-tool");
+    let (result, events) = drive_result(body.as_bytes(), &session_id, true).await;
+
+    let failure = result
+        .expect_err("premature EOF must fail")
+        .provider_stream_failure()
+        .expect("typed provider stream failure")
+        .clone();
+    assert_eq!(
+        failure.reason,
+        crate::value::ProviderStreamFailureReason::PrematureEof
+    );
+    let closeout = failed_update_for(&events, "toolu_eof")
+        .expect("premature EOF must close the announced tool");
+    assert!(matches!(
+        closeout,
+        AgentEvent::ToolCallUpdate {
+            status: ToolCallStatus::Failed,
+            error_category: Some(ToolCallErrorCategory::ParseAborted),
+            ..
+        }
+    ));
+
+    clear_session_sinks(&session_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn anthropic_stream_emits_raw_input_partial_when_args_unparseable() {
     // The model emits an unterminated string before the close —
     // the recovery path can't synthesize a value, so the transport

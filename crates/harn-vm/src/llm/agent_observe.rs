@@ -308,6 +308,7 @@ fn raw_provider_file_id(value: &str) -> String {
 pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
     use crate::value::{classify_error_message, ErrorCategory};
     let msg = match err {
+        VmError::ProviderStreamFailure(failure) => return failure.category().is_transient(),
         VmError::CategorizedError { category, message } => {
             let llm_info = crate::llm::api::classify_llm_error(category.clone(), message);
             return if llm_info.reason == crate::llm::api::LlmErrorReason::Unknown {
@@ -368,6 +369,7 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
 /// that does, via the separate overload predicate.
 pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
     let (category, message) = match err {
+        VmError::ProviderStreamFailure(failure) => (failure.category(), failure.to_string()),
         VmError::CategorizedError { category, message } => (category.clone(), message.clone()),
         VmError::Thrown(crate::value::VmValue::String(s)) => {
             (crate::value::classify_error_message(s), s.to_string())
@@ -892,6 +894,7 @@ pub(crate) async fn observed_llm_call(
                         category: &category,
                         classified: &classified,
                         message: &message,
+                        stream_failure: None,
                         retryable: false,
                         failover_eligible: true,
                         attempt_count: Some(attempt_count),
@@ -1149,6 +1152,7 @@ pub(crate) async fn observed_llm_call(
                     category: &category,
                     classified: &classified,
                     message: &message,
+                    stream_failure: error.provider_stream_failure(),
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,

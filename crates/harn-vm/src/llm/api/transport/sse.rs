@@ -14,6 +14,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
     session_id: Option<&str>,
     schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
     tools_offered: bool,
+    deadline_policy: super::liveness::StreamDeadlinePolicy,
     raw_capture: RawProviderCaptureTarget,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
@@ -33,7 +34,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
             result.map_err(std::io::Error::other)
         },
     )));
-    let result = consume_sse_lines(
+    let result = consume_sse_lines_with_policy(
         reader,
         provider,
         model,
@@ -42,6 +43,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
         session_id,
         schema_watch,
         tools_offered,
+        deadline_policy,
     )
     .await;
     if let Some(raw_bytes) = raw_bytes {
@@ -428,7 +430,37 @@ fn push_internal_tool_call(
 /// `reqwest::Response`. The Anthropic / OpenAI branches and the
 /// trailing accumulator drain that finalize the call live here.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: R,
+    provider: &str,
+    model: &str,
+    is_anthropic_style: bool,
+    delta_tx: DeltaSender,
+    session_id: Option<&str>,
+    schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
+    tools_offered: bool,
+) -> Result<LlmResult, VmError> {
+    consume_sse_lines_with_policy(
+        reader,
+        provider,
+        model,
+        is_anthropic_style,
+        delta_tx,
+        session_id,
+        schema_watch,
+        tools_offered,
+        super::liveness::StreamDeadlinePolicy {
+            total: Duration::from_hours(1),
+            first_chunk: Duration::from_hours(1),
+            idle: Duration::from_hours(1),
+        },
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + Unpin>(
     reader: R,
     provider: &str,
     model: &str,
@@ -437,9 +469,11 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     session_id: Option<&str>,
     mut schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
     tools_offered: bool,
+    deadline_policy: super::liveness::StreamDeadlinePolicy,
 ) -> Result<LlmResult, VmError> {
     use tokio::io::AsyncBufReadExt;
     let mut lines = reader.lines();
+    let mut liveness = super::liveness::StreamLiveness::new(provider, deadline_policy);
 
     let mut text = String::new();
     let mut input_tokens: i64 = 0;
@@ -516,23 +550,9 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     let mut oai_thinking_splitter = ThinkingStreamSplitter::new();
 
     loop {
-        let line = match lines.next_line().await {
-            Ok(Some(line)) => line,
-            // Clean EOF without `[DONE]` stays a normal stop: Anthropic ends
-            // streams with `message_stop` (no `[DONE]` sentinel) and some
-            // OpenAI-compatible servers close the connection cleanly.
-            Ok(None) => break,
-            Err(error) => {
-                // A mid-body read failure (the whole-request reqwest timeout
-                // from `resolve_timeout`, a connection reset, ...) must surface
-                // as a transient stream error rather than a truncated
-                // zero-token success that the agent loop accepts as an empty
-                // assistant turn.
-                let error = crate::egress::redact_diagnostic_text(&error.to_string());
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!("{provider} stream error (mid-stream read): {error}"),
-                ))));
-            }
+        let line = match liveness.next_line(lines.next_line()).await? {
+            Some(line) => line,
+            None => return Err(liveness.premature_eof("a provider terminal event")),
         };
         let data = if let Some(d) = line.strip_prefix("data: ") {
             d
@@ -545,6 +565,18 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         let json: serde_json::Value = match serde_json::from_str(data) {
             Ok(v) => v,
             Err(_) => continue,
+        };
+        liveness.mark_partial_output();
+        let terminal_frame = if is_anthropic_style {
+            json["type"].as_str() == Some("message_stop")
+        } else {
+            json["choices"].as_array().is_some_and(|choices| {
+                choices.iter().any(|choice| {
+                    choice
+                        .get("finish_reason")
+                        .is_some_and(|reason| !reason.is_null())
+                })
+            })
         };
 
         if is_anthropic_style {
@@ -934,6 +966,9 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
             }
             telemetry.capture_provider_metadata(&json);
+        }
+        if terminal_frame {
+            break;
         }
     }
 

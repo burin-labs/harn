@@ -1019,6 +1019,7 @@ aws_secret_access_key = dev-secret
             cache: false,
             prompt_cache_ttl: None,
             timeout: None,
+            idle_timeout: None,
             stream: false,
             provider_overrides: None,
             previous_response_id: None,

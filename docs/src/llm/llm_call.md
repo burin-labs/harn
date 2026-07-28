@@ -326,6 +326,18 @@ fast tier. Premium pricing applies only when provider telemetry confirms that
 tier. `cache` does not memoize full responses; use `with_cache` from
 `std/llm/handlers` for Harn-owned response caching.
 
+Streaming applies three independent limits on every SSE and NDJSON provider:
+`timeout_ms` bounds the whole request, `HARN_LLM_FIRST_TOKEN_TIMEOUT` bounds
+the wait for the first chunk, and `idle_timeout_ms` (or
+`HARN_LLM_IDLE_TIMEOUT`) bounds later gaps. A provider must send its protocol's
+terminal event (`[DONE]`, an OpenAI `finish_reason`, Anthropic `message_stop`,
+or Ollama `done: true`); EOF without one is a transient failure.
+
+Caught stream failures carry `source: "provider_stream"`, `phase`
+(`awaiting_first_chunk` or `streaming`), `deadline` (`total`, `first_chunk`,
+`idle`, or `nil`), and `partial`. The same fields appear on
+`provider_call_error` transcript receipts.
+
 #### OpenAI Responses
 
 These keys require `provider: "openai"` and `api_mode: "responses"`.

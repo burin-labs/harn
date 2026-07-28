@@ -8,6 +8,7 @@ use super::*;
 /// Final line has `"done":true` with token counts.
 ///
 /// Also supports OpenAI-compatible NDJSON where each line is `data: {...}`.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn vm_call_llm_api_ndjson_from_response(
     response: reqwest::Response,
     provider: &str,
@@ -16,6 +17,7 @@ pub(super) async fn vm_call_llm_api_ndjson_from_response(
     unload_grace: Duration,
     warmup_gate: &mut bool,
     schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
+    deadline_policy: super::liveness::StreamDeadlinePolicy,
     raw_capture: RawProviderCaptureTarget,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
@@ -35,7 +37,7 @@ pub(super) async fn vm_call_llm_api_ndjson_from_response(
             result.map_err(std::io::Error::other)
         },
     )));
-    let result = consume_ollama_ndjson_lines(
+    let result = consume_ollama_ndjson_lines_with_policy(
         reader,
         provider,
         model,
@@ -43,6 +45,7 @@ pub(super) async fn vm_call_llm_api_ndjson_from_response(
         unload_grace,
         warmup_gate,
         schema_watch,
+        deadline_policy,
     )
     .await;
     if let Some(raw_bytes) = raw_bytes {
@@ -60,6 +63,7 @@ pub(super) async fn vm_call_llm_api_ndjson_from_response(
     result
 }
 
+#[cfg(test)]
 pub(super) async fn consume_ollama_ndjson_lines<R>(
     reader: R,
     provider: &str,
@@ -67,7 +71,38 @@ pub(super) async fn consume_ollama_ndjson_lines<R>(
     delta_tx: DeltaSender,
     unload_grace: Duration,
     warmup_gate: &mut bool,
+    schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
+) -> Result<LlmResult, VmError>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    consume_ollama_ndjson_lines_with_policy(
+        reader,
+        provider,
+        model,
+        delta_tx,
+        unload_grace,
+        warmup_gate,
+        schema_watch,
+        super::liveness::StreamDeadlinePolicy {
+            total: Duration::from_hours(1),
+            first_chunk: Duration::from_hours(1),
+            idle: Duration::from_hours(1),
+        },
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn consume_ollama_ndjson_lines_with_policy<R>(
+    reader: R,
+    provider: &str,
+    model: &str,
+    delta_tx: DeltaSender,
+    unload_grace: Duration,
+    warmup_gate: &mut bool,
     mut schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
+    deadline_policy: super::liveness::StreamDeadlinePolicy,
 ) -> Result<LlmResult, VmError>
 where
     R: tokio::io::AsyncBufRead + Unpin,
@@ -75,6 +110,7 @@ where
     use tokio::io::AsyncBufReadExt;
 
     let mut lines = reader.lines();
+    let mut liveness = super::liveness::StreamLiveness::new(provider, deadline_policy);
 
     let mut text = String::new();
     let mut input_tokens: i64 = 0;
@@ -85,19 +121,18 @@ where
     let mut tool_calls = Vec::new();
     let mut blocks = Vec::new();
     let mut saw_done = false;
-    let mut saw_chunk = false;
     let mut done_reason: Option<String> = None;
     let mut telemetry = ProviderTelemetry::default();
 
     loop {
-        let line = next_ollama_ndjson_line(&mut lines, model, unload_grace, warmup_gate)
-            .await
-            .map_err(|error| {
-                let error = crate::egress::redact_diagnostic_text(&error.to_string());
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                    "ollama stream error: unexpected EOF or read failure before done=true: {error}"
-                ))))
-            })?;
+        let line = liveness
+            .next_line(next_ollama_ndjson_line(
+                &mut lines,
+                model,
+                unload_grace,
+                warmup_gate,
+            ))
+            .await?;
         let Some(line) = line else {
             break;
         };
@@ -107,6 +142,7 @@ where
         }
         let data = line.strip_prefix("data: ").unwrap_or(&line);
         if data == "[DONE]" {
+            saw_done = true;
             break;
         }
         let json: serde_json::Value = serde_json::from_str(data).map_err(|error| {
@@ -115,7 +151,7 @@ where
                 &data[..data.len().min(200)]
             ))))
         })?;
-        saw_chunk = true;
+        liveness.mark_partial_output();
 
         // Ollama streams content and thinking as separate channels for
         // reasoning-capable models (gemma3/4, qwen3, etc.); we always set
@@ -163,14 +199,7 @@ where
     }
 
     if !saw_done {
-        let suffix = if saw_chunk {
-            " after partial content"
-        } else {
-            " before any chunks"
-        };
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("ollama stream error: unexpected EOF before done=true{suffix}"),
-        ))));
+        return Err(liveness.premature_eof("done=true or [DONE]"));
     }
 
     let thinking = if thinking_text.is_empty() {

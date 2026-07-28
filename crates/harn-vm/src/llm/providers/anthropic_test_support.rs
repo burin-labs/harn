@@ -43,6 +43,7 @@ pub(super) fn base_payload() -> LlmRequestPayload {
         cache: false,
         prompt_cache_ttl: None,
         timeout: None,
+        idle_timeout: None,
         stream: true,
         provider_overrides: None,
         previous_response_id: None,

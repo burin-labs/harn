@@ -1,183 +1,185 @@
 use crate::value::{VmError, VmValue};
 
 use super::api::LlmCallOptions;
-use super::helpers::ResolvedProvider;
-
 pub(crate) async fn vm_stream_llm(
     opts: &LlmCallOptions,
     tx: &tokio::sync::mpsc::Sender<VmValue>,
 ) -> Result<(), VmError> {
-    use reqwest_eventsource::{Event, EventSource};
-    use tokio_stream::StreamExt;
-
-    let provider = &opts.provider;
-    super::ensure_real_llm_allowed(provider)?;
-
-    let resolved = ResolvedProvider::resolve(provider);
-    let client = super::streaming_client_for_base_url(&resolved.base_url);
-    let is_anthropic = super::provider::provider_uses_anthropic_messages(provider, &opts.model);
-    let wire_model = crate::llm_config::wire_model_id(&opts.model);
-
-    let body = if is_anthropic {
-        let mut body = serde_json::json!({
-            "model": wire_model,
-            "messages": opts.messages,
-            "max_tokens": opts.max_tokens,
-            "stream": true,
-        });
-        if let Some(ref sys) = opts.system {
-            body["system"] = serde_json::json!(sys);
-        }
-        if let Some(temp) = opts.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        crate::llm::providers::anthropic::strip_unsupported_sampling_params(
-            &mut body,
-            &opts.model,
-            &opts.thinking,
-        );
-        body
-    } else {
-        let mut msgs = Vec::new();
-        if let Some(ref sys) = opts.system {
-            msgs.push(serde_json::json!({"role": "system", "content": sys}));
-        }
-        msgs.extend(opts.messages.iter().cloned());
-        let mut body = serde_json::json!({
-            "model": wire_model,
-            "messages": msgs,
-            "max_tokens": opts.max_tokens,
-            "stream": true,
-        });
-        if let Some(temp) = opts.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        body
-    };
-
-    let req = client
-        .post(resolved.url())
-        .header("Content-Type", "application/json")
-        .json(&body);
-    let request = resolved.apply_headers(req, &opts.api_key);
-
-    let mut es = EventSource::new(request).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "LLM stream setup error: {e}"
-        ))))
-    })?;
-
-    let idle_timeout_secs = opts.idle_timeout.unwrap_or_else(|| {
-        crate::stdlib::process::session_env_var("HARN_LLM_IDLE_TIMEOUT")
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(30)
-    });
-    let idle_dur = std::time::Duration::from_secs(idle_timeout_secs);
-
-    // Prefill (time-to-first-token) streams no SSE bytes while the server
-    // processes the prompt, so a slow model on a large context would trip the
-    // short inter-token idle timeout *mid-prefill* (observed: a local 35B model
-    // idle-timing-out before its first token on a long context). Give the first
-    // token a more generous budget; subsequent inter-token gaps use the normal
-    // idle timeout. Still bounded by the overall deadline below. Configurable via
-    // HARN_LLM_FIRST_TOKEN_TIMEOUT; defaults to 4x the idle timeout, min 120s.
-    let first_token_timeout_secs =
-        crate::stdlib::process::session_env_var("HARN_LLM_FIRST_TOKEN_TIMEOUT")
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or_else(|| idle_timeout_secs.saturating_mul(4).max(120));
-    let first_token_dur = std::time::Duration::from_secs(first_token_timeout_secs);
-    let mut got_first_token = false;
-
-    // Bound total stream duration: a provider that dribbles bytes fast
-    // enough to keep resetting the idle timer would otherwise hold the
-    // stream open forever. Resolve the SAME whole-request deadline the
-    // non-streaming path applies (explicit opts.timeout > HARN_LLM_TIMEOUT env
-    // > model-catalog stream_timeout > 120s default). Using the raw
-    // `opts.timeout` here silently fell back to 30 minutes whenever a caller
-    // relied on the HARN_LLM_TIMEOUT env (leaving opts.timeout = None), so a
-    // hung/dribbling provider stream could run for half an hour per call.
-    let overall_budget_secs = opts.resolve_timeout();
-    let overall_dur = std::time::Duration::from_secs(overall_budget_secs);
-    let stream_start = std::time::Instant::now();
-
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let call = super::api::vm_call_llm_full_streaming_single_route(opts, delta_tx);
+    tokio::pin!(call);
     loop {
-        if stream_start.elapsed() >= overall_dur {
-            es.close();
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "stream overall deadline exceeded: {overall_budget_secs}s budget reached before stream completed"
-            )))));
-        }
-        let remaining_overall = overall_dur.saturating_sub(stream_start.elapsed());
-        // Before the first token, allow the longer prefill budget; after, the
-        // normal inter-token idle timeout.
-        let active_idle = if got_first_token {
-            idle_dur
-        } else {
-            first_token_dur
-        };
-        let wait = active_idle.min(remaining_overall);
-        let event = match tokio::time::timeout(wait, es.next()).await {
-            Ok(Some(event)) => event,
-            Ok(None) => break,
-            Err(_) => {
-                es.close();
-                // Overall-deadline is caught at loop top; this is a gap timeout.
-                let (secs, phase) = if got_first_token {
-                    (idle_timeout_secs, "inter-token idle")
-                } else {
-                    (first_token_timeout_secs, "time-to-first-token (prefill)")
-                };
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!("stream {phase} timeout: no data received for {secs}s"),
-                ))));
-            }
-        };
-        match event {
-            Ok(Event::Message(msg)) => {
-                got_first_token = true;
-                if msg.data == "[DONE]" {
-                    break;
-                }
-                let chunk_text = if is_anthropic {
-                    parse_anthropic_sse_chunk(&msg.data)
-                } else {
-                    parse_openai_sse_chunk(&msg.data)
-                };
-                if let Some(text) = chunk_text {
-                    if !text.is_empty()
-                        && tx
-                            .send(VmValue::String(arcstr::ArcStr::from(text)))
-                            .await
-                            .is_err()
+        tokio::select! {
+            result = &mut call => {
+                while let Ok(delta) = delta_rx.try_recv() {
+                    if tx
+                        .send(VmValue::String(arcstr::ArcStr::from(delta)))
+                        .await
+                        .is_err()
                     {
-                        break;
+                        return Ok(());
                     }
                 }
+                return result.map(|_| ());
             }
-            Ok(Event::Open) => {}
-            Err(_) => break,
+            Some(delta) = delta_rx.recv() => {
+                if tx
+                    .send(VmValue::String(arcstr::ArcStr::from(delta)))
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+            }
         }
     }
-
-    es.close();
-    Ok(())
 }
 
-fn parse_openai_sse_chunk(data: &str) -> Option<String> {
-    let json: serde_json::Value = serde_json::from_str(data).ok()?;
-    json["choices"][0]["delta"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
 
-fn parse_anthropic_sse_chunk(data: &str) -> Option<String> {
-    let json: serde_json::Value = serde_json::from_str(data).ok()?;
-    if json["type"].as_str() == Some("content_block_delta") {
-        return json["delta"]["text"].as_str().map(|s| s.to_string());
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn partial_sse_transport_failure_is_not_success() {
+        let _guard = crate::llm::env_guard();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind SSE stub");
+        let addr = listener.local_addr().expect("SSE stub address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept SSE request");
+            let mut request = [0_u8; 8192];
+            let _ = stream.read(&mut request).expect("read SSE request");
+            let event = "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n";
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{event}",
+                event.len() + 100
+            )
+            .expect("write truncated SSE response");
+        });
+
+        let mut providers = crate::llm_config::ProvidersConfig::default();
+        providers.providers.insert(
+            "fixture".to_string(),
+            crate::llm_config::ProviderDef {
+                base_url: format!("http://{addr}"),
+                auth_style: "none".to_string(),
+                auth_env: crate::llm_config::AuthEnv::None,
+                chat_endpoint: "/chat/completions".to_string(),
+                ..Default::default()
+            },
+        );
+        crate::llm_config::set_user_overrides(Some(providers));
+        let previous_disabled = std::env::var_os(crate::llm::LLM_CALLS_DISABLED_ENV);
+        unsafe {
+            std::env::remove_var(crate::llm::LLM_CALLS_DISABLED_ENV);
+        }
+
+        let opts = LlmCallOptions {
+            provider: "fixture".to_string(),
+            model: "fixture-model".to_string(),
+            messages: vec![serde_json::json!({"role": "user", "content": "test"})],
+            ..Default::default()
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let result = vm_stream_llm(&opts, &tx).await;
+
+        crate::llm_config::clear_user_overrides();
+        match previous_disabled {
+            Some(value) => unsafe {
+                std::env::set_var(crate::llm::LLM_CALLS_DISABLED_ENV, value);
+            },
+            None => unsafe {
+                std::env::remove_var(crate::llm::LLM_CALLS_DISABLED_ENV);
+            },
+        }
+        server.join().expect("SSE stub thread");
+
+        let mut partial = String::new();
+        while let Ok(item) = rx.try_recv() {
+            let VmValue::String(item) = item else {
+                panic!("expected a string stream item");
+            };
+            partial.push_str(&item);
+        }
+        assert_eq!(partial, "p");
+        assert!(
+            result.is_err(),
+            "a truncated SSE body after partial output must be a failure"
+        );
+        let failure = result
+            .as_ref()
+            .expect_err("truncated stream")
+            .provider_stream_failure()
+            .expect("typed provider stream failure");
+        assert_eq!(failure.phase, crate::value::ProviderStreamPhase::Streaming);
+        assert!(failure.partial);
     }
-    None
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn zero_chunk_sse_transport_failure_is_typed_not_success() {
+        let _guard = crate::llm::env_guard();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind SSE stub");
+        let addr = listener.local_addr().expect("SSE stub address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept SSE request");
+            let mut request = [0_u8; 8192];
+            let _ = stream.read(&mut request).expect("read SSE request");
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: 100\r\nconnection: close\r\n\r\n"
+            )
+            .expect("write empty truncated SSE response");
+        });
+
+        let mut providers = crate::llm_config::ProvidersConfig::default();
+        providers.providers.insert(
+            "fixture".to_string(),
+            crate::llm_config::ProviderDef {
+                base_url: format!("http://{addr}"),
+                auth_style: "none".to_string(),
+                auth_env: crate::llm_config::AuthEnv::None,
+                chat_endpoint: "/chat/completions".to_string(),
+                ..Default::default()
+            },
+        );
+        crate::llm_config::set_user_overrides(Some(providers));
+        let previous_disabled = std::env::var_os(crate::llm::LLM_CALLS_DISABLED_ENV);
+        unsafe {
+            std::env::remove_var(crate::llm::LLM_CALLS_DISABLED_ENV);
+        }
+        let opts = LlmCallOptions {
+            provider: "fixture".to_string(),
+            model: "fixture-model".to_string(),
+            messages: vec![serde_json::json!({"role": "user", "content": "test"})],
+            ..Default::default()
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let result = vm_stream_llm(&opts, &tx).await;
+
+        crate::llm_config::clear_user_overrides();
+        match previous_disabled {
+            Some(value) => unsafe {
+                std::env::set_var(crate::llm::LLM_CALLS_DISABLED_ENV, value);
+            },
+            None => unsafe {
+                std::env::remove_var(crate::llm::LLM_CALLS_DISABLED_ENV);
+            },
+        }
+        server.join().expect("SSE stub thread");
+
+        assert!(rx.try_recv().is_err(), "zero-chunk failure emitted a delta");
+        let failure = result
+            .expect_err("zero-chunk truncation must fail")
+            .provider_stream_failure()
+            .expect("typed provider stream failure")
+            .clone();
+        assert_eq!(
+            failure.phase,
+            crate::value::ProviderStreamPhase::AwaitingFirstChunk
+        );
+        assert!(!failure.partial);
+    }
 }
