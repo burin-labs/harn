@@ -193,24 +193,26 @@ pub fn current_process_owner_survivors() -> Vec<ProcessCleanupChild> {
     }
 }
 
-/// Kill every process carrying the current native owner-lifetime marker.
+/// Reap every process carrying the current native owner-lifetime marker.
 ///
 /// This is the fail-closed half of [`current_process_owner_survivors`]. It is
-/// intentionally immediate: the suite has completed, so any surviving helper
-/// has violated the contract and must not outlive the terminal report.
+/// used for clean suite teardown, so helpers first receive SIGTERM and get the
+/// normal process grace period to close servers and their own containment.
+/// Only helpers that remain receive SIGKILL. Abrupt owner death is handled by
+/// the native guardian and remains immediately fail-closed.
 pub fn kill_current_process_owner_survivors() -> ProcessCleanupReport {
     #[cfg(unix)]
     {
         if std::env::var(PROCESS_OWNER_TOKEN_ENV).is_err() {
             return ProcessCleanupReport::default();
         }
-        let mut report = ProcessCleanupReport::for_signal(None, 9);
-        let current_pgid = unsafe { libc::getpgrp() };
-        let survivors = current_process_owner_survivors();
-        for child in survivors {
-            signal_pid_preserving_group(child.pid, current_pgid, 9);
-            report.merge_child(child.with_signal(9));
+        let mut report = signal_current_process_owner_survivors(15);
+        wait_for_report_children_to_exit(&report, SUBPROCESS_TERM_GRACE);
+        report.refresh_survivor_status();
+        if current_process_owner_survivors().is_empty() {
+            return report;
         }
+        report.merge(signal_current_process_owner_survivors(9));
         wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
         report.refresh_survivor_status();
         report
@@ -219,6 +221,18 @@ pub fn kill_current_process_owner_survivors() -> ProcessCleanupReport {
     {
         ProcessCleanupReport::default()
     }
+}
+
+#[cfg(unix)]
+fn signal_current_process_owner_survivors(signal: i32) -> ProcessCleanupReport {
+    let mut report = ProcessCleanupReport::for_signal(None, signal);
+    let current_pgid = unsafe { libc::getpgrp() };
+    let survivors = current_process_owner_survivors();
+    for child in survivors {
+        signal_pid_preserving_group(child.pid, current_pgid, signal);
+        report.merge_child(child.with_signal(signal));
+    }
+    report
 }
 
 /// Structural evidence collected when Harn kills a child process tree.
