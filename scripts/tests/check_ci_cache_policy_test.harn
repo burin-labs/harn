@@ -195,6 +195,7 @@ fn workflows() {
               uses: "./.github/actions/rust-cache",
               with: {"shared-key": "workspace-macos", "source-key": native_source_key()},
             },
+            {name: "Clippy all targets (deny warnings)", run: "./scripts/ci/run_rust_lint_lane.sh"},
           ],
         },
         windows: {
@@ -516,6 +517,7 @@ pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(task
             {uses: "mozilla-actions/sccache-action@exact-pin"},
             {uses: "./.github/actions/configure-cargo-sccache"},
             {uses: "./.github/actions/rust-cache", with: {"shared-key": "workspace-macos"}},
+            {name: "Clippy all targets (deny warnings)", run: "cargo clippy -- -D warnings"},
           ],
         },
       },
@@ -555,6 +557,11 @@ pipeline test_ci_cache_policy_rejects_ownerless_or_incompatible_macos_cache(task
     ),
   )
   assert(errors.any({ error -> error.starts_with("workspace-macos cache-key inputs drift:") }))
+  assert(
+    errors.contains(
+      "ci.yml:macos must route strict Clippy through the cache-safe Rust lint entrypoint",
+    ),
+  )
 }
 
 pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(task) {
