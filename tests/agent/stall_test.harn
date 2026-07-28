@@ -103,20 +103,21 @@ fn _observe_text_only(state, iteration) {
   )
 }
 
-pipeline test_parse_error_turn_is_not_no_progress(task) {
+pipeline test_parse_error_turn_uses_distinct_bounded_recovery(task) {
   // A turn whose calls were ALL dropped by the parser is a malformed-call turn,
-  // not a no-progress monologue. Even across the no_progress_messages threshold
-  // (3) it must NOT trip the stall detector and must NOT accumulate the
-  // no-progress streak — the model already tried to act; parse-guidance feedback
-  // (injected by the loop) is the correct response, not a narration-loop nudge.
+  // not a no-progress monologue. It never accumulates the narration streak:
+  // the first rejection remains parse-guidance-only, while repeated rejection
+  // enters the detector's distinct bounded content-repair ladder.
   const o1 = _observe_parse_error(agent_stall_initial_state(), 1)
   assert(o1.warning == nil)
   assert(o1.state.no_progress_streak == 0)
   const o2 = _observe_parse_error(o1.state, 2)
-  assert(o2.warning == nil)
+  assert(o2.warning.pattern == "repeated_parse_rejection")
+  assert(o2.warning.count == 2)
   assert(o2.state.no_progress_streak == 0)
   const o3 = _observe_parse_error(o2.state, 3)
-  assert(o3.warning == nil)
+  assert(o3.warning.pattern == "repeated_parse_rejection")
+  assert(o3.warning.count == 3)
   assert(o3.state.no_progress_streak == 0)
 }
 

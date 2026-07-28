@@ -708,9 +708,28 @@ pub fn __native_fallback_feedback(policy, fallback_index) {
  * @effects: []
  * @errors: []
  */
-pub fn __inject_feedback_with_tool_repair(session_id, kind, content) {
+pub fn __inject_feedback_with_tool_repair(
+  session_id,
+  kind,
+  content,
+  source = nil,
+  reason = nil,
+  context = nil,
+) {
   let _ = agent_session_pair_orphaned_tool_use(session_id, content)
-  agent_session_inject_feedback(session_id, kind, content)
+  return agent_feedback_emit(
+    session_id,
+    [
+      {
+        kind: kind,
+        content: content,
+        source: source ?? kind,
+        reason: reason ?? kind,
+        action: "continue",
+      },
+    ],
+    context,
+  )
 }
 
 pub fn __parse_feedback_tool_annotations(entry) {
@@ -896,7 +915,13 @@ pub fn __maybe_inject_parse_error_feedback(
     },
     turn_opts,
   )
-  __inject_feedback_with_tool_repair(session_id, "parse_guidance", feedback)
+  __inject_feedback_with_tool_repair(
+    session_id,
+    "parse_guidance",
+    feedback,
+    "tool_parser",
+    "parse_rejected",
+  )
   // Only a full parse drop (zero calls dispatched) suppresses the no-progress
   // stall path; a partial-success turn made real progress and stays subject to
   // normal stall accounting.
@@ -957,7 +982,13 @@ pub fn __maybe_inject_blank_name_feedback(
     },
     turn_opts,
   )
-  __inject_feedback_with_tool_repair(session_id, "parse_guidance", feedback)
+  __inject_feedback_with_tool_repair(
+    session_id,
+    "parse_guidance",
+    feedback,
+    "tool_parser",
+    "blank_tool_name",
+  )
   agent_emit_event(
     session_id,
     "tool_call_blank_name_dropped",
@@ -968,6 +999,49 @@ pub fn __maybe_inject_blank_name_feedback(
     },
   )
   return true
+}
+
+/**
+ * Record one normalized assistant turn and classify parser feedback once.
+ * Partial success remains ordinary tool progress; only a zero-call rejection
+ * enters the bounded parse-recovery axis.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn __agent_loop_record_parse_feedback(
+  session_id,
+  normalized,
+  fallback_outcome,
+  tool_calls,
+  parsed,
+  recovered_batch_feedback,
+  llm_result,
+  turn_opts,
+) -> dict {
+  const recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
+    normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
+  } else {
+    normalized + {tool_calls: tool_calls}
+  }
+  agent_session_record_assistant(session_id, recorded_assistant)
+  const parse_dropped = __maybe_inject_parse_error_feedback(
+    session_id,
+    parsed,
+    tool_calls,
+    turn_opts,
+    recovered_batch_feedback,
+  )
+  const blank_name_dropped = if fallback_outcome.triggered {
+    false
+  } else {
+    __maybe_inject_blank_name_feedback(session_id, llm_result, parsed, len(tool_calls), turn_opts)
+  }
+  return {
+    had_parse_errors: parse_dropped || blank_name_dropped,
+    had_full_parse_rejection: parse_dropped || (blank_name_dropped && len(tool_calls) == 0),
+    parse_dropped: parse_dropped,
+  }
 }
 
 pub fn __detect_native_fallback(

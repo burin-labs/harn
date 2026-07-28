@@ -1,10 +1,7 @@
 Stop reason: {{ stop_reason }}
-Session: {{ session_id }}
 Iteration: {{ iteration }}
-Session tools used: {{ all_tools_used }}
-Successful session tools: {{ successful_tools_used }}
 
-Transcript context:
+Per-turn transcript evidence:
 {{ transcript }}
 
 Latest assistant text:

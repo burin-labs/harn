@@ -1,0 +1,94 @@
+import { agent_feedback_compose, agent_feedback_tool_example } from "std/agent/feedback"
+
+pipeline test_composition_is_deterministic_and_reason_coded(task) {
+  const composed = agent_feedback_compose(
+    [
+      {
+        content: "Retry with a valid call.",
+        source: "tool_parser",
+        reason: "parse_rejected",
+        action: "continue",
+      },
+      {
+        content: "Retry with a valid call.",
+        source: "stall_detector",
+        reason: "repeated_parse_rejection",
+        action: "continue",
+      },
+      {
+        content: "The recovery budget is exhausted.",
+        source: "recovery_budget",
+        reason: "feedback_cap_reached",
+        action: "stop",
+      },
+      {
+        content: "The terminal record was written.",
+        source: "terminal",
+        reason: "durable_checkpoint",
+        action: "inform",
+      },
+    ],
+  )
+  assert_eq(
+    composed.messages.map({ message -> message.content }),
+    ["The recovery budget is exhausted.", "The terminal record was written."],
+  )
+  assert_eq(
+    composed.suppressed.map({ item -> item.suppression_reason }),
+    ["byte_identical_duplicate", "contradicted_by_stop"],
+  )
+}
+
+pipeline test_next_step_requires_new_knowledge(task) {
+  const first = agent_feedback_compose(
+    [
+      {
+        content: "Run the focused test.",
+        source: "completion_judge",
+        reason: "judge_veto",
+        action: "continue",
+        next_step: "run focused test",
+      },
+    ],
+    {knowledge_state: "sha256:k1"},
+  )
+  const repeated = agent_feedback_compose(
+    [
+      {
+        content: "Run the focused test.",
+        source: "completion_judge",
+        reason: "judge_veto",
+        action: "continue",
+        next_step: "run focused test",
+      },
+    ],
+    {history: first.history, knowledge_state: "sha256:k1"},
+  )
+  const advanced = agent_feedback_compose(
+    [
+      {
+        content: "Run the focused test.",
+        source: "completion_judge",
+        reason: "judge_veto",
+        action: "continue",
+        next_step: "run focused test",
+      },
+    ],
+    {history: first.history, knowledge_state: "sha256:k2"},
+  )
+  assert_eq(len(repeated.messages), 0)
+  assert_eq(repeated.suppressed[0].suppression_reason, "unchanged_next_step")
+  assert_eq(len(advanced.messages), 1)
+}
+
+pipeline test_tool_examples_follow_the_locked_format(task) {
+  const args = [{key: "path", value: "notes.txt"}]
+  const text = agent_feedback_tool_example("write_note", args, {tool_format: "text"})
+  const json = agent_feedback_tool_example("write_note", args, {tool_format: "json"})
+  const native = agent_feedback_tool_example("write_note", args, {tool_format: "native"})
+  assert(contains(text, "<tool_call>"))
+  assert(contains(text, "write_note({ path: \"notes.txt\" })"))
+  assert(contains(json, "```tool"))
+  assert(contains(json, "\"name\":\"write_note\""))
+  assert_eq(native, "write_note({ path: \"notes.txt\" })")
+}

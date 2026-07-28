@@ -98,6 +98,7 @@ pub type StallDiagnostics = {
   no_progress_messages?: int,
   ping_pong_cycles?: int,
   repeat_context_window_error?: int,
+  repeat_parse_rejection?: int,
   hard_stop_after_trips?: int,
   repair_diagnostics?: RepairDiagnostics,
   repair_aware?: bool,
