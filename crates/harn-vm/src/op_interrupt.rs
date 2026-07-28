@@ -169,7 +169,11 @@ pub fn preserve_process_owner_token(command: &mut std::process::Command) {
 ///
 /// The current process is excluded. Conformance uses this as a fail-closed
 /// teardown audit; the guardian remains the authority that cleans the cohort
-/// if the runner itself is interrupted or killed.
+/// if the runner itself is interrupted or killed. The clean-exit audit must
+/// not consult the append-only process-group journal: exited groups can be
+/// reused by unrelated processes during a large suite. The journal is safe
+/// only for the guardian's abrupt-owner-death path, where reclaiming the whole
+/// lifetime takes precedence over a normal terminal report.
 pub fn current_process_owner_survivors() -> Vec<ProcessCleanupChild> {
     #[cfg(unix)]
     {
@@ -180,20 +184,6 @@ pub fn current_process_owner_survivors() -> Vec<ProcessCleanupChild> {
             .into_iter()
             .filter(|child| child.pid != std::process::id())
             .collect::<Vec<_>>();
-        let live_groups = live_process_groups();
-        for pgid in owner_process_groups(&token) {
-            if pgid != unsafe { libc::getpgrp() as u32 }
-                && live_groups.contains(&pgid)
-                && !survivors.iter().any(|child| child.pid == pgid)
-            {
-                survivors.push(ProcessCleanupChild::new(
-                    pgid,
-                    None,
-                    1,
-                    Some("<process-group>".to_string()),
-                ));
-            }
-        }
         survivors.sort_by_key(|child| child.pid);
         survivors
     }
@@ -217,27 +207,12 @@ pub fn kill_current_process_owner_survivors() -> ProcessCleanupReport {
         let mut report = ProcessCleanupReport::for_signal(None, 9);
         let current_pgid = unsafe { libc::getpgrp() };
         let survivors = current_process_owner_survivors();
-        let mut groups = Vec::new();
         for child in survivors {
-            if child.command_name.as_deref() == Some("<process-group>") {
-                unsafe {
-                    libc::kill(-(child.pid as i32), 9);
-                }
-                groups.push(child.pid);
-            } else {
-                signal_pid_preserving_group(child.pid, current_pgid, 9);
-            }
+            signal_pid_preserving_group(child.pid, current_pgid, 9);
             report.merge_child(child.with_signal(9));
         }
         wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
-        wait_for_process_groups_to_exit(&groups, SUBPROCESS_KILL_SETTLE);
         report.refresh_survivor_status();
-        let live_groups = live_process_groups();
-        for child in &mut report.children {
-            if groups.contains(&child.pid) {
-                child.alive_after_cleanup = Some(live_groups.contains(&child.pid));
-            }
-        }
         report
     }
     #[cfg(not(unix))]
@@ -694,34 +669,6 @@ fn signal_pid_preserving_group(pid: u32, preserved_pgid: i32, signal: i32) {
             libc::kill(-pgid, signal);
         }
         libc::kill(pid, signal);
-    }
-}
-
-#[cfg(unix)]
-fn live_process_groups() -> std::collections::HashSet<u32> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
-
-    let mut sys = System::new();
-    sys.refresh_processes_specifics(ProcessesToUpdate::All, false, ProcessRefreshKind::nothing());
-    sys.processes()
-        .iter()
-        .filter(|(_, process)| process_status_can_execute(process.status()))
-        .filter_map(|(pid, _)| {
-            let pgid = unsafe { libc::getpgid(pid.as_u32() as i32) };
-            u32::try_from(pgid).ok()
-        })
-        .collect()
-}
-
-#[cfg(unix)]
-fn wait_for_process_groups_to_exit(groups: &[u32], timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        let live_groups = live_process_groups();
-        if groups.iter().all(|pgid| !live_groups.contains(pgid)) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
