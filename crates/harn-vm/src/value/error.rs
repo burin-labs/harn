@@ -126,6 +126,11 @@ pub enum VmError {
         message: String,
         category: ErrorCategory,
     },
+    /// A provider stream failed before its protocol supplied a terminal
+    /// sentinel. Carries transport phase and deadline provenance structurally
+    /// so retry, transcript, and host projections never need to reclassify
+    /// rendered prose.
+    ProviderStreamFailure(Box<ProviderStreamFailure>),
     DaemonQueueFull {
         daemon_id: String,
         capacity: usize,
@@ -196,8 +201,118 @@ impl VmError {
                 dict.put_str("message", message);
                 VmValue::dict(dict)
             }
+            VmError::ProviderStreamFailure(failure) => failure.thrown_value(),
             other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
         }
+    }
+
+    pub fn provider_stream_failure(&self) -> Option<&ProviderStreamFailure> {
+        match self {
+            Self::ProviderStreamFailure(failure) => Some(failure),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderStreamPhase {
+    AwaitingFirstChunk,
+    Streaming,
+}
+
+impl ProviderStreamPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AwaitingFirstChunk => "awaiting_first_chunk",
+            Self::Streaming => "streaming",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderStreamFailureReason {
+    Read,
+    PrematureEof,
+    Deadline,
+}
+
+impl ProviderStreamFailureReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::PrematureEof => "premature_eof",
+            Self::Deadline => "deadline",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderStreamDeadline {
+    Total,
+    FirstChunk,
+    Idle,
+}
+
+impl ProviderStreamDeadline {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Total => "total",
+            Self::FirstChunk => "first_chunk",
+            Self::Idle => "idle",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderStreamFailure {
+    pub provider: String,
+    pub phase: ProviderStreamPhase,
+    pub reason: ProviderStreamFailureReason,
+    pub deadline: Option<ProviderStreamDeadline>,
+    pub partial: bool,
+    pub detail: String,
+}
+
+impl ProviderStreamFailure {
+    pub fn category(&self) -> ErrorCategory {
+        if self.deadline.is_some() {
+            ErrorCategory::Timeout
+        } else {
+            ErrorCategory::TransientNetwork
+        }
+    }
+
+    fn thrown_value(&self) -> VmValue {
+        let mut dict = std::collections::BTreeMap::new();
+        dict.put_str("category", self.category().as_str());
+        dict.put_str("message", self.to_string());
+        dict.put_str("source", "provider_stream");
+        dict.put_str("phase", self.phase.as_str());
+        dict.put_str("reason", self.reason.as_str());
+        dict.insert(
+            "deadline".to_string(),
+            self.deadline
+                .map(|deadline| VmValue::String(arcstr::ArcStr::from(deadline.as_str())))
+                .unwrap_or(VmValue::Nil),
+        );
+        dict.insert("partial".to_string(), VmValue::Bool(self.partial));
+        VmValue::dict(dict)
+    }
+}
+
+impl std::fmt::Display for ProviderStreamFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} provider stream failure (phase={}, reason={}",
+            self.provider,
+            self.phase.as_str(),
+            self.reason.as_str()
+        )?;
+        if let Some(deadline) = self.deadline {
+            write!(f, ", deadline={}", deadline.as_str())?;
+        }
+        write!(f, ", partial={}): {}", self.partial, self.detail)
     }
 }
 
@@ -397,6 +512,7 @@ pub fn error_to_category(err: &VmError) -> ErrorCategory {
         VmError::ProcessExit(_) => ErrorCategory::Generic,
         VmError::AbandonedExecution => ErrorCategory::Cancelled,
         VmError::CategorizedError { category, .. } => category.clone(),
+        VmError::ProviderStreamFailure(failure) => failure.category(),
         VmError::Thrown(VmValue::Dict(d)) => d
             .get("category")
             .map(|v| ErrorCategory::parse(&v.display()))
@@ -552,6 +668,7 @@ impl std::fmt::Display for VmError {
             VmError::CategorizedError { message, category } => {
                 write!(f, "Error [{}]: {}", category.as_str(), message)
             }
+            VmError::ProviderStreamFailure(failure) => failure.fmt(f),
             VmError::DaemonQueueFull {
                 daemon_id,
                 capacity,

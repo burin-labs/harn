@@ -211,6 +211,7 @@ pub(super) fn probe_request_payload_for_format(
         cache: false,
         prompt_cache_ttl: None,
         timeout: None,
+        idle_timeout: None,
         stream: mode == ToolProbeMode::Streaming,
         provider_overrides: None,
         previous_response_id: None,

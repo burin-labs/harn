@@ -12,9 +12,14 @@ use super::call::{build_llm_error_dict, execute_llm_call};
 use super::helpers::extract_llm_options;
 use super::stream::vm_stream_llm;
 
+fn llm_stream_error_item(err: &VmError, provider: &str, model: &str) -> VmValue {
+    build_llm_error_dict(err, provider, model)
+}
+
 pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let opts = extract_llm_options(&args)?;
     let provider = opts.provider.clone();
+    let model = opts.model.clone();
     let prompt_text = opts
         .messages
         .last()
@@ -44,7 +49,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         let result = vm_stream_llm(&opts, &tx_for_task).await;
         if let Err(e) = result {
             let _ = tx_for_task
-                .send(VmValue::String(arcstr::ArcStr::from(format!("error: {e}"))))
+                .send(llm_stream_error_item(&e, &provider, &model))
                 .await;
         }
         close_for_task.close();
@@ -323,7 +328,7 @@ mod tests {
     use crate::tracing::SpanKind;
     use crate::value::{VmError, VmValue};
 
-    use super::llm_stream_call_impl;
+    use super::{llm_stream_call_impl, llm_stream_error_item};
 
     #[tokio::test(start_paused = true)]
     async fn first_token_budget_records_streaming_ttft_under_virtual_time() {
@@ -396,5 +401,34 @@ mod tests {
             return None;
         };
         dict.get(key).map(VmValue::display)
+    }
+
+    #[test]
+    fn legacy_stream_projects_typed_provider_failure_as_error_item() {
+        let err = VmError::ProviderStreamFailure(Box::new(crate::value::ProviderStreamFailure {
+            provider: "openai".to_string(),
+            phase: crate::value::ProviderStreamPhase::AwaitingFirstChunk,
+            reason: crate::value::ProviderStreamFailureReason::Deadline,
+            deadline: Some(crate::value::ProviderStreamDeadline::FirstChunk),
+            partial: false,
+            detail: "first chunk deadline elapsed".to_string(),
+        }));
+
+        let item = llm_stream_error_item(&err, "openai", "test-model");
+
+        assert_eq!(dict_string(&item, "kind").as_deref(), Some("transient"));
+        assert_eq!(
+            dict_string(&item, "source").as_deref(),
+            Some("provider_stream")
+        );
+        assert_eq!(
+            dict_string(&item, "phase").as_deref(),
+            Some("awaiting_first_chunk")
+        );
+        assert_eq!(
+            dict_string(&item, "deadline").as_deref(),
+            Some("first_chunk")
+        );
+        assert_eq!(dict_string(&item, "partial").as_deref(), Some("false"));
     }
 }

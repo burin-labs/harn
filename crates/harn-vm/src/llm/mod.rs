@@ -25,6 +25,8 @@ pub(crate) mod autonomy_budget;
 pub(crate) mod cache;
 pub mod cache_conformance;
 mod call;
+#[cfg(test)]
+mod call_error_projection_tests;
 pub mod capabilities;
 pub mod capability_audit;
 mod code_mode;

@@ -445,6 +445,18 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     if let Some(ms) = agent_observe::extract_retry_after_ms(err) {
         dict.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
     }
+    if let Some(failure) = err.provider_stream_failure() {
+        dict.put_str("source", "provider_stream");
+        dict.put_str("phase", failure.phase.as_str());
+        dict.insert(
+            "deadline".to_string(),
+            failure
+                .deadline
+                .map(|deadline| VmValue::String(arcstr::ArcStr::from(deadline.as_str())))
+                .unwrap_or(VmValue::Nil),
+        );
+        dict.insert("partial".to_string(), VmValue::Bool(failure.partial));
+    }
     dict.put_str("provider", provider);
     dict.put_str("model", model);
     VmValue::dict(dict)
@@ -452,6 +464,7 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
 
 fn llm_error_message(err: &VmError) -> String {
     match err {
+        VmError::ProviderStreamFailure(failure) => failure.to_string(),
         VmError::CategorizedError { message, .. } => message.clone(),
         VmError::Thrown(VmValue::String(s)) => s.to_string(),
         VmError::Thrown(VmValue::Dict(d)) => d

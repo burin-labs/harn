@@ -76,14 +76,21 @@ use transport::vm_call_llm_api;
 struct OffthreadLlmError {
     message: String,
     category: Option<ErrorCategory>,
+    stream_failure: Option<Box<crate::value::ProviderStreamFailure>>,
 }
 
 impl OffthreadLlmError {
     fn from_vm_error(err: VmError) -> Self {
         match err {
+            VmError::ProviderStreamFailure(failure) => Self {
+                message: failure.to_string(),
+                category: Some(failure.category()),
+                stream_failure: Some(failure),
+            },
             VmError::CategorizedError { message, category } => Self {
                 message,
                 category: Some(category),
+                stream_failure: None,
             },
             VmError::Thrown(VmValue::String(message)) => {
                 Self::from_display_message(message.to_string())
@@ -97,15 +104,20 @@ impl OffthreadLlmError {
             return Self {
                 message: stripped.to_string(),
                 category: Some(category),
+                stream_failure: None,
             };
         }
         Self {
             message,
             category: None,
+            stream_failure: None,
         }
     }
 
     fn into_vm_error(self) -> VmError {
+        if let Some(failure) = self.stream_failure {
+            return VmError::ProviderStreamFailure(failure);
+        }
         match self.category {
             Some(category) => VmError::CategorizedError {
                 message: self.message,

@@ -14,7 +14,10 @@ for chunk in stream {
 
 `llm_stream` accepts the same options as `llm_call` (provider, model,
 max_tokens). The channel closes automatically when the response is
-complete.
+complete. If the provider fails after emitting zero or more string chunks, the
+last item is the same structured error dict used by `llm_call`, including typed
+provider-stream `phase`, `deadline`, and `partial` fields; transport failures
+are never represented as a successful close.
 
 `llm_stream_call` is the script-facing streaming variant of `llm_call`.
 It returns a first-class `Stream` of chunk dicts instead of a channel of
