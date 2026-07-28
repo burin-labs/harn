@@ -3,36 +3,75 @@ import "./plan"
 import "./support"
 import "./types"
 
-pub fn __safe_status(value) -> string {
-  if type_of(value) == "string" {
-    return value
+pub fn provider_tool_probe_campaign_case_status(report: dict) -> string {
+  const cases = report?.cases ?? []
+  if len(cases) == 0 {
+    return "skip"
   }
-  return "unknown"
+  for probe_case in cases {
+    if !(probe_case?.ok ?? false) {
+      return "fail"
+    }
+  }
+  return "pass"
 }
 
-pub fn __status_from_probe(value) -> string {
-  const status = __safe_status(value)
-  if status == "pass" {
-    return "pass"
+pub fn provider_tool_probe_campaign_probe_telemetry(report: dict) -> dict {
+  let case_count = 0
+  let successful_case_count = 0
+  let empty_completion_count = 0
+  let rate_limited_count = 0
+  let observed_latency_count = 0
+  let latency_ms_total = 0
+  let observed_usage_count = 0
+  let observed_cost_count = 0
+  let input_tokens = 0
+  let output_tokens = 0
+  let actual_usd = 0.0
+  for probe_case in report?.cases ?? [] {
+    case_count = case_count + 1
+    if probe_case?.ok ?? false {
+      successful_case_count = successful_case_count + 1
+    }
+    if probe_case?.classification == "empty_silent" {
+      empty_completion_count = empty_completion_count + 1
+    }
+    if probe_case?.http_status == 429 {
+      rate_limited_count = rate_limited_count + 1
+    }
+    if probe_case?.elapsed_ms != nil {
+      observed_latency_count = observed_latency_count + 1
+      latency_ms_total = latency_ms_total + (probe_case.elapsed_ms ?? 0)
+    }
+    const usage = probe_case?.usage
+    if type_of(usage) != "dict" {
+      continue
+    }
+    observed_usage_count = observed_usage_count + 1
+    input_tokens = input_tokens + (usage?.input_tokens ?? 0)
+    output_tokens = output_tokens + (usage?.output_tokens ?? 0)
+    if usage?.cost_usd != nil {
+      observed_cost_count = observed_cost_count + 1
+      actual_usd = actual_usd + (usage.cost_usd ?? 0.0)
+    }
   }
-  if status == "fail" {
-    return "fail"
+  return {
+    case_count: case_count,
+    successful_case_count: successful_case_count,
+    empty_completion_count: empty_completion_count,
+    request_attempt_count: case_count,
+    retry_count: 0,
+    retry_accounting: "provider tool-probe makes one physical request per case and does not retry",
+    rate_limited_count: rate_limited_count,
+    observed_latency_count: observed_latency_count,
+    latency_ms_total: latency_ms_total,
+    observed_usage_count: observed_usage_count,
+    observed_cost_count: observed_cost_count,
+    unpriced_case_count: case_count - observed_cost_count,
+    input_tokens: input_tokens,
+    output_tokens: output_tokens,
+    actual_usd: actual_usd,
   }
-  return "skip"
-}
-
-pub fn __probe_status_for_format(report: dict, mode: string, format: string) -> string {
-  const tool_calling = report?.tool_calling ?? {}
-  if format == "native" && mode == "streaming" {
-    return __safe_status(tool_calling?.streaming_native)
-  }
-  if format == "native" {
-    return __safe_status(tool_calling?.native)
-  }
-  if format == "json" || format == "text" {
-    return __safe_status(tool_calling?.text)
-  }
-  return "unknown"
 }
 
 pub fn __probe_cell(
@@ -44,14 +83,23 @@ pub fn __probe_cell(
   artifact_path: string,
   command: list<string>,
 ) -> ProviderToolProbeCell {
-  const status_value = __probe_status_for_format(report, mode, format)
-  const status = __status_from_probe(status_value)
+  const status = provider_tool_probe_campaign_case_status(report)
   const reason = if status == "pass" {
-    "provider tool-probe reported pass at the Harn parse/dispatch boundary"
+    "every saved provider tool-probe case passed at the Harn parse/dispatch boundary"
   } else if status == "fail" {
-    report?.tool_calling?.failure_reason ?? "provider tool-probe reported fail"
+    let failure_reason = ""
+    for probe_case in report?.cases ?? [] {
+      if !(probe_case?.ok ?? false) && failure_reason == "" {
+        failure_reason = trim(to_string(probe_case?.failure_reason ?? ""))
+      }
+    }
+    if failure_reason != "" {
+      failure_reason
+    } else {
+      report?.tool_calling?.failure_reason ?? "provider tool-probe reported fail"
+    }
   } else {
-    "provider tool-probe did not produce a verdict for this format/mode"
+    "provider tool-probe did not produce a case verdict"
   }
   return __base_cell(
     route,
@@ -62,7 +110,7 @@ pub fn __probe_cell(
     reason,
     {
       tool_calling: report?.tool_calling ?? {},
-      case_count: len(report?.cases ?? []),
+      telemetry: provider_tool_probe_campaign_probe_telemetry(report),
       schema_version: report?.schema_version,
     },
   )
@@ -174,6 +222,7 @@ pub fn __run_tool_probe(
   repeat: int,
   timeout_secs: int,
   output_dir: string,
+  trial: int = 1,
 ) -> list<ProviderToolProbeCell> {
   const missing = __missing_env_keys(route, env)
   if len(missing) > 0 {
@@ -196,6 +245,7 @@ pub fn __run_tool_probe(
       mode,
       format,
       output_dir,
+      trial,
     )
     const child = harness.process.spawn_captured(
       {cmd: harn_bin, args: command[1:len(command)], env: env},
@@ -223,7 +273,19 @@ pub fn __run_tool_probe(
           } else {
             "provider tool-probe produced non-JSON stdout"
           },
-          {exit_code: child.exit_code, stderr: trim(child.stderr ?? "")},
+          {
+            exit_code: child.exit_code,
+            stderr: trim(child.stderr ?? ""),
+            telemetry: {
+              actual_usd: 0.0,
+              observed_cost_count: 0,
+              unpriced_case_count: 1,
+              request_attempt_count: 1,
+              retry_count: 0,
+              retry_accounting:
+                "the child process produced no parseable receipt; the campaign conservatively counts one unpriced attempt",
+            },
+          },
         )
           + {command: command},
       ]
@@ -240,6 +302,7 @@ pub fn provider_tool_probe_campaign_artifact_path(
   mode: string,
   format: string,
   output_dir: string,
+  trial: int = 1,
 ) -> string {
   const probe_case = __slug(to_string(behavior.probe_case ?? "single_tool_call"))
   return path_join(
@@ -247,6 +310,166 @@ pub fn provider_tool_probe_campaign_artifact_path(
     "tool-probe-" + route.id + "-" + __slug(behavior.id) + "-" + probe_case + "-" + __slug(mode)
       + "-"
       + __slug(format)
+      + "-trial-"
+      + to_string(trial)
       + ".json",
   )
+}
+
+pub fn provider_tool_probe_campaign_scorecard_inputs(
+  harness: Harness,
+  cells: list<ProviderToolProbeCell>,
+  runtime: ProviderToolProbeRuntimeReceipt,
+  catalog: ProviderToolProbeCatalogReceipt,
+) -> dict {
+  let reports: list<dict> = []
+  for cell in cells {
+    const path = trim(to_string(cell?.artifact_path ?? ""))
+    if path == "" || !harness.fs.exists(path) {
+      continue
+    }
+    let already_present = false
+    for report in reports {
+      if report.path == path {
+        already_present = true
+      }
+    }
+    if already_present {
+      continue
+    }
+    reports = reports
+      + [
+      {path: path, sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(path))},
+    ]
+  }
+  const identity = {
+    schema_version: "harn.provider_tool_probe_scorecard_inputs.v1",
+    runtime: runtime,
+    catalog: catalog,
+    campaign_source: provider_tool_probe_campaign_source_receipt(harness),
+    reports: reports,
+  }
+  return identity
+    + {input_sha256: "sha256:" + harness.crypto.sha256(json_stringify(identity))}
+}
+
+pub fn provider_tool_probe_campaign_source_receipt(harness: Harness) -> dict {
+  const paths = [
+    "scripts/provider_tool_probe_campaign.harn",
+    "scripts/provider_tool_probe_campaign/catalog.harn",
+    "scripts/provider_tool_probe_campaign/env.harn",
+    "scripts/provider_tool_probe_campaign/execute.harn",
+    "scripts/provider_tool_probe_campaign/plan.harn",
+    "scripts/provider_tool_probe_campaign/report.harn",
+    "scripts/provider_tool_probe_campaign/support.harn",
+    "scripts/provider_tool_probe_campaign/types.harn",
+  ]
+  let files: list<dict> = []
+  for path in paths {
+    if harness.fs.exists(path) {
+      files = files
+        + [
+        {path: path, sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(path))},
+      ]
+    }
+  }
+  return {files: files, source_sha256: "sha256:" + harness.crypto.sha256(json_stringify(files))}
+}
+
+pub fn provider_tool_probe_campaign_write_scorecard(
+  harness: Harness,
+  harn_bin: string,
+  cells: list<ProviderToolProbeCell>,
+  output_dir: string,
+  runtime: ProviderToolProbeRuntimeReceipt,
+  catalog: ProviderToolProbeCatalogReceipt,
+  env: dict,
+) -> dict {
+  const inputs = provider_tool_probe_campaign_scorecard_inputs(harness, cells, runtime, catalog)
+  const input_manifest = path_join(output_dir, "scorecard-inputs.json")
+  const scorecard_json = path_join(output_dir, "scorecard.json")
+  const scorecard_markdown = path_join(output_dir, "scorecard.md")
+  const scorecard_receipt = path_join(output_dir, "scorecard-receipt.json")
+  harness.fs.write_text(input_manifest, json_stringify_pretty(inputs) + "\n")
+  if len(inputs.reports) == 0 {
+    const receipt = {
+      schema_version: "harn.provider_tool_probe_scorecard_receipt.v1",
+      status: "unavailable",
+      reason: "no saved live tool-probe reports were produced",
+      input_manifest: input_manifest,
+      input_sha256: inputs.input_sha256,
+    }
+    harness.fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
+    return {
+      scorecard_inputs_json: input_manifest,
+      scorecard_receipt_json: scorecard_receipt,
+      scorecard_status: receipt.status,
+    }
+  }
+  let args = ["provider", "tool-scorecard"]
+  for report in inputs.reports {
+    args = args + ["--tool-probe-report", report.path]
+  }
+  const json_child = harness.process.spawn_captured(
+    {cmd: harn_bin, args: args + ["--json"], env: env},
+  )
+  if json_child.exit_code != 0 || trim(json_child.stdout ?? "") == "" {
+    const receipt = {
+      schema_version: "harn.provider_tool_probe_scorecard_receipt.v1",
+      status: "error",
+      reason: trim(json_child.stderr ?? "tool-scorecard did not produce JSON"),
+      input_manifest: input_manifest,
+      input_sha256: inputs.input_sha256,
+      command: [harn_bin] + args + ["--json"],
+      exit_code: json_child.exit_code,
+    }
+    harness.fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
+    return {
+      scorecard_inputs_json: input_manifest,
+      scorecard_receipt_json: scorecard_receipt,
+      scorecard_status: receipt.status,
+    }
+  }
+  harness.fs.write_text(scorecard_json, json_child.stdout)
+  const markdown_child = harness.process.spawn_captured(
+    {cmd: harn_bin, args: args + ["--markdown"], env: env},
+  )
+  if markdown_child.exit_code == 0 && trim(markdown_child.stdout ?? "") != "" {
+    harness.fs.write_text(scorecard_markdown, markdown_child.stdout)
+  }
+  const receipt = {
+    schema_version: "harn.provider_tool_probe_scorecard_receipt.v1",
+    status: if markdown_child.exit_code == 0 {
+      "complete"
+    } else {
+      "partial"
+    },
+    reason: if markdown_child.exit_code == 0 {
+      "deterministic JSON and Markdown scorecards generated from the hashed saved reports"
+    } else {
+      trim(markdown_child.stderr ?? "Markdown scorecard generation failed")
+    },
+    input_manifest: input_manifest,
+    input_sha256: inputs.input_sha256,
+    scorecard_json: scorecard_json,
+    scorecard_json_sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(scorecard_json)),
+    scorecard_markdown: if markdown_child.exit_code == 0 {
+      scorecard_markdown
+    } else {
+      ""
+    },
+    scorecard_markdown_sha256: if markdown_child.exit_code == 0 {
+      "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(scorecard_markdown))
+    } else {
+      ""
+    },
+  }
+  harness.fs.write_text(scorecard_receipt, json_stringify_pretty(receipt) + "\n")
+  return {
+    scorecard_inputs_json: input_manifest,
+    scorecard_json: scorecard_json,
+    scorecard_markdown: receipt.scorecard_markdown,
+    scorecard_receipt_json: scorecard_receipt,
+    scorecard_status: receipt.status,
+  }
 }
