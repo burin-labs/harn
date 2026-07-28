@@ -1297,6 +1297,70 @@ fn models_lora_promote_check_rejects_single_trial_probe_receipts() {
 }
 
 #[test]
+fn models_lora_promote_check_rejects_serving_probe_without_adapter_binding() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (train_receipt, _) = write_executed_train_receipt(tmp.path());
+
+    let probe_root = tmp.path().join("PROMOTION_PROBES");
+    let base_probe_root = tmp.path().join("BASE_PROMOTION_PROBES");
+    for case_id in [
+        "sequential_tool_call",
+        "parallel_tool_calls",
+        "no_tool_answer",
+        "unavailable_tool_repair",
+        "multi_turn_tool_result_continuation",
+        "serving_concurrency_probe",
+    ] {
+        write_lora_probe_summary(&probe_root, case_id, true);
+        write_lora_probe_summary(&base_probe_root, case_id, true);
+    }
+    let summary_path = probe_root
+        .join("serving_concurrency_probe")
+        .join("summary.json");
+    let mut summary: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&summary_path).expect("read serving summary"))
+            .expect("parse serving summary");
+    summary["serving_probe"]["adapter_binding_established"] = serde_json::Value::Bool(false);
+    summary["serving_probe"]["adapter"] = serde_json::Value::Null;
+    fs::write(
+        &summary_path,
+        serde_json::to_string_pretty(&summary).expect("render serving summary"),
+    )
+    .expect("write serving summary");
+
+    let promoted = run(
+        &[
+            "models",
+            "lora",
+            "promote",
+            "--train-receipt",
+            train_receipt.to_str().expect("utf8 train receipt path"),
+            "--probe-root",
+            probe_root.to_str().expect("utf8 probe root"),
+            "--base-probe-root",
+            base_probe_root.to_str().expect("utf8 base probe root"),
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(promoted.exit_code, 1, "promote stdout={}", promoted.stdout);
+    let promoted_value = parse_json(&promoted.stdout, "failed serving promotion");
+    let details = &promoted_value["error"]["details"];
+    assert!(
+        details["errors"]
+            .as_array()
+            .expect("promotion errors")
+            .iter()
+            .any(|error| error
+                .as_str()
+                .is_some_and(|text| text.contains("serving_concurrency_probe adapter"))),
+        "details={details:?}"
+    );
+}
+
+#[test]
 fn models_lora_promote_check_fails_when_probe_matrix_is_missing() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let (train_receipt, _) = write_executed_train_receipt(tmp.path());

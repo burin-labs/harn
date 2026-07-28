@@ -290,6 +290,17 @@ back into Harn; the same block includes a
 `harn provider tool-probe` command for validating the served adapter route before
 promotion evals.
 
+The generated `serving_concurrency_probe` command selects a checked-in
+tool-call case and runs the manifest's minimum trial count concurrently. Before
+running the adapter-route command, replace `ADAPTER_PATH` with the inspected
+adapter artifact path; Harn computes and records its deterministic digest. Its
+`summary.json` records the requested and server-reported models, adapter
+identity, parser lane, distinct provider request ids, concurrency, and explicit
+usage/cost knownness. `harn models lora promote --check` rejects the receipt
+when any model falls back, request ids collide, the artifact digest changes,
+the parser contract fails, or adapter-binding evidence is missing. The base
+route runs the same concurrent case without claiming an adapter identity.
+
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,
 required probes, known cache/parser risks, and workarounds for Ollama,

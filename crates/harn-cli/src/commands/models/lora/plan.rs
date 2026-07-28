@@ -428,6 +428,7 @@ pub(super) fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, S
             base_model: &resolved.id,
             provider: &provider,
             request_model: &request_model,
+            adapter_artifact_path: "ADAPTER_PATH",
             tool_format: &decision.effective,
             eval_dataset: &eval_dataset,
             trainer_identity: Some(&trainer_identity),

@@ -178,7 +178,11 @@ fn collect_probe_evidence(
     let passed_cases = value_u64(&summary, "passed_cases");
     let pass_rate = summary.get("pass_rate").and_then(Value::as_f64);
     let total_cost_usd = summary.get("total_cost_usd").and_then(Value::as_f64);
-    let failed_case_reasons = failed_case_reasons(&summary);
+    let mut failed_case_reasons = failed_case_reasons(&summary);
+    let serving_probe = summary.get("serving_probe").cloned().unwrap_or(Value::Null);
+    if spec.case_id == "serving_concurrency_probe" {
+        failed_case_reasons.extend(validate_serving_probe(&serving_probe, route_role, evidence));
+    }
     let per_case_path = per_case_path_for_summary(&summary_path);
     let per_case_metrics = if per_case_path.is_file() {
         per_case_metrics(&per_case_path)?
@@ -211,6 +215,7 @@ fn collect_probe_evidence(
         per_case_count: per_case_metrics.count,
         per_case_passed_count: per_case_metrics.passed_count,
         per_case_ids: per_case_metrics.ids,
+        serving_probe,
     })
 }
 
@@ -239,6 +244,7 @@ fn missing_probe_evidence(
         per_case_count: 0,
         per_case_passed_count: 0,
         per_case_ids: Vec::new(),
+        serving_probe: Value::Null,
     }
 }
 
@@ -314,6 +320,121 @@ fn failed_case_reasons(summary: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn validate_serving_probe(receipt: &Value, route_role: &str, evidence: &Value) -> Vec<String> {
+    let mut errors = Vec::new();
+    let route = evidence
+        .get(if route_role == "adapter" {
+            "adapter_route"
+        } else {
+            "base_route"
+        })
+        .unwrap_or(&Value::Null);
+    let expected_model = value_string(route, "model");
+    let expected_provider = value_string(route, "provider");
+    let expected_tool_format = value_string(route, "tool_format");
+    if !receipt.is_object() {
+        return vec!["serving probe receipt is missing".to_string()];
+    }
+    if value_string(receipt, "route_role") != route_role {
+        errors.push("serving probe route role does not match the promotion route".to_string());
+    }
+    if value_string(receipt, "requested_model") != expected_model {
+        errors.push("serving probe requested model does not match the promotion route".to_string());
+    }
+    if value_string(receipt, "requested_provider") != expected_provider {
+        errors.push(
+            "serving probe requested provider does not match the promotion route".to_string(),
+        );
+    }
+    if value_string(receipt, "tool_format") != expected_tool_format {
+        errors.push("serving probe parser/tool format does not match the manifest".to_string());
+    }
+    let concurrency = value_u64(receipt, "concurrency_count");
+    if concurrency < 2 {
+        errors.push("serving probe did not issue concurrent requests".to_string());
+    }
+    if !receipt
+        .get("parser_contract_passed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        errors.push("serving probe did not establish the runtime parser contract".to_string());
+    }
+    if !receipt
+        .get("route_identity_established")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        errors.push("serving probe did not establish served-route identity".to_string());
+    }
+    let receipt_errors = receipt
+        .get("errors")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if !receipt_errors.is_empty() {
+        errors.push("serving probe reported binding or isolation errors".to_string());
+    }
+    let observed_models = receipt
+        .get("observed_models")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if observed_models.len() != concurrency as usize
+        || observed_models
+            .iter()
+            .any(|model| model.as_str() != Some(expected_model.as_str()))
+    {
+        errors.push(
+            "serving probe observed model identity is incomplete or inconsistent".to_string(),
+        );
+    }
+    let request_ids = receipt
+        .get("request_ids")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let unique_request_ids = request_ids
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .collect::<BTreeSet<_>>();
+    if request_ids.len() != concurrency as usize || unique_request_ids.len() != concurrency as usize
+    {
+        errors.push("serving probe request ids are missing or reused".to_string());
+    }
+    for field in ["usage_known", "cost_known"] {
+        if receipt.get(field).and_then(Value::as_bool).is_none() {
+            errors.push(format!("serving probe `{field}` knownness is not explicit"));
+        }
+    }
+    if route_role == "adapter" {
+        if !receipt
+            .get("adapter_binding_established")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            errors.push("serving probe did not establish adapter binding".to_string());
+        }
+        let adapter = receipt.get("adapter").unwrap_or(&Value::Null);
+        let adapter_id = value_string(adapter, "id");
+        let adapter_path = value_string(adapter, "path");
+        let adapter_sha256 = value_string(adapter, "sha256");
+        if adapter_id != expected_model || adapter_path.is_empty() {
+            errors.push("serving probe adapter identity or path is missing".to_string());
+        }
+        if adapter_sha256.len() != 71
+            || !adapter_sha256.starts_with("sha256:")
+            || !adapter_sha256[7..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            errors.push("serving probe adapter artifact digest is invalid".to_string());
+        }
+    }
+    errors
 }
 
 fn per_case_path_for_summary(summary_path: &Path) -> PathBuf {
@@ -541,6 +662,7 @@ fn per_case_metrics(path: &Path) -> Result<PerCaseMetrics, String> {
         if value
             .get("passed")
             .and_then(Value::as_bool)
+            .or_else(|| value.pointer("/score/passed").and_then(Value::as_bool))
             .unwrap_or(false)
         {
             passed_count += 1;
@@ -631,4 +753,5 @@ struct PromotionProbeEvidence {
     per_case_count: u64,
     per_case_passed_count: u64,
     per_case_ids: Vec<String>,
+    serving_probe: Value,
 }

@@ -82,8 +82,8 @@ cases require a single normalized tool call with deep-equal arguments; numeric v
 float representation differences. Refusal cases pass only when no tool call is emitted and the final
 text matches `reason_must_match`.
 
-Predicate cases are supported by the runner but intentionally absent from the initial checked-in
-50-case set so the default dataset can run without judge spend.
+Predicate cases are supported by the runner but intentionally absent from the checked-in corpus so
+the default dataset can run without judge spend.
 
 ## Attribution
 

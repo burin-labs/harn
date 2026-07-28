@@ -266,6 +266,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         base_model: &target.base_model,
         provider: &target.provider,
         request_model: &request_model,
+        adapter_artifact_path: "ADAPTER_PATH",
         tool_format: &target.harn_tool_format,
         eval_dataset: &eval_dataset,
         trainer_identity: None,

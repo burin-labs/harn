@@ -21,7 +21,7 @@
 //!      is a common invocation pattern.
 
 use std::fs;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use harn_vm::clock::{Clock, RealClock};
@@ -31,6 +31,7 @@ use harn_vm::llm::eval::tool_call_case::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use sha2::{Digest as _, Sha256};
 
 use crate::cli::{EvalToolCallsArgs, EvalToolCallsCommand, EvalToolCallsRegressionArgs};
 use crate::commands::eval_model_selector::{resolve_selector, ModelSelector};
@@ -119,6 +120,35 @@ struct EvalSummary {
     binder_latency: Option<LatencyStats>,
     total_latency: LatencyStats,
     cases: Vec<CaseSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    serving_probe: Option<ServingProbeReceipt>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ServingProbeReceipt {
+    schema_version: u32,
+    route_role: String,
+    requested_provider: String,
+    requested_model: String,
+    observed_models: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    adapter: Option<ServingAdapterIdentity>,
+    tool_format: String,
+    request_ids: Vec<String>,
+    concurrency_count: u16,
+    usage_known: bool,
+    cost_known: bool,
+    parser_contract_passed: bool,
+    route_identity_established: bool,
+    adapter_binding_established: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ServingAdapterIdentity {
+    id: String,
+    path: PathBuf,
+    sha256: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,9 +192,7 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         }
     };
     if let Some(filter) = args.filter.as_deref() {
-        cases.retain(|case| {
-            case.id.contains(filter) || case.tags.iter().any(|tag| tag.contains(filter))
-        });
+        cases.retain(|case| case_matches_filter(case, filter));
     }
     if let Some(max_cases) = args.max_cases {
         cases.truncate(max_cases);
@@ -189,19 +217,23 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
     let mut reports = Vec::new();
     let mut had_infra_error = false;
     for case in &cases {
-        match run_case(case, &planner, binder.as_ref(), &judge_model, &args).await {
-            Ok(report) => {
-                eprintln!(
-                    "{}: {} ({})",
-                    case.id,
-                    if report.score.passed { "pass" } else { "fail" },
-                    report.score.reason
-                );
-                reports.push(report);
-            }
-            Err(error) => {
-                had_infra_error = true;
-                eprintln!("{}: error: {error}", case.id);
+        let trials = (0..args.concurrency)
+            .map(|_| run_case(case, &planner, binder.as_ref(), &judge_model, &args));
+        for result in futures::future::join_all(trials).await {
+            match result {
+                Ok(report) => {
+                    eprintln!(
+                        "{}: {} ({})",
+                        case.id,
+                        if report.score.passed { "pass" } else { "fail" },
+                        report.score.reason
+                    );
+                    reports.push(report);
+                }
+                Err(error) => {
+                    had_infra_error = true;
+                    eprintln!("{}: error: {error}", case.id);
+                }
             }
         }
     }
@@ -213,7 +245,15 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         binder,
         judge_model,
         &reports,
+        &args,
     );
+    if summary
+        .serving_probe
+        .as_ref()
+        .is_some_and(|receipt| !receipt.errors.is_empty())
+    {
+        had_infra_error = true;
+    }
     if let Err(error) = write_outputs(&output_dir, &summary, &reports) {
         eprintln!("error: failed to write eval outputs: {error}");
         return 1;
@@ -231,6 +271,10 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
     println!("{summary_line}");
 
     i32::from(had_infra_error)
+}
+
+fn case_matches_filter(case: &ToolCallEvalCase, filter: &str) -> bool {
+    case.id.contains(filter) || case.tags.iter().any(|tag| tag.contains(filter))
 }
 
 #[derive(Debug, Serialize)]
@@ -828,8 +872,10 @@ fn build_summary(
     binder: Option<ModelSelector>,
     judge_model: ModelSelector,
     reports: &[CaseReport],
+    args: &EvalToolCallsArgs,
 ) -> EvalSummary {
     let passed_cases = reports.iter().filter(|report| report.score.passed).count();
+    let serving_probe = build_serving_probe_receipt(&planner, reports, args);
     let cases = reports
         .iter()
         .map(|report| CaseSummary {
@@ -865,7 +911,275 @@ fn build_summary(
         binder_latency: latency_stats_option(binder_latencies),
         total_latency: latency_stats(reports.iter().map(|report| report.total_latency_ms)),
         cases,
+        serving_probe,
     }
+}
+
+fn build_serving_probe_receipt(
+    planner: &ModelSelector,
+    reports: &[CaseReport],
+    args: &EvalToolCallsArgs,
+) -> Option<ServingProbeReceipt> {
+    let serving_reports = reports
+        .iter()
+        .filter(|report| report.id == "serving_concurrency_probe")
+        .collect::<Vec<_>>();
+    let route_role = args.serving_route_role.clone()?;
+    let tool_format = args.tool_format.clone().unwrap_or_default();
+    let observed_models = serving_reports
+        .iter()
+        .filter_map(|report| observed_response_model(&report.planner))
+        .collect::<Vec<_>>();
+    let request_ids = serving_reports
+        .iter()
+        .filter_map(|report| provider_request_id(&report.planner))
+        .collect::<Vec<_>>();
+    let all_trials_completed = serving_reports.len() == usize::from(args.concurrency);
+    let parser_contract_passed = all_trials_completed
+        && serving_reports.iter().all(|report| {
+            report.score.passed
+                && report
+                    .planner
+                    .raw_response
+                    .as_ref()
+                    .is_some_and(parser_contract_is_clean)
+        });
+    let usage_known = all_trials_completed
+        && serving_reports
+            .iter()
+            .all(|report| phase_usage_is_known(&report.planner));
+    let cost_known = all_trials_completed
+        && serving_reports
+            .iter()
+            .all(|report| report.planner.pricing_known);
+    let mut errors = Vec::new();
+    if route_role != "adapter" && route_role != "base" {
+        errors.push("serving route role must be explicitly adapter or base".to_string());
+    }
+    if args.concurrency < 2 || serving_reports.len() != usize::from(args.concurrency) {
+        errors.push(format!(
+            "concurrent serving receipt has {}/{} completed trials; at least 2 are required",
+            serving_reports.len(),
+            args.concurrency
+        ));
+    }
+    if tool_format.is_empty() {
+        errors.push("serving parser/tool format is missing".to_string());
+    }
+    if args.binder.is_some() {
+        errors.push(
+            "serving probe cannot use a binder that could hide route parser failures".to_string(),
+        );
+    }
+    if !parser_contract_passed {
+        errors.push("one or more serving responses failed the runtime parser contract".to_string());
+    }
+    if observed_models.len() != serving_reports.len()
+        || observed_models.iter().any(|model| model != &planner.model)
+    {
+        errors.push(format!(
+            "served model identity was not established as `{}` for every request",
+            planner.model
+        ));
+    }
+    let unique_request_ids = request_ids
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if request_ids.len() != serving_reports.len()
+        || unique_request_ids.len() != serving_reports.len()
+    {
+        errors.push(
+            "provider request ids are missing or reused across concurrent trials".to_string(),
+        );
+    }
+
+    let adapter = if route_role == "adapter" {
+        let id = args.serving_adapter_id.clone().unwrap_or_default();
+        let path = args.serving_adapter_path.clone().unwrap_or_default();
+        let expected_sha256 = args.serving_adapter_sha256.clone().unwrap_or_default();
+        if id != planner.model {
+            errors.push(format!(
+                "adapter id `{id}` does not match requested serving model `{}`",
+                planner.model
+            ));
+        }
+        let sha256 = match sha256_path(&path) {
+            Ok(observed) if expected_sha256 == "auto" || observed == expected_sha256 => observed,
+            Ok(observed) => {
+                errors.push(format!(
+                    "adapter artifact digest mismatch: expected `{expected_sha256}`, observed `{observed}`"
+                ));
+                observed
+            }
+            Err(error) => {
+                errors.push(error);
+                String::new()
+            }
+        };
+        Some(ServingAdapterIdentity { id, path, sha256 })
+    } else {
+        None
+    };
+    let route_identity_established = !observed_models.is_empty()
+        && observed_models.len() == serving_reports.len()
+        && observed_models.iter().all(|model| model == &planner.model)
+        && request_ids.len() == serving_reports.len()
+        && unique_request_ids.len() == serving_reports.len();
+    let adapter_binding_established =
+        route_role == "adapter" && route_identity_established && errors.is_empty();
+
+    Some(ServingProbeReceipt {
+        schema_version: 1,
+        route_role,
+        requested_provider: planner.provider.clone(),
+        requested_model: planner.model.clone(),
+        observed_models,
+        adapter,
+        tool_format,
+        request_ids,
+        concurrency_count: args.concurrency,
+        usage_known,
+        cost_known,
+        parser_contract_passed,
+        route_identity_established,
+        adapter_binding_established,
+        errors,
+    })
+}
+
+fn observed_response_model(phase: &PhaseReport) -> Option<String> {
+    let telemetry = phase
+        .raw_response
+        .as_ref()?
+        .pointer("/usage/provider_telemetry")?;
+    telemetry
+        .get("response_model")
+        .or_else(|| telemetry.get("runtime_loaded_model"))
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn provider_request_id(phase: &PhaseReport) -> Option<String> {
+    let response = phase.raw_response.as_ref()?;
+    response
+        .get("provider_response_id")
+        .or_else(|| response.pointer("/usage/provider_telemetry/request_id"))
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn phase_usage_is_known(phase: &PhaseReport) -> bool {
+    let Some(telemetry) = phase
+        .raw_response
+        .as_ref()
+        .and_then(|response| response.pointer("/usage/provider_telemetry"))
+    else {
+        return false;
+    };
+    telemetry.get("server_prompt_tokens").is_some()
+        && telemetry.get("server_output_tokens").is_some()
+}
+
+fn parser_contract_is_clean(response: &JsonValue) -> bool {
+    ["tool_parse_errors", "protocol_violations"]
+        .iter()
+        .all(|key| {
+            response
+                .get(key)
+                .and_then(JsonValue::as_array)
+                .is_none_or(Vec::is_empty)
+        })
+}
+
+fn sha256_path(path: &Path) -> Result<String, String> {
+    if path.as_os_str().is_empty() {
+        return Err("adapter artifact path is missing".to_string());
+    }
+    let mut files = Vec::new();
+    collect_artifact_files(path, &mut files)?;
+    files.sort();
+    if files.is_empty() {
+        return Err(format!("adapter artifact path {} is empty", path.display()));
+    }
+    let mut hasher = Sha256::new();
+    for file in files {
+        let relative = if path.is_file() {
+            file.file_name()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| file.clone())
+        } else {
+            file.strip_prefix(path).unwrap_or(&file).to_path_buf()
+        };
+        hasher.update(relative.as_os_str().as_encoded_bytes());
+        hasher.update([0]);
+        let mut reader = fs::File::open(&file).map_err(|error| {
+            format!(
+                "failed to read adapter artifact {}: {error}",
+                file.display()
+            )
+        })?;
+        let mut buffer = vec![0_u8; 64 * 1024];
+        loop {
+            let read = reader.read(&mut buffer).map_err(|error| {
+                format!(
+                    "failed to read adapter artifact {}: {error}",
+                    file.display()
+                )
+            })?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        hasher.update([0]);
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
+fn collect_artifact_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "failed to inspect adapter artifact {}: {error}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "adapter artifact path contains unsupported symlink: {}",
+            path.display()
+        ));
+    }
+    if metadata.is_file() {
+        files.push(path.to_path_buf());
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        return Err(format!(
+            "adapter artifact path is not a file or directory: {}",
+            path.display()
+        ));
+    }
+    let mut children = fs::read_dir(path)
+        .map_err(|error| {
+            format!(
+                "failed to read adapter artifact {}: {error}",
+                path.display()
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            format!(
+                "failed to read adapter artifact {}: {error}",
+                path.display()
+            )
+        })?;
+    children.sort_by_key(std::fs::DirEntry::file_name);
+    for child in children {
+        collect_artifact_files(&child.path(), files)?;
+    }
+    Ok(())
 }
 
 fn latency_stats_option(values: Vec<u64>) -> Option<LatencyStats> {
@@ -1102,6 +1416,19 @@ mod tests {
             &judge,
             &[exact_eval_case()]
         ));
+    }
+
+    #[test]
+    fn canonical_dataset_selects_serving_concurrency_probe_without_provider() {
+        let dataset =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/tool-call-eval");
+        let cases = load_tool_call_eval_dataset(&dataset).expect("canonical tool-call dataset");
+        let selected = cases
+            .iter()
+            .filter(|case| case_matches_filter(case, "serving_concurrency_probe"))
+            .collect::<Vec<_>>();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, "serving_concurrency_probe");
     }
 
     #[test]

@@ -11,7 +11,6 @@ use serde_json::Value;
 use crate::cli::ModelsLoraTrainArgs;
 
 mod provenance;
-
 use provenance::finalize_executed_trainer_provenance;
 
 use super::{
@@ -224,6 +223,7 @@ fn train_report(args: &ModelsLoraTrainArgs) -> Result<LoraTrainReport, String> {
         base_model: &resolved.id,
         provider: &provider,
         request_model: &request_model,
+        adapter_artifact_path: &args.output_dir.display().to_string(),
         tool_format: &decision.effective,
         eval_dataset: &eval_dataset,
         trainer_identity: Some(&trainer_identity),
