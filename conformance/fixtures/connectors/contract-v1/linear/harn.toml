@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "Pure-Harn Linear connector: webhook verification, replay-window enforcement, GraphQL dispatch."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-linear-connector"
+harn = ">=0.10,<0.11"
 
 [exports]
 default = "src/lib.harn"

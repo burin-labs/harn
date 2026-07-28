@@ -22,7 +22,7 @@ pipeline test(task) {
   const ok_config = {
     id: ok_id,
     kind: "issue.opened",
-    provider: "github",
+    provider: "webhook",
     autonomy_tier: nil,
     handler: ok_handler,
     when: ok_when,
@@ -39,7 +39,7 @@ pipeline test(task) {
   const fail_config = {
     id: fail_id,
     kind: "issue.opened",
-    provider: "github",
+    provider: "webhook",
     autonomy_tier: nil,
     handler: fail_handler,
     retry: {max: 1, backoff: "immediate"},
@@ -59,17 +59,17 @@ pipeline test(task) {
   __io_println(fail_handle.id == fail_id && fail_handle.handler_kind == "local")
   const bindings: list<TriggerBinding> = trigger_list()
   const listed_ok = bindings.find({ binding -> binding.id == ok_handle.id })
-  __io_println(len(bindings) == 2 && listed_ok?.provider == "github")
+  __io_println(len(bindings) == 2 && listed_ok?.provider == "webhook")
   __io_println(listed_ok?.metrics?.received == 0)
   const ok_fire: DispatchHandle = trigger_fire(
     ok_handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-success"}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-success"}},
   )
   __io_println(ok_fire.status == "dispatched" && ok_fire.error == nil)
   __io_println(contains(json_stringify(ok_fire.result ?? {}), "\"kind\":\"issue.opened\""))
   const fail_fire: DispatchHandle = trigger_fire(
     fail_handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-dlq"}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-dlq"}},
   )
   __io_println(fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"))
   const dlq_before: list<DlqEntry> = trigger_inspect_dlq()
@@ -78,7 +78,7 @@ pipeline test(task) {
     len(current_dlq_before) == 1 && current_dlq_before[0]?.event_id == fail_fire.event_id,
   )
   __io_println(len(current_dlq_before[0]?.retry_history) == 1)
-  __io_println(current_dlq_before[0]?.event?.provider == "github")
+  __io_println(current_dlq_before[0]?.event?.provider == "webhook")
   const replay: DispatchHandle = trigger_replay(fail_fire.event_id)
   __io_println(replay.status == "dlq" && replay.replay_of_event_id == fail_fire.event_id)
   const dlq_after: list<DlqEntry> = trigger_inspect_dlq()

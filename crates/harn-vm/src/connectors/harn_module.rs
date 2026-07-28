@@ -563,6 +563,7 @@ impl Connector for HarnConnector {
             let ctx = self.shared.ctx()?;
             let worker = self.shared.worker()?;
             let shutdown = self.shared.reset_poll_shutdown();
+            let payload_schema = self.payload_schema.clone();
             let tasks = poll_bindings
                 .into_iter()
                 .map(|binding| {
@@ -570,9 +571,17 @@ impl Connector for HarnConnector {
                     let ctx = ctx.clone();
                     let shutdown = shutdown.clone();
                     let provider_id = self.provider_id.clone();
+                    let payload_schema = payload_schema.clone();
                     tokio::spawn(async move {
-                        if let Err(error) =
-                            run_poll_loop(provider_id, worker, ctx, binding, shutdown).await
+                        if let Err(error) = run_poll_loop(
+                            provider_id,
+                            payload_schema,
+                            worker,
+                            ctx,
+                            binding,
+                            shutdown,
+                        )
+                        .await
                         {
                             eprintln!("[harn] Harn connector poll warning: {error}");
                         }
@@ -659,7 +668,7 @@ impl Connector for HarnConnector {
                     "connector module 'normalize_inbound' export returned no value".to_string(),
                 )
             })?;
-        parse_normalize_result(&self.provider_id, &raw, value)
+        parse_normalize_result(&self.provider_id, &self.payload_schema, &raw, value)
     }
 
     fn payload_schema(&self) -> ProviderPayloadSchema {
@@ -695,6 +704,7 @@ impl ConnectorClient for HarnConnectorClient {
 
 fn parse_normalize_result(
     provider_id: &ProviderId,
+    payload_schema: &ProviderPayloadSchema,
     raw: &crate::RawInbound,
     value: JsonValue,
 ) -> Result<ConnectorNormalizeResult, ConnectorError> {
@@ -707,11 +717,11 @@ fn parse_normalize_result(
     match result_type {
         Some("event") => {
             let event_value = value.get("event").cloned().unwrap_or(value);
-            parse_harn_normalized_event(provider_id, raw, event_value)
+            parse_harn_normalized_event(provider_id, payload_schema, raw, event_value)
                 .map(ConnectorNormalizeResult::event)
         }
         Some("batch") => {
-            let events = parse_events_field(provider_id, raw, &value, "events")?;
+            let events = parse_events_field(provider_id, payload_schema, raw, &value, "events")?;
             if events.is_empty() {
                 return Err(ConnectorError::HarnRuntime(
                     "NormalizeResult batch must contain at least one event".to_string(),
@@ -721,7 +731,7 @@ fn parse_normalize_result(
         }
         Some("immediate_response") => {
             let response = parse_http_response(&value, "immediate_response", 200)?;
-            let events = parse_optional_embedded_events(provider_id, raw, &value)?;
+            let events = parse_optional_embedded_events(provider_id, payload_schema, raw, &value)?;
             Ok(ConnectorNormalizeResult::ImmediateResponse { response, events })
         }
         Some("reject") => {
@@ -730,19 +740,16 @@ fn parse_normalize_result(
         Some(other) => Err(ConnectorError::HarnRuntime(format!(
             "unsupported NormalizeResult type '{other}'"
         ))),
-        None => {
-            tracing::warn!(
-                provider = provider_id.as_str(),
-                "Harn connector normalize_inbound returned a legacy direct event shape; return NormalizeResult v1 instead"
-            );
-            parse_harn_normalized_event(provider_id, raw, value)
-                .map(ConnectorNormalizeResult::event)
-        }
+        None => Err(ConnectorError::HarnRuntime(
+            "connector normalize_inbound must return NormalizeResult v1 with a `type` field"
+                .to_string(),
+        )),
     }
 }
 
 fn parse_optional_embedded_events(
     provider_id: &ProviderId,
+    payload_schema: &ProviderPayloadSchema,
     raw: &crate::RawInbound,
     value: &JsonValue,
 ) -> Result<Vec<TriggerEvent>, ConnectorError> {
@@ -759,16 +766,18 @@ fn parse_optional_embedded_events(
             .get("event")
             .cloned()
             .expect("checked immediate_response event field");
-        return parse_harn_normalized_event(provider_id, raw, event).map(|event| vec![event]);
+        return parse_harn_normalized_event(provider_id, payload_schema, raw, event)
+            .map(|event| vec![event]);
     }
     if has_events {
-        return parse_events_field(provider_id, raw, value, "events");
+        return parse_events_field(provider_id, payload_schema, raw, value, "events");
     }
     Ok(Vec::new())
 }
 
 fn parse_events_field(
     provider_id: &ProviderId,
+    payload_schema: &ProviderPayloadSchema,
     raw: &crate::RawInbound,
     value: &JsonValue,
     field: &str,
@@ -782,12 +791,13 @@ fn parse_events_field(
     events
         .iter()
         .cloned()
-        .map(|event| parse_harn_normalized_event(provider_id, raw, event))
+        .map(|event| parse_harn_normalized_event(provider_id, payload_schema, raw, event))
         .collect()
 }
 
 fn parse_harn_normalized_event(
     provider_id: &ProviderId,
+    payload_schema: &ProviderPayloadSchema,
     raw: &crate::RawInbound,
     value: JsonValue,
 ) -> Result<TriggerEvent, ConnectorError> {
@@ -803,13 +813,11 @@ fn parse_harn_normalized_event(
         &normalized.headers.unwrap_or_else(|| raw.headers.clone()),
         &HeaderRedactionPolicy::default(),
     );
-    let provider_payload = ProviderPayload::normalize(
-        provider_id,
-        &normalized.kind,
-        &raw.headers,
-        normalized.payload,
-    )
-    .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
+    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
+        provider: provider_id.as_str().to_string(),
+        schema_name: payload_schema.harn_schema_name.clone(),
+        raw: normalized.payload,
+    });
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),
@@ -1218,6 +1226,7 @@ fn parse_duration(raw: &str) -> Result<StdDuration, String> {
 
 async fn run_poll_loop(
     provider_id: ProviderId,
+    payload_schema: ProviderPayloadSchema,
     worker: Arc<HarnConnectorWorker>,
     ctx: ConnectorCtx,
     binding: ResolvedHarnPollBinding,
@@ -1246,6 +1255,7 @@ async fn run_poll_loop(
         }
         let tick = run_poll_tick(
             &provider_id,
+            &payload_schema,
             worker.clone(),
             &ctx,
             &binding,
@@ -1261,6 +1271,7 @@ async fn run_poll_loop(
 
 async fn run_poll_tick(
     provider_id: &ProviderId,
+    payload_schema: &ProviderPayloadSchema,
     worker: Arc<HarnConnectorWorker>,
     ctx: &ConnectorCtx,
     binding: &ResolvedHarnPollBinding,
@@ -1309,6 +1320,7 @@ async fn run_poll_tick(
     for normalized in events {
         let event = trigger_event_from_normalized(
             provider_id,
+            payload_schema,
             normalized,
             tick_at,
             binding.tenant_id.clone(),
@@ -1391,6 +1403,7 @@ fn poll_result_error(error: serde_json::Error) -> ConnectorError {
 
 fn trigger_event_from_normalized(
     provider_id: &ProviderId,
+    payload_schema: &ProviderPayloadSchema,
     normalized: HarnNormalizeResult,
     received_at: OffsetDateTime,
     fallback_tenant_id: Option<TenantId>,
@@ -1404,13 +1417,11 @@ fn trigger_event_from_normalized(
     let tenant_id = normalized.tenant_id.map(TenantId::new);
     let source_headers = normalized.headers.unwrap_or_default();
     let headers = redact_headers(&source_headers, &HeaderRedactionPolicy::default());
-    let provider_payload = ProviderPayload::normalize(
-        provider_id,
-        &normalized.kind,
-        &source_headers,
-        normalized.payload,
-    )
-    .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
+    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
+        provider: provider_id.as_str().to_string(),
+        schema_name: payload_schema.harn_schema_name.clone(),
+        raw: normalized.payload,
+    });
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),
@@ -1548,856 +1559,5 @@ fn raw_inbound_to_json(raw: &crate::RawInbound) -> JsonValue {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    mod egress_context;
-    use tempfile::TempDir;
-
-    use crate::event_log::{AnyEventLog, MemoryEventLog};
-    use crate::secrets::{
-        RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
-    };
-    use crate::{InboxIndex, MetricsRegistry, RateLimiterFactory};
-
-    fn raw_inbound(body: JsonValue) -> crate::RawInbound {
-        let mut headers = BTreeMap::new();
-        headers.insert("content-type".to_string(), "application/json".to_string());
-        raw_inbound_with_headers(body, headers)
-    }
-
-    fn raw_inbound_with_headers(
-        body: JsonValue,
-        headers: BTreeMap<String, String>,
-    ) -> crate::RawInbound {
-        let mut raw = crate::RawInbound::new(
-            "",
-            headers,
-            serde_json::to_vec(&body).expect("json body serializes"),
-        );
-        raw.received_at = OffsetDateTime::parse("2026-04-22T12:34:56Z", &Rfc3339).unwrap();
-        raw
-    }
-
-    async fn normalize_with_harn_connector(
-        source: &str,
-        body: JsonValue,
-        headers: BTreeMap<String, String>,
-    ) -> TriggerEvent {
-        let (_dir, module_path) = write_connector(source);
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let mut connector = HarnConnector::load(&module_path).await.unwrap();
-        connector.init(ctx(log).await).await.unwrap();
-        let result = connector
-            .normalize_inbound_result(raw_inbound_with_headers(body, headers))
-            .await
-            .unwrap();
-        connector.shutdown(StdDuration::ZERO).await.unwrap();
-        let ConnectorNormalizeResult::Event(event) = result else {
-            panic!("expected normalized event");
-        };
-        *event
-    }
-
-    fn event_value(kind: &str, dedupe_key: &str, id: &str) -> JsonValue {
-        json!({
-            "kind": kind,
-            "occurred_at": "2026-04-22T12:30:00Z",
-            "dedupe_key": dedupe_key,
-            "payload": {
-                "id": id,
-                "type": kind,
-            },
-            "signature_status": {
-                "state": "verified",
-            },
-        })
-    }
-
-    #[test]
-    fn normalize_result_v1_event_parses_normal_event() {
-        let provider = ProviderId::new("webhook");
-        let raw = raw_inbound(json!({"id": "evt-1"}));
-        let result = parse_normalize_result(
-            &provider,
-            &raw,
-            json!({
-                "type": "event",
-                "event": event_value("webhook.received", "webhook:evt-1", "evt-1"),
-            }),
-        )
-        .unwrap();
-
-        let ConnectorNormalizeResult::Event(event) = result else {
-            panic!("expected event result");
-        };
-        assert_eq!(event.provider, provider);
-        assert_eq!(event.kind, "webhook.received");
-        assert_eq!(event.dedupe_key, "webhook:evt-1");
-        assert_eq!(event.signature_status, SignatureStatus::Verified);
-        assert!(event.raw_body.is_some());
-    }
-
-    #[test]
-    fn normalize_result_v1_batch_parses_multiple_events() {
-        let provider = ProviderId::new("webhook");
-        let raw = raw_inbound(json!({"items": [{"id": "a"}, {"id": "b"}]}));
-        let result = parse_normalize_result(
-            &provider,
-            &raw,
-            json!({
-                "type": "batch",
-                "events": [
-                    event_value("webhook.received", "webhook:a", "a"),
-                    event_value("webhook.received", "webhook:b", "b"),
-                ],
-            }),
-        )
-        .unwrap();
-
-        let ConnectorNormalizeResult::Batch(events) = result else {
-            panic!("expected batch result");
-        };
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].dedupe_key, "webhook:a");
-        assert_eq!(events[1].dedupe_key, "webhook:b");
-    }
-
-    #[test]
-    fn normalize_result_v1_immediate_response_covers_slack_url_verification_fixture() {
-        let provider = ProviderId::new("slack");
-        let raw = raw_inbound(json!({
-            "type": "url_verification",
-            "challenge": "challenge-token",
-        }));
-        let result = parse_normalize_result(
-            &provider,
-            &raw,
-            json!({
-                "type": "immediate_response",
-                "immediate_response": {
-                    "status": 200,
-                    "headers": {
-                        "content-type": "text/plain; charset=utf-8",
-                    },
-                    "body": "challenge-token",
-                },
-            }),
-        )
-        .unwrap();
-
-        let ConnectorNormalizeResult::ImmediateResponse { response, events } = result else {
-            panic!("expected immediate_response result");
-        };
-        assert_eq!(response.status, 200);
-        assert_eq!(
-            response.headers.get("content-type").map(String::as_str),
-            Some("text/plain; charset=utf-8")
-        );
-        assert_eq!(
-            response.body,
-            JsonValue::String("challenge-token".to_string())
-        );
-        assert!(events.is_empty());
-    }
-
-    #[test]
-    fn normalize_result_v1_reject_parses_http_rejection() {
-        let provider = ProviderId::new("webhook");
-        let raw = raw_inbound(json!({"id": "evt-1"}));
-        let result = parse_normalize_result(
-            &provider,
-            &raw,
-            json!({
-                "type": "reject",
-                "status": 403,
-                "body": {
-                    "error": "verification_failed",
-                },
-            }),
-        )
-        .unwrap();
-
-        let ConnectorNormalizeResult::Reject(response) = result else {
-            panic!("expected reject result");
-        };
-        assert_eq!(response.status, 403);
-        assert_eq!(response.body["error"], "verification_failed");
-    }
-
-    #[test]
-    fn legacy_direct_normalize_result_still_parses_during_transition() {
-        let provider = ProviderId::new("webhook");
-        let raw = raw_inbound(json!({"id": "legacy"}));
-        let result = parse_normalize_result(
-            &provider,
-            &raw,
-            event_value("webhook.received", "webhook:legacy", "legacy"),
-        )
-        .unwrap();
-
-        let ConnectorNormalizeResult::Event(event) = result else {
-            panic!("expected legacy event result");
-        };
-        assert_eq!(event.kind, "webhook.received");
-        assert_eq!(event.dedupe_key, "webhook:legacy");
-    }
-
-    struct EmptySecretProvider;
-
-    #[async_trait]
-    impl SecretProvider for EmptySecretProvider {
-        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-            Err(SecretError::NotFound {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-            })
-        }
-
-        async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-            Ok(())
-        }
-
-        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-            Ok(RotationHandle {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-                from_version: None,
-                to_version: None,
-            })
-        }
-
-        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-            Ok(Vec::new())
-        }
-
-        fn namespace(&self) -> &'static str {
-            "test"
-        }
-
-        fn supports_versions(&self) -> bool {
-            false
-        }
-    }
-
-    struct StaticSecretProvider;
-
-    #[async_trait]
-    impl SecretProvider for StaticSecretProvider {
-        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-            if id.to_string().starts_with("test/signing-secret") {
-                return Ok(SecretBytes::from("local-secret"));
-            }
-            Err(SecretError::NotFound {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-            })
-        }
-
-        async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-            Ok(())
-        }
-
-        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-            Ok(RotationHandle {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-                from_version: None,
-                to_version: None,
-            })
-        }
-
-        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-            Ok(Vec::new())
-        }
-
-        fn namespace(&self) -> &'static str {
-            "test"
-        }
-
-        fn supports_versions(&self) -> bool {
-            false
-        }
-    }
-
-    async fn ctx(log: Arc<AnyEventLog>) -> ConnectorCtx {
-        let metrics = Arc::new(MetricsRegistry::default());
-        ConnectorCtx {
-            inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
-            event_log: log,
-            secrets: Arc::new(EmptySecretProvider),
-            metrics,
-            rate_limiter: Arc::new(RateLimiterFactory::default()),
-        }
-    }
-
-    async fn ctx_with_secrets(
-        log: Arc<AnyEventLog>,
-        secrets: Arc<dyn SecretProvider>,
-    ) -> ConnectorCtx {
-        let metrics = Arc::new(MetricsRegistry::default());
-        ConnectorCtx {
-            inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
-            event_log: log,
-            secrets,
-            metrics,
-            rate_limiter: Arc::new(RateLimiterFactory::default()),
-        }
-    }
-
-    fn write_connector(source: &str) -> (TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("connector.harn");
-        std::fs::write(&path, source).unwrap();
-        (dir, path)
-    }
-
-    /// Regression test for the dependency-package source-dir leak: loading a
-    /// connector contract (as `harn run` does for every installed
-    /// `[dependencies]` provider before executing the entry pipeline) spins up
-    /// an isolated `Vm` and calls `set_source_dir` on the connector's own dir,
-    /// which writes the *shared* thread-local `VM_SOURCE_DIR`. Before the fix,
-    /// that write was never restored, so the caller's resting source-dir
-    /// context — the anchor for top-level `render("@alias/...")` and
-    /// source-relative asset resolution — was left pointing at the dependency
-    /// package instead of the project root. The load must leave the caller's
-    /// thread-local source dir exactly as it found it.
-    #[tokio::test]
-    async fn load_contract_does_not_leak_thread_source_dir() {
-        // Stand in for the entry project: a dir whose `harn.toml` the caller's
-        // top-level asset resolution should keep anchoring on.
-        let project_dir = tempfile::tempdir().unwrap();
-        crate::stdlib::process::reset_process_state();
-        crate::stdlib::set_thread_source_dir(project_dir.path());
-        let before = crate::stdlib::process::source_root_path();
-
-        // The connector module lives in a *different* dir, like a materialized
-        // dependency package generation.
-        let (_dir, module_path) = write_connector(
-            r#"
-pub fn provider_id() { return "webhook" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "GenericWebhookPayload" }
-"#,
-        );
-        let _contract = load_contract(&module_path).await.unwrap();
-
-        let after = crate::stdlib::process::source_root_path();
-        assert_eq!(
-            after, before,
-            "loading a connector contract must not leak the thread-local source \
-             dir (before={before:?}, after={after:?})"
-        );
-        crate::stdlib::process::reset_process_state();
-    }
-
-    #[tokio::test]
-    async fn normalize_inbound_default_policy_allows_local_hot_path_work() {
-        let (_dir, module_path) = write_connector(
-            r#"
-pub fn provider_id() { return "webhook" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "GenericWebhookPayload" }
-
-pub fn normalize_inbound(raw) {
-  const decoded = base64_decode(raw.body_base64)
-  const body = json_parse(decoded)
-  const secret = secret_get("test/signing-secret")
-  const signature = hmac_sha256(secret, decoded)
-  metrics_inc("normalize_ok")
-  return {
-    type: "event",
-    event: {
-      kind: "webhook.received",
-      dedupe_key: "webhook:" + body.id,
-      payload: {id: body.id, signature: signature},
-      signature_status: {state: "verified"},
-    },
-  }
-}
-"#,
-        );
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let mut connector = HarnConnector::load(&module_path).await.unwrap();
-        connector
-            .init(ctx_with_secrets(log, Arc::new(StaticSecretProvider)).await)
-            .await
-            .unwrap();
-        let result = connector
-            .normalize_inbound_result(raw_inbound(json!({"id": "evt-1"})))
-            .await
-            .unwrap();
-        connector.shutdown(StdDuration::ZERO).await.unwrap();
-
-        let ConnectorNormalizeResult::Event(event) = result else {
-            panic!("expected normalized event");
-        };
-        assert_eq!(event.kind, "webhook.received");
-        assert_eq!(event.signature_status, SignatureStatus::Verified);
-        match &event.provider_payload {
-            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Webhook(
-                payload,
-            )) => assert_eq!(payload.raw["id"], "evt-1"),
-            other => panic!("unexpected provider payload: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn pure_harn_sunset_connectors_preserve_builtin_provider_payload_shapes() {
-        let github_event = normalize_with_harn_connector(
-            r#"
-pub fn provider_id() { return "github" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "GitHubEventPayload" }
-
-pub fn normalize_inbound(raw) {
-  const body = raw.body_json
-  return {
-    type: "event",
-    event: {
-      kind: raw.headers["X-GitHub-Event"],
-      dedupe_key: raw.headers["X-GitHub-Delivery"],
-      payload: body,
-      signature_status: {state: "verified"},
-    },
-  }
-}
-"#,
-            json!({
-                "action": "opened",
-                "installation": {"id": 101},
-                "issue": {"number": 42, "title": "Contract drift"}
-            }),
-            BTreeMap::from([
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("X-GitHub-Event".to_string(), "issues".to_string()),
-                ("X-GitHub-Delivery".to_string(), "delivery-gh-1".to_string()),
-            ]),
-        )
-        .await;
-        assert_eq!(github_event.kind, "issues");
-        assert_eq!(github_event.dedupe_key, "delivery-gh-1");
-        assert_eq!(github_event.signature_status, SignatureStatus::Verified);
-        match &github_event.provider_payload {
-            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::GitHub(
-                payload,
-            )) => {
-                let crate::triggers::GitHubEventPayload::Issues(payload) = payload.as_ref() else {
-                    panic!("unexpected github payload: {payload:?}");
-                };
-                assert_eq!(payload.common.event, "issues");
-                assert_eq!(payload.common.action.as_deref(), Some("opened"));
-                assert_eq!(payload.common.delivery_id.as_deref(), Some("delivery-gh-1"));
-                assert_eq!(payload.common.installation_id, Some(101));
-                assert_eq!(payload.issue["number"], 42);
-            }
-            other => panic!("unexpected github payload: {other:?}"),
-        }
-
-        let slack_event = normalize_with_harn_connector(
-            r#"
-pub fn provider_id() { return "slack" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "SlackEventPayload" }
-
-pub fn normalize_inbound(raw) {
-  const body = raw.body_json
-  return {
-    type: "event",
-    event: {
-      kind: body.event.type + "." + body.event.channel_type,
-      dedupe_key: "slack:" + body.event_id,
-      payload: body,
-      signature_status: {state: "verified"},
-    },
-  }
-}
-"#,
-            json!({
-                "team_id": "T123ABC456",
-                "api_app_id": "A123ABC456",
-                "type": "event_callback",
-                "event_id": "Ev123MESSAGE",
-                "event": {
-                    "type": "message",
-                    "user": "U123ABC456",
-                    "text": "hello from a channel",
-                    "ts": "1715000000.000100",
-                    "channel": "C123ABC456",
-                    "channel_type": "channel",
-                    "event_ts": "1715000000.000100"
-                }
-            }),
-            BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]),
-        )
-        .await;
-        assert_eq!(slack_event.kind, "message.channel");
-        match &slack_event.provider_payload {
-            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Slack(
-                payload,
-            )) => match payload.as_ref() {
-                crate::triggers::SlackEventPayload::Message(message) => {
-                    assert_eq!(message.common.event, "message.channel");
-                    assert_eq!(message.common.event_id.as_deref(), Some("Ev123MESSAGE"));
-                    assert_eq!(message.common.team_id.as_deref(), Some("T123ABC456"));
-                    assert_eq!(message.common.channel_id.as_deref(), Some("C123ABC456"));
-                    assert_eq!(message.channel_type.as_deref(), Some("channel"));
-                    assert_eq!(message.text.as_deref(), Some("hello from a channel"));
-                }
-                other => panic!("unexpected slack variant: {other:?}"),
-            },
-            other => panic!("unexpected slack payload: {other:?}"),
-        }
-
-        let linear_event = normalize_with_harn_connector(
-            r#"
-pub fn provider_id() { return "linear" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "LinearEventPayload" }
-
-pub fn normalize_inbound(raw) {
-  const body = raw.body_json
-  return {
-    type: "event",
-    event: {
-      kind: "issue." + body.action,
-      dedupe_key: raw.headers["Linear-Delivery"],
-      payload: body,
-      signature_status: {state: "verified"},
-    },
-  }
-}
-"#,
-            json!({
-                "action": "update",
-                "type": "Issue",
-                "organizationId": "org_123",
-                "webhookTimestamp": 1715000000000i64,
-                "webhookId": "wh_123",
-                "actor": {"id": "user_1", "name": "Ada"},
-                "data": {"id": "ISS-1", "title": "Fix Linear connector"},
-                "updatedFrom": {"title": "Previous title", "labelIds": ["lbl_1"]}
-            }),
-            BTreeMap::from([
-                ("Content-Type".to_string(), "application/json".to_string()),
-                (
-                    "Linear-Delivery".to_string(),
-                    "delivery-linear-1".to_string(),
-                ),
-            ]),
-        )
-        .await;
-        assert_eq!(linear_event.kind, "issue.update");
-        match &linear_event.provider_payload {
-            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Linear(
-                crate::triggers::LinearEventPayload::Issue(issue),
-            )) => {
-                assert_eq!(issue.common.event, "issue");
-                assert_eq!(issue.common.action.as_deref(), Some("update"));
-                assert_eq!(
-                    issue.common.delivery_id.as_deref(),
-                    Some("delivery-linear-1")
-                );
-                assert_eq!(issue.issue["id"], "ISS-1");
-                assert!(issue.changes.iter().any(|change| matches!(
-                    change,
-                    crate::triggers::event::LinearIssueChange::Title { previous: Some(value) }
-                        if value == "Previous title"
-                )));
-            }
-            other => panic!("unexpected linear payload: {other:?}"),
-        }
-
-        let notion_event = normalize_with_harn_connector(
-            r#"
-pub fn provider_id() { return "notion" }
-pub fn kinds() { return ["webhook", "poll"] }
-pub fn payload_schema() { return "NotionEventPayload" }
-
-pub fn normalize_inbound(raw) {
-  const body = raw.body_json
-  return {
-    type: "event",
-    event: {
-      kind: body.type,
-      dedupe_key: "notion:" + body.entity.id,
-      payload: body,
-      signature_status: {state: "verified"},
-    },
-  }
-}
-"#,
-            json!({
-                "id": "evt_1",
-                "type": "page.content_updated",
-                "workspace_id": "ws_1",
-                "subscription_id": "sub_1",
-                "integration_id": "int_1",
-                "entity": {"id": "page_1", "type": "page"},
-                "api_version": "2022-06-28"
-            }),
-            BTreeMap::from([
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("request-id".to_string(), "req_123".to_string()),
-            ]),
-        )
-        .await;
-        assert_eq!(notion_event.kind, "page.content_updated");
-        match &notion_event.provider_payload {
-            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Notion(
-                payload,
-            )) => {
-                assert_eq!(payload.event, "page.content_updated");
-                assert_eq!(payload.request_id.as_deref(), Some("req_123"));
-                assert_eq!(payload.workspace_id.as_deref(), Some("ws_1"));
-                assert_eq!(payload.entity_id.as_deref(), Some("page_1"));
-                assert_eq!(payload.entity_type.as_deref(), Some("page"));
-                assert_eq!(payload.subscription_id.as_deref(), Some("sub_1"));
-            }
-            other => panic!("unexpected notion payload: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn normalize_inbound_default_policy_denies_network_llm_and_file_effects() {
-        for (label, source, expected) in [
-            (
-                "network",
-                r#"
-pub fn provider_id() { return "webhook" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "GenericWebhookPayload" }
-pub fn normalize_inbound(_raw) {
-  http_get("https://example.invalid")
-  return {type: "reject", status: 400}
-}
-"#,
-                "network.http ceiling",
-            ),
-            (
-                "llm",
-                r#"
-pub fn provider_id() { return "webhook" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "GenericWebhookPayload" }
-pub fn normalize_inbound(_raw) {
-  llm_call("hello", nil, {provider: "mock"})
-  return {type: "reject", status: 400}
-}
-"#,
-                "llm.call ceiling",
-            ),
-            (
-                "file",
-                r#"
-pub fn provider_id() { return "webhook" }
-pub fn kinds() { return ["webhook"] }
-pub fn payload_schema() { return "GenericWebhookPayload" }
-pub fn normalize_inbound(_raw) {
-  read_file("ambient.txt")
-  return {type: "reject", status: 400}
-}
-"#,
-                "workspace.read_text ceiling",
-            ),
-        ] {
-            let (_dir, module_path) = write_connector(source);
-            let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-            let mut connector = HarnConnector::load(&module_path).await.unwrap();
-            connector.init(ctx(log).await).await.unwrap();
-            let error = connector
-                .normalize_inbound_result(raw_inbound(json!({"id": label})))
-                .await
-                .unwrap_err();
-            connector.shutdown(StdDuration::ZERO).await.unwrap();
-            let message = error.to_string();
-            assert!(
-                message.contains("connector export 'normalize_inbound' violated effect policy"),
-                "{label}: {message}"
-            );
-            assert!(message.contains(expected), "{label}: {message}");
-        }
-    }
-
-    fn write_poll_connector() -> (TempDir, PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("poll_connector.harn");
-        std::fs::write(
-            &path,
-            r#"
-pub fn provider_id() {
-  return "webhook"
-}
-
-pub fn kinds() {
-  return ["poll"]
-}
-
-pub fn payload_schema() {
-  return "GenericWebhookPayload"
-}
-
-pub fn poll_tick(ctx) {
-  let previous = 0
-  if ctx.cursor != nil && ctx.cursor.count != nil {
-    previous = ctx.cursor.count
-  }
-  const next = previous + 1
-  return {
-    cursor: {count: next},
-    state: {last_lease_id: ctx.lease.id, tenant_id: ctx.tenant_id},
-    events: [
-      {
-        kind: "webhook.poll",
-        dedupe_key: "poll-" + to_string(next),
-        payload: {
-          count: next,
-          previous: previous,
-          max_batch_size: ctx.max_batch_size,
-          tenant_id: ctx.tenant_id,
-          lease_id: ctx.lease.id,
-        },
-      },
-    ],
-  }
-}
-"#,
-        )
-        .unwrap();
-        (dir, path)
-    }
-
-    async fn read_topic(
-        log: &Arc<AnyEventLog>,
-        topic: &str,
-    ) -> Vec<(u64, crate::event_log::LogEvent)> {
-        let topic = Topic::new(topic).unwrap();
-        log.read_range(&topic, None, usize::MAX).await.unwrap()
-    }
-
-    #[tokio::test]
-    async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
-        let _clock = clock::install_override(clock::MockClock::new(
-            OffsetDateTime::parse("2026-04-22T12:34:56Z", &Rfc3339).unwrap(),
-        ));
-        let (_dir, module_path) = write_poll_connector();
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(128)));
-        let connector_ctx = ctx(log.clone()).await;
-        let mut connector = HarnConnector::load(&module_path).await.unwrap();
-        connector.init(connector_ctx.clone()).await.unwrap();
-
-        let mut binding = TriggerBinding::new(ProviderId::from("webhook"), "poll", "poll-source");
-        binding.dedupe_key = Some("event.dedupe_key".to_string());
-        binding.config = json!({
-            "poll": {
-                "interval_ms": 1000,
-                "state_key": "tenant-a-source",
-                "lease_id": "lease-a",
-                "tenant_id": "tenant-a",
-                "max_batch_size": 1,
-            }
-        });
-
-        let resolved = resolve_poll_binding(&binding).unwrap();
-        let worker = connector.shared.worker().unwrap();
-        let connector_ctx = connector.shared.ctx().unwrap();
-        let shutdown = Arc::new(PollShutdownSignal::default());
-        run_poll_tick(
-            &connector.provider_id,
-            worker.clone(),
-            &connector_ctx,
-            &resolved,
-            shutdown.clone(),
-        )
-        .await
-        .unwrap();
-        clock::advance(StdDuration::from_secs(1));
-        run_poll_tick(
-            &connector.provider_id,
-            worker,
-            &connector_ctx,
-            &resolved,
-            shutdown,
-        )
-        .await
-        .unwrap();
-        connector.shutdown(StdDuration::ZERO).await.unwrap();
-
-        let inbox = read_topic(&log, crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC).await;
-        let envelopes = inbox
-            .into_iter()
-            .map(|(_, event)| serde_json::from_value::<InboxEnvelope>(event.payload).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(envelopes[0].trigger_id.as_deref(), Some("poll-source"));
-        assert_eq!(envelopes[0].event.dedupe_key, "poll-1");
-        assert_eq!(envelopes[1].event.dedupe_key, "poll-2");
-        assert_eq!(
-            envelopes[1]
-                .event
-                .tenant_id
-                .as_ref()
-                .map(|tenant| tenant.0.as_str()),
-            Some("tenant-a")
-        );
-        match &envelopes[1].event.provider_payload {
-            ProviderPayload::Known(crate::triggers::event::KnownProviderPayload::Webhook(
-                payload,
-            )) => {
-                assert_eq!(payload.raw["previous"], 1);
-                assert_eq!(payload.raw["max_batch_size"], 1);
-                assert_eq!(payload.raw["tenant_id"], "tenant-a");
-                assert_eq!(payload.raw["lease_id"], "lease-a");
-            }
-            other => panic!("unexpected provider payload: {other:?}"),
-        }
-
-        let observed = read_topic(&log, crate::triggers::TRIGGER_INBOX_OBSERVABILITY_TOPIC).await;
-        assert_eq!(observed.len(), 2);
-        assert_eq!(
-            observed[0].1.payload["trigger_id"],
-            serde_json::json!("poll-source")
-        );
-        assert_eq!(
-            observed[1].1.payload["event"]["tenant_id"],
-            serde_json::json!("tenant-a")
-        );
-        assert!(observed[1].1.payload["event"]
-            .get("provider_payload")
-            .is_none());
-
-        let states = read_topic(&log, HARN_CONNECTOR_POLL_STATE_TOPIC).await;
-        assert_eq!(states.len(), 2);
-        let latest: HarnPollStateRecord =
-            serde_json::from_value(states.last().unwrap().1.payload.clone()).unwrap();
-        assert_eq!(latest.provider, "webhook");
-        assert_eq!(latest.binding_id, "poll-source");
-        assert_eq!(latest.state_key, "tenant-a-source");
-        assert_eq!(latest.cursor.unwrap()["count"], 2);
-        assert_eq!(latest.state.unwrap()["last_lease_id"], "lease-a");
-    }
-
-    #[tokio::test]
-    async fn poll_binding_requires_poll_tick_export() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("missing_poll.harn");
-        std::fs::write(
-            &path,
-            r#"
-pub fn provider_id() { return "webhook" }
-pub fn kinds() { return ["poll"] }
-pub fn payload_schema() { return "GenericWebhookPayload" }
-"#,
-        )
-        .unwrap();
-        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let mut connector = HarnConnector::load(&path).await.unwrap();
-        connector.init(ctx(log).await).await.unwrap();
-        let binding = TriggerBinding::new(ProviderId::from("webhook"), "poll", "poll-source");
-
-        let error = connector.activate(&[binding]).await.unwrap_err();
-        assert!(
-            error.to_string().contains("does not export poll_tick(ctx)"),
-            "{error}"
-        );
-        connector.shutdown(StdDuration::from_secs(1)).await.unwrap();
-    }
-}
+#[path = "harn_module/tests.rs"]
+mod tests;

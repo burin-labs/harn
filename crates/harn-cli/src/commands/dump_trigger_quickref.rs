@@ -231,7 +231,7 @@ fn generate_file() -> String {
     out.push_str("| `init(ctx)` | No | Receives event log, secrets, metrics, inbox, and rate-limit handles. |\n");
     out.push_str("| `activate(bindings)` | No | Runs on manifest activation/reload. |\n");
     out.push_str("| `shutdown()` | No | Cleanup on reload or process shutdown. |\n\n");
-    out.push_str("`normalize_inbound(raw)` must return one of these tagged shapes: `{ type: \"event\", event }`, `{ type: \"batch\", events }`, `{ type: \"immediate_response\", immediate_response, event?, events? }`, or `{ type: \"reject\", status, body? }`. Direct legacy event dicts are transitional only; new packages should use the tagged shape.\n\n");
+    out.push_str("`normalize_inbound(raw)` must return one of these tagged shapes: `{ type: \"event\", event }`, `{ type: \"batch\", events }`, `{ type: \"immediate_response\", immediate_response, event?, events? }`, or `{ type: \"reject\", status, body? }`. Direct legacy event dicts are rejected.\n\n");
     out.push_str("Connector-only builtins available during connector export execution: `secret_get`, `event_log_emit`, and `metrics_inc`. The hot-path `normalize_inbound` effect policy rejects network calls, LLM calls, process execution, host calls, MCP calls, and ambient filesystem/project access.\n\n");
     out.push_str("Runtime scripts can observe EventLog topics directly with `event_log.subscribe({topic, from_cursor, kind_prefix?})`, which returns a `Stream<dict>` of `{id, cursor, topic, kind, payload, headers, occurred_at_ms}` records. Use `event_log.latest(topic)` before subscribing to tail new events only, pass `kind_prefix` to receive only matching event kinds, or persist the `cursor` field to resume after a reconnect.\n\n");
 
@@ -445,7 +445,10 @@ mod tests {
     async fn generated_quickref_contains_catalog_and_contract() {
         let _scope = CatalogTestScope::new().await;
         let out = generate_file();
-        assert!(out.contains("| `github` | `webhook` | `GitHubEventPayload` | placeholder |"));
+        assert!(out.contains(
+            "| `webhook` | `webhook` | `GenericWebhookPayload` | builtin `webhook` / `standard` signatures |"
+        ));
+        assert!(!out.contains("| `github` |"));
         assert!(out.contains("Connector contract V1"));
         assert!(out.contains("harn package verify ."));
         assert!(out.contains("harn-forgejo-connector"));

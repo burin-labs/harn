@@ -20,7 +20,7 @@ fn register_tier_agent(agent_id: string, tier: string) -> TriggerHandle {
     {
       id: agent_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       autonomy_tier: tier,
       handler: tier_handler,
       when: nil,
@@ -39,7 +39,7 @@ fn register_tier_agent(agent_id: string, tier: string) -> TriggerHandle {
 fn fire_tier(handle: TriggerHandle, unique: string) -> DispatchHandle {
   return trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: unique}},
   )
 }
 

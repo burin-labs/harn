@@ -1,7 +1,8 @@
 [package]
 name = "harn-github-connector"
-version = "0.1.0"
+version = "0.4.0"
 repository = "https://github.com/burin-labs/harn-github-connector"
+harn = ">=0.10,<0.11"
 
 [[providers]]
 id = "github"
@@ -12,7 +13,8 @@ capabilities = ["webhook", "rate_limit", "pagination", "graphql"]
 auth_type = "github-app"
 flow = "browser"
 required_scopes = ["issues:read", "pull_requests:read", "contents:read", "metadata:read"]
-setup_command = ["harn", "connect", "github", "--app-slug", "<github-app-slug>"]
+required_secrets = ["github/app-private-key", "github/webhook-secret"]
+setup_command = ["harn", "connect", "github"]
 validation_command = ["harn", "connect", "status", "--connector", "github", "--json"]
 
 [[providers.setup.health_checks]]
@@ -41,5 +43,5 @@ expect_type = "event"
 expect_kind = "issues"
 expect_dedupe_key = "delivery-gh-1"
 expect_signature_state = "verified"
-expect_payload_contains = { provider = "github", event = "issues", action = "opened", delivery_id = "delivery-gh-1", installation_id = 101, issue = { number = 42, title = "Contract drift" } }
+expect_payload_contains = { provider = "github", schema_name = "GitHubEventPayload", raw = { action = "opened", installation = { id = 101 }, issue = { number = 42, title = "Contract drift" } } }
 expect_event_count = 1

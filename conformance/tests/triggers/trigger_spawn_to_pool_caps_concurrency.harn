@@ -39,7 +39,7 @@ pipeline test(task) {
     {
       id: trigger_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: SpawnToPool({pool: pool_name, task_factory: task_factory}),
       when: nil,
       retry: nil,
@@ -59,7 +59,7 @@ pipeline test(task) {
     const dispatch: DispatchHandle = trigger_fire(
       handle,
       {
-        provider: "github",
+        provider: "webhook",
         kind: "issue.opened",
         headers: {x_delivery: "evt-" + to_string(i) + "-" + unique},
       },

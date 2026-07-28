@@ -39,7 +39,7 @@ pipeline test(task) {
     {
       id: "hitl-replay-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: hitl_handler,
       retry: {max: 1, backoff: "immediate"},
       when: nil,
@@ -54,7 +54,7 @@ pipeline test(task) {
   )
   const fired: DispatchHandle = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-hitl-replay"}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-hitl-replay"}},
   )
   __io_println(fired.status == "dispatched")
   __io_println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))

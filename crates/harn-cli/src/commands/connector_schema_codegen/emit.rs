@@ -2,10 +2,8 @@
 //!
 //! This is the reverse of `pg_codegen`: instead of SQL -> Harn types, it walks
 //! the Harn type AST (`TypeExpr`) from the canonical schema module and emits the
-//! Rust structs the runtime deserializes webhook JSON into. The mapping mirrors
-//! the serde conventions of the hand-written `GitHubEventPayload` family in
-//! `crates/harn-vm/src/triggers/event/payloads.rs` so the same JSON deserializes
-//! identically into either copy.
+//! native Rust projections for tooling. The mapping preserves the established
+//! connector JSON representation.
 
 use harn_parser::{Node, ShapeField, TypeExpr};
 use harn_vm::text::case::to_snake_case;
@@ -280,7 +278,7 @@ fn named_rust_type(name: &str) -> String {
 }
 
 /// Render a union as an `event`-dispatched Rust enum with a manual
-/// `Deserialize`, mirroring the hand-written `GitHubEventPayload`.
+/// `Deserialize`, preserving the established connector payload representation.
 ///
 /// Each member maps to a variant; the trailing member that is a *common* record
 /// (no event-specific fields, named `...Common`) is the `Other` fallback the
@@ -300,8 +298,7 @@ fn render_union(union: &Union, schema: &Schema) -> Result<String, String> {
         variants.push((variant, member.clone(), event));
     }
 
-    // The enum is `Eq` iff every member record is `Eq` (matching the
-    // hand-written `GitHubEventPayload`, which derives `Eq`).
+    // The enum is `Eq` iff every member record is `Eq`.
     let all_members_eq = union.members.iter().all(|member| {
         schema
             .records

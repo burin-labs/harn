@@ -9,13 +9,13 @@ This table is generated from connector package manifests. A checked feature mean
 
 Regenerate with `make gen-connector-matrix` and verify with `make check-connector-matrix`.
 
-| Provider | Package | Webhook | OAuth | Rate limit | Pagination | GraphQL | Streaming |
-|---|---|---:|---:|---:|---:|---:|---:|
-| `bitbucket` | [`harn-bitbucket-connector`](https://github.com/burin-labs/harn-bitbucket-connector) | yes | no | yes | yes | no | no |
-| `buildkite` | [`harn-buildkite-connector`](https://github.com/burin-labs/harn-buildkite-connector) | yes | no | yes | yes | no | no |
-| `circleci` | [`harn-circleci-connector`](https://github.com/burin-labs/harn-circleci-connector) | yes | no | yes | yes | no | no |
-| `github` | [`harn-github-connector`](https://github.com/burin-labs/harn-github-connector) | yes | no | yes | yes | yes | no |
-| `linear` | [`harn-linear-connector`](https://github.com/burin-labs/harn-linear-connector) | yes | yes | yes | yes | yes | no |
-| `notion` | [`harn-notion-connector`](https://github.com/burin-labs/harn-notion-connector) | yes | no | yes | yes | no | no |
-| `render-logs` | [`harn-render-logs-connector`](https://github.com/burin-labs/harn-render-logs-connector) | yes | no | yes | no | no | yes |
-| `slack` | [`harn-slack-connector`](https://github.com/burin-labs/harn-slack-connector) | yes | no | yes | yes | no | no |
+| Provider | Package version | Harn floor | Auth | Secrets | Setup | Validate | Package gate | Capabilities |
+|---|---|---|---|---|---|---|---|---|
+| `bitbucket` | [`harn-bitbucket-connector`](https://github.com/burin-labs/harn-bitbucket-connector) `0.2.0` | `>=0.10,<0.11` | `api-key` | `bitbucket/api-token`, `bitbucket/webhook-secret` | `harn connect bitbucket` | `harn connect status --connector bitbucket --json` | `harn package verify . --provider bitbucket` (1 fixtures) | webhook, rate-limit, pagination |
+| `buildkite` | [`harn-buildkite-connector`](https://github.com/burin-labs/harn-buildkite-connector) `0.1.0` | `>=0.10,<0.11` | `api-key` | `buildkite/webhook-token`, `buildkite/api-token` | `harn connect buildkite` | `harn connect status --connector buildkite --json` | `harn package verify . --provider buildkite` (4 fixtures) | webhook, rate-limit, pagination |
+| `circleci` | [`harn-circleci-connector`](https://github.com/burin-labs/harn-circleci-connector) `0.1.0` | `>=0.10,<0.11` | `api-key` | `circleci/webhook-secret`, `circleci/api-token` | `harn connect circleci` | `harn connect status --connector circleci --json` | `harn package verify . --provider circleci` (4 fixtures) | webhook, rate-limit, pagination |
+| `github` | [`harn-github-connector`](https://github.com/burin-labs/harn-github-connector) `0.4.0` | `>=0.10,<0.11` | `github-app` | `github/app-private-key`, `github/webhook-secret` | `harn connect github` | `harn connect status --connector github --json` | `harn package verify . --provider github` (1 fixtures) | webhook, rate-limit, pagination, graphql |
+| `linear` | [`harn-linear-connector`](https://github.com/burin-labs/harn-linear-connector) `0.0.0` | `>=0.10,<0.11` | `oauth2` | `linear/api-token`, `linear/webhook-secret` | `harn connect linear` | `harn connect status --connector linear --json` | `harn package verify . --provider linear` (10 fixtures) | webhook, oauth, rate-limit, pagination, graphql |
+| `notion` | [`harn-notion-connector`](https://github.com/burin-labs/harn-notion-connector) `0.1.1` | `>=0.10,<0.11` | `oauth2` | `notion/api-token`, `notion/verification-token` | `harn connect notion` | `harn connect status --connector notion --json` | `harn package verify . --provider notion` (1 fixtures) | webhook, rate-limit, pagination |
+| `render-logs` | [`harn-render-logs-connector`](https://github.com/burin-labs/harn-render-logs-connector) `0.1.0` | `unspecified` | `api-key` | `render/api-key` | `harn connect api-key --connector render-logs --secret-id render/api-key` | `harn connect status --connector render-logs --json` | `harn package verify . --provider render-logs` (1 fixtures) | webhook, rate-limit, streaming |
+| `slack` | [`harn-slack-connector`](https://github.com/burin-labs/harn-slack-connector) `0.2.1` | `>=0.10,<0.11` | `oauth2` | `slack/signing-secret`, `slack/bot-token`, `slack/app-token` | `harn connect slack` | `harn connect status --connector slack --json` | `harn package verify . --provider slack` (2 fixtures) | webhook, rate-limit, pagination |

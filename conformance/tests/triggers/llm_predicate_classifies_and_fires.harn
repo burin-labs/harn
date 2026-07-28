@@ -26,7 +26,7 @@ pipeline test(task) {
         {
           id: "llm-predicate-fire-" + unique,
           kind: "issue.opened",
-          provider: "github",
+          provider: "webhook",
           handler: handler,
           when: classify,
           when_budget: nil,
@@ -42,7 +42,7 @@ pipeline test(task) {
       )
       const fire: DispatchHandle = trigger_fire(
         handle,
-        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fire-" + unique}},
+        {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-fire-" + unique}},
       )
       const evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(
         { entry -> entry?.headers?.trigger_id == handle.id },

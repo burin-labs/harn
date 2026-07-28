@@ -144,7 +144,7 @@ the nearest `harn.toml` uses:
 GitHub App setup stores:
 
 - `github/installation-<id>`
-- `github/app-<app-id>/private-key` when `--private-key-file` is supplied
+- `github/app-private-key` when `--private-key-file` is supplied
 - `github/webhook-secret` when a webhook secret is supplied
 
 Use `harn connect --list`, `harn connect --refresh <provider>`, and

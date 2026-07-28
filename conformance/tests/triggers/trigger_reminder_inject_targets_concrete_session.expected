@@ -3,7 +3,7 @@ true
 true
 true
 1
-Inject from github.issue.opened
+Inject from webhook.issue.opened
 release_reminder
 2
 release_reminder

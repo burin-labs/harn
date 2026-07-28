@@ -23,7 +23,7 @@ pipeline test(task) {
     {
       id: trigger_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: SpawnToPool(
         {
           pool: pool_name,
@@ -46,7 +46,7 @@ pipeline test(task) {
   const fired = trigger_fire(
     handle,
     {
-      provider: "github",
+      provider: "webhook",
       kind: "issue.opened",
       tenant_id: "acme",
       headers: {priority: "7", x_delivery: "evt-" + unique},
@@ -63,7 +63,7 @@ pipeline test(task) {
   // failing the dispatch.
   const fallback = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fallback-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-fallback-" + unique}},
   )
   __io_println(fallback.status == "dispatched")
   __io_println(fallback.result?.priority == 0)

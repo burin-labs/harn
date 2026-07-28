@@ -19,7 +19,7 @@ pipeline test(task) {
     {
       id: "trigger-interrupt-all-empty-" + unique,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       handler: InterruptAndSuspend({target_agents: "all", reason: "build_storm"}),
       when: nil,
       retry: nil,
@@ -34,7 +34,7 @@ pipeline test(task) {
   )
   const dispatch = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
   __io_println(dispatch.status == "dispatched")
   __io_println(dispatch.result?.status == "broadcast")

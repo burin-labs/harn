@@ -31,7 +31,7 @@ pipeline main() {
             name: "agent_await_resumption",
             arguments: {
               reason: "waiting on pr.merged",
-              conditions: {trigger: {kind: "pr.merged", provider: "github"}},
+              conditions: {trigger: {kind: "pr.merged", provider: "webhook"}},
             },
           },
         ],
@@ -59,7 +59,7 @@ pipeline main() {
       const fired: DispatchHandle = trigger_fire(
         trigger_handle,
         {
-          provider: "github",
+          provider: "webhook",
           kind: "pr.merged",
           payload: {number: 42, merged: true},
           headers: {x_delivery: "suspend-conditioned-trigger"},

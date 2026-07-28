@@ -26,7 +26,7 @@ pipeline test(task) {
         {
           id: "llm-predicate-replay-" + unique,
           kind: "issue.opened",
-          provider: "github",
+          provider: "webhook",
           handler: handler,
           when: classify,
           when_budget: nil,
@@ -42,7 +42,7 @@ pipeline test(task) {
       )
       const fire: DispatchHandle = trigger_fire(
         handle,
-        {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-replay-" + unique}},
+        {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-replay-" + unique}},
       )
       const replay: DispatchHandle = trigger_replay(fire.event_id)
       const evaluated = trigger_inspect_lifecycle("predicate.evaluated").filter(

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Pure-Harn Buildkite connector: signed webhooks, CI failure normalization, retry/rebuild + job logs."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-buildkite-connector"
-harn = ">=0.8,<0.9"
+harn = ">=0.10,<0.11"
 
 [exports]
 default = "src/lib.harn"

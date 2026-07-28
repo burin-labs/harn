@@ -138,13 +138,11 @@ pub fn local_fn(event: TriggerEvent) -> string {
                 "Bearer raw-header-secret".to_string(),
             );
             event.raw_body = Some(br#"{"note":"raw-body-secret"}"#.to_vec());
-            if let ProviderPayload::Known(KnownProviderPayload::GitHub(payload)) =
-                &mut event.provider_payload
-            {
-                if let GitHubEventPayload::Issues(payload) = payload.as_mut() {
-                    payload.common.raw = serde_json::json!({"neutral": "raw-provider-secret"});
-                    payload.issue = serde_json::json!({"title": "raw-provider-secret"});
-                }
+            if let ProviderPayload::Extension(payload) = &mut event.provider_payload {
+                payload.raw = serde_json::json!({
+                    "neutral": "raw-provider-secret",
+                    "issue": {"title": "raw-provider-secret"},
+                });
             }
 
             dispatcher

@@ -22,17 +22,15 @@ use harn_cli::commands::trigger::replay::{
 use harn_cli::package;
 use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use harn_vm::event_log::{install_default_for_base_dir, AnyEventLog, EventLog, LogEvent, Topic};
-use harn_vm::triggers::event::{GitHubEventCommon, GitHubEventPayload, GitHubIssuesEventPayload};
-use harn_vm::{
-    triggers::event::KnownProviderPayload, ProviderId, ProviderPayload, SignatureStatus,
-    TriggerEvent,
-};
+use harn_vm::triggers::event::KnownProviderPayload;
+use harn_vm::triggers::GenericWebhookPayload;
+use harn_vm::{ProviderId, ProviderPayload, SignatureStatus, TriggerEvent};
 use serde_json::Value;
 use std::fs;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
-const TRIGGER_ID: &str = "github-new-issue";
+const TRIGGER_ID: &str = "webhook-new-issue";
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -54,12 +52,12 @@ name = "fixture"
 handlers = "lib.harn"
 
 [[triggers]]
-id = "github-new-issue"
+id = "webhook-new-issue"
 kind = "webhook"
-provider = "github"
+provider = "webhook"
 match = { events = ["issues.opened"] }
 handler = "handlers::on_issue"
-secrets = { signing_secret = "github/webhook-secret" }
+secrets = { signing_secret = "webhook/signing-secret" }
 "#,
     );
 }
@@ -95,34 +93,23 @@ fn build_issue_event(delivery_id: &str, tenant_field: Option<&str>) -> TriggerEv
         raw.insert("tenant".to_string(), Value::String(tenant.to_string()));
     }
     TriggerEvent::new(
-        ProviderId::from("github"),
+        ProviderId::from("webhook"),
         "issues.opened",
         None,
         delivery_id.to_string(),
         None,
         BTreeMap::new(),
-        ProviderPayload::Known(KnownProviderPayload::GitHub(Box::new(
-            GitHubEventPayload::Issues(GitHubIssuesEventPayload {
-                common: GitHubEventCommon {
-                    event: "issues".to_string(),
-                    action: Some("opened".to_string()),
-                    delivery_id: Some(delivery_id.to_string()),
-                    installation_id: Some(42),
-                    topic: None,
-                    reaction_topics: Vec::new(),
-                    repository: None,
-                    repo: None,
-                    raw: Value::Object(raw),
-                },
-                issue: serde_json::json!({}),
-            }),
-        ))),
+        ProviderPayload::Known(KnownProviderPayload::Webhook(GenericWebhookPayload {
+            source: None,
+            content_type: Some("application/json".to_string()),
+            raw: Value::Object(raw),
+        })),
         SignatureStatus::Verified,
     )
 }
 
 /// Install the workspace's manifest triggers so `harn_vm` registers the
-/// `github-new-issue` binding. Mirrors what `package::install_manifest_triggers`
+/// `webhook-new-issue` binding. Mirrors what `package::install_manifest_triggers`
 /// does in the `harn run` / `harn trigger replay` paths.
 async fn install_workspace_triggers(workspace_root: &Path) {
     let mut vm = build_replay_vm(workspace_root);

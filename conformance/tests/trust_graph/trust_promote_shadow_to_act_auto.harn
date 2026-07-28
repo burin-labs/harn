@@ -21,7 +21,7 @@ pipeline test(task) {
     {
       id: agent_id,
       kind: "issue.opened",
-      provider: "github",
+      provider: "webhook",
       autonomy_tier: "shadow",
       handler: gated_handler,
       when: nil,
@@ -37,7 +37,7 @@ pipeline test(task) {
   )
   const first: DispatchHandle = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-shadow-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-shadow-" + unique}},
   )
   const denied: list<TrustRecord> = trust_query(
     {agent: agent_id, action: "fs.write", outcome: "denied"},
@@ -53,10 +53,10 @@ pipeline test(task) {
   const promote_records: list<TrustRecord> = trust_query({agent: agent_id, action: "trust.promote"})
   const second: DispatchHandle = trigger_fire(
     handle,
-    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-auto-" + unique}},
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-auto-" + unique}},
   )
   const successes: list<TrustRecord> = trust_query(
-    {agent: agent_id, action: "github.issue.opened", outcome: "success", tier: "act_auto"},
+    {agent: agent_id, action: "webhook.issue.opened", outcome: "success", tier: "act_auto"},
   )
   __io_println(first.status == "dispatched" && first.result?.autonomy_tier == "shadow")
   __io_println(!file_after_first)

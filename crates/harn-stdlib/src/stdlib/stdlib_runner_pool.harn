@@ -1,0 +1,289 @@
+/**
+ * Reusable supervision contract for ephemeral, single-use runner processes.
+ *
+ * Provider packages supply only the runner adapter closure (for example a
+ * `run.sh --jitconfig` invocation). Harn owns restart, scale, lifecycle state,
+ * and online/busy reporting.
+ */
+pub type RunnerRestartPolicy = "never" \
+  | "on_failure" \
+  | "always" \
+  | {
+  mode: "never" | "on_failure" | "always",
+  max_restarts?: int,
+  window_ms?: int,
+  backoff_ms?: int,
+  max_backoff_ms?: int,
+  factor?: float,
+  jitter_ms?: int,
+  circuit_open_ms?: int,
+}
+
+pub type RunnerContext = {
+  pool_id: string,
+  slot: int,
+  supervisor_id: string,
+  child_name: string,
+  attempt: int,
+  restart_count: int,
+  mark_busy: fn(bool) -> nil,
+}
+
+pub type RunnerPoolSpec = {
+  name: string,
+  min_size: int,
+  max_size: int,
+  initial_size?: int,
+  shutdown_ms?: int,
+  restart?: RunnerRestartPolicy,
+  run: fn(RunnerContext) -> any,
+}
+
+pub type RunnerPoolHandle = {
+  id: string,
+  name: string,
+  generation: int,
+  size: int,
+  min_size: int,
+  max_size: int,
+  shutdown_ms: int,
+  supervisor: dict,
+  statuses: any,
+  run: fn(RunnerContext) -> any,
+  restart: RunnerRestartPolicy,
+}
+
+pub type RunnerSlotState = {
+  slot: int,
+  name: string,
+  online: bool,
+  busy: bool,
+  lifecycle: string,
+  restart_count: int,
+  last_error: string?,
+}
+
+pub type RunnerPoolState = {
+  id: string,
+  name: string,
+  generation: int,
+  desired_size: int,
+  online: int,
+  busy: int,
+  status: string,
+  slots: list<RunnerSlotState>,
+  metrics: dict,
+}
+
+fn __runner_pool_size(value: int, min_size: int, max_size: int) -> int {
+  if min_size < 0 {
+    throw "runner_pool_start: min_size must be non-negative"
+  }
+  if max_size < 1 || max_size < min_size {
+    throw "runner_pool_start: max_size must be positive and at least min_size"
+  }
+  if value < min_size || value > max_size {
+    throw "runner pool size must be between min_size and max_size"
+  }
+  return value
+}
+
+fn __runner_slot_key(slot: int) -> string {
+  return "slot-" + to_string(slot)
+}
+
+fn __runner_pool_status(statuses, slot: int, online: bool, busy: bool, lifecycle: string) -> nil {
+  shared_map_set(
+    statuses,
+    __runner_slot_key(slot),
+    {online: online, busy: busy, lifecycle: lifecycle},
+  )
+}
+
+fn __runner_pool_children(handle, size: int) -> list<dict> {
+  let children = []
+  for slot in range(0, size) {
+    const slot_index = slot
+    const child_name = "runner-" + to_string(slot_index)
+    children = children
+      + [
+      {
+        name: child_name,
+        kind: "ephemeral_runner",
+        restart: handle.restart,
+        task: { ctx ->
+          __runner_pool_status(handle.statuses, slot_index, true, false, "online")
+          const mark_busy = { busy ->
+            __runner_pool_status(
+              handle.statuses,
+              slot_index,
+              true,
+              busy,
+              if busy {
+                "busy"
+              } else {
+                "online"
+              },
+            )
+          }
+          try {
+            const result = handle.run(
+              {
+                pool_id: handle.id,
+                slot: slot_index,
+                supervisor_id: ctx.supervisor_id,
+                child_name: ctx.child_name,
+                attempt: ctx.attempt,
+                restart_count: ctx.restart_count,
+                mark_busy: mark_busy,
+              },
+            )
+            __runner_pool_status(handle.statuses, slot_index, false, false, "exited")
+            result
+          } catch (error) {
+            __runner_pool_status(handle.statuses, slot_index, false, false, "failed")
+            throw error
+          }
+        },
+      },
+    ]
+  }
+  return children
+}
+
+fn __runner_pool_launch(handle, size: int) -> RunnerPoolHandle {
+  const next = handle + {size: size}
+  const supervisor = supervisor_start(
+    {
+      name: handle.name + "-g" + to_string(handle.generation),
+      strategy: "one_for_one",
+      shutdown_ms: handle.shutdown_ms,
+      children: __runner_pool_children(next, size),
+    },
+  )
+  return next + {supervisor: supervisor}
+}
+
+/**
+ * Start an ephemeral runner pool.
+ *
+ * The pool is inert until this function is called. The adapter closure owns
+ * provider-specific process arguments and credentials; the pool never copies
+ * credentials into its state. Call `ctx.mark_busy(true|false)` as the runner
+ * crosses job boundaries.
+ *
+ * @effects: [process]
+ * @errors: [invalid_argument, process_spawn]
+ */
+pub fn runner_pool_start(spec: RunnerPoolSpec) -> RunnerPoolHandle {
+  if trim(spec.name) == "" {
+    throw "runner_pool_start: name must be non-empty"
+  }
+  const initial_size = __runner_pool_size(
+    spec.initial_size ?? spec.min_size,
+    spec.min_size,
+    spec.max_size,
+  )
+  const id = spec.name + "-" + uuid()
+  const statuses = shared_map({scope: "task_group", key: "runner-pool:" + id, initial: {}})
+  return __runner_pool_launch(
+    {
+      id: id,
+      name: spec.name,
+      generation: 1,
+      size: initial_size,
+      min_size: spec.min_size,
+      max_size: spec.max_size,
+      shutdown_ms: spec.shutdown_ms ?? 5000,
+      supervisor: {},
+      statuses: statuses,
+      run: spec.run,
+      restart: spec.restart
+        ?? {
+        mode: "always",
+        max_restarts: 100,
+        window_ms: 300000,
+        backoff_ms: 250,
+        max_backoff_ms: 30000,
+        factor: 2.0,
+        jitter_ms: 100,
+        circuit_open_ms: 60000,
+      },
+    },
+    initial_size,
+  )
+}
+
+/**
+ * Gracefully replace the active generation at a new desired size.
+ *
+ * @effects: [process]
+ * @errors: [invalid_argument, process_spawn]
+ */
+pub fn runner_pool_scale(handle: RunnerPoolHandle, desired_size: int) -> RunnerPoolHandle {
+  const size = __runner_pool_size(desired_size, handle.min_size, handle.max_size)
+  if size == handle.size {
+    return handle
+  }
+  supervisor_stop(handle.supervisor, handle.shutdown_ms)
+  return __runner_pool_launch(handle + {generation: handle.generation + 1}, size)
+}
+
+/**
+ * Report the pool and per-slot online/busy lifecycle projection.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn runner_pool_state(handle: RunnerPoolHandle) -> RunnerPoolState {
+  const state = supervisor_state(handle.supervisor)
+  let slots = []
+  let online = 0
+  let busy = 0
+  for slot in range(0, handle.size) {
+    const child = state.children[slot]
+    const reported = shared_map_get(handle.statuses, __runner_slot_key(slot), {})
+    const is_online = reported?.online ?? (child.status == "running")
+    const is_busy = reported?.busy ?? false
+    if is_online {
+      online = online + 1
+    }
+    if is_busy {
+      busy = busy + 1
+    }
+    slots = slots
+      + [
+      {
+        slot: slot,
+        name: child.name,
+        online: is_online,
+        busy: is_busy,
+        lifecycle: reported?.lifecycle ?? child.status,
+        restart_count: child.restart_count,
+        last_error: child.last_error,
+      },
+    ]
+  }
+  return {
+    id: handle.id,
+    name: handle.name,
+    generation: handle.generation,
+    desired_size: handle.size,
+    online: online,
+    busy: busy,
+    status: state.status,
+    slots: slots,
+    metrics: state.metrics,
+  }
+}
+
+/**
+ * Stop all runner slots with the configured graceful-drain timeout.
+ *
+ * @effects: [process]
+ * @errors: [process_stop]
+ */
+pub fn runner_pool_stop(handle: RunnerPoolHandle) -> RunnerPoolState {
+  supervisor_stop(handle.supervisor, handle.shutdown_ms)
+  return runner_pool_state(handle)
+}

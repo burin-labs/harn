@@ -25,12 +25,11 @@ pub use event::{
     provider_metadata, redact_headers, register_provider_schemas, registered_provider_metadata,
     registered_provider_schema_names, reset_provider_catalog, A2aPushPayload, ChannelEventPayload,
     CronEventPayload, ExtensionProviderPayload, GenericWebhookPayload, GitForgePullRequestEvent,
-    GitForgePullRequestRef, GitForgeRepositoryRef, GitForgeWritebackTarget, GitHubEventPayload,
-    HeaderRedactionPolicy, LinearEventPayload, NotionEventPayload, NotionPolledChangeEvent,
+    GitForgePullRequestRef, GitForgeRepositoryRef, GitForgeWritebackTarget, HeaderRedactionPolicy,
     ProviderCatalog, ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod,
     ProviderPayload, ProviderRuntimeMetadata, ProviderSchema, ProviderSecretRequirement,
-    SignatureStatus, SignatureVerificationMetadata, SlackEventPayload, StreamEventPayload,
-    TenantId, TraceId, TriggerEvent, TriggerEventId,
+    SignatureStatus, SignatureVerificationMetadata, StreamEventPayload, TenantId, TraceId,
+    TriggerEvent, TriggerEventId,
 };
 pub use flow_control::{
     parse_flow_control_duration, TriggerBatchConfig, TriggerConcurrencyConfig,

@@ -13,9 +13,7 @@ use uuid::Uuid;
 
 use crate::connectors::a2a_push::A2aPushConnector;
 use crate::connectors::cron::{CatchupMode, CronConnector, CronEventSink};
-use crate::connectors::webhook::{
-    GenericWebhookConnector, WebhookProviderProfile, WebhookSignatureVariant,
-};
+use crate::connectors::webhook::{GenericWebhookConnector, WebhookSignatureVariant};
 use crate::connectors::{
     Connector, ConnectorCtx, ConnectorError, MetricsRegistry, RateLimitConfig, RateLimiterFactory,
     RawInbound, TriggerBinding as ConnectorTriggerBinding,
@@ -692,44 +690,29 @@ impl TriggerTestHarness {
         let _guard = clock::install_override(self.clock.clone());
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
         let inbox = build_inbox(&log).await;
-        let mut connector = GenericWebhookConnector::with_profile(WebhookProviderProfile::new(
-            ProviderId::from("github"),
-            "GitHubEventPayload",
-            WebhookSignatureVariant::GitHub,
-        ));
+        let mut connector = GenericWebhookConnector::new();
         connector
             .init(connector_ctx(
                 log,
                 Arc::new(StaticSecretProvider::new(
-                    "github",
+                    "webhook",
                     BTreeMap::from([(
-                        SecretId::new("github", "test-signing-secret"),
-                        "It's a Secret to Everybody".to_string(),
+                        SecretId::new("webhook", "test-signing-secret"),
+                        "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw".to_string(),
                     )]),
                 )),
                 inbox.clone(),
             ))
             .await
             .map_err(|error| error.to_string())?;
-        let mut binding =
-            webhook_binding(WebhookSignatureVariant::GitHub, Some("event.dedupe_key"));
-        binding.provider = ProviderId::from("github");
-        binding.binding_id = "github.webhook.fixture".to_string();
-        binding.config = json!({
-            "match": { "path": "/hooks/github" },
-            "secrets": { "signing_secret": "github/test-signing-secret" },
-            "webhook": {
-                "signature_scheme": "github",
-                "source": "fixtures",
-            }
-        });
+        let binding = webhook_binding(WebhookSignatureVariant::Standard, Some("event.dedupe_key"));
         connector
             .activate(&[binding])
             .await
             .map_err(|error| error.to_string())?;
 
-        let raw = github_raw_inbound();
-        let binding_id = "github.webhook.fixture";
+        let raw = standard_raw_inbound();
+        let binding_id = "webhook.fixture";
         let retention =
             StdDuration::from_secs(u64::from(DEFAULT_INBOX_RETENTION_DAYS) * 24 * 60 * 60);
 
@@ -791,7 +774,7 @@ impl TriggerTestHarness {
             ok: first_appended
                 && !second_appended
                 && emitted.len() == 1
-                && emitted[0].dedupe_key == "delivery-123",
+                && emitted[0].dedupe_key == "msg_p5jXN8AQM9LWM0D4loKWxJek",
             stub: false,
             summary: "duplicate GitHub-style webhook deliveries are dropped before append"
                 .to_string(),
@@ -802,7 +785,7 @@ impl TriggerTestHarness {
             bindings: Vec::new(),
             notes: Vec::new(),
             details: json!({
-                "delivery_id": "delivery-123",
+                "delivery_id": "msg_p5jXN8AQM9LWM0D4loKWxJek",
                 "first_appended": first_appended,
                 "second_appended": second_appended,
             }),

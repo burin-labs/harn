@@ -66,36 +66,15 @@ impl RouteConfig {
         match trigger.config.kind {
             TriggerKind::Webhook => {
                 let provider = trigger.config.provider.clone();
-                let signature_mode = match provider.as_str() {
-                    "github" => SignatureMode::GitHub,
-                    // Linear's signature scheme uses a different canonical
-                    // message shape than the shared verifier expects; keep
-                    // it Unsigned for now and revisit alongside the Linear
-                    // connector hardening pass.
-                    "linear" => SignatureMode::Unsigned,
-                    "webhook" => SignatureMode::Standard,
-                    // Slack and Notion both ship first-class HMAC and
-                    // their verifiers already exist in connectors/hmac.rs
-                    // (verify_slack / verify_notion). Wire them through
-                    // so default webhook routes are signed-by-default
-                    // when a `signing_secret` is configured.
-                    "slack" => SignatureMode::Slack,
-                    "notion" => SignatureMode::Notion,
-                    other => match harn_vm::provider_metadata(other) {
-                        Some(metadata)
-                            if matches!(
-                                metadata.runtime,
-                                harn_vm::ProviderRuntimeMetadata::Placeholder
-                            ) =>
-                        {
-                            SignatureMode::Unsigned
-                        }
-                        _ => {
-                            return Err(format!(
-                                "HTTP listener does not yet support webhook provider '{other}' on this branch"
-                            ).into())
-                        }
-                    },
+                let connector_ingress = match provider.as_str() {
+                    "webhook" => false,
+                    other if provider_requires_harn_connector(other) => true,
+                    other => {
+                        return Err(format!(
+                            "webhook provider '{other}' requires a package-backed Harn connector"
+                        )
+                        .into())
+                    }
                 };
                 Ok(Some(Self {
                     trigger_id: trigger.config.id.clone(),
@@ -103,7 +82,11 @@ impl RouteConfig {
                     provider,
                     path: trigger_path(trigger)?,
                     auth_mode: AuthMode::Public,
-                    signature_mode,
+                    signature_mode: if connector_ingress {
+                        SignatureMode::Unsigned
+                    } else {
+                        SignatureMode::Standard
+                    },
                     signing_secret: parse_secret_id(
                         trigger
                             .config
@@ -113,7 +96,7 @@ impl RouteConfig {
                     ),
                     dedupe_key_template: trigger.config.dedupe_key.clone(),
                     dedupe_retention_days: trigger.config.retry.retention_days,
-                    connector_ingress: false,
+                    connector_ingress,
                     connector: None,
                 }))
             }
@@ -158,6 +141,15 @@ impl RouteConfig {
             _ => Ok(None),
         }
     }
+}
+
+fn provider_requires_harn_connector(provider: &str) -> bool {
+    harn_vm::provider_metadata(provider).is_some_and(|metadata| {
+        matches!(
+            metadata.runtime,
+            harn_vm::ProviderRuntimeMetadata::Placeholder
+        )
+    })
 }
 
 fn a2a_push_connector_configured(trigger: &CollectedManifestTrigger) -> bool {
@@ -337,10 +329,7 @@ impl RouteRegistry {
 
 #[derive(Clone, Copy)]
 pub(crate) enum SignatureMode {
-    GitHub,
     Standard,
-    Slack,
-    Notion,
     Unsigned,
 }
 

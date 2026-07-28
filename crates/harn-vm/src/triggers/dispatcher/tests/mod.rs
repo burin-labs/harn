@@ -11,7 +11,7 @@ use crate::event_log::{install_memory_for_current_thread, EventLog, Topic};
 use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
 use crate::llm::mock::{get_llm_mock_calls, push_llm_mock, LlmMock};
 use crate::register_vm_stdlib;
-use crate::triggers::event::{GitHubEventPayload, KnownProviderPayload};
+use crate::triggers::event::ExtensionProviderPayload;
 use crate::triggers::registry::{
     install_manifest_triggers, resolve_live_trigger_binding, TriggerBindingSource,
     TriggerBindingSpec, TriggerHandlerSpec, TriggerPredicateSpec,

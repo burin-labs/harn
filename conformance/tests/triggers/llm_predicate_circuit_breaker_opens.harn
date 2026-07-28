@@ -30,7 +30,7 @@ pipeline test(task) {
         {
           id: "llm-predicate-breaker-" + unique,
           kind: "issue.opened",
-          provider: "github",
+          provider: "webhook",
           handler: handler,
           when: classify,
           when_budget: nil,
@@ -47,7 +47,7 @@ pipeline test(task) {
       const first: DispatchHandle = trigger_fire(
         handle,
         {
-          provider: "github",
+          provider: "webhook",
           kind: "issue.opened",
           headers: {x_delivery: "evt-breaker-1-" + unique},
         },
@@ -55,7 +55,7 @@ pipeline test(task) {
       const second: DispatchHandle = trigger_fire(
         handle,
         {
-          provider: "github",
+          provider: "webhook",
           kind: "issue.opened",
           headers: {x_delivery: "evt-breaker-2-" + unique},
         },
@@ -63,7 +63,7 @@ pipeline test(task) {
       const third: DispatchHandle = trigger_fire(
         handle,
         {
-          provider: "github",
+          provider: "webhook",
           kind: "issue.opened",
           headers: {x_delivery: "evt-breaker-3-" + unique},
         },
@@ -71,7 +71,7 @@ pipeline test(task) {
       const fourth: DispatchHandle = trigger_fire(
         handle,
         {
-          provider: "github",
+          provider: "webhook",
           kind: "issue.opened",
           headers: {x_delivery: "evt-breaker-4-" + unique},
         },

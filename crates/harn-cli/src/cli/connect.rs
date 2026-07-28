@@ -111,7 +111,7 @@ pub(crate) struct ConnectGithubArgs {
     /// Loopback callback URL. Port 0 binds a random localhost port.
     #[arg(long, default_value = "http://127.0.0.1:0/gh-install-callback")]
     pub redirect_uri: String,
-    /// PEM private-key file to store as github/app-<app_id>/private-key.
+    /// PEM private-key file to store as github/app-private-key.
     #[arg(long)]
     pub private_key_file: Option<PathBuf>,
     /// Inline webhook signing secret to store as github/webhook-secret.

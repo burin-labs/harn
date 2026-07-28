@@ -123,11 +123,11 @@ fn webhook_route(path: &str) -> RouteConfig {
     RouteConfig {
         trigger_id: "github-webhook".to_string(),
         binding_version: 1,
-        provider: ProviderId::from("github"),
+        provider: ProviderId::from("webhook"),
         path: path.to_string(),
         auth_mode: AuthMode::Public,
-        signature_mode: SignatureMode::GitHub,
-        signing_secret: Some(SecretId::new("github", "test-signing-secret")),
+        signature_mode: SignatureMode::Unsigned,
+        signing_secret: None,
         dedupe_key_template: Some("event.dedupe_key".to_string()),
         dedupe_retention_days: harn_vm::DEFAULT_INBOX_RETENTION_DAYS,
         connector_ingress: false,
@@ -1122,7 +1122,7 @@ async fn webhook_first_delivery_is_appended() {
     let response = reqwest::Client::new()
         .post(format!("http://{}/hooks/github", listener.local_addr()))
         .header("X-GitHub-Event", "issues")
-        .header("X-GitHub-Delivery", "delivery-1")
+        .header("webhook-id", "delivery-1")
         .header("X-Hub-Signature-256", github_signature("topsecret", body))
         .header("Content-Type", "application/json")
         .body(body.to_vec())
@@ -1200,7 +1200,7 @@ async fn webhook_ingest_saturation_returns_retry_after() {
     let first = client
         .post(&url)
         .header("X-GitHub-Event", "issues")
-        .header("X-GitHub-Delivery", "delivery-1")
+        .header("webhook-id", "delivery-1")
         .header("X-Hub-Signature-256", &signature)
         .header("Content-Type", "application/json")
         .body(body.to_vec())
@@ -1212,7 +1212,7 @@ async fn webhook_ingest_saturation_returns_retry_after() {
     let saturated = client
         .post(&url)
         .header("X-GitHub-Event", "issues")
-        .header("X-GitHub-Delivery", "delivery-2")
+        .header("webhook-id", "delivery-2")
         .header("X-Hub-Signature-256", &signature)
         .header("Content-Type", "application/json")
         .body(body.to_vec())
@@ -1279,7 +1279,7 @@ async fn webhook_duplicate_delivery_is_dropped() {
     let first = client
         .post(&url)
         .header("X-GitHub-Event", "issues")
-        .header("X-GitHub-Delivery", "delivery-1")
+        .header("webhook-id", "delivery-1")
         .header("X-Hub-Signature-256", &signature)
         .header("Content-Type", "application/json")
         .body(body.to_vec())
@@ -1291,7 +1291,7 @@ async fn webhook_duplicate_delivery_is_dropped() {
     let duplicate = client
         .post(&url)
         .header("X-GitHub-Event", "issues")
-        .header("X-GitHub-Delivery", "delivery-1")
+        .header("webhook-id", "delivery-1")
         .header("X-Hub-Signature-256", &signature)
         .header("Content-Type", "application/json")
         .body(body.to_vec())
@@ -1352,7 +1352,7 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
     let response = reqwest::Client::new()
         .post(format!("http://{}/hooks/github", listener.local_addr()))
         .header("X-GitHub-Event", "issues")
-        .header("X-GitHub-Delivery", "delivery-ttl")
+        .header("webhook-id", "delivery-ttl")
         .header("X-Hub-Signature-256", github_signature("topsecret", body))
         .header("Content-Type", "application/json")
         .body(body.to_vec())
