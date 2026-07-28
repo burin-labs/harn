@@ -4,6 +4,7 @@
 // normalizes coordination envelopes so agents can coordinate without inventing
 // host-local mailboxes or user-visible prose protocols.
 import { filter_nil } from "std/collections"
+import * as append_metadata from "std/coordination/append_metadata"
 import { ensure_parent_dir, read_json_result, write_json } from "std/fs"
 import { memory_store } from "std/memory"
 import "std/schema"
@@ -110,6 +111,8 @@ pub fn coord_message_schema() {
       reply_to: schema_field(schema_string(), false),
       thread_id: schema_field(schema_string(), false),
       dedupe_key: schema_field(schema_string(), false),
+      ts: schema_field(schema_string(), false),
+      seq: schema_field(schema_int(), false),
       created_at: schema_string(),
       ttl: schema_field(schema_any(), false),
       privacy: schema_field(schema_any(), false),
@@ -448,10 +451,10 @@ fn __coord_channel_options(resolution, options, id = nil) {
     out = out + {ttl: ttl}
   }
   const limit = opts?.limit
-  if limit != nil {
+  if limit != nil && opts?.since_ts == nil {
     out = out + {limit: limit}
   }
-  const cursor = opts?.from_cursor ?? opts?.cursor
+  const cursor = opts?.since_seq ?? opts?.from_cursor ?? opts?.cursor
   if cursor != nil {
     out = out + {from_cursor: cursor}
   }
@@ -953,6 +956,7 @@ fn __coord_subject(message, options, body) {
 fn __coord_envelope(scope, room, message, options) {
   const msg = __coord_dict(message)
   const opts = __coord_dict(options)
+  append_metadata.reject_write(msg, opts)
   const ctx = __coord_ctx()
   const resolution = __coord_resolution(scope, room, opts)
   const id = __coord_validate_component(
@@ -980,7 +984,6 @@ fn __coord_envelope(scope, room, message, options) {
       reply_to: opts?.reply_to ?? msg?.reply_to,
       thread_id: opts?.thread_id ?? msg?.thread_id,
       dedupe_key: opts?.dedupe_key,
-      created_at: opts?.created_at ?? msg?.created_at ?? date_iso(),
       ttl: opts?.ttl ?? msg?.ttl,
       privacy: opts?.privacy ?? msg?.privacy,
     },
@@ -1244,12 +1247,14 @@ pub fn coord_reply(scope, room, original, message, options = nil) {
 pub fn coord_post(scope, room, message, options = nil) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(scope, room, opts)
-  const envelope = __coord_envelope(scope, room, message, opts)
-  const channel = emit_channel(
+  const pending = __coord_envelope(scope, room, message, opts)
+  const appended = emit_channel(
     resolution.channel_name,
-    envelope,
-    __coord_channel_options(resolution, opts, envelope.id),
+    pending,
+    __coord_channel_options(resolution, opts, pending.id),
   )
+  const envelope = append_metadata.message_from_event(appended)
+  const channel = appended + {payload: envelope}
   return {
     schema: __COORD_RECEIPT_SCHEMA,
     id: envelope.id,
@@ -1397,7 +1402,7 @@ pub fn coord_ack(scope, room, consumer_id, cursor, options = nil) {
  * - `consumer_id` / `consumer`: explicit durable cursor owner.
  * - `to` / `recipient`: address filter; defaults to the consumer id.
  * - `from`, `kind`, `reply_to`, `thread_id`, `subject`: optional filters.
- * - `from_cursor` / `cursor`: override the consumer cursor for this read.
+ * - `since_seq` / `from_cursor` / `cursor` override the cursor; `since_ts` excludes older rows.
  * - `include_events`: keep channel event wrappers beside each message.
  *
  * The returned `next_cursor` is the high-water cursor scanned, not an implicit
@@ -1445,8 +1450,8 @@ pub fn coord_inbox(scope, room, options = nil) {
 /**
  * Read durable coordination messages from a scoped room.
  *
- * Pass `{include_events: true}` to preserve the channel event wrapper next to
- * each message.
+ * Messages include runtime-owned `ts` and per-room `seq`; `since_seq` and
+ * `since_ts` are exclusive. `{include_events: true}` preserves event wrappers.
  *
  * @effects: []
  * @errors: [runtime]
@@ -1454,16 +1459,11 @@ pub fn coord_inbox(scope, room, options = nil) {
 pub fn coord_read(scope, room, options = nil) {
   const opts = __coord_dict(options)
   const resolution = __coord_resolution(scope, room, opts)
-  const events = channel_events(resolution.channel_name, __coord_channel_options(resolution, opts))
-  let out = []
-  for event in events {
-    if opts?.include_events ?? false {
-      out = out + [{event: event, message: event.payload}]
-    } else {
-      out = out + [event.payload]
-    }
-  }
-  return out
+  return append_metadata.read_messages(
+    resolution.channel_name,
+    __coord_channel_options(resolution, opts),
+    opts,
+  )
 }
 
 /**

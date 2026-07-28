@@ -1,0 +1,76 @@
+import { coord_post, coord_read } from "std/coordination"
+
+fn rejected_timestamp(scope, room, message, options) {
+  return try {
+    coord_post(scope, room, message, options)
+    "accepted"
+  } catch (error) {
+    to_string(error)
+  }
+}
+
+pipeline default() {
+  const opts = {session_id: "coord-append-metadata"}
+  mock_time(2000)
+  const first = coord_post(
+    "session",
+    "ops",
+    {kind: "status", subject: "first"},
+    opts + {id: "coord-metadata-1"},
+  )
+  const second = coord_post(
+    "session",
+    "ops",
+    {kind: "status", subject: "second"},
+    opts + {id: "coord-metadata-2"},
+  )
+  mock_time(3000)
+  const third = coord_post(
+    "session",
+    "ops",
+    {kind: "status", subject: "third"},
+    opts + {id: "coord-metadata-3"},
+  )
+  __io_println(first.message.ts == first.channel.emitted_at.at)
+  __io_println(first.message.seq == first.channel.cursor)
+  __io_println(second.message.seq > first.message.seq)
+  __io_println(second.message.ts == first.message.ts)
+  const after_seq = coord_read("session", "ops", opts + {since_seq: second.message.seq})
+  __io_println(len(after_seq))
+  __io_println(after_seq[0].subject)
+  __io_println(after_seq[0].seq == third.message.seq)
+  __io_println(after_seq[0].ts == third.message.ts)
+  const after_ts = coord_read("session", "ops", opts + {since_ts: first.message.ts})
+  __io_println(len(after_ts))
+  __io_println(after_ts[0].subject)
+  __io_println(len(coord_read("session", "ops", opts + {since_ts: first.message.ts, limit: 0})))
+  const message_error = rejected_timestamp(
+    "session",
+    "ops",
+    {kind: "status", subject: "forged", ts: "2099-01-01T00:00:00Z"},
+    opts + {id: "coord-metadata-forged-message"},
+  )
+  __io_println(contains(message_error, "authoritative timestamps are runtime-owned"))
+  const option_error = rejected_timestamp(
+    "session",
+    "ops",
+    {kind: "status", subject: "forged"},
+    opts + {id: "coord-metadata-forged-option", ts: "2099-01-01T00:00:00Z"},
+  )
+  __io_println(contains(option_error, "authoritative timestamps are runtime-owned"))
+  const created_at_error = rejected_timestamp(
+    "session",
+    "ops",
+    {kind: "status", subject: "forged", created_at: "2099-01-01T00:00:00Z"},
+    opts + {id: "coord-metadata-forged-created-at"},
+  )
+  __io_println(contains(created_at_error, "authoritative timestamps are runtime-owned"))
+  const sequence_error = rejected_timestamp(
+    "session",
+    "ops",
+    {kind: "status", subject: "forged", seq: 99},
+    opts + {id: "coord-metadata-forged-sequence"},
+  )
+  __io_println(contains(sequence_error, "sequence numbers are runtime-owned"))
+  unmock_time()
+}
