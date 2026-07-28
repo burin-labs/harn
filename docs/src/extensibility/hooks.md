@@ -13,8 +13,11 @@ byte.
 `PreToolUse` and `PostToolUse` fire around each tool dispatch.
 `PreToolUse` returns `{deny: reason}` to refuse the call or
 `{args: replacement}` to rewrite the arguments; `PostToolUse` returns a
-string or `{result: replacement}` to rewrite the result. For custom
-logic, pass `pre` and/or `post` closures in the config table.
+string or `{result: replacement}` to rewrite the result. A hook that drops
+source bytes returns
+`{result: replacement, truncated: true, dropped_bytes: N}` so later hooks
+cannot erase the truncation signal by appending content. For custom logic,
+pass `pre` and/or `post` closures in the config table.
 
 ```harn
 register_tool_hook({pattern: "exec_*", deny: "exec is gated"})

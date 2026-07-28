@@ -10,6 +10,7 @@
 // documented ingestion format via `recognize_no_compact`.
 import { compaction_policy } from "std/agent/autocompact"
 import { agent_session_inject_reminder } from "std/agent/state"
+import { agent_report_truncation } from "std/agent/truncation"
 
 // -------------------------------------------------------------------------------------------------
 
@@ -331,7 +332,13 @@ fn __pin_reminder_body(content, options) {
   if type_of(limit) != "int" || limit <= 0 || len(text) <= limit {
     return content
   }
-  return text.substring(0, limit) + "\n[pin reminder truncated]"
+  const retained = text.substring(0, limit)
+  let _ = agent_report_truncation(
+    text,
+    retained,
+    "pin reminder exceeded its model-visible body budget",
+  )
+  return retained + "\n[pin reminder truncated]"
 }
 
 fn __pin_reminder_tags(base_tags, options) {

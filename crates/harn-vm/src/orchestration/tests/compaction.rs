@@ -11,9 +11,10 @@ use crate::orchestration::*;
 #[test]
 fn microcompact_snips_large_output() {
     let large = "x".repeat(50_000);
-    let result = microcompact_tool_output(&large, 10_000);
-    assert!(result.len() < 15_000);
-    assert!(result.contains("snipped"));
+    let result = microcompact_tool_output_result(&large, 10_000);
+    assert!(result.text.len() < 15_000);
+    assert!(result.text.contains("snipped"));
+    assert_eq!(result.dropped_bytes, 40_000);
 }
 
 #[test]
@@ -52,6 +53,11 @@ fn microcompact_preserves_strong_keyword_lines_without_file_line() {
     assert!(
         result.contains("FAILED tests/test_parser.py"),
         "strong 'FAIL' keyword should preserve pytest-style lines too:\n{result}"
+    );
+    let accounted = microcompact_tool_output_result(&output, 2_000);
+    assert!(
+        accounted.dropped_bytes > 0,
+        "diagnostic preservation must retain source-loss metadata"
     );
 }
 

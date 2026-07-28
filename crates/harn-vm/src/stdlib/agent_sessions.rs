@@ -1050,7 +1050,7 @@ fn agent_session_trim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     if keep_last < 0 {
         return Err(err("agent_session_trim: `keep_last` must be >= 0"));
     }
-    let Some(kept) = agent_sessions::trim(&id, keep_last as usize) else {
+    let Some(kept) = agent_sessions::trim(&id, keep_last as usize).map_err(err)? else {
         return Err(err(format!(
             "agent_session_trim: unknown session id '{id}'"
         )));

@@ -3521,7 +3521,10 @@ Three concentric surfaces:
 - `register_tool_hook({pattern, deny?, max_output?, pre?, post?})` — tool-level
   `PreToolUse` / `PostToolUse`. `pre` and `post` are closures that
   receive `{event, tool, result?}` payloads; `pre` can return `{deny}`
-  or `{args}`, and `post` can return a string or `{result}`.
+  or `{args}`, and `post` can return a string, `{result}`, or
+  `{result, truncated: true, dropped_bytes: N}`. Use the typed truncation
+  shape whenever source bytes were dropped so later hooks and runtime
+  observers retain exact loss metadata even if another hook appends text.
 - `register_persona_hook(persona_pattern, event, handler)` — persona
   `PreStep` / `PostStep` / `OnApprovalRequested` / `OnHandoffEmitted` /
   `OnPersonaPaused` / `OnPersonaResumed` / `OnBudgetThreshold(pct)`.

@@ -1,7 +1,6 @@
-/** std/command - deterministic command steps for Harn scripts. */
+import { prompt_cap } from "std/agent/truncation"
 import { write_stderr, write_stdout } from "std/io"
 import { shell_quote } from "std/runtime"
-import { truncate_text } from "std/text"
 
 /** Common fields guaranteed by normalized command results. */
 pub type CommandResult = {
@@ -1056,7 +1055,7 @@ pub fn command_output_text(result, stream: string = "combined") -> string {
 /**
  * command_failure_text formats a compact failure block for logs and recovery prompts.
  *
- * @effects: []
+ * @effects: [host]
  * @errors: []
  */
 pub fn command_failure_text(result, options = nil) -> string {
@@ -1066,13 +1065,14 @@ pub fn command_failure_text(result, options = nil) -> string {
   const {status = "failed", exit_code = result?.status} = result ?? {}
   let lines = ["status=" + to_string(status) + " exit=" + to_string(exit_code)]
   if trim(result?.stdout ?? "") != "" {
-    lines = lines + ["stdout:", truncate_text(result.stdout, max_stdout)]
+    lines = lines + ["stdout:", prompt_cap(result.stdout, max_stdout, "stdout")]
   }
   if trim(result?.stderr ?? "") != "" {
-    lines = lines + ["stderr:", truncate_text(result.stderr, max_stderr)]
+    lines = lines + ["stderr:", prompt_cap(result.stderr, max_stderr, "stderr")]
   }
   if len(lines) == 1 && trim(command_output_text(result)) != "" {
-    lines = lines + ["output:", truncate_text(command_output_text(result), max_stdout)]
+    lines = lines
+      + ["output:", prompt_cap(command_output_text(result), max_stdout, "output")]
   }
   return join(lines, "\n")
 }
@@ -1149,7 +1149,7 @@ fn __command_json_parse_error(label, stream, text, parsed, step, options) {
     {
       source: stream,
       reason: reason,
-      text_tail: truncate_text(text, opts?.parse_error_chars ?? 1000),
+      text_tail: prompt_cap(text, opts?.parse_error_chars ?? 1000, "parse-error tail"),
     },
   )
 }

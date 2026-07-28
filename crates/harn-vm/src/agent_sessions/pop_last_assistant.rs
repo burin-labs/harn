@@ -52,7 +52,7 @@ pub fn pop_last_if_assistant(id: &str) -> Result<bool, String> {
             .and_then(|event| event.get("id"))
             .map(VmValue::display)
             .filter(|id| !id.is_empty());
-        super::truncate_state(state, messages.len() - 1);
+        super::truncate_state(state, messages.len() - 1)?;
         crate::agent_session_journal::enqueue_message_removed(
             &mut state.transcript_journal,
             source_event_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),

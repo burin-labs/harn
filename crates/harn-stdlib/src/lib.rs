@@ -231,6 +231,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/introspection" => "stdlib/agent/introspection.harn",
     "agent/resume_by" => "stdlib/agent/resume_by.harn",
     "agent/state" => "stdlib/agent/state.harn",
+    "agent/truncation" => "stdlib/agent/truncation.harn",
     "agent/canon" => "stdlib/agent/canon.harn",
     "agent/skills" => "stdlib/agent/skills.harn",
     "agent/autocompact" => "stdlib/agent/autocompact.harn",

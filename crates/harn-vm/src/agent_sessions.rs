@@ -1057,108 +1057,18 @@ pub fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Optio
     })?;
     let new_id = fork(src_id, dst_id)?;
     link_child_session_with_branch(src_id, &new_id, Some(branched_at_event_index));
-    let _ = truncate(&new_id, keep_first);
+    truncate(&new_id, keep_first).ok().flatten()?;
     Some(new_id)
 }
 
-/// Truncate the session transcript to the first `keep_first`
-/// messages (opposite of `trim`, which keeps the last N). Returns
-/// counts and the retained tip event id when the session exists.
-pub fn truncate(id: &str, keep_first: usize) -> Option<SessionTruncateResult> {
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let state = map.get_mut(id)?;
-        let result = truncate_state(state, keep_first)?;
-        Some(result)
-    })
-}
-
-fn truncate_state(state: &mut SessionState, keep_first: usize) -> Option<SessionTruncateResult> {
-    let dict = state
-        .transcript
-        .as_dict()
-        .cloned()
-        .unwrap_or_else(crate::value::DictMap::new);
-    let messages: Vec<VmValue> = match dict.get("messages") {
-        Some(VmValue::List(list)) => list.iter().cloned().collect(),
-        _ => Vec::new(),
-    };
-    let existing_events = match dict.get("events") {
-        Some(VmValue::List(list)) => Some(list.iter().cloned().collect::<Vec<_>>()),
-        _ => None,
-    };
-    let kept_turn_count = keep_first.min(messages.len());
-    let removed_turn_count = messages.len().saturating_sub(kept_turn_count);
-    let mut new_tip_turn_id = existing_events
-        .as_ref()
-        .map(|events| turn_event_id_for_count(events, kept_turn_count))
-        .unwrap_or_else(|| {
-            let events = crate::llm::helpers::transcript_events_from_messages(&messages);
-            turn_event_id_for_count(&events, kept_turn_count)
-        });
-
-    if removed_turn_count > 0 {
-        let retained: Vec<VmValue> = messages.into_iter().take(kept_turn_count).collect();
-        let retained_events = match existing_events {
-            Some(events) => {
-                let keep_event_count = event_prefix_len_for_messages(&events, kept_turn_count);
-                events.into_iter().take(keep_event_count).collect()
-            }
-            None => crate::llm::helpers::transcript_events_from_messages(&retained),
-        };
-        new_tip_turn_id = turn_event_id_for_count(&retained_events, kept_turn_count);
-        let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(retained_events)),
-        );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(retained)),
-        );
-        next.remove("summary");
-        apply_transcript_with_budget(state, VmValue::dict(next), "truncate").ok()?;
-    }
-    state.touch();
-    Some(SessionTruncateResult {
-        kept_turn_count,
-        removed_turn_count,
-        new_tip_turn_id,
-    })
-}
+mod truncation;
+use truncation::truncate_state;
+pub use truncation::{trim, truncate};
 
 mod pop_last_assistant;
 pub use pop_last_assistant::pop_last_if_assistant;
 mod restore_message_event_ids;
 pub(crate) use restore_message_event_ids::restore_message_event_ids;
-
-pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let state = map.get_mut(id)?;
-        let dict = state.transcript.as_dict()?.clone();
-        let messages: Vec<VmValue> = match dict.get("messages") {
-            Some(VmValue::List(list)) => list.iter().cloned().collect(),
-            _ => Vec::new(),
-        };
-        let start = messages.len().saturating_sub(keep_last);
-        let retained: Vec<VmValue> = messages.into_iter().skip(start).collect();
-        let kept = retained.len();
-        let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(
-                crate::llm::helpers::transcript_events_from_messages(&retained),
-            )),
-        );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(retained)),
-        );
-        apply_transcript_with_budget(state, VmValue::dict(next), "trim").ok()?;
-        Some(kept)
-    })
-}
 
 /// Append a message dict to the session transcript. The message must
 /// have at least a string `role`; anything else is merged verbatim.

@@ -405,7 +405,9 @@ Execution order for a `run_command` call here:
 2. The handler runs — that's where `preset_run_command` matches the
    command, picks a mode, optionally rewrites, and forwards to `inner`.
 3. `register_tool_hook` `PostToolUse` fires (can rewrite or truncate
-   the result via `max_output`).
+   the result via `max_output`). Explicit truncating closures return
+   `{result, truncated: true, dropped_bytes: N}`; ordinary `{result}` remains
+   a rewrite with no implied loss.
 
 Both layers write to the transcript, so replay tools see every
 decision in order.

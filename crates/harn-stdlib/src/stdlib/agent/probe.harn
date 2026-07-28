@@ -1,4 +1,5 @@
 import { store_fact } from "std/agent/fact"
+import { agent_report_truncation } from "std/agent/truncation"
 import { filter_nil } from "std/collections"
 import { command_run } from "std/command"
 
@@ -107,7 +108,13 @@ fn __probe_truncate(value, limit) -> string {
   if len(text) <= limit {
     return text
   }
-  return substring(text, 0, limit) + "\n…[truncated " + to_string(len(text) - limit) + " bytes]"
+  const retained = substring(text, 0, limit)
+  let _ = agent_report_truncation(
+    text,
+    retained,
+    "probe evidence exceeded its model-visible byte budget",
+  )
+  return retained + "\n…[truncated " + to_string(len(text) - limit) + " bytes]"
 }
 
 fn __probe_command_options(opts) -> dict {

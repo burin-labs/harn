@@ -439,6 +439,7 @@ struct GroundedReviewFinding {
     confidence: &'static str,
     provenance: String,
     summary: String,
+    dropped_bytes: usize,
 }
 
 impl ReminderProvider for GroundedReviewProvider {
@@ -451,13 +452,32 @@ impl ReminderProvider for GroundedReviewProvider {
     }
 
     fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
-        let mut findings = grounded_review_findings(ctx);
+        let (mut findings, mut dropped_bytes) = grounded_review_findings(ctx);
         if findings.is_empty() {
             return None;
         }
+        dropped_bytes += findings
+            .iter()
+            .map(|finding| finding.dropped_bytes)
+            .sum::<usize>();
         let max_findings = grounded_review_max_findings(ctx);
         let truncated_count = findings.len().saturating_sub(max_findings);
+        dropped_bytes += findings[max_findings.min(findings.len())..]
+            .iter()
+            .map(grounded_review_finding_source_bytes)
+            .sum::<usize>();
         findings.truncate(max_findings);
+        if dropped_bytes > 0 {
+            crate::boundary::BoundaryFailure::new(
+                crate::boundary::BoundaryId::GroundedReview,
+                crate::boundary::BoundaryFailureKind::Truncated,
+                "grounded review provider capped model-visible evidence",
+            )
+            .with_count(truncated_count)
+            .with_dropped_bytes(dropped_bytes)
+            .in_session(&ctx.session_id)
+            .report();
+        }
 
         let mut reminder = provider_reminder(
             format_grounded_review_body(ctx, &findings, truncated_count),
@@ -473,18 +493,19 @@ impl ReminderProvider for GroundedReviewProvider {
     }
 }
 
-fn grounded_review_findings(ctx: &ProviderContext) -> Vec<GroundedReviewFinding> {
+fn grounded_review_findings(ctx: &ProviderContext) -> (Vec<GroundedReviewFinding>, usize) {
     let include_warnings =
         provider_config_bool(ctx, GROUNDED_REVIEW_ID, &["include_warnings"]).unwrap_or(false);
     let text_scan = provider_config_bool(ctx, GROUNDED_REVIEW_ID, &["text_scan"]).unwrap_or(true);
     let mut findings = Vec::new();
+    let mut dropped_bytes = 0;
     collect_explicit_error_finding(&ctx.payload, ctx.event, &mut findings);
     collect_verifier_signal_findings(&ctx.payload, "$", &mut findings, 0);
     collect_structured_review_findings(&ctx.payload, "$", include_warnings, &mut findings, 0);
     if text_scan {
-        collect_text_review_findings(&ctx.payload, ctx.event, &mut findings);
+        collect_text_review_findings(&ctx.payload, ctx.event, &mut findings, &mut dropped_bytes);
     }
-    dedupe_review_findings(findings)
+    (dedupe_review_findings(findings), dropped_bytes)
 }
 
 fn grounded_review_max_findings(ctx: &ProviderContext) -> usize {
@@ -516,11 +537,13 @@ fn collect_explicit_error_finding(
     let summary = error_summary
         .or_else(|| status.map(|value| format!("status={value}")))
         .unwrap_or_else(|| "runtime reported ok=false".to_string());
+    let (summary, dropped_bytes) = truncate_review_summary_with_loss(&summary);
     findings.push(GroundedReviewFinding {
         source: "runtime_error".to_string(),
         confidence: "verified",
         provenance: format!("event={}", event.as_str()),
-        summary: truncate_review_summary(&summary),
+        summary,
+        dropped_bytes,
     });
 }
 
@@ -553,6 +576,7 @@ fn collect_verifier_signal_findings(
                     confidence: "verified",
                     provenance: path.to_string(),
                     summary: format!("verifier outcome: {outcome}"),
+                    dropped_bytes: 0,
                 });
             }
             for (key, child) in map {
@@ -599,11 +623,13 @@ fn verifier_signal_finding(value: &JsonValue, path: &str) -> Option<GroundedRevi
         Some(name) => format!("{path} name={name} signal={signal}"),
         None => format!("{path} signal={signal}"),
     };
+    let (summary, dropped_bytes) = truncate_review_summary_with_loss(&reason);
     Some(GroundedReviewFinding {
         source: format!("verifier:{kind}"),
         confidence: "verified",
         provenance,
-        summary: truncate_review_summary(&reason),
+        summary,
+        dropped_bytes,
     })
 }
 
@@ -712,11 +738,14 @@ fn structured_signal_finding(
     {
         return None;
     }
+    let source = structured_signal_source(value, default_source, &summary);
+    let (summary, dropped_bytes) = truncate_review_summary_with_loss(&summary);
     Some(GroundedReviewFinding {
-        source: structured_signal_source(value, default_source, &summary),
+        source,
         confidence: "verified",
         provenance: structured_signal_provenance(value, path),
-        summary: truncate_review_summary(&summary),
+        summary,
+        dropped_bytes,
     })
 }
 
@@ -813,6 +842,7 @@ fn collect_text_review_findings(
     payload: &JsonValue,
     event: HookEvent,
     findings: &mut Vec<GroundedReviewFinding>,
+    dropped_bytes: &mut usize,
 ) {
     let tool_name = json_str(payload, "tool_name")
         .or_else(|| json_path_str(payload, &["tool", "name"]))
@@ -828,12 +858,14 @@ fn collect_text_review_findings(
         // Strip before trimming to budget: escape bytes are not content, so
         // charging them against the budget both wastes it and risks cutting
         // mid-sequence, leaving the stripper a fragment it cannot recognize.
-        let text = truncate_end_bytes(&strip_ansi(&text), GROUNDED_REVIEW_MAX_TEXT_BYTES);
+        let text = strip_ansi(&text);
+        *dropped_bytes += text.len().saturating_sub(GROUNDED_REVIEW_MAX_TEXT_BYTES);
+        let text = truncate_end_bytes(&text, GROUNDED_REVIEW_MAX_TEXT_BYTES);
         if !looks_like_verifier_output(&tool_name, &command, &text) {
             continue;
         }
         let source = classify_text_review_source(&tool_name, &command, &text);
-        for line in text.lines().filter_map(review_failure_line) {
+        for (line, summary_dropped_bytes) in text.lines().filter_map(review_failure_line) {
             findings.push(GroundedReviewFinding {
                 source: source.clone(),
                 confidence: "verified",
@@ -850,10 +882,8 @@ fn collect_text_review_findings(
                         ))
                 ),
                 summary: line,
+                dropped_bytes: summary_dropped_bytes,
             });
-            if findings.len() >= GROUNDED_REVIEW_HARD_MAX_FINDINGS {
-                return;
-            }
         }
     }
 }
@@ -1009,7 +1039,7 @@ fn classify_text_review_source(tool_name: &str, command: &str, text: &str) -> St
     }
 }
 
-fn review_failure_line(line: &str) -> Option<String> {
+fn review_failure_line(line: &str) -> Option<(String, usize)> {
     let cleaned = clean_inline_text(line.to_string());
     if cleaned.is_empty() {
         return None;
@@ -1057,7 +1087,7 @@ fn review_failure_line(line: &str) -> Option<String> {
         || lower.contains("compilation failed")
         || lower.contains("build failed")
         || (lower.contains("harn-") && lower.contains(" error "));
-    matched.then(|| truncate_review_summary(&cleaned))
+    matched.then(|| truncate_review_summary_with_loss(&cleaned))
 }
 
 /// Detect a per-line pass marker emitted by common test runners so a passing
@@ -1156,8 +1186,18 @@ fn error_value_summary(value: &JsonValue) -> Option<String> {
 }
 
 fn truncate_review_summary(value: &str) -> String {
+    truncate_review_summary_with_loss(value).0
+}
+
+fn truncate_review_summary_with_loss(value: &str) -> (String, usize) {
     let cleaned = clean_inline_text(value.to_string());
-    truncate_end(&cleaned, GROUNDED_REVIEW_SUMMARY_CHARS)
+    let truncated = truncate_end(&cleaned, GROUNDED_REVIEW_SUMMARY_CHARS);
+    let dropped_bytes = cleaned.len().saturating_sub(truncated.len());
+    (truncated, dropped_bytes)
+}
+
+fn grounded_review_finding_source_bytes(finding: &GroundedReviewFinding) -> usize {
+    finding.source.len() + finding.provenance.len() + finding.summary.len()
 }
 
 fn dedupe_review_findings(findings: Vec<GroundedReviewFinding>) -> Vec<GroundedReviewFinding> {
@@ -1899,6 +1939,8 @@ mod tests {
         }
     }
 
+    mod grounded_review_truncation_tests;
+
     #[test]
     fn default_enabled_ids_are_derived_and_exclude_only_opt_in_providers() {
         let defaults: BTreeSet<&str> = canonical_default_enabled_ids().into_iter().collect();
@@ -2206,69 +2248,6 @@ mod tests {
         assert!(reminder
             .body
             .contains("/workspace/lib (mount_mode: extend, mounted_at: 2026-05-24T00:00:01Z)"));
-    }
-
-    #[test]
-    fn grounded_review_provider_fires_on_verified_tool_failure() {
-        let payload = json!({
-            "tool_name": "exec_command",
-            "tool": {"name": "exec_command", "args": {"cmd": "cargo check -p demo"}},
-            "result": {
-                "text": "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n"
-            },
-            "iteration": 2,
-        });
-        let reminder = GroundedReviewProvider
-            .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
-            .expect("verified compiler output should fire");
-
-        assert_eq!(reminder.tags[0], GROUNDED_REVIEW_ID);
-        assert_eq!(reminder.ttl_turns, Some(2));
-        assert_eq!(reminder.propagate, ReminderPropagate::None);
-        assert_eq!(reminder.role_hint, ReminderRoleHint::Developer);
-        assert!(reminder
-            .dedupe_key
-            .as_deref()
-            .is_some_and(|key| key.starts_with("grounded_review:PostToolUse:")));
-        assert!(reminder.body.contains("verified:typecheck"));
-        assert!(reminder.body.contains("cannot find value `missing`"));
-        assert!(reminder.body.contains("command=cargo check -p demo"));
-    }
-
-    #[test]
-    fn grounded_review_provider_surfaces_verifier_and_undefined_name_signals() {
-        let payload = json!({
-            "verifier_signals": [
-                {
-                    "name": "lint gate",
-                    "kind": "lint",
-                    "signal": "refine",
-                    "reason": "lint: forbidden pattern matched: unwrap\\(\\)",
-                },
-                {"name": "typecheck", "kind": "typecheck", "signal": "accept"},
-            ],
-            "result": {
-                "diagnostics": [
-                    {
-                        "message": "undefined name `missing_symbol`",
-                        "name": "missing_symbol",
-                        "line": 7,
-                    },
-                ],
-            },
-        });
-        let reminder = GroundedReviewProvider
-            .evaluate(&ctx(HookEvent::PostAgentTurn, payload, JsonValue::Null))
-            .expect("verifier and undefined-name findings should fire");
-
-        assert!(reminder.body.contains("verified:verifier:lint"));
-        assert!(reminder.body.contains("forbidden pattern matched"));
-        assert!(reminder.body.contains("verified:undefined_names"));
-        assert!(reminder.body.contains("line=7"));
-        assert!(
-            !reminder.body.contains("typecheck verifier returned accept"),
-            "accepted verifier signals should not become reminders"
-        );
     }
 
     #[test]
