@@ -2506,6 +2506,8 @@ components:
                   format: uri-reference
             persona_id:
               type: [string, "null"]
+            model_policy:
+              $ref: "#/components/schemas/SessionModelPolicy"
             root_session_id:
               type: [string, "null"]
             parent_session_id:
@@ -2535,6 +2537,27 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/Session"
+    SessionModelPolicy:
+      type: object
+      additionalProperties: false
+      required: [provider, model]
+      description: |
+        Concrete default model route for a session. Explicit per-call route and
+        reasoning options take precedence, followed by this session policy,
+        persona/script policy, and ambient runtime defaults.
+      properties:
+        provider:
+          type: string
+          minLength: 1
+          description: Registered concrete provider identifier.
+        model:
+          type: string
+          minLength: 1
+          description: Provider-native model identifier.
+        reasoning_effort:
+          type: string
+          enum: [none, minimal, low, medium, high, xhigh, max]
+          description: Optional provider-portable reasoning effort.
     CreateSessionRequest:
       type: object
       required: [workspace_id]
@@ -2543,6 +2566,11 @@ components:
           type: string
         persona_id:
           type: [string, "null"]
+        model_policy:
+          oneOf:
+            - $ref: "#/components/schemas/SessionModelPolicy"
+            - type: "null"
+          description: Optional session model default. Null is equivalent to omission.
         vault_ids:
           type: array
           items:
@@ -2566,6 +2594,11 @@ components:
       properties:
         summary:
           type: [string, "null"]
+        model_policy:
+          oneOf:
+            - $ref: "#/components/schemas/SessionModelPolicy"
+            - type: "null"
+          description: Replaces the full session model policy; null clears it.
         metadata:
           $ref: "#/components/schemas/Metadata"
     ForkSessionRequest:

@@ -978,7 +978,7 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
-
+    mod session_model_policy;
     #[tokio::test]
     async fn openapi_json_is_served_from_canonical_spec() {
         let dir = tempfile::tempdir().expect("tempdir");
