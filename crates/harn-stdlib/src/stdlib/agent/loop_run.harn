@@ -1221,7 +1221,7 @@ pub fn __agent_loop_run(message, session, initial_opts) {
             consecutive_failure_count,
           ),
         )
-        const post_turn_opts = turn_opts
+        const post_turn_opts = __sync_tool_search_state(turn_opts, dispatched.turn_opts)
           + {
           _session_successful_tools: successful_tools_seen,
           _session_rejected_tools: rejected_tools_seen,

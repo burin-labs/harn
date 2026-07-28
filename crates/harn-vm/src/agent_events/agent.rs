@@ -22,6 +22,57 @@ pub struct StagedWriteSummary {
     pub snapshot_id: Option<String>,
 }
 
+/// The dependency/effect phase assigned to one model-proposed tool call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolBatchPhase {
+    Observation,
+    Mutation,
+    ProcessVerification,
+    Terminal,
+    ProviderNative,
+}
+
+/// What the dispatcher did with one model-proposed tool call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolBatchDisposition {
+    Executed,
+    Deferred,
+    SkippedAfterBlockingResult,
+}
+
+/// Whether this call is new or is a model re-proposal of a deferred call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolBatchProposalStatus {
+    New,
+    ReProposed,
+}
+
+/// Auditable decision for one call in a model-proposed tool batch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolBatchDispositionReceipt {
+    pub schema: String,
+    pub batch_id: String,
+    pub source_batch_id: Option<String>,
+    pub call_index: usize,
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub phase: ToolBatchPhase,
+    pub selected_phase: ToolBatchPhase,
+    pub disposition: ToolBatchDisposition,
+    pub proposal_status: ToolBatchProposalStatus,
+    pub reason: String,
+    pub planned_at_ms: f64,
+    pub started_at_ms: Option<f64>,
+    pub finished_at_ms: Option<f64>,
+    pub duration_ms: Option<f64>,
+    pub blocking_tool_call_id: Option<String>,
+    pub blocking_tool_name: Option<String>,
+    pub blocking_mutation_status: Option<ToolMutationStatus>,
+}
+
 /// Events emitted by the agent loop. Some variants map 1:1 to ACP
 /// `sessionUpdate` variants; Harn-specific lifecycle events ride on the
 /// extension stream.
@@ -844,6 +895,12 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         receipt: Option<ToolCallReceipt>,
     },
+    /// Records the execute/defer/skip decision for every call in a
+    /// model-proposed tool batch.
+    ToolBatchDisposition {
+        session_id: String,
+        receipt: ToolBatchDispositionReceipt,
+    },
     /// Emitted by `std/cache::with_cache` (both the generic and LLM
     /// forms) when a cached lookup returns a hit. Carries the
     /// content-addressed key, the backend that served the value, and a
@@ -1086,6 +1143,7 @@ impl AgentEvent {
             | Self::CapabilityGap { session_id, .. }
             | Self::ToolFormatOverride { session_id, .. }
             | Self::ToolCallAudit { session_id, .. }
+            | Self::ToolBatchDisposition { session_id, .. }
             | Self::CacheHit { session_id, .. }
             | Self::CacheMiss { session_id, .. }
             | Self::CompositionStart { session_id, .. }

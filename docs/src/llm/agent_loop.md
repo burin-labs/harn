@@ -385,7 +385,7 @@ Same as `llm_call`, plus additional options:
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
-| `max_concurrent_tools` | int | `1` | Maximum in-flight tool calls from one planner turn. Results are recorded in emitted order even when calls complete out of order |
+| `max_concurrent_tools` | int | `1` | Maximum in-flight tool calls inside one independent effect phase from a planner turn. Results are recorded in emitted order even when calls complete out of order |
 | `intra_turn_resource_fail_fast` | bool | `true` | When an annotated mutating tool call fails, skip later sibling calls in the same assistant response that target the same declared path resource. Set `false` only for legacy dispatch-all behavior |
 | `prefetch_next_turn` | bool | `false` | Start the next planner turn after tool results are recorded while local/custom audit receipt sinks flush in the background. The loop drains those flushes before returning |
 | `tool_surface_narrowing` | bool/dict | `{enabled: true, window_turns: 5, mode: "safe"}` | Between turns, remove model-visible tools that were unused across the rolling window. Safe mode narrows unused `read_only` tools while keeping mutating/control/unknown tools by class; dict configs may also set `mode: "aggressive"`, `hard_keep`, `prune_classes`, `keep_classes`, and `unknown_tool_policy` |
@@ -427,6 +427,25 @@ Same as `llm_call`, plus additional options:
 | `skill_match` | dict | `{strategy: "metadata", top_n: 1, sticky: true}` | Match configuration — `strategy` (`"metadata"` \| `"host"` \| `"embedding"`), `top_n`, `sticky` |
 | `working_files` | list\|string | `[]` | Paths that feed `paths:` glob auto-trigger in the metadata matcher and ride along as a hint to host-delegated matchers |
 | `mcp_servers` | list | nil | MCP servers to connect for this loop. Harn calls `tools/list` once per server, adds discovered tools as `<server>__<tool>`, and dispatches matching tool calls through `tools/call` |
+
+### Effect-phased tool batches
+
+The shared dispatcher classifies local calls from tool annotations into
+observation, mutation, process/verification, and terminal phases. A response
+that crosses a phase boundary executes only its maximal first-phase prefix and
+returns synthetic deferred results for the suffix. The next inference therefore
+sees the prefix results before it can re-propose later work. Calls inside an
+independent read-only prefix still fan out up to `max_concurrent_tools`, and one
+tool call containing several atomic same-resource operations remains one call.
+
+Every proposed call emits a `tool_batch_disposition` event with a typed
+`harn.agent_tool_batch_disposition.v1` receipt. The receipt records its phase,
+source position, executed/deferred/skipped disposition, whether it was
+re-proposed from the prior deferred suffix, and monotonic execution timing.
+A failed structurally declared mutation whose structured mutation status is not
+`applied` blocks re-proposed verification and terminal phases until the model
+observes or corrects the state. Provider-executed tools retain their
+provider-native batch contract.
 
 ### Recurring diagnostic signal
 

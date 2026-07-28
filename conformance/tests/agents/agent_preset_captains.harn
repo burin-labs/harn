@@ -118,6 +118,7 @@ pipeline default() {
           {id: "block1", name: "delete", arguments: {path: "/tmp/y"}},
         ],
       },
+      {tool_calls: [{id: "block1-reproposed", name: "delete", arguments: {path: "/tmp/y"}}]},
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->

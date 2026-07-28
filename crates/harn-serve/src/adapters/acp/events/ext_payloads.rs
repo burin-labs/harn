@@ -200,3 +200,26 @@ pub(super) fn capability_gap(event: &AgentEvent) -> serde_json::Value {
     }
     payload
 }
+
+/// Middleware audit metadata and its optional privacy-preserving receipt.
+pub(super) fn tool_call_audit(event: &AgentEvent) -> serde_json::Value {
+    let AgentEvent::ToolCallAudit {
+        tool_call_id,
+        tool_name,
+        audit,
+        receipt,
+        ..
+    } = event
+    else {
+        return serde_json::json!({});
+    };
+    let mut payload = serde_json::json!({
+        "toolCallId": tool_call_id,
+        "toolName": tool_name,
+        "audit": audit,
+    });
+    if let Some(receipt) = receipt {
+        payload["receipt"] = serde_json::to_value(receipt).expect("receipt serializes");
+    }
+    payload
+}

@@ -4367,7 +4367,14 @@ fans out (`max_concurrent_tools > 1`) and needs to reorder completions
 back to source order.
 
 For multi-tool turns, set `max_concurrent_tools: N` on `agent_loop` to
-fan out dispatch across siblings (capped at N). Middleware-backed
+fan out dispatch across siblings inside one independent effect phase (capped at
+N). Tool annotations classify calls as observation, mutation,
+process/verification, terminal, or provider-native. A response that crosses a
+local effect boundary executes only its maximal first-phase prefix and returns
+typed deferred results for the suffix, forcing the next inference to observe
+the prefix results before re-proposing later calls. Each proposal emits a
+`tool_batch_disposition` event with phase, disposition, re-proposal, and
+monotonic timing fields. Middleware-backed
 dispatch uses `parallel settle`; the host-batch path uses the same cap.
 Each middleware sibling invokes its own caller chain in a fresh scope,
 so `audit.layers` histories don't cross-talk. Results inject in source
