@@ -13,6 +13,11 @@ pub import {
   provider_tool_probe_campaign_runtime_revision_requirement_error,
   provider_tool_probe_campaign_select_behaviors,
 } from "./provider_tool_probe_campaign/catalog"
+import {
+  __ensure_dir,
+  __load_env_file,
+  __target_runtime_context,
+} from "./provider_tool_probe_campaign/env"
 pub import {
   provider_tool_probe_campaign_env_file,
   provider_tool_probe_campaign_env_from_dotenv_text,
@@ -20,17 +25,25 @@ pub import {
 } from "./provider_tool_probe_campaign/env"
 pub import {
   provider_tool_probe_campaign_artifact_path,
+  provider_tool_probe_campaign_case_status,
   provider_tool_probe_campaign_missing_env_keys,
+  provider_tool_probe_campaign_probe_telemetry,
+  provider_tool_probe_campaign_scorecard_inputs,
+  provider_tool_probe_campaign_source_receipt,
+  provider_tool_probe_campaign_write_scorecard,
 } from "./provider_tool_probe_campaign/execute"
 pub import {
   provider_tool_probe_campaign_planned_cells,
   provider_tool_probe_campaign_planned_cells_sliced_with_options,
   provider_tool_probe_campaign_planned_cells_with_options,
 } from "./provider_tool_probe_campaign/plan"
+import { __live_cells } from "./provider_tool_probe_campaign/report"
 pub import {
   provider_tool_probe_campaign_markdown,
+  provider_tool_probe_campaign_observed_spend,
   provider_tool_probe_campaign_report,
 } from "./provider_tool_probe_campaign/report"
+import "./provider_tool_probe_campaign/support"
 pub import {
   ProviderToolProbeBehavior,
   ProviderToolProbeCampaignReport,
@@ -49,7 +62,7 @@ const DEFAULT_OUTPUT_DIR = ".harn-runs/provider-tool-probe-campaign"
 fn main(harness: Harness) {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--require-runtime-revision REVISION] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--shard-count N --shard-index I] [--max-probes N] [--include-expensive] [--live] [--markdown]",
+      "usage: harn run scripts/provider_tool_probe_campaign.harn -- [--route provider:model | --catalog-routes] [--providers-config PATH] [--require-runtime-revision REVISION] [--behavior ID|CATEGORY|RUNNER] [--mode both|non-streaming|streaming] [--repeat N] [--shard-count N --shard-index I] [--max-probes N] [--max-cost-usd USD] [--include-expensive] [--live] [--markdown]",
     )
     return nil
   }
@@ -85,6 +98,15 @@ fn main(harness: Harness) {
   const shard_count = parsed?.shard_count ?? 1
   const shard_index = parsed?.shard_index ?? 0
   const max_probes = parsed?.max_probes ?? 0
+  const max_cost_usd = parsed?.max_cost_usd ?? 10.0
+  if repeat <= 0 {
+    harness.stdio.eprintln("--repeat must be >= 1")
+    exit(2)
+  }
+  if timeout_secs <= 0 {
+    harness.stdio.eprintln("--timeout-secs must be >= 1")
+    exit(2)
+  }
   if shard_count <= 0 {
     harness.stdio.eprintln("--shard-count must be >= 1")
     exit(2)
@@ -95,6 +117,10 @@ fn main(harness: Harness) {
   }
   if max_probes < 0 {
     harness.stdio.eprintln("--max-probes must be >= 0")
+    exit(2)
+  }
+  if max_cost_usd <= 0.0 {
+    harness.stdio.eprintln("--max-cost-usd must be > 0")
     exit(2)
   }
   const target = __target_runtime_context(harness, parsed, live, catalog_routes)
@@ -138,6 +164,7 @@ fn main(harness: Harness) {
       shard_count,
       shard_index,
       max_probes,
+      max_cost_usd,
     )
   } else {
     provider_tool_probe_campaign_planned_cells_sliced_with_options(
@@ -152,6 +179,19 @@ fn main(harness: Harness) {
     )
   }
   const cells = cell_plan.cells ?? []
+  const scorecard_artifacts = if live {
+    provider_tool_probe_campaign_write_scorecard(
+      harness,
+      harn_bin,
+      cells,
+      output_dir,
+      runtime,
+      catalog_receipt,
+      env,
+    )
+  } else {
+    {}
+  }
   const report = provider_tool_probe_campaign_report(
     routes,
     behaviors,
@@ -165,6 +205,8 @@ fn main(harness: Harness) {
     runtime,
     catalog_receipt,
     cell_plan.slice ?? {},
+    max_cost_usd,
+    scorecard_artifacts,
   )
   harness.fs.write_text(report.artifacts.report_json, json_stringify_pretty(report) + "\n")
   harness.fs.write_text(
@@ -177,7 +219,12 @@ fn main(harness: Harness) {
     harness.stdio.println(json_stringify_pretty(report))
   }
   const summary = report.summary
-  if live && ((summary.fail ?? 0) > 0 || (summary.error ?? 0) > 0) {
+  if live
+    && ((summary.fail ?? 0) > 0 || (summary.error ?? 0) > 0
+    || report.spend?.budget_status
+    == "stopped_unpriced"
+    || report.artifacts?.scorecard_status
+    != "complete") {
     exit(1)
   }
   return nil

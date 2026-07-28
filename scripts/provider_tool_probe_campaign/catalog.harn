@@ -680,6 +680,39 @@ pub fn provider_tool_probe_campaign_behaviors() -> list<ProviderToolProbeBehavio
       cheap: true,
     },
     {
+      id: "no_tool_answer_or_refusal",
+      category: "completion",
+      description:
+        "A direct answer or refusal is emitted without a spurious tool call when no tool is appropriate.",
+      runner: "provider_tool_probe",
+      probe_case: "no_tool_answer_or_refusal",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text"],
+      cheap: true,
+    },
+    {
+      id: "unavailable_tool_repair",
+      category: "repair",
+      description:
+        "The route repairs or rejects an unavailable tool request without inventing unsafe arguments.",
+      runner: "provider_tool_probe",
+      probe_case: "unavailable_tool_repair",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text"],
+      cheap: true,
+    },
+    {
+      id: "done_sentinel",
+      category: "completion",
+      description:
+        "The route emits the deterministic agent completion sentinel without a tool call.",
+      runner: "provider_tool_probe",
+      probe_case: "done_sentinel",
+      modes: ["non-streaming"],
+      tool_formats: ["native", "json", "text"],
+      cheap: true,
+    },
+    {
       id: "harmony_control_tokens_in_content",
       category: "parser",
       description:
