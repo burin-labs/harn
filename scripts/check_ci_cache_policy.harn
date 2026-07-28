@@ -776,13 +776,24 @@ pub fn windows_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string
 /** Keep the sole native-macOS cache writer byte-compatible with its restore-only PR consumer. */
 pub fn macos_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> {
   const source_key = "$" + "{{ " + NATIVE_SOURCE_FINGERPRINT_BODY + " }}"
-  return native_shared_cache_errors(
+  let errors = native_shared_cache_errors(
     ci_workflow,
     nightly_workflow,
     "macos",
     MACOS_CACHE_KEY,
     source_key,
   )
+  const lint_steps = (ci_workflow?.jobs?.macos?.steps ?? []).filter(
+    { step -> trim(step?.run ?? "") == "./scripts/ci/run_rust_lint_lane.sh" },
+  )
+    .to_list()
+  if len(lint_steps) != 1 {
+    errors = errors
+      + [
+      "ci.yml:macos must route strict Clippy through the cache-safe Rust lint entrypoint",
+    ]
+  }
+  return errors
 }
 
 fn persistent_sccache_job_errors(
@@ -981,6 +992,16 @@ fn colocated_rust_proof_errors(workflow) -> list<string> {
   return errors
 }
 
+fn strict_clippy_entrypoint_errors(rust_job) -> list<string> {
+  const lint_step = step_by_name(rust_job?.steps ?? [], "Run Rust lint")
+  if trim(lint_step?.if ?? "") == "matrix.kind == 'lint'"
+    && trim(lint_step?.run ?? "")
+    == "./scripts/ci/run_rust_lint_lane.sh" {
+    return []
+  }
+  return ["ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint"]
+}
+
 /** Validate the persistent local sccache action and every authorized heavy CI consumer. */
 pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
   let errors = remote_sccache_errors(action, SCCACHE_ACTION_PATH)
@@ -1063,6 +1084,7 @@ pub fn ci_sccache_policy_errors(action, workflow) -> list<string> {
       "ci.yml:rust-checks must keep compile lanes on distinct policy-sized persistent caches",
     ]
   }
+  errors = errors + strict_clippy_entrypoint_errors(rust_job)
   const build_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
   // Memory-bounded compile fan-out: 4 rustc jobs on the 8-vCPU hosted
   // runners, 12 on the big self-hosted workers (24 cores / 61 GB).

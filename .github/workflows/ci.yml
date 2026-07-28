@@ -1560,8 +1560,10 @@ jobs:
         # `BTreeMap` import in `secret_store_os_native.rs` — hid). Clippy
         # subsumes a plain `cargo build`/`check` and adds the lint surface;
         # `-D warnings` (from the job env) promotes every warning to a hard
-        # failure so it fails the PR instead of the release.
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # failure so it fails the PR instead of the release. The shared lint
+        # entrypoint invalidates restored workspace units first so Cargo cannot
+        # call them fresh without replaying their diagnostics.
+        run: ./scripts/ci/run_rust_lint_lane.sh
       - name: Verify canonical package hash parity
         run: cargo test -p harn-modules canonical_content_hash_projection_is_platform_independent
       - name: Typecheck generated Swift protocol bindings

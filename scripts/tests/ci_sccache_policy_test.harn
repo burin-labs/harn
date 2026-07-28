@@ -120,6 +120,11 @@ fn workflow() {
         steps: rust_with_flags.steps
           + [
           {
+            name: "Run Rust lint",
+            if: "matrix.kind == 'lint'",
+            run: "./scripts/ci/run_rust_lint_lane.sh",
+          },
+          {
             name: "Build portable workspace test archive",
             if:
               "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
@@ -268,6 +273,36 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(task) {
   assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
   assert(
     errors.contains("ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"),
+  )
+}
+
+@test
+pipeline test_rejects_strict_clippy_cache_safety_bypass(task) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-checks"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {
+        ...rust_job,
+        steps: rust_job.steps.map(
+          { step ->
+            if step?.name != "Run Rust lint" {
+              return step
+            }
+            return {...step, run: "cargo clippy --workspace --all-targets -- -D warnings"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_sccache_policy_errors(sccache_action(), invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint",
+    ),
   )
 }
 
