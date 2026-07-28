@@ -1,0 +1,80 @@
+// Append-owned metadata and exact reader cursors for std/coordination.
+import { filter_nil } from "std/collections"
+
+fn dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn nonnegative_int(value, fallback: int, label: string) -> int {
+  if value == nil {
+    return fallback
+  }
+  const parsed = to_int(value)
+  if parsed == nil || parsed < 0 {
+    throw "std/coordination: " + label + " must be a non-negative int"
+  }
+  return parsed
+}
+
+fn since_timestamp(options) {
+  const value = dict(options)?.since_ts
+  if value == nil {
+    return nil
+  }
+  if type_of(value) != "string" || trim(value) == "" {
+    throw "std/coordination: since_ts must be an RFC3339 timestamp"
+  }
+  return date_parse(value)
+}
+
+pub fn reject_write(message, options) -> nil {
+  const msg = dict(message)
+  const opts = dict(options)
+  if msg?.ts != nil || opts?.ts != nil || msg?.created_at != nil || opts?.created_at != nil {
+    throw "std/coordination: authoritative timestamps are runtime-owned; store imported source timestamps under data.claimed_ts"
+  }
+  if msg?.seq != nil || opts?.seq != nil {
+    throw "std/coordination: sequence numbers are runtime-owned"
+  }
+}
+
+pub fn message_from_event(event) -> dict {
+  const row = dict(event)
+  const message = dict(row?.payload)
+  const ts = row?.emitted_at?.at
+  const seq = row?.cursor ?? row?.event_id
+  return filter_nil(message + {ts: ts, seq: seq, created_at: message?.created_at ?? ts})
+}
+
+pub fn read_messages(channel_name: string, channel_options: dict, options = nil) -> list {
+  const opts = dict(options)
+  const since = since_timestamp(opts)
+  const events = channel_events(channel_name, channel_options)
+  const limit = if opts?.limit == nil {
+    nil
+  } else {
+    nonnegative_int(opts.limit, 0, "limit")
+  }
+  if limit == 0 {
+    return []
+  }
+  let out = []
+  for event in events {
+    if since != nil && date_parse(event.emitted_at.at) <= since {
+      continue
+    }
+    const message = message_from_event(event)
+    if opts?.include_events ?? false {
+      out = out + [{event: event + {payload: message}, message: message}]
+    } else {
+      out = out + [message]
+    }
+    if limit != nil && len(out) >= limit {
+      break
+    }
+  }
+  return out
+}

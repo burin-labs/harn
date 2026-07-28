@@ -2563,6 +2563,10 @@ const receipt = coord_post(
   {id: "release-claim", session_id: "agent-session-1"},
 )
 const messages = coord_read("session", "release", {session_id: "agent-session-1"})
+const newer = coord_read("session", "release", {
+  session_id: "agent-session-1",
+  since_seq: receipt.message.seq,
+})
 const stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
 const memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
 const request = coord_send("workspace", "release", "build-agent", {
@@ -2583,6 +2587,13 @@ and includes `task_id` in the channel name. Message kinds are `status`, `claim`,
 messages without acknowledging; `coord_ack` advances the consumer cursor after
 processing. `coord_post` only writes the ledger; `coord_remember` is explicit
 opt-in when a coordination message should become recallable memory.
+
+Every normalized coordination message has runtime-owned `ts` (the signed UTC
+channel append time) and `seq` (the monotonic per-room channel cursor).
+`coord_read` accepts exclusive `since_seq` and `since_ts` cursors. Never supply
+`ts`, `created_at`, or `seq` to a write; imported source timestamps belong in
+message data such as `data.claimed_ts`. Existing rows are projected from their
+channel event metadata without a history migration.
 
 Subscribe to channel emits with a `channel.emit` trigger (provider
 `channel`). `match.events` accepts `"channel:<name>"` selectors:

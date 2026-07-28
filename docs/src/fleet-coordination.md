@@ -84,10 +84,11 @@ text.
 
 ### Runtime-owned time
 
-The fleet helpers reject `created_at` and `ts` options. Event order and liveness
-use the channel event's signed `emitted_at.at_ms`, not a caller timestamp. A
-source timestamp imported from another system is metadata and must not become
-the authoritative fleet clock.
+The coordination write path rejects caller-supplied `created_at`, `ts`, and
+`seq`; fleet helpers enforce the same boundary before delegating. Event order
+and liveness use the channel event's signed `emitted_at.at_ms`, not a caller
+timestamp. A source timestamp imported from another system is metadata (for
+example, `data.claimed_ts`) and must not become the authoritative fleet clock.
 
 Actor fields are attribution, not cryptographic identity. Hosts must not treat
 an `agent` string alone as authentication.

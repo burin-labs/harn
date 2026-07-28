@@ -267,6 +267,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "memory" => "stdlib/stdlib_memory.harn",
     "session-store" => "stdlib/stdlib_session_store.harn",
     "coordination" => "stdlib/stdlib_coordination.harn",
+    "coordination/append_metadata" => "stdlib/coordination/append_metadata.harn",
     "fleet/coordination" => "stdlib/fleet/coordination.harn",
     "postgres" => "stdlib/stdlib_postgres.harn",
     "postgres/query" => "stdlib/postgres/query.harn",
