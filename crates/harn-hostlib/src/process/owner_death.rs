@@ -442,7 +442,7 @@ fn wait_for_payload_while_reaping_adopted(payload: Child) -> io::Result<ExitStat
     let _payload = payload;
     loop {
         let mut status = 0;
-        let waited = unsafe { libc::waitpid(-1, &mut status, 0) };
+        let waited = unsafe { libc::waitpid(-1, &raw mut status, 0) };
         if waited == payload_pid {
             return Ok(ExitStatus::from_raw(status));
         }
