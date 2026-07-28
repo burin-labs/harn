@@ -165,22 +165,17 @@ pub fn preserve_process_owner_token(command: &mut std::process::Command) {
     }
 }
 
-/// Return processes still carrying the current native owner-lifetime marker.
+/// Return live processes carrying `token` as an operation or owner marker.
 ///
-/// The current process is excluded. Conformance uses this as a fail-closed
-/// teardown audit; the guardian remains the authority that cleans the cohort
-/// if the runner itself is interrupted or killed. The clean-exit audit must
-/// not consult the append-only process-group journal: exited groups can be
-/// reused by unrelated processes during a large suite. The journal is safe
-/// only for the guardian's abrupt-owner-death path, where reclaiming the whole
-/// lifetime takes precedence over a normal terminal report.
-pub fn current_process_owner_survivors() -> Vec<ProcessCleanupChild> {
+/// The current process is excluded. This audit deliberately does not consult
+/// the append-only process-group journal: exited groups can be reused by
+/// unrelated processes during a large suite. The journal is safe only for the
+/// guardian's abrupt-owner-death path, where reclaiming the whole lifetime
+/// takes precedence over a normal terminal report.
+pub fn process_owner_survivors(token: &str) -> Vec<ProcessCleanupChild> {
     #[cfg(unix)]
     {
-        let Ok(token) = std::env::var(PROCESS_OWNER_TOKEN_ENV) else {
-            return Vec::new();
-        };
-        let mut survivors = cleanup_token_processes(&token)
+        let mut survivors = cleanup_token_processes(token)
             .into_iter()
             .filter(|child| child.pid != std::process::id())
             .collect::<Vec<_>>();
@@ -189,50 +184,9 @@ pub fn current_process_owner_survivors() -> Vec<ProcessCleanupChild> {
     }
     #[cfg(not(unix))]
     {
+        let _ = token;
         Vec::new()
     }
-}
-
-/// Reap every process carrying the current native owner-lifetime marker.
-///
-/// This is the fail-closed half of [`current_process_owner_survivors`]. It is
-/// used for clean suite teardown, so helpers first receive SIGTERM and get the
-/// normal process grace period to close servers and their own containment.
-/// Only helpers that remain receive SIGKILL. Abrupt owner death is handled by
-/// the native guardian and remains immediately fail-closed.
-pub fn kill_current_process_owner_survivors() -> ProcessCleanupReport {
-    #[cfg(unix)]
-    {
-        if std::env::var(PROCESS_OWNER_TOKEN_ENV).is_err() {
-            return ProcessCleanupReport::default();
-        }
-        let mut report = signal_current_process_owner_survivors(15);
-        wait_for_report_children_to_exit(&report, SUBPROCESS_TERM_GRACE);
-        report.refresh_survivor_status();
-        if current_process_owner_survivors().is_empty() {
-            return report;
-        }
-        report.merge(signal_current_process_owner_survivors(9));
-        wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
-        report.refresh_survivor_status();
-        report
-    }
-    #[cfg(not(unix))]
-    {
-        ProcessCleanupReport::default()
-    }
-}
-
-#[cfg(unix)]
-fn signal_current_process_owner_survivors(signal: i32) -> ProcessCleanupReport {
-    let mut report = ProcessCleanupReport::for_signal(None, signal);
-    let current_pgid = unsafe { libc::getpgrp() };
-    let survivors = current_process_owner_survivors();
-    for child in survivors {
-        signal_pid_preserving_group(child.pid, current_pgid, signal);
-        report.merge_child(child.with_signal(signal));
-    }
-    report
 }
 
 /// Structural evidence collected when Harn kills a child process tree.

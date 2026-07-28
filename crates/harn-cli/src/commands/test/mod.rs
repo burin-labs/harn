@@ -21,7 +21,6 @@ use crate::test_runner;
 use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness, ExecError};
 
 mod conformance;
-mod process_lifetime;
 mod reporting;
 #[cfg(feature = "hostlib")]
 mod supervisor;
