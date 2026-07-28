@@ -4,6 +4,7 @@ These examples show ready-to-customize `[[triggers]]` shapes. Each directory
 contains `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` unless noted:
 
 - `cron-daily-digest/`: cron schedule + local handler
+- `provider-catalog-notice/`: scheduled neutral provider notice adapter + draft-PR workflow
 - `scheduled-eval-suite/`: cron schedule + direct eval-pack handler
 - `eval-suite-regression-notifier/`: scheduled eval run + regression gate + Slack-on-flip notification
 - `context-maintenance/`: lifecycle hooks for non-blocking context refresh and crystallization

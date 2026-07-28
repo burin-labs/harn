@@ -1,0 +1,43 @@
+import "std/triggers"
+
+/**
+ * Invoke the transport-neutral workflow after an external adapter writes one
+ * ProviderNotice JSON file. The configured repository must be a dedicated,
+ * clean worktree; the workflow itself retains the fail-closed validation.
+ */
+pub fn run_provider_catalog_notice(_event: TriggerEvent) -> dict {
+  const root = harness.env.get_or("HARN_PROVIDER_NOTICE_WORKTREE", "")
+  const notice = harness.env.get_or("HARN_PROVIDER_NOTICE_FILE", "")
+  if root == "" || notice == "" {
+    return {
+      status: "skipped",
+      reason: "set HARN_PROVIDER_NOTICE_WORKTREE and HARN_PROVIDER_NOTICE_FILE",
+    }
+  }
+  let args = [
+    "run",
+    path_join(root, "scripts/provider_catalog_notice.harn"),
+    "--",
+    "--notice",
+    notice,
+    "--repo-root",
+    root,
+    "--apply",
+    "--open-pr",
+  ]
+  const extraction = harness.env.get_or("HARN_PROVIDER_NOTICE_EXTRACTION_FILE", "")
+  if extraction != "" {
+    args = args + ["--extraction", extraction]
+  }
+  const result = harness.process.spawn_captured({cmd: "harn", args: args, cwd: root})
+  return {
+    status: if result.exit_code == 0 {
+      "completed"
+    } else {
+      "failed"
+    },
+    exit_code: result.exit_code,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  }
+}
