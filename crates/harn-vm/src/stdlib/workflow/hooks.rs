@@ -71,9 +71,15 @@ pub(super) fn register_tool_hook_builtin(
     let post: Option<PostHookFn> = max_output.map(|max| {
         Arc::new(move |_name: &str, result: &str| {
             if result.len() > max {
-                crate::orchestration::PostToolAction::Modify(
-                    crate::orchestration::microcompact_tool_output(result, max),
-                )
+                let compacted = crate::orchestration::microcompact_tool_output_result(result, max);
+                if compacted.dropped_bytes > 0 {
+                    crate::orchestration::PostToolAction::Truncate {
+                        result: compacted.text,
+                        dropped_bytes: compacted.dropped_bytes,
+                    }
+                } else {
+                    crate::orchestration::PostToolAction::Modify(compacted.text)
+                }
             } else {
                 crate::orchestration::PostToolAction::Pass
             }

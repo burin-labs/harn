@@ -103,6 +103,67 @@ anchors = ["crates/harn-stdlib/src/stdlib/agent/chat.harn"]
 test = "conformance/tests/scenarios/agent_loud_boundary_events.harn"
 notes = "Emitted from Harn through the allowlisted `boundary_failure` host event, so a `.harn` boundary and a Rust one land on the same wire with the same vocabulary."
 
+[[boundary]]
+id = "post_tool_output"
+title = "PostToolUse output shaping"
+drops = "Bytes a PostToolUse hook explicitly reports removing before the rendered tool result reaches the next model turn."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = [
+  "crates/harn-vm/src/orchestration/hooks.rs",
+  "crates/harn-vm/src/stdlib/workflow/hooks.rs",
+  "crates/harn-vm/src/llm/agent_host_primitives.rs",
+]
+test = "crates/harn-vm/src/llm/agent_host_primitives/tool_output_truncation_tests.rs"
+notes = "The hook result carries cumulative dropped_bytes structurally. A later hook can append enough text to restore the original length without erasing the earlier truncation fact; legacy string/result rewrites remain modifications and never guess at data loss."
+
+[[boundary]]
+id = "transcript_seed"
+title = "Transcript JSONL seed cap"
+drops = "Oldest reconstructed messages omitted by agent_session_seed_from_jsonl truncate_to_last."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/llm/transcript_seed.rs"]
+test = "crates/harn-vm/src/llm/transcript_seed.rs"
+notes = "The event carries the number of omitted messages and their serialized byte count. It fires before the destination session exists, so the event has no session id."
+
+[[boundary]]
+id = "session_transcript"
+title = "Live session transcript truncate and trim"
+drops = "Message content removed by explicit prefix-retaining truncate or suffix-retaining trim operations."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/agent_sessions/truncation.rs"]
+test = "crates/harn-vm/src/agent_sessions_tests/truncation_boundary_tests.rs"
+notes = "Reports only after the replacement transcript is accepted by the budget boundary, outside the session RefCell borrow. Public truncate/trim operations propagate budget rejection as an error rather than confusing it with data loss or an unknown session."
+
+[[boundary]]
+id = "grounded_review"
+title = "Grounded-review evidence shaping"
+drops = "Verifier text beyond the scan byte cap, finding summaries beyond the summary cap, and findings beyond the configured count cap."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = ["crates/harn-vm/src/llm/reminder_providers.rs"]
+test = "crates/harn-vm/src/llm/reminder_providers/tests/grounded_review_truncation_tests.rs"
+notes = "One coalesced event per provider evaluation carries the cumulative exact byte count across all caps."
+
+[[boundary]]
+id = "agent_prompt_content"
+title = "Agent stdlib prompt-content caps"
+drops = "Command stdout/stderr and parse tails, probe evidence, pin reminder bodies, verification summaries, and simulated-user transcript context clipped before an agent consumes them."
+was_silent = true
+event = "agent_event:boundary_failure"
+anchors = [
+  "crates/harn-stdlib/src/stdlib/agent/truncation.harn",
+  "crates/harn-stdlib/src/stdlib/stdlib_command.harn",
+  "crates/harn-stdlib/src/stdlib/verification_core.harn",
+  "crates/harn-stdlib/src/stdlib/agent/probe.harn",
+  "crates/harn-stdlib/src/stdlib/agent/pins.harn",
+  "crates/harn-stdlib/src/stdlib/agent/user.harn",
+]
+test = "conformance/tests/scenarios/agent_truncation_boundaries.harn"
+notes = "Pure truncate_text remains side-effect free for non-agent consumers. Each model-facing owner reports through boundary_failure at the point it chooses the cap."
+
 # Boundaries audited under #5142 and found already loud. They do not construct
 # BoundaryFailure — they carry their own typed event, which is the older half of
 # the same invariant — so they are recorded here rather than registered above.

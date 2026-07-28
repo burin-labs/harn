@@ -81,8 +81,46 @@ async fn post_tool_hook_modifies_result() {
         .await
         .expect("hook result");
     clear_tool_hooks();
-    assert_eq!(result, "[REDACTED]");
-    assert_eq!(clean, "clean output");
+    assert_eq!(result.text, "[REDACTED]");
+    assert_eq!(result.dropped_bytes, 0);
+    assert_eq!(clean.text, "clean output");
+    assert_eq!(clean.dropped_bytes, 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn post_tool_hook_preserves_explicit_truncation_across_later_appends() {
+    clear_tool_hooks();
+    register_tool_hook(ToolHook {
+        pattern: "exec".to_string(),
+        pre: None,
+        post: Some(Arc::new(|_name, _result: &str| PostToolAction::Truncate {
+            result: "short".to_string(),
+            dropped_bytes: 7,
+        })),
+    });
+    register_tool_hook(ToolHook {
+        pattern: "exec".to_string(),
+        pre: None,
+        post: Some(Arc::new(|_name, result: &str| {
+            PostToolAction::Modify(format!("{result} +seven"))
+        })),
+    });
+
+    let result = run_post_tool_hooks("exec", &serde_json::json!({}), "twelve bytes")
+        .await
+        .expect("hook result");
+    clear_tool_hooks();
+
+    assert_eq!(result.text, "short +seven");
+    assert_eq!(
+        result.text.len(),
+        "twelve bytes".len(),
+        "the regression requires a zero net length change"
+    );
+    assert_eq!(
+        result.dropped_bytes, 7,
+        "later appended text must not erase the earlier truncation fact"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

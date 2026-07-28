@@ -602,13 +602,20 @@ impl AcpServer {
         if !harn_vm::agent_sessions::exists(&session_id) {
             harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
         }
-        let Some(result) = harn_vm::agent_sessions::truncate(&session_id, keep_first) else {
-            self.send_error(
-                id,
-                -32000,
-                &format!("Failed to truncate session: {session_id}"),
-            );
-            return;
+        let result = match harn_vm::agent_sessions::truncate(&session_id, keep_first) {
+            Ok(Some(result)) => result,
+            Ok(None) => {
+                self.send_error(
+                    id,
+                    -32000,
+                    &format!("Failed to truncate session: {session_id}"),
+                );
+                return;
+            }
+            Err(message) => {
+                self.send_error(id, -32000, &message);
+                return;
+            }
         };
 
         let mut update = serde_json::json!({

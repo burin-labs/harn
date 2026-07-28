@@ -6,7 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
 use crate::value::{VmError, VmValue};
+
+mod tool_output;
 use crate::vm::AsyncBuiltinCtx;
+pub use tool_output::{
+    microcompact_tool_output, microcompact_tool_output_result, MicrocompactedToolOutput,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompactStrategy {
@@ -733,36 +738,6 @@ pub(super) fn is_failure_signal_line(line: &str) -> bool {
         || assertion_value
         || rustc_continuation
         || failing_line_marker
-}
-
-/// Microcompact a tool result: if it exceeds `max_chars`, keep the first and
-/// last portions with a snip marker in between.
-pub fn microcompact_tool_output(output: &str, max_chars: usize) -> String {
-    if output.len() <= max_chars || max_chars < 200 {
-        return output.to_string();
-    }
-    let diagnostic_lines = output
-        .lines()
-        .filter(|line| is_failure_signal_line(line))
-        .take(32)
-        .collect::<Vec<_>>();
-    if !diagnostic_lines.is_empty() {
-        let diagnostics = diagnostic_lines.join("\n");
-        let budget = max_chars.saturating_sub(diagnostics.len() + 64);
-        let keep = budget / 2;
-        if keep >= 80 && output.len() > keep * 2 {
-            let head = snap_to_line_end(output, keep);
-            let tail = snap_to_line_start(output, output.len().saturating_sub(keep));
-            return format!(
-                "{head}\n\n[diagnostic lines preserved]\n{diagnostics}\n\n[... output compacted ...]\n\n{tail}"
-            );
-        }
-    }
-    let keep = max_chars / 2;
-    let head = snap_to_line_end(output, keep);
-    let tail = snap_to_line_start(output, output.len().saturating_sub(keep));
-    let snipped = output.len().saturating_sub(head.len() + tail.len());
-    format!("{head}\n\n[... {snipped} characters snipped ...]\n\n{tail}")
 }
 
 /// Snap a byte offset to the nearest preceding line boundary (end of a complete line).

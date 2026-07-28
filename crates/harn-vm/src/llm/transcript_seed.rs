@@ -117,9 +117,16 @@ pub(crate) fn load_seeded_transcript_from_jsonl(
         messages = drop_tool_payloads(&messages);
     }
     let mut truncated = false;
+    let mut dropped_message_count = 0;
+    let mut dropped_bytes = 0;
     if let Some(keep_last) = options.truncate_to_last {
         let start = messages.len().saturating_sub(keep_last);
         truncated = start > 0;
+        dropped_message_count = start;
+        dropped_bytes = messages[..start]
+            .iter()
+            .map(|message| message.to_string().len())
+            .sum();
         messages = messages.into_iter().skip(start).collect();
     }
 
@@ -131,6 +138,16 @@ pub(crate) fn load_seeded_transcript_from_jsonl(
             &validation_state,
             options,
         )?;
+    }
+    if truncated {
+        crate::boundary::BoundaryFailure::new(
+            crate::boundary::BoundaryId::TranscriptSeed,
+            crate::boundary::BoundaryFailureKind::Truncated,
+            "transcript seed retained only the requested trailing messages",
+        )
+        .with_count(dropped_message_count)
+        .with_dropped_bytes(dropped_bytes)
+        .report();
     }
 
     Ok(SeededTranscript {
@@ -549,6 +566,45 @@ mod tests {
         assert_eq!(seeded.messages.len(), 2);
         assert_eq!(seeded.messages[0]["content"], "hello");
         assert_eq!(seeded.messages[1]["content"], "hi");
+    }
+
+    #[test]
+    fn truncating_seed_emits_typed_boundary_with_exact_dropped_bytes() {
+        let captured = crate::boundary::tests::CapturedEvents::install();
+        let dropped = json!({"role": "user", "content": "oldest"});
+        let expected_dropped_bytes = dropped.to_string().len();
+        let kept = json!({"role": "assistant", "content": "newest"});
+        let seeded = load_records(
+            vec![
+                json!({"type": "message", "message": dropped}),
+                json!({"type": "message", "message": kept}),
+            ],
+            SeedOptions {
+                truncate_to_last: Some(1),
+                ..SeedOptions::default()
+            },
+        )
+        .expect("seed transcript");
+
+        assert!(seeded.truncated);
+        let events = captured.boundary_failures();
+        assert_eq!(events.len(), 1, "got: {events:?}");
+        match &events[0] {
+            crate::agent_events::AgentEvent::BoundaryFailure {
+                boundary,
+                kind,
+                dropped_count,
+                dropped_bytes,
+                ..
+            } => {
+                assert_eq!(*boundary, crate::boundary::BoundaryId::TranscriptSeed);
+                assert_eq!(boundary.as_str(), "transcript_seed");
+                assert_eq!(*kind, crate::boundary::BoundaryFailureKind::Truncated);
+                assert_eq!(*dropped_count, 1);
+                assert_eq!(*dropped_bytes, expected_dropped_bytes);
+            }
+            other => panic!("expected boundary failure, got {other:?}"),
+        }
     }
 
     #[test]

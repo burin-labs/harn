@@ -1,3 +1,4 @@
+import { agent_truncate_prompt_text } from "std/agent/truncation"
 /**
  * std/verification — deterministic verification facts and helper shapes.
  *
@@ -10,7 +11,7 @@
  */
 import { command_cancel, command_run, command_wait } from "std/command"
 import { shell_quote } from "std/runtime"
-import { regex_first_capture, truncate_text } from "std/text"
+import { regex_first_capture } from "std/text"
 import "std/verification_types"
 
 pub fn verification_file_hash_snapshot(paths: list<string>) -> VerificationFileHashSnapshot {
@@ -158,7 +159,11 @@ pub fn __verification_failure_signature(result, opts) {
   const max_chars = to_int(opts?.max_failure_signature_chars) ?? 4000
   const text = trim(__verification_result_text(result, source))
   if text != "" {
-    return truncate_text(text, max_chars)
+    return agent_truncate_prompt_text(
+      text,
+      max_chars,
+      "verification failure signature exceeded its model-visible budget",
+    )
   }
   const status = result?.status ?? "failed"
   const exit = __verification_exit(result, opts)
@@ -728,7 +733,11 @@ pub fn __verification_delta_normalize_text(text: string, cfg: dict) -> string {
   }
   const max_chars = to_int(cfg?.max_chars) ?? 4000
   if max_chars > 0 {
-    out = truncate_text(out, max_chars)
+    out = agent_truncate_prompt_text(
+      out,
+      max_chars,
+      "verification evidence exceeded its model-visible budget",
+    )
   }
   return out
 }

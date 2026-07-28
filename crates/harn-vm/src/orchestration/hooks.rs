@@ -13,6 +13,10 @@ use crate::agent_events::WorkerEvent;
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::value::{VmClosure, VmError, VmValue};
 
+mod post_tool;
+use post_tool::{apply_post_tool_action, parse_post_tool_result};
+pub use post_tool::{PostToolAction, PostToolHookResult};
+
 tokio::task_local! {
     static HOOK_REMINDER_REPORTS_TASK: Arc<parking_lot::Mutex<Vec<serde_json::Value>>>;
 }
@@ -339,20 +343,6 @@ pub enum PreToolAction {
     Reminder {
         spec: ReminderSpec,
         then: Box<PreToolAction>,
-    },
-}
-
-/// Action returned by a PostToolUse hook.
-#[derive(Clone, Debug)]
-pub enum PostToolAction {
-    /// Pass the result through unchanged.
-    Pass,
-    /// Replace the result text.
-    Modify(String),
-    /// Inject a reminder, then continue with the inner post-tool action.
-    Reminder {
-        spec: ReminderSpec,
-        then: Box<PostToolAction>,
     },
 }
 
@@ -1322,31 +1312,6 @@ fn parse_pre_tool_result(value: VmValue) -> Result<PreToolAction, VmError> {
     }
 }
 
-fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, VmError> {
-    let (value, effects) =
-        collect_hook_effects_and_action(HookEvent::PostToolUse, value, VmValue::Nil)?;
-    match value {
-        VmValue::Nil => Ok(wrap_post_tool_effects(effects, PostToolAction::Pass)),
-        VmValue::String(text) => Ok(wrap_post_tool_effects(
-            effects,
-            PostToolAction::Modify(text.to_string()),
-        )),
-        VmValue::Dict(map) => {
-            if let Some(result) = map.get("result") {
-                return Ok(wrap_post_tool_effects(
-                    effects,
-                    PostToolAction::Modify(result.display()),
-                ));
-            }
-            Ok(wrap_post_tool_effects(effects, PostToolAction::Pass))
-        }
-        other => Err(VmError::Runtime(format!(
-            "PostToolUse hook must return nil, string, or {{result}}, got {}",
-            other.type_name()
-        ))),
-    }
-}
-
 pub fn apply_pre_tool_action(
     action: PreToolAction,
     current_args: &mut serde_json::Value,
@@ -1365,21 +1330,6 @@ pub fn apply_pre_tool_action(
                 Some(HookEvent::PreToolUse),
             )?;
             apply_pre_tool_action(*then, current_args)
-        }
-    }
-}
-
-fn apply_post_tool_action(action: PostToolAction, current: String) -> Result<String, VmError> {
-    match action {
-        PostToolAction::Pass => Ok(current),
-        PostToolAction::Modify(new_result) => Ok(new_result),
-        PostToolAction::Reminder { spec, then } => {
-            inject_hook_effects(
-                "",
-                vec![HookEffect::Reminder(spec)],
-                Some(HookEvent::PostToolUse),
-            )?;
-            apply_post_tool_action(*then, current)
         }
     }
 }
@@ -1458,7 +1408,7 @@ pub async fn run_post_tool_hooks(
     tool_name: &str,
     args: &serde_json::Value,
     result: &str,
-) -> Result<String, VmError> {
+) -> Result<PostToolHookResult, VmError> {
     run_post_tool_hooks_with_ctx(None, tool_name, args, result).await
 }
 
@@ -1467,9 +1417,9 @@ pub async fn run_post_tool_hooks_with_ctx(
     tool_name: &str,
     args: &serde_json::Value,
     result: &str,
-) -> Result<String, VmError> {
+) -> Result<PostToolHookResult, VmError> {
     let hooks = runtime_hooks_for_event(HookEvent::PostToolUse);
-    let mut current = result.to_string();
+    let mut current = PostToolHookResult::unchanged(result);
     for hook in &hooks {
         let payload = if matches!(hook.matcher, PatternMatcher::EventExpression { .. }) {
             Some(serde_json::json!({
@@ -1481,7 +1431,7 @@ pub async fn run_post_tool_hooks_with_ctx(
                 },
                 "tool_call_id": crate::agent_sessions::current_tool_call_id(),
                 "result": {
-                    "text": current.clone(),
+                    "text": current.text.clone(),
                 },
             }))
         } else {
@@ -1495,7 +1445,7 @@ pub async fn run_post_tool_hooks_with_ctx(
             continue;
         }
         let action = match &hook.handler {
-            RuntimeHookHandler::NativePostTool(post) => post(tool_name, &current),
+            RuntimeHookHandler::NativePostTool(post) => post(tool_name, &current.text),
             RuntimeHookHandler::Vm { .. } => {
                 let payload = payload.as_ref().ok_or_else(|| {
                     VmError::Runtime("VM PostToolUse hook requires an event payload".to_string())
@@ -1510,7 +1460,14 @@ pub async fn run_post_tool_hooks_with_ctx(
         match action {
             PostToolAction::Pass => {}
             PostToolAction::Modify(new_result) => {
-                current = new_result;
+                current.text = new_result;
+            }
+            PostToolAction::Truncate {
+                result,
+                dropped_bytes,
+            } => {
+                current.text = result;
+                current.dropped_bytes = current.dropped_bytes.saturating_add(dropped_bytes);
             }
             PostToolAction::Reminder { spec, then } => {
                 inject_hook_effects(
@@ -1899,6 +1856,37 @@ mod tests {
         let message = error_message(parse_hook_effects(HookEvent::WorkerSpawned, &value));
         assert!(message.contains(Code::ReminderUnsupportedHookEvent.as_str()));
         assert!(message.contains("WorkerSpawned"), "{message}");
+    }
+
+    #[test]
+    fn post_tool_result_parses_explicit_truncation_metadata() {
+        let action = parse_post_tool_result(dict(vec![
+            ("result", vm_string("bounded")),
+            ("truncated", VmValue::Bool(true)),
+            ("dropped_bytes", VmValue::Int(17)),
+        ]))
+        .expect("typed post-tool truncation");
+
+        match action {
+            PostToolAction::Truncate {
+                result,
+                dropped_bytes,
+            } => {
+                assert_eq!(result, "bounded");
+                assert_eq!(dropped_bytes, 17);
+            }
+            other => panic!("expected typed truncation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn post_tool_result_rejects_unquantified_truncation() {
+        let error = parse_post_tool_result(dict(vec![
+            ("result", vm_string("bounded")),
+            ("truncated", VmValue::Bool(true)),
+        ]))
+        .expect_err("truncation without dropped bytes must fail");
+        assert!(error.to_string().contains("dropped_bytes"));
     }
 
     #[test]

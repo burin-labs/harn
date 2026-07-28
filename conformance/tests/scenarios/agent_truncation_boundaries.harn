@@ -1,0 +1,58 @@
+// Model-visible stdlib caps emit the same typed boundary event as Rust-owned
+// runtime caps. This exercises the real agent/tool path so the session owner,
+// subscriber fanout, and dropped-byte payload are all proven together.
+import { command_failure_text } from "std/command"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn truncating_tools() {
+  return tool_define(
+    tool_registry(),
+    "show_failure",
+    "Render a bounded command failure",
+    {
+      parameters: {},
+      handler: { _args ->
+        command_failure_text(
+          {status: "failed", exit_code: 1, stdout: "x".repeat(32)},
+          {max_stdout_chars: 8},
+        )
+      },
+    },
+  )
+}
+
+pipeline test(task) {
+  const session_id = "agent-truncation-boundary-" + uuid()
+  const seen = atomic(0)
+  const dropped_bytes = atomic(0)
+  agent_subscribe(
+    session_id,
+    { event ->
+      if event?.type == "boundary_failure" && event?.boundary == "agent_prompt_content" {
+        const _ = atomic_add(seen, 1)
+        const _ = atomic_set(dropped_bytes, event?.dropped_bytes ?? 0)
+      }
+    },
+  )
+  with_llm_script(
+    [llm_text("<tool_call>\nshow_failure({})\n</tool_call>"), llm_text("##DONE##")],
+    { ->
+      const _ = agent_loop(
+        "Show the failure once.",
+        nil,
+        {
+          provider: "mock",
+          session_id: session_id,
+          tools: truncating_tools(),
+          tool_format: "text",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+        },
+      )
+    },
+  )
+  assert(atomic_get(seen) == 1, "the model-visible command cap emits one typed boundary")
+  assert(atomic_get(dropped_bytes) == 24, "the boundary carries exact dropped source bytes")
+  log("ok")
+}

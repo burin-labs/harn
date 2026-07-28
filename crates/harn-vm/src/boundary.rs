@@ -103,16 +103,35 @@ pub enum BoundaryId {
     ProviderAdmissionGate,
     /// `agent_chat_loop` turn/input caps: the loop stops mid-conversation.
     ChatTurnCap,
+    /// PostToolUse result shaping: a hook shortens the tool output before the
+    /// next model turn sees it.
+    PostToolOutput,
+    /// Transcript JSONL seeding: only the newest requested messages are
+    /// imported into the new session.
+    TranscriptSeed,
+    /// Live session transcript truncate/trim operations.
+    SessionTranscript,
+    /// Grounded-review input, finding, and summary caps.
+    GroundedReview,
+    /// Harn stdlib prompt inputs shortened before they reach an agent: command
+    /// output, probe evidence, pin reminders, verification summaries, and
+    /// simulated-user transcript context.
+    AgentPromptContent,
 }
 
 impl BoundaryId {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 11] = [
         Self::TextToolParse,
         Self::ResponseContentExtraction,
         Self::VisibleTextSanitize,
         Self::HostEventIngest,
         Self::ProviderAdmissionGate,
         Self::ChatTurnCap,
+        Self::PostToolOutput,
+        Self::TranscriptSeed,
+        Self::SessionTranscript,
+        Self::GroundedReview,
+        Self::AgentPromptContent,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -123,6 +142,11 @@ impl BoundaryId {
             Self::HostEventIngest => "host_event_ingest",
             Self::ProviderAdmissionGate => "provider_admission_gate",
             Self::ChatTurnCap => "chat_turn_cap",
+            Self::PostToolOutput => "post_tool_output",
+            Self::TranscriptSeed => "transcript_seed",
+            Self::SessionTranscript => "session_transcript",
+            Self::GroundedReview => "grounded_review",
+            Self::AgentPromptContent => "agent_prompt_content",
         }
     }
 }
@@ -240,6 +264,13 @@ impl BoundaryFailure {
     /// coalesces a run of drops into one report.
     pub fn with_count(mut self, count: usize) -> Self {
         self.dropped_count = count;
+        self
+    }
+
+    /// Record an exact byte count when the boundary knows how much it removed
+    /// but intentionally does not retain the dropped content for an excerpt.
+    pub fn with_dropped_bytes(mut self, dropped_bytes: usize) -> Self {
+        self.dropped_bytes = dropped_bytes;
         self
     }
 

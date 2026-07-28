@@ -1663,8 +1663,20 @@ pub(super) async fn host_agent_dispatch_tool_call(
             )
             .await;
             hook_reminder_reports.extend(reports);
-            let rendered = rendered?;
-            let output_truncated = rendered.len() < rendered_before_hooks.len();
+            let hook_result = rendered?;
+            let dropped_bytes = hook_result.dropped_bytes;
+            let rendered = hook_result.text;
+            let output_truncated = dropped_bytes > 0;
+            if output_truncated {
+                crate::boundary::BoundaryFailure::new(
+                    crate::boundary::BoundaryId::PostToolOutput,
+                    crate::boundary::BoundaryFailureKind::Truncated,
+                    format!("PostToolUse hooks truncated output from tool {tool_name}"),
+                )
+                .with_dropped_bytes(dropped_bytes)
+                .in_session(&session_id)
+                .report();
+            }
             let reminder_payload = serde_json::json!({
                 "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
                 "session": {"id": &session_id},
@@ -1674,10 +1686,12 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 "result": {
                     "text": &rendered,
                     "truncated": output_truncated,
+                    "dropped_bytes": dropped_bytes,
                     "original_size": rendered_before_hooks.len(),
                     "final_size": rendered.len(),
                 },
                 "truncated": output_truncated,
+                "dropped_bytes": dropped_bytes,
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
             });
@@ -1727,6 +1741,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
                 "tool_output_truncated": output_truncated,
+                "dropped_bytes": dropped_bytes,
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
                 "reminder_provider_report": reminder_report,
@@ -3060,56 +3075,7 @@ mod approval_unavailable_tests;
 mod side_effect_ceiling_tests;
 
 #[cfg(test)]
-mod schema_argument_dispatch_tests {
-    use super::host_agent_dispatch_tool_call;
+mod schema_argument_dispatch_tests;
 
-    #[tokio::test]
-    async fn dispatch_flattens_schema_declared_discriminator_envelope() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("dispatch-proof.txt");
-        std::fs::write(&path, "schema dispatch proof\n").expect("write fixture");
-        let tools = crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "tools": [{
-                "name": "read_file",
-                "description": "Read a file through the local Harn executor.",
-                "parameters": {
-                    "operation": {
-                        "type": "string",
-                        "enum": ["read"]
-                    },
-                    "path": {"type": "string"}
-                }
-            }]
-        }));
-        let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "id": "schema-envelope-dispatch",
-            "name": "read_file",
-            "arguments": {
-                "read": {"path": path}
-            }
-        }));
-
-        let result = host_agent_dispatch_tool_call(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
-            call,
-            Some(&tools),
-            &crate::value::DictMap::new(),
-        )
-        .await
-        .expect("dispatch succeeds");
-        let result = crate::llm::helpers::vm_value_to_json(&result);
-
-        assert_eq!(result["ok"], serde_json::json!(true));
-        assert_eq!(
-            result["executor"]["kind"],
-            serde_json::json!("harn_builtin")
-        );
-        assert_eq!(result["arguments"]["operation"], serde_json::json!("read"));
-        assert_eq!(result["arguments"]["path"], serde_json::json!(path));
-        assert_eq!(
-            result["rendered_result"],
-            serde_json::json!("1\tschema dispatch proof"),
-            "the normalized call must reach the real local executor"
-        );
-    }
-}
+#[cfg(test)]
+mod tool_output_truncation_tests;

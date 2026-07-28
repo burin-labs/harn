@@ -8,6 +8,9 @@ use crate::value::VmDictExt;
 use futures::StreamExt as _;
 use std::sync::{Arc, Mutex};
 
+#[path = "agent_sessions_tests/truncation_boundary_tests.rs"]
+mod truncation_boundary_tests;
+
 struct TestAttachmentResolver(crate::host_attachments::MaterializedAttachment);
 
 impl crate::host_attachments::HostAttachmentResolver for TestAttachmentResolver {
@@ -1281,42 +1284,6 @@ fn fork_at_truncates_destination_to_keep_first() {
 }
 
 #[test]
-fn truncate_retains_prefix_and_reports_removed_turns() {
-    reset_session_store();
-    let id = open_or_create(Some("truncate-prefix".into()));
-    inject_message(&id, make_msg("user", "a")).unwrap();
-    inject_message(&id, make_msg("assistant", "b")).unwrap();
-    inject_message(&id, make_msg("user", "c")).unwrap();
-    append_event(
-        &id,
-        crate::llm::helpers::transcript_event(
-            "tool_call_audit",
-            "tool",
-            "internal",
-            "audit for dropped turn",
-            None,
-        ),
-    )
-    .unwrap();
-
-    let result = truncate(&id, 2).expect("truncate result");
-    assert_eq!(result.kept_turn_count, 2);
-    assert_eq!(result.removed_turn_count, 1);
-    assert!(
-        result.new_tip_turn_id.is_some(),
-        "retained tip event id should be surfaced"
-    );
-    assert_eq!(message_count(&id), 2);
-    assert_eq!(event_count_by_kind(&id, "message"), 2);
-    assert_eq!(event_count_by_kind(&id, "tool_call_audit"), 0);
-
-    let messages = messages_json(&id);
-    assert_eq!(messages[0]["content"], "a");
-    assert_eq!(messages[1]["content"], "b");
-    reset_session_store();
-}
-
-#[test]
 fn truncate_to_zero_clears_messages_events_and_stale_summary() {
     reset_session_store();
     let id = open_or_create(Some("truncate-zero".into()));
@@ -1330,7 +1297,9 @@ fn truncate_to_zero_clears_messages_events_and_stale_summary() {
     )
     .unwrap();
 
-    let result = truncate(&id, 0).expect("truncate result");
+    let result = truncate(&id, 0)
+        .expect("truncate succeeds")
+        .expect("truncate result");
     assert_eq!(result.kept_turn_count, 0);
     assert_eq!(result.removed_turn_count, 2);
     assert_eq!(result.new_tip_turn_id, None);
@@ -1372,7 +1341,7 @@ fn replace_messages_without_summary_clears_stale_summary() {
 #[test]
 fn truncate_unknown_session_returns_none() {
     reset_session_store();
-    assert!(truncate("does-not-exist", 1).is_none());
+    assert!(truncate("does-not-exist", 1).unwrap().is_none());
 }
 
 #[test]
