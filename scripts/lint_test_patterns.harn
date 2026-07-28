@@ -141,6 +141,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/lint_changed_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/demo_cli_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/doctor_dispatch.rs",
+  // Startup environment validation must run before clap or sidecar dispatch;
+  // only the real multi-call process exercises that boundary.
+  "crates/harn-cli/tests/harn_cli_e2e/environment_registry_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/models_dispatch.rs",
   "crates/harn-cli/tests/harn_cli_e2e/providers_dispatch.rs",
   "crates/harn-cli/tests/harn_cli_e2e/routes_graph_dispatch.rs",

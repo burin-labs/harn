@@ -38,6 +38,7 @@ mod dispatch_echo;
 mod dispatch_snapshot;
 mod doctor_cli;
 mod doctor_dispatch;
+mod environment_registry_cli;
 mod eval_cluster_dispatch;
 mod eval_coding_agent_cli;
 mod eval_coding_agent_dispatch;
