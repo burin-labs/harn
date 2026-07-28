@@ -296,6 +296,7 @@ fn sensitivity_for(name: &str) -> EnvironmentSensitivity {
         "SECRET",
         "PASSWORD",
         "API_KEY",
+        "OAUTH_KEY",
         "HEADERS",
         "PRIVATE_KEY",
     ]
@@ -320,7 +321,10 @@ fn is_extension_name(name: &str) -> bool {
 /// prefix exception. This admits model-role, rate-limit, and secret-provider
 /// keys without accepting near-miss fixed keys such as `HARN_LLM_TIMOUT`.
 fn is_structured_runtime_name(name: &str) -> bool {
-    is_secret_name(name) || is_rate_limit_name(name) || is_model_role_name(name)
+    is_secret_name(name)
+        || is_rate_limit_name(name)
+        || is_model_role_name(name)
+        || is_agent_model_option_name(name)
 }
 
 fn is_secret_name(name: &str) -> bool {
@@ -349,6 +353,31 @@ fn is_model_role_name(name: &str) -> bool {
         .iter()
         .find_map(|ending| suffix.strip_suffix(ending))
         .is_some_and(is_upper_identifier)
+}
+
+/// `std/agent/options` derives role-specific configuration keys from a role
+/// token and a closed suffix vocabulary. Keep that dynamic reader family
+/// structural so custom roles do not require per-role registry entries.
+fn is_agent_model_option_name(name: &str) -> bool {
+    const SUFFIXES: &[&str] = &[
+        "_EFFORT",
+        "_MODEL",
+        "_MODEL_ROLE",
+        "_PROVIDER",
+        "_REASONING_TASK",
+        "_TOOL_FORMAT",
+    ];
+    let Some(prefix) = SUFFIXES.iter().find_map(|suffix| name.strip_suffix(suffix)) else {
+        return false;
+    };
+    let Some(prefix) = prefix.strip_prefix("HARN_") else {
+        return false;
+    };
+    let role = prefix
+        .strip_prefix("AGENT_")
+        .or_else(|| prefix.strip_prefix("LLM_"))
+        .unwrap_or(prefix);
+    matches!(prefix, "AGENT" | "LLM") || is_upper_identifier(role)
 }
 
 fn is_upper_identifier(value: &str) -> bool {
@@ -408,6 +437,34 @@ mod tests {
             error.diagnostics()[0].kind,
             EnvironmentDiagnosticKind::UnknownName { .. }
         ));
+    }
+
+    #[test]
+    fn dynamic_agent_role_options_follow_a_closed_structural_grammar() {
+        for name in [
+            "HARN_AGENT_MODEL",
+            "HARN_LLM_TOOL_FORMAT",
+            "HARN_AGENT_REVIEW_PROVIDER",
+            "HARN_LLM_PLANNER_REASONING_TASK",
+            "HARN_RELEASE_EFFORT",
+        ] {
+            assert!(variable_spec(name).is_some(), "{name}");
+        }
+        for name in [
+            "HARN_AGENT_REVIEW_UNKNOWN",
+            "HARN_LLM_TIMOUT",
+            "HARN_RELEASE_",
+        ] {
+            assert!(variable_spec(name).is_none(), "{name}");
+        }
+    }
+
+    #[test]
+    fn credential_metadata_covers_non_api_oauth_keys() {
+        assert_eq!(
+            variable_spec("HARN_OAUTH_KEY").unwrap().sensitivity,
+            EnvironmentSensitivity::Credential
+        );
     }
 
     #[test]
@@ -480,6 +537,63 @@ mod tests {
         assert!(
             missing.is_empty(),
             "compiled HARN_* names missing from environment_registry_names.txt:\n{}",
+            missing.into_iter().collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    #[test]
+    fn every_harn_script_owned_name_is_registered_or_structurally_owned() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("harn-vm lives below workspace/crates");
+        let source_roots = [
+            "benchmarks",
+            "conformance",
+            "crates",
+            "evals",
+            "examples",
+            "experiments",
+            "perf",
+            "personas",
+            "scripts",
+            "tests",
+        ];
+        let mut missing = std::collections::BTreeSet::new();
+        for source_root in source_roots {
+            let source_root = workspace_root.join(source_root);
+            if !source_root.exists() {
+                continue;
+            }
+            for entry in walkdir::WalkDir::new(source_root)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.file_type().is_file()
+                        && entry.path().extension().and_then(OsStr::to_str) == Some("harn")
+                })
+            {
+                let source = std::fs::read_to_string(entry.path()).expect("read Harn source");
+                for token in harn_name_tokens(&source) {
+                    if variable_spec(token).is_none()
+                        && !matches!(
+                            token,
+                            "HARN_AGENT"
+                                | "HARN_AGENT_"
+                                | "HARN_LLM"
+                                | "HARN_LLM_"
+                                | "HARN_PLANNER"
+                                | "HARN_RELEASE"
+                        )
+                    {
+                        missing.insert(format!("{}: {token}", entry.path().display()));
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "Harn-script HARN_* names missing from environment_registry_names.txt:\n{}",
             missing.into_iter().collect::<Vec<_>>().join("\n")
         );
     }
