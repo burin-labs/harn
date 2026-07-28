@@ -97,6 +97,30 @@ Behavior today:
 - supports the same API-key, HMAC, and TLS listener settings as the other HTTP
   adapters
 
+Session create and update requests accept an optional typed `model_policy`:
+
+```json
+{
+  "model_policy": {
+    "provider": "openai",
+    "model": "gpt-5.6",
+    "reasoning_effort": "high"
+  }
+}
+```
+
+`provider` must name a registered provider, `model` is its provider-native
+model identifier, and `reasoning_effort` is optional. The supported efforts are
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. A policy set on
+create or update is returned by session get/list, inherited by forks, and used
+by subsequent session execution. Omitting `model_policy` preserves the current
+policy and existing defaults; sending `null` on update clears it.
+
+Precedence is explicit per-call provider/model/reasoning options, then the
+session `model_policy`, then persona or script policy, then ambient runtime
+defaults. This keeps task-specific calls authoritative while giving
+catalog-aware hosts a typed session default.
+
 ### MCP
 
 Choose MCP when the caller wants a tool surface.

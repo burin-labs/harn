@@ -37,7 +37,7 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
     if let Some(a) = config.aliases.get(alias) {
         return (a.id.clone(), Some(a.provider.clone()));
     }
-    (normalize_model_id(alias), None)
+    (normalize_model_id_with_config(alias, &config), None)
 }
 
 /// Strip host/provider selector prefixes that identify transport, not the
@@ -47,9 +47,18 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
 /// slash separator (`cerebras/gpt-oss-120b`) because its own /v1/models
 /// endpoint returns bare names that overlap OpenAI's families.
 pub fn normalize_model_id(raw: &str) -> String {
+    normalize_model_id_with_config(raw, &effective_config())
+}
+
+fn normalize_model_id_with_config(raw: &str, config: &ProvidersConfig) -> String {
     for prefix in PROVIDER_SELECTOR_PREFIXES {
         if let Some(stripped) = raw.strip_prefix(prefix) {
             return stripped.to_string();
+        }
+    }
+    if let Some((provider, model)) = raw.split_once(':') {
+        if !model.is_empty() && (provider == "mock" || config.providers.contains_key(provider)) {
+            return model.to_string();
         }
     }
     raw.to_string()
@@ -81,7 +90,7 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
         };
     }
 
-    let id = normalize_model_id(selector);
+    let id = normalize_model_id_with_config(selector, &config);
     let inference = infer_provider_with_config(&config, selector);
     let source = inference.source;
     let provider = inference.provider;
@@ -135,7 +144,20 @@ fn guard_tool_format(provider: &str, model: &str, requested: &str, alias: Option
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_model_info;
+    use super::{normalize_model_id, resolve_model_info};
+
+    #[test]
+    fn registered_provider_selector_normalizes_to_native_model_id() {
+        let model = resolve_model_info("openai:o3");
+        assert_eq!(model.provider, "openai");
+        assert_eq!(model.id, "o3");
+        assert_eq!(normalize_model_id("mock:o3"), "o3");
+        assert_eq!(
+            normalize_model_id("ollama:qwen3.2:latest"),
+            "qwen3.2:latest",
+            "only the first selector colon is transport syntax"
+        );
+    }
 
     #[test]
     fn grok_code_aliases_resolve_through_live_resolver() {

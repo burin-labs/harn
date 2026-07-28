@@ -118,6 +118,7 @@ CreateWorkspaceRequest
 UpdateWorkspaceRequest
 Session
 SessionList
+SessionModelPolicy
 CreateSessionRequest
 UpdateSessionRequest
 ForkSessionRequest

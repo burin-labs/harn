@@ -4,6 +4,48 @@
 
 use super::*;
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum SessionReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl SessionReasoningEffort {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SessionModelPolicy {
+    provider: String,
+    model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<SessionReasoningEffort>,
+}
+
+#[derive(Clone, Debug)]
+enum ModelPolicyChange {
+    Unchanged,
+    Clear,
+    Set(SessionModelPolicy),
+}
+
 pub(super) async fn list_sessions(
     State(state): State<ApiState>,
     OriginalUri(uri): OriginalUri,
@@ -26,6 +68,13 @@ pub(super) async fn create_session(
         return response;
     }
     let input = parse_json_body(&body).unwrap_or_else(|_| json!({}));
+    let model_policy = match parse_model_policy_change(&input, &state.provider_catalog) {
+        Ok(ModelPolicyChange::Clear) => ModelPolicyChange::Unchanged,
+        Ok(change) => change,
+        Err(message) => {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_model_policy", &message)
+        }
+    };
     let (workspace_id, workspace_root) = {
         let inner = state.inner.lock().expect("api state poisoned");
         let workspace_id = input
@@ -56,7 +105,10 @@ pub(super) async fn create_session(
         .map(str::to_string)
         .unwrap_or_else(|| format!("session_{}", Uuid::now_v7()));
     let now = now_rfc3339();
-    let session = json!({
+    if let Err(message) = apply_model_policy_change(&state, &session_id, &model_policy).await {
+        return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
+    }
+    let mut session = json!({
         "id": session_id,
         "object": "session",
         "created_at": now,
@@ -76,6 +128,7 @@ pub(super) async fn create_session(
         "summary": null,
         "expires_at": null
     });
+    project_model_policy(&mut session, &model_policy);
     {
         let mut inner = state.inner.lock().expect("api state poisoned");
         inner.sessions.insert(session_id.clone(), session.clone());
@@ -139,17 +192,126 @@ pub(super) async fn update_session(
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
+    let model_policy = match parse_model_policy_change(&input, &state.provider_catalog) {
+        Ok(change) => change,
+        Err(message) => {
+            return api_error(StatusCode::BAD_REQUEST, "invalid_model_policy", &message)
+        }
+    };
+    {
+        let inner = state.inner.lock().expect("api state poisoned");
+        if !inner.sessions.contains_key(&session_id) {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+        }
+    }
+    if let Err(message) = apply_model_policy_change(&state, &session_id, &model_policy).await {
+        return api_error(StatusCode::BAD_GATEWAY, "acp_error", &message);
+    }
     let session = {
         let mut inner = state.inner.lock().expect("api state poisoned");
-        let Some(session) = inner.sessions.get_mut(&session_id) else {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        };
+        let session = inner
+            .sessions
+            .get_mut(&session_id)
+            .expect("session existence checked before policy update");
         merge_mutable_fields(session, &input, &["summary", "metadata"]);
+        project_model_policy(session, &model_policy);
         session["updated_at"] = json!(now_rfc3339());
         session.clone()
     };
     state.append_event(Some(session_id), None, "session.updated", session.clone());
     Json(session).into_response()
+}
+
+fn parse_model_policy_change(
+    input: &Value,
+    provider_catalog: &ProviderCatalogRuntime,
+) -> Result<ModelPolicyChange, String> {
+    let Some(value) = input.get("model_policy") else {
+        return Ok(ModelPolicyChange::Unchanged);
+    };
+    if value.is_null() {
+        return Ok(ModelPolicyChange::Clear);
+    }
+    let mut policy: SessionModelPolicy = serde_json::from_value(value.clone()).map_err(|_| {
+        "model_policy must contain provider, model, and optional reasoning_effort only".to_string()
+    })?;
+    policy.provider = policy.provider.trim().to_ascii_lowercase();
+    policy.model = policy.model.trim().to_string();
+    if policy.provider.is_empty() {
+        return Err("model_policy.provider must not be empty".to_string());
+    }
+    if policy.model.is_empty() {
+        return Err("model_policy.model must not be empty".to_string());
+    }
+    let provider_known = policy.provider == "mock"
+        || provider_catalog
+            .artifact()
+            .providers
+            .iter()
+            .any(|provider| provider.id == policy.provider);
+    if !provider_known {
+        return Err(format!(
+            "model_policy.provider '{}' is not registered",
+            policy.provider
+        ));
+    }
+    Ok(ModelPolicyChange::Set(policy))
+}
+
+async fn apply_model_policy_change(
+    state: &ApiState,
+    session_id: &str,
+    change: &ModelPolicyChange,
+) -> Result<(), String> {
+    let (model, reasoning_effort) = match change {
+        ModelPolicyChange::Unchanged => return Ok(()),
+        ModelPolicyChange::Clear => ("@inherit".to_string(), "@inherit"),
+        ModelPolicyChange::Set(policy) => (
+            format!("{}:{}", policy.provider, policy.model),
+            policy
+                .reasoning_effort
+                .map(SessionReasoningEffort::as_str)
+                .unwrap_or("@inherit"),
+        ),
+    };
+    state
+        .acp
+        .call(
+            "session/set_config_option",
+            json!({
+                "sessionId": session_id,
+                "configId": "model",
+                "value": model,
+            }),
+        )
+        .await?;
+    state
+        .acp
+        .call(
+            "session/set_config_option",
+            json!({
+                "sessionId": session_id,
+                "configId": "thought_level",
+                "value": reasoning_effort,
+            }),
+        )
+        .await?;
+    Ok(())
+}
+
+fn project_model_policy(session: &mut Value, change: &ModelPolicyChange) {
+    match change {
+        ModelPolicyChange::Unchanged => {}
+        ModelPolicyChange::Clear => {
+            if let Some(session) = session.as_object_mut() {
+                session.remove("model_policy");
+            }
+        }
+        ModelPolicyChange::Set(policy) => {
+            session["model_policy"] =
+                serde_json::to_value(policy).expect("session model policy serializes");
+        }
+    }
 }
 
 pub(super) async fn close_session(
