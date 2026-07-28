@@ -1,14 +1,21 @@
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
 use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 use crate::package_snapshot::{package_lock_digest, PackageSnapshot};
+
+mod content_hash;
+pub use content_hash::{
+    compute_archive_content_hash, compute_package_content_hash, is_canonical_package_content_hash,
+    normalized_package_relative_path, verify_package_content_hash, CANONICAL_CONTENT_HASH_PREFIX,
+};
+use content_hash::{
+    compute_package_content_hash_capturing, excluded_package_name, validate_content_hash,
+};
 
 pub const CONTENT_HASH_FILE: &str = ".harn-content-hash";
 pub const CACHE_METADATA_FILE: &str = ".harn-package-cache.toml";
@@ -34,6 +41,8 @@ struct ExecutionLock {
 #[derive(Deserialize)]
 struct ExecutionLockPackage {
     name: String,
+    #[serde(default)]
+    source: String,
     content_hash: Option<String>,
 }
 
@@ -120,6 +129,14 @@ impl PackageExecutionGuard {
                 continue;
             };
             validate_content_hash(&content_hash)?;
+            if package.source.starts_with("git+")
+                && !is_canonical_package_content_hash(&content_hash)
+            {
+                return Err(PackageExecutionError::Invalid(format!(
+                    "git package '{}' uses an unversioned content hash; run `harn install` to migrate harn.lock",
+                    package.name
+                )));
+            }
             let root = snapshot.packages_root().join(&package.name);
             if !root.is_dir() {
                 return Err(PackageExecutionError::Invalid(format!(
@@ -354,7 +371,7 @@ impl PackageExecutionGuard {
             )));
         }
         let (actual_content_hash, source) =
-            compute_package_content_hash_capturing(&pin.root, Some(relative))?;
+            compute_package_content_hash_capturing(&pin.root, Some(relative), &pin.content_hash)?;
         if actual_content_hash != pin.content_hash {
             return Err(PackageExecutionError::Invalid(format!(
                 "package '{}' content changed in generation {}: expected {}, got {}",
@@ -495,139 +512,9 @@ impl fmt::Display for PackageExecutionError {
 
 impl std::error::Error for PackageExecutionError {}
 
-pub fn compute_package_content_hash(dir: &Path) -> Result<String, PackageExecutionError> {
-    compute_package_content_hash_capturing(dir, None).map(|(hash, _)| hash)
-}
-
-fn compute_package_content_hash_capturing(
-    dir: &Path,
-    capture: Option<&Path>,
-) -> Result<(String, Option<Vec<u8>>), PackageExecutionError> {
-    let mut files = Vec::new();
-    collect_hashable_files(dir, dir, &mut files)?;
-    files.sort();
-    let mut hasher = Sha256::new();
-    let mut captured = None;
-    for relative in files {
-        let normalized = normalized_package_relative_path(&relative);
-        let path = dir.join(&relative);
-        let contents = read_regular_file(&path)?;
-        hasher.update(normalized.as_bytes());
-        hasher.update([0]);
-        hasher.update(encode_hex(&Sha256::digest(&contents)).as_bytes());
-        if capture == Some(relative.as_path()) {
-            captured = Some(contents);
-        }
-    }
-    Ok((
-        format!("sha256:{}", encode_hex(&hasher.finalize())),
-        captured,
-    ))
-}
-
-fn collect_hashable_files(
-    root: &Path,
-    cursor: &Path,
-    out: &mut Vec<PathBuf>,
-) -> Result<(), PackageExecutionError> {
-    let entries = fs::read_dir(cursor).map_err(|error| {
-        PackageExecutionError::io("read directory", cursor.to_path_buf(), error)
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            PackageExecutionError::io("read directory entry", cursor.to_path_buf(), error)
-        })?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|error| PackageExecutionError::io("stat", path.clone(), error))?;
-        let name = entry.file_name();
-        // Exclusion first: a path that never reaches the content hash cannot
-        // make the package invalid, whatever kind of file it is. Checking the
-        // symlink before the exclusion rejected packages over a symlinked
-        // `.gitignore` or a symlinked cache-metadata file that the installer
-        // was about to skip anyway.
-        if excluded_package_name(&name) {
-            continue;
-        }
-        if file_type.is_symlink() {
-            return Err(PackageExecutionError::Invalid(format!(
-                "package content contains unsupported symlink: {}",
-                path.display()
-            )));
-        }
-        if file_type.is_dir() {
-            collect_hashable_files(root, &path, out)?;
-        } else if file_type.is_file() {
-            let relative = path.strip_prefix(root).map_err(|error| {
-                PackageExecutionError::Invalid(format!(
-                    "failed to relativize {}: {error}",
-                    path.display()
-                ))
-            })?;
-            out.push(relative.to_path_buf());
-        }
-    }
-    Ok(())
-}
-
-fn read_regular_file(path: &Path) -> Result<Vec<u8>, PackageExecutionError> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| PackageExecutionError::io("stat", path.to_path_buf(), error))?;
-    if !metadata.file_type().is_file() {
-        return Err(PackageExecutionError::Invalid(format!(
-            "package content is not a regular file: {}",
-            path.display()
-        )));
-    }
-    fs::read(path).map_err(|error| PackageExecutionError::io("read", path.to_path_buf(), error))
-}
-
-fn excluded_package_name(name: &OsStr) -> bool {
-    name == OsStr::new(".git")
-        || name == OsStr::new(".gitignore")
-        // CLAUDE.md is a repository-tooling projection of AGENTS.md, not
-        // executable package content. Excluding it lets repositories use the
-        // canonical direct symlink without weakening the blanket rejection of
-        // source or asset symlinks.
-        || name == OsStr::new("CLAUDE.md")
-        || name == OsStr::new(CONTENT_HASH_FILE)
-        || name == OsStr::new(CACHE_METADATA_FILE)
-}
-
-pub fn normalized_package_relative_path(path: &Path) -> String {
-    path.components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn validate_content_hash(hash: &str) -> Result<(), PackageExecutionError> {
-    let Some(hex) = hash.strip_prefix("sha256:") else {
-        return Err(PackageExecutionError::Invalid(format!(
-            "package content hash must use sha256:<64 hex>, got {hash}"
-        )));
-    };
-    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(PackageExecutionError::Invalid(format!(
-            "package content hash must use sha256:<64 hex>, got {hash}"
-        )));
-    }
-    Ok(())
-}
-
 fn is_safe_package_alias(alias: &str) -> bool {
     let mut components = Path::new(alias).components();
     matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use fmt::Write as _;
-        let _ = write!(encoded, "{byte:02x}");
-    }
-    encoded
 }
 
 #[cfg(test)]
@@ -689,7 +576,7 @@ mod tests {
         .unwrap();
         let dependency_hash = compute_package_content_hash(&dependency_root).unwrap();
         let lock = format!(
-            "version = 4\n\n[[package]]\nname = \"agents\"\ncontent_hash = \"{content_hash}\"\n\n[[package]]\nname = \"shared\"\ncontent_hash = \"{dependency_hash}\"\n"
+            "version = 5\n\n[[package]]\nname = \"agents\"\nsource = \"git+https://example.test/agents\"\ncontent_hash = \"{content_hash}\"\n\n[[package]]\nname = \"shared\"\nsource = \"git+https://example.test/shared\"\ncontent_hash = \"{dependency_hash}\"\n"
         );
         fs::write(generation_root.join(GENERATION_LOCK_FILE), &lock).unwrap();
         fs::write(generation_root.join(GENERATION_LEASE_FILE), []).unwrap();
@@ -709,6 +596,94 @@ mod tests {
         File::create(package_publication_lock_path(temp.path())).unwrap();
         let snapshot = Arc::new(PackageSnapshot::acquire(temp.path()).unwrap().unwrap());
         (temp, snapshot, entry, content_hash)
+    }
+
+    #[test]
+    fn canonical_content_hash_projection_is_platform_independent() {
+        let lf = tempfile::tempdir().unwrap();
+        let crlf = tempfile::tempdir().unwrap();
+        for root in [lf.path(), crlf.path()] {
+            fs::create_dir_all(root.join("src")).unwrap();
+            fs::write(root.join("asset.bin"), [0, b'\r', b'\n', 0xff]).unwrap();
+        }
+        fs::write(lf.path().join("harn.toml"), "[package]\nname = \"demo\"\n").unwrap();
+        fs::write(
+            crlf.path().join("harn.toml"),
+            "[package]\r\nname = \"demo\"\r\n",
+        )
+        .unwrap();
+        fs::write(
+            lf.path().join("src/lib.harn"),
+            "pub fn value() -> number { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            crlf.path().join("src/lib.harn"),
+            "pub fn value() -> number { 1 }\r\n",
+        )
+        .unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                lf.path().join("src/lib.harn"),
+                fs::Permissions::from_mode(0o644),
+            )
+            .unwrap();
+            fs::set_permissions(
+                crlf.path().join("src/lib.harn"),
+                fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+
+        let expected = "sha256-v2:899d8ece60275669d4894707420835dbac7530e4179a5e45163ba46add129435";
+        assert_eq!(compute_package_content_hash(lf.path()).unwrap(), expected);
+        assert_eq!(compute_package_content_hash(crlf.path()).unwrap(), expected);
+    }
+
+    #[test]
+    fn canonical_content_hash_normalizes_unicode_paths() {
+        let composed = tempfile::tempdir().unwrap();
+        let decomposed = tempfile::tempdir().unwrap();
+        fs::write(
+            composed.path().join("\u{e9}.harn"),
+            "pub fn value() { 1 }\n",
+        )
+        .unwrap();
+        fs::write(
+            decomposed.path().join("e\u{301}.harn"),
+            "pub fn value() { 1 }\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            compute_package_content_hash(composed.path()).unwrap(),
+            compute_package_content_hash(decomposed.path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn archive_and_canonical_content_hash_algorithms_are_explicit() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("AGENTS.md"), "# Guidance\n").unwrap();
+        fs::write(temp.path().join("CLAUDE.md"), "# Guidance\n").unwrap();
+        fs::write(temp.path().join("lib.harn"), "pub fn value() { 1 }\n").unwrap();
+
+        let archive = compute_archive_content_hash(temp.path()).unwrap();
+        let canonical = compute_package_content_hash(temp.path()).unwrap();
+
+        assert_eq!(
+            verify_package_content_hash(temp.path(), &archive).unwrap(),
+            archive
+        );
+        assert_eq!(
+            verify_package_content_hash(temp.path(), &canonical).unwrap(),
+            canonical
+        );
+        assert!(!is_canonical_package_content_hash(&archive));
+        assert!(is_canonical_package_content_hash(&canonical));
     }
 
     #[test]

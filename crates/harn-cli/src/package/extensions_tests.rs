@@ -148,7 +148,7 @@ google = { path = "./vendor/google" }
     )
     .unwrap();
     let lock_body = r#"
-version = 4
+version = 5
 generator_version = "0.9.19"
 protocol_artifact_version = "0.9.19"
 

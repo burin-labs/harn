@@ -45,6 +45,17 @@ pub(crate) fn install_packages_in_locked(
     if (frozen || offline) && existing.is_none() {
         return Err(format!("{} is missing", ctx.lock_path().display()).into());
     }
+    if (frozen || offline)
+        && existing
+            .as_ref()
+            .is_some_and(LockFile::requires_git_hash_migration)
+    {
+        return Err(format!(
+            "{} contains pre-v5 Git content hashes; run `harn install` and commit the migrated lockfile before using --locked or --offline",
+            ctx.lock_path().display()
+        )
+        .into());
+    }
 
     let desired = build_lockfile(
         workspace,

@@ -187,13 +187,7 @@ pub(crate) fn ensure_archive_cache_populated_in(
             .map_err(|error| format!("failed to create {}: {error}", temp_dir.display()))?;
         let bytes = read_package_archive_bytes(url)?;
         unpack_package_archive_bytes(&bytes, &temp_dir)?;
-        let hash = compute_content_hash(&temp_dir)?;
-        if hash != expected_hash {
-            return Err(format!(
-                "content hash mismatch for {source}: expected {expected_hash}, got {hash}"
-            )
-            .into());
-        }
+        verify_content_hash_or_compute(&temp_dir, expected_hash)?;
         write_cached_content_hash(&temp_dir, expected_hash)?;
         write_cache_metadata(&temp_dir, source, expected_hash, expected_hash)?;
         fs::rename(&temp_dir, &cache_dir).map_err(|error| {

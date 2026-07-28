@@ -3211,6 +3211,12 @@ package index and then write the same git dependency shape as direct GitHub
 installs; hand-authored manifests may also use registry semver ranges such as
 `my-lib = { version = "^1.2" }`.
 
+Git locks use the platform-independent `sha256-v2:<hex>` tree identity in
+`harn.lock` version 5. Paths, text line endings, permissions, and symlink
+handling follow the canonical package projection defined in the language spec.
+To migrate a version 4 lock, run `harn install` and commit the rewritten lock.
+Locked or offline installs fail closed while an unversioned Git hash remains.
+
 ## harn install
 
 Install dependencies declared in `harn.toml`, writing or reusing

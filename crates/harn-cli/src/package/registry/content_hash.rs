@@ -13,11 +13,22 @@ pub(crate) fn compute_content_hash(dir: &Path) -> Result<String, PackageError> {
         .map_err(|error| PackageError::Registry(error.to_string()))
 }
 
+#[cfg(test)]
+pub(crate) fn compute_archive_content_hash(dir: &Path) -> Result<String, PackageError> {
+    harn_modules::package_execution::compute_archive_content_hash(dir)
+        .map_err(|error| PackageError::Registry(error.to_string()))
+}
+
+pub(crate) fn is_canonical_content_hash(hash: &str) -> bool {
+    harn_modules::package_execution::is_canonical_package_content_hash(hash)
+}
+
 pub(crate) fn verify_content_hash_or_compute(
     dir: &Path,
     expected: &str,
 ) -> Result<(), PackageError> {
-    let actual = compute_content_hash(dir)?;
+    let actual = harn_modules::package_execution::verify_package_content_hash(dir, expected)
+        .map_err(|error| PackageError::Registry(error.to_string()))?;
     if actual != expected {
         return Err(format!(
             "content hash mismatch for {}: expected {}, got {}",
