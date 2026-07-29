@@ -11,6 +11,7 @@ use harn_lexer::Lexer;
 use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 
 mod acp_ambient_globals;
+mod attributes;
 mod coalesce;
 mod enum_construct;
 mod exhaustiveness;

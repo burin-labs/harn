@@ -1,6 +1,7 @@
 use harn_parser::{Node, SNode, TypeExpr, TypeParam};
 
 mod bindings;
+mod callable_entry;
 mod catalogs;
 mod closures;
 mod concurrency;
@@ -24,6 +25,22 @@ mod yield_scan;
 pub use error::CompileError;
 
 use crate::chunk::{Chunk, Constant, Op};
+
+/// A compiled top-level callable invocation.
+///
+/// The bootstrap chunk initializes the source module once and yields either
+/// the target callable or `[fixture, target]`. [`crate::Vm`] owns invocation:
+/// it calls the optional fixture, prepends that value to the explicit
+/// arguments, invokes the target through the ordinary callable arity/type
+/// path, and runs the pipeline-finish lifecycle once around the whole entry.
+///
+/// Keeping the bootstrap representation private prevents hosts from learning
+/// compiler bytecode conventions or smuggling arguments through VM globals.
+#[derive(Clone)]
+pub struct CompiledCallableEntry {
+    pub(crate) bootstrap: Chunk,
+    pub(crate) has_fixture: bool,
+}
 
 /// Jump operands are 16-bit chunk offsets (`emit_jump`, `patch_jump`,
 /// backward loop jumps), so a chunk whose code grows past `u16::MAX`
@@ -261,7 +278,7 @@ impl Compiler {
     /// Compile a single AST node. Most arm bodies live in per-category
     /// submodules (expressions, statements, closures, decls, patterns,
     /// error_handling, concurrency); this function is a thin dispatcher.
-    fn compile_node(&mut self, snode: &SNode) -> Result<(), CompileError> {
+    pub(super) fn compile_node(&mut self, snode: &SNode) -> Result<(), CompileError> {
         self.line = snode.span.line as u32;
         self.column = snode.span.column as u32;
         self.chunk.set_column(self.column);

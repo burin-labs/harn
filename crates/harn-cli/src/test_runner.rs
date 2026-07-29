@@ -11,19 +11,23 @@ use std::time::Instant;
 use crate::env_guard::ScopedEnvVar;
 use crate::test_timing::DurationSummary;
 use crate::CLI_RUNTIME_STACK_SIZE;
-use harn_lexer::Lexer;
-use harn_parser::const_eval::{const_eval, ConstEnv, ConstValue};
-use harn_parser::{Attribute, Node, Parser, SNode, TypedParam};
-use harn_vm::VmValue;
+use harn_parser::SNode;
+use harn_vm::{IsolateValue, VmValue};
 
+mod discovery;
 mod execution;
+#[cfg(test)]
+mod fixture_tests;
+mod fixtures;
 mod reporting;
 mod session;
 mod skill_context;
 #[cfg(test)]
 mod tests;
 
-use execution::execute_case;
+use discovery::{extract_cases_from_program, parse_program, seed_imported_enum_candidates};
+use execution::{execute_case, execute_file_fixture};
+use fixtures::{FixtureScope, TestFixture};
 pub use reporting::{
     AggregateTimings, PhaseTimings, TestPhase, TestResult, TestSummary, TestTimeout,
 };
@@ -180,8 +184,13 @@ struct TestCase {
     /// Number of workers this test reserves while running. Capped at the
     /// pool size during discovery so heavy tests still get scheduled.
     weight: usize,
-    /// Parameter bindings supplied by one `@test(cases: [...])` row.
-    bindings: Vec<(String, VmValue)>,
+    /// Explicit values supplied by one `@test(cases: [...])` row.
+    args: Vec<VmValue>,
+    /// Optional reusable setup selected by `@test(fixture: name)`.
+    fixture: Option<TestFixture>,
+    /// File-scoped fixture result cloned through Harn's isolate-safe COW
+    /// contract before this case enters its fresh VM.
+    file_fixture_value: Option<IsolateValue>,
 }
 
 fn canonicalize_existing_path(path: &Path) -> PathBuf {
@@ -375,6 +384,20 @@ async fn run_tests_with_session_impl(
 
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
+    if !options.fail_fast || all_results.is_empty() {
+        let prepared = prepare_file_fixtures(
+            cases,
+            options,
+            session,
+            &skill_contexts,
+            operator_approval_grant,
+        )
+        .await;
+        cases = prepared.cases;
+        all_results.extend(prepared.failures);
+    } else {
+        cases.clear();
+    }
     let execution = if !options.fail_fast || all_results.is_empty() {
         execute_cases(
             cases,
@@ -485,7 +508,14 @@ async fn run_test_file_with_session_impl(
         .map(Path::to_path_buf)
         .unwrap_or_else(test_execution_cwd);
     let prepared_module_cache = session.prepared_module_cache(0);
-    for case in cases {
+    let fixture_options = RunOptions {
+        timeout_ms,
+        ..RunOptions::default()
+    };
+    let prepared =
+        prepare_file_fixtures(cases, &fixture_options, session, &skill_contexts, None).await;
+    results.extend(prepared.failures);
+    for case in prepared.cases {
         let loaded_skills = skill_contexts.for_case(&case);
         results.push(
             execute_case(
@@ -711,250 +741,6 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
     }
 }
 
-fn parse_program(source: &str) -> Result<Vec<SNode>, String> {
-    let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|e| format!("{e}"))?;
-    let mut parser = Parser::new(tokens);
-    parser.parse().map_err(|e| format!("{e}"))
-}
-
-fn extract_cases_from_program(
-    file: &Path,
-    source: &Arc<String>,
-    program: &Arc<Vec<SNode>>,
-    filter: Option<&str>,
-    workers: usize,
-) -> Result<Vec<TestCase>, String> {
-    let mut cases = Vec::new();
-    for snode in program.iter() {
-        let Some(meta) = inspect_test_pipeline(snode)? else {
-            continue;
-        };
-        // Cap heavy weight so a single annotated test never deadlocks
-        // when the pool is smaller than the requested concurrency.
-        let weight = meta.weight.min(workers).max(1);
-        if meta.rows.is_empty() {
-            if filter.is_some_and(|pattern| !meta.name.contains(pattern)) {
-                continue;
-            }
-            cases.push(TestCase {
-                file: file.to_path_buf(),
-                name: meta.name.clone(),
-                pipeline_name: meta.name,
-                source: Arc::clone(source),
-                program: Arc::clone(program),
-                imported_enum_candidates: Arc::new(Vec::new()),
-                serial_group: meta.serial_group,
-                weight,
-                bindings: Vec::new(),
-            });
-        } else {
-            for row in meta.rows {
-                let case_name = format!("{}[{}]", meta.name, row.name);
-                if filter.is_some_and(|pattern| !case_name.contains(pattern)) {
-                    continue;
-                }
-                cases.push(TestCase {
-                    file: file.to_path_buf(),
-                    name: case_name,
-                    pipeline_name: meta.name.clone(),
-                    source: Arc::clone(source),
-                    program: Arc::clone(program),
-                    imported_enum_candidates: Arc::new(Vec::new()),
-                    serial_group: meta.serial_group.clone(),
-                    weight,
-                    bindings: meta.params.iter().cloned().zip(row.args).collect(),
-                });
-            }
-        }
-    }
-    Ok(cases)
-}
-
-fn seed_imported_enum_candidates(file: &Path, source: &str, cases: &mut [TestCase]) {
-    if cases.is_empty() || !harn_parser::visit::contains_identifier_enum_pattern(&cases[0].program)
-    {
-        return;
-    }
-    let mut candidates = harn_modules::build_with_source(file, source)
-        .imported_names_by_kind_for_file(file, harn_modules::DefKind::Enum)
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<Vec<_>>();
-    candidates.sort_unstable();
-    let candidates = Arc::new(candidates);
-    for case in cases {
-        case.imported_enum_candidates = Arc::clone(&candidates);
-    }
-}
-
-struct PipelineMeta {
-    name: String,
-    params: Vec<String>,
-    serial_group: Option<String>,
-    weight: usize,
-    rows: Vec<ParameterizedRow>,
-}
-
-struct ParameterizedRow {
-    name: String,
-    args: Vec<VmValue>,
-}
-
-fn inspect_test_pipeline(snode: &SNode) -> Result<Option<PipelineMeta>, String> {
-    // Pipelines marked `@test`, or named `test_*`, are user tests. The
-    // companion attributes `@serial` and `@heavy` only tune the scheduler
-    // and never make a non-test pipeline discoverable on their own.
-    let (attributes, inner) = match &snode.node {
-        Node::AttributedDecl { attributes, inner } => (attributes.as_slice(), inner.as_ref()),
-        _ => (&[][..], snode),
-    };
-    let (name, params) = match &inner.node {
-        Node::Pipeline { name, params, .. } => (name.clone(), TypedParam::names(params)),
-        _ => return Ok(None),
-    };
-    let has_test_attr = attributes.iter().any(|a| a.name == "test");
-    if !has_test_attr && !name.starts_with("test_") {
-        return Ok(None);
-    }
-    let serial_group = attributes
-        .iter()
-        .find(|a| a.name == "serial")
-        .map(serial_group_for);
-    let weight = attributes
-        .iter()
-        .find(|a| a.name == "heavy")
-        .and_then(heavy_weight_for)
-        .unwrap_or(1);
-    let rows = match attributes.iter().find(|a| a.name == "test") {
-        Some(attribute) => parameterized_rows(attribute, &name, params.len())?,
-        None => Vec::new(),
-    };
-    Ok(Some(PipelineMeta {
-        name,
-        params,
-        serial_group,
-        weight,
-        rows,
-    }))
-}
-
-fn parameterized_rows(
-    attribute: &Attribute,
-    pipeline_name: &str,
-    parameter_count: usize,
-) -> Result<Vec<ParameterizedRow>, String> {
-    let Some(cases) = attribute.named_arg("cases") else {
-        return Ok(Vec::new());
-    };
-    let Node::ListLiteral(items) = &cases.node else {
-        return Err(format!(
-            "@test cases for `{pipeline_name}` must be a list of {{name, args}} rows"
-        ));
-    };
-    if items.is_empty() {
-        return Err(format!(
-            "@test cases for `{pipeline_name}` must not be empty"
-        ));
-    }
-
-    let mut rows = Vec::with_capacity(items.len());
-    let mut names = HashSet::new();
-    for item in items {
-        let Node::DictLiteral(entries) = &item.node else {
-            return Err(format!(
-                "@test case in `{pipeline_name}` must be a {{name, args}} dict"
-            ));
-        };
-        let name_node = dict_entry(entries, "name").ok_or_else(|| {
-            format!("@test case in `{pipeline_name}` is missing string field `name`")
-        })?;
-        let name = match &name_node.node {
-            Node::StringLiteral(value) | Node::RawStringLiteral(value) => value.trim().to_string(),
-            _ => {
-                return Err(format!(
-                    "@test case name in `{pipeline_name}` must be a string literal"
-                ));
-            }
-        };
-        if name.is_empty() || !names.insert(name.clone()) {
-            return Err(format!(
-                "@test case names in `{pipeline_name}` must be non-empty and unique: `{name}`"
-            ));
-        }
-        let args_node = dict_entry(entries, "args").ok_or_else(|| {
-            format!("@test case `{name}` in `{pipeline_name}` is missing list field `args`")
-        })?;
-        let Node::ListLiteral(args) = &args_node.node else {
-            return Err(format!(
-                "@test case `{name}` in `{pipeline_name}` must provide `args` as a list"
-            ));
-        };
-        if args.len() != parameter_count {
-            return Err(format!(
-                "@test case `{name}` in `{pipeline_name}` has {} arguments; expected {parameter_count}",
-                args.len()
-            ));
-        }
-        let args = args
-            .iter()
-            .map(attribute_value)
-            .collect::<Result<Vec<_>, _>>()?;
-        rows.push(ParameterizedRow { name, args });
-    }
-    Ok(rows)
-}
-
-fn dict_entry<'a>(entries: &'a [harn_parser::DictEntry], key: &str) -> Option<&'a SNode> {
-    entries.iter().find_map(|entry| {
-        let matches = match &entry.key.node {
-            Node::Identifier(value) | Node::StringLiteral(value) => value == key,
-            _ => false,
-        };
-        matches.then_some(&entry.value)
-    })
-}
-
-fn attribute_value(node: &SNode) -> Result<VmValue, String> {
-    let value = const_eval(node, &ConstEnv::new())
-        .map_err(|error| format!("@test case arguments must be compile-time values: {error:?}"))?;
-    Ok(const_value_to_vm(value))
-}
-
-fn const_value_to_vm(value: ConstValue) -> VmValue {
-    match value {
-        ConstValue::Int(value) => VmValue::Int(value),
-        ConstValue::Float(value) => VmValue::Float(value),
-        ConstValue::Bool(value) => VmValue::Bool(value),
-        ConstValue::String(value) => VmValue::String(value.into()),
-        ConstValue::Nil => VmValue::Nil,
-        ConstValue::List(items) => {
-            VmValue::List(Arc::new(items.into_iter().map(const_value_to_vm).collect()))
-        }
-        ConstValue::Dict(entries) => VmValue::dict(
-            entries
-                .into_iter()
-                .map(|(key, value)| (key, const_value_to_vm(value)))
-                .collect::<Vec<(String, VmValue)>>(),
-        ),
-    }
-}
-
-fn serial_group_for(attr: &Attribute) -> String {
-    attr.string_arg("group")
-        .unwrap_or_else(|| "__default__".to_string())
-}
-
-fn heavy_weight_for(attr: &Attribute) -> Option<usize> {
-    attr.args
-        .iter()
-        .find(|a| a.name.as_deref() == Some("threads"))
-        .and_then(|a| match &a.value.node {
-            Node::IntLiteral(n) if *n >= 1 => Some(*n as usize),
-            _ => None,
-        })
-}
-
 fn sort_cases_longest_first(cases: &mut [TestCase], timings: &BTreeMap<String, u64>) {
     // Sort ascending so the slowest tests sit at the tail and get popped
     // first by workers. New (unmeasured) tests share the bottom of the
@@ -1068,6 +854,71 @@ fn update_timings_cache(path: &Path, mut existing: BTreeMap<String, u64>, result
 struct CaseExecutionResults {
     cases: Vec<TestResult>,
     infrastructure_errors: Vec<TestResult>,
+}
+
+struct PreparedFixtureCases {
+    cases: Vec<TestCase>,
+    failures: Vec<TestResult>,
+}
+
+async fn prepare_file_fixtures(
+    cases: Vec<TestCase>,
+    options: &RunOptions,
+    session: &TestRunSession,
+    skill_contexts: &PreparedSkillContexts,
+    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+) -> PreparedFixtureCases {
+    let mut values: BTreeMap<(PathBuf, String), Result<IsolateValue, TestResult>> = BTreeMap::new();
+    let mut prepared = Vec::with_capacity(cases.len());
+    let mut failures = Vec::new();
+    let prepared_module_cache = session.prepared_module_cache(0);
+
+    for mut case in cases {
+        let Some(fixture) = case
+            .fixture
+            .as_ref()
+            .filter(|fixture| fixture.scope == FixtureScope::File)
+            .cloned()
+        else {
+            prepared.push(case);
+            continue;
+        };
+        let key = (case.file.clone(), fixture.name.clone());
+        if !values.contains_key(&key) {
+            let cwd = case_execution_cwd(&case);
+            let value = execute_file_fixture(
+                &case,
+                &fixture,
+                &cwd,
+                options.timeout_ms,
+                skill_contexts.for_case(&case),
+                &prepared_module_cache,
+                session.stdio_available(),
+                operator_approval_grant,
+            )
+            .await;
+            if let Err(failure) = &value {
+                failures.push(failure.clone());
+            }
+            values.insert(key.clone(), value);
+        }
+        match values.get(&key).expect("fixture result inserted above") {
+            Ok(value) => {
+                case.file_fixture_value = Some(value.clone());
+                prepared.push(case);
+            }
+            Err(_) if options.fail_fast => {
+                prepared.clear();
+                break;
+            }
+            Err(_) => {}
+        }
+    }
+
+    PreparedFixtureCases {
+        cases: prepared,
+        failures,
+    }
 }
 
 async fn execute_cases(
@@ -1184,6 +1035,13 @@ async fn execute_cases(
                     let case = claim_next_case(&queue, &cancelled, fail_fast);
                     let Some(case) = case else { break };
                     let _guard = gate.acquire(case.weight, case.serial_group.as_deref());
+                    // A worker may have claimed this case before another
+                    // worker failed, then waited behind a heavy/serial gate.
+                    // Recheck at the execution barrier so queued work is not
+                    // mistaken for already-running work under fail-fast.
+                    if fail_fast && cancelled.load(Ordering::Acquire) {
+                        break;
+                    }
                     let cwd = case_execution_cwd(&case);
                     let loaded_skills = skill_contexts.for_case(&case);
                     let test_index = next_test_index(&completed);

@@ -93,7 +93,10 @@ esac
 SH
 chmod +x "$fake_cargo_bin/cargo"
 
-unset HARN_BIN
+# The resolver's explicit binary and build policy are a coupled input. This
+# test supplies both independently below, so do not inherit either from the
+# caller (notably `make all` with a prebuilt Harn binary).
+unset HARN_BIN HARN_BIN_NO_BUILD
 
 env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   CARGO_TARGET_DIR="$target_dir" \

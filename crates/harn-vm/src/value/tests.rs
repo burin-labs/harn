@@ -649,3 +649,35 @@ fn char_offset_conversions_round_trip() {
         }
     }
 }
+
+#[test]
+fn isolate_clone_uses_cow_for_nested_data_and_rejects_runtime_handles() {
+    let original = VmValue::dict([("nested", VmValue::List(Arc::new(vec![VmValue::Int(1)])))]);
+    let seed = original.try_into_isolate_value().unwrap();
+    let original = seed.instantiate();
+    let mut cloned = seed.instantiate();
+    let VmValue::Dict(ref mut cloned_map) = cloned else {
+        unreachable!()
+    };
+    let nested = Arc::make_mut(cloned_map).get_mut("nested").unwrap();
+    let VmValue::List(items) = nested else {
+        unreachable!()
+    };
+    Arc::make_mut(items)[0] = VmValue::Int(2);
+
+    let VmValue::Dict(original_map) = original else {
+        unreachable!()
+    };
+    let VmValue::List(original_items) = original_map.get("nested").unwrap() else {
+        unreachable!()
+    };
+    assert!(matches!(original_items[0], VmValue::Int(1)));
+
+    let handle = VmValue::dict([(
+        "nested_handle",
+        VmValue::List(Arc::new(vec![VmValue::TaskHandle(HarnStr::from(
+            "task_fixture",
+        ))])),
+    )]);
+    assert!(handle.try_into_isolate_value().is_err());
+}

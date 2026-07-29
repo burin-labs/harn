@@ -49,7 +49,9 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         source,
         file: file.clone(),
         imported_enum_candidates: Arc::new(Vec::new()),
-        bindings: Vec::new(),
+        args: vec![VmValue::Nil],
+        fixture: None,
+        file_fixture_value: None,
         weight: 1,
         serial_group: None,
     };
@@ -91,7 +93,9 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         source,
         file: file.clone(),
         imported_enum_candidates: Arc::new(Vec::new()),
-        bindings: Vec::new(),
+        args: vec![VmValue::Nil],
+        fixture: None,
+        file_fixture_value: None,
         weight: 1,
         serial_group: None,
     };
@@ -188,7 +192,9 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         source,
         file,
         imported_enum_candidates: Arc::new(Vec::new()),
-        bindings: Vec::new(),
+        args: vec![VmValue::Nil],
+        fixture: None,
+        file_fixture_value: None,
         weight: 1,
         serial_group: None,
     };
@@ -662,7 +668,9 @@ fn sort_cases_longest_first_uses_historical_durations() {
         imported_enum_candidates: Arc::new(Vec::new()),
         serial_group: None,
         weight: 1,
-        bindings: Vec::new(),
+        args: Vec::new(),
+        fixture: None,
+        file_fixture_value: None,
     };
     let mut cases = vec![mk("test_quick"), mk("test_slow"), mk("test_medium")];
     let mut timings = BTreeMap::new();
@@ -697,7 +705,9 @@ fn select_shard_cases_balances_by_historical_duration() {
         imported_enum_candidates: Arc::new(Vec::new()),
         serial_group: None,
         weight: 1,
-        bindings: Vec::new(),
+        args: Vec::new(),
+        fixture: None,
+        file_fixture_value: None,
     };
     let mut timings = BTreeMap::new();
     timings.insert("tests/a.harn::test_big".to_string(), 100);
@@ -1280,6 +1290,46 @@ pipeline test_equal(actual, expected) {
 }
 
 #[tokio::test]
+async fn parameterized_row_type_failure_does_not_block_siblings() {
+    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    let temp = TempTestDir::new();
+    temp.write(
+        "suite/test_typed_rows.harn",
+        r#"
+@test(cases: [
+  {name: "wrong_type", args: ["not an integer"]},
+  {name: "valid", args: [42]},
+])
+pipeline test_typed(value: int) {
+  assert_eq(value, 42)
+}
+"#,
+    );
+
+    let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
+
+    assert_eq!(summary.total, 2, "{:?}", summary.results);
+    assert_eq!(summary.passed, 1, "{:?}", summary.results);
+    assert_eq!(summary.failed, 1, "{:?}", summary.results);
+    let failure = summary
+        .results
+        .iter()
+        .find(|result| result.name == "test_typed[wrong_type]")
+        .expect("wrong-type row result");
+    assert!(
+        failure
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("expected int")),
+        "row values must pass through ordinary callable type checks: {failure:?}"
+    );
+    assert!(summary
+        .results
+        .iter()
+        .any(|result| result.name == "test_typed[valid]" && result.passed));
+}
+
+#[tokio::test]
 async fn parameterized_test_filter_selects_individual_row() {
     let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     let temp = TempTestDir::new();
@@ -1306,30 +1356,4 @@ pipeline test_length(value, expected) { assert_eq(len(value), expected) }
     assert_eq!(summary.total, 1);
     assert_eq!(summary.passed, 1);
     assert_eq!(summary.results[0].name, "test_length[empty]");
-}
-
-#[tokio::test]
-async fn malformed_parameterized_rows_fail_during_discovery() {
-    let _env_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
-    let temp = TempTestDir::new();
-    temp.write(
-        "suite/test_parameterized.harn",
-        r#"
-@test(cases: [
-  {name: "duplicate", args: [1]},
-  {name: "duplicate", args: [2]},
-])
-pipeline test_value(value) { assert(false, "must not execute") }
-"#,
-    );
-
-    let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
-
-    assert_eq!(summary.total, 1);
-    assert_eq!(summary.results[0].name, "<file error>");
-    assert_eq!(summary.timing.sample_count, 0);
-    assert!(summary.results[0]
-        .error
-        .as_deref()
-        .is_some_and(|error| error.contains("non-empty and unique")));
 }

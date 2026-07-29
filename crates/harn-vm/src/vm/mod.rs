@@ -2,6 +2,7 @@ mod async_builtin;
 mod builtin;
 mod cache;
 mod call_args;
+mod callable_entry;
 mod debug;
 mod dispatch;
 mod execution;

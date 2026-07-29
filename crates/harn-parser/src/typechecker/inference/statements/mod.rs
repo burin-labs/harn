@@ -18,6 +18,7 @@ mod check_node;
 mod expressions;
 mod name_resolution;
 mod patterns;
+mod test_attributes;
 
 use crate::ast::*;
 use crate::builtin_signatures;
