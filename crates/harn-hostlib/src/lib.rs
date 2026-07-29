@@ -38,6 +38,7 @@ pub mod error;
 pub mod fs;
 pub mod fs_snapshot;
 pub mod fs_watch;
+pub mod host_conditions;
 pub mod host_env_custody;
 pub mod host_lease;
 pub mod host_lease_capability;
@@ -58,6 +59,11 @@ mod text;
 mod value_args;
 
 pub use error::HostlibError;
+pub use host_conditions::{
+    HostConditionObservation, HostConditionStatus, HostConditionsCapability,
+    HostConditionsSnapshot, HostConditionsSource, HostContentionQuestion, HostEnvironment,
+    InjectedHostConditionsSource, LocalHostConditionsSource, HOST_CONDITIONS_SCHEMA_VERSION,
+};
 pub use host_lease::{
     HostLeaseAcquireReceipt, HostLeaseAcquireStatus, HostLeaseCargoExecutionContext,
     HostLeaseDeferReason, HostLeaseDeferReceipt, HostLeaseError, HostLeaseExecutionContext,
@@ -98,6 +104,7 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability)
         .with(verdict::VerdictCapability)
+        .with(host_conditions::HostConditionsCapability::default())
         .with(host_lease_capability::HostLeaseCapability);
     #[cfg(feature = "terminal-session")]
     {

@@ -1,0 +1,52 @@
+import { host_conditions_sample } from "std/host_conditions"
+import { assert_host_called, with_host_mocks } from "std/testing"
+
+fn sample_with_injected_host_facts() {
+  const snapshot = host_conditions_sample()
+  assert_host_called("host_conditions", "sample", {schema_version: 1}, nil)
+  return snapshot
+}
+
+pipeline test_host_conditions_observability(task) {
+  const snapshot = with_host_mocks(
+    [
+      {
+        capability: "host_conditions",
+        operation: "sample",
+        params: {schema_version: 1},
+        result: {
+          schema_version: 1,
+          observed_at_ms: 123,
+          environment: "virtualized",
+          sample_cost_us: 7,
+          questions: [
+            {question: "promised_cpu", status: "observed", contention: 0.0, reason: nil},
+            {
+              question: "nominal_speed",
+              status: "not_observable",
+              contention: nil,
+              reason: "guest cannot see host thermal state",
+            },
+            {
+              question: "accelerator_shared",
+              status: "unavailable",
+              contention: nil,
+              reason: "control-plane allocation read failed",
+            },
+            {question: "memory_or_io_contended", status: "observed", contention: 0.25, reason: nil},
+          ],
+        },
+      },
+    ],
+    sample_with_injected_host_facts,
+  )
+  assert_eq(snapshot.questions[0].status, "observed")
+  assert_eq(snapshot.questions[0].contention, 0.0)
+  assert_eq(snapshot.questions[1].status, "not_observable")
+  assert_eq(snapshot.questions[1].contention, nil)
+  assert_eq(snapshot.questions[2].status, "unavailable")
+  assert_eq(snapshot.questions[2].contention, nil)
+  assert_eq(snapshot.questions[3].status, "observed")
+  assert_eq(snapshot.questions[3].contention, 0.25)
+  __io_println("ok")
+}

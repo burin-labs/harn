@@ -279,6 +279,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "sqlite" => "stdlib/stdlib_sqlite.harn",
     "checkpoint" => "stdlib/stdlib_checkpoint.harn",
     "host" => "stdlib/stdlib_host.harn",
+    "host_conditions" => "stdlib/stdlib_host_conditions.harn",
     "host_lease" => "stdlib/stdlib_host_lease.harn",
     "git" => "stdlib/stdlib_git.harn",
     "git/checkout" => "stdlib/git/checkout.harn",
@@ -824,6 +825,7 @@ mod tests {
             "triage",
             "dashboard/jobs",
             "ui_resource",
+            "host_conditions",
             "host_lease",
         ] {
             assert!(
