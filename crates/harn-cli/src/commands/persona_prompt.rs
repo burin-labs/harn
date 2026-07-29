@@ -226,7 +226,7 @@ async fn run_compiler_script(
 ) -> Result<String, String> {
     let _dispatch = PERSONA_COMPILER_DISPATCH_LOCK.lock().await;
     let _payload = ScopedEnvVar::set(env_name, payload);
-    let outcome = dispatch::run_embedded_script(script, Vec::new(), true).await;
+    let outcome = Box::pin(dispatch::run_embedded_script(script, Vec::new(), true)).await;
     if outcome.exit_code != 0 {
         let detail = outcome.stderr.trim();
         return Err(if detail.is_empty() {
