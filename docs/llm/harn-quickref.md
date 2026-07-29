@@ -1304,6 +1304,33 @@ location and OAuth/service-account authentication. OpenAI-compatible Gemini
 routes such as OpenRouter remain OpenAI-wire routes and use OpenAI-style
 `tools`, `tool_calls`, and structured-output parameters.
 
+Google serves the Gemini models over two synchronous endpoints, and the
+`live_endpoint_family` capability says which one a route dispatches to:
+`gemini_generate_content` (the default, described above) or
+`gemini_interactions` (`POST /v1beta/interactions`, GA June 2026). The
+Interactions family models a turn as typed steps (`user_input`, `thought`,
+`model_output`, `function_call`, `function_result`) and adds provider-side
+conversation state via `previous_response_id`, streaming, and `background`.
+Harn sends `store: false` unless you ask for state, `thinking` maps onto the
+`minimal`/`low`/`medium`/`high` ladder rather than a token budget, and
+`frequency_penalty` / `presence_penalty` have no Interactions field. Gemini
+Batch is unaffected: it stays `generateContent`-shaped whichever live family a
+route uses. Opt in per project:
+
+```toml
+[[capabilities.provider.gemini]]
+model_match = "gemini-3.5*"
+extends = true          # one-field overlay; without it the row REPLACES the shipped one
+live_endpoint_family = "gemini_interactions"
+```
+
+Not every model is served by both endpoints; confirm with
+`provider_capabilities(provider, model).live_endpoint_family`, which honors
+project overrides.
+
+See [Providers](../src/llm/providers.md#gemini-interactions-api) for the full
+contract.
+
 ### Mid-conversation system & developer messages
 
 A conversation `messages` array (or a transcript built with `add_user` /
@@ -1619,6 +1646,7 @@ set under `[provider_defaults.<name>]`:
 | `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
 | `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
+| `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini/Vertex adapters emit Google `functionDeclarations` from canonical tool definitions. |
 | `defer_loading` | bool | Provider honors `defer_loading: true` on tool defs. |
 | `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |

@@ -1,9 +1,25 @@
 //! Google Gemini provider.
+//!
+//! Google serves the Gemini models over two incompatible synchronous wire
+//! shapes. This module owns `:generateContent` — the legacy path, the only
+//! shape Gemini Batch accepts, and the body/parse pair the Vertex provider
+//! delegates to. [`interactions`] owns `/v1beta/interactions`. Which one a
+//! route uses is the typed `live_endpoint_family` capability, resolved once in
+//! the capability matrix and switched on in exactly one place
+//! ([`GeminiProvider::chat_impl`]).
+
+pub(crate) mod interactions;
+mod interactions_stream;
+#[cfg(test)]
+mod interactions_tests;
+#[cfg(test)]
+mod test_support;
 
 use crate::llm::api::{
     DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry,
     RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
+use crate::llm::capabilities::LiveEndpointFamily;
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
@@ -30,6 +46,16 @@ impl LlmProviderChat for GeminiProvider {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
+}
+
+/// The live endpoint family for a route, or `None` when the route is not on the
+/// Gemini dialect at all. The single reader of the capability, so a caller can
+/// never re-derive the switch from a model-name substring.
+pub(crate) fn gemini_live_endpoint_family(
+    provider: &str,
+    model: &str,
+) -> Option<LiveEndpointFamily> {
+    crate::llm::capabilities::lookup(provider, model).live_endpoint_family
 }
 
 // Per-model Gemini thinking quirks are read from the capability matrix
@@ -217,6 +243,14 @@ impl GeminiProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
+        // The one place the two Gemini live endpoint families diverge. Vertex
+        // never reaches here — it has its own `chat_impl` and delegates only to
+        // `build_request_body` — so its URL/auth envelope stays untouched.
+        if gemini_live_endpoint_family(&request.provider, &request.model)
+            .is_some_and(LiveEndpointFamily::is_gemini_interactions)
+        {
+            return interactions::GeminiInteractions::chat(request, delta_tx).await;
+        }
         let body = Self::build_request_body(request);
         let pdef = crate::llm_config::provider_config(&request.provider);
         let base_url = pdef
@@ -544,60 +578,7 @@ mod tests {
     use crate::llm::api::{OutputFormat, ThinkingConfig};
     use serde_json::json;
 
-    fn text_payload(model: &str, thinking: ThinkingConfig) -> LlmRequestPayload {
-        LlmRequestPayload {
-            provider: "gemini".to_string(),
-            model: model.to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            messages: vec![serde_json::json!({
-                "role": "user",
-                "content": "hello",
-            })],
-            system: None,
-            max_tokens: 64,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: false,
-            top_logprobs: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            fast: false,
-            output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
-            stream: false,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            session_id: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-        }
-    }
+    use super::test_support::gemini_payload as text_payload;
 
     #[test]
     fn parse_response_preserves_raw_function_call_part() {

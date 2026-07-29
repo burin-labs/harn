@@ -2,13 +2,19 @@ use serde_json::{json, Value};
 
 use super::request_contract::probe_tool_contract;
 use super::{
-    probe_tool_registry, ToolConformanceRequestValidation, ToolConformanceRequestValidationStatus,
-    ToolConformanceRequestWarning, ToolProbeCase, ToolProbeFormat, ToolProbeMode,
-    ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
+    probe_tool_registry, ToolConformanceRequestWarning, ToolProbeCase, ToolProbeFormat,
+    ToolProbeMode, ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
 };
 use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
 use crate::llm::capabilities::WireDialect;
 use crate::llm_config;
+
+#[path = "tool_conformance_request_validation.rs"]
+mod validation;
+use validation::request_validation_dialect;
+#[cfg(test)]
+pub(in crate::llm::tool_conformance) use validation::validate_probe_request_body;
+pub(in crate::llm::tool_conformance) use validation::validate_probe_request_body_for_format;
 
 const ANTHROPIC_THINKING_SIGNATURE: &str = "harn-scorecard-anthropic-thinking-signature";
 const ANTHROPIC_REDACTED_THINKING_DATA: &str = "harn-scorecard-redacted-thinking-payload";
@@ -411,9 +417,17 @@ fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value 
         _ => {}
     }
 
-    match crate::llm::capabilities::lookup(&payload.provider, &payload.model).message_wire_format {
+    let caps = crate::llm::capabilities::lookup(&payload.provider, &payload.model);
+    match caps.message_wire_format {
         WireDialect::Anthropic => {
             crate::llm::providers::AnthropicProvider::build_request_body(payload)
+        }
+        WireDialect::Gemini
+            if caps.live_endpoint_family.is_some_and(
+                crate::llm::capabilities::LiveEndpointFamily::is_gemini_interactions,
+            ) =>
+        {
+            crate::llm::providers::GeminiInteractions::build_request_body(payload)
         }
         WireDialect::Gemini => crate::llm::providers::GeminiProvider::build_request_body(payload),
         WireDialect::Ollama => crate::llm::providers::OllamaProvider::build_request_body(payload),
@@ -476,6 +490,46 @@ fn request_body_warnings(
                 body,
                 "/generationConfig/topK",
                 "top_k",
+            );
+        }
+        "gemini_interactions" => {
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.temperature.is_some(),
+                body,
+                "/generation_config/temperature",
+                "temperature",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_p.is_some(),
+                body,
+                "/generation_config/top_p",
+                "top_p",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.top_k.is_some(),
+                body,
+                "/generation_config/top_k",
+                "top_k",
+            );
+            // Interactions' generation_config has no penalty fields at all, so
+            // a request that asks for them is always reported as dropped rather
+            // than failing the turn at the provider.
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.frequency_penalty.is_some(),
+                body,
+                "/generation_config/frequency_penalty",
+                "frequency_penalty",
+            );
+            push_omitted_sampling_param(
+                &mut omitted,
+                payload.presence_penalty.is_some(),
+                body,
+                "/generation_config/presence_penalty",
+                "presence_penalty",
             );
         }
         "ollama" => {
@@ -549,665 +603,10 @@ fn push_omitted_sampling_param(
 }
 
 #[cfg(test)]
-pub(super) fn validate_probe_request_body(
-    provider: &str,
-    model: &str,
-    probe_case: ToolProbeCase,
-    request_profile: ToolProbeRequestProfile,
-    body: &Value,
-) -> ToolConformanceRequestValidation {
-    validate_probe_request_body_for_format(
-        provider,
-        model,
-        ToolProbeFormat::Native,
-        probe_case,
-        request_profile,
-        body,
-    )
-}
-
-pub(super) fn validate_probe_request_body_for_format(
-    provider: &str,
-    model: &str,
-    tool_format: ToolProbeFormat,
-    probe_case: ToolProbeCase,
-    request_profile: ToolProbeRequestProfile,
-    body: &Value,
-) -> ToolConformanceRequestValidation {
-    let caps = crate::llm::capabilities::lookup(provider, model);
-    let dialect = request_validation_dialect(provider, &caps);
-    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup
-        && !crate::llm::tool_scorecard::signed_thinking_tool_history_supported(provider, model)
-    {
-        return ToolConformanceRequestValidation {
-            dialect,
-            status: ToolConformanceRequestValidationStatus::NotApplicable,
-            warnings: Vec::new(),
-            issues: vec![format!(
-                "signed thinking replay request is not applicable to {provider}:{model}; route has no signed-thinking tool-history surface"
-            )],
-        };
-    }
-    let mut issues = Vec::new();
-    if tool_format != ToolProbeFormat::Native {
-        validate_text_channel_probe_request(body, &dialect, tool_format, &mut issues);
-        validate_generation_parameter_ranges(body, &dialect, &mut issues);
-        return ToolConformanceRequestValidation {
-            dialect,
-            status: if issues.is_empty() {
-                ToolConformanceRequestValidationStatus::Pass
-            } else {
-                ToolConformanceRequestValidationStatus::Fail
-            },
-            warnings: Vec::new(),
-            issues,
-        };
-    }
-    match dialect.as_str() {
-        "anthropic" => {
-            validate_anthropic_probe_request(body, probe_case, request_profile, &mut issues);
-        }
-        "bedrock" => validate_bedrock_probe_request(body, probe_case, &mut issues),
-        "gemini" | "vertex" => {
-            validate_gemini_probe_request(body, probe_case, request_profile, &mut issues);
-        }
-        "ollama" => validate_ollama_probe_request(body, probe_case, &mut issues),
-        "openai_compat" => {
-            validate_openai_compat_probe_request(body, probe_case, &caps, &mut issues);
-        }
-        _ => issues.push(format!("unsupported validation dialect `{dialect}`")),
-    }
-    validate_generation_parameter_ranges(body, &dialect, &mut issues);
-    ToolConformanceRequestValidation {
-        dialect,
-        status: if issues.is_empty() {
-            ToolConformanceRequestValidationStatus::Pass
-        } else {
-            ToolConformanceRequestValidationStatus::Fail
-        },
-        warnings: Vec::new(),
-        issues,
-    }
-}
-
-fn validate_text_channel_probe_request(
-    body: &Value,
-    dialect: &str,
-    tool_format: ToolProbeFormat,
-    issues: &mut Vec<String>,
-) {
-    match dialect {
-        "gemini" | "vertex" => require_array(body, "/contents", issues),
-        _ => require_array(body, "/messages", issues),
-    }
-    for pointer in ["/tools", "/tool_choice", "/toolConfig", "/tool_config"] {
-        reject_present(body, pointer, "text-channel tool probe", issues);
-    }
-    let body_text = body.to_string();
-    let format_marker = match tool_format {
-        ToolProbeFormat::Json => "```tool",
-        ToolProbeFormat::Text => "<tool_call>",
-        ToolProbeFormat::Native => unreachable!(),
-    };
-    if !body_text.contains(TOOL_PROBE_TOOL_NAME) || !body_text.contains(format_marker) {
-        issues.push(format!(
-            "text-channel request is missing the {tool_format:?} echo_marker contract"
-        ));
-    }
-}
-
-fn request_validation_dialect(
-    provider: &str,
-    caps: &crate::llm::capabilities::Capabilities,
-) -> String {
-    if provider == "bedrock" {
-        return "bedrock".to_string();
-    }
-    if provider == "vertex" {
-        return "vertex".to_string();
-    }
-    match caps.message_wire_format {
-        crate::llm::capabilities::WireDialect::Anthropic => "anthropic".to_string(),
-        crate::llm::capabilities::WireDialect::Gemini => "gemini".to_string(),
-        crate::llm::capabilities::WireDialect::Ollama => "ollama".to_string(),
-        crate::llm::capabilities::WireDialect::OpenAiCompat => "openai_compat".to_string(),
-    }
-}
-
-fn validate_openai_compat_probe_request(
-    body: &Value,
-    probe_case: ToolProbeCase,
-    caps: &crate::llm::capabilities::Capabilities,
-    issues: &mut Vec<String>,
-) {
-    require_array(body, "/messages", issues);
-    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
-        issues.push(
-            "signed thinking replay request is not defined for OpenAI-compatible dialects"
-                .to_string(),
-        );
-        return;
-    }
-    if !probe_case.request_uses_probe_tool() {
-        reject_present(body, "/tools", "OpenAI-compatible no-tool request", issues);
-        reject_present(
-            body,
-            "/tool_choice",
-            "OpenAI-compatible no-tool request",
-            issues,
-        );
-        return;
-    }
-    require_openai_function_tool(body, "/tools/0", issues);
-    if probe_case.requires_probe_tool() {
-        validate_openai_compat_tool_choice(body, caps, issues);
-    } else {
-        reject_present(
-            body,
-            "/tool_choice",
-            "OpenAI-compatible tool-result-followup request",
-            issues,
-        );
-    }
-    reject_present(body, "/toolConfig", "OpenAI-compatible request", issues);
-}
-
-fn validate_openai_compat_tool_choice(
-    body: &Value,
-    caps: &crate::llm::capabilities::Capabilities,
-    issues: &mut Vec<String>,
-) {
-    let Some(tool_choice) = body.get("tool_choice") else {
-        issues.push("OpenAI-compatible request missing /tool_choice".to_string());
-        return;
-    };
-    if tool_choice.pointer("/type").and_then(Value::as_str) == Some("function") {
-        require_string_eq(
-            body,
-            "/tool_choice/function/name",
-            TOOL_PROBE_TOOL_NAME,
-            "OpenAI-compatible tool_choice.function.name",
-            issues,
-        );
-        return;
-    }
-    if let Some(mode) = tool_choice.as_str() {
-        if caps.allowed_tool_choice_modes.is_empty()
-            || caps
-                .allowed_tool_choice_modes
-                .iter()
-                .any(|allowed| allowed == mode)
-        {
-            return;
-        }
-        issues.push(format!(
-            "OpenAI-compatible tool_choice mode `{mode}` is not allowed by catalog capabilities"
-        ));
-        return;
-    }
-    require_string_eq(
-        body,
-        "/tool_choice/type",
-        "function",
-        "OpenAI-compatible tool_choice.type",
-        issues,
-    );
-}
-
-fn validate_anthropic_probe_request(
-    body: &Value,
-    probe_case: ToolProbeCase,
-    request_profile: ToolProbeRequestProfile,
-    issues: &mut Vec<String>,
-) {
-    require_array(body, "/messages", issues);
-    if !probe_case.request_uses_probe_tool() {
-        reject_present(body, "/tools", "Anthropic no-tool request", issues);
-        reject_present(body, "/tool_choice", "Anthropic no-tool request", issues);
-        return;
-    }
-    require_string_eq(
-        body,
-        "/tools/0/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Anthropic tool name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/tools/0/input_schema/properties/value/type",
-        "string",
-        "Anthropic input_schema value type",
-        issues,
-    );
-    reject_present(
-        body,
-        "/tools/0/function",
-        "Anthropic tool declaration",
-        issues,
-    );
-    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
-        validate_anthropic_signed_thinking_history(body, issues);
-        reject_present(
-            body,
-            "/tool_choice",
-            "Anthropic signed-thinking follow-up request",
-            issues,
-        );
-        return;
-    }
-    if probe_case.requires_probe_tool() {
-        match request_profile {
-            ToolProbeRequestProfile::CatalogDefault => {
-                require_string_eq(
-                    body,
-                    "/tool_choice/type",
-                    "tool",
-                    "Anthropic tool_choice.type",
-                    issues,
-                );
-                require_string_eq(
-                    body,
-                    "/tool_choice/name",
-                    TOOL_PROBE_TOOL_NAME,
-                    "Anthropic tool_choice.name",
-                    issues,
-                );
-            }
-            ToolProbeRequestProfile::ParameterEdges => {
-                require_string_eq(
-                    body,
-                    "/tool_choice/type",
-                    "any",
-                    "Anthropic parameter-edge tool_choice.type",
-                    issues,
-                );
-            }
-        }
-    } else {
-        reject_present(
-            body,
-            "/tool_choice",
-            "Anthropic tool-result-followup request",
-            issues,
-        );
-    }
-}
-
-fn validate_gemini_probe_request(
-    body: &Value,
-    probe_case: ToolProbeCase,
-    request_profile: ToolProbeRequestProfile,
-    issues: &mut Vec<String>,
-) {
-    require_array(body, "/contents", issues);
-    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
-        require_string_eq(
-            body,
-            "/tools/0/functionDeclarations/0/name",
-            TOOL_PROBE_TOOL_NAME,
-            "Gemini function declaration name",
-            issues,
-        );
-        validate_gemini_signed_thinking_history(body, issues);
-        reject_present(
-            body,
-            "/toolConfig",
-            "Gemini signed-thinking follow-up request",
-            issues,
-        );
-        reject_present(body, "/tool_choice", "Gemini request", issues);
-        return;
-    }
-    if !probe_case.request_uses_probe_tool() {
-        reject_present(body, "/tools", "Gemini no-tool request", issues);
-        reject_present(body, "/toolConfig", "Gemini no-tool request", issues);
-        return;
-    }
-    require_string_eq(
-        body,
-        "/tools/0/functionDeclarations/0/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Gemini function declaration name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/tools/0/functionDeclarations/0/parameters/properties/value/type",
-        "string",
-        "Gemini function declaration value type",
-        issues,
-    );
-    if probe_case.requires_probe_tool() {
-        require_string_eq(
-            body,
-            "/toolConfig/functionCallingConfig/mode",
-            "ANY",
-            "Gemini toolConfig mode",
-            issues,
-        );
-    }
-    if probe_case.requires_probe_tool()
-        && request_profile == ToolProbeRequestProfile::CatalogDefault
-    {
-        require_array_contains_string(
-            body,
-            "/toolConfig/functionCallingConfig/allowedFunctionNames",
-            TOOL_PROBE_TOOL_NAME,
-            "Gemini allowedFunctionNames",
-            issues,
-        );
-    } else if !probe_case.requires_probe_tool() {
-        reject_present(
-            body,
-            "/toolConfig",
-            "Gemini tool-result-followup request",
-            issues,
-        );
-    }
-    reject_present(body, "/tool_choice", "Gemini request", issues);
-}
-
-fn validate_bedrock_probe_request(
-    body: &Value,
-    probe_case: ToolProbeCase,
-    issues: &mut Vec<String>,
-) {
-    require_array(body, "/messages", issues);
-    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
-        issues
-            .push("signed thinking replay request is not defined for Bedrock Converse".to_string());
-        return;
-    }
-    if !probe_case.request_uses_probe_tool() {
-        reject_present(body, "/toolConfig", "Bedrock no-tool request", issues);
-        return;
-    }
-    require_string_eq(
-        body,
-        "/toolConfig/tools/0/toolSpec/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Bedrock toolSpec name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/toolConfig/tools/0/toolSpec/inputSchema/json/properties/value/type",
-        "string",
-        "Bedrock toolSpec value type",
-        issues,
-    );
-    reject_present(body, "/tool_choice", "Bedrock request", issues);
-}
-
-fn validate_ollama_probe_request(
-    body: &Value,
-    probe_case: ToolProbeCase,
-    issues: &mut Vec<String>,
-) {
-    require_array(body, "/messages", issues);
-    if probe_case == ToolProbeCase::SignedThinkingToolResultFollowup {
-        issues
-            .push("signed thinking replay request is not defined for Ollama dialects".to_string());
-        return;
-    }
-    if !probe_case.request_uses_probe_tool() {
-        reject_present(body, "/tools", "Ollama no-tool request", issues);
-        reject_present(body, "/tool_choice", "Ollama no-tool request", issues);
-        return;
-    }
-    require_openai_function_tool(body, "/tools/0", issues);
-    reject_present(body, "/tool_choice", "Ollama request", issues);
-}
-
-fn validate_anthropic_signed_thinking_history(body: &Value, issues: &mut Vec<String>) {
-    require_string_eq(
-        body,
-        "/messages/1/role",
-        "assistant",
-        "Anthropic signed-thinking assistant role",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/1/content/0/type",
-        "thinking",
-        "Anthropic thinking block type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/1/content/0/signature",
-        ANTHROPIC_THINKING_SIGNATURE,
-        "Anthropic thinking signature",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/1/content/1/type",
-        "redacted_thinking",
-        "Anthropic redacted thinking block type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/1/content/1/data",
-        ANTHROPIC_REDACTED_THINKING_DATA,
-        "Anthropic redacted thinking data",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/1/content/2/type",
-        "tool_use",
-        "Anthropic signed-thinking tool_use type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/1/content/2/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Anthropic signed-thinking tool_use name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/2/role",
-        "user",
-        "Anthropic signed-thinking tool_result role",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/messages/2/content/0/type",
-        "tool_result",
-        "Anthropic signed-thinking tool_result type",
-        issues,
-    );
-    let tool_use_id = body
-        .pointer("/messages/1/content/2/id")
-        .and_then(Value::as_str);
-    let tool_result_id = body
-        .pointer("/messages/2/content/0/tool_use_id")
-        .and_then(Value::as_str);
-    if tool_use_id.is_none() || tool_use_id != tool_result_id {
-        issues.push(format!(
-            "Anthropic signed-thinking tool_result id must match tool_use id, got use={tool_use_id:?} result={tool_result_id:?}"
-        ));
-    }
-}
-
-fn validate_gemini_signed_thinking_history(body: &Value, issues: &mut Vec<String>) {
-    require_string_eq(
-        body,
-        "/contents/1/role",
-        "model",
-        "Gemini signed-thinking model role",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/contents/1/parts/0/thoughtSignature",
-        GEMINI_THOUGHT_SIGNATURE,
-        "Gemini thoughtSignature",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/contents/1/parts/0/functionCall/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Gemini signed-thinking functionCall name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/contents/2/role",
-        "user",
-        "Gemini signed-thinking functionResponse role",
-        issues,
-    );
-    require_string_eq(
-        body,
-        "/contents/2/parts/0/functionResponse/name",
-        TOOL_PROBE_TOOL_NAME,
-        "Gemini signed-thinking functionResponse name",
-        issues,
-    );
-}
-
-fn require_openai_function_tool(body: &Value, base: &str, issues: &mut Vec<String>) {
-    require_string_eq(
-        body,
-        &format!("{base}/type"),
-        "function",
-        "tool type",
-        issues,
-    );
-    require_string_eq(
-        body,
-        &format!("{base}/function/name"),
-        TOOL_PROBE_TOOL_NAME,
-        "function tool name",
-        issues,
-    );
-    require_string_eq(
-        body,
-        &format!("{base}/function/parameters/properties/value/type"),
-        "string",
-        "function tool value type",
-        issues,
-    );
-}
-
-fn require_array(body: &Value, pointer: &str, issues: &mut Vec<String>) {
-    if !body.pointer(pointer).is_some_and(Value::is_array) {
-        issues.push(format!("{pointer} must be an array"));
-    }
-}
-
-fn require_string_eq(
-    body: &Value,
-    pointer: &str,
-    expected: &str,
-    label: &str,
-    issues: &mut Vec<String>,
-) {
-    match body.pointer(pointer).and_then(Value::as_str) {
-        Some(actual) if actual == expected => {}
-        Some(actual) => issues.push(format!("{label} must be `{expected}`, got `{actual}`")),
-        None => issues.push(format!("{label} missing at {pointer}")),
-    }
-}
-
-fn require_array_contains_string(
-    body: &Value,
-    pointer: &str,
-    expected: &str,
-    label: &str,
-    issues: &mut Vec<String>,
-) {
-    let Some(values) = body.pointer(pointer).and_then(Value::as_array) else {
-        issues.push(format!("{label} missing array at {pointer}"));
-        return;
-    };
-    if !values.iter().any(|value| value.as_str() == Some(expected)) {
-        issues.push(format!("{label} must contain `{expected}`"));
-    }
-}
-
-fn reject_present(body: &Value, pointer: &str, label: &str, issues: &mut Vec<String>) {
-    if body.pointer(pointer).is_some() {
-        issues.push(format!("{label} must not include {pointer}"));
-    }
-}
-
-fn validate_generation_parameter_ranges(body: &Value, dialect: &str, issues: &mut Vec<String>) {
-    match dialect {
-        "gemini" | "vertex" => {
-            require_optional_number_range(body, "/generationConfig/temperature", 0.0, 2.0, issues);
-            require_optional_number_range(body, "/generationConfig/topP", 0.0, 1.0, issues);
-            require_optional_integer_min(body, "/generationConfig/topK", 1, issues);
-            require_optional_integer_min(body, "/generationConfig/maxOutputTokens", 1, issues);
-        }
-        "bedrock" => {
-            require_optional_number_range(body, "/inferenceConfig/temperature", 0.0, 2.0, issues);
-            require_optional_number_range(body, "/inferenceConfig/topP", 0.0, 1.0, issues);
-            require_optional_integer_min(body, "/inferenceConfig/maxTokens", 1, issues);
-        }
-        "ollama" => {
-            require_optional_number_range(body, "/temperature", 0.0, 2.0, issues);
-            require_optional_number_range(body, "/top_p", 0.0, 1.0, issues);
-            require_optional_integer_min(body, "/max_tokens", 1, issues);
-            require_optional_integer_min(body, "/options/num_predict", 1, issues);
-        }
-        _ => {
-            require_optional_number_range(body, "/temperature", 0.0, 2.0, issues);
-            require_optional_number_range(body, "/top_p", 0.0, 1.0, issues);
-            require_optional_integer_min(body, "/top_k", 1, issues);
-            require_optional_integer_min(body, "/max_tokens", 1, issues);
-            require_optional_integer_min(body, "/max_completion_tokens", 1, issues);
-        }
-    }
-}
-
-fn require_optional_number_range(
-    body: &Value,
-    pointer: &str,
-    min: f64,
-    max: f64,
-    issues: &mut Vec<String>,
-) {
-    let Some(value) = body.pointer(pointer) else {
-        return;
-    };
-    let Some(number) = value.as_f64() else {
-        issues.push(format!("{pointer} must be a number when present"));
-        return;
-    };
-    if !number.is_finite() || number < min || number > max {
-        issues.push(format!(
-            "{pointer} must be finite and within [{min}, {max}], got {number}"
-        ));
-    }
-}
-
-fn require_optional_integer_min(body: &Value, pointer: &str, min: i64, issues: &mut Vec<String>) {
-    let Some(value) = body.pointer(pointer) else {
-        return;
-    };
-    let Some(number) = value.as_i64() else {
-        issues.push(format!("{pointer} must be an integer when present"));
-        return;
-    };
-    if number < min {
-        issues.push(format!("{pointer} must be >= {min}, got {number}"));
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::api::{ReasoningEffort, ThinkingConfig};
+    use crate::llm::tool_conformance::ToolConformanceRequestValidationStatus;
 
     #[test]
     fn gpt_oss_payload_and_body_inherit_logical_generation_defaults() {
@@ -1404,6 +803,61 @@ mod tests {
             super::super::ToolProbeRequestProfile::CatalogDefault,
             &body,
         );
+        assert_eq!(
+            validation.status,
+            ToolConformanceRequestValidationStatus::Pass,
+            "{:?}",
+            validation.issues
+        );
+    }
+
+    /// The dry-run audit has to be able to check BOTH Gemini endpoint families
+    /// without spending anything, so a route on `gemini_interactions` must build
+    /// an Interactions body and validate against Interactions pointers. If the
+    /// audit still reported this route as the `gemini` dialect it would check
+    /// `generateContent` pointers against an Interactions body and pass
+    /// vacuously.
+    #[test]
+    fn signed_thinking_followup_audits_the_gemini_interactions_family() {
+        let overrides: crate::llm::capabilities::CapabilitiesFile = toml::from_str(
+            "[[provider.gemini]]\n\
+             model_match = \"gemini-2.5-flash*\"\n\
+             extends = true\n\
+             live_endpoint_family = \"gemini_interactions\"\n",
+        )
+        .expect("override parses");
+        let previous = crate::llm::capabilities::swap_user_overrides(Some(overrides));
+
+        let body = probe_request_body(
+            "gemini",
+            "gemini-2.5-flash",
+            ToolProbeMode::NonStreaming,
+            super::super::ToolProbeCase::SignedThinkingToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            "thinking:case",
+        )
+        .expect("Gemini Interactions signed-thinking request body");
+
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["name"], TOOL_PROBE_TOOL_NAME);
+        assert!(
+            body.get("contents").is_none(),
+            "the generateContent envelope must not appear on this family"
+        );
+        assert_eq!(body["input"][1]["type"], "thought");
+        assert_eq!(body["input"][1]["signature"], GEMINI_THOUGHT_SIGNATURE);
+        assert_eq!(body["input"][2]["type"], "function_call");
+        assert_eq!(body["input"][3]["type"], "function_result");
+
+        let validation = validate_probe_request_body(
+            "gemini",
+            "gemini-2.5-flash",
+            super::super::ToolProbeCase::SignedThinkingToolResultFollowup,
+            super::super::ToolProbeRequestProfile::CatalogDefault,
+            &body,
+        );
+        crate::llm::capabilities::swap_user_overrides(previous);
+        assert_eq!(validation.dialect, "gemini_interactions");
         assert_eq!(
             validation.status,
             ToolConformanceRequestValidationStatus::Pass,

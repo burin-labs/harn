@@ -624,19 +624,33 @@ pub(crate) fn extract_llm_options(
     let include = opt_str_list(&options, "include");
     let max_tool_calls = opt_int(&options, "max_tool_calls");
 
-    if enforce_capability_gates
-        && api_mode != LlmApiMode::Responses
-        && (previous_response_id.is_some()
-            || store.is_some()
-            || background.is_some()
-            || truncation.is_some()
+    // Provider-side conversation state is not an OpenAI-Responses exclusive:
+    // Gemini's Interactions endpoint family serves the same three knobs
+    // (`previous_interaction_id` / `store` / `background`). Gate them on what
+    // the route can actually do rather than on one provider's api_mode, so the
+    // options stay one neutral vocabulary instead of two parallel spellings.
+    // The remaining four have no Interactions representation and would be
+    // silently dropped, so they still require Responses.
+    if enforce_capability_gates && api_mode != LlmApiMode::Responses {
+        let stateful_route = caps
+            .live_endpoint_family
+            .is_some_and(crate::llm::capabilities::LiveEndpointFamily::is_stateful);
+        if !stateful_route
+            && (previous_response_id.is_some() || store.is_some() || background.is_some())
+        {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "previous_response_id / store / background require api_mode: \"responses\" or a route with provider-side conversation state",
+            ))));
+        }
+        if truncation.is_some()
             || compact.is_some()
             || include.is_some()
-            || max_tool_calls.is_some())
-    {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "Responses-only options require api_mode: \"responses\"",
-        ))));
+            || max_tool_calls.is_some()
+        {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "Responses-only options require api_mode: \"responses\"",
+            ))));
+        }
     }
 
     let prefill = options

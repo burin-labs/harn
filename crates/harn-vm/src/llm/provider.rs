@@ -174,15 +174,27 @@ thread_local! {
     /// Thread-local for !Send VM compatibility. Provider objects are
     /// constructed on-the-fly to avoid RefCell-across-await issues.
     static PROVIDER_NAMES: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    /// Whether the built-in roster has been installed on THIS thread.
+    ///
+    /// Tracked separately from `PROVIDER_NAMES` being non-empty: a thread that
+    /// registered a custom provider first would otherwise look "already
+    /// registered" and never receive the built-ins, silently demoting every
+    /// native route on that thread to the OpenAI-compatible fallback.
+    static DEFAULTS_REGISTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Register all built-in providers. Called once per thread at VM startup.
+/// Register all built-in providers on the current thread.
+///
+/// Idempotent and cheap after the first call, so dispatch can self-heal rather
+/// than depend on a startup hook having run on whichever thread ends up serving
+/// a call.
 pub(crate) fn register_default_providers() {
+    if DEFAULTS_REGISTERED.with(std::cell::Cell::get) {
+        return;
+    }
+    DEFAULTS_REGISTERED.with(|flag| flag.set(true));
     PROVIDER_NAMES.with(|names| {
         let mut names = names.borrow_mut();
-        if !names.is_empty() {
-            return;
-        }
         names.insert("mock".to_string());
         names.insert("fake".to_string());
         names.insert("anthropic".to_string());
@@ -235,7 +247,14 @@ pub(crate) fn register_provider_name(name: &str) {
 }
 
 /// Check whether a named provider is registered.
+///
+/// Installs the built-in roster first. Registration is thread-local, and the
+/// thread that serves an `llm_call` is not necessarily the one that ran VM
+/// startup — without this, a built-in native route (Gemini, Vertex, Bedrock,
+/// Azure) answers "unregistered" and falls through to the OpenAI-compatible
+/// transport, which sends an OpenAI body to the native provider's URL.
 pub(crate) fn is_provider_registered(name: &str) -> bool {
+    register_default_providers();
     PROVIDER_NAMES.with(|names| names.borrow().contains(name))
 }
 
@@ -376,5 +395,63 @@ pub(crate) fn provider_native_tool_search_shape(
         NativeToolSearchShape::Anthropic
     } else {
         NativeToolSearchShape::OpenAi
+    }
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::*;
+
+    /// Provider registration is thread-local, but the thread that serves an
+    /// `llm_call` is not necessarily the one that ran VM startup. When a
+    /// built-in native provider answered "unregistered", dispatch fell through
+    /// to the OpenAI-compatible transport and sent an OpenAI-shaped body to the
+    /// native provider's base URL — observed live as `POST /v1beta/models` with
+    /// `{"messages": [...]}` for a `gemini` route. A fresh `std::thread` has
+    /// fresh thread-locals and has never run startup, so it reproduces exactly
+    /// that condition.
+    #[test]
+    fn builtin_providers_resolve_on_a_thread_that_never_ran_vm_startup() {
+        let unresolved: Vec<&str> = std::thread::spawn(|| {
+            [
+                "gemini",
+                "vertex",
+                "bedrock",
+                "azure_openai",
+                "anthropic",
+                "ollama",
+                "openai",
+            ]
+            .into_iter()
+            .filter(|name| !is_provider_registered(name))
+            .collect()
+        })
+        .join()
+        .expect("probe thread");
+        assert!(
+            unresolved.is_empty(),
+            "built-in providers must resolve on any dispatching thread; missing: {unresolved:?}"
+        );
+    }
+
+    /// The roster used to be installed only when the registry was empty, so a
+    /// thread that registered a custom provider first kept every built-in
+    /// unregistered for its whole life.
+    #[test]
+    fn a_custom_provider_registered_first_does_not_suppress_the_builtins() {
+        let (custom, builtin) = std::thread::spawn(|| {
+            register_provider_name("acme-proxy");
+            (
+                is_provider_registered("acme-proxy"),
+                is_provider_registered("gemini"),
+            )
+        })
+        .join()
+        .expect("probe thread");
+        assert!(custom, "custom provider registration must survive");
+        assert!(
+            builtin,
+            "registering a custom provider must not suppress the built-in roster"
+        );
     }
 }

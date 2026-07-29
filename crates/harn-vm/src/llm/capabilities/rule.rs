@@ -11,8 +11,9 @@ use std::collections::{BTreeMap, HashSet};
 use serde::Deserialize;
 
 use super::model::{
-    fill_opt, Capabilities, CapabilitiesFile, ComputerUseStyle, ProviderDefaults,
-    ReasoningHistoryWireField, ScreenshotScaling, SystemMessagePlacement, WireDialect,
+    fill_opt, Capabilities, CapabilitiesFile, ComputerUseStyle, LiveEndpointFamily,
+    ProviderDefaults, ReasoningHistoryWireField, ScreenshotScaling, SystemMessagePlacement,
+    WireDialect,
 };
 use crate::llm::providers::anthropic::claude_generation;
 use crate::llm::providers::openai_compat::gpt_generation;
@@ -50,6 +51,13 @@ pub struct ProviderRule {
     /// Known values are `openai`, `anthropic`, `gemini`, and `ollama`.
     #[serde(default)]
     pub message_wire_format: Option<String>,
+    /// Which synchronous endpoint family this route dispatches to when its
+    /// dialect serves more than one. Unset on a Gemini-dialect row resolves to
+    /// `gemini_generate_content`; unset elsewhere stays `None`. Independent of
+    /// `batch_wire_format` — Gemini Batch is `generateContent`-only regardless.
+    /// See [`LiveEndpointFamily`].
+    #[serde(default)]
+    pub live_endpoint_family: Option<LiveEndpointFamily>,
     /// Native tool definition wire shape. Known values are `openai`
     /// and `anthropic`.
     #[serde(default)]
@@ -525,6 +533,7 @@ impl ProviderRule {
             extends: _,
             native_tools,
             message_wire_format,
+            live_endpoint_family,
             native_tool_wire_format,
             defer_loading,
             tool_search,
@@ -621,6 +630,7 @@ impl ProviderRule {
         } = other;
         fill_opt(&mut self.native_tools, native_tools);
         fill_opt(&mut self.message_wire_format, message_wire_format);
+        fill_opt(&mut self.live_endpoint_family, live_endpoint_family);
         fill_opt(&mut self.native_tool_wire_format, native_tool_wire_format);
         fill_opt(&mut self.defer_loading, defer_loading);
         fill_opt(&mut self.tool_search, tool_search);
@@ -1007,6 +1017,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         extends: false,
         native_tools: None,
         message_wire_format: None,
+        live_endpoint_family: None,
         native_tool_wire_format: None,
         defer_loading: None,
         tool_search: None,
@@ -1116,15 +1127,29 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
     // so derive the response-splitting quirk from the resolved style rather
     // than adding a second, drift-prone catalog field.
     let emits_inline_reasoning = thinking_block_style == "inline";
+    let message_wire_format = WireDialect::from_message_wire_format(
+        &rule
+            .message_wire_format
+            .clone()
+            .or_else(|| defaults.message_wire_format.clone())
+            .unwrap_or_else(|| "openai".to_string()),
+    );
+    // Only the Gemini dialect serves two live endpoint families, so an unset
+    // value is meaningful only there — and there it means the legacy
+    // `:generateContent` path. Deriving it once here (rather than defaulting
+    // per call site) is what keeps `provider_capabilities` output, the dispatch
+    // report, and the transport switch reading the same value.
+    let live_endpoint_family = rule
+        .live_endpoint_family
+        .or(defaults.live_endpoint_family)
+        .or_else(|| {
+            (message_wire_format == WireDialect::Gemini)
+                .then_some(LiveEndpointFamily::GeminiGenerateContent)
+        });
     Capabilities {
         native_tools: rule.native_tools.unwrap_or(false),
-        message_wire_format: WireDialect::from_message_wire_format(
-            &rule
-                .message_wire_format
-                .clone()
-                .or_else(|| defaults.message_wire_format.clone())
-                .unwrap_or_else(|| "openai".to_string()),
-        ),
+        message_wire_format,
+        live_endpoint_family,
         native_tool_wire_format: rule
             .native_tool_wire_format
             .clone()

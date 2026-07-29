@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harn_vm::llm::capabilities::{self, Capabilities, ProviderCapabilityMatrixRow};
+use harn_vm::llm::capabilities::{
+    self, Capabilities, LiveEndpointFamily, ProviderCapabilityMatrixRow,
+};
 use harn_vm::provider_catalog::{
     self, CatalogModel, CatalogProvider, DeprecationStatus, ProviderCatalogArtifact,
     ProviderClassification,
@@ -486,7 +488,13 @@ fn endpoint_style(
     }
     match caps.message_wire_format.as_str() {
         "anthropic" => "Anthropic Messages API".to_string(),
-        "gemini" => "Gemini generateContent".to_string(),
+        // Both Gemini families are the same dialect, so the endpoint family is
+        // what distinguishes them in the support matrix. Batch is reported
+        // separately and stays `generateContent`-shaped either way.
+        "gemini" => match caps.live_endpoint_family {
+            Some(LiveEndpointFamily::GeminiInteractions) => "Gemini Interactions API".to_string(),
+            _ => "Gemini generateContent".to_string(),
+        },
         "ollama" => "Ollama native chat API".to_string(),
         _ => "OpenAI-compatible chat completions".to_string(),
     }

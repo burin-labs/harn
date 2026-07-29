@@ -34,6 +34,22 @@
 #   native_tools    : whether the model accepts native tool-call wire shape.
 #   message_wire_format:
 #                     shared helper wire format: openai, anthropic, gemini, or ollama.
+#   live_endpoint_family:
+#                     which SYNCHRONOUS endpoint family the route dispatches to
+#                     when its `message_wire_format` serves more than one. Only
+#                     the gemini dialect does today: `gemini_generate_content`
+#                     (POST /v1beta/models/{model}:generateContent, the legacy
+#                     path and the default) and `gemini_interactions` (POST
+#                     /v1beta/interactions, GA June 2026 — server-side state via
+#                     previous_interaction_id, streamed step events, background
+#                     execution, remote MCP). Unset on a gemini-dialect row
+#                     resolves to `gemini_generate_content`; unset elsewhere
+#                     stays absent. This is the value the runtime switches on,
+#                     unlike the advisory `recommended_endpoint` string.
+#                     It is independent of `batch_wire_format`: Gemini Batch
+#                     accepts `generateContent`-shaped bodies only, so a route
+#                     on `gemini_interactions` still batches as
+#                     `batch_wire_format = "gemini"`.
 #   native_tool_wire_format:
 #                     native tool definition shape: openai or anthropic.
 #   defer_loading   : whether `defer_loading: true` is honored on tool defs.
@@ -397,6 +413,13 @@ presence_penalty_supported = false
 
 [provider_defaults.gemini]
 message_wire_format = "gemini"
+# Live synchronous traffic defaults to the legacy `:generateContent` endpoint.
+# `gemini_interactions` is the second family Harn can speak (see
+# `live_endpoint_family` in 00-base.toml); it is opt-in per model row or per
+# project so an existing route's wire bytes never change underneath it.
+# Independent of `batch_wire_format`: Gemini Batch stays `generateContent`-only
+# whichever live family a route selects.
+live_endpoint_family = "gemini_generate_content"
 file_upload_wire_format = "gemini"
 files_api_supported = true
 batch_wire_format = "gemini"
