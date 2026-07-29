@@ -6,8 +6,8 @@
 # full dispatch + parse + typecheck + compile cost. Compares medians
 # against:
 #
-#   - the per-command budget in perf/cli/budgets.toml, and
-#   - the most recent recorded baseline in perf/cli/baselines/main.json.
+#   - the per-command budget in bench/cli/budgets.toml, and
+#   - the most recent recorded baseline in bench/cli/baselines/main.json.
 #
 # Either condition can fail the gate (see the README for the rules).
 #
@@ -16,14 +16,14 @@
 # fallback is intentional — `hyperfine` is not in the default dev-setup
 # install on macOS.
 #
-# See perf/cli/README.md for usage and design notes. Tracks epic #2293
+# See bench/cli/README.md for usage and design notes. Tracks epic #2293
 # (G5 = #2298).
 
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-budgets_file="${HARN_CLI_BUDGETS:-$repo_root/perf/cli/budgets.toml}"
-baseline_file="${HARN_CLI_BASELINE:-$repo_root/perf/cli/baselines/main.json}"
+budgets_file="${HARN_CLI_BUDGETS:-$repo_root/bench/cli/budgets.toml}"
+baseline_file="${HARN_CLI_BASELINE:-$repo_root/bench/cli/baselines/main.json}"
 iterations="${HARN_CLI_BENCH_ITERATIONS:-20}"
 build_release=1
 harn_bin="${HARN_BIN:-}"
@@ -41,8 +41,8 @@ baseline. Exits non-zero if any command fails the gate.
 Options:
   -n, --iterations N      Timed runs per command (default: 20)
   --no-build              Skip `cargo build --release --bin harn`
-  --budgets FILE          Override perf/cli/budgets.toml
-  --baseline FILE         Override perf/cli/baselines/main.json
+  --budgets FILE          Override bench/cli/budgets.toml
+  --baseline FILE         Override bench/cli/baselines/main.json
   --commands NAMES        Comma-separated subset of bench keys to run
   --update-baseline       Overwrite this commit's slot in the baseline file
                           even if it was already populated

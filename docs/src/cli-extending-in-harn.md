@@ -444,7 +444,7 @@ primitive instead.
 
 Cold-start matters more than steady-state for the CLI. Every ported
 subcommand has to meet a wall-clock budget pinned in
-`perf/cli/budgets.toml` and gated by `make bench-cli-cold-start`. The
+`bench/cli/budgets.toml` and gated by `make bench-cli-cold-start`. The
 gate runs each subcommand under a cold bytecode cache, samples a
 fixed number of invocations, and asserts the median stays under the
 budget.
@@ -455,7 +455,7 @@ make bench-cli-cold-start
 
 Two ratchets work together to keep the port honest:
 
-- **`make bench-cli-cold-start`** ([G5][g5] / `perf/cli/budgets.toml`)
+- **`make bench-cli-cold-start`** ([G5][g5] / `bench/cli/budgets.toml`)
   fails when a ported script's cold-start regresses. Bump the budget
   only with a rationale comment — re-tuning the budget is the loudest
   possible signal that a port got slower.

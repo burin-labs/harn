@@ -7,7 +7,7 @@
 # this lane builds an optimized `harn` binary before measuring ~millisecond
 # CLI startup and otherwise adds release-build wall time to PR rollup.
 #
-# See perf/cli/README.md for the methodology and per-command budgets.
+# See bench/cli/README.md for the methodology and per-command budgets.
 
 name: CLI cold-start budget
 

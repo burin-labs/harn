@@ -664,7 +664,7 @@ writes a JSON report with `iterations[]`, `mean_ms`, `p50_ms`, `p95_ms`,
 `stddev_ms`, and `rollup`. `HARN_PROFILE=1` and `HARN_PROFILE_JSON=<path>` work
 as environment aliases.
 
-`harn bench replay` reads `benchmarks/replay/suite.json` by default. It emits
+`harn bench replay` reads `bench/replay/suite.json` by default. It emits
 schema `harn.replay_benchmark.report.v1`, including cloud-platform ingest metadata,
 fixture receipts, replay-fidelity scores, permission-preservation scores,
 tool-call drift counts, transcript drift counts, observed interaction totals,
@@ -678,8 +678,8 @@ adapter:
 ```bash
 harn bench replay \
   --adapter opencode-jsonl \
-  --external-first benchmarks/replay/adapters/opencode/first.jsonl \
-  --external-second benchmarks/replay/adapters/opencode/second.jsonl \
+  --external-first bench/replay/adapters/opencode/first.jsonl \
+  --external-second bench/replay/adapters/opencode/second.jsonl \
   --external-name opencode-permission-run \
   --json
 ```

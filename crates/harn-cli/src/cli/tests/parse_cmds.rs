@@ -793,7 +793,7 @@ fn test_parses_bench_replay_args() {
         "harn",
         "bench",
         "replay",
-        "benchmarks/replay/suite.json",
+        "bench/replay/suite.json",
         "--json",
         "--output",
         "replay-benchmark.json",
@@ -817,7 +817,7 @@ fn test_parses_bench_replay_args() {
     };
     assert_eq!(
         replay.selection.as_deref(),
-        Some(std::path::Path::new("benchmarks/replay/suite.json"))
+        Some(std::path::Path::new("bench/replay/suite.json"))
     );
     assert!(replay.json);
     assert_eq!(

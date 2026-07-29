@@ -25,6 +25,6 @@ OpenCode-inspired JSONL shape accepted by:
 ```sh
 harn bench replay \
   --adapter opencode-jsonl \
-  --external-first benchmarks/replay/adapters/opencode/first.jsonl \
-  --external-second benchmarks/replay/adapters/opencode/second.jsonl
+  --external-first bench/replay/adapters/opencode/first.jsonl \
+  --external-second bench/replay/adapters/opencode/second.jsonl
 ```

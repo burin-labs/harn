@@ -165,13 +165,13 @@ opcode handlers, or stdlib collection dispatch:
 make bench-vm
 ```
 
-The target runs deterministic fixtures under `perf/vm/` in release mode using
+The target runs deterministic fixtures under `bench/vm/` in release mode using
 the existing `harn bench` command. For repeatable local comparisons, run it a
 few times on the same machine with the same iteration count and compare the
 average wall time values:
 
 ```bash
-./scripts/bench_vm.sh --iterations 20 --baseline perf/vm/BASELINE.md
+./scripts/bench_vm.sh --iterations 20 --baseline bench/vm/BASELINE.md
 ```
 
 Local CPU load and thermal state can move results by several percent, so treat

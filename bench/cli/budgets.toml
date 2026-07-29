@@ -11,7 +11,7 @@
 # meant to catch *new* regressions on already-ported commands, not to
 # block ports from landing while their handler is still warming up.
 # Lower these per-command as each W ticket lands its parity snapshot
-# (see perf/cli/README.md).
+# (see bench/cli/README.md).
 #
 # Schema:
 #

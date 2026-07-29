@@ -1,4 +1,4 @@
-# perf/ — performance suites and baselines
+# bench/ — benchmark suites and baselines
 
 Criterion suites, `.harn` micro-fixtures, budget gates, and recorded
 baselines, grouped by subsystem:
@@ -22,7 +22,7 @@ the perf work for that migration:
   (epic [#2095](https://github.com/burin-labs/harn/issues/2095) and all
   eight children) fully shipped: ArcStr strings, boxed variant slimming,
   inline caches on every hot opcode, `Rc<Regex>` caching, dispatch
-  splits. `perf/vm/` pins those wins.
+  splits. `bench/vm/` pins those wins.
 - **The risk surface is the `harn_entry` boundary**
   (`crates/harn-vm/src/stdlib/harn_entry.rs`): every Rust→`.harn` call
   pays a child-VM clone plus a module-cache lookup, and — when the
@@ -35,15 +35,15 @@ the perf work for that migration:
 These suites are the **regression gates for the stage-loop inversion
 wave** (phase H-W2). Run them before/after each inversion PR:
 
-- `perf/orchestration/bench_harn_entry_crossing.rs` — typed vs by-name
+- `bench/orchestration/bench_harn_entry_crossing.rs` — typed vs by-name
   crossing cost, warm vs cold parent module cache.
-- `perf/orchestration/bench_transcript_projection.rs` — per-turn
+- `bench/orchestration/bench_transcript_projection.rs` — per-turn
   projection cost at ~10k/50k/100k-token transcripts.
-- `perf/orchestration/bench_hook_dispatch.rs` — 1/8/32/128 hook fan-out
+- `bench/orchestration/bench_hook_dispatch.rs` — 1/8/32/128 hook fan-out
   (directly models per-turn governors).
 - `scripts/bench_cli_cold_start.sh` — cold-start budget gate against
-  `perf/cli/baselines/main.json` (pre-migration baseline recorded; see
-  `perf/cli/README.md`).
+  `bench/cli/baselines/main.json` (pre-migration baseline recorded; see
+  `bench/cli/README.md`).
 
 ```bash
 cargo bench -p harn-orchestration-perf --bench bench_harn_entry_crossing

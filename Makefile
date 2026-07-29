@@ -233,7 +233,7 @@ bench-cli-cold-start:
 	./scripts/bench_cli_cold_start.sh
 
 # Postgres hostlib loadgen. Self-skips (exit 0) when HARN_TEST_POSTGRES_URL
-# is unset; see perf/postgres/README.md for the tunable env vars.
+# is unset; see bench/postgres/README.md for the tunable env vars.
 loadgen-postgres:
 	@if [ -z "$${HARN_TEST_POSTGRES_URL:-}" ]; then \
 		echo "harn-postgres-loadgen: HARN_TEST_POSTGRES_URL not set — skipping (no Postgres to drive)"; \

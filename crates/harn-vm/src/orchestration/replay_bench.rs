@@ -938,9 +938,8 @@ mod tests {
 
     #[test]
     fn replay_benchmark_reports_stable_golden_metrics_for_matching_trace() {
-        let fixture =
-            benchmark_replay_trace("benchmarks/replay/simple.json", &trace_pair(("ok", "ok")))
-                .expect("benchmark fixture");
+        let fixture = benchmark_replay_trace("bench/replay/simple.json", &trace_pair(("ok", "ok")))
+            .expect("benchmark fixture");
 
         assert!(fixture.passed);
         assert!(fixture.deterministic);
@@ -957,7 +956,7 @@ mod tests {
     #[test]
     fn replay_benchmark_reports_reduced_fidelity_for_meaningful_drift() {
         let fixture =
-            benchmark_replay_trace("benchmarks/replay/drift.json", &trace_pair(("ok", "error")))
+            benchmark_replay_trace("bench/replay/drift.json", &trace_pair(("ok", "error")))
                 .expect("benchmark fixture");
 
         assert!(!fixture.passed);

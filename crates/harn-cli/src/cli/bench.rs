@@ -27,7 +27,7 @@ pub(crate) enum BenchCommand {
 #[derive(Debug, Args)]
 pub(crate) struct BenchReplayArgs {
     /// Replay benchmark suite manifest, fixture file, or fixture directory.
-    /// Defaults to benchmarks/replay/suite.json.
+    /// Defaults to bench/replay/suite.json.
     pub selection: Option<PathBuf>,
     /// Emit the machine-readable report to stdout.
     #[arg(long)]

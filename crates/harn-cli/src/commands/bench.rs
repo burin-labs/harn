@@ -452,7 +452,7 @@ fn resolve_replay_selection(selection: Option<&PathBuf>, repo_root: &Path) -> Pa
     match selection {
         Some(selection) if selection.is_absolute() || selection.exists() => selection.clone(),
         Some(selection) => repo_root.join(selection),
-        None => repo_root.join("benchmarks/replay/suite.json"),
+        None => repo_root.join("bench/replay/suite.json"),
     }
 }
 
@@ -778,7 +778,7 @@ mod tests {
             .and_then(|path| path.parent())
             .expect("repo root")
             .to_path_buf();
-        let selection = repo_root.join("benchmarks/replay/suite.json");
+        let selection = repo_root.join("bench/replay/suite.json");
         let (suite_name, fixture_paths) =
             resolve_replay_benchmark_selection(&selection, &repo_root, "fallback")
                 .expect("resolve replay benchmark suite");

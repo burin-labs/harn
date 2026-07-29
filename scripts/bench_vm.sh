@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-fixtures_dir="${HARN_BENCH_FIXTURES_DIR:-$repo_root/perf/vm}"
+fixtures_dir="${HARN_BENCH_FIXTURES_DIR:-$repo_root/bench/vm}"
 iterations="${HARN_BENCH_ITERATIONS:-20}"
 baseline_file=""
 build_release=1
