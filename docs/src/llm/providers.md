@@ -168,6 +168,24 @@ vLLM's `vllm serve`; user or project provider overlays can change command names,
 default ports, arg names, prefix args, model-source environment variables, and
 LoRA flag names for local runtime versions or platform-specific installs.
 
+Dynamic runtimes such as vLLM and TGI deliberately do not ship a guessed model
+row. Declare the concrete request model in the project manifest's `[llm]` table
+or a user `providers.toml` overlay. Catalog export, dispatch audit, and
+tool-scorecard planning then consume that row through the normal catalog path:
+
+```toml
+[llm.models."runtime/qwen"]
+name = "Runtime Qwen"
+provider = "vllm"
+wire_model = "qwen-runtime"
+context_window = 32768
+```
+
+For example, `harn provider tool-scorecard --plan-from-catalog
+--route vllm:qwen-runtime --json` plans the configured route without contacting
+the runtime. Until a concrete model row is configured, the plan reports vLLM or
+TGI as `requires_runtime_model`.
+
 Each local-runtime row declares a closed `kind`, `wire_protocol`, and `stop`
 contract. Harn validates that ownership, request shape, and cleanup strategy are
 coherent before the CLI can launch, inspect, warm, or evict the runtime.

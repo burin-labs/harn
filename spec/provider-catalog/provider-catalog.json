@@ -1320,7 +1320,8 @@
         "vertex_generate_content"
       ],
       "features": [
-        "native_tools"
+        "native_tools",
+        "wire_model_capabilities"
       ],
       "caveats": [],
       "latency_p50_ms": 2100
@@ -22430,6 +22431,79 @@
       ]
     },
     {
+      "id": "vertex/gemini-2.5-flash",
+      "name": "Gemini 2.5 Flash (Vertex AI)",
+      "provider": "vertex",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "gemini-2.5-flash",
+      "equivalence_group": "gemini-2.5-flash",
+      "served_variant": "vertex",
+      "wire_model": "gemini-2.5-flash",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "long_context",
+        "vision",
+        "cheap",
+        "tool_use",
+        "agentic"
+      ]
+    },
+    {
       "id": "grok-4.3",
       "name": "Grok 4.3",
       "provider": "xai",
@@ -28458,6 +28532,22 @@
         "tool_search",
         "tools",
         "vision"
+      ]
+    },
+    {
+      "provider": "vertex",
+      "model": "gemini-2.5-flash",
+      "base_url": "https://aiplatform.googleapis.com/v1",
+      "secret_env": "VERTEX_AI_ACCESS_TOKEN",
+      "label": "Gemini 2.5 Flash (Vertex AI)",
+      "family": "google-gemini",
+      "capabilities": [
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "streaming",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "tools"
       ]
     },
     {
