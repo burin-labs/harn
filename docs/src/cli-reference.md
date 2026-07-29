@@ -3160,6 +3160,8 @@ an MCP server name, or uses the explicit URL when you pass `--url` or a raw
 - discovers OAuth protected resource and authorization server metadata
 - prefers pre-registered `client_id` / `client_secret` values when supplied
 - falls back to dynamic client registration when supported by the server
+- tries the requested loopback port first and uses an OS-selected port only
+  when the selected client-registration mode permits port variance
 - stores tokens in the local OS keychain and refreshes them automatically
 
 `harn mcp status` prints the configured server state. For OAuth-backed HTTP
@@ -3177,6 +3179,14 @@ Relevant flags:
 | `--client-secret <secret>` | Optional client secret for `client_secret_post` / `client_secret_basic` servers |
 | `--scope <scopes>` | Override or provide requested OAuth scopes |
 | `--redirect-uri <uri>` | Override the default loopback redirect URI (default shown by `harn mcp redirect-uri`) |
+
+For an exact-match preregistered client (`auth.mode = "byo"`), Harn never
+silently changes a fixed redirect port. CIMD native clients may vary the
+loopback port under RFC 8252. Dynamic registration is deliberately repeated
+for each authorization, so the registration, authorization request, and token
+exchange all carry the same effective URI after a fixed-port fallback or
+reauthorization on a new port. Redirect compatibility errors include that URI
+and the selected client mode.
 
 Security guidance:
 

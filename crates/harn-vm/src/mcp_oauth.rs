@@ -44,10 +44,21 @@ use crate::mcp_auth::{
     validate_authorization_response_issuer_value, validate_issuer_binding,
     validate_token_endpoint_auth_method, McpOAuthDiscovery, OAuthAuthorizationCodeTokenForm,
     OAuthAuthorizationServerMetadata, OAuthAuthorizationUrlOptions, OAuthClientAuthMode,
-    OAuthClientAuthOptions, OAuthDynamicClientRegistrationResponse, OAuthRefreshTokenForm,
-    DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL,
+    OAuthClientAuthOptions, OAuthClientAuthSelection, OAuthDynamicClientRegistrationResponse,
+    OAuthRefreshTokenForm, DEFAULT_MCP_OAUTH_CLIENT_ID_METADATA_DOCUMENT_URL,
 };
 use crate::secrets::{KeyringSecretProvider, SecretBytes, SecretError, SecretId, SecretProvider};
+
+mod redirect;
+
+use redirect::{
+    generate_pkce_pair, random_hex, redirect_compatibility_error,
+    redirect_compatibility_error_for_mode, select_redirect_policy, CallbackCapabilities,
+};
+pub use redirect::{
+    AuthorizationCallback, BeginAuthorization, ImportStoredToken, LoopbackCallback,
+    PendingAuthorization,
+};
 
 /// Keyring service namespace for stored MCP OAuth tokens. Shared by every
 /// surface so a token minted by `harn mcp login` is the same one the ACP
@@ -299,53 +310,6 @@ fn token_response_extra(
     (!extra.is_empty()).then_some(serde_json::Value::Object(extra))
 }
 
-/// Inputs to [`begin_authorization`]. The server is identified by its URL; the
-/// client may be pre-registered (`client_id`/`client_secret`) or left to
-/// dynamic registration. `redirect_uri` is the loopback or client-scheme URL
-/// the authorization server will redirect to. `mode`/`static_secret_id` carry
-/// an explicit `[mcp.auth]` selection so the engine resolves the same client
-/// auth the runtime does (CIMD by default when unset).
-#[derive(Clone, Debug, Default)]
-pub struct BeginAuthorization {
-    pub server_url: String,
-    pub redirect_uri: String,
-    pub mode: Option<OAuthClientAuthMode>,
-    pub client_id: Option<String>,
-    pub client_secret: Option<String>,
-    pub static_secret_id: Option<String>,
-    pub scopes: Option<String>,
-}
-
-/// A legacy bearer/refresh token that a thin client found in an older
-/// surface-specific store. Discovery and canonical key selection still happen
-/// here so the imported token lands in the same Harn-owned store as a fresh
-/// [`begin_authorization`] / [`complete_authorization`] flow.
-#[derive(Clone, Debug)]
-pub struct ImportStoredToken {
-    pub server_url: String,
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    pub expires_at_unix: Option<i64>,
-    pub token_endpoint: Option<String>,
-    pub client_id: String,
-    pub client_secret: Option<String>,
-    pub token_endpoint_auth_method: Option<String>,
-    pub scopes: Option<String>,
-}
-
-/// The browser-facing result of [`begin_authorization`]: the URL to open and
-/// the `state` that the matching [`complete_authorization`] call must echo.
-#[derive(Clone, Debug, Serialize)]
-pub struct PendingAuthorization {
-    pub authorize_url: String,
-    pub state: String,
-    pub redirect_uri: String,
-    /// Canonical RFC 8707 resource indicator for the server.
-    pub resource: String,
-    /// Authorization server issuer resolved during discovery.
-    pub issuer: String,
-}
-
 /// Server-side flow state held between [`begin_authorization`] and
 /// [`complete_authorization`], keyed by `state`. Holds the PKCE verifier and
 /// resolved client credentials — never leaves the harn process.
@@ -353,6 +317,8 @@ pub struct PendingAuthorization {
 struct PendingFlow {
     code_verifier: String,
     redirect_uri: String,
+    client_mode: OAuthClientAuthMode,
+    allow_ephemeral_port: bool,
     client_id: String,
     client_secret: Option<String>,
     token_auth_method: String,
@@ -376,6 +342,15 @@ fn pending_flows() -> &'static Mutex<HashMap<String, PendingFlow>> {
 pub async fn begin_authorization(
     request: BeginAuthorization,
 ) -> Result<PendingAuthorization, String> {
+    begin_authorization_with_callback(request, &AuthorizationCallback::Exact).await
+}
+
+/// Begin authorization through a concrete callback adapter. This is the seam
+/// shared by the CLI loopback listener and protocol-host redirect capture.
+pub async fn begin_authorization_with_callback(
+    request: BeginAuthorization,
+    callback: &AuthorizationCallback,
+) -> Result<PendingAuthorization, String> {
     let resource = canonical_resource_indicator(&request.server_url).map_err(|e| e.to_string())?;
     let discovery = discover(&request.server_url).await?;
     ensure_pkce_s256_supported(&discovery.authorization_server_metadata)?;
@@ -385,16 +360,56 @@ pub async fn begin_authorization(
         .clone()
         .or_else(|| (!discovery.scopes.is_empty()).then(|| discovery.scopes.join(" ")));
 
-    let (client_id, client_secret, token_auth_method) = resolve_client(
+    let selection = select_oauth_client_auth(
         &discovery.authorization_server_metadata,
-        request.mode,
-        request.client_id.clone(),
-        request.client_secret.clone(),
-        request.static_secret_id.as_deref(),
+        OAuthClientAuthOptions {
+            mode: request.mode,
+            client_id: request.client_id.as_deref(),
+            client_secret: request.client_secret.as_deref(),
+            client_id_metadata_document_url: request.client_id.as_deref(),
+            static_secret_id: request.static_secret_id.as_deref(),
+        },
+    )
+    .map_err(|error| {
+        redirect_compatibility_error_for_mode(
+            &request.redirect_uri,
+            request.mode.map_or("auto", OAuthClientAuthMode::as_str),
+            &error,
+            false,
+        )
+    })?;
+    let client_mode = selection.mode;
+    let capabilities = match callback {
+        AuthorizationCallback::Exact => CallbackCapabilities::Exact,
+        AuthorizationCallback::Loopback(_) => CallbackCapabilities::LoopbackWithEphemeralPort,
+    };
+    let redirect_policy = select_redirect_policy(
+        &discovery.authorization_server_metadata,
+        client_mode,
         &request.redirect_uri,
+        capabilities,
+    )?;
+    let redirect_uri = match callback {
+        AuthorizationCallback::Exact => redirect_policy.requested_redirect_uri.clone(),
+        AuthorizationCallback::Loopback(callback) => callback.acquire(&redirect_policy)?,
+    };
+
+    let (client_id, client_secret, token_auth_method) = resolve_selected_client(
+        &discovery.authorization_server_metadata,
+        selection,
+        request.client_secret.clone(),
+        &redirect_uri,
         scopes.as_deref(),
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        redirect_compatibility_error(
+            &redirect_uri,
+            client_mode,
+            &format!("client setup failed: {error}"),
+            redirect_policy.allow_ephemeral_port,
+        )
+    })?;
 
     let (code_verifier, code_challenge) = generate_pkce_pair();
     let state = random_hex(16);
@@ -403,7 +418,7 @@ pub async fn begin_authorization(
             .authorization_server_metadata
             .authorization_endpoint,
         client_id: &client_id,
-        redirect_uri: &request.redirect_uri,
+        redirect_uri: &redirect_uri,
         state: &state,
         code_challenge: &code_challenge,
         resource: &resource,
@@ -426,7 +441,9 @@ pub async fn begin_authorization(
         state.clone(),
         PendingFlow {
             code_verifier,
-            redirect_uri: request.redirect_uri.clone(),
+            redirect_uri: redirect_uri.clone(),
+            client_mode,
+            allow_ephemeral_port: redirect_policy.allow_ephemeral_port,
             client_id,
             client_secret,
             token_auth_method,
@@ -447,7 +464,7 @@ pub async fn begin_authorization(
     Ok(PendingAuthorization {
         authorize_url: authorize_url.to_string(),
         state,
-        redirect_uri: request.redirect_uri,
+        redirect_uri,
         resource,
         issuer: discovery.authorization_server_issuer,
     })
@@ -493,7 +510,14 @@ pub async fn complete_authorization(
         &form,
     )
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| {
+        redirect_compatibility_error(
+            &flow.redirect_uri,
+            flow.client_mode,
+            &format!("authorization-code exchange failed: {error}"),
+            flow.allow_ephemeral_port,
+        )
+    })?;
 
     let stored = StoredMcpToken {
         access_token: token.access_token,
@@ -728,25 +752,13 @@ pub async fn delete_token(
 /// Resolve the `(client_id, client_secret, token_endpoint_auth_method)` for a
 /// flow via the unified auth selection (CIMD by default when the server
 /// advertises it; otherwise BYO client id, dynamic registration, or an error).
-async fn resolve_client(
+async fn resolve_selected_client(
     metadata: &OAuthAuthorizationServerMetadata,
-    mode: Option<OAuthClientAuthMode>,
-    client_id: Option<String>,
+    selection: OAuthClientAuthSelection<'_>,
     client_secret: Option<String>,
-    static_secret_id: Option<&str>,
     redirect_uri: &str,
     scopes: Option<&str>,
 ) -> Result<(String, Option<String>, String), String> {
-    let selection = select_oauth_client_auth(
-        metadata,
-        OAuthClientAuthOptions {
-            mode,
-            client_id: client_id.as_deref(),
-            client_secret: client_secret.as_deref(),
-            client_id_metadata_document_url: client_id.as_deref(),
-            static_secret_id,
-        },
-    )?;
     match selection.mode {
         OAuthClientAuthMode::Cimd => {
             // CIMD presents an HTTPS client-metadata-document URL as the
@@ -771,6 +783,10 @@ async fn resolve_client(
                 .registration_endpoint
                 .as_deref()
                 .ok_or_else(|| "dynamic client registration endpoint missing".to_string())?;
+            // DCR registrations are deliberately per-authorization. If a
+            // loopback bind falls back to a different port, this registers
+            // that effective URI instead of reusing immutable client metadata
+            // from an earlier authorization.
             let registration =
                 dynamic_client_registration(registration_endpoint, redirect_uri, scopes).await?;
             let auth_method = registration
@@ -1748,21 +1764,6 @@ fn stored_token_for_import(
     })
 }
 
-// --- crypto/util -------------------------------------------------------------
-
-fn generate_pkce_pair() -> (String, String) {
-    let verifier = random_hex(32);
-    let digest = Sha256::digest(verifier.as_bytes());
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    (verifier, challenge)
-}
-
-fn random_hex(bytes: usize) -> String {
-    (0..bytes)
-        .map(|_| format!("{:02x}", rand::random::<u8>()))
-        .collect()
-}
-
 fn current_unix_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1796,15 +1797,6 @@ mod tests {
         assert_ne!(first, other_resource);
         assert_ne!(first, other_client);
         assert!(first.starts_with("mcp-token-"));
-    }
-
-    #[test]
-    fn pkce_challenge_is_s256_of_verifier() {
-        let (verifier, challenge) = generate_pkce_pair();
-        let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(Sha256::digest(verifier.as_bytes()));
-        assert_eq!(challenge, expected);
-        assert_eq!(verifier.len(), 64);
     }
 
     #[test]
