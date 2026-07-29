@@ -7,7 +7,7 @@ use super::util::trigger_provider_completion_parser;
 #[derive(Debug, Args)]
 pub(crate) struct PersonaArgs {
     #[command(subcommand)]
-    pub command: PersonaCommand,
+    pub command: Box<PersonaCommand>,
     /// Explicit harn.toml path or directory. Defaults to nearest harn.toml from cwd.
     #[arg(long, global = true, value_name = "PATH")]
     pub manifest: Option<PathBuf>,

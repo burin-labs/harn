@@ -72,5 +72,7 @@ fn downstream_bindings_project_and_decode_model_display_name() {
     assert!(typescript_declarations().contains("display_name: string"));
     let swift = swift_binding().expect("Swift binding renders");
     assert!(swift.contains("public let displayName: String"));
-    assert!(swift.contains("displayName = try container.decode(String.self, forKey: .displayName)"));
+    assert!(swift.contains(
+        "displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name"
+    ));
 }

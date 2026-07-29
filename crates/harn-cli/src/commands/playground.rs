@@ -55,9 +55,9 @@ pub(crate) async fn run_command(
     };
 
     if args.watch {
-        run_watch(&config).await
+        Box::pin(run_watch(&config)).await
     } else {
-        let output = execute_playground(&config).await?;
+        let output = Box::pin(execute_playground(&config)).await?;
         if !output.is_empty() {
             io::stdout()
                 .write_all(output.as_bytes())
@@ -93,7 +93,7 @@ async fn run_watch(config: &PlaygroundConfig) -> Result<(), String> {
         config.script.display(),
         config.host.display()
     );
-    emit_run_result(execute_playground(config).await);
+    emit_run_result(Box::pin(execute_playground(config)).await);
 
     let roots = watch_roots(&config.host, &config.script);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -144,7 +144,7 @@ async fn run_watch(config: &PlaygroundConfig) -> Result<(), String> {
             "\x1b[2m[playground] change detected, re-running {}...\x1b[0m",
             config.script.display()
         );
-        emit_run_result(execute_playground(config).await);
+        emit_run_result(Box::pin(execute_playground(config)).await);
     }
 }
 

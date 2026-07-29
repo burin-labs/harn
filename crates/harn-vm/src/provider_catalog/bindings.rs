@@ -424,7 +424,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public let auth: HarnProviderAuth
     public let extraHeaders: [String: String]?
     public let healthcheck: HarnProviderHealthcheck?
-    public let cacheUsageAccounting: Bool
+    private let encodedCacheUsageAccounting: Bool?
+    public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
     public let protocols: [String]
     public let features: [String]
     public let caveats: [String]
@@ -443,7 +444,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case auth
         case extraHeaders = "extra_headers"
         case healthcheck
-        case cacheUsageAccounting = "cache_usage_accounting"
+        case encodedCacheUsageAccounting = "cache_usage_accounting"
         case protocols
         case features
         case caveats
@@ -700,7 +701,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
-        displayName = try container.decode(String.self, forKey: .displayName)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name
         blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
         provider = try container.decode(String.self, forKey: .provider)
         aliases = try container.decode([String].self, forKey: .aliases)
