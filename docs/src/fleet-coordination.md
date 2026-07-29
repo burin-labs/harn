@@ -294,7 +294,11 @@ State defaults to `~/.harn/host-leases`. Set `HARN_HOST_LEASE_ROOT` to isolate
 tests or relocate state for processes running under the same OS account. A
 cross-user registry requires a privileged host service and is not provided by
 this local capability. Priority class is preserved in receipts in this
-registry slice; queue ordering remains owned by Harn's worker scheduler.
+registry slice; queue ordering remains owned by Harn's worker scheduler. The
+worker scheduler maps low-priority dispatch to deferrable work, promotes it
+after a bounded 30-minute wait on the default FIFO path, and returns a typed
+claim-time scheduling receipt. Host leases continue to serialize scarce native
+resources without introducing a second queue-policy owner.
 
 ## Forward compatibility
 

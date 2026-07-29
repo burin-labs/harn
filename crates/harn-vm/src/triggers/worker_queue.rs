@@ -12,38 +12,16 @@ use crate::event_log::{
 use super::scheduler::{self, SchedulableJob, SchedulerPolicy, SchedulerSnapshot, SchedulerState};
 use super::{DispatchOutcome, TriggerEvent};
 
+mod scheduling;
+
+pub use scheduling::{
+    WorkerQueuePriority, WorkerQueueSchedulingDecision, WorkerQueueSchedulingReceipt,
+    DEFERRABLE_PROMOTION_AGE_MS,
+};
+
 pub const WORKER_QUEUE_CATALOG_TOPIC: &str = "worker.queues";
 const WORKER_QUEUE_CLAIMS_SUFFIX: &str = ".claims";
 const WORKER_QUEUE_RESPONSES_SUFFIX: &str = ".responses";
-const NORMAL_PROMOTION_AGE_MS: i64 = 15 * 60 * 1000;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum WorkerQueuePriority {
-    High,
-    #[default]
-    Normal,
-    Low,
-}
-
-impl WorkerQueuePriority {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::High => "high",
-            Self::Normal => "normal",
-            Self::Low => "low",
-        }
-    }
-
-    pub fn effective_rank(self, enqueued_at_ms: i64, now_ms: i64) -> u8 {
-        match self {
-            Self::High => 0,
-            Self::Normal if now_ms.saturating_sub(enqueued_at_ms) >= NORMAL_PROMOTION_AGE_MS => 0,
-            Self::Normal => 1,
-            Self::Low => 2,
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorkerQueueJob {
@@ -78,6 +56,7 @@ pub struct WorkerQueueClaimHandle {
 pub struct ClaimedWorkerJob {
     pub handle: WorkerQueueClaimHandle,
     pub job: WorkerQueueJob,
+    pub scheduling: WorkerQueueSchedulingReceipt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,7 +142,7 @@ impl WorkerQueueState {
         scheduler_state: &mut SchedulerState,
         policy: &SchedulerPolicy,
         now_ms: i64,
-    ) -> Option<&WorkerQueueJobState> {
+    ) -> Option<(&WorkerQueueJobState, scheduler::SchedulerSelection)> {
         let candidates: Vec<&WorkerQueueJobState> =
             self.jobs.iter().filter(|job| job.is_ready()).collect();
         if candidates.is_empty() {
@@ -182,6 +161,7 @@ impl WorkerQueueState {
         candidates
             .into_iter()
             .find(|job| job.job_event_id == pick.job_event_id)
+            .map(|job| (job, pick))
     }
 
     fn active_claim_for(&self, job_event_id: u64) -> Option<&WorkerQueueClaimHandle> {
@@ -512,20 +492,27 @@ impl WorkerQueue {
         for _ in 0..8 {
             let now_ms = now_ms();
             let state = self.queue_state(queue_name).await?;
-            let (job, fairness_key) = {
+            let (job, selection) = {
                 let mut states = self
                     .scheduler_states
                     .lock()
                     .expect("scheduler state poisoned");
                 let scheduler_state = states.entry(queue_name.to_string()).or_default();
-                let Some(job) =
+                let Some((job, selection)) =
                     state.next_ready_job_with_scheduler(scheduler_state, &policy, now_ms)
                 else {
                     return Ok(None);
                 };
-                let job = job.clone();
-                let fairness_key = policy.fairness_key_of(&SchedulableJob::from_state(&job));
-                (job, fairness_key)
+                (job.clone(), selection)
+            };
+            let scheduling = WorkerQueueSchedulingReceipt {
+                selected_at_ms: now_ms,
+                enqueued_at_ms: job.enqueued_at_ms,
+                waited_ms: now_ms.saturating_sub(job.enqueued_at_ms).max(0) as u64,
+                priority: job.job.priority,
+                decision: selection.decision,
+                promotion_deadline_at_ms: selection.promotion_deadline_at_ms,
+                fairness_key: selection.fairness_key.clone(),
             };
             let claim = WorkerQueueClaimRecord {
                 job_event_id: job.job_event_id,
@@ -533,6 +520,7 @@ impl WorkerQueue {
                 consumer_id: consumer_id.to_string(),
                 claimed_at_ms: now_ms,
                 expires_at_ms: expiry_ms(now_ms, ttl),
+                scheduling: Some(scheduling.clone()),
             };
             self.event_log
                 .append(
@@ -555,7 +543,7 @@ impl WorkerQueue {
                         .lock()
                         .expect("scheduler state poisoned");
                     let scheduler_state = states.entry(queue_name.to_string()).or_default();
-                    scheduler_state.note_claim_committed(&fairness_key);
+                    scheduler_state.note_claim_committed(&selection.fairness_key);
                 }
                 if let Some(metrics) = crate::active_metrics_registry() {
                     let summary = refreshed.summary(now_ms);
@@ -570,7 +558,7 @@ impl WorkerQueue {
                     metrics.record_scheduler_selection(
                         queue_name,
                         policy.fairness_key.as_str(),
-                        &fairness_key,
+                        &selection.fairness_key,
                     );
                     if let Ok(snap) = self.inspect_queue(queue_name).await {
                         for stat in &snap.scheduler.keys {
@@ -598,6 +586,7 @@ impl WorkerQueue {
                         expires_at_ms: claim.expires_at_ms,
                     },
                     job: job.job,
+                    scheduling,
                 }));
             }
         }
@@ -838,6 +827,8 @@ struct WorkerQueueClaimRecord {
     consumer_id: String,
     claimed_at_ms: i64,
     expires_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scheduling: Option<WorkerQueueSchedulingReceipt>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1002,6 +993,15 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(
+            claimed.scheduling.decision,
+            WorkerQueueSchedulingDecision::Priority
+        );
+        assert_eq!(claimed.scheduling.priority, WorkerQueuePriority::Normal);
+        assert_eq!(claimed.scheduling.fairness_key, "_no_tenant");
+        assert!(
+            claimed.scheduling.promotion_deadline_at_ms > Some(claimed.scheduling.enqueued_at_ms)
+        );
         let before_ack = queue.queue_state("triage").await.unwrap();
         assert_eq!(before_ack.summary(now_ms()).ready, 0);
         assert_eq!(before_ack.summary(now_ms()).in_flight, 1);
@@ -1089,6 +1089,7 @@ mod tests {
             consumer_id: "consumer-a".to_string(),
             claimed_at_ms: now_ms().saturating_sub(2),
             expires_at_ms: now_ms().saturating_sub(1),
+            scheduling: None,
         };
         log.append(
             &claims_topic("triage").unwrap(),
@@ -1130,7 +1131,7 @@ mod tests {
             ))
             .unwrap(),
         );
-        old_normal.occurred_at_ms = now_ms() - NORMAL_PROMOTION_AGE_MS - 1_000;
+        old_normal.occurred_at_ms = now_ms() - scheduling::NORMAL_PROMOTION_AGE_MS - 1_000;
         log.append(&topic, old_normal).await.unwrap();
 
         let high = LogEvent::new(
