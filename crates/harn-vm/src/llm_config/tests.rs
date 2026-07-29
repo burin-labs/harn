@@ -659,15 +659,14 @@ fn fireworks_gpt_oss_route_has_real_context_window() {
 
 #[test]
 fn test_user_catalog_overlay_re_homes_model_provider() {
-    // Users can re-home a built-in model by overlaying a catalog row;
-    // the exact-match catalog lookup must honor overlays as well as the
-    // embedded TOML.
+    // Exact-match catalog lookup must honor user overlays as well as embedded TOML.
     reset_overrides();
     let mut overlay = ProvidersConfig::default();
     overlay.models.insert(
         "gpt-4o".to_string(),
         ModelDef {
             name: "GPT-4o via OpenRouter".to_string(),
+            display_name: None,
             blurb: None,
             provider: "openrouter".to_string(),
             context_window: 128_000,
@@ -1414,6 +1413,7 @@ fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
         "acme/model-fast".to_string(),
         ModelDef {
             name: "Acme Fast".to_string(),
+            display_name: None,
             blurb: None,
             provider: "acme".to_string(),
             context_window: 65_536,

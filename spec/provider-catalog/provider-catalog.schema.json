@@ -557,6 +557,10 @@
         "deprecation": {
           "$ref": "#/$defs/deprecation"
         },
+        "display_name": {
+          "minLength": 1,
+          "type": "string"
+        },
         "equivalence_group": {
           "minLength": 1,
           "type": "string"
@@ -664,6 +668,7 @@
       "required": [
         "id",
         "name",
+        "display_name",
         "provider",
         "aliases",
         "context_window",
@@ -1029,6 +1034,9 @@
         "auth": {
           "$ref": "#/$defs/auth"
         },
+        "cache_usage_accounting": {
+          "type": "boolean"
+        },
         "caveats": {
           "items": {
             "type": "string"
@@ -1100,6 +1108,7 @@
         "classification",
         "endpoint",
         "auth",
+        "cache_usage_accounting",
         "protocols",
         "features",
         "caveats"
@@ -1477,7 +1486,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v6.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v7.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1521,10 +1530,10 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v6.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v7.json"
     },
     "schema_version": {
-      "const": 6
+      "const": 7
     },
     "variants": {
       "items": {

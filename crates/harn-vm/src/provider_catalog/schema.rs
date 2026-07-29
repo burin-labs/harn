@@ -32,7 +32,7 @@ pub fn schema_value() -> Value {
         "$defs": {
             "provider": {
                 "type": "object",
-                "required": ["id", "display_name", "classification", "endpoint", "auth", "protocols", "features", "caveats"],
+                "required": ["id", "display_name", "classification", "endpoint", "auth", "cache_usage_accounting", "protocols", "features", "caveats"],
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
                     "display_name": {"type": "string", "minLength": 1},
@@ -42,6 +42,7 @@ pub fn schema_value() -> Value {
                     "auth": {"$ref": "#/$defs/auth"},
                     "extra_headers": {"type": "object", "additionalProperties": {"type": "string"}},
                     "healthcheck": {"$ref": "#/$defs/healthcheck"},
+                    "cache_usage_accounting": {"type": "boolean"},
                     "protocols": {"type": "array", "items": {"type": "string"}},
                     "features": {"type": "array", "items": {"type": "string"}},
                     "caveats": {"type": "array", "items": {"type": "string"}},
@@ -192,6 +193,7 @@ pub fn schema_value() -> Value {
                 "required": [
                     "id",
                     "name",
+                    "display_name",
                     "provider",
                     "aliases",
                     "context_window",
@@ -212,6 +214,7 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "id": {"type": "string", "minLength": 1},
                     "name": {"type": "string", "minLength": 1},
+                    "display_name": {"type": "string", "minLength": 1},
                     "blurb": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
                     "aliases": {"type": "array", "items": {"type": "string"}},

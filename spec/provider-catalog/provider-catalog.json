@@ -1,6 +1,6 @@
 {
-  "schema_version": 6,
-  "schema": "https://harnlang.com/schemas/provider-catalog.v6.json",
+  "schema_version": 7,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v7.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
     {
@@ -26,6 +26,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
       "protocols": [
         "anthropic_messages"
       ],
@@ -59,6 +60,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -86,6 +88,7 @@
         ],
         "required": true
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "azure_openai_chat_completions"
       ],
@@ -119,6 +122,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -152,6 +156,7 @@
         "env": [],
         "required": true
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "bedrock_converse"
       ],
@@ -184,6 +189,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -211,6 +217,7 @@
         ],
         "required": true
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -242,6 +249,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -288,6 +296,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -317,6 +326,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -347,6 +357,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -375,6 +386,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -405,6 +417,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -437,6 +450,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -467,6 +481,7 @@
         "method": "GET",
         "path": "/v1beta/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "gemini_generate_content"
       ],
@@ -497,6 +512,7 @@
         "method": "GET",
         "url": "https://models.github.ai/catalog/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -526,6 +542,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -557,6 +574,7 @@
         "method": "GET",
         "url": "https://huggingface.co/api/whoami-v2"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -586,6 +604,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -615,6 +634,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -651,6 +671,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -679,6 +700,7 @@
         "method": "GET",
         "path": "/v1/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -742,6 +764,7 @@
         "method": "GET",
         "path": "/v1/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -777,6 +800,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -805,6 +829,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -834,6 +859,7 @@
         "method": "GET",
         "path": "/v1/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -893,6 +919,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -925,6 +952,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -956,6 +984,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -984,6 +1013,7 @@
         "method": "GET",
         "path": "/api/tags"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "ollama_native"
       ],
@@ -1023,6 +1053,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1052,6 +1083,7 @@
         "method": "GET",
         "path": "/auth/key"
       },
+      "cache_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1080,6 +1112,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1111,6 +1144,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1140,6 +1174,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1185,6 +1220,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1213,6 +1249,7 @@
         "method": "GET",
         "path": "/health"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1255,6 +1292,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1286,6 +1324,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1316,6 +1355,7 @@
         ],
         "required": true
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "vertex_generate_content"
       ],
@@ -1345,6 +1385,7 @@
         "method": "GET",
         "path": "/v1/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1398,6 +1439,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1428,6 +1470,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1477,6 +1520,7 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": false,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1489,6 +1533,7 @@
     {
       "id": "claude-3-5-haiku-20241022",
       "name": "Claude Haiku 3.5",
+      "display_name": "Claude Haiku 3.5",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -1593,6 +1638,7 @@
     {
       "id": "claude-3-5-sonnet-20240620",
       "name": "Claude Sonnet 3.5 (2024-06-20)",
+      "display_name": "Claude Sonnet 3.5",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -1697,6 +1743,7 @@
     {
       "id": "claude-3-5-sonnet-20241022",
       "name": "Claude Sonnet 3.5 (2024-10-22)",
+      "display_name": "Claude Sonnet 3.5",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -1801,6 +1848,7 @@
     {
       "id": "claude-3-opus-20240229",
       "name": "Claude Opus 3",
+      "display_name": "Claude Opus 3",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -1903,6 +1951,7 @@
     {
       "id": "claude-fable-5",
       "name": "Claude Fable 5",
+      "display_name": "Claude Fable 5",
       "provider": "anthropic",
       "aliases": [
         "fable"
@@ -2030,6 +2079,7 @@
     {
       "id": "claude-haiku-4-5-20251001",
       "name": "Claude Haiku 4.5",
+      "display_name": "Claude Haiku 4.5",
       "provider": "anthropic",
       "aliases": [
         "haiku"
@@ -2140,6 +2190,7 @@
     {
       "id": "claude-opus-4-1-20250805",
       "name": "Claude Opus 4.1",
+      "display_name": "Claude Opus 4.1",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -2252,6 +2303,7 @@
     {
       "id": "claude-opus-4-20250514",
       "name": "Claude Opus 4",
+      "display_name": "Claude Opus 4",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -2364,6 +2416,7 @@
     {
       "id": "claude-opus-4-5-20251101",
       "name": "Claude Opus 4.5",
+      "display_name": "Claude Opus 4.5",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -2472,6 +2525,7 @@
     {
       "id": "claude-opus-4-6",
       "name": "Claude Opus 4.6",
+      "display_name": "Claude Opus 4.6",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 1000000,
@@ -2586,6 +2640,7 @@
     {
       "id": "claude-opus-4-7",
       "name": "Claude Opus 4.7",
+      "display_name": "Claude Opus 4.7",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 1000000,
@@ -2735,6 +2790,7 @@
     {
       "id": "claude-opus-4-8",
       "name": "Claude Opus 4.8",
+      "display_name": "Claude Opus 4.8",
       "provider": "anthropic",
       "aliases": [
         "opus48"
@@ -2893,6 +2949,7 @@
     {
       "id": "claude-opus-5",
       "name": "Claude Opus 5",
+      "display_name": "Claude Opus 5",
       "provider": "anthropic",
       "aliases": [
         "opus",
@@ -3046,6 +3103,7 @@
     {
       "id": "claude-sonnet-4-20250514",
       "name": "Claude Sonnet 4",
+      "display_name": "Claude Sonnet 4",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -3158,6 +3216,7 @@
     {
       "id": "claude-sonnet-4-5",
       "name": "Claude Sonnet 4.5",
+      "display_name": "Claude Sonnet 4.5",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -3271,6 +3330,7 @@
     {
       "id": "claude-sonnet-4-5-20250929",
       "name": "Claude Sonnet 4.5",
+      "display_name": "Claude Sonnet 4.5",
       "provider": "anthropic",
       "aliases": [],
       "context_window": 200000,
@@ -3382,6 +3442,7 @@
     {
       "id": "claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6",
+      "display_name": "Claude Sonnet 4.6",
       "provider": "anthropic",
       "aliases": [
         "sonnet46"
@@ -3503,6 +3564,7 @@
     {
       "id": "claude-sonnet-5",
       "name": "Claude Sonnet 5",
+      "display_name": "Claude Sonnet 5",
       "provider": "anthropic",
       "aliases": [
         "frontier",
@@ -3634,6 +3696,7 @@
     {
       "id": "baseten/deepseek-ai/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (Baseten)",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "baseten",
       "aliases": [
         "baseten-deepseek-v4-pro"
@@ -3733,6 +3796,7 @@
     {
       "id": "baseten/moonshotai/Kimi-K2.5",
       "name": "Kimi K2.5 (Baseten)",
+      "display_name": "Kimi K2.5",
       "provider": "baseten",
       "aliases": [],
       "context_window": 262000,
@@ -3817,6 +3881,7 @@
     {
       "id": "baseten/moonshotai/Kimi-K2.6",
       "name": "Kimi K2.6 (Baseten)",
+      "display_name": "Kimi K2.6",
       "provider": "baseten",
       "aliases": [],
       "context_window": 262000,
@@ -3902,6 +3967,7 @@
     {
       "id": "baseten/moonshotai/Kimi-K2.7-Code",
       "name": "Kimi K2.7 Code (Baseten)",
+      "display_name": "Kimi K2.7 Code",
       "provider": "baseten",
       "aliases": [
         "baseten-kimi-k2.7-code"
@@ -3996,6 +4062,7 @@
     {
       "id": "baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
       "name": "Nemotron 3 Ultra 550B A55B (Baseten)",
+      "display_name": "Nemotron 3 Ultra 550B A55B",
       "provider": "baseten",
       "aliases": [
         "baseten-nemotron-ultra"
@@ -4091,6 +4158,7 @@
     {
       "id": "baseten/nvidia/Nemotron-120B-A12B",
       "name": "Nemotron 3 Super 120B A12B (Baseten)",
+      "display_name": "Nemotron 3 Super 120B A12B",
       "provider": "baseten",
       "aliases": [
         "baseten-nemotron-super"
@@ -4188,6 +4256,7 @@
     {
       "id": "baseten/openai/gpt-oss-120b",
       "name": "GPT-OSS 120B (Baseten)",
+      "display_name": "GPT-OSS 120B",
       "provider": "baseten",
       "aliases": [
         "baseten-gpt-oss-120b"
@@ -4287,6 +4356,7 @@
     {
       "id": "baseten/zai-org/GLM-4.7",
       "name": "GLM 4.7 (Baseten)",
+      "display_name": "GLM 4.7",
       "provider": "baseten",
       "aliases": [],
       "context_window": 200000,
@@ -4364,6 +4434,7 @@
     {
       "id": "baseten/zai-org/GLM-5",
       "name": "GLM 5 (Baseten)",
+      "display_name": "GLM 5",
       "provider": "baseten",
       "aliases": [],
       "context_window": 202800,
@@ -4446,6 +4517,7 @@
     {
       "id": "baseten/zai-org/GLM-5.1",
       "name": "GLM 5.1 (Baseten)",
+      "display_name": "GLM 5.1",
       "provider": "baseten",
       "aliases": [],
       "context_window": 202800,
@@ -4528,6 +4600,7 @@
     {
       "id": "baseten/zai-org/GLM-5.2",
       "name": "GLM 5.2 (Baseten)",
+      "display_name": "GLM 5.2",
       "provider": "baseten",
       "aliases": [
         "baseten-glm-5.2"
@@ -4633,6 +4706,7 @@
     {
       "id": "anthropic.claude-sonnet-4-5-20250929-v1:0",
       "name": "Claude Sonnet 4.5 (Amazon Bedrock)",
+      "display_name": "Claude Sonnet 4.5",
       "provider": "bedrock",
       "aliases": [],
       "context_window": 200000,
@@ -4710,6 +4784,7 @@
     {
       "id": "meta.llama3-1-70b-instruct-v1:0",
       "name": "Llama 3.1 70B Instruct (Amazon Bedrock)",
+      "display_name": "Llama 3.1 70B Instruct",
       "provider": "bedrock",
       "aliases": [],
       "context_window": 128000,
@@ -4784,6 +4859,7 @@
     {
       "id": "gpt-oss-120b",
       "name": "GPT-OSS 120B (Cerebras)",
+      "display_name": "GPT-OSS 120B",
       "provider": "cerebras",
       "aliases": [],
       "context_window": 131072,
@@ -4880,6 +4956,7 @@
     {
       "id": "llama-3.3-70b",
       "name": "Llama 3.3 70B (Cerebras, dedicated legacy)",
+      "display_name": "Llama 3.3 70B",
       "provider": "cerebras",
       "aliases": [],
       "context_window": 131072,
@@ -4945,6 +5022,7 @@
     {
       "id": "zai-glm-4.7",
       "name": "Z.ai GLM 4.7 (Cerebras)",
+      "display_name": "Z.ai GLM 4.7",
       "provider": "cerebras",
       "aliases": [],
       "context_window": 131072,
@@ -5017,6 +5095,7 @@
     {
       "id": "command-a-plus-05-2026",
       "name": "Command A+",
+      "display_name": "Command A+",
       "provider": "cohere",
       "aliases": [
         "cohere",
@@ -5110,6 +5189,7 @@
     {
       "id": "dashscope/qwen3-coder-next",
       "name": "Qwen3 Coder Next (DashScope)",
+      "display_name": "Qwen3 Coder Next",
       "provider": "dashscope",
       "aliases": [
         "dashscope-qwen3-coder-next"
@@ -5200,6 +5280,7 @@
     {
       "id": "dashscope/qwen3-coder-plus",
       "name": "Qwen3 Coder Plus (DashScope)",
+      "display_name": "Qwen3 Coder Plus",
       "provider": "dashscope",
       "aliases": [],
       "context_window": 1048576,
@@ -5273,6 +5354,7 @@
     {
       "id": "dashscope/qwen3.5-397b-a17b",
       "name": "Qwen3.5 397B A17B (DashScope)",
+      "display_name": "Qwen3.5 397B A17B",
       "provider": "dashscope",
       "aliases": [],
       "context_window": 262144,
@@ -5358,6 +5440,7 @@
     {
       "id": "dashscope/qwen3.6-35b-a3b",
       "name": "Qwen3.6 35B A3B (DashScope)",
+      "display_name": "Qwen3.6 35B A3B",
       "provider": "dashscope",
       "aliases": [],
       "context_window": 262144,
@@ -5434,6 +5517,7 @@
     {
       "id": "dashscope/qwen3.7-max",
       "name": "Qwen3.7 Max (DashScope)",
+      "display_name": "Qwen3.7 Max",
       "provider": "dashscope",
       "aliases": [
         "dashscope-qwen3.7-max"
@@ -5512,6 +5596,7 @@
     {
       "id": "deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo",
       "name": "MiniMax M2.7 Turbo (DeepInfra)",
+      "display_name": "MiniMax M2.7 Turbo",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 196608,
@@ -5586,6 +5671,7 @@
     {
       "id": "deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507",
       "name": "Qwen3 235B A22B Instruct 2507 (DeepInfra)",
+      "display_name": "Qwen3 235B A22B Instruct 2507",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 262144,
@@ -5655,6 +5741,7 @@
     {
       "id": "deepinfra/Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
       "name": "Qwen3 Coder 480B A35B Turbo (DeepInfra)",
+      "display_name": "Qwen3 Coder 480B A35B Turbo",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 262144,
@@ -5727,6 +5814,7 @@
     {
       "id": "deepinfra/Qwen/Qwen3.5-397B-A17B",
       "name": "Qwen3.5 397B A17B (DeepInfra)",
+      "display_name": "Qwen3.5 397B A17B",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 262144,
@@ -5806,6 +5894,7 @@
     {
       "id": "deepinfra/Qwen/Qwen3.6-27B",
       "name": "Qwen3.6 27B (DeepInfra)",
+      "display_name": "Qwen3.6 27B",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 262144,
@@ -5885,6 +5974,7 @@
     {
       "id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
       "name": "Qwen3.6 35B A3B (DeepInfra)",
+      "display_name": "Qwen3.6 35B A3B",
       "provider": "deepinfra",
       "aliases": [
         "deepinfra-qwen3.6"
@@ -5974,6 +6064,7 @@
     {
       "id": "deepinfra/Qwen/Qwen3.7-Max",
       "name": "Qwen3.7 Max (DeepInfra)",
+      "display_name": "Qwen3.7 Max",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 1000000,
@@ -6058,6 +6149,7 @@
     {
       "id": "deepinfra/deepseek-ai/DeepSeek-V3.2",
       "name": "DeepSeek V3.2 (DeepInfra)",
+      "display_name": "DeepSeek V3.2",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 163840,
@@ -6142,6 +6234,7 @@
     {
       "id": "deepinfra/deepseek-ai/DeepSeek-V4-Flash",
       "name": "DeepSeek V4 Flash (DeepInfra)",
+      "display_name": "DeepSeek V4 Flash",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 1000000,
@@ -6235,6 +6328,7 @@
     {
       "id": "deepinfra/deepseek-ai/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (DeepInfra)",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "deepinfra",
       "aliases": [
         "deepinfra-deepseek"
@@ -6320,6 +6414,7 @@
     {
       "id": "deepinfra/moonshotai/Kimi-K2.7-Code",
       "name": "Kimi K2.7 Code (DeepInfra)",
+      "display_name": "Kimi K2.7 Code",
       "provider": "deepinfra",
       "aliases": [
         "deepinfra-kimi-k2.7-code"
@@ -6411,6 +6506,7 @@
     {
       "id": "deepinfra/openai/gpt-oss-120b",
       "name": "GPT-OSS 120B (DeepInfra)",
+      "display_name": "GPT-OSS 120B",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 131072,
@@ -6500,6 +6596,7 @@
     {
       "id": "deepinfra/zai-org/GLM-4.6",
       "name": "GLM 4.6 (DeepInfra)",
+      "display_name": "GLM 4.6",
       "provider": "deepinfra",
       "aliases": [],
       "context_window": 202752,
@@ -6573,6 +6670,7 @@
     {
       "id": "deepinfra/zai-org/GLM-5.2",
       "name": "GLM 5.2 (DeepInfra)",
+      "display_name": "GLM 5.2",
       "provider": "deepinfra",
       "aliases": [
         "deepinfra-glm-5.2"
@@ -6660,6 +6758,7 @@
     {
       "id": "deepseek-v4-flash",
       "name": "DeepSeek V4 Flash",
+      "display_name": "DeepSeek V4 Flash",
       "provider": "deepseek",
       "aliases": [
         "deepseek",
@@ -6739,6 +6838,7 @@
     {
       "id": "deepseek-v4-pro",
       "name": "DeepSeek V4 Pro",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "deepseek",
       "aliases": [
         "deepseek-pro",
@@ -6816,6 +6916,7 @@
     {
       "id": "accounts/fireworks/models/deepseek-v4-pro",
       "name": "DeepSeek V4 Pro (Fireworks)",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 1048576,
@@ -6909,6 +7010,7 @@
     {
       "id": "accounts/fireworks/models/glm-5p1",
       "name": "GLM 5.1 (Fireworks)",
+      "display_name": "GLM 5.1",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 202752,
@@ -6997,6 +7099,7 @@
     {
       "id": "accounts/fireworks/models/glm-5p2",
       "name": "GLM 5.2 (Fireworks)",
+      "display_name": "GLM 5.2",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 1048576,
@@ -7091,6 +7194,7 @@
     {
       "id": "accounts/fireworks/models/gpt-oss-120b",
       "name": "GPT-OSS 120B (Fireworks)",
+      "display_name": "GPT-OSS 120B",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 131072,
@@ -7194,6 +7298,7 @@
     {
       "id": "accounts/fireworks/models/kimi-k2p5",
       "name": "Kimi K2.5 (Fireworks)",
+      "display_name": "Kimi K2.5",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 262144,
@@ -7286,6 +7391,7 @@
     {
       "id": "accounts/fireworks/models/kimi-k2p6",
       "name": "Kimi K2.6 (Fireworks)",
+      "display_name": "Kimi K2.6",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 262144,
@@ -7382,6 +7488,7 @@
     {
       "id": "accounts/fireworks/models/kimi-k2p7-code",
       "name": "Kimi K2.7 Code (Fireworks)",
+      "display_name": "Kimi K2.7 Code",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 262144,
@@ -7478,6 +7585,7 @@
     {
       "id": "accounts/fireworks/models/minimax-m3",
       "name": "MiniMax M3 (Fireworks)",
+      "display_name": "MiniMax M3",
       "provider": "fireworks",
       "aliases": [],
       "context_window": 524288,
@@ -7573,6 +7681,7 @@
     {
       "id": "gemini-2.5-flash",
       "name": "Gemini 2.5 Flash",
+      "display_name": "Gemini 2.5 Flash",
       "provider": "gemini",
       "aliases": [],
       "context_window": 1048576,
@@ -7720,6 +7829,7 @@
     {
       "id": "gemini-2.5-flash-lite",
       "name": "Gemini 2.5 Flash-Lite",
+      "display_name": "Gemini 2.5 Flash-Lite",
       "provider": "gemini",
       "aliases": [],
       "context_window": 1048576,
@@ -7859,6 +7969,7 @@
     {
       "id": "gemini-2.5-pro",
       "name": "Gemini 2.5 Pro",
+      "display_name": "Gemini 2.5 Pro",
       "provider": "gemini",
       "aliases": [],
       "context_window": 1048576,
@@ -8014,6 +8125,7 @@
     {
       "id": "gemini-3.1-flash-lite",
       "name": "Gemini 3.1 Flash-Lite",
+      "display_name": "Gemini 3.1 Flash-Lite",
       "provider": "gemini",
       "aliases": [],
       "context_window": 1048576,
@@ -8152,6 +8264,7 @@
     {
       "id": "gemini-3.1-pro-preview",
       "name": "Gemini 3.1 Pro (Preview)",
+      "display_name": "Gemini 3.1 Pro",
       "provider": "gemini",
       "aliases": [],
       "context_window": 1048576,
@@ -8305,6 +8418,7 @@
     {
       "id": "gemini-3.5-flash",
       "name": "Gemini 3.5 Flash",
+      "display_name": "Gemini 3.5 Flash",
       "provider": "gemini",
       "aliases": [],
       "context_window": 1048576,
@@ -8451,6 +8565,7 @@
     {
       "id": "models/gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B MoE (Gemini API)",
+      "display_name": "Gemma 4 26B MoE",
       "provider": "gemini",
       "aliases": [
         "gemini-gemma4-26b"
@@ -8535,6 +8650,7 @@
     {
       "id": "models/gemma-4-31b-it",
       "name": "Gemma 4 31B (Gemini API)",
+      "display_name": "Gemma 4 31B",
       "provider": "gemini",
       "aliases": [
         "gemini-gemma4-31b"
@@ -8620,6 +8736,7 @@
     {
       "id": "groq/compound",
       "name": "Groq Compound",
+      "display_name": "Groq Compound",
       "provider": "groq",
       "aliases": [],
       "context_window": 131072,
@@ -8696,6 +8813,7 @@
     {
       "id": "groq/compound-mini",
       "name": "Groq Compound Mini",
+      "display_name": "Groq Compound Mini",
       "provider": "groq",
       "aliases": [],
       "context_window": 131072,
@@ -8773,6 +8891,7 @@
     {
       "id": "groq/openai/gpt-oss-120b",
       "name": "GPT-OSS 120B (Groq)",
+      "display_name": "GPT-OSS 120B",
       "provider": "groq",
       "aliases": [],
       "context_window": 131072,
@@ -8878,6 +8997,7 @@
     {
       "id": "groq/openai/gpt-oss-20b",
       "name": "GPT-OSS 20B (Groq)",
+      "display_name": "GPT-OSS 20B",
       "provider": "groq",
       "aliases": [],
       "context_window": 131072,
@@ -8983,6 +9103,7 @@
     {
       "id": "llama-3.1-8b-instant",
       "name": "Llama 3.1 8B Instant (Groq)",
+      "display_name": "Llama 3.1 8B Instant",
       "provider": "groq",
       "aliases": [],
       "context_window": 131072,
@@ -9076,6 +9197,7 @@
     {
       "id": "llama-3.3-70b-versatile",
       "name": "Llama 3.3 70B Versatile (Groq)",
+      "display_name": "Llama 3.3 70B Versatile",
       "provider": "groq",
       "aliases": [],
       "context_window": 131072,
@@ -9171,6 +9293,7 @@
     {
       "id": "qwen/qwen3.6-27b",
       "name": "Qwen3.6 27B (Groq)",
+      "display_name": "Qwen3.6 27B",
       "provider": "groq",
       "aliases": [
         "groq-qwen3.6"
@@ -9265,6 +9388,7 @@
     {
       "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
       "name": "Qwen3-Coder 480B A35B Instruct (Hugging Face Router)",
+      "display_name": "Qwen3-Coder 480B A35B Instruct",
       "provider": "huggingface",
       "aliases": [
         "hf-qwen3-coder",
@@ -9349,6 +9473,7 @@
     {
       "id": "mercury-2",
       "name": "Mercury 2",
+      "display_name": "Mercury 2",
       "provider": "inception",
       "aliases": [],
       "context_window": 128000,
@@ -9425,6 +9550,7 @@
     {
       "id": "mercury-coder-small",
       "name": "Mercury Coder Small",
+      "display_name": "Mercury Coder Small",
       "provider": "inception",
       "aliases": [],
       "context_window": 32768,
@@ -9486,6 +9612,7 @@
     {
       "id": "qwen3.6-35b-a3b",
       "name": "Qwen3.6 35B (llama.cpp)",
+      "display_name": "Qwen3.6 35B",
       "provider": "llamacpp",
       "aliases": [
         "llamacpp-qwen3.6"
@@ -9554,6 +9681,7 @@
     {
       "id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "name": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
+      "display_name": "Qwen3.6 35B Q4",
       "provider": "llamacpp",
       "aliases": [
         "llamacpp-qwen3.6-q4",
@@ -9644,6 +9772,7 @@
     {
       "id": "qwen3.6-35b-a3b-ud-q5-k-xl",
       "name": "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
+      "display_name": "Qwen3.6 35B Q5",
       "provider": "llamacpp",
       "aliases": [],
       "context_window": 262144,
@@ -9710,6 +9839,7 @@
     {
       "id": "gemma-4-12b-it",
       "name": "Gemma 4 12B (local)",
+      "display_name": "Gemma 4 12B",
       "provider": "local",
       "aliases": [
         "local-gemma4-12b"
@@ -9779,6 +9909,7 @@
     {
       "id": "gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B MoE (local)",
+      "display_name": "Gemma 4 26B MoE",
       "provider": "local",
       "aliases": [
         "local-gemma4",
@@ -9848,6 +9979,7 @@
     {
       "id": "gemma-4-31b-it",
       "name": "Gemma 4 31B (local)",
+      "display_name": "Gemma 4 31B",
       "provider": "local",
       "aliases": [
         "local-gemma4-31b"
@@ -9917,6 +10049,7 @@
     {
       "id": "gemma-4-e2b-it",
       "name": "Gemma 4 E2B (local)",
+      "display_name": "Gemma 4 E2B",
       "provider": "local",
       "aliases": [
         "local-gemma4-e2b"
@@ -9986,6 +10119,7 @@
     {
       "id": "gemma-4-e4b-it",
       "name": "Gemma 4 E4B (local)",
+      "display_name": "Gemma 4 E4B",
       "provider": "local",
       "aliases": [
         "local-gemma4-e4b"
@@ -10054,6 +10188,7 @@
     {
       "id": "MiniMax-M2",
       "name": "MiniMax M2",
+      "display_name": "MiniMax M2",
       "provider": "minimax",
       "aliases": [
         "minimax-m2"
@@ -10129,6 +10264,7 @@
     {
       "id": "MiniMax-M2.5",
       "name": "MiniMax M2.5",
+      "display_name": "MiniMax M2.5",
       "provider": "minimax",
       "aliases": [
         "minimax-m2.5"
@@ -10201,6 +10337,7 @@
     {
       "id": "MiniMax-M2.5-highspeed",
       "name": "MiniMax M2.5 (highspeed)",
+      "display_name": "MiniMax M2.5",
       "provider": "minimax",
       "aliases": [],
       "context_window": 204800,
@@ -10270,6 +10407,7 @@
     {
       "id": "MiniMax-M2.7",
       "name": "MiniMax M2.7",
+      "display_name": "MiniMax M2.7",
       "provider": "minimax",
       "aliases": [
         "minimax-m2.7"
@@ -10348,6 +10486,7 @@
     {
       "id": "MiniMax-M2.7-highspeed",
       "name": "MiniMax M2.7 (highspeed)",
+      "display_name": "MiniMax M2.7",
       "provider": "minimax",
       "aliases": [],
       "context_window": 204800,
@@ -10419,6 +10558,7 @@
     {
       "id": "MiniMax-M3",
       "name": "MiniMax M3",
+      "display_name": "MiniMax M3",
       "provider": "minimax",
       "aliases": [
         "minimax",
@@ -10509,6 +10649,7 @@
     {
       "id": "MiniMax-Text-01",
       "name": "MiniMax Text 01",
+      "display_name": "MiniMax Text 01",
       "provider": "minimax",
       "aliases": [],
       "context_window": 1000000,
@@ -10575,6 +10716,7 @@
     {
       "id": "codestral-2508",
       "name": "Codestral 25.08",
+      "display_name": "Codestral 25.08",
       "provider": "mistral",
       "aliases": [
         "codestral"
@@ -10661,6 +10803,7 @@
     {
       "id": "devstral-medium-2512",
       "name": "Devstral 2 Medium",
+      "display_name": "Devstral 2 Medium",
       "provider": "mistral",
       "aliases": [
         "devstral-medium"
@@ -10747,6 +10890,7 @@
     {
       "id": "devstral-small-2512",
       "name": "Devstral 2 Small",
+      "display_name": "Devstral 2 Small",
       "provider": "mistral",
       "aliases": [
         "devstral-small"
@@ -10833,6 +10977,7 @@
     {
       "id": "mistral-large-2512",
       "name": "Mistral Large 3 2512",
+      "display_name": "Mistral Large 3 2512",
       "provider": "mistral",
       "aliases": [],
       "context_window": 262144,
@@ -10928,6 +11073,7 @@
     {
       "id": "mistral-medium-3-5",
       "name": "Mistral Medium 3.5",
+      "display_name": "Mistral Medium 3.5",
       "provider": "mistral",
       "aliases": [],
       "context_window": 262144,
@@ -11034,6 +11180,7 @@
     {
       "id": "mistral-small-2603",
       "name": "Mistral Small 4",
+      "display_name": "Mistral Small 4",
       "provider": "mistral",
       "aliases": [],
       "context_window": 262144,
@@ -11130,6 +11277,7 @@
     {
       "id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
       "name": "Qwen3.6 35B-A3B (MLX 4-bit)",
+      "display_name": "Qwen3.6 35B-A3B 4-bit",
       "provider": "mlx",
       "aliases": [
         "local-qwen3.6-27b",
@@ -11204,6 +11352,7 @@
     {
       "id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit",
       "name": "Qwen3.6 35B-A3B (MLX 8-bit)",
+      "display_name": "Qwen3.6 35B-A3B 8-bit",
       "provider": "mlx",
       "aliases": [
         "mlx-qwen3.6-q8"
@@ -11273,6 +11422,7 @@
     {
       "id": "moonshot/kimi-k2.5",
       "name": "Kimi K2.5 (Moonshot direct)",
+      "display_name": "Kimi K2.5",
       "provider": "moonshot",
       "aliases": [],
       "context_window": 262144,
@@ -11349,6 +11499,7 @@
     {
       "id": "moonshot/kimi-k2.6",
       "name": "Kimi K2.6 (Moonshot direct)",
+      "display_name": "Kimi K2.6",
       "provider": "moonshot",
       "aliases": [
         "kimi-direct",
@@ -11439,6 +11590,7 @@
     {
       "id": "moonshot/kimi-k2.7-code",
       "name": "Kimi K2.7 Code (Moonshot direct)",
+      "display_name": "Kimi K2.7 Code",
       "provider": "moonshot",
       "aliases": [
         "moonshot-kimi-k2.7-code"
@@ -11531,6 +11683,7 @@
     {
       "id": "moonshot/kimi-k2.7-code-highspeed",
       "name": "Kimi K2.7 Code Highspeed (Moonshot direct)",
+      "display_name": "Kimi K2.7 Code Highspeed",
       "provider": "moonshot",
       "aliases": [
         "moonshot-kimi-k2.7-code-highspeed"
@@ -11624,6 +11777,7 @@
     {
       "id": "moonshot/kimi-k3",
       "name": "Kimi K3 (Moonshot direct)",
+      "display_name": "Kimi K3",
       "provider": "moonshot",
       "aliases": [
         "kimi-k3",
@@ -11718,6 +11872,7 @@
     {
       "id": "nvidia/deepseek-v4-flash",
       "name": "DeepSeek V4 Flash (NVIDIA NIM)",
+      "display_name": "DeepSeek V4 Flash",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 1048576,
@@ -11797,6 +11952,7 @@
     {
       "id": "nvidia/deepseek-v4-pro",
       "name": "DeepSeek V4 Pro (NVIDIA NIM)",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "nvidia",
       "aliases": [
         "nvidia-deepseek-v4-pro"
@@ -11877,6 +12033,7 @@
     {
       "id": "nvidia/kimi-k2.6",
       "name": "Kimi K2.6 (NVIDIA NIM)",
+      "display_name": "Kimi K2.6",
       "provider": "nvidia",
       "aliases": [
         "nvidia-kimi-k2.6"
@@ -11966,6 +12123,7 @@
     {
       "id": "nvidia/minimax-m2.7",
       "name": "MiniMax M2.7 (NVIDIA NIM)",
+      "display_name": "MiniMax M2.7",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 196608,
@@ -12044,6 +12202,7 @@
     {
       "id": "nvidia/minimax-m3",
       "name": "MiniMax M3 (NVIDIA NIM)",
+      "display_name": "MiniMax M3",
       "provider": "nvidia",
       "aliases": [
         "nvidia-minimax-m3"
@@ -12129,6 +12288,7 @@
     {
       "id": "nvidia/mistral-medium-3.5-128b",
       "name": "Mistral Medium 3.5 128B (NVIDIA NIM)",
+      "display_name": "Mistral Medium 3.5 128B",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 262144,
@@ -12199,6 +12359,7 @@
     {
       "id": "nvidia/nemotron-3-nano-30b-a3b",
       "name": "Nemotron 3 Nano 30B A3B (NVIDIA NIM)",
+      "display_name": "Nemotron 3 Nano 30B A3B",
       "provider": "nvidia",
       "aliases": [
         "nvidia-nemotron-nano"
@@ -12279,6 +12440,7 @@
     {
       "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
       "name": "Nemotron 3 Nano Omni 30B A3B Reasoning (NVIDIA NIM)",
+      "display_name": "Nemotron 3 Nano Omni 30B A3B Reasoning",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 262144,
@@ -12361,6 +12523,7 @@
     {
       "id": "nvidia/nemotron-3-super-120b-a12b",
       "name": "Nemotron 3 Super 120B A12B (NVIDIA NIM)",
+      "display_name": "Nemotron 3 Super 120B A12B",
       "provider": "nvidia",
       "aliases": [
         "nvidia-nemotron-super"
@@ -12448,6 +12611,7 @@
     {
       "id": "nvidia/nemotron-3-ultra-550b-a55b",
       "name": "Nemotron 3 Ultra 550B A55B (NVIDIA NIM)",
+      "display_name": "Nemotron 3 Ultra 550B A55B",
       "provider": "nvidia",
       "aliases": [
         "nvidia-nemotron-ultra"
@@ -12534,6 +12698,7 @@
     {
       "id": "nvidia/openai/gpt-oss-120b",
       "name": "GPT-OSS 120B (NVIDIA NIM)",
+      "display_name": "GPT-OSS 120B",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 131072,
@@ -12615,6 +12780,7 @@
     {
       "id": "nvidia/openai/gpt-oss-20b",
       "name": "GPT-OSS 20B (NVIDIA NIM)",
+      "display_name": "GPT-OSS 20B",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 131072,
@@ -12697,6 +12863,7 @@
     {
       "id": "nvidia/step-3.7-flash",
       "name": "Step 3.7 Flash (NVIDIA NIM)",
+      "display_name": "Step 3.7 Flash",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 131072,
@@ -12771,6 +12938,7 @@
     {
       "id": "nvidia/z-ai/glm-5.1",
       "name": "GLM 5.1 (NVIDIA NIM)",
+      "display_name": "GLM 5.1",
       "provider": "nvidia",
       "aliases": [],
       "context_window": 202752,
@@ -12849,6 +13017,7 @@
     {
       "id": "devstral-small-2:24b",
       "name": "Devstral Small 2 24B",
+      "display_name": "Devstral Small 2 24B",
       "provider": "ollama",
       "aliases": [
         "devstral-small-2",
@@ -12915,6 +13084,7 @@
     {
       "id": "gemma4:12b-mlx",
       "name": "Gemma 4 12B (MLX)",
+      "display_name": "Gemma 4 12B",
       "provider": "ollama",
       "aliases": [
         "ollama-gemma4-12b"
@@ -12980,6 +13150,7 @@
     {
       "id": "gemma4:12b-mxfp8",
       "name": "Gemma 4 12B (MXFP8)",
+      "display_name": "Gemma 4 12B",
       "provider": "ollama",
       "aliases": [],
       "context_window": 131072,
@@ -13043,6 +13214,7 @@
     {
       "id": "gemma4:12b-nvfp4",
       "name": "Gemma 4 12B (NVFP4)",
+      "display_name": "Gemma 4 12B",
       "provider": "ollama",
       "aliases": [
         "ollama-gemma4-12b-nvfp4"
@@ -13108,6 +13280,7 @@
     {
       "id": "gemma4:26b",
       "name": "Gemma 4 26B MoE",
+      "display_name": "Gemma 4 26B MoE",
       "provider": "ollama",
       "aliases": [
         "ollama-gemma4",
@@ -13176,6 +13349,7 @@
     {
       "id": "llama3.2",
       "name": "Llama 3.2",
+      "display_name": "Llama 3.2",
       "provider": "ollama",
       "aliases": [],
       "context_window": 32000,
@@ -13238,6 +13412,7 @@
     {
       "id": "gpt-4-turbo",
       "name": "GPT-4 Turbo",
+      "display_name": "GPT-4 Turbo",
       "provider": "openai",
       "aliases": [],
       "context_window": 128000,
@@ -13325,6 +13500,7 @@
     {
       "id": "gpt-4.1",
       "name": "GPT-4.1",
+      "display_name": "GPT-4.1",
       "provider": "openai",
       "aliases": [],
       "context_window": 1047576,
@@ -13415,6 +13591,7 @@
     {
       "id": "gpt-4.1-mini",
       "name": "GPT-4.1 Mini",
+      "display_name": "GPT-4.1 Mini",
       "provider": "openai",
       "aliases": [],
       "context_window": 1047576,
@@ -13507,6 +13684,7 @@
     {
       "id": "gpt-4.1-nano",
       "name": "GPT-4.1 Nano",
+      "display_name": "GPT-4.1 Nano",
       "provider": "openai",
       "aliases": [],
       "context_window": 1047576,
@@ -13598,6 +13776,7 @@
     {
       "id": "gpt-4o",
       "name": "GPT-4o",
+      "display_name": "GPT-4o",
       "provider": "openai",
       "aliases": [],
       "context_window": 128000,
@@ -13690,6 +13869,7 @@
     {
       "id": "gpt-4o-mini",
       "name": "GPT-4o Mini",
+      "display_name": "GPT-4o Mini",
       "provider": "openai",
       "aliases": [],
       "context_window": 128000,
@@ -13790,6 +13970,7 @@
     {
       "id": "gpt-5.3-codex",
       "name": "GPT-5.3-Codex",
+      "display_name": "GPT-5.3-Codex",
       "provider": "openai",
       "aliases": [],
       "context_window": 400000,
@@ -13887,6 +14068,7 @@
     {
       "id": "gpt-5.4",
       "name": "GPT-5.4",
+      "display_name": "GPT-5.4",
       "provider": "openai",
       "aliases": [],
       "context_window": 1000000,
@@ -14000,6 +14182,7 @@
     {
       "id": "gpt-5.4-mini",
       "name": "GPT-5.4 Mini",
+      "display_name": "GPT-5.4 Mini",
       "provider": "openai",
       "aliases": [],
       "context_window": 400000,
@@ -14106,6 +14289,7 @@
     {
       "id": "gpt-5.4-nano",
       "name": "GPT-5.4 Nano",
+      "display_name": "GPT-5.4 Nano",
       "provider": "openai",
       "aliases": [],
       "context_window": 400000,
@@ -14204,6 +14388,7 @@
     {
       "id": "gpt-5.4-pro",
       "name": "GPT-5.4 Pro",
+      "display_name": "GPT-5.4 Pro",
       "provider": "openai",
       "aliases": [],
       "context_window": 1050000,
@@ -14318,6 +14503,7 @@
     {
       "id": "gpt-5.5",
       "name": "GPT-5.5",
+      "display_name": "GPT-5.5",
       "provider": "openai",
       "aliases": [],
       "context_window": 1050000,
@@ -14499,6 +14685,7 @@
     {
       "id": "gpt-5.5-pro",
       "name": "GPT-5.5 Pro",
+      "display_name": "GPT-5.5 Pro",
       "provider": "openai",
       "aliases": [],
       "context_window": 1050000,
@@ -14612,6 +14799,7 @@
     {
       "id": "gpt-5.6-luna",
       "name": "GPT-5.6 Luna",
+      "display_name": "GPT-5.6 Luna",
       "blurb": "Fastest and lowest-cost GPT-5.6 option for routine edits, summaries, and quick iterations.",
       "provider": "openai",
       "aliases": [
@@ -14793,6 +14981,7 @@
     {
       "id": "gpt-5.6-sol",
       "name": "GPT-5.6 Sol",
+      "display_name": "GPT-5.6 Sol",
       "blurb": "Most capable GPT-5.6 option for difficult planning, coding, and review, with the highest cost.",
       "provider": "openai",
       "aliases": [
@@ -14973,6 +15162,7 @@
     {
       "id": "gpt-5.6-terra",
       "name": "GPT-5.6 Terra",
+      "display_name": "GPT-5.6 Terra",
       "blurb": "Balanced GPT-5.6 option for everyday coding work, with lower cost and latency than Sol.",
       "provider": "openai",
       "aliases": [
@@ -15152,6 +15342,7 @@
     {
       "id": "o1",
       "name": "OpenAI o1",
+      "display_name": "OpenAI o1",
       "provider": "openai",
       "aliases": [],
       "context_window": 200000,
@@ -15243,6 +15434,7 @@
     {
       "id": "o1-mini",
       "name": "OpenAI o1-mini",
+      "display_name": "OpenAI o1-mini",
       "provider": "openai",
       "aliases": [],
       "context_window": 128000,
@@ -15335,6 +15527,7 @@
     {
       "id": "o3",
       "name": "OpenAI o3",
+      "display_name": "OpenAI o3",
       "provider": "openai",
       "aliases": [],
       "context_window": 200000,
@@ -15430,6 +15623,7 @@
     {
       "id": "o3-mini",
       "name": "OpenAI o3-mini",
+      "display_name": "OpenAI o3-mini",
       "provider": "openai",
       "aliases": [],
       "context_window": 200000,
@@ -15526,6 +15720,7 @@
     {
       "id": "o4-mini",
       "name": "OpenAI o4-mini",
+      "display_name": "OpenAI o4-mini",
       "provider": "openai",
       "aliases": [],
       "context_window": 200000,
@@ -15620,6 +15815,7 @@
     {
       "id": "Qwen/Qwen3.5-9B",
       "name": "Qwen3.5 9B",
+      "display_name": "Qwen3.5 9B",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 131072,
@@ -15682,6 +15878,7 @@
     {
       "id": "anthropic/claude-fable-5",
       "name": "Claude Fable 5 (via OpenRouter)",
+      "display_name": "Claude Fable 5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
@@ -15753,6 +15950,7 @@
     {
       "id": "anthropic/claude-haiku-4-5",
       "name": "Claude Haiku 4.5 (via OpenRouter)",
+      "display_name": "Claude Haiku 4.5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 200000,
@@ -15822,6 +16020,7 @@
     {
       "id": "anthropic/claude-opus-4.8",
       "name": "Claude Opus 4.8 (via OpenRouter)",
+      "display_name": "Claude Opus 4.8",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
@@ -15894,6 +16093,7 @@
     {
       "id": "anthropic/claude-opus-4.8-fast",
       "name": "Claude Opus 4.8 Fast (via OpenRouter)",
+      "display_name": "Claude Opus 4.8 Fast",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
@@ -15964,6 +16164,7 @@
     {
       "id": "anthropic/claude-opus-5",
       "name": "Claude Opus 5 (via OpenRouter)",
+      "display_name": "Claude Opus 5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
@@ -16032,6 +16233,7 @@
     {
       "id": "anthropic/claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6 (via OpenRouter)",
+      "display_name": "Claude Sonnet 4.6",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
@@ -16109,6 +16311,7 @@
     {
       "id": "anthropic/claude-sonnet-5",
       "name": "Claude Sonnet 5 (via OpenRouter)",
+      "display_name": "Claude Sonnet 5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
@@ -16186,6 +16389,7 @@
     {
       "id": "bytedance-seed/seed-2.0-lite",
       "name": "Seed 2.0 Lite (via OpenRouter)",
+      "display_name": "Seed 2.0 Lite",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -16262,6 +16466,7 @@
     {
       "id": "cohere/north-mini-code:free",
       "name": "North Mini Code Free (via OpenRouter)",
+      "display_name": "North Mini Code Free",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 256000,
@@ -16335,6 +16540,7 @@
     {
       "id": "deepseek/deepseek-v3.2",
       "name": "DeepSeek V3.2",
+      "display_name": "DeepSeek V3.2",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 131072,
@@ -16415,6 +16621,7 @@
     {
       "id": "deepseek/deepseek-v4-flash",
       "name": "DeepSeek V4 Flash (via OpenRouter)",
+      "display_name": "DeepSeek V4 Flash",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1048576,
@@ -16489,6 +16696,7 @@
     {
       "id": "deepseek/deepseek-v4-pro",
       "name": "DeepSeek V4 Pro (via OpenRouter)",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1048576,
@@ -16562,6 +16770,7 @@
     {
       "id": "google/gemini-2.5-flash",
       "name": "Gemini 2.5 Flash (via OpenRouter)",
+      "display_name": "Gemini 2.5 Flash",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1048576,
@@ -16649,6 +16858,7 @@
     {
       "id": "google/gemini-3.5-flash",
       "name": "Gemini 3.5 Flash (via OpenRouter)",
+      "display_name": "Gemini 3.5 Flash",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1048576,
@@ -16736,6 +16946,7 @@
     {
       "id": "google/gemma-4-26b-a4b-it",
       "name": "Gemma 4 26B MoE (OpenRouter)",
+      "display_name": "Gemma 4 26B MoE",
       "provider": "openrouter",
       "aliases": [
         "openrouter-gemma4-26b",
@@ -16810,6 +17021,7 @@
     {
       "id": "google/gemma-4-31b-it",
       "name": "Gemma 4 31B (OpenRouter)",
+      "display_name": "Gemma 4 31B",
       "provider": "openrouter",
       "aliases": [
         "openrouter-gemma4-31b"
@@ -16881,6 +17093,7 @@
     {
       "id": "kwaipilot/kat-coder-pro-v2",
       "name": "KAT-Coder-Pro V2",
+      "display_name": "KAT-Coder-Pro V2",
       "provider": "openrouter",
       "aliases": [
         "kat-coder-pro-v2",
@@ -16961,6 +17174,7 @@
     {
       "id": "minimax/minimax-m2",
       "name": "MiniMax M2 (via OpenRouter)",
+      "display_name": "MiniMax M2",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 204800,
@@ -17028,6 +17242,7 @@
     {
       "id": "minimax/minimax-m2.5",
       "name": "MiniMax M2.5 (via OpenRouter)",
+      "display_name": "MiniMax M2.5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 205000,
@@ -17095,6 +17310,7 @@
     {
       "id": "minimax/minimax-m2.7",
       "name": "MiniMax M2.7 (via OpenRouter)",
+      "display_name": "MiniMax M2.7",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 204800,
@@ -17163,6 +17379,7 @@
     {
       "id": "minimax/minimax-m3",
       "name": "MiniMax M3 (via OpenRouter)",
+      "display_name": "MiniMax M3",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1048576,
@@ -17241,6 +17458,7 @@
     {
       "id": "mistralai/mistral-large-2512",
       "name": "Mistral Large 3 2512",
+      "display_name": "Mistral Large 3 2512",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -17319,6 +17537,7 @@
     {
       "id": "mistralai/mistral-medium-3-5",
       "name": "Mistral Medium 3.5 (via OpenRouter)",
+      "display_name": "Mistral Medium 3.5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -17409,6 +17628,7 @@
     {
       "id": "mistralai/mistral-small-2603",
       "name": "Mistral Small 4",
+      "display_name": "Mistral Small 4",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -17489,6 +17709,7 @@
     {
       "id": "moonshotai/kimi-k2.6",
       "name": "Kimi K2.6",
+      "display_name": "Kimi K2.6",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -17575,6 +17796,7 @@
     {
       "id": "moonshotai/kimi-k2.7-code",
       "name": "Kimi K2.7 Code",
+      "display_name": "Kimi K2.7 Code",
       "provider": "openrouter",
       "aliases": [
         "kimi-k2.7-code",
@@ -17663,6 +17885,7 @@
     {
       "id": "nvidia/nemotron-3-super-120b-a12b:free",
       "name": "Nemotron 3 Super 120B A12B Free (via OpenRouter)",
+      "display_name": "Nemotron 3 Super 120B A12B Free",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -17736,6 +17959,7 @@
     {
       "id": "openai/gpt-5.4-mini",
       "name": "GPT-5.4 Mini (via OpenRouter)",
+      "display_name": "GPT-5.4 Mini",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 400000,
@@ -17815,6 +18039,7 @@
     {
       "id": "openai/gpt-5.4-nano",
       "name": "GPT-5.4 Nano (via OpenRouter)",
+      "display_name": "GPT-5.4 Nano",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 400000,
@@ -17892,6 +18117,7 @@
     {
       "id": "openai/gpt-5.4-pro",
       "name": "GPT-5.4 Pro (via OpenRouter)",
+      "display_name": "GPT-5.4 Pro",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -17971,6 +18197,7 @@
     {
       "id": "openai/gpt-5.5",
       "name": "GPT-5.5 (via OpenRouter)",
+      "display_name": "GPT-5.5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18050,6 +18277,7 @@
     {
       "id": "openai/gpt-5.5-pro",
       "name": "GPT-5.5 Pro (via OpenRouter)",
+      "display_name": "GPT-5.5 Pro",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18129,6 +18357,7 @@
     {
       "id": "openai/gpt-5.6-luna",
       "name": "GPT-5.6 Luna (via OpenRouter)",
+      "display_name": "GPT-5.6 Luna",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18216,6 +18445,7 @@
     {
       "id": "openai/gpt-5.6-luna-pro",
       "name": "GPT-5.6 Luna Pro (via OpenRouter)",
+      "display_name": "GPT-5.6 Luna Pro",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18303,6 +18533,7 @@
     {
       "id": "openai/gpt-5.6-sol",
       "name": "GPT-5.6 Sol (via OpenRouter)",
+      "display_name": "GPT-5.6 Sol",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18388,6 +18619,7 @@
     {
       "id": "openai/gpt-5.6-sol-pro",
       "name": "GPT-5.6 Sol Pro (via OpenRouter)",
+      "display_name": "GPT-5.6 Sol Pro",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18473,6 +18705,7 @@
     {
       "id": "openai/gpt-5.6-terra",
       "name": "GPT-5.6 Terra (via OpenRouter)",
+      "display_name": "GPT-5.6 Terra",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18558,6 +18791,7 @@
     {
       "id": "openai/gpt-5.6-terra-pro",
       "name": "GPT-5.6 Terra Pro (via OpenRouter)",
+      "display_name": "GPT-5.6 Terra Pro",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1050000,
@@ -18643,6 +18877,7 @@
     {
       "id": "openai/gpt-oss-120b",
       "name": "GPT-OSS 120B",
+      "display_name": "GPT-OSS 120B",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 131072,
@@ -18730,6 +18965,7 @@
     {
       "id": "openrouter/free",
       "name": "OpenRouter Free Router",
+      "display_name": "OpenRouter Free Router",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 200000,
@@ -18805,6 +19041,7 @@
     {
       "id": "qwen/qwen3-coder",
       "name": "Qwen3 Coder 480B A35B",
+      "display_name": "Qwen3 Coder 480B A35B",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -18876,6 +19113,7 @@
     {
       "id": "qwen/qwen3-coder-next",
       "name": "Qwen3 Coder Next",
+      "display_name": "Qwen3 Coder Next",
       "provider": "openrouter",
       "aliases": [
         "mid",
@@ -18964,6 +19202,7 @@
     {
       "id": "qwen/qwen3.5-397b-a17b",
       "name": "Qwen3.5 397B A17B",
+      "display_name": "Qwen3.5 397B A17B",
       "provider": "openrouter",
       "aliases": [
         "openrouter-qwen3.5-397b"
@@ -19048,6 +19287,7 @@
     {
       "id": "qwen/qwen3.5-plus-20260420",
       "name": "Qwen3.5 Plus 20260420 (via OpenRouter)",
+      "display_name": "Qwen3.5 Plus 20260420",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
@@ -19120,6 +19360,7 @@
     {
       "id": "qwen/qwen3.6-35b-a3b",
       "name": "Qwen3.6 35B A3B (via OpenRouter)",
+      "display_name": "Qwen3.6 35B A3B",
       "provider": "openrouter",
       "aliases": [
         "openrouter-qwen3.6-35b",
@@ -19195,6 +19436,7 @@
     {
       "id": "qwen/qwen3.6-flash",
       "name": "Qwen3.6 Flash (via OpenRouter)",
+      "display_name": "Qwen3.6 Flash",
       "provider": "openrouter",
       "aliases": [
         "openrouter-qwen3.6",
@@ -19273,6 +19515,7 @@
     {
       "id": "qwen/qwen3.6-max-preview",
       "name": "Qwen3.6 Max Preview (via OpenRouter)",
+      "display_name": "Qwen3.6 Max Preview",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 262144,
@@ -19345,6 +19588,7 @@
     {
       "id": "qwen/qwen3.6-plus",
       "name": "Qwen3.6 Plus (via OpenRouter)",
+      "display_name": "Qwen3.6 Plus",
       "provider": "openrouter",
       "aliases": [
         "openrouter-qwen3.6-plus",
@@ -19423,6 +19667,7 @@
     {
       "id": "qwen/qwen3.7-max",
       "name": "Qwen3.7 Max",
+      "display_name": "Qwen3.7 Max",
       "provider": "openrouter",
       "aliases": [
         "openrouter-qwen3.7-max",
@@ -19506,6 +19751,7 @@
     {
       "id": "qwen/qwen3.7-plus",
       "name": "Qwen3.7 Plus",
+      "display_name": "Qwen3.7 Plus",
       "provider": "openrouter",
       "aliases": [
         "openrouter-qwen3.7-plus",
@@ -19590,6 +19836,7 @@
     {
       "id": "stepfun/step-3.7-flash",
       "name": "Step 3.7 Flash",
+      "display_name": "Step 3.7 Flash",
       "provider": "openrouter",
       "aliases": [
         "openrouter-step-3.7-flash",
@@ -19666,6 +19913,7 @@
     {
       "id": "x-ai/grok-4.5",
       "name": "Grok 4.5 (via OpenRouter)",
+      "display_name": "Grok 4.5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 500000,
@@ -19742,6 +19990,7 @@
     {
       "id": "z-ai/glm-5",
       "name": "GLM 5 (via OpenRouter)",
+      "display_name": "GLM 5",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 202752,
@@ -19816,6 +20065,7 @@
     {
       "id": "z-ai/glm-5.1",
       "name": "GLM 5.1 (via OpenRouter)",
+      "display_name": "GLM 5.1",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 202752,
@@ -19894,6 +20144,7 @@
     {
       "id": "z-ai/glm-5.2",
       "name": "GLM 5.2 (via OpenRouter)",
+      "display_name": "GLM 5.2",
       "provider": "openrouter",
       "aliases": [
         "openrouter-glm-5.2"
@@ -19974,6 +20225,7 @@
     {
       "id": "z-ai/glm-5v-turbo",
       "name": "GLM 5V Turbo (via OpenRouter)",
+      "display_name": "GLM 5V Turbo",
       "provider": "openrouter",
       "aliases": [],
       "context_window": 202752,
@@ -20049,6 +20301,7 @@
     {
       "id": "sambanova/DeepSeek-V3.2",
       "name": "DeepSeek V3.2 (SambaNova)",
+      "display_name": "DeepSeek V3.2",
       "provider": "sambanova",
       "aliases": [
         "sambanova-deepseek"
@@ -20134,6 +20387,7 @@
     {
       "id": "sambanova/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (SambaNova)",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "sambanova",
       "aliases": [],
       "context_window": 163840,
@@ -20219,6 +20473,7 @@
     {
       "id": "sambanova/Llama-4-Maverick",
       "name": "Llama 4 Maverick (SambaNova)",
+      "display_name": "Llama 4 Maverick",
       "provider": "sambanova",
       "aliases": [],
       "context_window": 131072,
@@ -20303,6 +20558,7 @@
     {
       "id": "sambanova/Meta-Llama-3.3-70B-Instruct",
       "name": "Llama 3.3 70B Instruct (SambaNova)",
+      "display_name": "Llama 3.3 70B Instruct",
       "provider": "sambanova",
       "aliases": [
         "sambanova-llama"
@@ -20385,6 +20641,7 @@
     {
       "id": "sambanova/MiniMax-M2.7",
       "name": "MiniMax M2.7 (SambaNova)",
+      "display_name": "MiniMax M2.7",
       "provider": "sambanova",
       "aliases": [
         "sambanova-minimax-m2.7"
@@ -20473,6 +20730,7 @@
     {
       "id": "sambanova/gemma-4-31B-it",
       "name": "Gemma 4 31B (SambaNova)",
+      "display_name": "Gemma 4 31B",
       "provider": "sambanova",
       "aliases": [],
       "context_window": 131072,
@@ -20551,6 +20809,7 @@
     {
       "id": "sambanova/gpt-oss-120b",
       "name": "GPT-OSS 120B (SambaNova)",
+      "display_name": "GPT-OSS 120B",
       "provider": "sambanova",
       "aliases": [
         "sambanova-gpt-oss-120b"
@@ -20642,6 +20901,7 @@
     {
       "id": "MiniMaxAI/MiniMax-M2.7",
       "name": "MiniMax M2.7 (Together)",
+      "display_name": "MiniMax M2.7",
       "provider": "together",
       "aliases": [
         "together-minimax-m2.7"
@@ -20728,6 +20988,7 @@
     {
       "id": "MiniMaxAI/MiniMax-M3",
       "name": "MiniMax M3 (Together)",
+      "display_name": "MiniMax M3",
       "provider": "together",
       "aliases": [
         "together-minimax-m3"
@@ -20816,6 +21077,7 @@
     {
       "id": "Qwen/Qwen2.5-7B-Instruct-Turbo",
       "name": "Qwen2.5 7B Instruct Turbo (Together)",
+      "display_name": "Qwen2.5 7B Instruct Turbo",
       "provider": "together",
       "aliases": [],
       "context_window": 32768,
@@ -20895,6 +21157,7 @@
     {
       "id": "Qwen/Qwen3-Coder-Next-FP8",
       "name": "Qwen3 Coder Next FP8 (Together, dedicated)",
+      "display_name": "Qwen3 Coder Next FP8",
       "provider": "together",
       "aliases": [],
       "context_window": 262144,
@@ -20978,6 +21241,7 @@
     {
       "id": "Qwen/Qwen3.5-397B-A17B",
       "name": "Qwen3.5 397B A17B (Together)",
+      "display_name": "Qwen3.5 397B A17B",
       "provider": "together",
       "aliases": [],
       "context_window": 262144,
@@ -21067,6 +21331,7 @@
     {
       "id": "Qwen/Qwen3.6-Plus",
       "name": "Qwen3.6 Plus (Together)",
+      "display_name": "Qwen3.6 Plus",
       "provider": "together",
       "aliases": [],
       "context_window": 1000000,
@@ -21147,6 +21412,7 @@
     {
       "id": "Qwen/Qwen3.7-Max",
       "name": "Qwen3.7 Max (Together)",
+      "display_name": "Qwen3.7 Max",
       "provider": "together",
       "aliases": [
         "together-qwen3.7-max"
@@ -21237,6 +21503,7 @@
     {
       "id": "Qwen/Qwen3.7-Plus",
       "name": "Qwen3.7 Plus (Together)",
+      "display_name": "Qwen3.7 Plus",
       "provider": "together",
       "aliases": [],
       "context_window": 1000000,
@@ -21317,6 +21584,7 @@
     {
       "id": "deepseek-ai/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (Together)",
+      "display_name": "DeepSeek V4 Pro",
       "provider": "together",
       "aliases": [
         "together-deepseek",
@@ -21412,6 +21680,7 @@
     {
       "id": "google/gemma-4-31B-it",
       "name": "Gemma 4 31B (Together)",
+      "display_name": "Gemma 4 31B",
       "provider": "together",
       "aliases": [
         "together-gemma4-31b"
@@ -21495,6 +21764,7 @@
     {
       "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
       "name": "Llama 3.3 70B Instruct Turbo (Together)",
+      "display_name": "Llama 3.3 70B Instruct Turbo",
       "provider": "together",
       "aliases": [],
       "context_window": 131072,
@@ -21574,6 +21844,7 @@
     {
       "id": "moonshotai/Kimi-K2.6",
       "name": "Kimi K2.6 (Together)",
+      "display_name": "Kimi K2.6",
       "provider": "together",
       "aliases": [],
       "context_window": 262144,
@@ -21660,6 +21931,7 @@
     {
       "id": "moonshotai/Kimi-K2.7-Code",
       "name": "Kimi K2.7 Code (Together)",
+      "display_name": "Kimi K2.7 Code",
       "provider": "together",
       "aliases": [
         "together-kimi-k2.7-code"
@@ -21743,6 +22015,7 @@
     {
       "id": "openai/gpt-oss-20b",
       "name": "GPT-OSS 20B (Together)",
+      "display_name": "GPT-OSS 20B",
       "provider": "together",
       "aliases": [],
       "context_window": 131072,
@@ -21836,6 +22109,7 @@
     {
       "id": "together/nvidia/nemotron-3-ultra-550b-a55b",
       "name": "Nemotron 3 Ultra 550B A55B (Together)",
+      "display_name": "Nemotron 3 Ultra 550B A55B",
       "provider": "together",
       "aliases": [],
       "context_window": 512288,
@@ -21916,6 +22190,7 @@
     {
       "id": "zai-org/GLM-5",
       "name": "GLM 5 (Together)",
+      "display_name": "GLM 5",
       "provider": "together",
       "aliases": [],
       "context_window": 202752,
@@ -21998,6 +22273,7 @@
     {
       "id": "zai-org/GLM-5.1",
       "name": "GLM 5.1 (Together)",
+      "display_name": "GLM 5.1",
       "provider": "together",
       "aliases": [
         "together-glm-5.1"
@@ -22091,6 +22367,7 @@
     {
       "id": "zai-org/GLM-5.2",
       "name": "GLM 5.2 (Together)",
+      "display_name": "GLM 5.2",
       "provider": "together",
       "aliases": [
         "together-glm-5.2"
@@ -22184,6 +22461,7 @@
     {
       "id": "vercel/anthropic/claude-haiku-4.5",
       "name": "Claude Haiku 4.5 (Vercel AI Gateway)",
+      "display_name": "Claude Haiku 4.5",
       "provider": "vercel_ai_gateway",
       "aliases": [
         "vercel-claude-haiku-4.5"
@@ -22261,6 +22539,7 @@
     {
       "id": "vercel/google/gemini-3.1-flash-lite-preview",
       "name": "Gemini 3.1 Flash Lite Preview (Vercel AI Gateway)",
+      "display_name": "Gemini 3.1 Flash Lite Preview",
       "provider": "vercel_ai_gateway",
       "aliases": [
         "vercel-gemini-3.1-flash-lite"
@@ -22349,6 +22628,7 @@
     {
       "id": "vercel/openai/gpt-5.4-nano",
       "name": "GPT-5.4 Nano (Vercel AI Gateway)",
+      "display_name": "GPT-5.4 Nano",
       "provider": "vercel_ai_gateway",
       "aliases": [
         "vercel-gpt-5.4-nano"
@@ -22433,6 +22713,7 @@
     {
       "id": "vertex/gemini-2.5-flash",
       "name": "Gemini 2.5 Flash (Vertex AI)",
+      "display_name": "Gemini 2.5 Flash",
       "provider": "vertex",
       "aliases": [],
       "context_window": 1048576,
@@ -22506,6 +22787,7 @@
     {
       "id": "grok-4.3",
       "name": "Grok 4.3",
+      "display_name": "Grok 4.3",
       "provider": "xai",
       "aliases": [
         "grok-4.3"
@@ -22604,6 +22886,7 @@
     {
       "id": "grok-4.5",
       "name": "Grok 4.5",
+      "display_name": "Grok 4.5",
       "provider": "xai",
       "aliases": [
         "grok",
@@ -22702,6 +22985,7 @@
     {
       "id": "grok-build-0.1",
       "name": "Grok Build 0.1",
+      "display_name": "Grok Build 0.1",
       "provider": "xai",
       "aliases": [
         "grok-code",
@@ -22805,6 +23089,7 @@
     {
       "id": "glm-4.5",
       "name": "GLM 4.5",
+      "display_name": "GLM 4.5",
       "provider": "zai",
       "aliases": [],
       "context_window": 131072,
@@ -22876,6 +23161,7 @@
     {
       "id": "glm-4.5-air",
       "name": "GLM 4.5 Air",
+      "display_name": "GLM 4.5 Air",
       "provider": "zai",
       "aliases": [],
       "context_window": 131072,
@@ -22947,6 +23233,7 @@
     {
       "id": "glm-4.6",
       "name": "GLM 4.6",
+      "display_name": "GLM 4.6",
       "provider": "zai",
       "aliases": [
         "glm-4.6"
@@ -23020,6 +23307,7 @@
     {
       "id": "glm-4.7",
       "name": "GLM 4.7",
+      "display_name": "GLM 4.7",
       "provider": "zai",
       "aliases": [],
       "context_window": 204800,
@@ -23091,6 +23379,7 @@
     {
       "id": "glm-5",
       "name": "GLM 5",
+      "display_name": "GLM 5",
       "provider": "zai",
       "aliases": [
         "glm-5"
@@ -23163,6 +23452,7 @@
     {
       "id": "glm-5-turbo",
       "name": "GLM 5 Turbo",
+      "display_name": "GLM 5 Turbo",
       "provider": "zai",
       "aliases": [],
       "context_window": 202752,
@@ -23235,6 +23525,7 @@
     {
       "id": "glm-5.1",
       "name": "GLM 5.1",
+      "display_name": "GLM 5.1",
       "provider": "zai",
       "aliases": [
         "glm-5.1"
@@ -23314,6 +23605,7 @@
     {
       "id": "glm-5.2",
       "name": "GLM 5.2",
+      "display_name": "GLM 5.2",
       "provider": "zai",
       "aliases": [
         "glm",

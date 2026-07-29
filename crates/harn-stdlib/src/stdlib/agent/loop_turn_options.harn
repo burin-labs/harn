@@ -300,6 +300,8 @@ pub fn __iteration_info_payload(llm_result, tool_count, visible_text, aggregates
     text: visible_text,
     provider: llm_result?.provider ?? "",
     model: llm_result?.model ?? "",
+    serving_base_url: telemetry?.serving_base_url ?? "",
+    cache_supported: llm_result?.usage?.cache_supported ?? false,
     response_ms: telemetry?.client_wall_ms ?? 0,
     input_tokens: llm_result?.usage?.input_tokens ?? 0,
     output_tokens: llm_result?.usage?.output_tokens ?? 0,

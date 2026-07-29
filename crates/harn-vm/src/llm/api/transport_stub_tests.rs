@@ -206,6 +206,25 @@ fn spawn_openai_empty_stub(
     spawn_openai_empty_stub_many(request_count, 2)
 }
 
+fn spawn_openai_success_stub() -> LlmStub {
+    spawn_llm_stub("OpenAI-compatible success stub", |stream| {
+        use std::io::{Read, Write};
+        let mut buf = vec![0u8; 16_384];
+        let n = stream.read(&mut buf).expect("read request");
+        let request = String::from_utf8_lossy(&buf[..n]);
+        assert!(request.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"));
+        let body = r#"{"id":"ok","object":"chat.completion","created":0,"model":"qwen3.6-35b-a3b-ud-q4-k-xl","choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write response");
+    })
+}
+
 fn spawn_openai_empty_stub_many(
     request_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     max_requests: usize,
@@ -234,6 +253,8 @@ fn spawn_openai_empty_stub_many(
 }
 
 fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
+    let cache_usage_accounting = crate::llm_config::provider_config(provider)
+        .and_then(|provider| provider.cache_usage_accounting);
     let mut overlay = crate::llm_config::ProvidersConfig::default();
     overlay.providers.insert(
         provider.to_string(),
@@ -242,6 +263,7 @@ fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
             auth_style: "none".to_string(),
             auth_env: crate::llm_config::AuthEnv::None,
             chat_endpoint: "/chat/completions".to_string(),
+            cache_usage_accounting,
             ..Default::default()
         },
     );
@@ -442,7 +464,85 @@ fn offthread_streaming_completes_inside_localset() {
         assert_eq!(result.model, "stub-model");
         assert_eq!(result.input_tokens, 3);
         assert_eq!(result.output_tokens, 2);
+        assert!(!result.cache_supported);
+        assert_eq!(
+            result.telemetry.serving_base_url.as_deref(),
+            Some(format!("http://{addr}").as_str())
+        );
         assert_eq!(deltas.join(""), "hello world");
+    });
+}
+
+#[test]
+fn llamacpp_openai_transport_reports_route_and_unsupported_cache_accounting() {
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        let server = spawn_openai_success_stub();
+        let addr = server.addr();
+        install_openai_stub_provider("llamacpp", addr);
+        crate::llm_config::set_runtime_provider_endpoint_overrides(
+            crate::llm_config::RuntimeProviderEndpointOverrides::single(
+                "llamacpp",
+                format!("http://{addr}/v1"),
+            )
+            .expect("valid stub endpoint"),
+        );
+        assert_eq!(
+            crate::llm_config::provider_config("llamacpp")
+                .and_then(|provider| provider.cache_usage_accounting),
+            Some(false)
+        );
+
+        let mut opts = base_opts("llamacpp");
+        opts.model = "qwen3.6-35b-a3b-ud-q4-k-xl".to_string();
+        opts.stream = false;
+        opts.cache = false;
+        let result = vm_call_llm_full(&opts).await;
+        let result = result.expect("llama.cpp-compatible call should succeed");
+
+        assert_eq!(result.model, "qwen3.6-35b-a3b-ud-q4-k-xl");
+        assert!(result.input_tokens > 0);
+        assert!(result.output_tokens > 0);
+        assert_eq!(result.cache_read_tokens, 0);
+        assert_eq!(result.cache_write_tokens, 0);
+        assert!(!result.cache_supported);
+        assert_eq!(
+            result.telemetry.serving_base_url.as_deref(),
+            Some(format!("http://{addr}/v1").as_str())
+        );
+
+        crate::llm_config::clear_user_overrides();
+        crate::llm_config::clear_runtime_provider_endpoint_overrides();
+        drop(server);
+
+        let server = spawn_openai_success_stub();
+        install_openai_stub_provider("openai", server.addr());
+        crate::llm_config::set_runtime_provider_endpoint_overrides(
+            crate::llm_config::RuntimeProviderEndpointOverrides::single(
+                "openai",
+                format!("http://{}/v1", server.addr()),
+            )
+            .expect("valid stub endpoint"),
+        );
+        let mut opts = base_opts("openai");
+        opts.model = "gpt-4o-mini".to_string();
+        opts.stream = false;
+        let supported = vm_call_llm_full(&opts)
+            .await
+            .expect("OpenAI-compatible call should succeed");
+        assert_eq!(supported.cache_read_tokens, 0);
+        assert!(supported.cache_supported);
+
+        crate::llm_config::clear_user_overrides();
+        crate::llm_config::clear_runtime_provider_endpoint_overrides();
+        drop(server);
     });
 }
 

@@ -14,9 +14,9 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 6;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 7;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v6.json";
+    "https://harnlang.com/schemas/provider-catalog.v7.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -32,6 +32,10 @@ const REMOTE_CACHE_META_FILE: &str = "catalog.meta.json";
 const FACT_FRESHNESS_WARNING_DAYS: i64 = 180;
 
 mod bindings;
+#[cfg(test)]
+mod cache_accounting_tests;
+#[cfg(test)]
+mod display_name_tests;
 mod local_runtime;
 #[cfg(test)]
 mod local_runtime_tests;
@@ -168,6 +172,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
             .healthcheck
             .clone()
             .map(healthcheck_def_from_catalog),
+        cache_usage_accounting: Some(provider.cache_usage_accounting),
         features: provider.features.clone(),
         rpm: provider.rpm,
         rate_limits: provider.rate_limits.clone(),
@@ -181,6 +186,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
 fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
     llm_config::ModelDef {
         name: model.name.clone(),
+        display_name: Some(model.display_name.clone()),
         blurb: model.blurb.clone(),
         provider: model.provider.clone(),
         context_window: model.context_window,
@@ -407,6 +413,7 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
             .healthcheck
             .clone()
             .map(catalog_provider_healthcheck),
+        cache_usage_accounting: provider.cache_usage_accounting.unwrap_or(false),
         protocols: provider_protocols(&id, &provider),
         features: provider.features.clone(),
         caveats: provider_caveats(&id, &provider),
@@ -534,6 +541,13 @@ fn catalog_model(
     config: &llm_config::ProvidersConfig,
     llm_capability_overrides: CatalogCapabilityOverrides<'_>,
 ) -> CatalogModel {
+    let display_name = model
+        .display_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::trim)
+        .map(str::to_string)
+        .unwrap_or_else(|| compact_model_display_name(&model.name));
     let caps = match llm_capability_overrides {
         CatalogCapabilityOverrides::CurrentThread => {
             llm::capabilities::lookup(&model.provider, &id)
@@ -640,11 +654,58 @@ fn catalog_model(
         serving_tiers: model.serving_tiers.clone(),
         id,
         name: model.name,
+        display_name,
         provider: model.provider,
         context_window: model.context_window,
         runtime_context_window: model.runtime_context_window,
         stream_timeout: model.stream_timeout,
     }
+}
+
+fn compact_model_display_name(name: &str) -> String {
+    let trimmed = name.trim();
+    let Some(open) = trimmed.find('(') else {
+        return trimmed.to_string();
+    };
+    let base = trimmed[..open].trim_end();
+    let details = trimmed[open + 1..]
+        .strip_suffix(')')
+        .unwrap_or(&trimmed[open + 1..]);
+    let quant = details
+        .split(|character: char| character == ',' || character.is_whitespace())
+        .map(|part| {
+            part.trim_matches(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '_' && character != '-'
+            })
+        })
+        .find_map(compact_quant_label);
+    match quant {
+        Some(quant) if !base.is_empty() => format!("{base} {quant}"),
+        _ if !base.is_empty() => base.to_string(),
+        _ => trimmed.to_string(),
+    }
+}
+
+fn compact_quant_label(value: &str) -> Option<String> {
+    let upper = value.to_ascii_uppercase();
+    if matches!(upper.as_str(), "FP8" | "FP16" | "BF16" | "INT8" | "INT4") {
+        return Some(upper);
+    }
+    if let Some(digits) = upper
+        .strip_suffix("-BIT")
+        .or_else(|| upper.strip_suffix("BIT"))
+        .filter(|digits| {
+            !digits.is_empty() && digits.chars().all(|character| character.is_ascii_digit())
+        })
+    {
+        return Some(format!("{digits}-bit"));
+    }
+    let digits = upper
+        .strip_prefix('Q')?
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    (!digits.is_empty()).then(|| format!("Q{digits}"))
 }
 
 fn effective_batch_api_supported_for_config(
