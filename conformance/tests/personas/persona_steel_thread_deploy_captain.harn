@@ -10,7 +10,9 @@ import {
 } from "std/testing"
 
 fn deploy_receipt(harness: Harness, step, result) {
-  const wrapped = with_audit_receipt(harness,  harness, fn() { return result },
+  const wrapped = with_audit_receipt(
+    harness,
+    fn() { return result },
     {persona: "deploy_captain", step: step, started_at: "2026-01-01T00:00:00Z"},
   )
   return wrapped()
@@ -27,7 +29,8 @@ fn deploy_captain(harness: Harness, ctx) {
 
 @step(name: "wait_for_pr_merged")
 fn wait_for_pr_merged(harness: Harness, ctx) {
-  return deploy_receipt(harness, 
+  return deploy_receipt(
+    harness,
     "wait_for_pr_merged",
     {repo: ctx.repo, pr: ctx.pr, wait_source: "github.pull_request_merged", polls: 2, merged: true},
   )
@@ -35,7 +38,8 @@ fn wait_for_pr_merged(harness: Harness, ctx) {
 
 @step(name: "deploy_to_staging")
 fn deploy_to_staging(harness: Harness, pr_state) {
-  return deploy_receipt(harness, 
+  return deploy_receipt(
+    harness,
     "deploy_to_staging",
     {
       environment: "staging",
@@ -48,7 +52,8 @@ fn deploy_to_staging(harness: Harness, pr_state) {
 
 @step(name: "smoke_test")
 fn smoke_test(harness: Harness, deployment) {
-  return deploy_receipt(harness, 
+  return deploy_receipt(
+    harness,
     "smoke_test",
     {
       deployment_id: deployment.deployment_id,
@@ -60,7 +65,8 @@ fn smoke_test(harness: Harness, deployment) {
 
 @step(name: "promote_production")
 fn promote_production(harness: Harness, smoke) {
-  return deploy_receipt(harness, 
+  return deploy_receipt(
+    harness,
     "promote_production",
     {
       deployment_id: smoke.deployment_id,
@@ -72,7 +78,7 @@ fn promote_production(harness: Harness, smoke) {
 }
 
 pipeline test(harness: Harness) {
-  step_assertions_begin("deploy_captain")
+  step_assertions_begin(harness, "deploy_captain")
   const result = deploy_captain(harness, {repo: "burin-labs/harn", pr: 1078})
   assert_steps_ran(["wait_for_pr_merged", "deploy_to_staging", "smoke_test", "promote_production"])
   assert_step_received("wait_for_pr_merged", { event -> event.args[0].pr == 1078 })
@@ -103,7 +109,7 @@ pipeline test(harness: Harness) {
       ],
     },
   )
-  step_assertions_end()
+  step_assertions_end(harness)
   harness.stdio.println("persona_steel_thread deploy")
   harness.stdio.println(result.promoted.result.promoted)
 }

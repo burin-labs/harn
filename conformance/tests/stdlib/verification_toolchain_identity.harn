@@ -2,6 +2,7 @@ import { verification_toolchain_facts } from "std/verification"
 
 pipeline test(harness: Harness, task) {
   const facts = verification_toolchain_facts(
+    harness.tools,
     [
       {
         id: "go/unit",

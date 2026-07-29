@@ -462,7 +462,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
     return env_bin
   }
   let target_dir = ""
-  const meta = harness.process.spawn_captured(
+  const meta = harness.process.run(
     {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
   )
   if meta.success {
@@ -482,7 +482,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.spawn_captured(
+    const build = harness.process.run(
       {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
     )
     if !build.success {
@@ -494,7 +494,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
 }
 
 fn fetch_help(harness: Harness, harn_bin: string, path: list<string>) -> string {
-  const res = harness.process.spawn_captured({cmd: harn_bin, args: path + ["--help"]})
+  const res = harness.process.run({cmd: harn_bin, args: path + ["--help"]})
   if res.exit_code == 0 {
     return res.stdout + res.stderr
   }

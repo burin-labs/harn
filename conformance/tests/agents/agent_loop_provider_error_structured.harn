@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { with_llm_script } from "std/testing"
 
@@ -31,7 +32,7 @@ pipeline main(harness: Harness) {
     ],
     { ->
       const transcript_dir = path_join(
-        harness.fs.temp_dir(),
+        harness.fs.workspace_temp_dir(),
         "harn-agent-loop-provider-error-" + harness.random.uuid(),
       )
       const opts: AgentLoopOptions = {

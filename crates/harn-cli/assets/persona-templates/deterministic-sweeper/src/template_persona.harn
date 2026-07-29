@@ -17,7 +17,7 @@ fn drain_queue(harness: Harness, task) {
       request: fixture?.request ?? "drain queued work",
     },
   )
-  return bounded_loop(harness,  harness, {remaining: fixture.items, processed: []},
+  return bounded_loop(harness, {remaining: fixture.items, processed: []},
     fn(state) {
       if len(state.remaining) == 0 {
         return {state: state, progress: false, done: true}

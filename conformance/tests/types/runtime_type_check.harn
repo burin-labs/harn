@@ -14,5 +14,5 @@ pipeline test(harness: Harness, task) {
     return "hi " + name
   }
   assert_eq(greet("world"), "hi world")
-  harness.stdio.println("type checks ok")
+  harness.stdio.log("type checks ok")
 }

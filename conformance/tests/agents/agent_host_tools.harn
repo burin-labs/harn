@@ -1,14 +1,15 @@
+import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
 import { agent_command_tools, agent_host_tools } from "std/agent/host_tools"
 
 pipeline main(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-host-tools-" + harness.random.uuid())
-  const outside = path_join(harness.fs.temp_dir(), "harn-host-tools-outside-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-host-tools-" + harness.random.uuid())
+  const outside = path_join(harness.fs.workspace_temp_dir(), "harn-host-tools-outside-" + harness.random.uuid())
   harness.fs.mkdir(root, true)
   harness.fs.mkdir(outside, true)
   harness.fs.mkdir(path_join(root, "logs"), true)
   harness.fs.write_text(path_join(root, "README.md"), "alpha\nbeta\ngamma\n")
   harness.fs.write_text(path_join(root, "logs/llm_transcript.jsonl"), "beta from transcript\n")
-  const tools = agent_host_tools(harness,  harness, nil,
+  const tools = agent_host_tools(harness, nil,
     {
       root: root,
       cwd: root,
@@ -73,7 +74,7 @@ pipeline main(harness: Harness) {
   )
   const blocked_data = json_parse(blocked.rendered_result)
   harness.stdio.println(blocked_data.blocked)
-  const lifecycle_tools = agent_command_tools(harness,  harness, nil,
+  const lifecycle_tools = agent_command_tools(harness, nil,
     {root: root, cwd: root, background_commands: true, allow_argv_prefixes: [["sh", "-c"]]},
   )
   harness.stdio.println(tool_find(lifecycle_tools, "poll_command") != nil)

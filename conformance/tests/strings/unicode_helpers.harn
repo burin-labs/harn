@@ -4,5 +4,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(str_pad("ha", 5, ".", "left"), "...ha")
   assert_eq(str_pad("ha", 5, ".", "right"), "ha...")
   assert_eq(str_pad("é", 3, ".", "both"), ".é.")
-  harness.stdio.println("unicode helpers ok")
+  harness.stdio.log("unicode helpers ok")
 }

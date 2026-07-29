@@ -123,19 +123,20 @@ fn __safe_invoke(next, call) {
 }
 
 /**
- * Partial-application support for the canonical `(next, opts) -> caller`
- * middleware shape. Every middleware in this module starts its body
- * with `if !__llm_handler_is_callable(first) { return __partial(impl,
- * first) }` so call sites can use either form interchangeably:
+ * Partial-application support for pure `(next, opts) -> caller` middleware.
  *
  *   with_X(next, opts)   // direct: returns a caller
  *   with_X(opts)         // curried: returns fn(next) -> caller, drops into compose
  *
- * Without this, `compose([with_logging(harness, {...})])` silently treats the
- * opts dict as `next` and fails at the first invocation.
  */
 fn __partial(handler_impl, opts) {
   return { next -> handler_impl(next, opts) }
+}
+
+// Effectful middleware retains its attenuated root authority when curried;
+// the wrapper passed to `compose` accepts only the next caller.
+fn __partial_with_harness(handler_impl, harness: Harness, opts) {
+  return { next -> handler_impl(harness, next, opts) }
 }
 
 fn __emit_event(harness: Harness, session_id, name, payload) {
@@ -239,11 +240,11 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
     delay = max_ms
   }
   if backoff == "jittered" || jitter == "full" {
-    const r = harness.random.gen_f64()
+    const r = harness.random.f64()
     delay = to_int(r * to_float(delay))
   } else if jitter == "equal" {
     const half = delay / 2
-    const r = harness.random.gen_f64()
+    const r = harness.random.f64()
     delay = half + to_int(r * to_float(half))
   }
   if delay < 0 {
@@ -284,7 +285,7 @@ fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) 
  */
 pub fn with_retry(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
-    return __partial(with_retry, next)
+    return __partial_with_harness(with_retry, harness, next)
   }
   const cfg = __opts_dict(opts)
   const {max_attempts = 3, base_ms = 250, max_ms = 8000, backoff = "exponential", jitter = "full", honor_retry_after = true} =
@@ -371,7 +372,8 @@ pub fn with_fallback(harness: Harness, callers) {
       const inner = callers[idx]
       const envelope = __safe_invoke(inner, call)
       last_envelope = envelope
-      __emit_event(harness, 
+      __emit_event(
+        harness,
         session_id,
         "llm_fallback_attempt",
         {
@@ -458,7 +460,8 @@ pub fn with_shadow(harness: Harness, primary, shadow, opts = nil) {
       differs
     }
     if should_compare {
-      __emit_event(harness, 
+      __emit_event(
+        harness,
         to_string(call?.turn?.session_id ?? ""),
         "llm_shadow_diff",
         {
@@ -562,7 +565,7 @@ pub fn with_prompt_rewrite(next, rewriter) {
  */
 pub fn with_logging(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
-    return __partial(with_logging, next)
+    return __partial_with_harness(with_logging, harness, next)
   }
   const cfg = __opts_dict(opts)
   const {level = "info", include_prompt = false} = cfg ?? {}
@@ -649,7 +652,7 @@ fn __budget_check(limit_name, max_value, observed, on_exceed) {
  */
 pub fn with_budget(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
-    return __partial(with_budget, next)
+    return __partial_with_harness(with_budget, harness, next)
   }
   const cfg = __opts_dict(opts)
   const max_total_tokens = cfg?.max_total_tokens
@@ -739,7 +742,8 @@ pub fn with_cache(harness: Harness, first, second = nil, third = nil) {
       }
       const merged_opts = opts + cfg
       const session_id = to_string(call?.turn?.session_id ?? merged_opts?.session_id ?? "")
-      return __with_cache_run(harness,  harness,
+      return __with_cache_run(
+        harness,
         call?.prompt,
         call?.system,
         merged_opts,
@@ -753,7 +757,8 @@ pub fn with_cache(harness: Harness, first, second = nil, third = nil) {
   const system = second
   const opts = third ?? {}
   const session_id = to_string(opts?.session_id ?? "")
-  return __with_cache_run(harness,  harness,
+  return __with_cache_run(
+    harness,
     prompt,
     system,
     opts,
@@ -839,7 +844,8 @@ fn __with_cache_emit_hit(harness: Harness, session_id, key, cached, opts) {
   if session_id == "" {
     return
   }
-  __emit_event(harness, 
+  __emit_event(
+    harness,
     session_id,
     "cache_hit",
     {
@@ -857,7 +863,8 @@ fn __with_cache_emit_miss(harness: Harness, session_id, key, cached, compute_ms)
   if session_id == "" {
     return
   }
-  __emit_event(harness, 
+  __emit_event(
+    harness,
     session_id,
     "cache_miss",
     {
@@ -965,7 +972,8 @@ fn __semantic_emit_hit(harness: Harness, session_id, entry, similarity, opts) {
   if session_id == "" {
     return
   }
-  __emit_event(harness, 
+  __emit_event(
+    harness,
     session_id,
     "semantic_cache_hit",
     {
@@ -981,7 +989,8 @@ fn __semantic_emit_miss(harness: Harness, session_id, similarity, compute_ms) {
   if session_id == "" {
     return
   }
-  __emit_event(harness, 
+  __emit_event(
+    harness,
     session_id,
     "semantic_cache_miss",
     {nearest_similarity: similarity, metrics: {compute_ms: compute_ms}},
@@ -1029,7 +1038,7 @@ fn __semantic_emit_miss(harness: Harness, session_id, similarity, compute_ms) {
  */
 pub fn with_semantic_cache(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
-    return __partial(with_semantic_cache, next)
+    return __partial_with_harness(with_semantic_cache, harness, next)
   }
   const cfg = __opts_dict(opts)
   return { call ->
@@ -1152,9 +1161,9 @@ fn __result_schema_issue_text(candidate, schema) -> string {
  * @effects: [llm.call]
  * @errors: [result_schema]
  */
-pub fn with_result_schema(next, schema = nil, opts = nil) {
+pub fn with_result_schema(harness: Harness, next, schema = nil, opts = nil) {
   if !__llm_handler_is_callable(next) {
-    return { inner -> with_result_schema(inner, next, schema) }
+    return { inner -> with_result_schema(harness, inner, next, schema) }
   }
   const cfg = __opts_dict(opts)
   const max_attempts = to_int(cfg?.max_attempts ?? 3)
@@ -1206,6 +1215,7 @@ pub fn with_result_schema(next, schema = nil, opts = nil) {
         }
       }
       current_call = __repair_apply_strategy(
+        harness,
         call,
         {error: {message: last_issue_text}},
         strategy,
@@ -1238,7 +1248,7 @@ pub fn with_result_schema(next, schema = nil, opts = nil) {
  */
 pub fn with_circuit_breaker(harness: Harness, handler, options = nil) {
   if !__llm_handler_is_callable(handler) {
-    return __partial(with_circuit_breaker, handler)
+    return __partial_with_harness(with_circuit_breaker, harness, handler)
   }
   const opts = options ?? {}
   const {threshold = 5, reset_ms = 30000} = opts ?? {}
@@ -1287,7 +1297,7 @@ fn __repair_default_nudge(error_dict) {
   return join(lines, "\n")
 }
 
-fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
+fn __repair_apply_strategy(harness: Harness, call, envelope, strategy, max_tokens, temperature) {
   const nudge = if __llm_handler_is_callable(strategy) {
     const r = try {
       strategy(call?.prompt, call?.system, call?.opts, envelope)
@@ -1320,7 +1330,7 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
     // budget, a reasoning route clears the truncation floor. Reuses the shared
     // `repair_min_max_tokens` so this never drifts from the judge floor.
     const requested = to_int(max_tokens) ?? 0
-    const floor = repair_min_max_tokens(repaired_opts)
+    const floor = repair_min_max_tokens(harness, repaired_opts)
     const effective = if requested > floor {
       requested
     } else {
@@ -1367,9 +1377,9 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn with_repair(next, opts = nil) {
+pub fn with_repair(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
-    return __partial(with_repair, next)
+    return { inner -> with_repair(harness, inner, next) }
   }
   const cfg = __opts_dict(opts)
   const enabled = cfg?.enabled ?? true
@@ -1387,7 +1397,14 @@ pub fn with_repair(next, opts = nil) {
     if status != "schema_validation" {
       return first
     }
-    const repair_call = __repair_apply_strategy(call, first, strategy, max_tokens, temperature)
+    const repair_call = __repair_apply_strategy(
+      harness,
+      call,
+      first,
+      strategy,
+      max_tokens,
+      temperature,
+    )
     const second = __safe_invoke(next, repair_call)
     return second + {repair_attempted: true}
   }
@@ -1520,7 +1537,7 @@ fn __timeout_resolve_ms(opts) {
  */
 pub fn with_timeout(harness: Harness, next, opts = nil) {
   if !__llm_handler_is_callable(next) {
-    return __partial(with_timeout, next)
+    return __partial_with_harness(with_timeout, harness, next)
   }
   const timeout_ms = __timeout_resolve_ms(opts)
   const cfg = if type_of(opts) == "dict" {
@@ -1656,7 +1673,8 @@ pub fn with_routing(harness: Harness, opts) {
     } else {
       to_string(cfg?.default_name ?? "default")
     }
-    __emit_event(harness, 
+    __emit_event(
+      harness,
       to_string(call?.turn?.session_id ?? ""),
       "llm_routing_decision",
       {route_index: pick.index, route_name: route_name, used_default: pick.index < 0},

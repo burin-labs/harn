@@ -26,6 +26,7 @@ pipeline test(harness: Harness, task) {
     timings: {warmMs: {p95: 100}, coldMs: {p95: 5000}},
   }
   const started = verification_start_warm_state(
+    harness.tools,
     row,
     {command_options: {capture: {max_inline_bytes: 4096}}},
   )
@@ -36,17 +37,26 @@ pipeline test(harness: Harness, task) {
   assert_eq(started.fact.warm, false)
   assert_eq(started.fact.timing_kind, "cold")
   const reused = verification_start_warm_state(
+    harness.tools,
     row,
     {existing: started, command_options: {capture: {max_inline_bytes: 4096}}},
   )
   assert_eq(reused.reused, true)
   assert_eq(reused.handle_id, started.handle_id)
   assert_eq(reused.status, "starting")
-  const stopped = verification_teardown_warm_state(started, {wait_result_ms: 2000})
+  const stopped = verification_teardown_warm_state(
+    harness.tools,
+    started,
+    {wait_result_ms: 2000},
+  )
   assert_eq(stopped.handle_id, started.handle_id)
   assert_eq(stopped.cancelled, true)
   assert_eq(stopped.status, "torn_down")
-  const repeated = verification_teardown_warm_state(started, {wait_result_ms: 100})
+  const repeated = verification_teardown_warm_state(
+    harness.tools,
+    started,
+    {wait_result_ms: 100},
+  )
   assert_eq(repeated.cancelled, false)
   harness.stdio.println("verification warm-state lifecycle ok")
 }

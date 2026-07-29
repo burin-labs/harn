@@ -6,6 +6,6 @@ pipeline test(harness: Harness, task) {
       "b" -> { "got b" }
     }
   }
-  harness.stdio.println(is_err(result))
-  harness.stdio.println(unwrap_err(result))
+  harness.stdio.log(is_err(result))
+  harness.stdio.log(unwrap_err(result))
 }

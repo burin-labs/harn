@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // A provider can emit a malformed tool call with an EMPTY/whitespace name
 // alongside valid sibling calls in the same turn (observed live on go/rust
 // eval runs: a turn carrying `[look, "", look]`). Dispatching the nameless

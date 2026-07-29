@@ -34,7 +34,7 @@ pipeline test_fenced_completion_judge_uses_typed_checkpoint(harness: Harness, ta
         max_iterations: 3,
         verify_completion_judge: {provider: "mock", max_invocations: 1, fail_open_on_error: false},
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Finish after satisfying the judge.", nil, opts) },
       )
       const feedback = __feedback_contents(captured, "verify_completion")

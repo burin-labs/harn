@@ -12,7 +12,7 @@ pipeline default(harness: Harness) {
   with_llm_script(
     harness.llm, [llm_text("{\"instructions\":[\"Plan first.\",\"Plan first.\"]}")],
     { ->
-      const proposed = propose_instructions(harness,  harness, "Base",
+      const proposed = propose_instructions(harness, "Base",
         {
           provider: "mock",
           proposal_count: 2,

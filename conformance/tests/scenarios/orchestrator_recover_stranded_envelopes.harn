@@ -3,7 +3,7 @@ import "../_common"
 fn wait_for_readyz(harness: Harness, url, pid) {
   let attempts = 0
   while attempts < 200 {
-    if !process_alive(pid) {
+    if !process_alive(harness.process, pid) {
       return false
     }
     try {
@@ -19,7 +19,7 @@ fn wait_for_readyz(harness: Harness, url, pid) {
 }
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-recover-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-orchestrator-recover-" + harness.random.uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -29,10 +29,10 @@ pipeline test(harness: Harness, task) {
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> string {\n  return event.kind\n}\n",
   )
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  const crash_start = shell_at(
+  const crash_start = harness.process.shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX=1 "
       + harn_bin
@@ -52,17 +52,17 @@ pipeline test(harness: Harness, task) {
     },
   )
   const crash_exited = wait_for_exit(harness, crash_pid)
-  if !crash_exited && process_alive(crash_pid) {
+  if !crash_exited && process_alive(harness.process, crash_pid) {
     // Under heavy CI load the dispatcher can be scheduling-starved past
     // the wait_for_exit timeout. Force-kill so the restart orchestrator
     // doesn't race the still-alive crash process for the state dir; the
     // assertion below still reflects whether the crash happened
     // naturally under HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX.
-    const _ = shell("kill -KILL " + crash_pid)
+    const _ = harness.process.shell("kill -KILL " + crash_pid)
     wait_for_exit(harness, crash_pid)
   }
   harness.stdio.println(response.status == 200 && crash_exited)
-  const restart = shell_at(
+  const restart = harness.process.shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
       + harn_bin
@@ -78,7 +78,7 @@ pipeline test(harness: Harness, task) {
   )
   const state_dir = path_join(root, "state")
   const config_path = path_join(root, "harn.toml")
-  const queue = shell_at(
+  const queue = harness.process.shell_at(
     root,
     "env HARN_EVENT_LOG_BACKEND=file "
       + harn_bin
@@ -93,7 +93,7 @@ pipeline test(harness: Harness, task) {
       && queue.stdout.contains("Stranded envelopes:")
       && !queue.stdout.contains("dispatch_succeeded"),
   )
-  const recover = shell_at(
+  const recover = harness.process.shell_at(
     root,
     "env HARN_EVENT_LOG_BACKEND=file "
       + harn_bin
@@ -109,7 +109,7 @@ pipeline test(harness: Harness, task) {
       && recover.stdout.contains("Candidates:")
       && recover.stdout.contains("event_id=trigger_evt_"),
   )
-  const _ = shell("kill -TERM " + restart_pid)
+  const _ = harness.process.shell("kill -TERM " + restart_pid)
   wait_for_exit(harness, restart_pid)
   harness.fs.delete(root)
 }

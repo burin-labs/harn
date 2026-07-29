@@ -163,8 +163,8 @@ fn __edit_lifecycle_post_apply(options, context) {
 }
 
 fn __edit_lifecycle_snapshot(fs: HarnessFs, random: HarnessRandom, path, options) {
-  const session_id = "edit-lifecycle-" + random.harness.random.uuid_v7()
-  const snapshot_id = "post-apply-" + random.harness.random.uuid_v7()
+  const session_id = "edit-lifecycle-" + random.uuid_v7()
+  const snapshot_id = "post-apply-" + random.uuid_v7()
   let request: dict = {session_id: session_id, scope_id: snapshot_id, paths: [path]}
   if options?.snapshot_root != nil {
     request = request.merging({root: options.snapshot_root})

@@ -14,7 +14,7 @@ fn judge_until_confident(harness: Harness, task) {
     required: ["decision", "confidence", "rationale"],
     properties: {decision: {type: "string"}, confidence: {type: "number"}, rationale: {type: "string"}},
   }
-  return bounded_loop(harness,  harness, {decision: nil, confidence: 0.0, attempts: 0},
+  return bounded_loop(harness, {decision: nil, confidence: 0.0, attempts: 0},
     fn(state) {
       const prompt = harness.fs.render_prompt(
         "../prompts/system.harn.prompt",

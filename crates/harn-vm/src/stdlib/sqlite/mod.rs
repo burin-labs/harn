@@ -1156,6 +1156,15 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_authority_cannot_be_forged_with_a_dict() {
+        let forged = dict(&[("_type", s(HANDLE_DB)), ("id", s("sqlitedb-1"))]);
+        let error = db_handle(Some(&forged), "sqlite_query")
+            .err()
+            .expect("script-visible dictionaries must not act as database authority");
+        assert!(error.to_string().contains("expected sqlite_db handle"));
+    }
+
+    #[test]
     fn mock_db_matches_parameterized_query_and_records_calls() {
         reset_sqlite_state();
         let fixtures = parse_mock_fixtures(&[dict(&[

@@ -14,19 +14,25 @@ pipeline default(harness: Harness) {
   // summarize task: clamp = max(256, ceil(used * 0.30)).
   // For a ~1000-token prompt, expect roughly 300 (>=256).
   const r_sum = recommend_max_output_tokens(
+    harness,
     {prompt: s, model: "claude-sonnet-4-20250514", task_kind: "summarize"},
   )
   harness.stdio.println(r_sum >= 256 && r_sum <= 600)
   // code task: cap is min(remaining, 8192). For a small prompt, expect 8192.
   const r_code = recommend_max_output_tokens(
+    harness,
     {prompt: "small prompt", model: "claude-sonnet-4-20250514", task_kind: "code"},
   )
   harness.stdio.println(r_code == 8192)
   // chat (default): expect 1024.
-  const r_chat = recommend_max_output_tokens({prompt: "hi", model: "claude-sonnet-4-20250514"})
+  const r_chat = recommend_max_output_tokens(
+    harness,
+    {prompt: "hi", model: "claude-sonnet-4-20250514"},
+  )
   harness.stdio.println(r_chat == 1024)
   // floor at 64.
   const r_min = recommend_max_output_tokens(
+    harness,
     {prompt: "x", model: "claude-sonnet-4-20250514", task_kind: "summarize"},
   )
   harness.stdio.println(r_min >= 64)

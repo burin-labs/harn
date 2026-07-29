@@ -1,7 +1,9 @@
 import { agent_model_options, agent_sanitize_model_options } from "std/agent/options"
 
 pipeline default(harness: Harness) {
-  const env_route = agent_model_options(harness,  harness, {
+  const env_route = agent_model_options(
+    harness,
+    {
       role: "release",
       env_prefixes: ["HARN_RELEASE", "HARN_PLANNER"],
       defaults: {provider: "mock", model: "gpt-5.4-preview"},
@@ -14,7 +16,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(env_route.options.effort == nil)
   harness.stdio.println(env_route.options.prompt_cache == nil)
   harness.stdio.println(join(env_route.stripped, ","))
-  const explicit = agent_model_options(harness,  harness, {
+  const explicit = agent_model_options(
+    harness,
+    {
       role: "release",
       env_prefixes: ["HARN_RELEASE"],
       provider: "mock",
@@ -25,11 +29,13 @@ pipeline default(harness: Harness) {
   harness.stdio.println(explicit.model)
   harness.stdio.println(explicit.options.effort)
   const sanitized = agent_sanitize_model_options(
+    harness,
     {provider: "mock", model: "gpt-4o", effort: "high", cache_control: {type: "ephemeral"}},
   )
   harness.stdio.println(sanitized.effort == nil)
   harness.stdio.println(sanitized.cache_control == nil)
   const direct_thinking = agent_sanitize_model_options(
+    harness,
     {
       provider: "anthropic",
       model: "claude-sonnet-4-6",
@@ -38,6 +44,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(direct_thinking.thinking.mode)
   const proxied_thinking = agent_sanitize_model_options(
+    harness,
     {
       provider: "openrouter",
       model: "anthropic/claude-sonnet-4-6",
@@ -46,10 +53,12 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(proxied_thinking.thinking == nil)
   const disabled_thinking = agent_sanitize_model_options(
+    harness,
     {provider: "openrouter", model: "anthropic/claude-sonnet-4-6", thinking: {mode: "disabled"}},
   )
   harness.stdio.println(disabled_thinking.thinking.mode)
   const healthcheck = agent_sanitize_model_options(
+    harness,
     {
       provider: "cerebras",
       model: "gpt-oss-120b",

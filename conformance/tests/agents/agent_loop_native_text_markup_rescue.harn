@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // #3220: in a NATIVE tool-format session, a model that falls back to its
 // chat template's TEXT rendering of a tool call (qwen style:
 // `<tool_call><function=NAME><parameter=KEY>...</parameter></function></tool_call>`)

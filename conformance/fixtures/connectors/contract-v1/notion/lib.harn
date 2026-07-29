@@ -7,7 +7,10 @@ pub fn kinds() {
 }
 
 pub fn payload_schema() {
-  return {harn_schema_name: "NotionEventPayload", json_schema: {type: "object", additionalProperties: true}}
+  return {
+    harn_schema_name: "NotionEventPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
 }
 
 pub fn init(ctx) {
@@ -16,7 +19,7 @@ pub fn init(ctx) {
   }
 }
 
-pub fn activate(bindings) {
+pub fn activate(harness: Harness, bindings) {
   harness.obs.metrics_inc("notion_contract_activations", len(bindings))
 }
 

@@ -15,7 +15,7 @@ fn fail_dispatch(error_text) {
 }
 
 fn observe(harness: Harness, config, state, prev_dispatch) {
-  return agent_stall_observe_tool_calls(harness,  harness, "seam3-delivered",
+  return agent_stall_observe_tool_calls(harness, "seam3-delivered",
     [{name: "run", arguments: {cmd: "test"}}],
     1,
     config,
@@ -64,5 +64,5 @@ pipeline default(harness: Harness) {
   assert(s2.warning.pattern == "delivered_fix_not_landing", "live: distinct delivered-fix pattern")
   assert(s2.warning.count == 2, "live: fires at streak 2, not 3")
   assert(s2.warning.remediation_delivered, "live: warning carries the delivered-fix fact")
-  harness.stdio.println("stall delivered-fix trigger ok")
+  harness.stdio.log("stall delivered-fix trigger ok")
 }

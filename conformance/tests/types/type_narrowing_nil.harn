@@ -24,12 +24,12 @@ pipeline test(harness: Harness, task) {
     }
     return x
   }
-  harness.stdio.println(check_neq("hello"))
-  harness.stdio.println(check_neq(nil))
-  harness.stdio.println(check_eq("world"))
-  harness.stdio.println(check_eq(nil))
-  harness.stdio.println(check_truthiness("yes"))
-  harness.stdio.println(check_truthiness(nil))
-  harness.stdio.println(check_negation(nil))
-  harness.stdio.println(check_negation("no"))
+  harness.stdio.log(check_neq("hello"))
+  harness.stdio.log(check_neq(nil))
+  harness.stdio.log(check_eq("world"))
+  harness.stdio.log(check_eq(nil))
+  harness.stdio.log(check_truthiness("yes"))
+  harness.stdio.log(check_truthiness(nil))
+  harness.stdio.log(check_negation(nil))
+  harness.stdio.log(check_negation("no"))
 }

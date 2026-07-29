@@ -2,7 +2,7 @@ pipeline test(harness: Harness, task) {
   let d = {}
   d["a.b.c"] = "x"
   d.k = "y"
-  harness.stdio.println(d["a.b.c"])
-  harness.stdio.println(d.k)
-  harness.stdio.println(json_stringify(d))
+  harness.stdio.log(d["a.b.c"])
+  harness.stdio.log(d.k)
+  harness.stdio.log(json_stringify(d))
 }

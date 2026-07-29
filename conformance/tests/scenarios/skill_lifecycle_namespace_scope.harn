@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -95,7 +96,7 @@ pipeline test(harness: Harness, task) {
         threw_typo = true
       }
       assert(threw_typo, "unrecognized colon-prefixed entry rejected")
-      harness.stdio.println("skill_lifecycle_namespace_scope tests passed")
+      harness.stdio.log("skill_lifecycle_namespace_scope tests passed")
     },
   )
 }

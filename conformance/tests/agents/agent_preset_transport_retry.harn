@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * agent_preset uses the shared agent-loop default transport retry normalizer.
  * Direct agent_loop calls use the same default retry at the
@@ -7,7 +8,7 @@ import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn preset_agent(harness: Harness, kind, prompt, options = nil) {
-  const opts = agent_preset(kind, options)
+  const opts = agent_preset(harness, kind, options)
   return agent_loop(harness, prompt, opts?.system, opts)
 }
 

@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -32,14 +33,14 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park then race two resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       harness.stdio.println("pre_race_status=" + suspended.status)
-      const first = resume_agent(handle)
-      const done = wait_agent(handle)
+      const first = resume_agent(harness.agent, handle)
+      const done = wait_agent(harness.agent, handle)
       harness.stdio.println("first_resume_status=" + first.status)
       harness.stdio.println("post_first_status=" + done.status)
       const second = try {
-        resume_agent(handle)
+        resume_agent(harness.agent, handle)
       }
       harness.stdio.println("second_resume_failed=" + to_string(is_err(second)))
       const err_text = to_string(unwrap_err(second))

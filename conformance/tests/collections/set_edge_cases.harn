@@ -33,5 +33,5 @@ pipeline test(harness: Harness, task) {
   // Nil in sets
   const s5 = set(nil, 1, nil)
   assert_eq(len(s5), 2)
-  harness.stdio.println("set edge cases ok")
+  harness.stdio.log("set edge cases ok")
 }

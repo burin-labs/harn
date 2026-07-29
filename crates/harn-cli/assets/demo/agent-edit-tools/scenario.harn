@@ -36,7 +36,7 @@ pipeline default(harness: Harness, _task) {
   harness.fs.mkdir(root, true)
   const tools = agent_edit_tools(harness, nil, {root: root, cwd: root})
   // 1. write_file: create a file wholesale (parent dirs are created).
-  const wrote = dispatch(harness, 
+  const wrote = dispatch(harness,
     tools,
     "write_file",
     {path: "src/config.txt", content: "mode = draft\nretries = 3\n"},
@@ -46,7 +46,7 @@ pipeline default(harness: Harness, _task) {
     "write_file -> created=" + to_string(wrote_data.created) + " path=" + wrote_data.path,
   )
   // 2. edit_file: exact-string replacement, unique match required.
-  const edited = dispatch(harness, 
+  const edited = dispatch(harness,
     tools,
     "edit_file",
     {path: "src/config.txt", old_string: "mode = draft", new_string: "mode = live"},
@@ -58,14 +58,14 @@ pipeline default(harness: Harness, _task) {
   )
   // 3. edit_file guardrail: an ambiguous match is refused, not silently applied.
   harness.fs.write_text(path_join(root, "src/dupes.txt"), "todo\ntodo\n")
-  const ambiguous = dispatch(harness, 
+  const ambiguous = dispatch(harness,
     tools,
     "edit_file",
     {path: "src/dupes.txt", old_string: "todo", new_string: "done"},
   )
   harness.stdio.println("edit_file (2 matches, no replace_all) -> ok=" + to_string(ambiguous.ok))
   harness.stdio.println("  error: " + ambiguous.error)
-  const all = dispatch(harness, 
+  const all = dispatch(harness,
     tools,
     "edit_file",
     {path: "src/dupes.txt", old_string: "todo", new_string: "done", replace_all: true},
@@ -98,13 +98,13 @@ pipeline default(harness: Harness, _task) {
   //    The embedder composes tool callers; nothing tool-specific is needed.
   const consent_hits = harness.runtime.atomic(0)
   const audit_hits = harness.runtime.atomic(0)
-  const caller = compose_tool_callers(harness,  harness, [
-      with_audit_log(harness,  harness, { _receipt ->
+  const caller = compose_tool_callers(harness, [
+      with_audit_log(harness, { _receipt ->
           harness.runtime.atomic_add(audit_hits, 1)
           return nil
         },
       ),
-      with_consent(harness,  harness, { _call ->
+      with_consent(harness, { _call ->
           harness.runtime.atomic_add(consent_hits, 1)
           return true
         },

@@ -1,7 +1,8 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn_command_policy_hooks")
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn_command_policy_hooks")
   if harness.fs.exists(root) {
     harness.fs.delete(root)
   }

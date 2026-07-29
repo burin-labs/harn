@@ -24,5 +24,5 @@ pipeline test(harness: Harness, task) {
   const parsed = from_xml("<root><name>Ada</name><year>1815</year></root>")
   assert_eq(parsed.root.name, "Ada", "from_xml extracts string field")
   assert_eq(parsed.root.year, 1815, "from_xml coerces numeric text")
-  harness.stdio.println("xml builtins: all tests passed")
+  harness.stdio.log("xml builtins: all tests passed")
 }

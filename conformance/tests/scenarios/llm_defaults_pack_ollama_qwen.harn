@@ -9,5 +9,5 @@ pipeline test(harness: Harness, task) {
   // No effort or thinkingBudget either — qwen3 path is a no-op.
   assert_eq(r.has("effort"), false)
   assert_eq(r.has("thinkingBudget"), false)
-  harness.stdio.println("llm_defaults_pack_ollama_qwen passed")
+  harness.stdio.log("llm_defaults_pack_ollama_qwen passed")
 }

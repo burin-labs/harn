@@ -5,6 +5,6 @@ type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
 pipeline test(harness: Harness, task) {
   const m: Msg = {kind: "ping", ttl: 5}
   match m.kind {
-    "ping" -> { harness.stdio.println("ping") }
+    "ping" -> { harness.stdio.log("ping") }
   }
 }

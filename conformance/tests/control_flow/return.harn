@@ -1,4 +1,4 @@
 pipeline test(harness: Harness, task) {
-  harness.stdio.println("before")
+  harness.stdio.log("before")
   return
 }

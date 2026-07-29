@@ -297,7 +297,7 @@ fn graph_research_template(harness: Harness) {
     mode: "agent",
     tools: read_search_tools(harness),
     system: research_system(),
-    model_policy: apply_reasoning_policy(harness,  harness, {
+    model_policy: apply_reasoning_policy(harness, {
         provider: provider_name(harness),
         model: generator_model(harness),
         temperature: 0,
@@ -319,7 +319,7 @@ fn graph_execute_template(harness: Harness) {
     mode: "agent",
     tools: edit_tools(harness),
     system: execute_system(),
-    model_policy: apply_reasoning_policy(harness,  harness, {
+    model_policy: apply_reasoning_policy(harness, {
         provider: provider_name(harness),
         model: generator_model(harness),
         temperature: 0,
@@ -381,7 +381,7 @@ fn run_read_only_evaluator(harness: Harness, task, workspace_root, profile, plan
       + "Research facts:\n${render_facts(facts)}\n"
       + "User-facing response draft:\n${final_response}\n"
       + "Return strict JSON only with keys: verdict, reason, strengths, gaps.",
-    evaluator_options(harness,  harness, "You are a separate evaluator model.\n"
+    evaluator_options(harness, "You are a separate evaluator model.\n"
         + "Grade the read-only answer against the success criteria.\n"
         + "Use read/search/run only if needed.\n"
         + "Pass only if the draft is grounded in the research facts or your own tool results.\n"
@@ -528,7 +528,7 @@ pipeline default(harness: Harness) {
     if len(planning?.questions ?? []) == 0 {
       break
     }
-    const research_results = collect_research_batch(harness, 
+    const research_results = collect_research_batch(harness,
       root,
       profile,
       bounded_questions(profile, planning?.questions ?? []),
@@ -568,7 +568,7 @@ pipeline default(harness: Harness) {
       final_response = "Workflow finished with failed stages: ${join(failed, ", ")}"
     }
   } else if planning?.ready {
-    const evaluation = run_read_only_evaluator(harness, 
+    const evaluation = run_read_only_evaluator(harness,
       request,
       root,
       profile,

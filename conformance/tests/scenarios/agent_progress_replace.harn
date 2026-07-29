@@ -4,7 +4,7 @@ import { agent_session_finalize, agent_session_init } from "std/agent/state"
 
 pipeline default(harness: Harness) {
   const session_id = "agent-progress-replace-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session_id,
+  const captured = agent_capture_events(harness, session_id,
     fn() {
       let session = agent_session_init(harness, "progress replace", nil, {session_id: session_id})
       agent_progress(harness, {message: "initial"})

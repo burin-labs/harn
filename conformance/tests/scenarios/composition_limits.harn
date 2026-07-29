@@ -8,7 +8,7 @@ pipeline main(harness: Harness) {
     },
   ]
   const manifest = composition_binding_manifest(tools)
-  const capped = composition_execute(
+  const capped = harness.tools.composition_execute(
     "let _a = read_file({path: \"a\"})\nreturn read_file({path: \"b\"})",
     manifest,
     {run_id: "conformance-child-cap", max_operations: 1},
@@ -16,7 +16,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(capped.ok)
   harness.stdio.println(capped.run.failure_category)
   harness.stdio.println(capped.child_calls.count)
-  const too_large = composition_execute(
+  const too_large = harness.tools.composition_execute(
     "return \"0123456789\"",
     manifest,
     {run_id: "conformance-output-cap", max_output_bytes: 4},
@@ -34,7 +34,7 @@ pipeline main(harness: Harness) {
     {include_denied: true, gated_tools: ["write_file"], side_effect_ceiling: "workspace_write"},
   )
   harness.stdio.println(gated_manifest.bindings[0].policy.disposition)
-  const gated = composition_execute(
+  const gated = harness.tools.composition_execute(
     "return write_file(harness, {path: \"x\", content: \"bad\"})",
     gated_manifest,
     {run_id: "conformance-gated"},

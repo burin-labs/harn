@@ -16,5 +16,5 @@ pipeline test_attribute_smoke(harness: Harness, task) {
   // test is just that `@deprecated` parses and that `@test` flags a
   // pipeline as a test entry point.
   assert(compute_v2(2) == 4, "v2 still callable")
-  harness.stdio.println("attributes_basic ok")
+  harness.stdio.log("attributes_basic ok")
 }

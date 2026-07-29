@@ -14,8 +14,8 @@ fn __agent_done_sentinel(opts) {
   return sentinel
 }
 
-fn __agent_tool_format(opts) {
-  return agent_tool_format(opts)
+fn __agent_tool_format(harness: Harness, opts) {
+  return agent_tool_format(harness, opts)
 }
 
 /**
@@ -41,8 +41,8 @@ fn __agent_tool_format(opts) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_tool_call_paradigm(options = nil) {
-  const format = __agent_tool_format(options)
+pub fn agent_tool_call_paradigm(harness: Harness, options = nil) {
+  const format = __agent_tool_format(harness, options)
   if format == "native" {
     return {
       kind: "native",
@@ -94,8 +94,8 @@ pub fn agent_tool_call_paradigm(options = nil) {
  * @api_stability: experimental
  * @example: agent_render_tool_call_exemplar("edit", [{key: "action", value: "create"}], opts)
  */
-pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
-  const p = agent_tool_call_paradigm(options)
+pub fn agent_render_tool_call_exemplar(harness: Harness, name, args, options = nil) {
+  const p = agent_tool_call_paradigm(harness, options)
   if p.kind == "json" {
     // Fenced-JSON: one ```tool block wrapping a single {name, args} object.
     // Both `body` and scalar args are ordinary JSON string/values — the JSON
@@ -133,8 +133,8 @@ pub fn agent_render_tool_call_exemplar(name, args, options = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_render_tool_call_prefix(name: string, options = nil) -> string {
-  const p = agent_tool_call_paradigm(options)
+pub fn agent_render_tool_call_prefix(harness: Harness, name: string, options = nil) -> string {
+  const p = agent_tool_call_paradigm(harness, options)
   if p.kind == "native" || name == "" {
     return ""
   }
@@ -176,9 +176,9 @@ fn __agent_loop_contract_prompt(harness: Harness, opts) {
   if !loop_until_done && sentinel == nil {
     return ""
   }
-  const mode = __agent_tool_format(opts)
-  const paradigm = agent_tool_call_paradigm(opts)
-  return loop_until_done_system_prompt(harness,  harness, {
+  const mode = __agent_tool_format(harness, opts)
+  const paradigm = agent_tool_call_paradigm(harness, opts)
+  return loop_until_done_system_prompt(harness, {
       loop_until_done: loop_until_done,
       exit_when_verified: opts?.exit_when_verified ?? false,
       has_tools: agent_has_tools(opts),
@@ -194,23 +194,23 @@ fn __agent_loop_contract_prompt(harness: Harness, opts) {
 }
 
 fn __agent_native_tool_contract_prompt(harness: Harness, opts) {
-  if !agent_has_tools(opts) || __agent_tool_format(opts) != "native" {
+  if !agent_has_tools(opts) || __agent_tool_format(harness, opts) != "native" {
     return ""
   }
-  return render_agent_prompt_id(harness,  harness, "agent.tool_contract_native",
+  return render_agent_prompt_id(harness, "agent.tool_contract_native",
     {done_sentinel: __agent_done_sentinel(opts)},
     opts,
   )
 }
 
 fn __agent_json_tool_contract_prompt(harness: Harness, opts) {
-  if !agent_has_tools(opts) || __agent_tool_format(opts) != "json" {
+  if !agent_has_tools(opts) || __agent_tool_format(harness, opts) != "json" {
     return ""
   }
-  return render_agent_prompt_id(harness,  harness, "agent.tool_contract_json",
+  return render_agent_prompt_id(harness, "agent.tool_contract_json",
     {
       done_sentinel: __agent_done_sentinel(opts),
-      body_hint: agent_tool_call_paradigm(opts).body_hint,
+      body_hint: agent_tool_call_paradigm(harness, opts).body_hint,
       expanded_schemas: __agent_tool_listing_prompt(opts.tools),
     },
     opts,
@@ -260,12 +260,12 @@ fn __agent_tool_listing_prompt(registry) {
 }
 
 fn __agent_text_tool_contract_prompt(harness: Harness, opts) {
-  if opts?.tools == nil || __agent_tool_format(opts) == "native" {
+  if opts?.tools == nil || __agent_tool_format(harness, opts) == "native" {
     return ""
   }
   const turn_policy = opts?.turn_policy ?? {}
   const done_sentinel = __agent_done_sentinel(opts)
-  return render_agent_prompt_id(harness,  harness, "agent.tool_contract_text",
+  return render_agent_prompt_id(harness, "agent.tool_contract_text",
     {
       mode: "text",
       native_mode: false,
@@ -277,23 +277,26 @@ fn __agent_text_tool_contract_prompt(harness: Harness, opts) {
       shared_types: opts?.shared_types ?? "",
       expanded_schemas: __agent_tool_listing_prompt(opts.tools),
       compact_schemas: "",
-      native_contract: render_agent_prompt_id(harness,  harness, "agent.tool_contract_native",
+      native_contract: render_agent_prompt_id(harness, "agent.tool_contract_native",
         {done_sentinel: done_sentinel},
         opts,
       ),
-      action_native_contract: render_agent_prompt_id(harness,  harness, "agent.tool_contract_action_native",
+      action_native_contract: render_agent_prompt_id(harness, "agent.tool_contract_action_native",
         {done_sentinel: done_sentinel},
         opts,
       ),
-      task_ledger_contract: render_agent_prompt_id(harness,  harness, "agent.tool_contract_task_ledger",
+      task_ledger_contract: render_agent_prompt_id(harness, "agent.tool_contract_task_ledger",
         {done_sentinel: done_sentinel},
         opts,
       ),
-      text_response_protocol: render_agent_prompt_id(harness,  harness, "agent.tool_contract_text_response_protocol",
-        {done_sentinel: done_sentinel, body_hint: agent_tool_call_paradigm(opts).body_hint},
+      text_response_protocol: render_agent_prompt_id(harness, "agent.tool_contract_text_response_protocol",
+        {
+          done_sentinel: done_sentinel,
+          body_hint: agent_tool_call_paradigm(harness, opts).body_hint,
+        },
         opts,
       ),
-      action_text_contract: render_agent_prompt_id(harness,  harness, "agent.tool_contract_action_text",
+      action_text_contract: render_agent_prompt_id(harness, "agent.tool_contract_action_text",
         {done_sentinel: done_sentinel},
         opts,
       ),
@@ -584,13 +587,13 @@ pub fn agent_build_turn_system_fragments(harness: Harness, session, opts, iterat
     "native_tool_contract",
     __agent_native_tool_contract_prompt(harness, opts),
   )
-  if opts?.tools != nil && __agent_tool_format(opts) == "json" {
+  if opts?.tools != nil && __agent_tool_format(harness, opts) == "json" {
     fragments = __agent_push_system_fragment(
       fragments,
       "json_tool_contract",
       __agent_json_tool_contract_prompt(harness, opts),
     )
-  } else if opts?.tools != nil && __agent_tool_format(opts) != "native" {
+  } else if opts?.tools != nil && __agent_tool_format(harness, opts) != "native" {
     fragments = __agent_push_system_fragment(
       fragments,
       "text_tool_contract",

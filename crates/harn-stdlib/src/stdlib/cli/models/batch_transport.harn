@@ -14,7 +14,7 @@ fn __load_batch_http_fixture(harness: Harness) {
   const fixture = safe_dict(json_parse(harness.fs.read_text(path)))
   for raw_mock in fixture["mocks"] ?? [] {
     const mock = safe_dict(raw_mock)
-    http_mock(
+    harness.testing.http_mock(
       safe_string(mock["method"], ""),
       safe_string(mock["url"], ""),
       safe_dict(mock["response"]),
@@ -28,7 +28,7 @@ fn __persist_batch_http_fixture_calls(harness: Harness) {
     return
   }
   __mkdirp(harness, dirname(path) ?? ".")
-  harness.fs.write_text(path, json_stringify_pretty(http_mock_calls()) + "\n")
+  harness.fs.write_text(path, json_stringify_pretty(harness.testing.http_mock_calls()) + "\n")
 }
 
 /**

@@ -199,15 +199,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
-        "composition_execute",
-        &[
-            Param::new("snippet", TY_STRING),
-            Param::new("manifest", TY_DICT),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
-    BuiltinSignature::simple(
         "composition_crystallization_trace",
         &[
             Param::new("report", TY_DICT),
@@ -302,7 +293,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    BuiltinSignature::simple("flush_trigger_aggregations", &[], TY_NIL),
     BuiltinSignature::simple(
         "flat_map",
         &[
@@ -348,7 +338,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("pg_connect", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("pg_execute", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("pg_mock_calls", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("pg_mock_pool", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("pg_pool", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("pg_query", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("pg_query_one", &[Param::new("args", TY_ANY)], TY_ANY),
@@ -356,19 +345,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("pi", &[Param::new("args", TY_ANY)], TY_FLOAT),
     BuiltinSignature::variadic("receive", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("request_approval", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic("runtime_context", &[Param::new("args", TY_ANY)], TY_DICT),
-    BuiltinSignature::variadic(
-        "runtime_context_clear",
-        &[Param::new("args", TY_ANY)],
-        TY_ANY,
-    ),
-    BuiltinSignature::variadic("runtime_context_get", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("runtime_context_set", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic(
-        "runtime_context_values",
-        &[Param::new("args", TY_ANY)],
-        TY_DICT,
-    ),
     BuiltinSignature::variadic("select", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("send", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("shared_cas", &[Param::new("args", TY_ANY)], TY_BOOL),
@@ -391,7 +367,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("shared_snapshot", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("secret_get", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("secret_scan", &[Param::new("args", TY_ANY)], TY_LIST),
-    BuiltinSignature::variadic("self_review", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("sleep", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("spawn", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("stream", &[Param::new("args", TY_ANY)], TY_DICT),
@@ -426,35 +401,13 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("args", TY_ANY)],
         TY_ANY,
     ),
-    BuiltinSignature::variadic("task_current", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("timer_end", &[Param::new("args", TY_ANY)], TY_INT),
     BuiltinSignature::variadic("timer_start", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("try_receive", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("vision_ocr", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("window", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::simple("yield_now", &[], TY_NIL),
     // Clone / merge / dedupe helpers — see crates/harn-vm/src/stdlib/collections.rs.
     // `clone`, `deep_clone`, `deep_merge`, `unique`,
-    BuiltinSignature::simple(
-        "jsonrpc_batch",
-        &[
-            Param::new("url", TY_STRING),
-            Param::new("calls", TY_LIST),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_LIST,
-    ),
-    // Generic JSON-RPC client — see crates/harn-vm/src/stdlib/jsonrpc.rs.
-    BuiltinSignature::simple(
-        "jsonrpc_call",
-        &[
-            Param::new("url", TY_STRING),
-            Param::new("method", TY_STRING),
-            Param::optional("params", TY_ANY),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_ANY,
-    ),
     // Parser-only shadows for migrated builtins that harn-parser unit
     // tests reference by name. The runtime-installed slice from
     // `#[harn_builtin]` shadows these at driver startup; without these
@@ -477,22 +430,8 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
-    BuiltinSignature::simple(
-        "flow_evaluate_invariants",
-        &[
-            Param::new("source", TY_STRING),
-            Param::new("slice", TY_DICT),
-            Param::optional("options", TY_DICT_OR_NIL),
-        ],
-        TY_DICT,
-    ),
     BuiltinSignature::simple("json_parse", &[Param::new("text", TY_STRING)], TY_ANY),
     BuiltinSignature::simple("log", &[Param::new("message", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple(
-        "mkdtemp",
-        &[Param::optional("prefix", TY_STRING)],
-        TY_STRING,
-    ),
     BuiltinSignature::simple("workspace_temp_dir", &[], TY_STRING),
     BuiltinSignature::simple(
         "mkdtemp_in_workspace",

@@ -89,8 +89,41 @@ flow.
 
 ## The harness
 
-The single argument to every lifecycle callback is the `harness`. It
-exposes one read-side surface and a dozen write-side actions.
+Effects flow from the harness capability object; imports are pure. The runtime
+injects the root `Harness` at the entrypoint and lifecycle boundaries.
+Importing a helper does not grant it authority: pass `HarnessFs`,
+`HarnessNet`, `HarnessAgent`, or another nominal sub-handle explicitly. Pure
+builtins remain global; every effectful runtime operation has a typed harness
+contract shared by the checker, policy engine, runtime receipts, and generated
+reference.
+
+Treat authority as something that attenuates as control moves inward:
+
+```harn
+fn load_manifest(fs: HarnessFs, path: string) -> string {
+  return fs.read_text(path)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(load_manifest(harness.fs, "harn.toml"))
+}
+```
+
+Keep root `Harness` at entry and genuine orchestration boundaries. Helpers
+accept the smallest coherent capability interface they need—not mechanically
+the fewest possible arguments. The `capability-attenuation` lint identifies
+root parameters used only through one or two sub-handles and offers the narrow
+signature. Narrow handles provide actual isolation: a `HarnessFs` value has no
+environment, process, network, or sibling-handle surface.
+
+Harness values are runtime authority and cannot be serialized or persisted as
+domain state. Persist ordinary data and stable identifiers, then let the
+runtime inject fresh authority when execution resumes.
+
+The single argument to every lifecycle callback is the `harness`. Its
+lifecycle methods are one slice of that broader capability surface.
+Deterministic tests configure `harness.testing`; they do not install an
+ambient process registry or clock override.
 
 ### Read: unsettled state
 

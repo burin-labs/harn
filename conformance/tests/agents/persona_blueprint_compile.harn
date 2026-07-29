@@ -2,6 +2,7 @@ import { persona_blueprint_compile, persona_blueprint_validate } from "std/perso
 
 pipeline main(harness: Harness) {
   const digest = persona_blueprint_compile(
+    harness,
     {
       schema_version: "1",
       name: "reply_digest",
@@ -33,6 +34,7 @@ pipeline main(harness: Harness) {
     },
   ]
   const triage = persona_blueprint_compile(
+    harness,
     {
       schema_version: "1",
       name: "alerts_triage",
@@ -51,6 +53,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(triage_lowering.triggers[0].handler)
   harness.stdio.println(triage_lowering.triggers[0].secrets.signing_secret)
   const mixed_sources = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "too_many_sources",
@@ -65,6 +68,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(mixed_sources.valid)
   harness.stdio.println(mixed_sources.errors.any({ error -> error.code == "source_count" }))
   const missing_source = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "missing_source",
@@ -77,6 +81,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(missing_source.valid)
   harness.stdio.println(missing_source.errors.any({ error -> error.code == "source_count" }))
   const malformed_without_source = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "bad-name",

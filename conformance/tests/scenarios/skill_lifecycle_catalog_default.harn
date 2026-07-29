@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -42,7 +43,7 @@ pipeline test(harness: Harness, task) {
         !contains(calls[1].system, "## Available skills"),
         "catalog drops once a skill is active",
       )
-      harness.stdio.println("skill_lifecycle_catalog_default tests passed")
+      harness.stdio.log("skill_lifecycle_catalog_default tests passed")
     },
   )
 }

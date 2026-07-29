@@ -1,12 +1,16 @@
+import { agent_loop } from "std/agent/loop"
 import { scripted_user, simulated_user_post_turn, simulated_user_status } from "std/agent/user"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
   with_llm_script(
-    harness.llm, [llm_text("Which test runner should I use?"), llm_text("Done. ##DONE##")],
+    harness.llm,
+    [llm_text("Which test runner should I use?"), llm_text("Done. ##DONE##")],
     { ->
       const answerer = scripted_user(harness, ["Use Vitest."])
-      const result = agent_loop(harness, "Create index.test.ts with full edge coverage.",
+      const result = agent_loop(
+        harness,
+        "Create index.test.ts with full edge coverage.",
         nil,
         {
           provider: "mock",
@@ -17,7 +21,7 @@ pipeline main(harness: Harness) {
         },
       )
       const calls = harness.llm.mock_calls()
-      const status = simulated_user_status(answerer)
+      const status = simulated_user_status(harness, answerer)
       harness.stdio.println(result.status)
       harness.stdio.println(result.stop_reason)
       harness.stdio.println(result.llm.iterations)

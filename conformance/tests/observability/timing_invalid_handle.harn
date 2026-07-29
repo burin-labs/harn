@@ -3,11 +3,11 @@ import { end_timing, timing_event } from "std/timing"
 pipeline default(harness: Harness) {
   let raised = nil
   try {
-    end_timing({span_id: 9999})
+    end_timing(harness, {span_id: 9999})
   } catch (e) {
     raised = e
   }
   harness.stdio.println(raised != nil)
   // Unknown handles record no events without throwing.
-  harness.stdio.println(timing_event({span_id: 9999}, "ghost"))
+  harness.stdio.println(timing_event(harness, {span_id: 9999}, "ghost"))
 }

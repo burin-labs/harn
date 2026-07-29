@@ -3,5 +3,5 @@ pipeline test(harness: Harness, task) {
   while false {
     ran = true
   }
-  harness.stdio.println(ran)
+  harness.stdio.log(ran)
 }

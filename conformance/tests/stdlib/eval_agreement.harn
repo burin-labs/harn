@@ -93,5 +93,5 @@ pipeline test(harness: Harness, task) {
   // --- fewer than 2 jointly-decided cases -> kappa undefined ---
   const one = cohen_kappa([[e1(verdict_pass()), e2(verdict_pass())]])
   assert(one.kappa == nil, "fewer than 2 jointly-decided cases -> kappa undefined")
-  harness.stdio.println("stdlib eval agreement ok")
+  harness.stdio.log("stdlib eval agreement ok")
 }

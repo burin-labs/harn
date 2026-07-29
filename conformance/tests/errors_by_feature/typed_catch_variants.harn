@@ -15,23 +15,23 @@ pipeline test(harness: Harness, task) {
   try {
     fail_notfound()
   } catch (e: ApiError) {
-    harness.stdio.println("variant: ${e.variant}")
-    harness.stdio.println("field: ${e.fields[0]}")
+    harness.stdio.log("variant: ${e.variant}")
+    harness.stdio.log("field: ${e.fields[0]}")
   }
   // Ensure non-matching error propagates through typed catch
   try {
     try {
       throw "plain string error"
     } catch (e: ApiError) {
-      harness.stdio.println("should not reach")
+      harness.stdio.log("should not reach")
     }
   } catch (e) {
-    harness.stdio.println("propagated: ${e}")
+    harness.stdio.log("propagated: ${e}")
   }
   // Nested try with different enum variants
   try {
     fail_timeout()
   } catch (e: ApiError) {
-    harness.stdio.println("timeout variant: ${e.variant}")
+    harness.stdio.log("timeout variant: ${e.variant}")
   }
 }

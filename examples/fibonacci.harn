@@ -6,6 +6,6 @@ pipeline default(harness: Harness, task) {
     return fib(n - 1) + fib(n - 2)
   }
   for i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
-    harness.stdio.println("fib(${i}) = ${fib(i)}")
+    harness.stdio.log("fib(${i}) = ${fib(i)}")
   }
 }

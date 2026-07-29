@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
       explanation: "Use --force-with-lease",
     },
   )
-  const wrapper = preset_run_command(harness,  harness, {
+  const wrapper = preset_run_command(harness, {
       stacks: ["rust"],
       custom_rules: [custom_rule],
       mode: tool_hooks_mode_deny_with_explanation,
@@ -47,7 +47,7 @@ pipeline default(harness: Harness) {
       explanation: "cargo build is forbidden here, use cargo check",
     },
   )
-  const wrapper2 = preset_run_command(harness,  harness, {
+  const wrapper2 = preset_run_command(harness, {
       stacks: ["rust"],
       custom_rules: [cargo_custom],
       mode: tool_hooks_mode_deny_with_explanation,

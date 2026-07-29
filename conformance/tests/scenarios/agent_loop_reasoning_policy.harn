@@ -52,5 +52,5 @@ pipeline test(harness: Harness, task) {
   )
   assert_eq(current_gpt_summary.thinking.mode, "effort")
   assert_eq(current_gpt_summary.thinking.level, "none")
-  harness.stdio.println("agent_loop_reasoning_policy passed")
+  harness.stdio.log("agent_loop_reasoning_policy passed")
 }

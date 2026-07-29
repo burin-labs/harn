@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -111,7 +112,7 @@ pipeline test(harness: Harness, task) {
       }
       assert(query_events == 1, "exactly one search query happened")
       assert(result_events == 1, "exactly one search result event emitted")
-      harness.stdio.println("tool_search_client_bm25 tests passed")
+      harness.stdio.log("tool_search_client_bm25 tests passed")
     },
   )
 }

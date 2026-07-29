@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Scratchpad-enabled agent_loop recites live working memory at the prompt tail
  * and periodically reorganizes it into cited notes for the next turn.
@@ -89,7 +90,7 @@ pipeline default(harness: Harness) {
       ),
     ],
     { ->
-      const rejected = agent_scratchpad_reorganize(harness,  harness, {session_id: manual_id, task: "manual task"},
+      const rejected = agent_scratchpad_reorganize(harness, {session_id: manual_id, task: "manual task"},
         {provider: "mock", scratchpad: {enabled: true, reorganizer: {provider: "mock"}}},
         1,
       )

@@ -1,9 +1,9 @@
 import { invalidate_facts, recall_facts, store_fact } from "std/agent/fact"
 
 pipeline test_agent_fact_store(harness: Harness, _task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-agent-facts-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-agent-facts-" + harness.random.uuid())
   const opts = {root: root, namespace: "agent/facts"}
-  const first = store_fact(harness,  harness, harness.memory, {
+  const first = store_fact(harness, harness.memory, {
       kind: "Claim",
       claim: "Alice prefers Rust examples",
       confidence: 0.82,
@@ -16,7 +16,7 @@ pipeline test_agent_fact_store(harness: Harness, _task) {
     },
     opts + {now: "2026-05-23T22:00:00Z"},
   )
-  store_fact(harness,  harness, harness.memory, {
+  store_fact(harness, harness.memory, {
       kind: "Hypothesis",
       claim: "Bob prefers TypeScript examples",
       confidence: 0.4,

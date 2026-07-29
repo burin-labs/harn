@@ -7,7 +7,7 @@ pipeline main(harness: Harness) {
       {role: "assistant", content: "four"},
     ],
   )
-  const with_keeper = transcript.inject_reminder(
+  const with_keeper = harness.agent.transcript_inject_reminder(
     base,
     {
       body: "preserved across compaction",
@@ -16,7 +16,7 @@ pipeline main(harness: Harness) {
       preserve_on_compact: true,
     },
   ).transcript
-  const with_discard = transcript.inject_reminder(
+  const with_discard = harness.agent.transcript_inject_reminder(
     with_keeper,
     {
       body: "discarded during compaction",
@@ -25,7 +25,7 @@ pipeline main(harness: Harness) {
       preserve_on_compact: false,
     },
   ).transcript
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     with_discard,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )

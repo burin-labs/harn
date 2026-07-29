@@ -3,10 +3,10 @@ pipeline test(harness: Harness, task) {
   // Don't send anything — timeout should fire
   select {
     msg from ch1 {
-      harness.stdio.println("got: ${msg}")
+      harness.stdio.log("got: ${msg}")
     }
     timeout 50ms {
-      harness.stdio.println("timed out")
+      harness.stdio.log("timed out")
     }
   }
 }

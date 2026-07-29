@@ -1,15 +1,15 @@
 import "std/path"
 
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(ext("lib/main.rs"))
-  harness.stdio.println(stem("archive.tar.gz"))
-  harness.stdio.println(stem(".gitignore"))
-  harness.stdio.println(is_absolute("/tmp/x"))
-  harness.stdio.println(is_absolute("C:/tmp/x"))
-  harness.stdio.println(is_absolute("C:tmp/x"))
-  harness.stdio.println(is_absolute("relative/path"))
-  const root = path_join(harness.fs.temp_dir(), "harn_stdlib_path_module")
+  harness.stdio.log(ext("lib/main.rs"))
+  harness.stdio.log(stem("archive.tar.gz"))
+  harness.stdio.log(stem(".gitignore"))
+  harness.stdio.log(is_absolute("/tmp/x"))
+  harness.stdio.log(is_absolute("C:/tmp/x"))
+  harness.stdio.log(is_absolute("C:tmp/x"))
+  harness.stdio.log(is_absolute("relative/path"))
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn_stdlib_path_module")
   harness.fs.write_text(path_join(root, "nested/file.txt"), "ok")
-  harness.stdio.println(workspace_canonicalize_existing("nested/file.txt", root))
+  harness.stdio.println(workspace_canonicalize_existing(harness, "nested/file.txt", root))
   harness.fs.delete(root)
 }

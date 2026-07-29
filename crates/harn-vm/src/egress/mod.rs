@@ -154,14 +154,18 @@ fn with_state_write<T>(write: impl FnOnce(&mut EgressState) -> T) -> T {
 }
 
 pub fn register_egress_builtins(vm: &mut Vm) {
-    vm.register_builtin("egress_policy", |args, _out| {
-        let Some(VmValue::Dict(config)) = args.first() else {
-            return Err(vm_error("egress_policy: requires a config dict"));
-        };
-        let policy = policy_from_config(config)?;
-        install_policy(policy, "stdlib")?;
-        Ok(policy_summary())
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "egress_policy",
+        |args, _out| {
+            let Some(VmValue::Dict(config)) = args.first() else {
+                return Err(vm_error("egress_policy: requires a config dict"));
+            };
+            let policy = policy_from_config(config)?;
+            install_policy(policy, "stdlib")?;
+            Ok(policy_summary())
+        },
+    );
 }
 
 pub async fn enforce_url_allowed(surface: &str, url: &str) -> Result<(), VmError> {

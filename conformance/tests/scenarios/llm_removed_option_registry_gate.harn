@@ -1,4 +1,4 @@
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   const registry = __llm_call_option_registry()
   let tested = 0
   for key in keys(registry.removed) {

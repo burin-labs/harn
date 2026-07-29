@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 pipeline default(harness: Harness) {
   const result = harness.llm.call("hello world", nil, {provider: "mock"})
   harness.stdio.println(result.transcript._type)
@@ -5,15 +6,30 @@ pipeline default(harness: Harness) {
   // seed it, then pass the same session_id to the follow-up so the
   // agent loop automatically loads prior messages as prefix.
   const s = harness.agent.open()
-  const _first = agent_loop(harness, "hello world",
+  const _first = agent_loop(
+    harness,
+    "hello world",
     nil,
     {provider: "mock", session_id: s, max_iterations: 1},
   )
-  const resumed = agent_loop(harness, "follow up", nil, {provider: "mock", session_id: s, max_iterations: 1})
+  const resumed = agent_loop(
+    harness,
+    "follow up",
+    nil,
+    {provider: "mock", session_id: s, max_iterations: 1},
+  )
   harness.stdio.println(len(transcript_messages(resumed?.transcript)))
-  const compacted = transcript_compact(resumed?.transcript, {keep_last: 1, summary: "summary"})
+  const compacted = harness.agent.compact_transcript(
+    resumed?.transcript,
+    {keep_last: 1, summary: "summary"},
+  )
   harness.stdio.println(transcript_summary(compacted))
-  const completion = harness.llm.completion("let x = ", ";", nil, {provider: "mock", model_tier: "small"})
+  const completion = harness.llm.completion(
+    "let x = ",
+    ";",
+    nil,
+    {provider: "mock", model_tier: "small"},
+  )
   harness.stdio.println(completion.text)
   const picked = harness.llm.pick_model("frontier")
   harness.stdio.println(picked?.provider)

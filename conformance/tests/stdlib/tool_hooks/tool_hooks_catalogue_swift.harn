@@ -15,7 +15,7 @@ fn probe(harness: Harness, reg, cmd) {
 }
 
 pipeline default(harness: Harness) {
-  const reg = tool_hooks_seed_registry(["swift"])
+  const reg = tool_hooks_seed_registry(harness, ["swift"])
   probe(harness, reg, "swift build --clean")
   probe(harness, reg, "swift package clean")
   /* Targeted build is allowed. */

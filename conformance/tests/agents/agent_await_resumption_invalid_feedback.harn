@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {

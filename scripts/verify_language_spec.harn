@@ -236,7 +236,7 @@ fn harn_command_argv(harness: Harness, subcommand: string) -> list<string> {
   if harn_bin != nil && harn_bin != "" {
     return [harn_bin, subcommand]
   }
-  const meta = harness.process.spawn_captured(
+  const meta = harness.process.run(
     {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
   )
   if meta.success {
@@ -269,7 +269,7 @@ pipeline main(harness: Harness, task) {
   /* The runtime sandbox only permits writes inside the workspace root,
    * so the scratch directory lives there (and is removed afterward)
    * rather than under the system temp dir the Python version used. */
-  const mk = harness.process.spawn_captured(
+  const mk = harness.process.run(
     {cmd: "mktemp", args: ["-d", "harn-spec-verify-XXXXXX"]},
   )
   if !mk.success {
@@ -282,7 +282,7 @@ pipeline main(harness: Harness, task) {
    * an interrupted run leaks a `harn-spec-verify-*` directory into the
    * workspace root, where it shows up as a confusing untracked entry. */
   defer {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+    harness.process.run({cmd: "rm", args: ["-rf", tmpbase]})
   }
   let manifest_lines = []
   let failures = []
@@ -306,7 +306,7 @@ pipeline main(harness: Harness, task) {
     } else {
       argv_prefix.slice(1, argv_prefix.count) + [path]
     }
-    const result = harness.process.spawn_captured({cmd: bin, args: args})
+    const result = harness.process.run({cmd: bin, args: args})
     if result.exit_code != 0 {
       failures = failures + [{name: name, result: result}]
     }

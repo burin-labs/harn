@@ -6,5 +6,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(regex_split("a, b, c", ",\\s*"), ["a", "b", "c"])
   assert_eq(regex_replace("hello", "hi", "HeLLo HELLO", "i"), "hi hi")
   assert_eq(regex_match("hello", "world", "i"), nil)
-  harness.stdio.println("regex flags ok")
+  harness.stdio.log("regex flags ok")
 }

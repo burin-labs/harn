@@ -37,9 +37,9 @@ pipeline main(harness: Harness) {
           max_iterations: 3,
         },
       )
-      const suspended = wait_agent(handle)
-      const resumed = resume_agent(suspended, "operator says go", true)
-      const completed = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
+      const resumed = resume_agent(harness.agent, suspended, "operator says go", true)
+      const completed = wait_agent(harness.agent, handle)
       const calls = harness.llm.mock_calls()
       const resumed_msgs = calls[1].messages
       const resumed_tail = resumed_msgs[len(resumed_msgs) - 1].content

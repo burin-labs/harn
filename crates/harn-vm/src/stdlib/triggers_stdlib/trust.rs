@@ -194,7 +194,7 @@ async fn trust_record_ns_impl(
 #[harn_builtin(
     exposure = "harness.runtime.trust_score",
     effects = ["state.read@dynamic"],
-    sig = "trust.score(...args: any) -> dict",
+    sig = "trust.score(...args: any) -> TrustScore",
     kind = "async",
     category = "triggers"
 )]
@@ -214,7 +214,7 @@ async fn trust_score_ns_impl(
 #[harn_builtin(
     exposure = "harness.runtime.trust_policy_for",
     effects = ["state.read@dynamic"],
-    sig = "trust.policy_for(...args: any) -> dict",
+    sig = "trust.policy_for(...args: any) -> CapabilityPolicy",
     kind = "async",
     category = "triggers"
 )]
@@ -233,7 +233,7 @@ async fn trust_policy_for_ns_impl(
 #[harn_builtin(
     exposure = "harness.runtime.trust_verify_chain",
     effects = ["state.read@dynamic"],
-    sig = "trust.verify_chain(...args: any) -> dict",
+    sig = "trust.verify_chain(...args: any) -> TrustChainReport",
     kind = "async",
     category = "triggers"
 )]

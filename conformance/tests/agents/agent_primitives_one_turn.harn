@@ -1,3 +1,9 @@
+import {
+  agent_dispatch_tool_batch,
+  agent_dispatch_tool_call,
+  agent_llm_turn,
+  agent_parse_tool_calls,
+} from "std/agent/primitives"
 import { with_llm_script } from "std/testing"
 
 fn calculator_tools() {

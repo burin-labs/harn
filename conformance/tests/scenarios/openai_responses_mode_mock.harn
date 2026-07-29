@@ -61,7 +61,7 @@ pipeline test(harness: Harness, task) {
       assert(call.compact, "standalone compaction flag recorded")
       assert(call.include[0] == "web_search_call.action", "include list recorded")
       assert(call.max_tool_calls == 2, "tool-call limit recorded")
-      harness.stdio.println("openai_responses_mode_mock tests passed")
+      harness.stdio.log("openai_responses_mode_mock tests passed")
     },
   )
 }

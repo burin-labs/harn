@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 
 fn first_event(events, event_type) {
@@ -10,9 +11,9 @@ fn first_event(events, event_type) {
 }
 
 fn wall_clock_case(harness: Harness) {
-  mock_time(0)
+  harness.testing.clock_set(0)
   const caller = { _call ->
-    advance_time(1500)
+    harness.testing.clock_advance(1500)
     return {
       ok: true,
       value: {
@@ -25,7 +26,7 @@ fn wall_clock_case(harness: Harness) {
     }
   }
   const session = "budget-wall-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "work",
       nil,
       {
@@ -48,7 +49,7 @@ fn wall_clock_case(harness: Harness) {
   harness.stdio.println(
     "wall_iteration_elapsed=" + to_string(iteration_event.iteration_info.wall_clock_ms >= 1000),
   )
-  unmock_time()
+  harness.testing.clock_reset()
 }
 
 fn total_cost_case(harness: Harness) {
@@ -65,7 +66,7 @@ fn total_cost_case(harness: Harness) {
     }
   }
   const session = "budget-cost-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "work",
       nil,
       {
@@ -91,7 +92,7 @@ fn total_cost_case(harness: Harness) {
 }
 
 fn circuit_case(harness: Harness) {
-  mock_time(0)
+  harness.testing.clock_set(0)
   const caller = { _call ->
     return {
       ok: false,
@@ -101,7 +102,7 @@ fn circuit_case(harness: Harness) {
     }
   }
   const session = "budget-circuit-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "retry",
       nil,
       {
@@ -124,7 +125,7 @@ fn circuit_case(harness: Harness) {
   harness.stdio.println("circuit_pause=" + to_string(breaker.paused_for_ms))
   harness.stdio.println("circuit_budget_kind=" + budget_event.kind)
   harness.stdio.println("circuit_clock=" + to_string(harness.clock.now_ms()))
-  unmock_time()
+  harness.testing.clock_reset()
 }
 
 pipeline default(harness: Harness) {

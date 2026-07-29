@@ -23,7 +23,7 @@ pub fn agent_report_truncation(harness: Harness, original: any, retained: any, d
   if type_of(session_id) != "string" || session_id == "" {
     return nil
   }
-  let _ = agent_emit_event(harness,  harness, session_id,
+  let _ = agent_emit_event(harness, session_id,
     "boundary_failure",
     {
       boundary: "agent_prompt_content",

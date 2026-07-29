@@ -152,7 +152,7 @@ pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
     "miss"
   }
   if previous == nil && store_opts != nil {
-    const cached = cache_get(cache_key, store_opts)
+    const cached = cache_get(harness, cache_key, store_opts)
     if cached.hit {
       previous = cached.value
       cache_status = "refresh"
@@ -169,13 +169,13 @@ pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
   if response.status == 304 && previous != nil {
     const not_modified = __web_not_modified(source_url, response, previous, fetched_at)
     if store_opts != nil {
-      cache_put(cache_key, not_modified, store_opts)
+      cache_put(harness, cache_key, not_modified, store_opts)
     }
     return not_modified
   }
   const envelope = __web_fetch_envelope(source_url, response, fetched_at, cache_status)
   if store_opts != nil && envelope.ok {
-    cache_put(cache_key, envelope, store_opts)
+    cache_put(harness, cache_key, envelope, store_opts)
   }
   return envelope
 }
@@ -805,7 +805,12 @@ fn __web_path_for_robots(url) {
  * @effects: [net]
  * @errors: []
  */
-pub fn robots_allowed(harness: Harness, url: string, user_agent: string = "*", options = nil) -> bool {
+pub fn robots_allowed(
+  harness: Harness,
+  url: string,
+  user_agent: string = "*",
+  options = nil,
+) -> bool {
   const opts = options ?? {}
   const robots_url = opts?.robots_url ?? __web_robots_url(url)
   const response = web_fetch(harness, robots_url, opts?.fetch_options ?? {})
@@ -855,7 +860,8 @@ fn __web_sitemap_candidates(harness: Harness, base_url, opts) {
     return opts.sitemap_urls
   }
   let urls = []
-  const robots = web_fetch(harness, 
+  const robots = web_fetch(
+    harness,
     opts?.robots_url ?? web_origin_url(base_url, "/robots.txt"),
     opts?.fetch_options ?? {},
   )

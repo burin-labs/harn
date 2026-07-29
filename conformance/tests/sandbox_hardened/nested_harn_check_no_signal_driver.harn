@@ -10,7 +10,7 @@ import "../_common"
  * an egress channel — so this guard rides on `socket`, not `socketpair`.)
  */
 pipeline default(harness: Harness) {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),

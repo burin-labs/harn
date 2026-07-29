@@ -8,9 +8,9 @@ pipeline test(harness: Harness, task) {
       _ -> { "unknown" }
     }
   }
-  harness.stdio.println(classify(0))
-  harness.stdio.println(classify(5))
-  harness.stdio.println(classify(-3))
+  harness.stdio.log(classify(0))
+  harness.stdio.log(classify(5))
+  harness.stdio.log(classify(-3))
   // Guard with string pattern
   fn greet(name) {
     return match name {
@@ -19,7 +19,7 @@ pipeline test(harness: Harness, task) {
       n -> { "Hello, ${n}!" }
     }
   }
-  harness.stdio.println(greet("admin"))
-  harness.stdio.println(greet("Bob"))
-  harness.stdio.println(greet("Bartholomew"))
+  harness.stdio.log(greet("admin"))
+  harness.stdio.log(greet("Bob"))
+  harness.stdio.log(greet("Bartholomew"))
 }

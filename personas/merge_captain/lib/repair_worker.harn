@@ -36,7 +36,7 @@ pub fn default_executor(harness: Harness, bundle, options) {
     + {output: {schema: schema, strict: true, validation: "error"}}
   const result = agent_loop(harness, bundle.prompt, supplied?.system, agent_options)
   const raw = result?.text ?? ""
-  const checkpoint = typed_output_checkpoint_from_text(harness,  harness, "merge_captain.repair_worker.summary",
+  const checkpoint = typed_output_checkpoint_from_text(harness, "merge_captain.repair_worker.summary",
     raw,
     schema,
     merged
@@ -123,7 +123,7 @@ pub fn invoke(harness: Harness, args) {
   const started_at = _started(harness)
   const bundle_err = validate_bundle(bundle)
   if bundle_err != nil {
-    return _empty_output_run(harness, 
+    return _empty_output_run(harness,
       {
         parent_receipt_ref: parent_receipt_ref,
         bundle: bundle,
@@ -138,7 +138,7 @@ pub fn invoke(harness: Harness, args) {
   const repair_policy = args.policy?.repair_worker
   const policy_err = validate_repair_policy(repair_policy)
   if policy_err != nil {
-    return _empty_output_run(harness, 
+    return _empty_output_run(harness,
       {
         parent_receipt_ref: parent_receipt_ref,
         bundle: bundle,
@@ -151,7 +151,7 @@ pub fn invoke(harness: Harness, args) {
   }
   const decision = gate(repair_policy, bundle, dry_run)
   if !decision.allowed && !dry_run {
-    return _empty_output_run(harness, 
+    return _empty_output_run(harness,
       {
         parent_receipt_ref: parent_receipt_ref,
         bundle: bundle,
@@ -166,7 +166,7 @@ pub fn invoke(harness: Harness, args) {
     )
   }
   if dry_run {
-    return _empty_output_run(harness, 
+    return _empty_output_run(harness,
       {
         parent_receipt_ref: parent_receipt_ref,
         bundle: bundle,
@@ -179,7 +179,7 @@ pub fn invoke(harness: Harness, args) {
   const executor = args.executor ?? default_executor
   const exec_result = executor(bundle, args.agent_options ?? {})
   if !exec_result.ok {
-    return _empty_output_run(harness, 
+    return _empty_output_run(harness,
       {
         parent_receipt_ref: parent_receipt_ref,
         bundle: bundle,
@@ -293,7 +293,7 @@ pub fn invoke_for_ci_failure(harness: Harness, args) {
       approval_required_for: ["semantic_repair"],
     },
   )
-  return invoke(harness, 
+  return invoke(harness,
     {
       bundle: bundle,
       policy: policy,
@@ -343,7 +343,7 @@ pub fn invoke_for_merge_conflict(harness: Harness, args) {
       approval_required_for: ["semantic_repair", "force_push"],
     },
   )
-  return invoke(harness, 
+  return invoke(harness,
     {
       bundle: bundle,
       policy: policy,
@@ -396,7 +396,7 @@ pub fn invoke_for_release_audit(harness: Harness, args) {
       approval_required_for: args.approval_required_for ?? ["semantic_repair", "release_tag"],
     },
   )
-  return invoke(harness, 
+  return invoke(harness,
     {
       bundle: bundle,
       policy: policy,

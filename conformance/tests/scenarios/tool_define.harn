@@ -40,5 +40,5 @@ pipeline test(harness: Harness, task) {
   // Tool list
   const tools = tool_list(registry)
   assert(len(tools) == 2, "tool_list should return 2 tools")
-  harness.stdio.println("tool_define tests passed")
+  harness.stdio.log("tool_define tests passed")
 }

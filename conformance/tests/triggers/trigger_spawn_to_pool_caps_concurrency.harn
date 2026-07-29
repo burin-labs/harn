@@ -8,7 +8,7 @@ import "std/triggers"
  * bounds in-flight closures regardless of the inbound event rate.
  */
 pipeline test(harness: Harness, task) {
-  mock_time(1700000000000)
+  harness.testing.clock_set(1700000000000)
   const bp = Backpressure()
   const gate = harness.runtime.channel(nil, 8)
   const inflight = harness.runtime.atomic(0)
@@ -16,7 +16,7 @@ pipeline test(harness: Harness, task) {
   const completed = harness.runtime.atomic(0)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const pool_name = "spawn-to-pool-cap-demo-" + unique
   const _ = pool_create(
@@ -77,5 +77,5 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(harness.runtime.atomic_get(peak) <= 3)
   harness.stdio.println(harness.runtime.atomic_get(inflight) == 0)
   harness.stdio.println(harness.runtime.atomic_get(completed) == 8)
-  unmock_time()
+  harness.testing.clock_reset()
 }

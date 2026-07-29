@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * An internal engine/wiring bug surfaced during tool dispatch must ABORT the
  * agent loop, not be swallowed as a recoverable tool observation.

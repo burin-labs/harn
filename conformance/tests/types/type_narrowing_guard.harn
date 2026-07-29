@@ -13,8 +13,8 @@ pipeline test(harness: Harness, task) {
     }
     return "string: ${x}"
   }
-  harness.stdio.println(require_string("hello"))
-  harness.stdio.println(require_string(nil))
-  harness.stdio.println(require_typeof("yes"))
-  harness.stdio.println(require_typeof(42))
+  harness.stdio.log(require_string("hello"))
+  harness.stdio.log(require_string(nil))
+  harness.stdio.log(require_typeof("yes"))
+  harness.stdio.log(require_typeof(42))
 }

@@ -1,19 +1,19 @@
 pipeline default(harness: Harness) {
-  const local_roots = harn.mcp.roots()
+  const local_roots = harness.tools.mcp_roots()
   require local_roots.count > 0, "harn.mcp.roots should expose at least one root"
   require local_roots[0].uri.starts_with("file://"), "root URI should be a file URI"
   require local_roots[0].path.count > 0, "script root should include a local path"
-  const root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     harness.env.get("HARN_BIN") ?? "harn",
   )
   const server_path = path_join(root, "conformance/helpers/mcp_roots_server.harn")
-  const client = mcp_connect(harn_bin, ["serve", "mcp", server_path])
-  const tools = mcp_list_tools(client)
+  const client = harness.tools.mcp_connect(harn_bin, ["serve", "mcp", server_path])
+  const tools = harness.tools.mcp_list_tools(client)
   require tools.count == 1, "roots server should expose one report tool"
-  const report = json_parse(mcp_call(client, "roots_report", {}))
+  const report = json_parse(harness.tools.mcp_call(client, "roots_report", {}))
   harness.stdio.println(report.roots_count > 0)
   harness.stdio.println(report.roots[0].uri.starts_with("file://"))
-  mcp_disconnect(client)
+  harness.tools.mcp_disconnect(client)
 }

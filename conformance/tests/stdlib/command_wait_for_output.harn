@@ -1,5 +1,4 @@
 import { command_wait_for_output } from "std/command"
-import { assert_host_called, with_host_mocks } from "std/testing"
 
 const REQUEST = {
   handle_id: "hto-test-1",
@@ -21,7 +20,11 @@ fn test_wait_for_ready(harness: Harness) {
       timeout_ms: REQUEST.timeout_ms,
     },
   )
-  assert_host_called("tools", "wait_command_output", REQUEST, nil)
+  const calls = harness.testing.calls()
+  require len(calls) == 1
+  require calls[0].capability == "tools"
+  require calls[0].method == "wait_command_output"
+  require calls[0].args[0] == REQUEST
   require event.status == "matched"
   require event.matched
   require event.match == "ready on 4312"
@@ -33,35 +36,31 @@ fn test_wait_for_ready(harness: Harness) {
 }
 
 pipeline default(harness: Harness) {
-  with_host_mocks(
-    [
-      {
-        capability: "tools",
-        operation: "wait_command_output",
-        params: REQUEST,
-        result: {
-          status: "matched",
-          handle_id: "hto-test-1",
-          source: "stderr",
-          pattern: "ready\\s+on\\s+\\d+",
-          matched: true,
-          timed_out: false,
-          match_start: 4,
-          match_end: 17,
-          next_offset: 17,
-          match: "ready on 4312",
-          result: {
-            handle_id: "hto-test-1",
-            status: "running",
-            timed_out: false,
-            exit_code: nil,
-            stdout: "",
-            stderr: "xxxxready on 4312",
-          },
-        },
+  harness.testing.clear()
+  harness.testing.respond(
+    "tools",
+    "wait_command_output",
+    {
+      status: "matched",
+      handle_id: "hto-test-1",
+      source: "stderr",
+      pattern: "ready\\s+on\\s+\\d+",
+      matched: true,
+      timed_out: false,
+      match_start: 4,
+      match_end: 17,
+      next_offset: 17,
+      match: "ready on 4312",
+      result: {
+        handle_id: "hto-test-1",
+        status: "running",
+        timed_out: false,
+        exit_code: nil,
+        stdout: "",
+        stderr: "xxxxready on 4312",
       },
-    ],
-    test_wait_for_ready,
+    },
   )
+  test_wait_for_ready(harness)
   harness.stdio.println("ok")
 }

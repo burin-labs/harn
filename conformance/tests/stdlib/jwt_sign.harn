@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
-  const root = harness.fs.project_root() ?? cwd()
+  const root = harness.fs.workspace_root()
   const helper_dir = path_join(root, "conformance/helpers")
   const claims = {iss: "12345", iat: 1700000000, exp: 1700000600}
   const es256_key = harness.fs.read_text(path_join(helper_dir, "jwt_es256_test_key.pem"))

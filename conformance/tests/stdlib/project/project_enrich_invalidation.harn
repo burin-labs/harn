@@ -1,7 +1,7 @@
 import "std/project"
 
 pipeline test(harness: Harness, task) {
-  const base_dir = path_join(harness.fs.temp_dir(), "harn-project-enrich-invalidation-" + harness.random.uuid())
+  const base_dir = path_join(harness.fs.workspace_temp_dir(), "harn-project-enrich-invalidation-" + harness.random.uuid())
   harness.fs.mkdir(path_join(base_dir, "src"))
   harness.fs.write_text(
     path_join(base_dir, "Cargo.toml"),

@@ -11,6 +11,27 @@ fn name(param1, param2) {
 Declares a named function. Equivalent to `let name = { param1, param2 -> ... }`.
 The function captures the lexical scope at definition time.
 
+Public functions should keep call sites explicit when several parameters have
+the same type and their order is easy to confuse. Prefer one named closed
+record once a public API would otherwise expose four or more homogeneous
+positional parameters:
+
+```harn
+type Bounds = {left: int, top: int, right: int, bottom: int}
+
+pub fn area(bounds: Bounds) -> int {
+  const {left, top, right, bottom} = bounds
+  return (right - left) * (bottom - top)
+}
+
+const pixels = area({left: 10, top: 20, right: 110, bottom: 70})
+```
+
+This is API guidance, not a blanket arity limit: heterogeneous positional
+parameters that read naturally and private implementation helpers remain
+valid. The `homogeneous-positional-api` lint provides an informational
+recommendation for ambiguous public signatures.
+
 ### Default parameters
 
 Parameters may have default values using `= expr`. Required parameters must

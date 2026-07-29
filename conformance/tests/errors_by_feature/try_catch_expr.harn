@@ -17,14 +17,14 @@ pipeline test(harness: Harness, task) {
   } catch (e) {
     -1
   }
-  harness.stdio.println("success: ${s}")
+  harness.stdio.log("success: ${s}")
   // --- Caught-throw path, explicitly typed as string ---
   const c: string = try {
     throw "boom"
   } catch (e) {
     "recovered:${e}"
   }
-  harness.stdio.println("caught: ${c}")
+  harness.stdio.log("caught: ${c}")
   // --- Typed catch on matching throw, explicitly typed ---
   fn not_found() {
     throw AppError.NotFound("missing")
@@ -34,39 +34,39 @@ pipeline test(harness: Harness, task) {
   } catch (e: AppError) {
     "typed:${e.variant}"
   }
-  harness.stdio.println("typed-match: ${t}")
+  harness.stdio.log("typed-match: ${t}")
   // --- Catch binds error variable; explicit type on result ---
   const err_msg: string = try {
     throw "shallow"
   } catch (e) {
     e
   }
-  harness.stdio.println("err_msg: ${err_msg}")
+  harness.stdio.log("err_msg: ${err_msg}")
   // --- Both branches return the same type; type-checker infers that type ---
   const lub: string = try {
     "ok"
   } catch (e) {
     "err"
   }
-  harness.stdio.println("lub: ${lub}")
+  harness.stdio.log("lub: ${lub}")
   // --- Finally on success; value is try body tail; annotated type ---
   const f_ok: int = try {
     7
   } catch (e) {
     0
   } finally {
-    harness.stdio.println("finally-ok")
+    harness.stdio.log("finally-ok")
   }
-  harness.stdio.println("finally_ok_value: ${f_ok}")
+  harness.stdio.log("finally_ok_value: ${f_ok}")
   // --- Finally on caught throw; value is catch body tail; annotated type ---
   const f_err: int = try {
     throw "x"
   } catch (e) {
     99
   } finally {
-    harness.stdio.println("finally-err")
+    harness.stdio.log("finally-err")
   }
-  harness.stdio.println("finally_err_value: ${f_err}")
+  harness.stdio.log("finally_err_value: ${f_err}")
   // --- `try { ... } finally { ... }` without catch on success path;
   //     finally runs for effect, value is body tail. (Throw through this
   //     form propagates past the expression — exercised in
@@ -74,9 +74,9 @@ pipeline test(harness: Harness, task) {
   const f_only: string = try {
     "raw"
   } finally {
-    harness.stdio.println("finally-only")
+    harness.stdio.log("finally-only")
   }
-  harness.stdio.println("finally_only_value: ${f_only}")
+  harness.stdio.log("finally_only_value: ${f_only}")
   // --- Bare try expression: Result<T, E> wrapping (unchanged) ---
   const bare_ok = try {
     5
@@ -84,14 +84,14 @@ pipeline test(harness: Harness, task) {
   const bare_err = try {
     throw "nope"
   }
-  harness.stdio.println("bare_ok: ${bare_ok}")
-  harness.stdio.println("bare_err_isErr: ${is_err(bare_err)}")
+  harness.stdio.log("bare_ok: ${bare_ok}")
+  harness.stdio.log("bare_err_isErr: ${is_err(bare_err)}")
   // --- Statement-position try/catch still works and discards its value ---
   try {
-    harness.stdio.println("stmt-body")
+    harness.stdio.log("stmt-body")
     "ignored-value"
   } catch (e) {
-    harness.stdio.println("stmt-catch")
+    harness.stdio.log("stmt-catch")
   }
   // --- Nested try/catch expressions ---
   const nested: string = try {
@@ -103,24 +103,24 @@ pipeline test(harness: Harness, task) {
   } catch (e) {
     "outer-caught"
   }
-  harness.stdio.println("nested: ${nested}")
+  harness.stdio.log("nested: ${nested}")
   // --- catch without error variable, still valued ---
   const anon: string = try {
     throw "silent"
   } catch {
     "anon-caught"
   }
-  harness.stdio.println("anon: ${anon}")
+  harness.stdio.log("anon: ${anon}")
   // --- Expression usage inline — no `let`, value piped to println-like
   //     call directly; exercises expression-position outside a binding. ---
-  harness.stdio.println(
+  harness.stdio.log(
     try {
       "inline-ok"
     } catch (e) {
       "inline-err"
     },
   )
-  harness.stdio.println(
+  harness.stdio.log(
     try {
       throw "x"
     } catch (e) {

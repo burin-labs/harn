@@ -21,7 +21,7 @@ pipeline test_list_workspace_files_is_deterministic(harness: Harness) {
   if len(a) >= 2 {
     assert(a[0] <= a[1], "first two entries sorted ascending")
   }
-  harness.stdio.println("test_list_workspace_files_is_deterministic passed")
+  harness.stdio.log("test_list_workspace_files_is_deterministic passed")
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -35,7 +35,7 @@ pipeline test_find_workspace_no_match_returns_explicit_message(harness: Harness)
   assert(contains(result, "xyzzy_nonexistent_token"), "no-match includes the token in the message")
   // Must NOT silently return empty string — that's the bug the unified tool fixed.
   assert(result.trim() != "", "no-match never returns empty (information-poor)")
-  harness.stdio.println("test_find_workspace_no_match_returns_explicit_message passed")
+  harness.stdio.log("test_find_workspace_no_match_returns_explicit_message passed")
 }
 
 @test
@@ -43,7 +43,7 @@ pipeline test_find_workspace_filename_match(harness: Harness) {
   const result = find_workspace(harness, "auth-guard")
   assert(contains(result, "## Filename matches"), "filename-match section header present")
   assert(contains(result, "auth-guard.ts"), "auth-guard.ts surfaces via filename match")
-  harness.stdio.println("test_find_workspace_filename_match passed")
+  harness.stdio.log("test_find_workspace_filename_match passed")
 }
 
 @test
@@ -52,14 +52,14 @@ pipeline test_find_workspace_content_match_returns_grep_output(harness: Harness)
   const result = find_workspace(harness, "API_KEYS")
   assert(contains(result, "## Content matches"), "content-match section header present")
   assert(contains(result, "auth-guard.ts"), "auth-guard.ts surfaced via content match")
-  harness.stdio.println("test_find_workspace_content_match_returns_grep_output passed")
+  harness.stdio.log("test_find_workspace_content_match_returns_grep_output passed")
 }
 
 @test
 pipeline test_find_workspace_empty_query_is_handled(harness: Harness) {
   const result = find_workspace(harness, "")
   assert(contains(result, "(empty query)"), "empty query returns explicit message")
-  harness.stdio.println("test_find_workspace_empty_query_is_handled passed")
+  harness.stdio.log("test_find_workspace_empty_query_is_handled passed")
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -71,5 +71,5 @@ pipeline test_workspace_root_resolves_under_experiment_dir(harness: Harness) {
   const root = workspace_root(harness)
   assert(contains(root, "burin-mini"), "workspace_root contains experiment dir name")
   assert(contains(root, "workspace"), "workspace_root points at the workspace folder")
-  harness.stdio.println("test_workspace_root_resolves_under_experiment_dir passed")
+  harness.stdio.log("test_workspace_root_resolves_under_experiment_dir passed")
 }

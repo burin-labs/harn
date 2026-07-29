@@ -5,7 +5,7 @@ pipeline test(harness: Harness, task) {
     Blue
   }
   const c = Color.Red
-  harness.stdio.println(c)
-  harness.stdio.println(c == Color.Red)
-  harness.stdio.println(c == Color.Blue)
+  harness.stdio.log(c)
+  harness.stdio.log(c == Color.Red)
+  harness.stdio.log(c == Color.Blue)
 }

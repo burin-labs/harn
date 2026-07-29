@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 
 fn policy_tools() {
@@ -88,7 +89,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(secret?.tools?.rejected[0] == "read_secret")
   harness.stdio.println(secret_events.contains("sensitive_path"))
   harness.stdio.println(secret_events.contains("harn.permission_policy_decision.v1"))
-  const ask = one_call(harness, 
+  const ask = one_call(harness,
     "fetch_url",
     {url: "https://api.example.com/v1/issues", method: "post"},
     {
@@ -104,7 +105,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(ask?.tools?.rejected[0] == "fetch_url")
   harness.stdio.println(ask_events.contains("managed network approval"))
   harness.stdio.println(ask_events.contains("\"action\":\"ask\""))
-  const allowed = one_call(harness, 
+  const allowed = one_call(harness,
     "run_command",
     {argv: ["npm", "test"]},
     {allow_sensitive_paths: true, rules: [{allow: {tool: "run_command", command_identity: "npm"}}]},
@@ -114,7 +115,7 @@ pipeline main(harness: Harness) {
   )
   harness.stdio.println(len(allowed?.tools?.rejected) == 0)
   harness.stdio.println(grant_events.contains("command_rule"))
-  const mcp = one_call(harness, 
+  const mcp = one_call(harness,
     "github__create_issue",
     {title: "blocked"},
     {

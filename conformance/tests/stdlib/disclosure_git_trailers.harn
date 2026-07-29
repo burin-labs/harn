@@ -33,7 +33,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(trailers)
   harness.stdio.println("--- default ---")
   harness.stdio.println(
-    git_trailers(harness,  harness, nested_chain,
+    git_trailers(harness, nested_chain,
       {project: false, env: false, config: {identities: config.identities}},
     ),
   )
@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(append_git_trailers(harness, "Fix identity trailers", chain, options + {enabled: false}))
   harness.stdio.println("--- config suppressed ---")
   harness.stdio.println(
-    append_git_trailers(harness,  harness, "Fix identity trailers",
+    append_git_trailers(harness, "Fix identity trailers",
       chain,
       {
         project: false,

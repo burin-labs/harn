@@ -7,7 +7,7 @@ pipeline test(harness: Harness, task) {
       {role: "assistant", content: "four"},
     ],
   )
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     base,
     {
       strategy: "custom",
@@ -21,5 +21,5 @@ pipeline test(harness: Harness, task) {
     transcript_events_by_kind(compacted, "compaction")[0].metadata?.strategy == "custom",
     "custom event recorded",
   )
-  harness.stdio.println("compact_transcript_custom tests passed")
+  harness.stdio.log("compact_transcript_custom tests passed")
 }

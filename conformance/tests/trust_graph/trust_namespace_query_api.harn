@@ -3,11 +3,13 @@ import "std/trust"
 pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const actor_id = "trust-namespace-" + unique
   const trace_id = "trace-" + unique
-  const entry_id: TrustEntryId = record({
+  const entry_id: TrustEntryId = record(
+    harness,
+    {
       actor_id: actor_id,
       action: "merge_pr",
       approver: "maintainer-1",
@@ -18,6 +20,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   const records: list<TrustGraphRecord> = query(
+    harness,
     {actor: actor_id, action: "merge_pr", outcome: "success"},
   )
   const namespaced: list<TrustGraphRecord> = harness.runtime.trust_query_alias(

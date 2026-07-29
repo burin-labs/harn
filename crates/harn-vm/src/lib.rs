@@ -235,7 +235,7 @@ pub use harness::{
     DenyEvent, Harness, HarnessAgent, HarnessCall, HarnessChannels, HarnessClock, HarnessEnv,
     HarnessFs, HarnessKind, HarnessLlm, HarnessMemory, HarnessNet, HarnessObs, HarnessPostgres,
     HarnessProcess, HarnessRandom, HarnessSecrets, HarnessSqlite, HarnessStdio, HarnessSystem,
-    HarnessTenant, HarnessTerm, HarnessTesting, MockAwareClock, MockHarnessBuilder, VmHarness,
+    HarnessTenant, HarnessTerm, HarnessTesting, MockHarnessBuilder, VmHarness,
 };
 pub use harness_auth::{
     current_auth_principal, enter_auth_principal, AuthPrincipal, AuthPrincipalScopeGuard,

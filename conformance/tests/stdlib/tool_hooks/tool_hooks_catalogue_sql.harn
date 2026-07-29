@@ -15,7 +15,7 @@ fn probe(harness: Harness, reg, cmd) {
 }
 
 pipeline default(harness: Harness) {
-  const reg = tool_hooks_seed_registry(["sql"])
+  const reg = tool_hooks_seed_registry(harness, ["sql"])
   /* Unbounded scans — fire. */
   probe(harness, reg, "SELECT * FROM users")
   probe(harness, reg, "select * from logs")

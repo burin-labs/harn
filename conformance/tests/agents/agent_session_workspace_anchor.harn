@@ -53,5 +53,5 @@ pipeline main(harness: Harness, task) {
   const cleared = harness.agent.set_workspace_anchor(session, nil)
   assert(cleared, "clearing reports change")
   assert(harness.agent.workspace_anchor(session) == nil, "clearing returns nil")
-  harness.stdio.println("agent_session_workspace_anchor tests passed")
+  harness.stdio.log("agent_session_workspace_anchor tests passed")
 }

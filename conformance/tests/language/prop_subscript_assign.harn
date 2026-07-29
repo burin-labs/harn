@@ -19,5 +19,5 @@ pipeline test(harness: Harness, task) {
   let nums = [10, 20, 30]
   nums[1] += 5
   assert_eq(nums[1], 25, "compound subscript assignment")
-  harness.stdio.println("property/subscript assignment: all tests passed")
+  harness.stdio.log("property/subscript assignment: all tests passed")
 }

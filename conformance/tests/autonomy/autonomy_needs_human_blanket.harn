@@ -23,12 +23,12 @@ fn attempt_write(harness: Harness, target: string) -> dict {
 pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   // Shape 1: blanket `requires_human` flag flips the whole policy into
   // needs-human, even when the resolved tier is `act_auto`.
   const blanket_agent = "needs-human-blanket-" + unique
-  const blanket_target = path_join(harness.fs.temp_dir(), "needs_human_blanket_" + unique + ".txt")
+  const blanket_target = path_join(harness.fs.workspace_temp_dir(), "needs_human_blanket_" + unique + ".txt")
   const blanket_outcome = harness.runtime.with_autonomy_policy(
     {agent_id: blanket_agent, autonomy_tier: "act_auto", requires_human: true},
     fn() { return attempt_write(harness, blanket_target) },
@@ -42,7 +42,7 @@ pipeline test(harness: Harness, task) {
   // Shape 2: per-agent tag flips just one agent into needs-human while
   // other agents under the same policy continue to auto-apply.
   const scoped_agent = "needs-human-agent-" + unique
-  const scoped_target = path_join(harness.fs.temp_dir(), "needs_human_agent_" + unique + ".txt")
+  const scoped_target = path_join(harness.fs.workspace_temp_dir(), "needs_human_agent_" + unique + ".txt")
   const scoped_outcome = harness.runtime.with_autonomy_policy(
     {agent_id: scoped_agent, autonomy_tier: "act_auto", requires_human_agents: [scoped_agent]},
     fn() { return attempt_write(harness, scoped_target) },

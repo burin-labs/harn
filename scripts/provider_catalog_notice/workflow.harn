@@ -16,7 +16,7 @@ fn __nonempty(value) -> bool {
 }
 
 fn __notice_id(harness: Harness, notice: dict) -> string {
-  return harness.crypto.sha256(
+  return sha256(
     json_stringify(
       {
         source_id: notice?.source_id,

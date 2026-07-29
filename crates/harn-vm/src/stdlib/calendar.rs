@@ -272,7 +272,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "__calendar_parts(timestamp: any, timezone?: string) -> dict",
+    sig = "__calendar_parts(timestamp: any, timezone?: string) -> CalendarParts",
     category = "calendar"
 )]
 fn calendar_parts_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -458,7 +458,7 @@ fn calendar_countries_builtin(_args: &[VmValue], _out: &mut String) -> Result<Vm
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "__calendar_country_info(code: string) -> dict | nil",
+    sig = "__calendar_country_info(code: string) -> CalendarCountry | nil",
     category = "calendar"
 )]
 fn calendar_country_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -675,7 +675,7 @@ fn calendar_business_days_between_builtin(
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "__calendar_business_window(timestamp: any, calendar?: any, options?: dict, timezone?: string) -> dict",
+    sig = "__calendar_business_window(timestamp: any, calendar?: any, options?: dict, timezone?: string) -> CalendarBusinessWindow",
     category = "calendar"
 )]
 fn calendar_business_window_builtin(

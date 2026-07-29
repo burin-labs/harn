@@ -43,5 +43,5 @@ pipeline main(harness: Harness, task) {
     unwrap_err(unbound).contains("no tool registry bound"),
     "unbound error mentions missing registry",
   )
-  harness.stdio.println("tool_ref tests passed")
+  harness.stdio.log("tool_ref tests passed")
 }

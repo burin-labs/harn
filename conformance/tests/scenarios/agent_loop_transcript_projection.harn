@@ -1,6 +1,5 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
-
-const flaky_calls = harness.runtime.atomic(0)
 
 /**
  * agent_loop applies transcript_projection at each turn boundary,
@@ -10,7 +9,7 @@ const flaky_calls = harness.runtime.atomic(0)
  * projected prefix omits the failure while the raw transcript keeps
  * both turns intact.
  */
-fn flaky_tool() {
+fn flaky_tool(harness: Harness, flaky_calls) {
   let tools = tool_registry()
   const handler = fn(_args) {
     const previous_calls = harness.runtime.atomic_add(flaky_calls, 1)
@@ -68,19 +67,23 @@ fn gc_tools() {
 }
 
 pipeline default(harness: Harness) {
+  const flaky_calls = harness.runtime.atomic(0)
   harness.runtime.atomic_set(flaky_calls, 0)
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "call_1", name: "run", arguments: {step: "first"}}]},
       {tool_calls: [{id: "call_2", name: "run", arguments: {step: "second"}}]},
       llm_text("Finished. ##DONE##"),
     ],
     { ->
-      const result = agent_loop(harness, "kick it off",
+      const result = agent_loop(
+        harness,
+        "kick it off",
         "You are a test agent.",
         {
           provider: "mock",
-          tools: flaky_tool(),
+          tools: flaky_tool(harness, flaky_calls),
           tool_format: "native",
           max_iterations: 6,
           loop_until_done: true,
@@ -106,7 +109,8 @@ pipeline default(harness: Harness) {
     },
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "read_stale_1", name: "read_stale", arguments: {}},
@@ -130,7 +134,9 @@ pipeline default(harness: Harness) {
       llm_text("Done with projection GC. ##DONE##"),
     ],
     { ->
-      const gc_result = agent_loop(harness, "complete projection GC task",
+      const gc_result = agent_loop(
+        harness,
+        "complete projection GC task",
         "You are a projection test agent.",
         {
           provider: "mock",
@@ -154,7 +160,9 @@ pipeline default(harness: Harness) {
       const gc_events = transcript_events_by_kind(gc_result.transcript, "transcript.projection")
       const gc_projection = gc_events[len(gc_events) - 1]
       harness.stdio.println("gc_status:" + gc_result.status)
-      harness.stdio.println("gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0))
+      harness.stdio.println(
+        "gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0),
+      )
       harness.stdio.println(
         "gc_has_scratchpad_root:"
           + to_string(
@@ -173,7 +181,9 @@ pipeline default(harness: Harness) {
           contains(projected_stale_body, "reclaimed by reachability_gc"),
         ),
       )
-      harness.stdio.println("gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")))
+      harness.stdio.println(
+        "gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")),
+      )
     },
   )
 }

@@ -3,18 +3,18 @@ pipeline test(harness: Harness, task) {
   const r1 = try {
     42
   }
-  harness.stdio.println(r1)
+  harness.stdio.log(r1)
   // Success preserves an existing Result instead of nesting Ok(Ok(...))
   const r1_flat = try {
     Ok(7)
   }
-  harness.stdio.println(r1_flat)
-  harness.stdio.println(unwrap(r1_flat))
+  harness.stdio.log(r1_flat)
+  harness.stdio.log(unwrap(r1_flat))
   // Error wraps in Err
   const r2 = try {
     throw "boom"
   }
-  harness.stdio.println(r2)
+  harness.stdio.log(r2)
   // Nested function errors caught
   fn risky() {
     throw "failed"
@@ -22,6 +22,6 @@ pipeline test(harness: Harness, task) {
   const r3 = try {
     risky()
   }
-  harness.stdio.println(is_err(r3))
-  harness.stdio.println(unwrap_err(r3))
+  harness.stdio.log(is_err(r3))
+  harness.stdio.log(unwrap_err(r3))
 }

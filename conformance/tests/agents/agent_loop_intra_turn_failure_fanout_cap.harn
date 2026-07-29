@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * FIX A4: intra-turn failing-fan-out cap.
  *

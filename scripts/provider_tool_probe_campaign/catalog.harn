@@ -208,7 +208,7 @@ pub fn __provider_tool_probe_campaign_runtime(
   harn_bin: string,
 ) -> ProviderToolProbeRuntimeReceipt {
   const child = try {
-    harness.process.spawn_captured({cmd: harn_bin, args: ["version", "--json"]})
+    harness.process.run({cmd: harn_bin, args: ["version", "--json"]})
   } catch (e) {
     {exit_code: -1, stdout: "", stderr: to_string(e)}
   }
@@ -249,7 +249,7 @@ pub fn __provider_tool_probe_campaign_catalog(
 ) -> dict {
   const command = ["provider", "catalog", "show"]
   const child = try {
-    harness.process.spawn_captured(
+    harness.process.run(
       {
         cmd: harn_bin,
         args: command,

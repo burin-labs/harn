@@ -1,34 +1,48 @@
 import "std/memory"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-memory-hybrid-" + harness.random.uuid())
-  host_mock_clear()
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-memory-hybrid-" + harness.random.uuid())
+  harness.testing.clear()
   // Give distinct unit vectors per record by matching on the
   // record-key line that searchable_text emits first. The mocks are
   // checked newest-first so the more specific one wins.
   const alice_text =
     "alice\nAlice prefers Rust examples\nprofile rust\n\"Alice prefers Rust examples\""
   const bob_text = "bob\nBob prefers TypeScript\nprofile typescript\n\"Bob prefers TypeScript\""
-  host_mock("memory", "embed", {result: {vector: [0.5, 0.5], dim: 2, model: "fake"}})
-  host_mock(
-    "memory",
+  harness.testing.respond(
     "embed",
-    {result: {vector: [1.0, 0.0], dim: 2, model: "fake"}, params: {text: alice_text}},
+    "text_response",
+    {vector: [0.5, 0.5], dim: 2, model: "fake"},
+    nil,
+    true,
   )
-  host_mock(
-    "memory",
+  harness.testing.respond(
     "embed",
-    {result: {vector: [0.0, 1.0], dim: 2, model: "fake"}, params: {text: bob_text}},
+    "text_response",
+    {vector: [1.0, 0.0], dim: 2, model: "fake"},
+    {text: alice_text},
+    true,
   )
-  host_mock(
-    "memory",
+  harness.testing.respond(
     "embed",
-    {result: {vector: [1.0, 0.0], dim: 2, model: "fake"}, params: {text: "rust"}},
+    "text_response",
+    {vector: [0.0, 1.0], dim: 2, model: "fake"},
+    {text: bob_text},
+    true,
   )
-  host_mock(
-    "memory",
+  harness.testing.respond(
     "embed",
-    {result: {vector: [0.0, 1.0], dim: 2, model: "fake"}, params: {text: "typescript"}},
+    "text_response",
+    {vector: [1.0, 0.0], dim: 2, model: "fake"},
+    {text: "rust"},
+    true,
+  )
+  harness.testing.respond(
+    "embed",
+    "text_response",
+    {vector: [0.0, 1.0], dim: 2, model: "fake"},
+    {text: "typescript"},
+    true,
   )
   memory_open(
     harness.memory, "agent/hybrid",

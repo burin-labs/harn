@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 fn write_tools() {
   let tools = tool_registry()
   tools = tool_define(

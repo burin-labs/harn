@@ -1,14 +1,14 @@
 pipeline test(harness: Harness, task) {
   // regex_match returns list of matches
   const matches = regex_match("[0-9]+", "abc 123 def 456")
-  harness.stdio.println(matches)
+  harness.stdio.log(matches)
   // regex_match returns nil when no match
   const no_match = regex_match("[0-9]+", "hello")
-  harness.stdio.println(no_match)
+  harness.stdio.log(no_match)
   // regex_replace
   const result = regex_replace("[0-9]+", "NUM", "abc 123 def 456")
-  harness.stdio.println(result)
+  harness.stdio.log(result)
   // regex_replace with capture groups
   const swapped = regex_replace("(\\w+)-(\\w+)", "$2-$1", "hello-world")
-  harness.stdio.println(swapped)
+  harness.stdio.log(swapped)
 }

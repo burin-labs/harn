@@ -57,7 +57,7 @@ pipeline test_post_turn_feedback_kind_threads_to_event(harness: Harness, task) {
           return nil
         },
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Finish after the callback.", nil, opts) },
       )
       const feedback = __feedback_event_by_kind(captured, "typed_policy_feedback")
@@ -89,7 +89,7 @@ pipeline test_post_turn_feedback_kind_defaults_when_absent_or_empty(harness: Har
           return nil
         },
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Finish after two callbacks.", nil, opts) },
       )
       assert_eq(__feedback_event_count_by_kind(captured, "post_turn"), 2)
@@ -116,7 +116,7 @@ pipeline test_terminal_feedback_kind_threads_to_event(harness: Harness, task) {
           }
         },
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Finish after terminal rescue.", nil, opts) },
       )
       const feedback = __feedback_event_by_kind(captured, "terminal_rescue_policy")

@@ -20,8 +20,8 @@ fn range_of(content: string, line_index: int, needle: string) -> dict {
 
 pipeline default(harness: Harness) {
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_edit_extract_variable_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_edit_extract_variable_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   // 1) Rust dry-run: preview the extraction without touching disk.
@@ -30,7 +30,10 @@ pipeline default(harness: Harness) {
   const rs_path = write_fixture(harness, root, "calc.rs", rs_body)
   const rs_range = range_of(rs_body, 1, "compute(2)")
   const preview = edit_extract_variable(
-    harness.fs, {path: rs_path, range: rs_range, new_name: "first", dry_run: true},
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs_path, range: rs_range, new_name: "first", dry_run: true},
   )
   harness.stdio.println(preview.result)
   harness.stdio.println(preview.ok)
@@ -42,7 +45,12 @@ pipeline default(harness: Harness) {
   // Disk is byte-identical after a dry run.
   harness.stdio.println(harness.fs.read_text(rs_path) == rs_body)
   // 2) Rust apply: the declaration is inserted and the span replaced.
-  const applied = edit_extract_variable(harness.fs, {path: rs_path, range: rs_range, new_name: "first"})
+  const applied = edit_extract_variable(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs_path, range: rs_range, new_name: "first"},
+  )
   harness.stdio.println(applied.result)
   harness.stdio.println(applied.applied)
   const rs_after = harness.fs.read_text(rs_path)
@@ -53,7 +61,12 @@ pipeline default(harness: Harness) {
   const py_body = "def calc():\n    result = compute(2) + compute(3)\n    return result\n"
   const py_path = write_fixture(harness, root, "calc.py", py_body)
   const py_range = range_of(py_body, 1, "compute(2)")
-  const py_applied = edit_extract_variable(harness.fs, {path: py_path, range: py_range, new_name: "first"})
+  const py_applied = edit_extract_variable(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: py_path, range: py_range, new_name: "first"},
+  )
   harness.stdio.println(py_applied.result)
   const py_after = harness.fs.read_text(py_path)
   harness.stdio.println(contains(py_after, "    first = compute(2)"))
@@ -62,7 +75,10 @@ pipeline default(harness: Harness) {
   // 4) Unsupported language: Java has no inferable local-declaration form.
   const java_path = write_fixture(harness, root, "Calc.java", "int x = compute(2) + compute(3);\n")
   const unsupported = edit_extract_variable(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {
       path: java_path,
       range: {start_line: 0, start_col: 8, end_line: 0, end_col: 18},
       new_name: "first",
@@ -72,10 +88,18 @@ pipeline default(harness: Harness) {
   harness.stdio.println(unsupported.errors[0].code)
   // 5) Multi-line range is rejected as unsupported.
   const multi = edit_extract_variable(
-    harness.fs, {path: rs_path, range: {start_line: 0, start_col: 0, end_line: 2, end_col: 4}, new_name: "x"},
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs_path, range: {start_line: 0, start_col: 0, end_line: 2, end_col: 4}, new_name: "x"},
   )
   harness.stdio.println(multi.result)
   // 6) Missing new_name is invalid_params.
-  const invalid = edit_extract_variable(harness.fs, {path: rs_path, range: rs_range})
+  const invalid = edit_extract_variable(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs_path, range: rs_range},
+  )
   harness.stdio.println(invalid.result)
 }

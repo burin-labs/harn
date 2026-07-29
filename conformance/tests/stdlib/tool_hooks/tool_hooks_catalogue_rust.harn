@@ -16,7 +16,7 @@ fn probe(harness: Harness, reg, cmd) {
 }
 
 pipeline default(harness: Harness) {
-  const reg = tool_hooks_seed_registry(["rust"])
+  const reg = tool_hooks_seed_registry(harness, ["rust"])
   /* target_dir_conflict: bare cargo build/test/check/run all fire. */
   probe(harness, reg, "cargo build --release")
   probe(harness, reg, "cargo check")

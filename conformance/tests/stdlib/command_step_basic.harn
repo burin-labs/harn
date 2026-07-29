@@ -16,7 +16,9 @@ fn failing_command(harness: Harness) {
 
 pipeline default(harness: Harness) {
   const step = command_step(
-    harness.tools, "say hello",
+    harness.tools,
+    harness.clock,
+    "say hello",
     no_newline_echo(harness, "hello"),
     {capture: {max_inline_bytes: 100}, tail_bytes: 100},
   )
@@ -34,7 +36,9 @@ pipeline default(harness: Harness) {
   assert_eq(tail.content, "llo")
   assert_eq(tail.eof, true)
   const failed = command_step(
-    harness.tools, "fail",
+    harness.tools,
+    harness.clock,
+    "fail",
     failing_command(harness),
     {capture: {max_inline_bytes: 100}, tail_bytes: 100},
   )

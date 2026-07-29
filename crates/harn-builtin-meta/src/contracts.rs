@@ -300,6 +300,7 @@ pub enum EffectKind {
     Process,
     Llm,
     Tool,
+    Mcp,
     Host,
     Worker,
     Secret,

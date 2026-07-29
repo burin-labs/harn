@@ -15,7 +15,7 @@ pipeline test(harness: Harness, task) {
       i
     }
   } catch (e) {
-    harness.stdio.println("caught: " + e)
+    harness.stdio.log("caught: " + e)
   }
   // `parallel` drains cancelled siblings before returning; if the old
   // run-to-completion behavior regresses, the sibling sets this flag.

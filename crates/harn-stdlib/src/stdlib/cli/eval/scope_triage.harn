@@ -1,4 +1,5 @@
 import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
 import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
 
 fn __env_bool(harness: Harness, name: string) -> bool {
@@ -187,10 +188,14 @@ fn __verdict_event(events) {
 
 fn __run_case(harness: Harness, case, classifier) {
   const session = "scope-triage-eval-" + to_string(case?.id ?? harness.random.uuid())
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(
+    harness,
+    session,
     fn() {
       harness.agent.open(session, {workspace_anchor: __scope_eval_anchor()})
-      return agent_loop(to_string(case?.prompt ?? case?.message ?? ""),
+      return agent_loop(
+        harness,
+        to_string(case?.prompt ?? case?.message ?? ""),
         nil,
         {
           provider: "mock",

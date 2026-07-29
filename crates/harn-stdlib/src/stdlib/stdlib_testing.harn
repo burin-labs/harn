@@ -293,6 +293,8 @@ pub type CapabilityFixture = {
   method: string,
   result: any?,
   error: string?,
+  when: dict?,
+  repeat: bool?,
 }
 
 /**
@@ -312,9 +314,21 @@ pub fn with_capability_fixtures(
   try {
     for fixture in fixtures {
       if fixture.error != nil {
-        harness.testing.respond_error(fixture.capability, fixture.method, fixture.error)
+        harness.testing.respond_error(
+          fixture.capability,
+          fixture.method,
+          fixture.error,
+          fixture.when,
+          fixture.repeat,
+        )
       } else {
-        harness.testing.respond(fixture.capability, fixture.method, fixture.result)
+        harness.testing.respond(
+          fixture.capability,
+          fixture.method,
+          fixture.result,
+          fixture.when,
+          fixture.repeat,
+        )
       }
     }
     const result = __testing_call_body(body)

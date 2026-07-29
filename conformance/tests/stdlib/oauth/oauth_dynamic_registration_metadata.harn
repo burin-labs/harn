@@ -110,5 +110,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(response.content_type, "application/json", "json content type")
   assert_eq(response.headers["cache-control"], "no-store", "no-store cache control")
   assert(contains(response.body, "redirect_uris"), "body carries metadata")
-  harness.stdio.println("oauth dynamic registration metadata ok")
+  harness.stdio.log("oauth dynamic registration metadata ok")
 }

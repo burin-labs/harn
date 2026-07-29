@@ -62,5 +62,5 @@ pipeline test(harness: Harness, task) {
   )
   assert_eq(capped.fallback, true)
   assert_eq(capped.reviewer.id, "gpt-4o-mini")
-  harness.stdio.println("llm_provider_catalog passed")
+  harness.stdio.log("llm_provider_catalog passed")
 }

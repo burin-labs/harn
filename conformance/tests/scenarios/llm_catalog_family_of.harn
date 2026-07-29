@@ -3,12 +3,12 @@
 import { family_of } from "std/llm/catalog"
 
 pipeline default(harness: Harness) {
-  harness.stdio.println(family_of("claude-3-5-haiku-20241022"))
-  harness.stdio.println(family_of("claude-opus-4-7-20260101"))
-  harness.stdio.println(family_of("claude-sonnet-4-20250514"))
-  harness.stdio.println(family_of("gpt-5-something"))
-  harness.stdio.println(family_of("gpt-4o-mini"))
-  harness.stdio.println(family_of("gemini-2.5-flash"))
-  harness.stdio.println(family_of("ollama:qwen3:30b-a3b"))
-  harness.stdio.println(family_of("mystery-model-xyz"))
+  harness.stdio.println(family_of(harness, "claude-3-5-haiku-20241022"))
+  harness.stdio.println(family_of(harness, "claude-opus-4-7-20260101"))
+  harness.stdio.println(family_of(harness, "claude-sonnet-4-20250514"))
+  harness.stdio.println(family_of(harness, "gpt-5-something"))
+  harness.stdio.println(family_of(harness, "gpt-4o-mini"))
+  harness.stdio.println(family_of(harness, "gemini-2.5-flash"))
+  harness.stdio.println(family_of(harness, "ollama:qwen3:30b-a3b"))
+  harness.stdio.println(family_of(harness, "mystery-model-xyz"))
 }

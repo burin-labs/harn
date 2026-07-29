@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -14,7 +15,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const stalled_session = "done-judge-stalled-" + harness.random.uuid()
-      const stalled = agent_capture_events(harness,  harness, stalled_session,
+      const stalled = agent_capture_events(harness, stalled_session,
         fn() { return agent_loop(harness, "Do not judge unless stalled.",
           nil,
           {
@@ -45,7 +46,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const capped_session = "done-judge-cap-" + harness.random.uuid()
-      const capped = agent_capture_events(harness,  harness, capped_session,
+      const capped = agent_capture_events(harness, capped_session,
         fn() { return agent_loop(harness, "Judge once at most.",
           nil,
           {
@@ -72,7 +73,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const closure_session = "done-judge-closure-" + harness.random.uuid()
-      const closure = agent_capture_events(harness,  harness, closure_session,
+      const closure = agent_capture_events(harness, closure_session,
         fn() { return agent_loop(harness, "Judge when the loop-state predicate says so.",
           nil,
           {

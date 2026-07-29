@@ -180,7 +180,7 @@ fn __fixture_tools(harness: Harness, root: string, python: string, fixture: stri
   if fixture == "read-only-audit" {
     return agent_host_tools(harness, nil, {root: root, cwd: root, max_inline_bytes: 4000, enabled_tools: ["read_file"]})
   }
-  const tools = agent_host_tools(harness,  harness, nil,
+  const tools = agent_host_tools(harness, nil,
     {
       root: root,
       cwd: root,
@@ -826,7 +826,7 @@ fn __default_structural_validator() {
   }
 }
 
-fn __run_fixture_agent(harness: Harness, 
+fn __run_fixture_agent(harness: Harness,
   fixture: string,
   task: string,
   provider: string,
@@ -869,7 +869,7 @@ fn __run_fixture_agent(harness: Harness,
     return __run_preset_agent(harness, "audit", task, options + {require_successful_tools: ["read_file"]})
   }
   if fixture == "no-tool-diagnosis" {
-    return __run_preset_agent(harness, 
+    return __run_preset_agent(harness,
       "summary",
       task,
       options
@@ -1006,7 +1006,7 @@ fn main(harness: Harness) {
   } else {
     args.task
   }
-  const result = __run_fixture_agent(harness, 
+  const result = __run_fixture_agent(harness,
     args.fixture,
     task,
     args.provider,

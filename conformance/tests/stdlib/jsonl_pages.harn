@@ -20,7 +20,7 @@ fn event_contract() -> SchemaContract<Event> {
 }
 
 pipeline default(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-jsonl-pages-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-jsonl-pages-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   const path = path_join(root, "events.jsonl")
   harness.fs.write_text(

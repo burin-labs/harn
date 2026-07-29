@@ -60,5 +60,5 @@ pipeline main(harness: Harness) {
   require saw_arg_key, "invalid arg constraint key is reported"
   require saw_prompt_policy, "unknown prompt tool reference is reported"
   require saw_approval, "approval pattern mismatch is reported"
-  harness.stdio.println("tool_surface_validate tests passed")
+  harness.stdio.log("tool_surface_validate tests passed")
 }

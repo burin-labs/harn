@@ -93,7 +93,7 @@ pipeline test_thrash_hard_stop_gets_one_bounded_recovery_turn(harness: Harness, 
           max_feedback: 2,
         },
       }
-      let captured = agent_capture_events(harness,  harness, session,
+      let captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Write tests after inspecting the target model.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
@@ -152,7 +152,7 @@ pipeline test_no_progress_monologue_gets_one_tool_call_recovery_turn(harness: Ha
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
@@ -211,7 +211,7 @@ pipeline test_uncovered_thrash_hard_stop_emits_skipped_recovery_receipt(harness:
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Edit the target file.", nil, opts) },
       )
       assert_eq(captured.result.status, "stuck")
@@ -260,7 +260,7 @@ pipeline test_final_wrapup_tool_call_skip_is_observable(harness: Harness, task) 
     session_id: session,
     llm_caller: mock_llm,
   }
-  let captured = agent_capture_events(harness,  harness, session,
+  let captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "Run out of budget while still trying tools.", nil, opts) },
   )
   assert_eq(captured.result.status, "budget_exhausted")

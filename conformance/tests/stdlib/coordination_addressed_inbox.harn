@@ -1,10 +1,9 @@
 import { coord_ack, coord_cursor, coord_inbox, coord_reply, coord_send } from "std/coordination"
 
 pipeline default(harness: Harness) {
-  mock_time(4000)
+  harness.testing.clock_set(4000)
   const opts = {workspace_id: "workspace-A", tenant_id: "tenant-A"}
-  const request = coord_send(
-    harness.channels, "workspace",
+  const request = coord_send(harness.runtime, harness.channels, harness.random, "workspace",
     "ops",
     "agent-A",
     {
@@ -16,30 +15,28 @@ pipeline default(harness: Harness) {
     },
     opts + {id: "coord-inbox-1"},
   )
-  const _other = coord_send(
-    harness.channels, "workspace",
+  const _other = coord_send(harness.runtime, harness.channels, harness.random, "workspace",
     "ops",
     "agent-B",
     {kind: "status", subject: "unrelated", body: "For another agent.", from: {agent: "agent-C"}},
     opts + {id: "coord-inbox-2"},
   )
-  const inbox_a = coord_inbox(harness.channels, "workspace", "ops", opts + {consumer_id: "agent-A"})
+  const inbox_a = coord_inbox(harness.runtime, harness.channels, "workspace", "ops", opts + {consumer_id: "agent-A"})
   harness.stdio.println(len(inbox_a.messages))
   harness.stdio.println(inbox_a.messages[0].subject)
   harness.stdio.println(inbox_a.messages[0].kind)
   harness.stdio.println(inbox_a.messages[0].data.paths[0])
   harness.stdio.println(inbox_a.from_cursor == nil)
-  const repeat_a = coord_inbox(harness.channels, "workspace", "ops", opts + {consumer_id: "agent-A"})
+  const repeat_a = coord_inbox(harness.runtime, harness.channels, "workspace", "ops", opts + {consumer_id: "agent-A"})
   harness.stdio.println(len(repeat_a.messages))
-  const dict_address_a = coord_inbox(harness.channels, "workspace", "ops", opts + {to: {agent: "agent-A"}})
+  const dict_address_a = coord_inbox(harness.runtime, harness.channels, "workspace", "ops", opts + {to: {agent: "agent-A"}})
   harness.stdio.println(dict_address_a.consumer_id)
   harness.stdio.println(len(dict_address_a.messages))
-  const _ack = coord_ack(harness.channels, "workspace", "ops", "agent-A", inbox_a.next_cursor, opts)
-  harness.stdio.println(coord_cursor(harness.channels, "workspace", "ops", "agent-A", opts) == inbox_a.next_cursor)
-  const after_ack = coord_inbox(harness.channels, "workspace", "ops", opts + {consumer_id: "agent-A"})
+  const _ack = coord_ack(harness.runtime, harness.channels, "workspace", "ops", "agent-A", inbox_a.next_cursor, opts)
+  harness.stdio.println(coord_cursor(harness.runtime, harness.channels, "workspace", "ops", "agent-A", opts) == inbox_a.next_cursor)
+  const after_ack = coord_inbox(harness.runtime, harness.channels, "workspace", "ops", opts + {consumer_id: "agent-A"})
   harness.stdio.println(len(after_ack.messages))
-  const reply = coord_reply(
-    harness.channels, "workspace",
+  const reply = coord_reply(harness.runtime, harness.channels, harness.random, "workspace",
     "ops",
     request,
     {
@@ -52,7 +49,7 @@ pipeline default(harness: Harness) {
     opts + {id: "coord-reply-1"},
   )
   harness.stdio.println(reply.message.reply_to == request.id)
-  const inbox_b = coord_inbox(
+  const inbox_b = coord_inbox(harness.runtime,
     harness.channels, "workspace",
     "ops",
     opts + {consumer_id: "agent-B", reply_to: request.id},
@@ -61,5 +58,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(inbox_b.messages[0].subject)
   harness.stdio.println(inbox_b.messages[0].reply_to)
   harness.stdio.println(inbox_b.messages[0].thread_id)
-  unmock_time()
+  harness.testing.clock_reset()
 }

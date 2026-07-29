@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // Live-shape / registration proof for `overlay_policy` (std/agent/overlays).
 //
 // Catches dead-since-inception drift: proves the overlay fragment actually

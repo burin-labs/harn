@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_loop_options } from "std/agent/options"
 import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 import { llm_text, with_llm_script } from "std/testing"

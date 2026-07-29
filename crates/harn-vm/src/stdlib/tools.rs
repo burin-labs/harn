@@ -202,7 +202,7 @@ fn host_current_tool_registry_impl(
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "plan_artifact(...args: any) -> dict", category = "tools"
+    sig = "plan_artifact(...args: any) -> PlanArtifact", category = "tools"
 )]
 fn plan_artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = args.first().cloned().unwrap_or(VmValue::Nil);

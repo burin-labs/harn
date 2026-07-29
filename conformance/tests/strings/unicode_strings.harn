@@ -2,25 +2,25 @@
 pipeline default(harness: Harness, task) {
   const emoji = "Hello 🌍🔥 World"
   // len counts characters, not bytes
-  harness.stdio.println(len(emoji))
+  harness.stdio.log(len(emoji))
   // contains with multi-byte
-  harness.stdio.println(emoji.contains("🌍"))
-  harness.stdio.println(emoji.contains("🎉"))
+  harness.stdio.log(emoji.contains("🌍"))
+  harness.stdio.log(emoji.contains("🎉"))
   // replace multi-byte
-  harness.stdio.println(emoji.replace("🔥", "💧"))
+  harness.stdio.log(emoji.replace("🔥", "💧"))
   // split around multi-byte
-  harness.stdio.println("a🔥b🔥c".split("🔥"))
+  harness.stdio.log("a🔥b🔥c".split("🔥"))
   // starts_with / ends_with
-  harness.stdio.println("café".starts_with("caf"))
-  harness.stdio.println("café".ends_with("fé"))
+  harness.stdio.log("café".starts_with("caf"))
+  harness.stdio.log("café".ends_with("fé"))
   // interpolation with multi-byte
   const name = "André"
-  harness.stdio.println("Hello ${name}!")
+  harness.stdio.log("Hello ${name}!")
   // CJK characters
   const cjk = "中文测试"
-  harness.stdio.println(len(cjk))
-  harness.stdio.println(cjk.contains("文"))
+  harness.stdio.log(len(cjk))
+  harness.stdio.log(cjk.contains("文"))
   // Accented characters
   const accented = "naïve résumé"
-  harness.stdio.println(accented.replace("é", "e"))
+  harness.stdio.log(accented.replace("é", "e"))
 }

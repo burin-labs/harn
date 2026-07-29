@@ -19,8 +19,8 @@ fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> s
 
 pipeline default(harness: Harness) {
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_edit_change_signature_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_edit_change_signature_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   // 1) Rust add_parameter with default_fill across THREE call sites.
@@ -28,7 +28,10 @@ pipeline default(harness: Harness) {
     "fn add(a: i64, b: i64) -> i64 {\n    return a + b\n}\nfn main() {\n    let x = add(1, 2);\n    let y = add(3, 4);\n    let z = add(5, 6);\n}\n"
   const rs_path = write_fixture(harness, root, "add.rs", rs_body)
   const rs_ap = edit_add_parameter(
-    harness.fs, {path: rs_path, symbol: {name: "add"}, param: "c: i64", default: "0"},
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs_path, symbol: {name: "add"}, param: "c: i64", default: "0"},
   )
   harness.stdio.println(rs_ap.result)
   const rs_after = harness.fs.read_text(rs_path)
@@ -40,7 +43,12 @@ pipeline default(harness: Harness) {
   // 2) Python reorder_parameters — definition + call args permuted.
   const py_body = "def sub(a, b):\n    return a - b\n\np = sub(10, 3)\nq = sub(20, 5)\n"
   const py_path = write_fixture(harness, root, "sub.py", py_body)
-  const py_ro = edit_reorder_parameters(harness.fs, {path: py_path, symbol: {name: "sub"}, order: [1, 0]})
+  const py_ro = edit_reorder_parameters(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: py_path, symbol: {name: "sub"}, order: [1, 0]},
+  )
   harness.stdio.println(py_ro.result)
   const py_after = harness.fs.read_text(py_path)
   harness.stdio.println(contains(py_after, "def sub(b, a):"))
@@ -50,7 +58,12 @@ pipeline default(harness: Harness) {
   const ts_body =
     "function add(a: number, b: number): number {\n  return a + b\n}\nconst x = add(1, 2)\n"
   const ts_path = write_fixture(harness, root, "add.ts", ts_body)
-  const ts_rt = edit_change_return_type(harness.fs, {path: ts_path, symbol: {name: "add"}, new_type: "string"})
+  const ts_rt = edit_change_return_type(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: ts_path, symbol: {name: "add"}, new_type: "string"},
+  )
   harness.stdio.println(ts_rt.result)
   harness.stdio.println(
     contains(harness.fs.read_text(ts_path), "function add(a: number, b: number): string {"),
@@ -61,14 +74,20 @@ pipeline default(harness: Harness) {
     "function mul(a: number, b: number): number {\n  return a * b\n}\nconst r = mul(2, 3)\n"
   const cs_path = write_fixture(harness, root, "mul.ts", cs_body)
   const strict = edit_change_signature(
-    harness.fs, {path: cs_path, symbol: {name: "mul"}, new_params: "a: number, b: number, c: number"},
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: cs_path, symbol: {name: "mul"}, new_params: "a: number, b: number, c: number"},
   )
   harness.stdio.println(strict.result)
   harness.stdio.println(strict.conflicts[0].code)
   harness.stdio.println(harness.fs.read_text(cs_path) == cs_body)
   // 5) change_signature(default_fill) rewrites def + appends to each call.
   const df = edit_change_signature(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {
       path: cs_path,
       symbol: {name: "mul"},
       new_params: "a: number, b: number, c: number",

@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
   const items = ["foo", "bar", "baz"]
   const found = items.find({ x -> x.starts_with("ba") })
-  harness.stdio.println(found)
+  harness.stdio.log(found)
 }

@@ -18,7 +18,7 @@ import {
 pipeline default(harness: Harness) {
   /* Clear any latent audit entries from earlier in the run so each
    * mode's drain starts from a clean slate. */
-  lifecycle_audit_log_take()
+  lifecycle_audit_log_take(harness)
   const echo = { args -> return {ok: true, ran: args.command} }
   /* Synthesize a rewrite-bearing match record matching the shape
    * `tool_hooks_match` produces. Using an inline match avoids the
@@ -33,6 +33,7 @@ pipeline default(harness: Harness) {
     rewrite: { command, _ctx -> command + " --target-dir target-shared" },
   }
   const rewrite_result = tool_hooks_mode_rewrite_with_audit(
+    harness,
     rewrite_rule,
     {command: "cargo build --release"},
     echo,
@@ -41,7 +42,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(rewrite_result.command)
   harness.stdio.println(rewrite_result.original_command)
   harness.stdio.println(rewrite_result.result.ran)
-  const rewrite_audits = lifecycle_audit_log_take()
+  const rewrite_audits = lifecycle_audit_log_take(harness)
   /* Expect two audit entries: tool_rewrite + tool_hooks.reminder_injected. */
   harness.stdio.println(len(rewrite_audits))
   harness.stdio.println(rewrite_audits[0].kind)
@@ -62,6 +63,7 @@ pipeline default(harness: Harness) {
     rewrite: nil,
   }
   const deny_result = tool_hooks_mode_deny_with_explanation(
+    harness,
     deny_rule,
     {command: "git push origin main --force"},
     echo,
@@ -71,7 +73,7 @@ pipeline default(harness: Harness) {
   /* Deny must not call `inner` — the echo executor's `ran` field
    * should be absent from the result envelope. */
   harness.stdio.println(deny_result?.result == nil)
-  const deny_audits = lifecycle_audit_log_take()
+  const deny_audits = lifecycle_audit_log_take(harness)
   harness.stdio.println(len(deny_audits))
   harness.stdio.println(deny_audits[0].kind)
   harness.stdio.println(deny_audits[0].payload.rule_id)
@@ -86,6 +88,7 @@ pipeline default(harness: Harness) {
     rewrite: nil,
   }
   const warn_result = tool_hooks_mode_passthrough_only_audit(
+    harness,
     warn_rule,
     {command: "find . -name foo"},
     echo,
@@ -93,7 +96,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(warn_result.action)
   harness.stdio.println(warn_result.command)
   harness.stdio.println(warn_result.result.ran)
-  const warn_audits = lifecycle_audit_log_take()
+  const warn_audits = lifecycle_audit_log_take(harness)
   harness.stdio.println(len(warn_audits))
   harness.stdio.println(warn_audits[0].kind)
   harness.stdio.println(warn_audits[0].payload.rule_id)
@@ -105,12 +108,12 @@ pipeline default(harness: Harness) {
    * still records the audit + reminder side effects. The
    * `rule.rewrite` callback is invoked so the envelope reflects the
    * rewritten command. */
-  const preview = tool_hooks_mode_rewrite_with_audit(rewrite_rule, "cargo test", nil)
+  const preview = tool_hooks_mode_rewrite_with_audit(harness, rewrite_rule, "cargo test", nil)
   harness.stdio.println(preview.action)
   harness.stdio.println(preview.command)
   harness.stdio.println(preview.original_command)
   harness.stdio.println(preview?.result == nil)
-  const preview_audits = lifecycle_audit_log_take()
+  const preview_audits = lifecycle_audit_log_take(harness)
   harness.stdio.println(len(preview_audits))
   harness.stdio.println(preview_audits[0].kind)
   harness.stdio.println(preview_audits[1].kind)

@@ -1,9 +1,9 @@
 pipeline test(harness: Harness, task) {
   const a = iter([1, 2, 3, 4, 5]).windows(3).to_list()
-  harness.stdio.println(a)
+  harness.stdio.log(a)
   const b = iter([1, 2, 3, 4, 5]).windows(5).to_list()
-  harness.stdio.println(b)
+  harness.stdio.log(b)
   const c = iter([1, 2, 3]).windows(10).to_list()
-  harness.stdio.println(c)
-  harness.stdio.println(len(c))
+  harness.stdio.log(c)
+  harness.stdio.log(len(c))
 }

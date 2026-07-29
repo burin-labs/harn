@@ -473,7 +473,7 @@ fn __try_revoke_remote(harness: Harness, cfg, token_value) {
 fn __revoke_locked(harness: Harness, cfg) {
   const prev = cfg.storage.get(cfg.storage_key)
   const access = prev?.access_token
-  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(harness,  harness,
+  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(harness,
     cfg,
     to_string(access),
   )

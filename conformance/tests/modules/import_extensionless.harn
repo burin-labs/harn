@@ -1,6 +1,6 @@
 import "lib/helpers"
 
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(double(3))
-  harness.stdio.println(greet("harn"))
+  harness.stdio.log(double(3))
+  harness.stdio.log(greet("harn"))
 }

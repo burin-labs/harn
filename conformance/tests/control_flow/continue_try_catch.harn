@@ -7,8 +7,8 @@ pipeline default(harness: Harness, task) {
       }
       sum = sum + i
     } catch (e) {
-      harness.stdio.println(e)
+      harness.stdio.log(e)
     }
   }
-  harness.stdio.println(sum)
+  harness.stdio.log(sum)
 }

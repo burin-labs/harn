@@ -144,7 +144,7 @@ fn post_eval_verdict(harness: Harness, verdict, options) {
     )
   }
   const api_base_url = trim(to_string(opts?.api_base_url ?? DEFAULT_SLACK_API_BASE_URL))
-  const response = connector_http_json(harness,  harness, "POST",
+  const response = connector_http_json(harness, "POST",
     api_base_url + "/chat.postMessage",
     {
       headers: {

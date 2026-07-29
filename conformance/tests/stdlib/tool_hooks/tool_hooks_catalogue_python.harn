@@ -15,7 +15,7 @@ fn probe(harness: Harness, reg, cmd) {
 }
 
 pipeline default(harness: Harness) {
-  const reg = tool_hooks_seed_registry(["python"])
+  const reg = tool_hooks_seed_registry(harness, ["python"])
   /* find_versus_rg: quoted and unquoted *.py patterns. */
   probe(harness, reg, "find . -name '*.py'")
   probe(harness, reg, "find . -name *.py")

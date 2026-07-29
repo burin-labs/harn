@@ -12,7 +12,7 @@ fn handle_session(harness: Harness, event) {
 pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const _ = harness.runtime.trigger_register(
     {

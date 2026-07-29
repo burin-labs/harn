@@ -2,14 +2,14 @@ pipeline test(harness: Harness, task) {
   // `to ... exclusive` is the half-open form. `.to_list()` is the
   // explicit path to materialize a range into a list for printing.
   const xs = 0 to 4 exclusive
-  harness.stdio.println(xs.to_list())
+  harness.stdio.log(xs.to_list())
   // used in a for loop
   let sum = 0
   for i in 1 to 5 exclusive {
     sum += i
   }
-  harness.stdio.println(sum)
+  harness.stdio.log(sum)
   // empty when end <= start
   const empty = 5 to 5 exclusive
-  harness.stdio.println(len(empty))
+  harness.stdio.log(len(empty))
 }

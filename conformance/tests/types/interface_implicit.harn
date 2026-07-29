@@ -19,7 +19,7 @@ pipeline test(harness: Harness, task) {
     }
   }
   fn show(item: Displayable) {
-    harness.stdio.println(item.display())
+    harness.stdio.log(item.display())
   }
   show(Dog({name: "Rex"}))
   show(Cat({name: "Whiskers"}))

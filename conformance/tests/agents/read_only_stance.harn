@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { agent_stance_default_consent_check } from "std/agent/stance"
 import { with_llm_script } from "std/testing"
@@ -127,7 +128,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "read-only-stance-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "no code changes yet, just research the bug",
           nil,
           {
@@ -176,7 +177,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "read-only-stance-policy-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "inspect only",
           nil,
           {
@@ -213,7 +214,7 @@ pipeline default(harness: Harness) {
       const session = harness.agent.open("read-only-stance-default-consent-" + harness.random.uuid())
       harness.agent.reset(session)
       harness.agent.inject(session, {role: "user", content: "please make the change"})
-      const verdict = agent_stance_default_consent_check(harness,  harness, "the user requested an edit",
+      const verdict = agent_stance_default_consent_check(harness, "the user requested an edit",
         session,
         {provider: "mock"},
       )

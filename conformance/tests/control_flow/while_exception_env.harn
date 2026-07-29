@@ -8,7 +8,7 @@ pipeline test(harness: Harness, task) {
       }
     }
   } catch (e) {
-    harness.stdio.println(i)
-    harness.stdio.println(e)
+    harness.stdio.log(i)
+    harness.stdio.log(e)
   }
 }

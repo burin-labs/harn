@@ -15,5 +15,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(r.provider, "openai")
   // Medium scale calibration populates the low-level effort.
   assert_eq(r.effort, "medium")
-  harness.stdio.println("llm_defaults_pack_provider_auto passed")
+  harness.stdio.log("llm_defaults_pack_provider_auto passed")
 }

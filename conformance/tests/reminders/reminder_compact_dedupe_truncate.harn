@@ -15,7 +15,7 @@ pipeline main(harness: Harness) {
     ],
     events: [old, newest],
   }
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     crafted,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )

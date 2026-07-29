@@ -5,7 +5,7 @@ pipeline test(harness: Harness, task) {
     const h = spawn {
       42
     }
-    harness.stdio.println(await(h))
+    harness.stdio.log(await(h))
   }
-  harness.stdio.println("done")
+  harness.stdio.log("done")
 }

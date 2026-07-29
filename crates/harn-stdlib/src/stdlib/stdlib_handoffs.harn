@@ -232,12 +232,12 @@ fn __handoff_policy_override(handoff_value) {
   return nil
 }
 
-fn __handoff_invoke_dispatcher(dispatcher, envelope) {
+fn __handoff_invoke_dispatcher(harness: Harness, dispatcher, envelope) {
   const policy = __handoff_policy_override(envelope?.handoff)
   if policy == nil {
-    return dispatcher(envelope)
+    return dispatcher(harness, envelope)
   }
-  return __harn_with_execution_policy_override(policy, fn() { return dispatcher(envelope) })
+  return __harn_with_execution_policy_override(policy, fn() { return dispatcher(harness, envelope) })
 }
 
 /**
@@ -282,7 +282,7 @@ pub fn handoff_dispatch(harness: Harness, handoff_payload, decision = nil, optio
   const invocation_result = if dispatcher == nil {
     nil
   } else {
-    __handoff_invoke_dispatcher(dispatcher, invocation_envelope)
+    __handoff_invoke_dispatcher(harness, dispatcher, invocation_envelope)
   }
   return dispatch
     + {

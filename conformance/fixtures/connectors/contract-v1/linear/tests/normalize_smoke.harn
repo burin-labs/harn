@@ -61,7 +61,7 @@ fn fixture_json(harness: Harness, path) {
 }
 
 pipeline test(harness: Harness, task) {
-  activate([{id: "linear.test", kind: "webhook", config: {signing_secret: "test-secret"}}])
+  activate(harness, [{id: "linear.test", kind: "webhook", config: {signing_secret: "test-secret"}}])
   assert_eq(provider_id(), "linear")
   assert_eq(kinds(), ["webhook"])
   assert_eq(payload_schema().harn_schema_name, "LinearEventPayload")
@@ -96,14 +96,18 @@ pipeline test(harness: Harness, task) {
     assert_eq(normalized.event.signature_status.state, "verified")
     assert_eq(normalized.event.payload.data.id, variant.data_id)
   }
-  const edge_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859140000,\"webhookId\":\"wh_edge\",\"data\":{\"id\":\"ISS-EDGE\"}}"
+  const edge_body =
+    "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859140000,\"webhookId\":\"wh_edge\",\"data\":{\"id\":\"ISS-EDGE\"}}"
   assert_eq(normalize_inbound(harness, raw(harness, edge_body, "test-secret")).type, "event")
   // raw(harness) does NOT refresh string webhookTimestamps; the connector returns
   // invalid_webhook_timestamp before any clock check.
   const now_ms = to_int(harness.clock.now().timestamp * 1000)
-  const bad_timestamp_body_fresh = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":\"not-a-number\",\"webhookId\":\"wh_bad_ts\",\"data\":{\"id\":\"ISS-BAD-TS\"}}"
+  const bad_timestamp_body_fresh =
+    "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":\"not-a-number\",\"webhookId\":\"wh_bad_ts\",\"data\":{\"id\":\"ISS-BAD-TS\"}}"
   const bad_signed = hmac_sha256("test-secret", bad_timestamp_body_fresh)
-  const bad_timestamp = normalize_inbound(harness, {
+  const bad_timestamp = normalize_inbound(
+    harness,
+    {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -120,9 +124,12 @@ pipeline test(harness: Harness, task) {
   // Stale-timestamp body: synthesize a body whose webhookTimestamp is far
   // outside the 60s window and sign it with the real secret. The connector
   // must still reject as timestamp_out_of_window (F10 / F4 enforcement).
-  const stale_body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1,\"webhookId\":\"wh_stale\",\"data\":{\"id\":\"ISS-STALE\"}}"
+  const stale_body =
+    "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1,\"webhookId\":\"wh_stale\",\"data\":{\"id\":\"ISS-STALE\"}}"
   const stale_signed = hmac_sha256("test-secret", stale_body)
-  const stale = normalize_inbound(harness, {
+  const stale = normalize_inbound(
+    harness,
+    {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -136,7 +143,10 @@ pipeline test(harness: Harness, task) {
   assert_eq(stale.type, "reject")
   assert_eq(stale.status, 401)
   assert(contains(stale.body, "timestamp_out_of_window"))
-  const invalid = normalize_inbound(harness, raw(harness, issue_body, "wrong-secret", "test-secret"))
+  const invalid = normalize_inbound(
+    harness,
+    raw(harness, issue_body, "wrong-secret", "test-secret"),
+  )
   assert_eq(invalid.type, "reject")
   assert_eq(invalid.status, 401)
   assert(contains(invalid.body, "invalid_signature"))
@@ -147,7 +157,9 @@ pipeline test(harness: Harness, task) {
   assert(contains(unsupported.body, "unsupported_action"))
   // F1: hard-reject when raw.body_text is missing — we cannot HMAC-verify a
   // re-serialized body byte-for-byte against Linear's signed bytes.
-  const missing_body = normalize_inbound(harness, {
+  const missing_body = normalize_inbound(
+    harness,
+    {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -168,8 +180,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(missing_body.status, 400)
   assert(contains(missing_body.body, "missing_body_text"))
   // F2: hard-reject before HMAC when no signing secret is configured.
-  shutdown()
-  activate([{id: "linear.test", kind: "webhook", config: {}}])
+  shutdown(harness)
+  activate(harness, [{id: "linear.test", kind: "webhook", config: {}}])
   const no_secret_body = json_stringify(
     {
       action: "update",
@@ -179,7 +191,9 @@ pipeline test(harness: Harness, task) {
       data: {id: "ISS-NOSECRET"},
     },
   )
-  const no_secret = normalize_inbound(harness, {
+  const no_secret = normalize_inbound(
+    harness,
+    {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -195,7 +209,7 @@ pipeline test(harness: Harness, task) {
   assert(contains(no_secret.body, "missing_secret"))
   // F3: dedupe uses signed body.webhookId before linear-delivery header so a
   // captured (body, signature) pair cannot be re-played with a rotated header.
-  activate([{id: "linear.test", kind: "webhook", config: {signing_secret: "test-secret"}}])
+  activate(harness, [{id: "linear.test", kind: "webhook", config: {signing_secret: "test-secret"}}])
   const f3_body = json_stringify(
     {
       action: "update",
@@ -206,7 +220,9 @@ pipeline test(harness: Harness, task) {
     },
   )
   const f3_signed = hmac_sha256("test-secret", f3_body)
-  const f3_event = normalize_inbound(harness, {
+  const f3_event = normalize_inbound(
+    harness,
+    {
       kind: "webhook",
       headers: {
         "content-type": "application/json",
@@ -221,6 +237,7 @@ pipeline test(harness: Harness, task) {
   // F4: bindings cannot widen the replay window past the cap.
   const too_large = try {
     activate(
+      harness,
       [
         {
           id: "linear.test",
@@ -232,5 +249,5 @@ pipeline test(harness: Harness, task) {
   }
   assert(is_err(too_large))
   assert_eq(unwrap_err(too_large).code, "replay_window_too_large")
-  shutdown()
+  shutdown(harness)
 }

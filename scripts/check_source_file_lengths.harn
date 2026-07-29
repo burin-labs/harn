@@ -461,7 +461,7 @@ pub fn apply_baseline_edits(harness: Harness, root: string, edits: list<Baseline
 
 /** In-scope source paths git tracks under `root`, empty when git cannot answer. */
 fn git_tracked_sources(harness: Harness, root: string) -> list<string> {
-  const res = harness.process.spawn_captured(
+  const res = harness.process.run(
     {cmd: "git", args: ["-C", root, "ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
   )
   if !res.success {

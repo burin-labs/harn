@@ -4,6 +4,6 @@ pipeline test(harness: Harness, task) {
       harness.clock.sleep_ms(75ms)
     }
   } catch (e) {
-    harness.stdio.println("caught deadline")
+    harness.stdio.log("caught deadline")
   }
 }

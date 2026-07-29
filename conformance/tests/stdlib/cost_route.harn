@@ -9,7 +9,7 @@ pipeline test(harness: Harness, task) {
   }
   assert_eq(routed.provider, "mock")
   assert_eq(routed.model, "mock")
-  assert_eq(llm_call_count(), 1)
+  assert_eq(llm_call_count(harness.llm), 1)
   const explicit = cost_route {
     route_policy: "always(mock:mock)"
 
@@ -17,6 +17,6 @@ pipeline test(harness: Harness, task) {
   }
   assert_eq(explicit.provider, "mock")
   assert_eq(explicit.model, "mock")
-  assert_eq(llm_call_count(), 2)
+  assert_eq(llm_call_count(harness.llm), 2)
   harness.stdio.println("ok")
 }

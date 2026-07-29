@@ -6,20 +6,20 @@ import "std/agent/hypothesis"
  * in-place status update, unknown-id handling, and delete.
  */
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-hyp-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-hyp-" + harness.random.uuid())
   const sid = "agent.hypotheses"
   const o = {root: root}
-  hypothesis_open(sid, {id: "h1", statement: "flaky test is timing"}, o)
-  hypothesis_open(sid, {id: "h2", statement: "cache bug", status: "verifying"}, o)
-  harness.stdio.println(hypothesis_get(sid, "h1", o).status)
-  harness.stdio.println(hypothesis_get(sid, "h2", o).status)
-  harness.stdio.println(len(hypothesis_list(sid, o)))
-  hypothesis_set_status(sid, "h1", "confirmed", o)
-  harness.stdio.println(hypothesis_get(sid, "h1", o).status)
-  harness.stdio.println(len(hypothesis_list(sid, {root: root, status: "confirmed"})))
-  harness.stdio.println(hypothesis_get(sid, "nope", o) == nil)
-  harness.stdio.println(hypothesis_set_status(sid, "nope", "x", o).ok)
-  hypothesis_delete(sid, "h2", o)
-  harness.stdio.println(len(hypothesis_list(sid, o)))
+  hypothesis_open(harness, sid, {id: "h1", statement: "flaky test is timing"}, o)
+  hypothesis_open(harness, sid, {id: "h2", statement: "cache bug", status: "verifying"}, o)
+  harness.stdio.println(hypothesis_get(harness, sid, "h1", o).status)
+  harness.stdio.println(hypothesis_get(harness, sid, "h2", o).status)
+  harness.stdio.println(len(hypothesis_list(harness, sid, o)))
+  hypothesis_set_status(harness, sid, "h1", "confirmed", o)
+  harness.stdio.println(hypothesis_get(harness, sid, "h1", o).status)
+  harness.stdio.println(len(hypothesis_list(harness, sid, {root: root, status: "confirmed"})))
+  harness.stdio.println(hypothesis_get(harness, sid, "nope", o) == nil)
+  harness.stdio.println(hypothesis_set_status(harness, sid, "nope", "x", o).ok)
+  hypothesis_delete(harness, sid, "h2", o)
+  harness.stdio.println(len(hypothesis_list(harness, sid, o)))
   harness.fs.delete(root)
 }

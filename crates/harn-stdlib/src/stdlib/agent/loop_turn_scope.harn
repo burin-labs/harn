@@ -283,7 +283,7 @@ pub fn __scope_classifier_alert_body(harness: Harness, verdict, session) {
     + "\n\nThree options:\n"
     + "  - add_root: mount the target repo into this session with `harness.agent.add_root(session_id, root, {mount_mode})`\n"
     + "  - reanchor: switch the session primary anchor with `harness.agent.reanchor(session_id, new_anchor)`\n"
-    + "  - fork: spawn a sub-agent against the target repo with `spawn_agent({anchor: new_anchor, ...})`\n\n"
+    + "  - fork: spawn a sub-agent against the target repo with `spawn_agent(harness.agent, {anchor: new_anchor, ...})`\n\n"
     + "Ask the user which handoff they prefer before doing workspace-mutating work.\n</scope-alert>"
 }
 
@@ -652,7 +652,7 @@ pub fn __agent_loop_stall_warning_receipt(warning) {
   }
 }
 
-pub fn __agent_loop_emit_thrash_recovery_checkpoint(harness: Harness, 
+pub fn __agent_loop_emit_thrash_recovery_checkpoint(harness: Harness,
   session_id,
   iteration,
   tool_calls,
@@ -748,7 +748,7 @@ pub fn __agent_loop_final_wrapup(harness: Harness, message, session, opts, final
   } else {
     turn_prompt.messages
   }
-  const llm_opts = __agent_loop_effective_llm_options(wrapup_opts)
+  const llm_opts = __agent_loop_effective_llm_options(harness, wrapup_opts)
     + {
     messages: turn_messages,
     session_id: session.session_id,
@@ -890,7 +890,10 @@ pub fn __agent_loop_apply_output_contract(harness: Harness, final_result, opts, 
   if direct.ok {
     return final_result + {output: direct.value, output_valid: true}
   }
-  const repair_opts = __agent_loop_effective_llm_options(opts + {_output_contract_repair: true})
+  const repair_opts = __agent_loop_effective_llm_options(
+    harness,
+    opts + {_output_contract_repair: true},
+  )
     + {
     session_id: session.session_id,
     tools: nil,

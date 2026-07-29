@@ -25,5 +25,5 @@ pipeline test(harness: Harness, task) {
   assert(tool_count(tools) == 2, "forwarded registry keeps both tools")
   assert(tool_find(tools, "ping") != nil, "package boundary preserved ping")
   assert(tool_find(tools, "echo") != nil, "stdlib binding preserved echo")
-  harness.stdio.println("tool_registry_forward ok count=" + to_string(tool_count(tools)))
+  harness.stdio.log("tool_registry_forward ok count=" + to_string(tool_count(tools)))
 }

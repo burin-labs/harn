@@ -2,7 +2,10 @@
 //!
 //! This crate intentionally contains only static source strings so runtime and
 //! static tooling crates can share the same stdlib modules without depending on
-//! each other.
+//! each other. Loading this catalog is pure: modules cannot register ambient
+//! effects, and every effectful stdlib function must receive its typed Harness
+//! capability explicitly from the caller, including callbacks that may perform
+//! effects.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibSource {
@@ -998,7 +1001,7 @@ mod tests {
             .expect("std/agent/workers should export agent_stop");
         assert_eq!(
             stop.signature,
-            "agent_stop(worker, options: AgentStopOptions = nil)"
+            "agent_stop(worker, options: AgentStopOptions? = nil)"
         );
         assert_eq!(stop.required_params, 1);
         assert_eq!(stop.total_params, 2);

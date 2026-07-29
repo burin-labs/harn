@@ -30,6 +30,6 @@ fn nested(limit: int) -> int {
 }
 
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(first_over(20))
-  harness.stdio.println(nested(7))
+  harness.stdio.log(first_over(20))
+  harness.stdio.log(nested(7))
 }

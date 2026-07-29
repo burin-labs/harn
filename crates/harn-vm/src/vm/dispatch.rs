@@ -256,6 +256,56 @@ impl Vm {
         }
     }
 
+    /// Project macro-declared Harness methods onto the runtime dispatch table.
+    ///
+    /// Modules may still install a specialized adapter explicitly. For the
+    /// ordinary case, however, the builtin contract is the single source of
+    /// truth: declaring `exposure = "harness.<capability>.<method>"` is enough
+    /// to make that handler callable through the typed capability and never
+    /// creates a second hand-maintained registration list.
+    pub(crate) fn project_declared_capability_methods(&mut self) {
+        use harn_builtin_meta::BuiltinExposure;
+
+        let projections = self
+            .builtin_metadata
+            .iter()
+            .filter_map(|(name, metadata)| {
+                let BuiltinExposure::HarnessMethod { capability, method } =
+                    metadata.contract().exposure
+                else {
+                    return None;
+                };
+                Some((capability, method, name.clone(), metadata.kind()))
+            })
+            .collect::<Vec<_>>();
+
+        for (capability, method, name, kind) in projections {
+            let key = (capability, method.to_string());
+            if self.capability_methods.contains_key(&key) {
+                continue;
+            }
+            let dispatch = match kind {
+                VmBuiltinKind::Sync => self
+                    .builtins
+                    .get(name.as_str())
+                    .cloned()
+                    .map(VmBuiltinDispatch::Sync),
+                VmBuiltinKind::Async => self
+                    .async_builtins
+                    .get(name.as_str())
+                    .cloned()
+                    .map(VmBuiltinDispatch::Async),
+            }
+            .unwrap_or_else(|| {
+                panic!(
+                    "declared capability method harness.{}.{method} has no runtime handler `{name}`",
+                    capability.field_name()
+                )
+            });
+            Arc::make_mut(&mut self.capability_methods).insert(key, dispatch);
+        }
+    }
+
     /// Remove a sync builtin (so an async version can take precedence).
     pub fn unregister_builtin(&mut self, name: &str) {
         Arc::make_mut(&mut self.builtins).remove(name);
@@ -683,12 +733,6 @@ impl Vm {
         }
         self.record_builtin_contract_effects(name, &args);
         crate::typecheck::validate_builtin_call(name, &args, None)?;
-
-        if let Some(result) =
-            crate::runtime_context::dispatch_runtime_context_builtin(self, name, &args)
-        {
-            return result;
-        }
 
         if let Some(id) = direct_id {
             if let Some(entry) = self.builtins_by_id.get(&id).cloned() {

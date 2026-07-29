@@ -25,7 +25,7 @@ pipeline main(harness: Harness, task) {
   harness.agent.close(s)
   require !harness.agent.exists(s), "close evicts"
   const close_session = "close-status-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, close_session,
+  const captured = agent_capture_events(harness, close_session,
     fn() {
       let _ = harness.agent.open(close_session)
       harness.agent.close(close_session, {reason: "timeout", status: "idle", source: "test"})
@@ -39,5 +39,5 @@ pipeline main(harness: Harness, task) {
   require event.reason == "timeout", "close event carries reason"
   require event.status == "idle", "close event carries status"
   require event.metadata.source == "test", "close event carries metadata"
-  harness.stdio.println("agent_sessions basic tests passed")
+  harness.stdio.log("agent_sessions basic tests passed")
 }

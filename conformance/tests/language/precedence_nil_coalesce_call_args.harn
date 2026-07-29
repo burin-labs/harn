@@ -1,7 +1,7 @@
 fn show_three(harness: Harness, a, b, c) {
-  harness.stdio.println("a=" + a)
-  harness.stdio.println("b=" + b)
-  harness.stdio.println("c=" + c)
+  harness.stdio.log("a=" + a)
+  harness.stdio.log("b=" + b)
+  harness.stdio.log("c=" + c)
 }
 
 fn tag_for(path) {

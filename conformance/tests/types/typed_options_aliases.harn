@@ -22,7 +22,7 @@ pipeline test(harness: Harness, task) {
     budget: budget,
   }
   const projected = llm_options(call_opts)
-  harness.stdio.println(
+  harness.stdio.log(
     "llm provider=" + to_string(projected.provider) + " budget="
       + to_string(
       projected.budget?.max_cost_usd,
@@ -38,7 +38,7 @@ pipeline test(harness: Harness, task) {
       capabilities: ["tools"],
     },
   ]
-  harness.stdio.println("ladder len=" + to_string(len(model_ladder(ladder))))
+  harness.stdio.log("ladder len=" + to_string(len(model_ladder(ladder))))
   const loop_opts: AgentLoopOptions = {
     provider: "mock",
     loop_until_done: true,
@@ -47,7 +47,7 @@ pipeline test(harness: Harness, task) {
     turn_policy: {require_action_or_yield: true, max_prose_chars: 800},
   }
   const typed_loop = agent_options(loop_opts)
-  harness.stdio.println(
+  harness.stdio.log(
     "loop until_done=" + to_string(typed_loop.loop_until_done) + " prose_cap="
       + to_string(
       typed_loop.turn_policy?.max_prose_chars,
@@ -58,7 +58,7 @@ pipeline test(harness: Harness, task) {
     rate_limit: {max_calls: 5},
     reasoning_task: "verify",
   }
-  harness.stdio.println("preset reasoning_task=" + to_string(agent_preset_options(preset_overrides).reasoning_task))
+  harness.stdio.log("preset reasoning_task=" + to_string(agent_preset_options(preset_overrides).reasoning_task))
   const stage_retry: WorkflowRetryPolicy = {max_attempts: 3, verify: true, backoff_ms: 100}
   const stage: StageSpec = {
     id: "repair",
@@ -69,7 +69,7 @@ pipeline test(harness: Harness, task) {
     output_contract: {output_kinds: ["patch"], min_inputs: 1},
   }
   const typed_stage = workflow_stage_spec(stage)
-  harness.stdio.println(
+  harness.stdio.log(
     "stage id=" + to_string(typed_stage.id) + " retries="
       + to_string(
       typed_stage.retry_policy?.max_attempts,

@@ -34,7 +34,7 @@ pipeline test_pin_accepts_registered_kinds(harness: Harness, task) {
     "remaining_failures",
     "verification_hud",
   ]
-  const p = pin(harness,  harness, "guardrails",
+  const p = pin(harness, "guardrails",
     "Never delete AGENTS.md.",
     {register_kinds: kinds, role_hint: "system"},
   )

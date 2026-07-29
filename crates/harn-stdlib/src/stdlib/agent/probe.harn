@@ -109,7 +109,7 @@ fn __probe_truncate(harness: Harness, value, limit) -> string {
     return text
   }
   const retained = substring(text, 0, limit)
-  let _ = agent_report_truncation(harness,  harness, text,
+  let _ = agent_report_truncation(harness, text,
     retained,
     "probe evidence exceeded its model-visible byte budget",
   )
@@ -127,7 +127,7 @@ fn __probe_command_options(opts) -> dict {
 }
 
 fn __probe_temp_path(harness: Harness, suffix) -> string {
-  return path_join(harness.fs.temp_dir(), "harn-probe-" + harness.random.uuid() + suffix)
+  return path_join(harness.fs.workspace_temp_dir(), "harn-probe-" + harness.random.uuid() + suffix)
 }
 
 fn __probe_harn_binary(opts) -> string {

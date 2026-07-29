@@ -60,6 +60,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::config::{SecurityConfig, SecurityMode};
+use crate::stdlib::macros::harn_builtin;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -1140,61 +1141,61 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
 /// (the host, or `std/security::configure`) call it to push a resolved
 /// policy from their `[security]` config / feature flag.
 pub fn register_security_builtins(vm: &mut Vm) {
-    vm.register_builtin("security_policy", |args, _out| {
-        let Some(VmValue::Dict(config)) = args.first() else {
-            return Err(VmError::Runtime(
-                "security_policy: requires a config dict".to_string(),
-            ));
-        };
-        let policy = policy_from_dict(config);
-        let summary = policy_summary(&policy);
-        push_policy(policy);
-        Ok(summary)
-    });
+    vm.register_builtin_def(&SECURITY_POLICY_IMPL_DEF);
+    vm.register_builtin_def(&SECURITY_STAMP_DIRECTIVE_IMPL_DEF);
+    vm.register_builtin_def(&SECURITY_VERIFY_DIRECTIVE_IMPL_DEF);
+}
 
-    // Stamp a cross-agent / orchestration directive with verifiable provenance.
-    // The legitimate orchestrator calls this so its directives authenticate on
-    // the read path; a forged directive embedded in untrusted content cannot be
-    // stamped without the process key.
-    vm.register_builtin("security_stamp_directive", |args, _out| {
-        let Some(VmValue::String(content)) = args.first() else {
-            return Err(VmError::Runtime(
-                "security_stamp_directive: requires a content string".to_string(),
-            ));
-        };
-        let emitter = match args.get(1) {
-            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-            _ => "orchestrator".to_string(),
-        };
-        Ok(VmValue::String(arcstr::ArcStr::from(
-            provenance::stamp_directive(content.as_ref(), &emitter),
-        )))
-    });
+#[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@const=security-policy"], sig = "__security_policy(config: dict) -> dict", category = "security")]
+fn security_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(VmValue::Dict(config)) = args.first() else {
+        return Err(VmError::Runtime(
+            "security_policy: requires a config dict".to_string(),
+        ));
+    };
+    let policy = policy_from_dict(config);
+    let summary = policy_summary(&policy);
+    push_policy(policy);
+    Ok(summary)
+}
 
-    // Authenticate a directive-looking span on the read path. Returns
-    // `{status, forged, trust, emitter?}` so a pipeline / conformance test can
-    // observe the quarantine decision.
-    vm.register_builtin("security_verify_directive", |args, _out| {
-        let Some(VmValue::String(content)) = args.first() else {
-            return Err(VmError::Runtime(
-                "security_verify_directive: requires a content string".to_string(),
-            ));
-        };
-        let verdict = provenance::verify(content.as_ref());
-        let mut map = BTreeMap::new();
-        let (status, forged) = match &verdict {
-            DirectiveProvenance::NoDirective => ("none", false),
-            DirectiveProvenance::Authenticated { emitter } => {
-                map.put_str("emitter", emitter);
-                ("authenticated", false)
-            }
-            DirectiveProvenance::Forged => ("forged", true),
-        };
-        map.put_str("status", status);
-        map.insert("forged".to_string(), VmValue::Bool(forged));
-        map.put_str("trust", if forged { "untrusted" } else { "trusted" });
-        Ok(VmValue::dict(map))
-    });
+#[harn_builtin(exposure = "privileged_wire", effects = ["secret.read@const=directive-signing-key"], sig = "__security_stamp_directive(content: string, emitter?: string) -> string", category = "security")]
+fn security_stamp_directive_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(VmValue::String(content)) = args.first() else {
+        return Err(VmError::Runtime(
+            "security_stamp_directive: requires a content string".to_string(),
+        ));
+    };
+    let emitter = match args.get(1) {
+        Some(VmValue::String(emitter)) if !emitter.is_empty() => emitter.as_ref(),
+        _ => "orchestrator",
+    };
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        provenance::stamp_directive(content, emitter),
+    )))
+}
+
+#[harn_builtin(exposure = "privileged_wire", effects = ["secret.read@const=directive-signing-key"], sig = "__security_verify_directive(content: string) -> dict", category = "security")]
+fn security_verify_directive_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let Some(VmValue::String(content)) = args.first() else {
+        return Err(VmError::Runtime(
+            "security_verify_directive: requires a content string".to_string(),
+        ));
+    };
+    let verdict = provenance::verify(content);
+    let mut map = BTreeMap::new();
+    let (status, forged) = match &verdict {
+        DirectiveProvenance::NoDirective => ("none", false),
+        DirectiveProvenance::Authenticated { emitter } => {
+            map.put_str("emitter", emitter);
+            ("authenticated", false)
+        }
+        DirectiveProvenance::Forged => ("forged", true),
+    };
+    map.put_str("status", status);
+    map.insert("forged".to_string(), VmValue::Bool(forged));
+    map.put_str("trust", if forged { "untrusted" } else { "trusted" });
+    Ok(VmValue::dict(map))
 }
 
 #[cfg(test)]

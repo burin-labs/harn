@@ -6,5 +6,5 @@ pipeline default(harness: Harness, task) {
     }
     result = result + item
   }
-  harness.stdio.println(result)
+  harness.stdio.log(result)
 }

@@ -4,6 +4,6 @@ pipeline default(harness: Harness, task) {
     total = total + value
   }
   if total < 0 {
-    harness.stdio.println("unreachable")
+    harness.stdio.log("unreachable")
   }
 }

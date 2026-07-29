@@ -33,5 +33,5 @@ pipeline test(harness: Harness, task) {
   const m3 = m1.merging(m2)
   assert(m3.has("x"), ".merge preserves left keys")
   assert(m3.has("y"), ".merge includes right keys")
-  harness.stdio.println("dict merge: all tests passed")
+  harness.stdio.log("dict merge: all tests passed")
 }

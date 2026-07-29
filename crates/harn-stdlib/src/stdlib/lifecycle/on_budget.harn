@@ -46,6 +46,8 @@
  *
  * Tracking: harn#1914 (P-11), harn#1853 (epic).
  */
+import { agent_loop } from "std/agent/loop"
+
 fn __on_budget_snapshot(budget_state) {
   if budget_state == nil {
     return {}
@@ -227,10 +229,10 @@ fn __on_budget_replan_reminder(kind, iteration) {
  * @api_stability: experimental
  * @example: harness.agent.register_persona_hook("*", "OnBudgetThreshold", OnBudget.replan)
  */
-pub fn replan(_harness: Harness, harness, budget_state) {
+pub fn replan(harness: Harness, budget_state) {
   __on_budget_emit_audit(harness, "budget_replan", "replan", budget_state)
   const snapshot = __on_budget_snapshot(budget_state)
-  const src = __on_budget_session_id(harness, _harness, snapshot)
+  const src = __on_budget_session_id(harness, snapshot)
   if src == "" {
     throw {
       category: "budget_exceeded",
@@ -242,7 +244,7 @@ pub fn replan(_harness: Harness, harness, budget_state) {
     }
   }
   const iteration = __on_budget_int(snapshot?.iteration ?? snapshot?.n, 0)
-  const keep_first = __on_budget_replan_keep_first(harness, _harness, src, snapshot, iteration)
+  const keep_first = __on_budget_replan_keep_first(harness, src, snapshot, iteration)
   const dst = snapshot?.dst_session_id
   const forked = if dst != nil {
     harness.agent.fork_at(src, keep_first, to_string(dst))

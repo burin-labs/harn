@@ -2,5 +2,5 @@ import "lib/render_helper.harn"
 
 pipeline test(harness: Harness, task) {
   const text = load_greeting(harness)
-  harness.stdio.println(text)
+  harness.stdio.log(text)
 }

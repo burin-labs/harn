@@ -150,7 +150,7 @@ pipeline test_baseline_parser_requires_canonical_positive_integer(harness: Harne
 
 @test
 pipeline test_source_scope_includes_tests_benches_and_stdlib_only(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_source(harness, root, "crates/app/src/lib.rs", 1)
       write_source(harness, root, "crates/app/tests/integration.rs", 1)
       write_source(harness, root, "crates/app/benches/latency.rs", 1)
@@ -284,7 +284,7 @@ pipeline test_update_plan_is_sorted_and_only_tightens_existing_debt(harness: Har
 
 @test
 pipeline test_tightening_and_removal_apply_end_to_end(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       const big = "crates/example/src/big.rs"
       const small = "crates/example/src/small.rs"
       write_source(harness, root, big, 1600)
@@ -312,7 +312,7 @@ pipeline test_tightening_and_removal_apply_end_to_end(harness: Harness, task) {
 
 @test
 pipeline test_normal_update_never_exempts_or_records_growth(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       const old = "crates/example/src/old.rs"
       const added = "crates/example/src/added.rs"
       write_source(harness, root, old, 1601)
@@ -330,7 +330,7 @@ pipeline test_normal_update_never_exempts_or_records_growth(harness: Harness, ta
 
 @test
 pipeline test_deleted_source_leaves_stale_shard_until_update(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       const deleted = "crates/example/src/deleted.rs"
       write_baseline(harness, root, deleted, 1600)
       const report = check_source_file_lengths(harness, root)

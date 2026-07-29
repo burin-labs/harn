@@ -14,7 +14,7 @@ pipeline default(harness: Harness) {
   harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const result = on_finish_drain(harness, return_value)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("drain_result=" + to_string(result))
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)

@@ -12,7 +12,7 @@
  */
 pipeline main(harness: Harness, task) {
   const sid = harness.agent.open()
-  harness.stdio.println("opened session ${sid}")
+  harness.stdio.log("opened session ${sid}")
   const first = agent_loop(harness, "Remember that my favorite color is teal.",
     nil,
     {session_id: sid, provider: "mock", max_iterations: 2},
@@ -24,6 +24,6 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("turn 2 status=${second.status} len=${harness.agent.length(sid)}")
   const snap = harness.agent.snapshot(sid)
-  harness.stdio.println("final transcript has ${len(snap["messages"])} messages")
+  harness.stdio.log("final transcript has ${len(snap["messages"])} messages")
   harness.agent.close(sid)
 }

@@ -1,4 +1,6 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_prompt_overrides } from "std/agent/prompts"
+import { agent_turn } from "std/agent/turn"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
@@ -120,7 +122,7 @@ pipeline test(harness: Harness, task) {
         !contains(text_contract, "{\"name\": \"tool_name\""),
         "legacy JSON tool syntax removed",
       )
-      harness.stdio.println("agent_prompt_overrides_and_timestamps tests passed")
+      harness.stdio.log("agent_prompt_overrides_and_timestamps tests passed")
     },
   )
 }

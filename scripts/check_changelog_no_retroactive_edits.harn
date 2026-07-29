@@ -325,7 +325,7 @@ pub fn flag_value(args: list<string>, name: string) -> string? {
 }
 
 fn git(harness: Harness, args: list<string>) {
-  return harness.process.spawn_captured({cmd: "git", args: args})
+  return harness.process.run({cmd: "git", args: args})
 }
 
 /**

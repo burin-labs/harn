@@ -4,10 +4,10 @@ pipeline test(harness: Harness, task) {
     Err(message)
   }
   const success = Result.Ok(42)
-  harness.stdio.println(success)
-  harness.stdio.println(success.variant)
+  harness.stdio.log(success)
+  harness.stdio.log(success.variant)
   const failure = Result.Err("something went wrong")
-  harness.stdio.println(failure)
-  harness.stdio.println(failure.variant)
-  harness.stdio.println(failure.fields)
+  harness.stdio.log(failure)
+  harness.stdio.log(failure.variant)
+  harness.stdio.log(failure.fields)
 }

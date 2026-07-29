@@ -8,5 +8,5 @@ pipeline default(harness: Harness, task) {
       result = result + to_string(i) + j + " "
     }
   }
-  harness.stdio.println(result)
+  harness.stdio.log(result)
 }

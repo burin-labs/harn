@@ -1,6 +1,6 @@
 import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
 
-fn gated(gate, value) {
+fn gated(harness: Harness, gate, value) {
   return { ->
     harness.runtime.receive(gate)
     return value
@@ -16,7 +16,7 @@ fn drop_oldest_case(harness: Harness, bp) {
   const pool = pool_create(
     {name: "bp-drop-oldest", max_concurrent: 1, backpressure: bp.queue(1, "drop_oldest")},
   )
-  const warmup = pool.submit(gated(gate, "warmup"))
+  const warmup = pool.submit(gated(harness, gate, "warmup"))
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
   const saturated = pool.snapshot()
@@ -36,7 +36,7 @@ fn drop_newest_case(harness: Harness, bp) {
   const pool = pool_create(
     {name: "bp-drop-newest", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
   )
-  const warmup = pool.submit(gated(gate, "warmup"))
+  const warmup = pool.submit(gated(harness, gate, "warmup"))
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
   const saturated = pool.snapshot()
@@ -56,7 +56,7 @@ fn ring_buffer_case(harness: Harness, bp) {
   const pool = pool_create(
     {name: "bp-ring-buffer", max_concurrent: 1, backpressure: bp.ring_buffer(1)},
   )
-  const warmup = pool.submit(gated(gate, "warmup"))
+  const warmup = pool.submit(gated(harness, gate, "warmup"))
   const old = pool.submit(constant("old"))
   const newest = pool.submit(constant("newest"))
   const saturated = pool.snapshot()
@@ -76,7 +76,7 @@ fn fail_submitter_case(harness: Harness, bp) {
   const pool = pool_create(
     {name: "bp-fail-submitter", max_concurrent: 1, backpressure: bp.queue(1, "fail_submitter")},
   )
-  const warmup = pool.submit(gated(gate, "warmup"))
+  const warmup = pool.submit(gated(harness, gate, "warmup"))
   const queued = pool.submit(constant("queued"))
   const failed = try {
     pool.submit(constant("overflow"))
@@ -92,7 +92,7 @@ fn fail_submitter_case(harness: Harness, bp) {
 fn fail_fast_case(harness: Harness, bp) {
   const gate = harness.runtime.channel(nil, 1)
   const pool = pool_create({name: "bp-fail-fast", max_concurrent: 1, backpressure: bp.fail_fast})
-  const warmup = pool.submit(gated(gate, "warmup"))
+  const warmup = pool.submit(gated(harness, gate, "warmup"))
   const failed = try {
     pool.submit(constant("overflow"))
   }
@@ -111,7 +111,7 @@ fn block_submitter_case(harness: Harness, bp) {
   const pool = pool_create(
     {name: "bp-block-submitter", max_concurrent: 1, backpressure: bp.queue(1)},
   )
-  const warmup = pool.submit(gated(gate, "warmup"))
+  const warmup = pool.submit(gated(harness, gate, "warmup"))
   const queued = pool.submit(constant("queued"))
   const submitter = spawn {
     harness.runtime.send(started, "started")
@@ -133,7 +133,9 @@ fn block_submitter_case(harness: Harness, bp) {
 fn audit_case(harness: Harness) {
   // Filter to drop receipts so the assertion ignores the `pool_submit`
   // and `pool_dequeue` receipts emitted on the same topic by PL-06.
-  const stream = harness.obs.event_log_subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
+  const stream = harness.obs.event_log_subscribe(
+    {topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"},
+  )
   const first = stream.next().value
   const second = stream.next().value
   const third = stream.next().value

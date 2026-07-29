@@ -15,9 +15,9 @@ pipeline test(harness: Harness, task) {
     }
     return "is string: ${x}"
   }
-  harness.stdio.println(describe("hello"))
-  harness.stdio.println(describe(42))
-  harness.stdio.println(describe(nil))
-  harness.stdio.println(not_string(99))
-  harness.stdio.println(not_string("hi"))
+  harness.stdio.log(describe("hello"))
+  harness.stdio.log(describe(42))
+  harness.stdio.log(describe(nil))
+  harness.stdio.log(not_string(99))
+  harness.stdio.log(not_string("hi"))
 }

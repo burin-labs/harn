@@ -24,8 +24,8 @@ pipeline test(harness: Harness, task) {
       policy: {tool_arg_constraints: [{tool: "list_directory", arg_key: "path", arg_patterns: ["src/*"]}]},
     },
   )
-  harness.stdio.println(result?.tools?.rejected[0])
-  harness.stdio.println(
+  harness.stdio.log(result?.tools?.rejected[0])
+  harness.stdio.log(
     json_stringify(transcript_messages(result?.transcript)).contains("is outside your allowed scope"),
   )
 }

@@ -90,7 +90,7 @@ pipeline test_persona_prompt_eval_rubric(harness: Harness, _task) {
       ),
     ],
     { ->
-      const receipt = persona_compile_prompt(harness,  harness, "Create a reply digest every four hours in UTC.",
+      const receipt = persona_compile_prompt(harness, "Create a reply digest every four hours in UTC.",
         {provider: "mock", name_override: "reply_digest"},
         PROVIDERS,
       )
@@ -149,7 +149,7 @@ pipeline test_persona_prompt_eval_rubric(harness: Harness, _task) {
   assert_eq(len(pack.split["meter-tune"]), 6)
   assert_eq(len(pack.split["meter-holdout"]), 6)
   assert_eq(len(unique(pack.split["meter-tune"] + pack.split["meter-holdout"])), 12)
-  const projected = persona_prompt_eval_manifest(harness,  harness, pack,
+  const projected = persona_prompt_eval_manifest(harness, pack,
     "meter-holdout",
     5,
     "mock",
@@ -227,5 +227,5 @@ pipeline test_persona_prompt_eval_rubric(harness: Harness, _task) {
   assert_eq(stale_harness.gate_evaluable, false)
   const ad_hoc_split = comparison(baseline, treatment, "ad-hoc")
   assert_eq(ad_hoc_split.gate_evaluable, false)
-  harness.stdio.println("persona prompt eval rubric ok")
+  harness.stdio.log("persona prompt eval rubric ok")
 }

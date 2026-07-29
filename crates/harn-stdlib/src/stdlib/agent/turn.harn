@@ -46,7 +46,7 @@ fn __agent_turn_options(harness: Harness, options) {
   if !contains(opts.keys(), "loop_until_done") {
     opts = opts + {loop_until_done: true}
   }
-  const loop_opts = agent_loop_options(opts)
+  const loop_opts = agent_loop_options(harness, opts)
   if loop_opts?.done_sentinel == nil && !__agent_turn_native_natural_completion(loop_opts) {
     throw "agent_turn: done_sentinel is required for non-native loops; pass a non-empty string or omit it"
   }

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { read_jsonl } from "std/jsonl"
 import {
@@ -81,7 +82,7 @@ pipeline default(harness: Harness) {
   if harness.fs.exists(local_path) {
     harness.fs.delete(local_path)
   }
-  const local_captured = agent_capture_events(harness,  harness, local_session,
+  const local_captured = agent_capture_events(harness, local_session,
     fn() { return run_receipt_agent(harness, local_session, {sink: "local", redact: ["secret"]}) },
   )
   const local_result = local_captured.result
@@ -122,7 +123,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("reminder_role_hint=" + to_string(reminder_lifecycle[0]?.role_hint ?? ""))
   harness.stdio.println("reminder_tag=" + to_string(reminder_lifecycle[0]?.tags[0] ?? ""))
   const cloud_session = "receipt-cloud-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, cloud_session,
+  const captured = agent_capture_events(harness, cloud_session,
     fn() { return run_receipt_agent(harness, cloud_session, {sink: "cloud", redact: ["secret"]}) },
   )
   const receipt_events = captured.events.filter(

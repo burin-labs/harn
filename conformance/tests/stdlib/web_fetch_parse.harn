@@ -2,8 +2,8 @@ import { mem_cache } from "std/cache"
 import { web_fetch, web_parse_html } from "std/web"
 
 pipeline test(harness: Harness, task) {
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://example.com/article",
     {
@@ -38,7 +38,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   const store = mem_cache({namespace: "web-fetch-parse"})
-  const fetched = web_fetch(harness,  harness, "https://example.com/article",
+  const fetched = web_fetch(harness, "https://example.com/article",
     {store: store, fetched_at: "fixture-time"},
   )
   assert_eq(fetched.status, 200)

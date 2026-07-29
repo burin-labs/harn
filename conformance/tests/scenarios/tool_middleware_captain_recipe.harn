@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Captain-shaped middleware stack: composes audit + telemetry + summary
  * + required-reason + handoff + rate-limit + dry-run over a registry of
@@ -17,12 +18,6 @@ import {
   with_telemetry,
 } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
-
-const audit_records = harness.runtime.atomic(0)
-
-const telemetry_records = harness.runtime.atomic(0)
-
-const handoff_records = harness.runtime.atomic(0)
 
 /**
  * Tool schemas omit `reason` deliberately. with_required_reason adds it
@@ -80,8 +75,12 @@ fn tools() {
 }
 
 pipeline default(harness: Harness) {
+  const audit_records = harness.runtime.atomic(0)
+  const telemetry_records = harness.runtime.atomic(0)
+  const handoff_records = harness.runtime.atomic(0)
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {
         tool_calls: [
           {id: "t1", name: "read", arguments: {path: "/tmp/a", reason: "inspect target file"}},
@@ -93,12 +92,18 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const reason_mw = with_required_reason()
-      const stack = compose_tool_callers(harness,  harness, [
-          with_audit_log(harness,  harness, { _record ->
+      const stack = compose_tool_callers(
+        harness,
+        [
+          with_audit_log(
+            harness,
+            { _record ->
               let _ = harness.runtime.atomic_add(audit_records, 1)
             },
           ),
-          with_telemetry(harness, { _record ->
+          with_telemetry(
+            harness,
+            { _record ->
               let _ = harness.runtime.atomic_add(telemetry_records, 1)
             },
           ),
@@ -111,12 +116,14 @@ pipeline default(harness: Harness) {
               },
             },
           ),
-          with_rate_limit({max_calls: 10}),
+          with_rate_limit(harness, {max_calls: 10}),
           with_dry_run({only: ["edit"], message: "preview"}),
         ],
       )
       const registry = tools()
-      const result = agent_loop(harness, "polish + handoff",
+      const result = agent_loop(
+        harness,
+        "polish + handoff",
         nil,
         {
           provider: "mock",

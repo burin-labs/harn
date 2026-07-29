@@ -181,7 +181,7 @@ fn __render_main_harn(package_name: string) -> string {
     + "  if !result.ok {\n"
     + "    throw result.error?.message ?? \"tool call failed\"\n"
     + "  }\n"
-    + "  harness.stdio.println(result.rendered_result)\n"
+    + "  harness.stdio.log(result.rendered_result)\n"
     + "}\n"
 }
 

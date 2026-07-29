@@ -18,7 +18,7 @@ pub fn __progress_nudge_text(depth, has_tools, paradigm, made_tool_calls = false
  * @api_stability: experimental
  */
 pub fn agent_loop(harness: Harness, message, system_prompt = nil, options = nil) {
-  let opts = agent_loop_options(agent_progress_apply_options(harness, options))
+  let opts = agent_loop_options(harness, agent_progress_apply_options(harness, options))
   opts = opts + {tools: agent_lifecycle_tools(opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {
     opts = opts + {_primary_system: system_prompt}

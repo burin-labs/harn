@@ -3,5 +3,5 @@ pipeline default(harness: Harness, task) {
     "What is 2 + 2? Answer with just the number.",
     "You are a helpful assistant. Be concise.",
   )
-  harness.stdio.println("LLM says: ${response}")
+  harness.stdio.log("LLM says: ${response}")
 }

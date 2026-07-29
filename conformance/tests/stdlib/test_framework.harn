@@ -3,5 +3,5 @@ pipeline test(harness: Harness, task) {
   const result = harness.llm.call("hello world", nil, {provider: "mock"})
   assert(contains(result.text, "Mock"))
   assert(contains(result.text, "2-word prompt"))
-  harness.stdio.println("mock llm works")
+  harness.stdio.log("mock llm works")
 }

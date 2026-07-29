@@ -1,14 +1,18 @@
 import "std/agent_state"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-agent-state-" + harness.random.uuid())
-  const handle = agent_state_init(root, {session_id: "roundtrip-session", writer_id: "writer-a"})
-  harness.stdio.println(handle._type == "state_handle")
-  harness.stdio.println(handle.session_id == "roundtrip-session")
-  agent_state_write(handle, "ledger.md", "hello state")
-  agent_state_write(handle, "evidence/b.json", "{\"rank\":2}")
-  agent_state_write(handle, "evidence/a.json", "{\"rank\":1}")
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-agent-state-" + harness.random.uuid())
+  const handle = agent_state_init(
+    harness.agent,
+    root,
+    {session_id: "roundtrip-session", writer_id: "writer-a"},
+  )
+  harness.stdio.println(type_of(handle) == "resource")
+  agent_state_write(harness.agent, handle, "ledger.md", "hello state")
+  agent_state_write(harness.agent, handle, "evidence/b.json", "{\"rank\":2}")
+  agent_state_write(harness.agent, handle, "evidence/a.json", "{\"rank\":1}")
   agent_state_handoff(
+    harness.agent,
     handle,
     {
       source_persona: "merge_captain",
@@ -26,13 +30,13 @@ pipeline default(harness: Harness) {
       confidence: 0.61,
     },
   )
-  harness.stdio.println(agent_state_read(handle, "ledger.md"))
-  harness.stdio.println(json_stringify(agent_state_list(handle)))
-  const handoff = json_parse(agent_state_read(handle, agent_state_handoff_key()))
+  harness.stdio.println(agent_state_read(harness.agent, handle, "ledger.md"))
+  harness.stdio.println(json_stringify(agent_state_list(harness.agent, handle)))
+  const handoff = json_parse(agent_state_read(harness.agent, handle, agent_state_handoff_key()))
   harness.stdio.println(handoff.handoff.target_persona_or_human.kind)
   harness.stdio.println(handoff.key == agent_state_handoff_key())
   harness.stdio.println(handoff.handoff.allowed_side_effects[0] == "publish_release_notes")
-  agent_state_delete(handle, "ledger.md")
-  harness.stdio.println(agent_state_read(handle, "ledger.md") == nil)
+  agent_state_delete(harness.agent, handle, "ledger.md")
+  harness.stdio.println(agent_state_read(harness.agent, handle, "ledger.md") == nil)
   harness.fs.delete(root)
 }

@@ -831,14 +831,14 @@ pub fn with_governance(harness: Harness, opts: dict, config: dict) -> dict {
  * agent_governed_preset(harness, kind, options, governance) is `agent_preset` with a
  * governor / detector spec folded in, so a durable persona can carry its pace
  * governor and detector rows by name. Equivalent to
- * `with_governance(harness, agent_preset(kind, options), governance)`.
+ * `with_governance(harness, agent_preset(harness, kind, options), governance)`.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
 pub fn agent_governed_preset(harness: Harness, kind, options = nil, governance = {}) -> dict {
-  return with_governance(harness, agent_preset(kind, options), governance)
+  return with_governance(harness, agent_preset(harness, kind, options), governance)
 }
 
 /**

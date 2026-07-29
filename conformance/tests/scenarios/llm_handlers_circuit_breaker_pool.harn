@@ -3,7 +3,7 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   const raw_handler = fn(call) { return harness.llm.call(call.prompt, call?.system, call.opts) }
-  const pooled = with_circuit_breaker(raw_handler, {threshold: 2, reset_ms: 60000})
+  const pooled = with_circuit_breaker(harness, raw_handler, {threshold: 2, reset_ms: 60000})
   const bad_call = {prompt: "bad route", system: nil, opts: {provider: "mock", model: "bad-model"}}
   const good_call = {
     prompt: "good route",
@@ -11,7 +11,8 @@ pipeline default(harness: Harness) {
     opts: {provider: "mock", model: "good-model"},
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {error: {category: "server_error", message: "bad model failed once"}},
       {error: {category: "server_error", message: "bad model failed twice"}},
       llm_text("healthy"),
@@ -41,6 +42,7 @@ pipeline default(harness: Harness) {
       }
       harness.stdio.println(len(harness.llm.mock_calls()))
       const shared = with_circuit_breaker(
+        harness,
         raw_handler,
         {name: "shared-model-circuit", threshold: 1, reset_ms: 60000},
       )
@@ -57,6 +59,7 @@ pipeline default(harness: Harness) {
       }
       harness.stdio.println(len(harness.llm.mock_calls()))
       const unset = with_circuit_breaker(
+        harness,
         fn(_call) {
           throw "missing route failed"
         },

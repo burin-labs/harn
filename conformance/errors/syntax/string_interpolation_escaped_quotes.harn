@@ -6,5 +6,5 @@
  */
 pipeline test(harness: Harness, task) {
   const x = nil
-  harness.stdio.println("value=${x ?? \"y\"}")
+  harness.stdio.log("value=${x ?? \"y\"}")
 }

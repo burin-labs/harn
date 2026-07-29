@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { AgentLoopOptions } from "std/agent/options"
 import { read_jsonl } from "std/jsonl"
 import { with_llm_script } from "std/testing"
@@ -7,7 +8,7 @@ pipeline main(harness: Harness) {
     harness.llm, [{error: {category: "transient_network", message: "connection reset by peer"}}],
     { ->
       const transcript_dir = path_join(
-        harness.fs.temp_dir(),
+        harness.fs.workspace_temp_dir(),
         "harn-provider-call-error-telemetry-" + harness.random.uuid(),
       )
       const opts: AgentLoopOptions = {

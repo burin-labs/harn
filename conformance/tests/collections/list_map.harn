@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
   const nums = [1, 2, 3]
   const doubled = nums.map({ x -> x * 2 })
-  harness.stdio.println(doubled)
+  harness.stdio.log(doubled)
 }

@@ -1,0 +1,26 @@
+fn main(harness: Harness) {
+  let json_rejected = false
+  try {
+    json_stringify({authority: harness.fs})
+  } catch (_error) {
+    json_rejected = true
+  }
+
+  let store_rejected = false
+  try {
+    harness.runtime.store_set("authority", {root: harness})
+  } catch (_error) {
+    store_rejected = true
+  }
+
+  let checkpoint_rejected = false
+  try {
+    harness.runtime.checkpoint("authority", harness.net)
+  } catch (_error) {
+    checkpoint_rejected = true
+  }
+
+  harness.stdio.println(json_rejected)
+  harness.stdio.println(store_rejected)
+  harness.stdio.println(checkpoint_rejected)
+}

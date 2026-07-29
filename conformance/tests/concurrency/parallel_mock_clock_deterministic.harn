@@ -8,16 +8,16 @@
  * actually sleeping.
  */
 pipeline test(harness: Harness, task) {
-  mock_time(1700000000000)
+  harness.testing.clock_set(1700000000000)
   const order = harness.runtime.atomic(0)
   const results = parallel each [10, 20, 30, 40] with { max_concurrent: 2 } { n ->
     harness.clock.sleep_ms(n)
     harness.runtime.yield_now()
     return harness.runtime.atomic_add(order, 1) * 1000 + n
   }
-  harness.stdio.println(len(results))
+  harness.stdio.log(len(results))
   // Mock time advanced by the largest sleep observed, not the sum.
   const elapsed_ms = harness.clock.now_ms() - 1700000000000
-  harness.stdio.println(elapsed_ms >= 40 && elapsed_ms <= 100)
-  unmock_time()
+  harness.stdio.log(elapsed_ms >= 40 && elapsed_ms <= 100)
+  harness.testing.clock_reset()
 }

@@ -8,7 +8,7 @@
  * and a machine-readable summary report.
  */
 pipeline default(harness: Harness, task) {
-  harness.stdio.println("Starting data pipeline")
+  harness.stdio.log("Starting data pipeline")
   const raw = """
 [
   {"id": "a1", "name": "Alpha", "score": 91, "team": "red"},

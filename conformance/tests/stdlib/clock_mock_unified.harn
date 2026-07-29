@@ -11,7 +11,7 @@
  * two different timing models depending on which builtin they used.
  */
 pipeline test(harness: Harness, task) {
-  mock_time(1700000000000)
+  harness.testing.clock_set(1700000000000)
   const start_wall = harness.clock.now_ms()
   const start_mono = harness.clock.monotonic_ms()
   const start_ts = harness.clock.timestamp()
@@ -26,12 +26,12 @@ pipeline test(harness: Harness, task) {
   const end_mono = harness.clock.monotonic_ms()
   const end_ts = harness.clock.timestamp()
   const end_elapsed = harness.clock.elapsed()
-  harness.stdio.println(end_wall - start_wall)
-  harness.stdio.println(end_mono - start_mono)
+  harness.stdio.log(end_wall - start_wall)
+  harness.stdio.log(end_mono - start_mono)
   // timestamp() returns float seconds; assert it advanced by the same
   // 175 ms (within fp rounding) rather than logging a flaky derived ms.
   const ts_delta_ms = end_ts * 1000.0 - start_ts * 1000.0
-  harness.stdio.println(ts_delta_ms > 174.0 && ts_delta_ms < 176.0)
-  harness.stdio.println(end_elapsed - start_elapsed)
-  unmock_time()
+  harness.stdio.log(ts_delta_ms > 174.0 && ts_delta_ms < 176.0)
+  harness.stdio.log(end_elapsed - start_elapsed)
+  harness.testing.clock_reset()
 }

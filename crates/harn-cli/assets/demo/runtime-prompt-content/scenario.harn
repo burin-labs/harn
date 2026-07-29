@@ -6,7 +6,7 @@ import "std/runtime"
  * the same `runtime.prompt_content` boundary used by an attached ACP host.
  */
 pipeline default(harness: Harness, _task) {
-  host_mock(
+  harness.testing.respond(
     "runtime",
     "prompt_content",
     [

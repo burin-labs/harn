@@ -54,9 +54,9 @@ pipeline main(harness: Harness) {
           max_iterations: 3,
         },
       )
-      const _suspended_keep = wait_agent(handle_keep)
-      const _resumed_keep = resume_agent(handle_keep, "operator says go", true)
-      const done_keep = wait_agent(handle_keep)
+      const _suspended_keep = wait_agent(harness.agent, handle_keep)
+      const _resumed_keep = resume_agent(harness.agent, handle_keep, "operator says go", true)
+      const done_keep = wait_agent(harness.agent, handle_keep)
       const kept_calls = harness.llm.mock_calls()
       const kept_msgs = kept_calls[1].messages
       const kept_resumed_tail = kept_msgs[len(kept_msgs) - 1].content
@@ -82,9 +82,9 @@ pipeline main(harness: Harness) {
           max_iterations: 3,
         },
       )
-      const _suspended_reset = wait_agent(handle_reset)
-      const _resumed_reset = resume_agent(handle_reset, "operator says reset", false)
-      const done_reset = wait_agent(handle_reset)
+      const _suspended_reset = wait_agent(harness.agent, handle_reset)
+      const _resumed_reset = resume_agent(harness.agent, handle_reset, "operator says reset", false)
+      const done_reset = wait_agent(harness.agent, handle_reset)
       const reset_calls = harness.llm.mock_calls()
       const reset_msgs = reset_calls[3].messages
       const reset_resumed_tail = reset_msgs[len(reset_msgs) - 1].content

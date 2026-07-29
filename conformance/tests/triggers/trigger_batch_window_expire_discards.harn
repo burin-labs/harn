@@ -10,10 +10,10 @@ fn handle_batch(harness: Harness, event) {
 }
 
 pipeline test(harness: Harness, task) {
-  mock_time(2000000)
+  harness.testing.clock_set(2000000)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const _ = harness.runtime.trigger_register(
     {
@@ -37,9 +37,9 @@ pipeline test(harness: Harness, task) {
   const _ = harness.channels.append("batch.discard.input", {seq: 1})
   const _ = harness.channels.append("batch.discard.input", {seq: 2})
   const _ = harness.channels.append("batch.discard.input", {seq: 3})
-  const _ = advance_time(60000)
-  flush_trigger_aggregations()
+  const _ = harness.testing.clock_advance(60000)
+  harness.channels.flush_aggregations()
   const fired = harness.channels.events("batch.discard.fired")
   harness.stdio.println("after-window:" + to_string(len(fired)))
-  unmock_time()
+  harness.testing.clock_reset()
 }

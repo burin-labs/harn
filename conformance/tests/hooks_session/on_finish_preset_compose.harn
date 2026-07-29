@@ -21,7 +21,7 @@ pipeline default(harness: Harness) {
     { harness, return_value ->
       harness.handoff_to("seed-pipeline", {note: "compose test"})
       const result = preset(harness, return_value)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind_0=" + audits[0].kind)
       harness.stdio.println("result_status=" + result.status)
@@ -29,7 +29,7 @@ pipeline default(harness: Harness) {
       const final_state = harness.unsettled_state()
       harness.stdio.println("envelopes=" + to_string(len(final_state.partial_handoffs)))
       const _abandon = on_finish_abandon(harness, return_value)
-      const trailing = lifecycle_audit_log_take()
+      const trailing = lifecycle_audit_log_take(harness)
       harness.stdio.println("abandon_kind=" + trailing[0].kind)
       return return_value
     },

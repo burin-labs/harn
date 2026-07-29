@@ -1269,6 +1269,16 @@ mod tests {
     }
 
     #[test]
+    fn validator_authority_cannot_be_forged_with_a_string() {
+        let error = call_result(
+            "__json_stream_validator_feed",
+            vec![string("json_stream_validator:1"), string("{}")],
+        )
+        .expect_err("script-visible strings must not act as validator authority");
+        assert!(error.to_string().contains("expected validator handle"));
+    }
+
+    #[test]
     fn stream_validator_rejects_cyclic_schema_at_create() {
         reset_json_stream_state();
         let schema = dict([("$ref", string("#"))]);

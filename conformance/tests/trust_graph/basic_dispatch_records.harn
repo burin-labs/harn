@@ -1,6 +1,6 @@
 import "std/triggers"
 
-fn handle_issue(event: TriggerEvent) -> dict {
+fn handle_issue(harness: Harness, event: TriggerEvent) -> dict {
   const context = harness.runtime.handler_context()
   return {
     agent: context?.agent,
@@ -14,7 +14,7 @@ fn handle_issue(event: TriggerEvent) -> dict {
 pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const agent_id = "github-triage-bot-" + unique
   const handle: TriggerHandle = harness.runtime.trigger_register(
@@ -39,7 +39,9 @@ pipeline test(harness: Harness, task) {
     handle,
     {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  const records: list<TrustRecord> = harness.runtime.trust_query({agent: agent_id, action: "webhook.issue.opened"})
+  const records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: agent_id, action: "webhook.issue.opened"},
+  )
   harness.stdio.println(fired.status == "dispatched" && fired.error == nil)
   harness.stdio.println(fired.result?.agent == agent_id)
   harness.stdio.println(fired.result?.action == "webhook.issue.opened")

@@ -1,8 +1,8 @@
 pipeline test(harness: Harness, task) {
   const a: string? = "hello"
-  harness.stdio.println(a)
+  harness.stdio.log(a)
   const b: string? = nil
-  harness.stdio.println(b)
+  harness.stdio.log(b)
   const c: int | float = 3.14
-  harness.stdio.println(c)
+  harness.stdio.log(c)
 }

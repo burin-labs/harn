@@ -15,7 +15,7 @@ pipeline default(harness: Harness) {
       ),
     ],
     { ->
-      const result = best_of_n(harness,  harness, "rate these",
+      const result = best_of_n(harness, "rate these",
         "",
         {
           n: 4,

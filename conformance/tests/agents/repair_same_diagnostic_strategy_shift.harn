@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { agent_session_messages } from "std/agent/state"
 import "std/collections"
@@ -53,7 +54,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "repair-strategy-shift-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Make the failing test pass.",
           nil,
           {

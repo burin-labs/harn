@@ -1,4 +1,3 @@
-import { clear_host_mocks, mock_host_response } from "std/testing"
 import {
   workflow_classify_stage_outcome,
   workflow_evaluate_condition,
@@ -92,8 +91,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(static_escalation.result.text)
   harness.stdio.println(static_escalation.artifacts[0].data.queue)
   harness.stdio.println(static_escalation.branch)
-  clear_host_mocks()
-  mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
+  harness.testing.clear()
+  harness.testing.respond("interaction", "approval_response", {approved: true, reviewer: "lead", reason: "ready"})
   const static_gate = workflow_prepare_static_stage(harness, 
     {
       node_id: "gate",

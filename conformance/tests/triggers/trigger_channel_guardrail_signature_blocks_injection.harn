@@ -9,7 +9,7 @@ import { prompt_injection_scanner } from "std/channel_guardrails"
 pipeline default(harness: Harness) {
   harness.obs.pipeline_lifecycle_audit_log_take()
   harness.channels.guardrail_clear()
-  const id = prompt_injection_scanner({id: "scan-1"})
+  const id = prompt_injection_scanner(harness, {id: "scan-1"})
   harness.stdio.println(id)
   /* Adversarial payload — the regex sweep flags
    * "ignore previous instructions" and short-circuits before append. */

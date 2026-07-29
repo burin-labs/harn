@@ -1,4 +1,4 @@
 pipeline default(harness: Harness, task) {
   const _ = 1
-  harness.stdio.println(_)
+  harness.stdio.log(_)
 }

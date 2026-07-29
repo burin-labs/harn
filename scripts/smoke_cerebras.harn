@@ -29,7 +29,7 @@ pipeline default(harness: Harness, args) {
     )
     const elapsed = harness.clock.monotonic_ms() - start
     samples = samples + [elapsed]
-    harness.stdio.println("[${i + 1}/${iterations}] ${elapsed}ms — ${r.text}")
+    harness.stdio.log("[${i + 1}/${iterations}] ${elapsed}ms — ${r.text}")
   }
   const measured = samples[warmup:iterations]
   const measured_count = iterations - warmup
@@ -39,9 +39,9 @@ pipeline default(harness: Harness, args) {
   const p50 = sorted[p50_index]
   const p99 = sorted[p99_index]
   const mean = sorted.sum() / measured_count
-  harness.stdio.println("")
-  harness.stdio.println("Cerebras latency baseline — model=${model} iterations=${iterations} warmup=${warmup}")
-  harness.stdio.println("  p50  : ${p50}ms")
-  harness.stdio.println("  p99  : ${p99}ms")
-  harness.stdio.println("  mean : ${mean}ms")
+  harness.stdio.log("")
+  harness.stdio.log("Cerebras latency baseline — model=${model} iterations=${iterations} warmup=${warmup}")
+  harness.stdio.log("  p50  : ${p50}ms")
+  harness.stdio.log("  p99  : ${p99}ms")
+  harness.stdio.log("  mean : ${mean}ms")
 }

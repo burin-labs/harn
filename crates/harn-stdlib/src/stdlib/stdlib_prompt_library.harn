@@ -76,7 +76,7 @@ fn __front_matter_fragment(harness: Harness, path, text) {
   const meta_text = substring(rest, 0, marker)
   const body = substring(rest, marker + len("\n---\n"))
   const meta = toml_parse(meta_text)
-  return __fragment_from_config(harness,  harness,
+  return __fragment_from_config(harness,
     meta + {body: body, path: path, source_path: path},
     dirname(path),
   )
@@ -566,7 +566,7 @@ pub fn prompt_library_suggest(library, ctx = nil) {
 pub fn prompt_library_api(harness: Harness, library) {
   return {
     inject: fn(id, bindings = nil) { return prompt_library_inject(harness, library, id, bindings) },
-    inject_cluster: fn(filters = nil, bindings = nil) { return prompt_library_inject_cluster(harness, 
+    inject_cluster: fn(filters = nil, bindings = nil) { return prompt_library_inject_cluster(harness,
       library,
       filters,
       bindings,

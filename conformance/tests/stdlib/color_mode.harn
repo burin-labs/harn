@@ -1,9 +1,9 @@
 /** Verifies set_color_mode controls ANSI emission. */
 pipeline test(harness: Harness, task) {
-  set_color_mode("never")
-  harness.stdio.println(json_stringify(color("hi", "red")))
-  harness.stdio.println(json_stringify(bold("hi")))
-  set_color_mode("always")
-  harness.stdio.println(json_stringify(color("hi", "red")))
-  harness.stdio.println(json_stringify(bold("hi")))
+  harness.term.set_color_mode("never")
+  harness.stdio.log(json_stringify(color("hi", "red")))
+  harness.stdio.log(json_stringify(bold("hi")))
+  harness.term.set_color_mode("always")
+  harness.stdio.log(json_stringify(color("hi", "red")))
+  harness.stdio.log(json_stringify(bold("hi")))
 }

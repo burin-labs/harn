@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { AgentLoopOptions } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
@@ -58,7 +59,7 @@ pipeline default(harness: Harness) {
           max_feedback: 1,
         },
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Edit the target file after inspecting it.", nil, opts) },
       )
       const receipts = events_of(captured.events, "typed_checkpoint").filter(

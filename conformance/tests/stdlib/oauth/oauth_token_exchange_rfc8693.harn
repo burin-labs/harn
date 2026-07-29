@@ -15,16 +15,18 @@ pipeline test(harness: Harness, task) {
       default_scopes: [],
     },
   )
-  const cli = client(harness,  harness, provider,
+  const cli = client(
+    harness,
+    provider,
     {
       client_id: "rs08",
       client_secret: "long-secure-random-secret",
-      storage: memory(),
+      storage: memory(harness.auth),
       token_auth_method: "client_secret_basic",
     },
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://as.example.com/as/token.oauth2",
     {
@@ -50,7 +52,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(exchanged.issued_token_type, token_type("jwt"), "issued token type returned")
   assert_eq(exchanged.token_exchange_mode, "delegation", "actor token selects delegation")
   assert_eq(exchanged.scopes, ["status", "feed"], "response scopes split")
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "one token-exchange request")
   assert_eq(calls[0].method, "POST", "token exchange uses POST")
   assert(starts_with(calls[0].headers.authorization, "Basic "), "client_secret_basic auth header")
@@ -92,5 +94,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(logged.payload.mode, "delegation", "audit mode")
   assert_eq(logged.payload.next.has_access_token, true, "audit records access presence")
   assert(logged.payload.next?.access_token == nil, "audit does not leak exchanged token")
-  harness.stdio.println("oauth token exchange rfc8693 ok")
+  harness.stdio.log("oauth token exchange rfc8693 ok")
 }

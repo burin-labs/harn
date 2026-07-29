@@ -185,7 +185,7 @@ pipeline test_postconditions_are_verified(harness: Harness, task) {
 }
 
 pipeline test_real_checkout_ignores_stale_fetch_configuration(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-git-checkout-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-git-checkout-" + harness.random.uuid())
   const seed = path_join(root, "seed")
   const remote = path_join(root, "remote.git")
   const consumer = path_join(root, "consumer")

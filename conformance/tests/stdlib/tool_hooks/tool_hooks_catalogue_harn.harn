@@ -21,7 +21,7 @@ fn probe_with_rewrite(harness: Harness, reg, cmd) {
 }
 
 pipeline default(harness: Harness) {
-  const reg = tool_hooks_seed_registry(["harn"])
+  const reg = tool_hooks_seed_registry(harness, ["harn"])
   /* Bare `cargo run --bin harn` fires, rewrite inserts --quiet. */
   probe_with_rewrite(harness, reg, "cargo run --bin harn -- run script.harn")
   /* Already-quiet calls are skipped. */

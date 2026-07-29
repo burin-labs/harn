@@ -1,7 +1,7 @@
 import "std/postgres"
 
 pipeline default(harness: Harness) {
-  const db = pg_mock_pool(
+  const db = harness.testing.pg_mock_pool(
     [
       {
         sql: "select id, payload from receipts where tenant_id = $1",

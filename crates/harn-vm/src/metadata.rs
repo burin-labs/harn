@@ -823,7 +823,7 @@ fn metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let mut data = BTreeMap::new();
     if let VmValue::Dict(dict) = &data_val {
         for (k, v) in dict.iter() {
-            data.insert(k.to_string(), vm_to_json(v));
+            data.insert(k.to_string(), vm_to_json(v)?);
         }
     }
 
@@ -838,20 +838,20 @@ fn metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn metadata_fields_from_value(
     namespace: &str,
     value: &VmValue,
-) -> BTreeMap<FieldKey, serde_json::Value> {
+) -> Result<BTreeMap<FieldKey, serde_json::Value>, VmError> {
     let mut data = BTreeMap::new();
     match value {
         VmValue::Dict(dict) => {
             for (k, v) in dict.iter() {
-                data.insert(k.to_string(), vm_to_json(v));
+                data.insert(k.to_string(), vm_to_json(v)?);
             }
         }
         VmValue::String(_) if !namespace.is_empty() => {
-            data.insert(namespace.to_string(), vm_to_json(value));
+            data.insert(namespace.to_string(), vm_to_json(value)?);
         }
         _ => {}
     }
-    data
+    Ok(data)
 }
 
 fn classification_field<'a>(
@@ -1069,7 +1069,7 @@ pub(crate) fn project_metadata_host_set(
         .or_else(|| params.get("data"))
         .cloned()
         .unwrap_or(VmValue::Nil);
-    let data = metadata_fields_from_value(&namespace, &value);
+    let data = metadata_fields_from_value(&namespace, &value)?;
     if namespace.is_empty() || data.is_empty() {
         return Ok(VmValue::Nil);
     }
@@ -1393,7 +1393,7 @@ fn path_metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let mut data = BTreeMap::new();
     if let VmValue::Dict(dict) = &data_val {
         for (k, v) in dict.iter() {
-            data.insert(k.to_string(), vm_to_json(v));
+            data.insert(k.to_string(), vm_to_json(v)?);
         }
     }
     if data.is_empty() {

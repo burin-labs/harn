@@ -5,7 +5,7 @@
 import { fail_fast, pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
 pipeline default(harness: Harness) {
-  const dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-stale-" + harness.random.uuid())
+  const dir = path_join(harness.fs.workspace_temp_dir(), "harn-pool-durability-stale-" + harness.random.uuid())
   const pool = pool_create(
     {
       name: "stale-demo",
@@ -18,8 +18,8 @@ pipeline default(harness: Harness) {
   )
   const h1 = pool.submit({ -> 7 }, {idempotency_key: "task-A"})
   const r1 = pool_wait(h1)
-  harness.stdio.println(r1.status)
-  harness.stdio.println(r1.result)
+  harness.stdio.log(r1.status)
+  harness.stdio.log(r1.result)
   // Forge an in-flight record on disk via a side-channel append. The
   // simulate_restart helper then drops the live registry, and a fresh
   // pool_create re-hydrates: terminal "task-A" stays completed, the
@@ -40,17 +40,17 @@ pipeline default(harness: Harness) {
       dir: dir,
     },
   )
-  harness.stdio.println(resumed.completed)
-  harness.stdio.println(resumed.failed)
-  harness.stdio.println(resumed.total)
+  harness.stdio.log(resumed.completed)
+  harness.stdio.log(resumed.failed)
+  harness.stdio.log(resumed.total)
   // Re-submitting under "task-A" still dedupes (completed).
   const h2 = resumed.submit({ -> 0 }, {idempotency_key: "task-A"})
   const r2 = pool_wait(h2)
-  harness.stdio.println(r2.status)
-  harness.stdio.println(r2.result)
+  harness.stdio.log(r2.status)
+  harness.stdio.log(r2.result)
   // The forged "task-B" came back failed; a re-submit with the same
   // idempotency_key short-circuits to that failed snapshot too.
   const h3 = resumed.submit({ -> 0 }, {idempotency_key: "task-B"})
   const r3 = pool_wait(h3)
-  harness.stdio.println(r3.status)
+  harness.stdio.log(r3.status)
 }

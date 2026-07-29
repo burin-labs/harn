@@ -6,6 +6,7 @@ fn has_code(report, code) {
 
 pipeline main(harness: Harness) {
   const forbidden_authority = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "unsafe",
@@ -30,6 +31,7 @@ pipeline main(harness: Harness) {
     },
   ]
   const invalid_external = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "sdk_watch",
@@ -44,6 +46,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(has_code(invalid_external, "ambiguous_provider_transport"))
   harness.stdio.println(has_code(invalid_external, "event_namespace_mismatch"))
   const invalid_cron = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "bad_clock",
@@ -59,6 +62,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(has_code(invalid_cron, "invalid_timezone"))
   harness.stdio.println(has_code(invalid_cron, "cron_unavailable"))
   const malformed_five_field_cron = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "invalid_minute",
@@ -72,6 +76,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(malformed_five_field_cron.valid)
   harness.stdio.println(has_code(malformed_five_field_cron, "invalid_cron"))
   const tab_separated_cron = persona_blueprint_validate(
+    harness,
     {
       schema_version: "1",
       name: "tab_clock",

@@ -3,5 +3,5 @@ pipeline test(harness: Harness, task) {
     return a + b
   }
   const result = add("hello", "world")
-  harness.stdio.println(result)
+  harness.stdio.log(result)
 }

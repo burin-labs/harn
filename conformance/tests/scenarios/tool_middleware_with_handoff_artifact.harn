@@ -7,8 +7,6 @@
  */
 import { with_handoff_artifact } from "std/llm/tool_middleware"
 
-const captured = harness.runtime.atomic(0)
-
 fn next_with_result(payload) {
   return { call ->
     return {
@@ -50,6 +48,7 @@ fn full_handoff_payload() {
 }
 
 pipeline default(harness: Harness) {
+  const captured = harness.runtime.atomic(0)
   // (1) Tool returns `{__handoff: <full handoff>}` — middleware emits the
   // typed handoff record on audit.handoff and fires the sink.
   const mw = with_handoff_artifact(

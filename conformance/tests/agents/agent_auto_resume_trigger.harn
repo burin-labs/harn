@@ -25,7 +25,7 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park until review approval.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       const trigger_handle = suspended?.suspension?.auto_resume_trigger
       harness.stdio.println(suspended?.status)
       harness.stdio.println(trigger_handle?.id != nil)
@@ -40,7 +40,7 @@ pipeline main(harness: Harness) {
         },
       )
       harness.stdio.println(fired.status)
-      const resumed = wait_agent(handle)
+      const resumed = wait_agent(harness.agent, handle)
       harness.stdio.println(resumed?.status)
       harness.stdio.println(contains(resumed?.task ?? "", "approved"))
     },

@@ -397,7 +397,7 @@ fn git_grep(harness: Harness, root: string, pattern: string, globs: list<string>
   for glob in globs {
     args = args.appending(glob)
   }
-  const result = harness.process.spawn_captured({cmd: "git", args: args})
+  const result = harness.process.run({cmd: "git", args: args})
   // 1 means "no matches", which is a legitimate (if alarming) answer.
   if result.exit_code != 0 && result.exit_code != 1 {
     return nil

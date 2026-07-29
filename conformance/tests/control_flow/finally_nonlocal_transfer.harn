@@ -8,7 +8,7 @@ pipeline test(harness: Harness, task) {
       return "finally"
     }
   }
-  harness.stdio.println(ret_in_finally())
+  harness.stdio.log(ret_in_finally())
   // `break`/`continue` that escape a finally run it and transfer normally.
   fn break_in_finally() {
     let seen = []
@@ -23,5 +23,5 @@ pipeline test(harness: Harness, task) {
     }
     return seen
   }
-  harness.stdio.println(break_in_finally())
+  harness.stdio.log(break_in_finally())
 }

@@ -5,11 +5,13 @@
 import { poll_until, retry_with_result, wait_for_status } from "std/poll"
 
 pipeline default(harness: Harness) {
-  mock_time(1700000000000)
-  store_set("probe_counter", 0)
-  const value = poll_until(harness,  harness, fn() {
-      let n = (store_get("probe_counter") ?? 0) + 1
-      store_set("probe_counter", n)
+  harness.testing.clock_set(1700000000000)
+  harness.runtime.store_set("probe_counter", 0)
+  const value = poll_until(
+    harness,
+    fn() {
+      let n = (harness.runtime.store_get("probe_counter") ?? 0) + 1
+      harness.runtime.store_set("probe_counter", n)
       if n < 3 {
         return nil
       }
@@ -18,11 +20,13 @@ pipeline default(harness: Harness) {
     {timeout_ms: 60000, interval_ms: 100},
   )
   harness.stdio.println(value)
-  harness.stdio.println(store_get("probe_counter"))
-  store_set("status_counter", 0)
-  const row = wait_for_status(harness,  harness, fn() {
-      let n = (store_get("status_counter") ?? 0) + 1
-      store_set("status_counter", n)
+  harness.stdio.println(harness.runtime.store_get("probe_counter"))
+  harness.runtime.store_set("status_counter", 0)
+  const row = wait_for_status(
+    harness,
+    fn() {
+      let n = (harness.runtime.store_get("status_counter") ?? 0) + 1
+      harness.runtime.store_set("status_counter", n)
       if n == 1 {
         return {status: "queued"}
       }
@@ -37,13 +41,15 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(row.status)
   harness.stdio.println(row.url)
-  harness.stdio.println(store_get("status_counter"))
+  harness.stdio.println(harness.runtime.store_get("status_counter"))
   const timed_out = poll_until(harness, fn() { return nil }, {timeout_ms: 200, interval_ms: 50})
   harness.stdio.println(timed_out == nil)
-  store_set("retry_counter", 0)
-  const retry_report = retry_with_result(harness,  harness, fn(attempt) {
-      let n = (store_get("retry_counter") ?? 0) + 1
-      store_set("retry_counter", n)
+  harness.runtime.store_set("retry_counter", 0)
+  const retry_report = retry_with_result(
+    harness,
+    fn(attempt) {
+      let n = (harness.runtime.store_get("retry_counter") ?? 0) + 1
+      harness.runtime.store_set("retry_counter", n)
       if n < 3 {
         return Err("transient")
       }
@@ -54,14 +60,16 @@ pipeline default(harness: Harness) {
   harness.stdio.println(retry_report.ok)
   harness.stdio.println(retry_report.attempts)
   harness.stdio.println(retry_report.value.attempt)
-  const exhausted = retry_with_result(harness,  harness, fn(attempt) { return Err("permanent") },
+  const exhausted = retry_with_result(
+    harness,
+    fn(attempt) { return Err("permanent") },
     {max_attempts: 2, base_ms: 5},
   )
   harness.stdio.println(exhausted.ok)
   harness.stdio.println(exhausted.attempts)
   harness.stdio.println(exhausted.error)
-  store_delete("probe_counter")
-  store_delete("status_counter")
-  store_delete("retry_counter")
-  unmock_time()
+  harness.runtime.store_delete("probe_counter")
+  harness.runtime.store_delete("status_counter")
+  harness.runtime.store_delete("retry_counter")
+  harness.testing.clock_reset()
 }

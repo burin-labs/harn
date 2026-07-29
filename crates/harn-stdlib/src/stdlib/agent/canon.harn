@@ -146,7 +146,9 @@ pub fn canon_resolve_root(harness: Harness, options = nil) -> string {
   if env_root != "" {
     return env_root
   }
-  const root = __canon_text(opts?.project_root ?? harness.fs.project_root() ?? harness.fs.cwd() ?? "")
+  const root = __canon_text(
+    opts?.project_root ?? harness.fs.project_root() ?? harness.fs.cwd() ?? "",
+  )
   if root == "" {
     return ""
   }
@@ -364,7 +366,8 @@ fn __canon_manifest_from_installed_packages(harness: Harness, project_root_value
       if __canon_text(contribution?.kind) != "harn.canon" {
         continue
       }
-      const contribution_manifest_path = __canon_manifest_path_for_contribution(harness, 
+      const contribution_manifest_path = __canon_manifest_path_for_contribution(
+        harness,
         package_dir,
         contribution,
       )
@@ -372,7 +375,11 @@ fn __canon_manifest_from_installed_packages(harness: Harness, project_root_value
         packs = __canon_append_manifest_packs(
           packs,
           dirname(contribution_manifest_path),
-          read_json_typed<CanonManifest>(harness.fs, contribution_manifest_path, __canon_manifest_schema()),
+          read_json_typed<CanonManifest>(
+            harness.fs,
+            contribution_manifest_path,
+            __canon_manifest_schema(),
+          ),
         )
         continue
       }
@@ -488,7 +495,9 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
  */
 pub fn canon_resolve_packs(harness: Harness, options = nil) -> list<dict> {
   const opts = options ?? {}
-  const project = __canon_text(opts?.project_root ?? harness.fs.project_root() ?? harness.fs.cwd() ?? "")
+  const project = __canon_text(
+    opts?.project_root ?? harness.fs.project_root() ?? harness.fs.cwd() ?? "",
+  )
   const explicit_root = __canon_text(opts?.canon_root)
   const env_root = if explicit_root == "" {
     __canon_root_with_manifest(harness, harness.env.get_or("HARN_CANON_ROOT", ""))
@@ -516,7 +525,10 @@ pub fn canon_resolve_packs(harness: Harness, options = nil) -> list<dict> {
     if configured_root {
       root_manifest
     } else {
-      __canon_merge_manifest_packs(root_manifest, __canon_manifest_from_installed_packages(harness, project))
+      __canon_merge_manifest_packs(
+        root_manifest,
+        __canon_manifest_from_installed_packages(harness, project),
+      )
     }
   } else if needs_manifest {
     __canon_manifest_from_installed_packages(harness, project)
@@ -551,7 +563,7 @@ pub fn canon_evaluate_slice(harness: Harness, slice, options = nil) -> dict {
   let ok = true
   for pack in packs {
     selected = selected.appending(pack.id)
-    const report = flow_evaluate_invariants(
+    const report = harness.runtime.flow_evaluate_invariants(
       "",
       slice,
       {
@@ -625,7 +637,12 @@ pub fn canon_inject_feedback(harness: Harness, session_id: string, slice, option
   const mode = lowercase(__canon_text(opts?.inject ?? "feedback"))
   let reminder_id = nil
   if feedback != "" && mode == "feedback" {
-    agent_session_inject_feedback(harness, session_id, opts?.feedback_kind ?? "harn_canon", feedback)
+    agent_session_inject_feedback(
+      harness,
+      session_id,
+      opts?.feedback_kind ?? "harn_canon",
+      feedback,
+    )
   } else if feedback != "" && mode == "reminder" {
     const reminder = (opts?.reminder ?? {})
       + {
@@ -660,7 +677,12 @@ pub fn canon_inject_feedback(harness: Harness, session_id: string, slice, option
  * @errors: [runtime]
  * @api_stability: experimental
  */
-pub fn canon_inject_paths_feedback(harness: Harness, session_id: string, paths, options = nil) -> dict {
+pub fn canon_inject_paths_feedback(
+  harness: Harness,
+  session_id: string,
+  paths,
+  options = nil,
+) -> dict {
   const opts = options ?? {}
   const slice = canon_slice_from_paths(harness, paths, opts)
   return canon_inject_feedback(harness, session_id, slice, opts + {files: slice.files})
@@ -1003,8 +1025,12 @@ fn __canon_event_state_key(session_id: string, suffix: string, options = nil) ->
   return prefix + "." + __canon_text(session_id) + "." + suffix
 }
 
-fn __canon_event_stored_observed_symbols(session_id: string, options = nil) -> list {
-  const raw = store_get(__canon_event_state_key(session_id, "observed_symbols", options))
+fn __canon_event_stored_observed_symbols(
+  runtime: HarnessRuntime,
+  session_id: string,
+  options = nil,
+) -> list {
+  const raw = runtime.store_get(__canon_event_state_key(session_id, "observed_symbols", options))
   if type_of(raw) == "list" {
     return raw
   }
@@ -1019,6 +1045,7 @@ fn __canon_event_stored_observed_symbols(session_id: string, options = nil) -> l
  * @api_stability: experimental
  */
 pub fn canon_event_record_observed_symbols(
+  runtime: HarnessRuntime,
   session_id: string,
   event,
   options = nil,
@@ -1028,11 +1055,11 @@ pub fn canon_event_record_observed_symbols(
   if sid == "" {
     return event_symbols
   }
-  let merged = __canon_event_stored_observed_symbols(sid, options)
+  let merged = __canon_event_stored_observed_symbols(runtime, sid, options)
   for symbol in event_symbols {
     merged = __canon_event_push_symbol(merged, symbol)
   }
-  store_set(__canon_event_state_key(sid, "observed_symbols", options), merged)
+  runtime.store_set(__canon_event_state_key(sid, "observed_symbols", options), merged)
   return merged
 }
 
@@ -1095,7 +1122,12 @@ pub fn canon_event_router(harness: Harness, session_id: string, event, options =
   if !(opts?.enabled ?? opts?.active ?? true) {
     return nil
   }
-  const observed_symbols = canon_event_record_observed_symbols(session_id, event ?? {}, opts)
+  const observed_symbols = canon_event_record_observed_symbols(
+    harness.runtime,
+    session_id,
+    event ?? {},
+    opts,
+  )
   if !__canon_event_is_iteration_end(event ?? {}) {
     return nil
   }
@@ -1126,11 +1158,11 @@ pub fn canon_event_router(harness: Harness, session_id: string, event, options =
   }
   if !is_ok(injected) {
     const message = to_string(injected)
-    store_set(__canon_event_state_key(session_id, "last_error", opts), message)
+    harness.runtime.store_set(__canon_event_state_key(session_id, "last_error", opts), message)
     return {ok: false, error: message, paths: paths}
   }
   const result = unwrap(injected) + {paths: paths}
-  store_set(__canon_event_state_key(session_id, "last_result", opts), result)
+  harness.runtime.store_set(__canon_event_state_key(session_id, "last_result", opts), result)
   return result
 }
 
@@ -1147,10 +1179,10 @@ pub fn canon_install_feedback_sink(harness: Harness, session_id: string, options
     return nil
   }
   const key = __canon_event_state_key(session_id, "installed", opts)
-  if store_get(key) {
+  if harness.runtime.store_get(key) {
     return nil
   }
-  store_set(key, true)
+  harness.runtime.store_set(key, true)
   const handler = { event -> canon_event_router(harness, session_id, event, opts) }
   harness.agent.subscribe(session_id, handler)
   return nil

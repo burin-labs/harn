@@ -313,7 +313,7 @@ pipeline main(harness: Harness, task) {
       continue
     }
     const bytes = harness.fs.read_bytes(path)
-    const sha = harness.crypto.sha256(bytes)
+    const sha = sha256(bytes)
     const size: int = harness.fs.stat(path).size
     assets = {...assets, [triple]: asset_record(triple, download_base, sha, size)}
   }

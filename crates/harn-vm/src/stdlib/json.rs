@@ -193,6 +193,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 )]
 fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
+    reject_harness_serialization(val, "json_stringify")?;
     Ok(VmValue::String(arcstr::ArcStr::from(vm_value_to_json(val))))
 }
 
@@ -203,6 +204,7 @@ fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
+    reject_harness_serialization(val, "json_stringify_pretty")?;
     ensure_serializable_depth(val, "json_stringify_pretty")?;
     serde_json::to_string_pretty(&vm_value_to_data_value(val))
         .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
@@ -211,6 +213,39 @@ fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                 "json_stringify_pretty: {error}"
             ))))
         })
+}
+
+fn reject_harness_serialization(value: &VmValue, builtin: &str) -> Result<(), VmError> {
+    match value {
+        VmValue::Harness(handle) => Err(VmError::TypeError(format!(
+            "{builtin}: {} is runtime authority and cannot be serialized",
+            handle.type_name()
+        ))),
+        VmValue::List(items) => items
+            .iter()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::Dict(entries) => entries
+            .values()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::Set(items) => items
+            .items()
+            .iter()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::EnumVariant(value) => value
+            .fields
+            .iter()
+            .try_for_each(|item| reject_harness_serialization(item, builtin)),
+        VmValue::StructInstance(value) => value.fields.iter().try_for_each(|item| {
+            item.as_ref()
+                .map(|item| reject_harness_serialization(item, builtin))
+                .unwrap_or(Ok(()))
+        }),
+        VmValue::Pair(value) => {
+            reject_harness_serialization(&value.0, builtin)?;
+            reject_harness_serialization(&value.1, builtin)
+        }
+        _ => Ok(()),
+    }
 }
 
 #[harn_builtin(

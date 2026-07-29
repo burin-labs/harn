@@ -2,9 +2,9 @@ pipeline test(harness: Harness, task) {
   const _missing = nil
   // A nested string literal inside an interpolation hole uses bare double
   // quotes; its contents — including `}` and `{` — must not end the hole.
-  harness.stdio.println("fallback: ${_missing ?? "unknown"}")
-  harness.stdio.println("brace in string: ${_missing ?? "a}b{c"}")
+  harness.stdio.log("fallback: ${_missing ?? "unknown"}")
+  harness.stdio.log("brace in string: ${_missing ?? "a}b{c"}")
   const _d = {"a}b": 7}
-  harness.stdio.println("dict key with brace: ${_d["a}b"]}")
-  harness.stdio.println("call with brace arg: ${["x}y", "z"].count}")
+  harness.stdio.log("dict key with brace: ${_d["a}b"]}")
+  harness.stdio.log("call with brace arg: ${["x}y", "z"].count}")
 }

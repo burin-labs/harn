@@ -19,13 +19,10 @@
  */
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
-const observed = harness.runtime.atomic(0)
-
-const observed_action_resume = harness.runtime.atomic(0)
-
-const observed_action_cancel = harness.runtime.atomic(0)
-
 pipeline default(harness: Harness) {
+  const observed = harness.runtime.atomic(0)
+  const observed_action_resume = harness.runtime.atomic(0)
+  const observed_action_cancel = harness.runtime.atomic(0)
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "on_drain_decision",
@@ -52,8 +49,12 @@ pipeline default(harness: Harness) {
   harness.stdio.println("resume_control=" + resume_event.control)
   harness.stdio.println("cancel_control=" + cancel_event.control)
   harness.stdio.println("observed=" + to_string(harness.runtime.atomic_get(observed)))
-  harness.stdio.println("observed_resume=" + to_string(harness.runtime.atomic_get(observed_action_resume)))
-  harness.stdio.println("observed_cancel=" + to_string(harness.runtime.atomic_get(observed_action_cancel)))
+  harness.stdio.println(
+    "observed_resume=" + to_string(harness.runtime.atomic_get(observed_action_resume)),
+  )
+  harness.stdio.println(
+    "observed_cancel=" + to_string(harness.runtime.atomic_get(observed_action_cancel)),
+  )
   // Clear hooks before the on_finish recording path, since the audit
   // route currently requires no registered hook to round-trip safely
   // (the lifecycle dispatcher requires an async-builtin VM context;
@@ -70,7 +71,7 @@ pipeline default(harness: Harness) {
           reason: "ordering decision",
         },
       )
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("receipt_status=" + receipt.status)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)

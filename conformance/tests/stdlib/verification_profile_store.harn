@@ -68,5 +68,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(unbound.status, "unbound")
   assert_eq(unbound.advisory, true)
   assert_eq(unbound.feedsGates, false)
-  harness.stdio.println("verification profile store ok")
+  harness.stdio.log("verification profile store ok")
 }

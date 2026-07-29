@@ -31,8 +31,8 @@ pipeline test(harness: Harness, task) {
       "Signature=bbd206a978e4215b047ffcb9df0601d8173a68a1d314fbb5ce382e7556b147be",
     ),
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://service.us-east-1.amazonaws.com/",
     {status: 200, body: "ok", headers: {}},
@@ -43,9 +43,9 @@ pipeline test(harness: Harness, task) {
     {body: body, headers: signed.headers},
   )
   assert_eq(response.status, 200)
-  const redacted = http_mock_calls()
+  const redacted = harness.testing.http_mock_calls()
   assert_eq(redacted[0].headers.authorization, "[redacted]")
-  const raw = http_mock_calls({include_sensitive: true})
+  const raw = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(raw[0].headers.authorization, signed.authorization)
   const session_signed = aws_sigv4_headers(
     {

@@ -218,7 +218,7 @@ pub fn render_spend_table(rows: list) -> string {
 }
 
 fn current_utc_year(harness: Harness) -> string {
-  const res = harness.process.spawn_captured({cmd: "date", args: ["-u", "+%Y"]})
+  const res = harness.process.run({cmd: "date", args: ["-u", "+%Y"]})
   if res.success {
     return res.stdout.trim()
   }
@@ -226,7 +226,7 @@ fn current_utc_year(harness: Harness) -> string {
 }
 
 fn require_gh(harness: Harness) {
-  const res = harness.process.spawn_captured({cmd: "gh", args: ["--version"]})
+  const res = harness.process.run({cmd: "gh", args: ["--version"]})
   if !res.success {
     harness.stdio.eprintln("gha_spend_report: gh CLI not found")
     harness.runtime.exit(1)
@@ -234,7 +234,7 @@ fn require_gh(harness: Harness) {
 }
 
 fn gh_api_json(harness: Harness, path: string) {
-  const res = harness.process.spawn_captured({cmd: "gh", args: ["api", path]})
+  const res = harness.process.run({cmd: "gh", args: ["api", path]})
   if !res.success {
     return nil
   }

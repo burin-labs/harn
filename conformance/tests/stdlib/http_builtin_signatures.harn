@@ -1,32 +1,32 @@
 pipeline test(harness: Harness, task) {
-  http_mock("GET", "https://api.example.com/users", {status: 200, body: "alice", headers: {}})
-  http_mock("POST", "https://api.example.com/users", {status: 201, body: "created", headers: {}})
-  http_mock(
+  harness.testing.http_mock("GET", "https://api.example.com/users", {status: 200, body: "alice", headers: {}})
+  harness.testing.http_mock("POST", "https://api.example.com/users", {status: 201, body: "created", headers: {}})
+  harness.testing.http_mock(
     "GET",
     "https://api.example.com/stream",
     {status: 206, body: "abcdef", headers: {"content-type": "application/octet-stream"}},
   )
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     "https://api.example.com/download",
     {status: 200, body: "payload", headers: {"content-type": "text/plain"}},
   )
   const get_resp: dict = harness.net.get("https://api.example.com/users")
   const post_resp: dict = harness.net.post("https://api.example.com/users", "{}")
-  const stream: string = http_stream_open("https://api.example.com/stream")
-  const info: dict = http_stream_info(stream)
-  const chunk = http_stream_read(stream, 3)
-  const closed: bool = http_stream_close(stream)
-  const dst = harness.fs.temp_dir() + "/http-signature-download.txt"
+  const stream: string = harness.net.stream_open("https://api.example.com/stream")
+  const info: dict = harness.net.stream_info(stream)
+  const chunk = harness.net.stream_read(stream, 3)
+  const closed: bool = harness.net.stream_close(stream)
+  const dst = harness.fs.workspace_temp_dir() + "/http-signature-download.txt"
   const download_resp: dict = harness.net.download("https://api.example.com/download", dst)
-  harness.stdio.println(get_resp.status)
-  harness.stdio.println(get_resp.body)
-  harness.stdio.println(post_resp.status)
-  harness.stdio.println(post_resp.body)
-  harness.stdio.println(info.status)
+  harness.stdio.log(get_resp.status)
+  harness.stdio.log(get_resp.body)
+  harness.stdio.log(post_resp.status)
+  harness.stdio.log(post_resp.body)
+  harness.stdio.log(info.status)
   if chunk != nil {
-    harness.stdio.println(bytes_to_string(chunk))
+    harness.stdio.log(bytes_to_string(chunk))
   }
-  harness.stdio.println(closed)
-  harness.stdio.println(download_resp.bytes_written)
+  harness.stdio.log(closed)
+  harness.stdio.log(download_resp.bytes_written)
 }

@@ -7,26 +7,26 @@ pipeline test(harness: Harness, task) {
   const a4: any = [1, 2, 3]
   const a5: any = {k: "v"}
   const a6: any = true
-  harness.stdio.println(a1)
-  harness.stdio.println(a2)
-  harness.stdio.println(a3)
-  harness.stdio.println(a4)
-  harness.stdio.println(a5)
-  harness.stdio.println(a6)
+  harness.stdio.log(a1)
+  harness.stdio.log(a2)
+  harness.stdio.log(a3)
+  harness.stdio.log(a4)
+  harness.stdio.log(a5)
+  harness.stdio.log(a6)
   // `any` flows back out to concrete types (escape hatch — no narrowing required).
   const s: string = a2
-  harness.stdio.println(s)
+  harness.stdio.log(s)
   // Function with untyped/any parameter and return.
   fn passthrough(x: any) -> any {
     return x
   }
-  harness.stdio.println(passthrough(7))
-  harness.stdio.println(passthrough("world"))
-  harness.stdio.println(passthrough(nil))
+  harness.stdio.log(passthrough(7))
+  harness.stdio.log(passthrough("world"))
+  harness.stdio.log(passthrough(nil))
   // `any | nil` is still legal — union with top is equivalent to `any`,
   // but explicit unions remain valid annotations.
   fn maybe() -> any? {
     return nil
   }
-  harness.stdio.println(maybe())
+  harness.stdio.log(maybe())
 }

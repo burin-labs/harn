@@ -2,6 +2,7 @@ import "std/agent/hypothesis"
 
 pipeline default(harness: Harness) {
   hypothesis_open(
+    harness,
     "agent.hypotheses",
     {id: "h1", statement: "legacy timestamp override"},
     {now: "2026-01-01T00:00:00Z"},

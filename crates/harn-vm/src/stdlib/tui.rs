@@ -41,7 +41,7 @@ pub(crate) fn register_tui_builtins(vm: &mut Vm) {
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "__tui_page(options: dict) -> dict", category = "tui"
+    sig = "__tui_page(options: dict) -> PageResult", category = "tui"
 )]
 fn __tui_page(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let options = parse_page_options(args)?;

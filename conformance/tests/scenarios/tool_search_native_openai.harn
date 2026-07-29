@@ -118,7 +118,7 @@ pipeline test(harness: Harness, task) {
         pre54_err.contains("does not expose native"),
         "diagnostic mentions missing native support",
       )
-      harness.stdio.println("tool_search_native_openai tests passed")
+      harness.stdio.log("tool_search_native_openai tests passed")
     },
   )
 }

@@ -78,6 +78,7 @@ fn routing_record(replicas: usize, policy: ReadRoutingPolicy) -> Arc<PoolRecord>
         statement_cache_capacity: DEFAULT_STATEMENT_CACHE_CAPACITY,
         read_routing_policy: policy,
         circuit: Arc::new(CircuitBreakerState::disabled()),
+        described_oids: Arc::new(SyncMutex::new(BTreeMap::new())),
     })
 }
 
@@ -187,17 +188,13 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
         VmValue::List(items) => items,
         _ => unreachable!(),
     };
-    let id = next_id("pgmock");
-    MOCKS.with(|mocks| {
-        mocks.borrow_mut().insert(
-            id.clone(),
-            MockPool {
-                fixtures: parse_mock_fixtures(fixture_list).unwrap(),
-                calls: Vec::new(),
-            },
-        );
-    });
-    let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
+    let handle = VmValue::resource(VmResourceHandle::new(
+        HANDLE_MOCK,
+        SyncMutex::new(MockPool {
+            fixtures: parse_mock_fixtures(fixture_list).unwrap(),
+            calls: Vec::new(),
+        }),
+    ));
     let rows = mock_query(
         &handle,
         "select * from claims where tenant_id = $1",
@@ -209,8 +206,21 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
         VmValue::List(std::sync::Arc::new(rows)).display(),
         "[{claim_id: c1}]"
     );
-    let calls = MOCKS.with(|mocks| mocks.borrow().values().next().unwrap().calls.clone());
+    let calls = mock_handle(Some(&handle), "test")
+        .unwrap()
+        .lock()
+        .calls
+        .clone();
     assert_eq!(calls.len(), 1);
+}
+
+#[test]
+fn postgres_authority_cannot_be_forged_with_a_dict() {
+    let forged = dict(&[("_type", s(HANDLE_POOL)), ("id", s("pgpool-1"))]);
+    let error = pool_record_from_handle(&forged, "pg_query")
+        .err()
+        .expect("script-visible dictionaries must not act as pool authority");
+    assert!(error.to_string().contains("expected pg_pool handle"));
 }
 
 #[test]
@@ -221,17 +231,13 @@ fn mock_execute_returns_rows_affected() {
         ("rows_affected", VmValue::Int(3)),
     ])])
     .unwrap();
-    let id = next_id("pgmock");
-    MOCKS.with(|mocks| {
-        mocks.borrow_mut().insert(
-            id.clone(),
-            MockPool {
-                fixtures,
-                calls: Vec::new(),
-            },
-        );
-    });
-    let handle = handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new());
+    let handle = VmValue::resource(VmResourceHandle::new(
+        HANDLE_MOCK,
+        SyncMutex::new(MockPool {
+            fixtures,
+            calls: Vec::new(),
+        }),
+    ));
     let rows = mock_query(
         &handle,
         "update receipts set status = $1",
@@ -344,8 +350,9 @@ async fn open_single_conn_pool(url: &str) -> VmValue {
 /// tests can assert two handles point at the SAME (or distinct) pool via
 /// `Arc::ptr_eq`.
 fn pool_ptr(handle: &VmValue) -> Arc<PgPool> {
-    let id = handle_id(Some(handle), HANDLE_POOL, "test").expect("pool handle id");
-    pool_by_id(&id).expect("pool record")
+    pool_record_from_handle(handle, "test")
+        .map(|record| Arc::clone(&record.pool))
+        .expect("pool authority")
 }
 
 /// SECURITY/CORRECTNESS: with the shared registry installed, two `pg_pool`
@@ -414,6 +421,7 @@ fn lazy_record() -> PoolRecord {
         statement_cache_capacity: DEFAULT_STATEMENT_CACHE_CAPACITY,
         read_routing_policy: ReadRoutingPolicy::ReplicaOrPrimary,
         circuit: Arc::new(circuit::CircuitBreakerState::disabled()),
+        described_oids: Arc::new(SyncMutex::new(BTreeMap::new())),
     }
 }
 
@@ -2173,8 +2181,12 @@ async fn pool_describe_probe_failure_falls_back_to_text_null_when_env_url_is_set
 
     // The fallback cached an EMPTY OID list for this SQL (probe failed), so
     // later runs reuse the text fallback with no further probing.
-    let cached = DESCRIBED_OIDS
-        .with(|c| c.borrow().get(sql).cloned())
+    let record = pool_record_from_handle(&handle, "test").expect("pool authority");
+    let cached = record
+        .described_oids
+        .lock()
+        .get(sql)
+        .cloned()
         .expect("ambiguous SQL must populate the OID cache (with an empty list)");
     assert!(
         cached.is_empty(),
@@ -2342,7 +2354,7 @@ pg_close(db)
 
 /// Performant describe-then-bind: the server describe for a given SQL runs
 /// at most **once**. The first nil-query of a SQL populates the
-/// [`DESCRIBED_OIDS`] cache (one describe round-trip); every subsequent
+/// pool-local described-OID cache (one describe round-trip); every subsequent
 /// nil-query of the SAME SQL is a cache hit and performs **no** further
 /// describe. Asserted via the `cfg(test)` [`DESCRIBE_ROUND_TRIPS`] counter.
 #[tokio::test(flavor = "current_thread")]
@@ -2357,8 +2369,9 @@ async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
     let sql = "SELECT $1::bigint AS v";
 
     // Cache must start empty for this SQL.
+    let record = pool_record_from_handle(&handle, "test").expect("pool authority");
     assert!(
-        DESCRIBED_OIDS.with(|c| !c.borrow().contains_key(sql)),
+        !record.described_oids.lock().contains_key(sql),
         "OID cache should not contain the SQL before first use"
     );
 
@@ -2373,7 +2386,7 @@ async fn nil_query_describes_once_and_caches_oids_when_env_url_is_set() {
         "first nil query must perform exactly one describe round-trip"
     );
     assert!(
-        DESCRIBED_OIDS.with(|c| c.borrow().contains_key(sql)),
+        record.described_oids.lock().contains_key(sql),
         "OID cache must be populated after first nil query"
     );
 

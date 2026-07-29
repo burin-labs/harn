@@ -1,4 +1,4 @@
 pipeline test(harness: Harness, task: any) -> int {
-  harness.stdio.println("typed pipeline ok")
+  harness.stdio.log("typed pipeline ok")
   return 42
 }

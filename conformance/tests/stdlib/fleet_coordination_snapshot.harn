@@ -13,7 +13,7 @@ import {
 import { is_type } from "std/schema"
 
 pipeline default(harness: Harness) {
-  mock_time(1000)
+  harness.testing.clock_set(1000)
   const opts = {session_id: "fleet-test", from: {agent: "lane-a"}}
   const claim = fleet_claim(
     harness, "session",
@@ -22,7 +22,7 @@ pipeline default(harness: Harness) {
     opts + {id: "claim-1", requires_ack: true, lease_ms: 100, worktree: "/tmp/work"},
   )
   const proposed = fleet_project(
-    coord_read(harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
     {now_ms: 1000, grace_ms: 20},
   )
   harness.stdio.println(proposed.schema)
@@ -36,7 +36,7 @@ pipeline default(harness: Harness) {
     "accepted",
     {id: "ack-1", session_id: "fleet-test", from: {agent: "control"}},
   )
-  advance_time(50)
+  harness.testing.clock_advance(50)
   const _ = fleet_heartbeat(
     harness, "session",
     "ops",
@@ -57,7 +57,7 @@ pipeline default(harness: Harness) {
     opts + {id: "checkin-1"},
   )
   const active = fleet_project(
-    coord_read(harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
     {now_ms: 1200, grace_ms: 20},
   )
   harness.stdio.println(active.claims[0]?.state)
@@ -72,7 +72,7 @@ pipeline default(harness: Harness) {
     {id: "ack-finding", session_id: "fleet-test", from: {agent: "control"}},
   )
   const cleared = fleet_project(
-    coord_read(harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
     {now_ms: 1360, grace_ms: 20},
   )
   harness.stdio.println(cleared.actors[1]?.liveness?.status)
@@ -86,7 +86,7 @@ pipeline default(harness: Harness) {
     opts + {id: "done-1", counts: {tests: 7}},
   )
   const finished = fleet_project(
-    coord_read(harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
+    coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}),
     {now_ms: 1360, grace_ms: 20},
   )
   harness.stdio.println(finished.claims[0]?.state)
@@ -96,8 +96,8 @@ pipeline default(harness: Harness) {
   }
   harness.stdio.println(!is_ok(bad_time))
   const missing_projection_time = try {
-    fleet_project(coord_read(harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}))
+    fleet_project(coord_read(harness.runtime, harness.channels, "session", "ops", {session_id: "fleet-test", include_events: true}))
   }
   harness.stdio.println(!is_ok(missing_projection_time))
-  unmock_time()
+  harness.testing.clock_reset()
 }

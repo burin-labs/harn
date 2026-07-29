@@ -553,6 +553,7 @@ fn parse_effect_spec(
         "process" => quote!(#support::EffectKind::Process),
         "llm" => quote!(#support::EffectKind::Llm),
         "tool" => quote!(#support::EffectKind::Tool),
+        "mcp" => quote!(#support::EffectKind::Mcp),
         "host" => quote!(#support::EffectKind::Host),
         "worker" => quote!(#support::EffectKind::Worker),
         "secret" => quote!(#support::EffectKind::Secret),

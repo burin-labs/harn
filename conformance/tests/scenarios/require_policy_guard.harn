@@ -15,20 +15,20 @@ pipeline test(harness: Harness, task) {
   assert_eq(kind_denial.body.details.kind, "missing_auth")
   // Tenant-safe: the denial never echoes the caller's own kind.
   assert_eq(kind_denial.body.details["caller_kind"], nil)
-  harness.stdio.println("kind missing auth ok")
+  harness.stdio.log("kind missing auth ok")
   // scopes clause: anonymous callers fail as missing-auth, not as a
   // principal-specific missing-scope denial.
   const scope_denial = require_policy(harness, {scopes: ["secrets:write"]})
   assert(scope_denial != nil, "missing scope must be denied")
   assert_eq(scope_denial.status, 401)
   assert_eq(scope_denial.body.details.kind, "missing_auth")
-  harness.stdio.println("scope missing auth ok")
+  harness.stdio.log("scope missing auth ok")
   const req = {
     method: "POST",
     path_params: {tenant: "acme"},
     body: "{\"method\":\"doc.write\",\"owner\":\"user_1\"}",
   }
-  const mismatch = require_policy(harness,  harness, {
+  const mismatch = require_policy(harness, {
       matches: [
         {
           kind: "tenant_mismatch",
@@ -47,14 +47,14 @@ pipeline test(harness: Harness, task) {
   // Mismatch denials describe the failing guard but never echo compared values.
   assert_eq(mismatch.body.details["left_value"], nil)
   assert_eq(mismatch.body.details["right_value"], nil)
-  harness.stdio.println("tenant mismatch ok")
+  harness.stdio.log("tenant mismatch ok")
   assert_eq(require_policy(harness, {matches: [{left: "body.owner", right: {value: "user_1"}}]}, req), nil)
-  harness.stdio.println("body match ok")
+  harness.stdio.log("body match ok")
   const auth_match = require_policy(harness, {matches: [{left: "body.owner", right: "auth.subject"}]}, req)
   assert_eq(auth_match.status, 401)
   assert_eq(auth_match.body.details.kind, "missing_auth")
-  harness.stdio.println("auth match missing auth ok")
-  const method_denial = require_policy(harness,  harness, {
+  harness.stdio.log("auth match missing auth ok")
+  const method_denial = require_policy(harness, {
       method_path: "body.method",
       methods: {
         "doc.write": {
@@ -74,9 +74,9 @@ pipeline test(harness: Harness, task) {
   assert_eq(method_denial.status, 403)
   assert_eq(method_denial.body.details.kind, "resource_mismatch")
   assert_eq(method_denial.body.details.label, "owner")
-  harness.stdio.println("json-rpc method policy ok")
+  harness.stdio.log("json-rpc method policy ok")
   // No clauses (or an empty allow-set) → nothing to enforce → allowed (nil).
   assert_eq(require_policy(harness, {}), nil)
   assert_eq(require_policy(harness, {kinds: []}), nil)
-  harness.stdio.println("noop allow ok")
+  harness.stdio.log("noop allow ok")
 }

@@ -45,5 +45,5 @@ pipeline test(harness: Harness) {
     contains(agent_preset(harness, "good_pins").pin_policy.kinds, "goal"),
     "valid custom pin_policy fills through",
   )
-  harness.stdio.println("agent preset pin_policy tests passed")
+  harness.stdio.log("agent preset pin_policy tests passed")
 }

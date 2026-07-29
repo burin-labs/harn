@@ -45,5 +45,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(round(delta.ci_lo * 1000), -250)
   assert_eq(round(delta.ci_hi * 1000), 500)
   assert_eq(delta.status, "inconclusive")
-  harness.stdio.println("stdlib eval stats ledger aliases ok")
+  harness.stdio.log("stdlib eval stats ledger aliases ok")
 }

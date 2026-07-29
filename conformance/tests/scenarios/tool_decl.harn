@@ -55,5 +55,5 @@ pipeline test(harness: Harness, task) {
   const search_handler = search_tool.handler
   const default_result = search_handler("needle")
   assert(default_result == "needle:*.py:20", "handler should still honor defaulted params")
-  harness.stdio.println("tool_decl tests passed")
+  harness.stdio.log("tool_decl tests passed")
 }

@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn harn_script_with_vision_ocr_is_rejected_under_read_only_parent() {
         let source = r#"
-            vision_ocr("receipt.png")
+            harness.system.vision_ocr("receipt.png")
         "#;
         let report = enforce_nested_invocation_ceiling(
             &read_only_parent(),

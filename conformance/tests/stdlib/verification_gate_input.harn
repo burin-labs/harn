@@ -71,6 +71,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(newer_green_supersedes_red.previous.classification.status, "bound_fresh")
   assert_eq(newer_green_supersedes_red.current.classification.status, "bound_fresh")
   const late_background_red = verification_gate_input(
+    harness,
     newer_green_supersedes_red.current.value,
     old_red + {source: "background", at: "2026-07-03T00:03:00Z"},
     hashes,
@@ -83,7 +84,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(late_background_red.current.classification.status, "bound_stale")
   assert_eq(late_background_red.current.value.source, "background")
   const stale_previous_not_baseline = verification_gate_input(
-    harness, old_red,
+    harness,
+    old_red,
     fresh_red + {diagnostics: ["B"]},
     hashes,
   )

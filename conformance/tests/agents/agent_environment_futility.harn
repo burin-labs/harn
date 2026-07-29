@@ -6,7 +6,7 @@ import {
   agent_observation_fingerprint,
 } from "std/agent/stall"
 
-pipeline test(_task) {
+pipeline test(harness: Harness, _task) {
   const action = agent_action_identity("edit", {path: "src/lib.rs", replacement: "fixed"})
   const same_action = agent_action_identity("edit", {path: "src/lib.rs", replacement: "fixed"})
   const different_action = agent_action_identity("edit", {path: "src/lib.rs", replacement: "other"})
@@ -61,5 +61,5 @@ pipeline test(_task) {
   assert(stopped.action == "stop" && stopped.blocked, "policy hook can stop deterministically")
   const escalated = agent_futility_decide(unobservable)
   assert(escalated.action == "escalate", "unobservable state escalates by default")
-  log("ok")
+  harness.stdio.log("ok")
 }

@@ -91,7 +91,7 @@ pipeline default(harness: Harness, task) {
     schema_contract_check({id: "v2-ready", version: 2, payload: {count: 1}}, broken),
   )
   harness.stdio.println(broken_failure.kind + ":" + broken_failure.issues[0].rule)
-  const root = path_join(harness.fs.temp_dir(), "harn-schema-contract-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-schema-contract-" + harness.random.uuid_v7())
   const run = run_artifacts_open(harness, "contract", {root: root, run_id: "run-a"})
   const receipt_artifact = artifact_descriptor("receipt.json", contract)
   const written = unwrap(

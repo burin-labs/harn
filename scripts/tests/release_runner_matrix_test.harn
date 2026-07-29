@@ -5,7 +5,7 @@ fn run_matrix(harness: Harness, args) {
 
 fn run_matrix_with_policy(harness: Harness, policy, args) {
   const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
-  const path = path_join(harness.fs.temp_dir(), "release-runner-policy-" + harness.random.uuid_v7() + ".json")
+  const path = path_join(harness.fs.workspace_temp_dir(), "release-runner-policy-" + harness.random.uuid_v7() + ".json")
   harness.fs.write_text(path, json_stringify(policy))
   return shell_at(
     root,

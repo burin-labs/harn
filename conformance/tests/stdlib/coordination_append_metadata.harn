@@ -1,8 +1,16 @@
 import { coord_post, coord_read } from "std/coordination"
 
-fn rejected_timestamp(scope, room, message, options) {
+fn rejected_timestamp(
+  runtime: HarnessRuntime,
+  channels: HarnessChannels,
+  random: HarnessRandom,
+  scope,
+  room,
+  message,
+  options,
+) {
   return try {
-    coord_post(scope, room, message, options)
+    coord_post(runtime, channels, random, scope, room, message, options)
     "accepted"
   } catch (error) {
     to_string(error)
@@ -11,22 +19,22 @@ fn rejected_timestamp(scope, room, message, options) {
 
 pipeline default(harness: Harness) {
   const opts = {session_id: "coord-append-metadata"}
-  mock_time(2000)
-  const first = coord_post(
-    harness.channels, "session",
+  harness.testing.clock_set(2000)
+  const first = coord_post(harness.runtime, harness.channels, harness.random,
+    "session",
     "ops",
     {kind: "status", subject: "first"},
     opts + {id: "coord-metadata-1"},
   )
-  const second = coord_post(
-    harness.channels, "session",
+  const second = coord_post(harness.runtime, harness.channels, harness.random,
+    "session",
     "ops",
     {kind: "status", subject: "second"},
     opts + {id: "coord-metadata-2"},
   )
-  mock_time(3000)
-  const third = coord_post(
-    harness.channels, "session",
+  harness.testing.clock_set(3000)
+  const third = coord_post(harness.runtime, harness.channels, harness.random,
+    "session",
     "ops",
     {kind: "status", subject: "third"},
     opts + {id: "coord-metadata-3"},
@@ -35,16 +43,33 @@ pipeline default(harness: Harness) {
   harness.stdio.println(first.message.seq == first.channel.cursor)
   harness.stdio.println(second.message.seq > first.message.seq)
   harness.stdio.println(second.message.ts == first.message.ts)
-  const after_seq = coord_read(harness.channels, "session", "ops", opts + {since_seq: second.message.seq})
+  const after_seq = coord_read(harness.runtime,
+    harness.channels,
+    "session",
+    "ops",
+    opts + {since_seq: second.message.seq},
+  )
   harness.stdio.println(len(after_seq))
   harness.stdio.println(after_seq[0].subject)
   harness.stdio.println(after_seq[0].seq == third.message.seq)
   harness.stdio.println(after_seq[0].ts == third.message.ts)
-  const after_ts = coord_read(harness.channels, "session", "ops", opts + {since_ts: first.message.ts})
+  const after_ts = coord_read(harness.runtime,
+    harness.channels,
+    "session",
+    "ops",
+    opts + {since_ts: first.message.ts},
+  )
   harness.stdio.println(len(after_ts))
   harness.stdio.println(after_ts[0].subject)
-  harness.stdio.println(len(coord_read(harness.channels, "session", "ops", opts + {since_ts: first.message.ts, limit: 0})))
+  harness.stdio.println(
+    len(
+      coord_read(harness.runtime, harness.channels, "session", "ops", opts + {since_ts: first.message.ts, limit: 0}),
+    ),
+  )
   const message_error = rejected_timestamp(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "ops",
     {kind: "status", subject: "forged", ts: "2099-01-01T00:00:00Z"},
@@ -52,6 +77,9 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(contains(message_error, "authoritative timestamps are runtime-owned"))
   const option_error = rejected_timestamp(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "ops",
     {kind: "status", subject: "forged"},
@@ -59,6 +87,9 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(contains(option_error, "authoritative timestamps are runtime-owned"))
   const created_at_error = rejected_timestamp(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "ops",
     {kind: "status", subject: "forged", created_at: "2099-01-01T00:00:00Z"},
@@ -66,11 +97,14 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(contains(created_at_error, "authoritative timestamps are runtime-owned"))
   const sequence_error = rejected_timestamp(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     "session",
     "ops",
     {kind: "status", subject: "forged", seq: 99},
     opts + {id: "coord-metadata-forged-sequence"},
   )
   harness.stdio.println(contains(sequence_error, "sequence numbers are runtime-owned"))
-  unmock_time()
+  harness.testing.clock_reset()
 }

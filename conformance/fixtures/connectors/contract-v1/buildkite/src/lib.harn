@@ -99,35 +99,39 @@ pub fn payload_schema() {
 }
 
 /** Initialize connector state with orchestrator context. */
-pub fn init(ctx = nil) {
-  const next = __state() + {initialized: true, ctx: ctx ?? {}}
-  __set_state(next)
+pub fn init(harness: Harness, ctx = nil) {
+  const next = __state(harness.runtime) + {initialized: true, ctx: ctx ?? {}}
+  __set_state(harness.runtime, next)
   return next
 }
 
 /** Activate webhook bindings and reject duplicate configured paths. */
-pub fn activate(bindings = []) {
+pub fn activate(harness: Harness, bindings = []) {
   let by_id = {}
   let seen_paths = {}
   for binding in bindings ?? [] {
-    const binding_id = binding?.binding_id ?? binding?.id ?? ("binding-" + to_string(len(by_id.keys())))
+    const binding_id = binding?.binding_id ?? binding?.id
+      ?? ("binding-" + to_string(len(by_id.keys())))
     const path = binding?.path ?? binding?.match?.path
     if path != nil && path != "" {
       if seen_paths.get(path) {
-        return __err("activation", "buildkite connector path `" + path + "` is configured by multiple bindings")
+        return __err(
+          "activation",
+          "buildkite connector path `" + path + "` is configured by multiple bindings",
+        )
       }
       seen_paths[path] = true
     }
     by_id[binding_id] = binding + {binding_id: binding_id}
   }
-  const next = __state() + {active: true, bindings: by_id}
-  __set_state(next)
+  const next = __state(harness.runtime) + {active: true, bindings: by_id}
+  __set_state(harness.runtime, next)
   return {bindings: len(by_id.keys()), kind: "webhook", provider: BUILDKITE_PROVIDER_ID}
 }
 
 /** Clear connector lifecycle state. */
-pub fn shutdown() {
-  store_delete(BUILDKITE_STATE_KEY)
+pub fn shutdown(harness: Harness) {
+  harness.runtime.store_delete(BUILDKITE_STATE_KEY)
   return {active: false, provider: BUILDKITE_PROVIDER_ID}
 }
 
@@ -164,13 +168,21 @@ pub fn normalize_inbound(harness: Harness, raw) {
   const payload = unwrap(parsed)
   const event = payload?.event ?? __header(headers, "x-buildkite-event")
   if event == nil || event == "" {
-    return __reject(400, "missing_event", "missing Buildkite event field and X-Buildkite-Event header")
+    return __reject(
+      400,
+      "missing_event",
+      "missing Buildkite event field and X-Buildkite-Event header",
+    )
   }
   if event == "ping" {
     return __reject(200, "ping", "buildkite webhook ping acknowledged")
   }
   if !contains(BUILDKITE_SUPPORTED_EVENTS, event) {
-    return __reject(400, "unsupported_event", "unsupported Buildkite event type `" + to_string(event) + "`")
+    return __reject(
+      400,
+      "unsupported_event",
+      "unsupported Buildkite event type `" + to_string(event) + "`",
+    )
   }
   const normalized = __build_event(event, payload, raw, headers, signature_status)
   return {type: "event", event: normalized}
@@ -180,13 +192,16 @@ pub fn normalize_inbound(harness: Harness, raw) {
 /** Dispatch a supported Buildkite REST / GraphQL method. */
 pub fn call(harness: Harness, method, args = {}) {
   if !contains(BUILDKITE_OUTBOUND_METHODS, method) {
-    return __err("method_not_found", "buildkite connector does not implement outbound method `" + method + "`")
+    return __err(
+      "method_not_found",
+      "buildkite connector does not implement outbound method `" + method + "`",
+    )
   }
   if method == "github_commit_pulls" {
     return __github_commit_pulls(harness, args ?? {})
   }
   if method == "graphql" {
-    return __graphql(args ?? {})
+    return __graphql(harness, args ?? {})
   }
   const config = __outbound_config(harness, args ?? {})
   if is_err(config) {
@@ -196,14 +211,21 @@ pub fn call(harness: Harness, method, args = {}) {
   if method == "api.request" {
     const http_method = __upcase_method(args?.method ?? "GET")
     const path = to_string(args?.path ?? "")
-    return __buildkite_json(harness, http_method, __api_url(cfg.api_base_url, path), args?.body, cfg)
+    return __buildkite_json(
+      harness,
+      http_method,
+      __api_url(cfg.api_base_url, path),
+      args?.body,
+      cfg,
+    )
   }
   const org = __require(args, "org")
   if is_err(org) {
     return org
   }
   if method == "job.log" {
-    return __buildkite_json(harness, 
+    return __buildkite_json(
+      harness,
       "GET",
       __api_url(
         cfg.api_base_url,
@@ -219,7 +241,8 @@ pub fn call(harness: Harness, method, args = {}) {
     )
   }
   if method == "job.retry" {
-    return __buildkite_json(harness, 
+    return __buildkite_json(
+      harness,
       "PUT",
       __api_url(
         cfg.api_base_url,
@@ -231,7 +254,8 @@ pub fn call(harness: Harness, method, args = {}) {
     )
   }
   if method == "job.unblock" {
-    return __buildkite_json(harness, 
+    return __buildkite_json(
+      harness,
       "PUT",
       __api_url(
         cfg.api_base_url,
@@ -243,7 +267,8 @@ pub fn call(harness: Harness, method, args = {}) {
     )
   }
   if method == "build.rebuild" {
-    return __buildkite_json(harness, 
+    return __buildkite_json(
+      harness,
       "PUT",
       __api_url(cfg.api_base_url, __build_path(unwrap(org), args) + "/rebuild"),
       nil,
@@ -251,22 +276,35 @@ pub fn call(harness: Harness, method, args = {}) {
     )
   }
   if method == "build.cancel" {
-    return __buildkite_json(harness, 
+    return __buildkite_json(
+      harness,
       "PUT",
       __api_url(cfg.api_base_url, __build_path(unwrap(org), args) + "/cancel"),
       nil,
       cfg,
     )
   }
-  return __buildkite_json(harness, "GET", __api_url(cfg.api_base_url, __build_path(unwrap(org), args)), nil, cfg)
+  return __buildkite_json(
+    harness,
+    "GET",
+    __api_url(cfg.api_base_url, __build_path(unwrap(org), args)),
+    nil,
+    cfg,
+  )
 }
 
-fn __state() {
-  return store_get(BUILDKITE_STATE_KEY) ?? {active: false, bindings: {}, ctx: {}, initialized: false}
+fn __state(runtime: HarnessRuntime) {
+  return runtime.store_get(BUILDKITE_STATE_KEY)
+    ?? {
+    active: false,
+    bindings: {},
+    ctx: {},
+    initialized: false,
+  }
 }
 
-fn __set_state(state) {
-  store_set(BUILDKITE_STATE_KEY, state)
+fn __set_state(runtime: HarnessRuntime, state) {
+  runtime.store_set(BUILDKITE_STATE_KEY, state)
   return state
 }
 
@@ -288,7 +326,9 @@ fn __reject(status, code, message) {
 fn __reject_err(err) {
   const code = err?.code ?? "rejected"
   const message = err?.message ?? "request rejected"
-  const status = if code == "invalid_signature" || code == "invalid_token" || code == "missing_signature"
+  const status = if code == "invalid_signature" || code == "invalid_token"
+    || code
+    == "missing_signature"
     || code == "missing_token"
     || code == "missing_secret"
     || code == "stale_signature" {
@@ -310,8 +350,8 @@ fn __header(headers, name) {
 }
 
 @complexity(allow)
-fn __webhook_token(raw) {
-  const state = __state()
+fn __webhook_token(harness: Harness, raw) {
+  const state = __state(harness.runtime)
   const ctx_token = state.ctx?.webhook_token ?? state.ctx?.secrets?.webhook_token
   if ctx_token != nil && trim(to_string(ctx_token)) != "" {
     return to_string(ctx_token)
@@ -321,12 +361,13 @@ fn __webhook_token(raw) {
   if binding_id != nil {
     const binding = bindings.get(binding_id)
     const binding_token = binding?.webhook_token ?? binding?.secrets?.webhook_token
-      ?? binding?.config?.webhook_token
+      ?? binding?.config
+      ?.webhook_token
     if binding_token != nil && trim(to_string(binding_token)) != "" {
       return to_string(binding_token)
     }
   }
-  const secret_id = __webhook_token_id(raw)
+  const secret_id = __webhook_token_id(harness.runtime, raw)
   if secret_id != nil {
     const resolved = try {
       harness.secrets.read(secret_id)
@@ -350,18 +391,19 @@ fn __webhook_token(raw) {
   return nil
 }
 
-fn __webhook_token_id(raw) {
+fn __webhook_token_id(runtime: HarnessRuntime, raw) {
   const metadata = raw?.metadata ?? {}
   const id = metadata?.secret_ids?.webhook_token ?? metadata?.config?.secret_ids?.webhook_token
   if id != nil && trim(to_string(id)) != "" {
     return to_string(id)
   }
-  const bindings = __state().bindings ?? {}
+  const bindings = __state(runtime).bindings ?? {}
   const binding_id = metadata?.binding_id ?? raw?.binding_id
   if binding_id != nil {
     const binding = bindings.get(binding_id)
     const bid = binding?.webhook_token_id ?? binding?.secrets?.webhook_token_id
-      ?? binding?.config?.secret_ids?.webhook_token
+      ?? binding?.config
+      ?.secret_ids?.webhook_token
     if bid != nil && trim(to_string(bid)) != "" {
       return to_string(bid)
     }
@@ -371,7 +413,7 @@ fn __webhook_token_id(raw) {
 
 @complexity(allow)
 fn __verify_webhook(harness: Harness, raw, headers, body_text) {
-  const token = __webhook_token(raw)
+  const token = __webhook_token(harness, raw)
   if token == nil || trim(to_string(token)) == "" {
     return __err(
       "missing_secret",
@@ -384,7 +426,10 @@ fn __verify_webhook(harness: Harness, raw, headers, body_text) {
   }
   const provided_token = __header(headers, "x-buildkite-token")
   if provided_token == nil || provided_token == "" {
-    return __err("missing_signature", "neither X-Buildkite-Signature nor X-Buildkite-Token header is present")
+    return __err(
+      "missing_signature",
+      "neither X-Buildkite-Signature nor X-Buildkite-Token header is present",
+    )
   }
   if !constant_time_eq(to_string(token), to_string(provided_token)) {
     return __err("invalid_token", "x-buildkite-token did not match the configured webhook token")
@@ -398,8 +443,14 @@ fn __verify_signature(harness: Harness, raw, signature_header, body_text, token)
   const timestamp = fields.get("timestamp")
   const signature = fields.get("signature")
   if timestamp == nil || trim(to_string(timestamp)) == "" || signature == nil
-    || trim(to_string(signature)) == "" {
-    return __err("invalid_signature", "x-buildkite-signature must contain `timestamp=<unix>,signature=<hex>`")
+    || trim(
+    to_string(signature),
+  )
+    == "" {
+    return __err(
+      "invalid_signature",
+      "x-buildkite-signature must contain `timestamp=<unix>,signature=<hex>`",
+    )
   }
   const signed_message = to_string(timestamp) + "." + body_text
   const expected = hmac_sha256(token, signed_message)
@@ -535,7 +586,8 @@ fn __job(job) {
 
 fn __org_from_pipeline(pipeline_obj) {
   const provider = pipeline_obj?.provider ?? {}
-  return provider?.settings?.account ?? pipeline_obj?.organization?.slug ?? pipeline_obj?.account_slug
+  return provider?.settings?.account ?? pipeline_obj?.organization?.slug
+    ?? pipeline_obj?.account_slug
 }
 
 @complexity(allow)
@@ -573,7 +625,9 @@ fn __pipeline_ref(args) {
 
 fn __build_path(org, args) {
   return "/organizations/" + url_encode(org) + "/pipelines/" + __pipeline_ref(args) + "/builds/"
-    + url_encode(to_string(args?.build_number ?? ""))
+    + url_encode(
+    to_string(args?.build_number ?? ""),
+  )
 }
 
 fn __upcase_method(method) {
@@ -582,16 +636,25 @@ fn __upcase_method(method) {
 
 @complexity(allow)
 fn __outbound_config(harness: Harness, args) {
-  const api_base_url = args?.api_base_url ?? harness.env.get_or("BUILDKITE_API_BASE_URL", BUILDKITE_API_BASE_URL)
+  const api_base_url = args?.api_base_url
+    ?? harness.env.get_or(
+    "BUILDKITE_API_BASE_URL",
+    BUILDKITE_API_BASE_URL,
+  )
   const base_check = __validate_url_host(api_base_url, "api_base_url")
   if is_err(base_check) {
     return base_check
   }
   const api_token = args?.api_token ?? args?.access_token ?? args?.token ?? args?.secrets?.api_token
-    ?? harness.env.get("BUILDKITE_API_TOKEN")
+    ?? harness
+    .env
+    .get("BUILDKITE_API_TOKEN")
     ?? harness.env.get("BUILDKITE_TOKEN")
   if api_token == nil || trim(to_string(api_token)) == "" {
-    return __err("missing_token", "buildkite connector requires api_token (Bearer) for outbound calls")
+    return __err(
+      "missing_token",
+      "buildkite connector requires api_token (Bearer) for outbound calls",
+    )
   }
   return Ok({api_base_url: to_string(api_base_url), api_token: to_string(api_token)})
 }
@@ -680,7 +743,10 @@ fn __is_disallowed_host(host_lc) {
     return true
   }
   if ends_with(host_lc, ".localhost") || ends_with(host_lc, ".local")
-    || ends_with(host_lc, ".internal") {
+    || ends_with(
+    host_lc,
+    ".internal",
+  ) {
     return true
   }
   if host_lc == "::1" || host_lc == "0:0:0:0:0:0:0:1" {
@@ -733,7 +799,8 @@ fn __buildkite_json(harness: Harness, method, url, body, cfg) {
     if is_err(limited) {
       return limited
     }
-    if (response.status == 429 || response.status == 503) && unwrap(limited) && !retried_rate_limit {
+    if (response.status == 429 || response.status == 503) && unwrap(limited)
+      && !retried_rate_limit {
       retried_rate_limit = true
       continue
     }
@@ -748,7 +815,8 @@ fn __buildkite_json(harness: Harness, method, url, body, cfg) {
       return __err(
         code,
         "buildkite API request failed with status " + to_string(response.status) + ": "
-          + response.body,
+          + response
+          .body,
       )
     }
     return __decode_response(response)
@@ -804,7 +872,9 @@ fn __maybe_wait_for_rate_limit(harness: Harness, response) {
 @complexity(allow)
 fn __graphql(harness: Harness, args) {
   const api_token = args?.api_token ?? args?.access_token ?? args?.token
-    ?? harness.env.get("BUILDKITE_API_TOKEN")
+    ?? harness.env.get(
+    "BUILDKITE_API_TOKEN",
+  )
     ?? harness.env.get("BUILDKITE_TOKEN")
   if api_token == nil || trim(to_string(api_token)) == "" {
     return __err("missing_token", "buildkite graphql requires api_token (Bearer)")
@@ -817,7 +887,8 @@ fn __graphql(harness: Harness, args) {
   if is_err(base_check) {
     return base_check
   }
-  return __buildkite_json(harness, 
+  return __buildkite_json(
+    harness,
     "POST",
     to_string(url),
     {query: to_string(args.query), variables: args?.variables ?? {}},
@@ -851,7 +922,9 @@ fn __github_commit_pulls(harness: Harness, args) {
   const url = __api_url(
     to_string(base),
     "/repos/" + url_encode(unwrap(owner)) + "/" + url_encode(unwrap(repo)) + "/commits/"
-      + url_encode(unwrap(sha))
+      + url_encode(
+      unwrap(sha),
+    )
       + "/pulls",
   )
   return __buildkite_json(harness, "GET", url, nil, {api_token: to_string(github_token)})

@@ -27,7 +27,7 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const envelope = safe_structured_call(harness,  harness, "Grade this output.",
+      const envelope = safe_structured_call(harness, "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )
@@ -48,7 +48,7 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const envelope = safe_structured_call(harness,  harness, "Grade this output.",
+      const envelope = safe_structured_call(harness, "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )
@@ -69,7 +69,7 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const envelope = safe_structured_call(harness,  harness, "Grade this output.",
+      const envelope = safe_structured_call(harness, "Grade this output.",
         schema,
         {provider: "mock", model: "mock-model", max_tokens: 200},
       )

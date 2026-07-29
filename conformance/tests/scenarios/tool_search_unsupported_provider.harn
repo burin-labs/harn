@@ -51,5 +51,5 @@ pipeline test(harness: Harness, task) {
   assert(native_err != nil, "native mode must error on unsupported provider")
   assert(native_err.contains("does not expose native"), "error mentions missing native support")
   assert(native_err.contains("mode: \"client\""), "error suggests the client fallback")
-  harness.stdio.println("tool_search_unsupported_provider tests passed")
+  harness.stdio.log("tool_search_unsupported_provider tests passed")
 }

@@ -17,7 +17,9 @@ import {
 } from "std/personas/bulletins"
 
 pipeline default(harness: Harness) {
-  const proposed = bulletin_propose(harness,  harness, {
+  const proposed = bulletin_propose(
+    harness,
+    {
       scope: "user",
       scope_key: "kenneth@example.com",
       subject: "kenneth",
@@ -56,7 +58,11 @@ pipeline default(harness: Harness) {
   harness.stdio.println(proposed.id == stable_id)
   const validated = bulletin_validate(proposed)
   harness.stdio.println(validated.id == proposed.id)
-  const proposal_receipt = bulletin_emit(harness, proposed, {topic: "personas.bulletins.test.proposed"})
+  const proposal_receipt = bulletin_emit(
+    harness,
+    proposed,
+    {topic: "personas.bulletins.test.proposed"},
+  )
   harness.stdio.println(proposal_receipt.schema)
   harness.stdio.println(proposal_receipt.kind)
   harness.stdio.println(proposal_receipt.bulletin.status)
@@ -67,7 +73,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(proposal_event.kind)
   harness.stdio.println(proposal_event.headers.schema)
   harness.stdio.println(proposal_event.payload.scope)
-  const accept_receipt = bulletin_accept(harness,  harness, proposed,
+  const accept_receipt = bulletin_accept(
+    harness,
+    proposed,
     {
       topic: "personas.bulletins.test.decisions",
       decided_by: "user",
@@ -96,7 +104,9 @@ pipeline default(harness: Harness) {
   )
   const active = bulletin_active(harness, expired_after_accept, "2026-05-11T16:10:00.000Z")
   harness.stdio.println(len(active))
-  const second = bulletin_propose(harness,  harness, {
+  const second = bulletin_propose(
+    harness,
+    {
       scope: "user",
       scope_key: "kenneth@example.com",
       subject: "kenneth",
@@ -108,13 +118,17 @@ pipeline default(harness: Harness) {
   )
   const rendered = bulletin_render_for_prompt(harness, updated + [second])
   harness.stdio.println(rendered)
-  const rendered_accepted_only = bulletin_render_for_prompt(harness, updated + [second],
+  const rendered_accepted_only = bulletin_render_for_prompt(
+    harness,
+    updated + [second],
     {include_proposed: false},
   )
   harness.stdio.println(rendered_accepted_only)
   const dedup = bulletin_dedupe(harness, [proposed, proposed, second])
   harness.stdio.println(len(dedup))
-  const supersede_receipt = bulletin_supersede(harness,  harness, second,
+  const supersede_receipt = bulletin_supersede(
+    harness,
+    second,
     [proposed.id],
     {
       decided_by: "user",
@@ -125,7 +139,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(supersede_receipt.decision.action)
   harness.stdio.println(supersede_receipt.decision.supersedes[0] == proposed.id)
   harness.stdio.println(supersede_receipt.topic == "personas.bulletins.test.decisions")
-  const reject_receipt = bulletin_reject(harness,  harness, proposed,
+  const reject_receipt = bulletin_reject(
+    harness,
+    proposed,
     {
       decided_by: "user",
       decided_at: "2026-05-11T16:30:00.000Z",
@@ -134,7 +150,9 @@ pipeline default(harness: Harness) {
     },
   )
   harness.stdio.println(reject_receipt.decision.status)
-  const expire_receipt = bulletin_expire(harness,  harness, proposed,
+  const expire_receipt = bulletin_expire(
+    harness,
+    proposed,
     {
       decided_by: "policy",
       decided_at: "2026-05-11T16:45:00.000Z",
@@ -143,12 +161,17 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(expire_receipt.decision.status)
   const bad_scope = try {
-    bulletin_propose(harness,  harness, {scope: "weird", scope_key: "x", subject: "x", assertion: "x", confidence: 0.5},
+    bulletin_propose(
+      harness,
+      {scope: "weird", scope_key: "x", subject: "x", assertion: "x", confidence: 0.5},
     )
   }
   harness.stdio.println(is_err(bad_scope))
   const bad_confidence = try {
-    bulletin_propose(harness, {scope: "user", scope_key: "x", subject: "x", assertion: "x", confidence: 1.5})
+    bulletin_propose(
+      harness,
+      {scope: "user", scope_key: "x", subject: "x", assertion: "x", confidence: 1.5},
+    )
   }
   harness.stdio.println(is_err(bad_confidence))
   const missing_assertion = try {
@@ -161,11 +184,13 @@ pipeline default(harness: Harness) {
   harness.stdio.println(is_err(supersede_missing))
   const invalid_decision: any = {schema: "not.real.v1", bulletin_id: "x"}
   const bad_decision_schema = try {
-    bulletin_emit_decision(invalid_decision)
+    bulletin_emit_decision(harness, invalid_decision)
   }
   harness.stdio.println(is_err(bad_decision_schema))
   const bad_sync = try {
-    bulletin_propose(harness,  harness, {
+    bulletin_propose(
+      harness,
+      {
         scope: "user",
         scope_key: "x",
         subject: "x",

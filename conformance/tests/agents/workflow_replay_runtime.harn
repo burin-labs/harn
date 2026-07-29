@@ -1,3 +1,4 @@
+import { workflow_execute } from "std/workflow/execute"
 pipeline main(harness: Harness) {
   const flow = workflow_graph(
     {

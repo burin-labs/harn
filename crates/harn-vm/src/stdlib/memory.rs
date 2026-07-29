@@ -245,7 +245,7 @@ const EMBED_CACHE_NAMESPACE: &str = "__embed";
     category = "memory"
 )]
 async fn embed_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let text = required_string(&args, 0, "__embed", "text")?;
@@ -254,7 +254,8 @@ async fn embed_impl(
     let model_hint = option_string(options, "embed_model_hint")
         .or_else(|| option_string(options, "model_hint"))
         .unwrap_or_else(|| DEFAULT_EMBED_MODEL_HINT.to_string());
-    let embedding = embed_cached(&root, EMBED_CACHE_NAMESPACE, &text, &model_hint).await?;
+    let embedding =
+        embed_cached(Some(&ctx), &root, EMBED_CACHE_NAMESPACE, &text, &model_hint).await?;
     let mut map = crate::value::DictMap::new();
     map.insert(
         crate::value::intern_key("vector"),
@@ -282,7 +283,7 @@ async fn embed_impl(
     category = "memory"
 )]
 async fn memory_store_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let namespace = required_string(&args, 0, "__memory_store", "namespace")?;
@@ -316,7 +317,14 @@ async fn memory_store_impl(
     if want_embed {
         let model_hint = option_string(options, "embed_model_hint")
             .unwrap_or_else(|| config.model_hint().to_string());
-        let _ = ensure_embedding(&root, &namespace, &searchable_text(&record), &model_hint).await?;
+        let _ = ensure_embedding(
+            Some(&ctx),
+            &root,
+            &namespace,
+            &searchable_text(&record),
+            &model_hint,
+        )
+        .await?;
     }
 
     Ok(memory_record_to_vm(&record, None))
@@ -330,7 +338,7 @@ async fn memory_store_impl(
     category = "memory"
 )]
 async fn memory_recall_impl(
-    _ctx: crate::vm::AsyncBuiltinCtx,
+    ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let namespace = required_string(&args, 0, "__memory_recall", "namespace")?;
@@ -351,6 +359,7 @@ async fn memory_recall_impl(
 
     let records = active_records(&root, &namespace)?;
     let scored = score_records_async(
+        Some(&ctx),
         records,
         &query,
         mode,
@@ -995,6 +1004,7 @@ fn read_namespace_config(root: &Path, namespace: &str) -> Result<NamespaceConfig
 
 #[allow(clippy::too_many_arguments)]
 async fn score_records_async(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     records: Vec<(usize, MemoryRecord)>,
     query: &str,
     mode: RecallMode,
@@ -1009,19 +1019,26 @@ async fn score_records_async(
     match mode {
         RecallMode::Lexical => Ok(score_bm25(records, query)),
         RecallMode::Semantic => {
-            score_semantic(records, query, root, namespace, model_hint, config).await
+            score_semantic(ctx, records, query, root, namespace, model_hint, config).await
         }
         RecallMode::Hybrid => {
             let bm25_by_id = score_bm25(records.clone(), query)
                 .into_iter()
                 .map(|item| (item.record.id.clone(), item.score))
                 .collect::<HashMap<_, _>>();
-            let cosine_by_id =
-                score_semantic(records.clone(), query, root, namespace, model_hint, config)
-                    .await?
-                    .into_iter()
-                    .map(|item| (item.record.id.clone(), item.score))
-                    .collect::<HashMap<_, _>>();
+            let cosine_by_id = score_semantic(
+                ctx,
+                records.clone(),
+                query,
+                root,
+                namespace,
+                model_hint,
+                config,
+            )
+            .await?
+            .into_iter()
+            .map(|item| (item.record.id.clone(), item.score))
+            .collect::<HashMap<_, _>>();
             let (bm25_weight, cosine_weight) = config.hybrid_weights();
             let max_bm25 = bm25_by_id
                 .values()
@@ -1116,6 +1133,7 @@ fn score_bm25(records: Vec<(usize, MemoryRecord)>, query: &str) -> Vec<ScoredRec
 }
 
 async fn score_semantic(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     records: Vec<(usize, MemoryRecord)>,
     query: &str,
     root: &Path,
@@ -1123,7 +1141,7 @@ async fn score_semantic(
     model_hint: &str,
     config: &NamespaceConfig,
 ) -> Result<Vec<ScoredRecord>, VmError> {
-    let query_vector = ensure_embedding(root, namespace, query, model_hint).await?;
+    let query_vector = ensure_embedding(ctx, root, namespace, query, model_hint).await?;
     if query_vector.is_empty() {
         return Err(VmError::Runtime(
             "memory: memory.embed returned an empty vector for the query".to_string(),
@@ -1140,7 +1158,7 @@ async fn score_semantic(
     let mut scored = Vec::with_capacity(records.len());
     for (sequence, record) in records {
         let record_vector =
-            ensure_embedding(root, namespace, &searchable_text(&record), model_hint).await?;
+            ensure_embedding(ctx, root, namespace, &searchable_text(&record), model_hint).await?;
         if record_vector.len() != query_vector.len() {
             return Err(VmError::Runtime(format!(
                 "memory: embedding dimension mismatch for record {} (query={}, record={})",
@@ -1169,12 +1187,13 @@ async fn score_semantic(
 }
 
 async fn ensure_embedding(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     root: &Path,
     namespace: &str,
     text: &str,
     model_hint: &str,
 ) -> Result<Vec<f64>, VmError> {
-    Ok(embed_cached(root, namespace, text, model_hint)
+    Ok(embed_cached(ctx, root, namespace, text, model_hint)
         .await?
         .vector)
 }
@@ -1185,6 +1204,7 @@ async fn ensure_embedding(
 /// This is the shared substrate behind both `memory_recall`'s semantic scoring
 /// and the standalone `__embed` builtin.
 async fn embed_cached(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     root: &Path,
     namespace: &str,
     text: &str,
@@ -1203,7 +1223,21 @@ async fn embed_cached(
     let mut params = crate::value::DictMap::new();
     params.put_str("text", text);
     params.put_str("model_hint", hint);
-    let result = dispatch_host_operation("memory", "embed", &params).await?;
+    params.put_str("root", root.to_string_lossy());
+    let fixture_result = ctx
+        .and_then(|ctx| ctx.child_vm().root_harness_value())
+        .and_then(|root| match root {
+            VmValue::Harness(root) => root.inner().fixtures().dispatch(
+                harn_builtin_meta::CapabilityId::Embed,
+                "text_response",
+                &[VmValue::dict(params.clone())],
+            ),
+            _ => None,
+        });
+    let result = match fixture_result {
+        Some(result) => result?,
+        None => dispatch_host_operation("memory", "embed", &params).await?,
+    };
     let cached = parse_embedding_response(result, hint)?;
     write_cached_embedding(&path, &cached)?;
     Ok(cached)

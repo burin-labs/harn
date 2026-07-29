@@ -11,7 +11,7 @@ pipeline test(harness: Harness, task) {
     }
   }
   fn run_proc<T>(p: T) where T: Processor {
-    harness.stdio.println(p.process("hello"))
+    harness.stdio.log(p.process("hello"))
   }
   run_proc(MyProc({name: "a"}))
 }

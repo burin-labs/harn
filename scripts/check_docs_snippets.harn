@@ -262,7 +262,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
     return env_bin
   }
   let target_dir = ""
-  const meta = harness.process.spawn_captured(
+  const meta = harness.process.run(
     {cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
   )
   if meta.success {
@@ -282,7 +282,7 @@ fn resolve_harn_bin(harness: Harness) -> string {
   const bin = "${target_dir}/debug/harn"
   if !harness.fs.exists(bin) {
     harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
-    const build = harness.process.spawn_captured(
+    const build = harness.process.run(
       {cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]},
     )
     if !build.success {
@@ -303,7 +303,7 @@ pipeline main(harness: Harness, task) {
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the snippet scratch directory lives there (removed afterward) rather
    * than under the system temp dir the bash version used. */
-  const mk = harness.process.spawn_captured(
+  const mk = harness.process.run(
     {cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]},
   )
   if !mk.success {
@@ -312,7 +312,7 @@ pipeline main(harness: Harness, task) {
   }
   const tmp_dir = mk.stdout.trim()
   defer {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_dir]})
+    harness.process.run({cmd: "rm", args: ["-rf", tmp_dir]})
   }
   let checked = 0
   let skipped = 0
@@ -338,7 +338,7 @@ pipeline main(harness: Harness, task) {
       checked = checked + 1
       const block_path = "${prefix}_${event.idx}${mode_extension(event.mode)}"
       harness.fs.write_text(block_path, event.content)
-      const res = harness.process.spawn_captured(
+      const res = harness.process.run(
         {cmd: harn_bin, args: mode_argv(event.mode, block_path)},
       )
       if !res.success {
@@ -367,7 +367,7 @@ pipeline main(harness: Harness, task) {
     harness.stdio.println("      intentional fragment.")
     // harness.runtime.exit() bypasses defer, so remove the scratch directory before reporting
     // failure to the calling shell.
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_dir]})
+    harness.process.run({cmd: "rm", args: ["-rf", tmp_dir]})
     harness.runtime.exit(1)
   }
 }

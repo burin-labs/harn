@@ -20,7 +20,7 @@ type DisclosureGitTrailerOptions = {
  * project `harn.toml`, env, and `options.config`. The nested tables stay open
  * dict because they are keyed by arbitrary surface names and actor subjects.
  */
-type DisclosureConfig = {defaults?: dict, surfaces?: dict, identities?: dict}
+type DisclosureConfig = {defaults: dict?, surfaces: dict?, identities: dict?}
 
 /**
  * Rendering context assembled by `__context` from an ActorChain: the resolved
@@ -150,7 +150,7 @@ fn __config(harness: Harness, options) -> DisclosureConfig {
   config = deep_merge(config, __project_config(harness, opts))
   config = deep_merge(config, __env_config(harness, opts))
   config = deep_merge(config, __as_config(opts?.config))
-  return config
+  return {defaults: config?.defaults, surfaces: config?.surfaces, identities: config?.identities}
 }
 
 fn __slug(value: string) -> string {
@@ -537,7 +537,7 @@ fn __signed_off_by_targets_non_human(line: string, ctx: DisclosureContext) -> bo
   return false
 }
 
-fn __safe_git_trailers(block: string, ctx: dict) -> string {
+fn __safe_git_trailers(block: string, ctx: DisclosureContext) -> string {
   let lines = []
   for line in split(trim(block), "\n") {
     const cleaned = trim(line)
@@ -592,7 +592,12 @@ fn __append_trailer_block(message: string, block: string) -> string {
  * @effects: [fs-read, env-read]
  * @errors: [TypeError, ValueError]
  */
-pub fn render(harness: Harness, chain, surface: string, options: DisclosureRenderOptions = {}) -> any {
+pub fn render(
+  harness: Harness,
+  chain,
+  surface: string,
+  options: DisclosureRenderOptions = {},
+) -> any {
   const config = __config(harness, options)
   const surface_config = __surface_config(config, surface)
   const ctx = __context(chain, config)
@@ -617,7 +622,11 @@ pub fn render(harness: Harness, chain, surface: string, options: DisclosureRende
  * @effects: [fs-read, env-read]
  * @errors: [TypeError, ValueError]
  */
-pub fn slack_message_disclosure(harness: Harness, chain, options: DisclosureRenderOptions = {}) -> dict {
+pub fn slack_message_disclosure(
+  harness: Harness,
+  chain,
+  options: DisclosureRenderOptions = {},
+) -> dict {
   const config = __config(harness, options)
   const ctx = __context(chain, config)
   return __slack_message_disclosure(harness.fs, config, ctx)
@@ -655,7 +664,8 @@ pub fn git_trailers(harness: Harness, chain, options: DisclosureGitTrailerOption
  * @effects: [fs-read, env-read]
  * @errors: [TypeError, ValueError]
  */
-pub fn append_git_trailers(harness: Harness, 
+pub fn append_git_trailers(
+  harness: Harness,
   message: string,
   chain,
   options: DisclosureGitTrailerOptions = {},

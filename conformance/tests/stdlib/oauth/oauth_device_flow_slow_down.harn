@@ -8,8 +8,8 @@ import { custom } from "std/oauth/providers"
 import { memory } from "std/oauth/storage"
 
 pipeline test(harness: Harness, task) {
-  const _ = mock_time(1700000000000)
-  const store = memory()
+  const _ = harness.testing.clock_set(1700000000000)
+  const store = memory(harness.auth)
   const provider = custom(
     {
       id: "mockSlowDown",
@@ -19,8 +19,8 @@ pipeline test(harness: Harness, task) {
       default_scopes: ["read"],
     },
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/device",
     {
@@ -30,7 +30,7 @@ pipeline test(harness: Harness, task) {
       headers: {"content-type": "application/json"},
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/token",
     {
@@ -49,7 +49,9 @@ pipeline test(harness: Harness, task) {
     },
   )
   const start_ts = to_int(harness.clock.timestamp())
-  const token_set = device_flow(harness,  harness, provider,
+  const token_set = device_flow(
+    harness,
+    provider,
     {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }},
   )
   const end_ts = to_int(harness.clock.timestamp())
@@ -62,8 +64,8 @@ pipeline test(harness: Harness, task) {
     elapsed >= 8,
     "polling honored slow_down bump (elapsed >= 8s, was " + to_string(elapsed) + ")",
   )
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 3, "device + 2 token polls")
-  const _ = unmock_time()
-  harness.stdio.println("oauth device flow slow_down ok")
+  const _ = harness.testing.clock_reset()
+  harness.stdio.log("oauth device flow slow_down ok")
 }

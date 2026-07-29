@@ -67,5 +67,5 @@ pipeline main(harness: Harness, task) {
     "lifecycle is audited"
   require len(transcript_events_by_kind(final_snapshot, "live_session_permission_route")) == 1,
     "permission route is audited"
-  harness.stdio.println("live session lifecycle tests passed")
+  harness.stdio.log("live session lifecycle tests passed")
 }

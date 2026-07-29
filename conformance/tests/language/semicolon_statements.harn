@@ -19,5 +19,5 @@ pipeline test(harness: Harness, task) {
   assert(second() == "two", "second function should parse on one line")
   assert(x + y == 3, "semicolon should separate let bindings")
   assert(meta.prompt == "Follow the runbook.", "skill fields should accept semicolons")
-  harness.stdio.println("semicolon statements passed")
+  harness.stdio.log("semicolon statements passed")
 }

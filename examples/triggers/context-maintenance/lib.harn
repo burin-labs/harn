@@ -6,7 +6,7 @@ import {
 
 fn __queue(harness: Harness, job_id, event, options = nil) {
   const receipt = context_maintenance_queue_receipt(job_id, event, options ?? {})
-  harness.stdio.println("queued " + receipt.job_id + " from " + to_string(receipt.lifecycle_event ?? "unknown"))
+  harness.stdio.log("queued " + receipt.job_id + " from " + to_string(receipt.lifecycle_event ?? "unknown"))
   return receipt
 }
 

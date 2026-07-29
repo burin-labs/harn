@@ -7,7 +7,10 @@ pub fn kinds() {
 }
 
 pub fn payload_schema() {
-  return {harn_schema_name: "SlackEventPayload", json_schema: {type: "object", additionalProperties: true}}
+  return {
+    harn_schema_name: "SlackEventPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
 }
 
 pub fn init(ctx) {
@@ -16,7 +19,7 @@ pub fn init(ctx) {
   }
 }
 
-pub fn activate(bindings) {
+pub fn activate(harness: Harness, bindings) {
   harness.obs.metrics_inc("slack_contract_activations", len(bindings))
 }
 
@@ -25,7 +28,11 @@ pub fn normalize_inbound(raw) {
   if body.type == "url_verification" {
     return {
       type: "immediate_response",
-      immediate_response: {status: 200, headers: {"content-type": "text/plain; charset=utf-8"}, body: body.challenge},
+      immediate_response: {
+        status: 200,
+        headers: {"content-type": "text/plain; charset=utf-8"},
+        body: body.challenge,
+      },
     }
   }
   return {

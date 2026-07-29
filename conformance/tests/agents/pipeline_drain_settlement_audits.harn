@@ -15,7 +15,7 @@ pipeline default(harness: Harness) {
       harness.handoff_to("nightly-drain", {note: "first"})
       harness.handoff_to("nightly-drain", {note: "second"})
       const result = on_finish_drain(harness, return_value)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("status=" + result.status)
       harness.stdio.println("items_processed=" + to_string(result.items_processed))
       const drain_decisions = audits.filter({ entry -> entry.kind == "drain_decision" })

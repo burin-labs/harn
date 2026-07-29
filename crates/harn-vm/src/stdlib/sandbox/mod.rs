@@ -301,6 +301,22 @@ pub fn register_sandbox_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
+    use harn_builtin_meta::CapabilityId;
+    vm.register_capability_method(
+        CapabilityId::System,
+        "sandbox_active_backend",
+        sandbox_active_backend_impl,
+    );
+    vm.register_capability_method(
+        CapabilityId::System,
+        "sandbox_backend_available",
+        sandbox_backend_available_impl,
+    );
+    vm.register_capability_method(
+        CapabilityId::System,
+        "sandbox_active_profile",
+        sandbox_active_profile_impl,
+    );
 }
 
 pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[

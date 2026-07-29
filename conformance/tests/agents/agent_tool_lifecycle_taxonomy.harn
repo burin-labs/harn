@@ -36,5 +36,5 @@ pipeline test(harness: Harness) {
   assert_eq(agent_tool_mutation_status("unknown"), "unknown")
   assert_eq(agent_tool_mutation_status(nil), "unknown")
   assert_eq(agent_tool_mutation_status("future_status"), "unknown")
-  harness.stdio.println("agent tool lifecycle taxonomy ok")
+  harness.stdio.log("agent tool lifecycle taxonomy ok")
 }

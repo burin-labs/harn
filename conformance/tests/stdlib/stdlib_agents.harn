@@ -16,8 +16,12 @@ pipeline default(harness: Harness) {
   harness.stdio.println(result?.status)
   harness.stdio.println(result?.repair != nil)
   harness.stdio.println(result?.transcript?._type)
-  const continued = workflow_continue(result, "Continue", flow, {provider: "mock"})
+  const continued = workflow_continue(harness, result, "Continue", flow, {provider: "mock"})
   harness.stdio.println(continued?.transcript?._type)
-  const compacted = workflow_compact(continued, {provider: "mock", keep_last: 1})
+  const compacted = workflow_compact(
+    harness.agent,
+    continued,
+    {provider: "mock", keep_last: 1},
+  )
   harness.stdio.println(transcript_summary(compacted) != nil)
 }

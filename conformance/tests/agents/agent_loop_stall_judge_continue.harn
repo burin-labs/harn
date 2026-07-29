@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { agent_session_messages } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
@@ -45,7 +46,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "stall-judge-continue-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Continue when the stall judge vetoes.",
           nil,
           {
@@ -104,7 +105,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const other_session = "stall-judge-other-" + harness.random.uuid()
-      const other = agent_capture_events(harness,  harness, other_session,
+      const other = agent_capture_events(harness, other_session,
         fn() { return agent_loop(harness, "Do not run a stall judge for non-stalled cadence.",
           nil,
           {

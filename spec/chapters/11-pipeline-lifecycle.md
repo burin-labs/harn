@@ -43,6 +43,47 @@ registration into the next run.
 
 ### `Harness` type
 
+Effects flow from the harness capability object; imports are pure.
+
+`Harness` is the only root authority injected by the runtime. A program
+receives it as an explicit entrypoint parameter—normally
+`fn main(harness: Harness)`—and may pass either the root or one of its nominal
+sub-handles to helpers. Importing a module never grants authority: imports only
+bind code, types, constants, and pure values. An imported helper that performs
+an effect must require the relevant `Harness*` value in its ordinary parameter
+list.
+
+Pure computation remains available as global functions. Runtime operations are
+not globals: their public contracts are methods on a closed `Harness`
+capability type. Each contract declares its conservative effect family,
+access mode, and resource selector; the compiler, policy engine, runtime
+receipts, language tooling, and generated reference all consume that same
+manifest. A host may implement a contract directly or through a privileged
+wire primitive, but privileged wire names are not source-visible or
+re-exportable.
+
+Possessing one sub-handle grants no other sub-handle. For example, a helper
+that accepts `HarnessFs` cannot read environment variables, invoke a process,
+or make a network request. Hosts may narrow a grant or supply deterministic
+fixtures without installing a process registry or an ambient thread-local
+mock. Runtime dispatch rejects a method absent from the typed contract even if
+an embedder accidentally registered a same-named callable.
+
+Authority narrows as control moves inward. Entrypoints and orchestration
+functions may accept root `Harness`; ordinary helpers should accept the
+smallest coherent nominal capability interface that describes their work.
+One handle is not automatically better than two, and a coordinator that
+genuinely combines several capabilities may retain the root. The
+`capability-attenuation` lint reports helpers whose root parameter is used only
+through one or two direct sub-handles and suggests the corresponding
+`Harness*` signature.
+
+`Harness` and every `Harness*` sub-handle are runtime authority, not domain
+data. They cannot be JSON-serialized, placed in the persistent store,
+checkpointed, or embedded inside a persisted record. Programs persist stable
+identifiers and ordinary data, then receive fresh authority from the runtime
+when execution resumes.
+
 The single argument to every lifecycle callback is the harness. The
 read-side surface is `unsettled_state(): UnsettledStateSnapshot`,
 which returns a stable JSON-shaped dict with five lists:
@@ -55,18 +96,20 @@ registries (suspended subagents, partial handoffs, in-flight LLM
 calls, pool pending tasks) and from event-log records (queued
 trigger inbox + worker queue items).
 
-Capability sub-handles are exposed by field access on the harness:
+Capability sub-handles are exposed by field access on the harness. The
+contract manifest is the exhaustive method reference; these groups describe
+the stable ownership boundaries:
 
-| Field | Type | Primary methods |
+| Fields | Ownership |
 |---|---|---|
-| `harness.stdio` | `HarnessStdio` | `print`, `println`, `eprint`, `eprintln`, `read_line`, `prompt` |
-| `harness.term` | `HarnessTerm` | `width`, `height`, `read_password` |
-| `harness.clock` | `HarnessClock` | `now_ms`, `timestamp`, `monotonic_ms`, `elapsed`, `sleep_ms` |
-| `harness.fs` | `HarnessFs` | `read_text`, `write_text`, `replace_text`, `append`, `exists`, `list_dir` |
-| `harness.env` | `HarnessEnv` | `get`, `set`, `unset`, `list` |
-| `harness.random` | `HarnessRandom` | `gen_u64`, `uuid`, `bytes` |
-| `harness.net` | `HarnessNet` | `get`, `post` |
-| `harness.system` | `HarnessSystem` | `platform`, `arch`, `cpu`, `memory`, `cwd`, `pid` |
+| `stdio`, `term`, `clock`, `env`, `random`, `system` | Process observation, user I/O, time, and entropy |
+| `fs`, `process`, `net`, `channels`, `secrets` | External I/O and durable communication |
+| `llm`, `agent`, `tools`, `interaction`, `verdict` | Model, worker, tool-protocol, human-interaction, and decision authority |
+| `tenant`, `auth`, `obs`, `runtime`, `project` | Execution identity, authentication, telemetry, runtime context, and project state |
+| `ast`, `code_index`, `scanner`, `rules`, `lint` | Language and code-analysis services |
+| `computer`, `embed`, `memory`, `sqlite`, `postgres` | Native interaction and data services |
+| `fs_watch`, `host_lease`, `secret_store`, `terminal` | Long-lived resource factories |
+| `testing` | Per-harness deterministic fixtures, captured calls, and virtual-clock control |
 
 Write-side actions:
 
@@ -168,9 +211,10 @@ Every lifecycle decision is reproducible on a replay:
    wall-clock or external state) cannot drift the second run.
 3. **Signed timestamps.** `harness.emit_audit` stamps entries with a
    per-run monotonic `LIFECYCLE_SEQ` counter rather than wall-clock
-   time. Wall-clock fields (`queued_at_ms`, `age_ms`) come from
-   `clock_mock`-aware sources and respect `mock_time(...)` /
-   `advance_time(...)` in tests.
+   time. Wall-clock fields (`queued_at_ms`, `age_ms`) come from the
+   harness clock. Tests control only their own harness through
+   `harness.testing.clock_set(...)`, `clock_advance(...)`, and
+   `clock_reset()`.
 4. **One-shot registration.** `pipeline_on_finish(callback)` is
    last-write-wins; the slot is consumed exactly once per run via
    `take_pipeline_on_finish`. The error exit path clears the slot

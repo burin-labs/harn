@@ -23,8 +23,7 @@ pipeline main(harness: Harness, task) {
   const workers = []
   for sub in subtasks {
     const worker_session = harness.agent.fork(parent_session)
-    const worker = spawn_agent(
-      {
+    const worker = spawn_agent(harness.agent, {
         name: sub.name,
         task: sub.prompt,
         node: {
@@ -35,25 +34,25 @@ pipeline main(harness: Harness, task) {
         },
       },
     )
-    harness.stdio.println("Spawned agent: ${sub.name} (status: ${worker?.status})")
+    harness.stdio.log("Spawned agent: ${sub.name} (status: ${worker?.status})")
     workers = workers + [worker]
   }
   // Wait for all workers and collect results
   const results = []
   for worker in workers {
-    const done = wait_agent(worker)
-    harness.stdio.println("Agent ${done?.name} finished (status: ${done?.status})")
+    const done = wait_agent(harness.agent, worker)
+    harness.stdio.log("Agent ${done?.name} finished (status: ${done?.status})")
     results = results + [done]
   }
   // Aggregate results
-  harness.stdio.println("")
-  harness.stdio.println("=== Aggregated Results ===")
+  harness.stdio.log("")
+  harness.stdio.log("=== Aggregated Results ===")
   for r in results {
-    harness.stdio.println("${r?.name}: artifacts=${r?.artifact_count}, has_transcript=${r?.has_transcript}")
+    harness.stdio.log("${r?.name}: artifacts=${r?.artifact_count}, has_transcript=${r?.has_transcript}")
   }
-  harness.stdio.println("Total agents completed: ${len(results)}")
+  harness.stdio.log("Total agents completed: ${len(results)}")
   // Clean up
   for r in results {
-    close_agent(r)
+    close_agent(harness.agent, r)
   }
 }

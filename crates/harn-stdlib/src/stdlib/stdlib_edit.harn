@@ -126,7 +126,7 @@ fn __refactor_common_root(paths) {
 }
 
 fn __refactor_new_session(random: HarnessRandom, operation) {
-  return "harn-refactor-" + operation + "-" + random.harness.random.uuid_v7()
+  return "harn-refactor-" + operation + "-" + random.uuid_v7()
 }
 
 fn __refactor_leading_ws(line) {

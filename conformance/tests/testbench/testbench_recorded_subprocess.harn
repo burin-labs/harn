@@ -8,10 +8,10 @@
  * paused clock is installed automatically by the conformance runner.
  */
 pipeline test(harness: Harness, task) {
-  const git_out = exec("git", "status")
+  const git_out = harness.process.exec("git", "status")
   harness.stdio.println(git_out.success)
   harness.stdio.println(trim(git_out.stdout))
-  const echo_out = exec("echo", "hi")
+  const echo_out = harness.process.exec("echo", "hi")
   harness.stdio.println(echo_out.success)
   harness.stdio.println(trim(echo_out.stdout))
 }

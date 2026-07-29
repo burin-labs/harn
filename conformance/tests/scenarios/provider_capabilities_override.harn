@@ -40,5 +40,5 @@ pipeline test(harness: Harness, task) {
   harness.llm.provider_capabilities_clear()
   const restored = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
   assert(restored.defer_loading, "clear: shipped defaults restored")
-  harness.stdio.println("provider_capabilities_override tests passed")
+  harness.stdio.log("provider_capabilities_override tests passed")
 }

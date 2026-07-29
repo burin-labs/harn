@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * agent_loop(harness, {tool_caller}) routes every dispatch through the supplied
  * caller. The caller increments a counter, observes the envelope, and
@@ -7,8 +8,6 @@
  */
 import { with_required_reason } from "std/llm/tool_middleware"
 import { llm_text, with_llm_script } from "std/testing"
-
-const observed = harness.runtime.atomic(0)
 
 fn tools() {
   const r = tool_registry()
@@ -24,6 +23,7 @@ fn tools() {
 }
 
 pipeline default(harness: Harness) {
+  const observed = harness.runtime.atomic(0)
   // Two tool calls in turn 1, then a finishing turn.
   with_llm_script(
     harness.llm, [

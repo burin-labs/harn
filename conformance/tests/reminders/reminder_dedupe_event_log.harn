@@ -1,11 +1,11 @@
 pipeline main(harness: Harness) {
   const topic = "transcript.reminder.lifecycle"
   const cursor = harness.obs.event_log_latest(topic)
-  const first = transcript.inject_reminder(
+  const first = harness.agent.transcript_inject_reminder(
     transcript(),
     {body: "old reminder", dedupe_key: "context-slot", ttl_turns: 2},
   )
-  const second = transcript.inject_reminder(
+  const second = harness.agent.transcript_inject_reminder(
     first.transcript,
     {body: "new reminder", dedupe_key: "context-slot", ttl_turns: 3},
   )

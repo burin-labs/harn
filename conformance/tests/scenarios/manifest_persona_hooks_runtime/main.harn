@@ -10,5 +10,5 @@ fn admin_merge(pr) {
 
 pipeline default(harness: Harness) {
   const result = merge_pr("PR-9")
-  harness.stdio.println(result)
+  harness.stdio.log(result)
 }

@@ -1,5 +1,5 @@
 pipeline default(harness: Harness) {
-  mcp_server_metadata(
+  harness.tools.mcp_server_metadata(
     {
       name: "harn-http-elicit-test",
       version: "1.0.0",
@@ -14,7 +14,7 @@ pipeline default(harness: Harness) {
     {
       parameters: {prompt: "string"},
       handler: { args ->
-        const response = mcp_elicit(
+        const response = harness.tools.mcp_elicit(
           {
             message: args.prompt ?? "Choose environment",
             requestedSchema: {
@@ -37,5 +37,5 @@ pipeline default(harness: Harness) {
       },
     },
   )
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 }

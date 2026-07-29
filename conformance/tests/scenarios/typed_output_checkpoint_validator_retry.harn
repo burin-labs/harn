@@ -22,8 +22,8 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session_id = "typed-checkpoint-session"
-      const captured = agent_capture_events(harness,  harness, session_id,
-        fn() { typed_output_checkpoint(harness,  harness, "merge_captain.next_action",
+      const captured = agent_capture_events(harness, session_id,
+        fn() { typed_output_checkpoint(harness, "merge_captain.next_action",
           "Choose the next Merge Captain action.",
           schema,
           {

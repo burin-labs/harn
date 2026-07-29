@@ -64,7 +64,7 @@ pipeline test_persona_prompt_compile(harness: Harness, _task) {
       ),
     ],
     { ->
-      const sdk = persona_compile_prompt(harness,  harness, "Watch github.com/acme/sdk and narrate meaningful changes every morning.",
+      const sdk = persona_compile_prompt(harness, "Watch github.com/acme/sdk and narrate meaningful changes every morning.",
         {provider: "mock", name_override: "acme_sdk_watch"},
         PROVIDERS,
       )
@@ -134,7 +134,7 @@ pipeline test_persona_prompt_compile(harness: Harness, _task) {
         throw "Compile receipt has no Slack catalog entry"
       }
       assert_eq(slack_catalog.required_secrets, ["signing_secret"])
-      const slack = persona_compile_prompt(harness,  harness, "Triage #alerts in Slack: page me, start investigating, or ignore.",
+      const slack = persona_compile_prompt(harness, "Triage #alerts in Slack: page me, start investigating, or ignore.",
         {provider: "mock", max_tokens: 1200},
         PROVIDERS,
       )
@@ -151,7 +151,7 @@ pipeline test_persona_prompt_compile(harness: Harness, _task) {
       }
       assert_eq(slack_trigger.provider, "slack")
       assert_eq(slack_trigger.events, ["slack.message"])
-      const digest = persona_compile_prompt(harness,  harness, "Every 4 hours, digest what I need to reply to or follow up on.",
+      const digest = persona_compile_prompt(harness, "Every 4 hours, digest what I need to reply to or follow up on.",
         {provider: "mock"},
         PROVIDERS,
       )
@@ -166,7 +166,7 @@ pipeline test_persona_prompt_compile(harness: Harness, _task) {
         throw "Digest lowering has no trigger"
       }
       assert_eq(digest_trigger.schedule, "0 */4 * * *")
-      const rejected = persona_compile_prompt(harness,  harness, "Route a mismatched event.",
+      const rejected = persona_compile_prompt(harness, "Route a mismatched event.",
         {provider: "mock"},
         PROVIDERS,
       )
@@ -178,7 +178,7 @@ pipeline test_persona_prompt_compile(harness: Harness, _task) {
         throw "Rejected prompt has no diagnostic"
       }
       assert_eq(rejected_error.code, "event_namespace_mismatch")
-      const mixed_source = persona_compile_prompt(harness,  harness, "Compile a mixed source.",
+      const mixed_source = persona_compile_prompt(harness, "Compile a mixed source.",
         {provider: "mock"},
         PROVIDERS,
       )
@@ -187,7 +187,7 @@ pipeline test_persona_prompt_compile(harness: Harness, _task) {
       assert_eq(mixed_source.checkpoint.attempts, 1)
       assert_eq(mixed_source.blueprint, nil)
       assert_eq(len(harness.llm.mock_calls()), 5)
-      const over_budget = persona_compile_prompt(harness,  harness, "Compile me.",
+      const over_budget = persona_compile_prompt(harness, "Compile me.",
         {provider: "mock", max_tokens: 1201},
         PROVIDERS,
       )
@@ -200,13 +200,13 @@ pipeline test_persona_prompt_compile(harness: Harness, _task) {
       assert_eq(over_budget_error.code, "max_tokens_out_of_range")
       assert_eq(len(harness.llm.mock_calls()), 5)
       const baseline_catalog = persona_compile_prompt(harness, "", {provider: "mock"}, PROVIDERS)
-      const rotated_catalog = persona_compile_prompt(harness,  harness, "",
+      const rotated_catalog = persona_compile_prompt(harness, "",
         {provider: "mock"},
         PROVIDERS_WITH_ROTATED_SLACK_SECRET,
       )
       assert_eq(baseline_catalog.catalog_digest == rotated_catalog.catalog_digest, false)
       assert_eq(len(harness.llm.mock_calls()), 5)
-      harness.stdio.println("persona prompt compiler ok")
+      harness.stdio.log("persona prompt compiler ok")
     },
   )
 }

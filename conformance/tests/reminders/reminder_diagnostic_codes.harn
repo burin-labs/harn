@@ -6,11 +6,11 @@ fn has_code(result, code) {
 
 pipeline main(harness: Harness) {
   const invalid_type = try {
-    transcript.inject_reminder(transcript(), {body: 1})
+    harness.agent.transcript_inject_reminder(transcript(), {body: 1})
   }
   harness.stdio.println(has_code(invalid_type, "HARN-RMD-001"))
   const bad_propagate = try {
-    transcript.inject_reminder(transcript(), {body: "remember", propagate: "workspace"})
+    harness.agent.transcript_inject_reminder(transcript(), {body: "remember", propagate: "workspace"})
   }
   harness.stdio.println(has_code(bad_propagate, "HARN-RMD-005"))
   harness.agent.clear_reminder_providers()

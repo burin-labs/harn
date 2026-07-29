@@ -11,8 +11,8 @@ const COUNT: int = len([10, 20, 30, 40])
 const GREETING: string = "hello" + "-" + "world"
 
 pipeline main(harness: Harness) {
-  harness.stdio.println(X)
-  harness.stdio.println(Y)
-  harness.stdio.println(COUNT)
-  harness.stdio.println(GREETING)
+  harness.stdio.log(X)
+  harness.stdio.log(Y)
+  harness.stdio.log(COUNT)
+  harness.stdio.log(GREETING)
 }

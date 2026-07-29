@@ -20,8 +20,8 @@ pipeline test(harness: Harness, task) {
     }
     return 0
   }
-  harness.stdio.println(describe({val: "hi"}))
-  harness.stdio.println(describe({val: 7}))
-  harness.stdio.println(latency({msg: {kind: "pong", lat: 42}}))
-  harness.stdio.println(latency({msg: {kind: "ping", ttl: 9}}))
+  harness.stdio.log(describe({val: "hi"}))
+  harness.stdio.log(describe({val: 7}))
+  harness.stdio.log(latency({msg: {kind: "pong", lat: 42}}))
+  harness.stdio.log(latency({msg: {kind: "ping", ttl: 9}}))
 }

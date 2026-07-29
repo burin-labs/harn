@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * The per-turn primary system block is decomposed into individually
  * auditable fragments (#2632). `agent_build_turn_system_fragments` emits one
@@ -77,7 +78,7 @@ pipeline test(harness: Harness, task) {
       assert(contains(recorded, "## Active skills"), "live system surfaces active skills")
       assert(contains(recorded, "You are a careful operator."), "live system surfaces primary text")
       assert(!contains(recorded, "\n\n\n"), "no triple-newline runs in composed system")
-      harness.stdio.println("prompt_fragments_decompose tests passed")
+      harness.stdio.log("prompt_fragments_decompose tests passed")
     },
   )
 }

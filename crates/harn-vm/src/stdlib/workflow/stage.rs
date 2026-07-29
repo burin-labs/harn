@@ -449,7 +449,13 @@ pub(super) async fn execute_stage_attempts(
     artifacts: &[ArtifactRecord],
     transcript: Option<VmValue>,
 ) -> Result<ExecutedStage, VmError> {
+    let harness = ctx.child_vm().root_harness_value().ok_or_else(|| {
+        VmError::Runtime(
+            "workflow_execute_stage_attempts: execution has no root Harness authority".to_string(),
+        )
+    })?;
     let args = vec![
+        harness,
         VmValue::String(arcstr::ArcStr::from(task)),
         VmValue::String(arcstr::ArcStr::from(node_id)),
         node_to_vm_with_raw(node)?,

@@ -62,7 +62,7 @@ pub fn select_release_smoke_run(runs: list, tag: string, log_loader) {
 }
 
 fn gh(harness: Harness, args: list<string>) -> string {
-  const result = harness.process.spawn_captured({cmd: "gh", args: args})
+  const result = harness.process.run({cmd: "gh", args: args})
   if result.exit_code != 0 {
     throw "gh " + args.join(" ") + " failed: " + result.stderr.trim()
   }
@@ -135,7 +135,7 @@ fn main(harness: Harness) -> int {
       runs,
       tag,
       { run_id ->
-        const result = harness.process.spawn_captured(
+        const result = harness.process.run(
           {cmd: "gh", args: ["run", "view", to_string(run_id), "--repo", repo, "--log"]},
         )
         return result.exit_code == 0 ? result.stdout : nil

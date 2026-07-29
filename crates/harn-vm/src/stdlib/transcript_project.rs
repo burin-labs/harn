@@ -25,6 +25,7 @@ use crate::llm::helpers::{
     is_transcript_value, transcript_event, transcript_message_list, vm_value_to_json,
 };
 use crate::stdlib::json_to_vm_value;
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
@@ -34,19 +35,31 @@ const DEFAULT_REACHABILITY_GC_ROOT_WINDOW: usize = 8;
 const DEFAULT_REACHABILITY_GC_MIN_CHARS: usize = 500;
 
 pub(crate) fn register_transcript_projection_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("transcript_project", |ctx, args| async move {
-        let transcript_value = args.first().cloned().unwrap_or(VmValue::Nil);
-        let transcript = transcript_value
-            .as_dict()
-            .filter(|_| is_transcript_value(&transcript_value))
-            .ok_or_else(|| {
-                VmError::Runtime("transcript_project: first argument must be a transcript".into())
-            })?;
-        let options = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        let policy = parse_projection_options(&options)?;
-        let result = project_transcript(Some(&ctx), transcript, &policy).await?;
-        Ok(result_to_vm(&result, &policy))
-    });
+    vm.register_builtin_def(&TRANSCRIPT_PROJECT_IMPL_DEF);
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "transcript_project(transcript: dict | list, options?: any) -> dict",
+    kind = "async",
+    category = "transcript"
+)]
+async fn transcript_project_impl(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let transcript_value = args.first().cloned().unwrap_or(VmValue::Nil);
+    let transcript = transcript_value
+        .as_dict()
+        .filter(|_| is_transcript_value(&transcript_value))
+        .ok_or_else(|| {
+            VmError::Runtime("transcript_project: first argument must be a transcript".into())
+        })?;
+    let options = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let policy = parse_projection_options(&options)?;
+    let result = project_transcript(Some(&ctx), transcript, &policy).await?;
+    Ok(result_to_vm(&result, &policy))
 }
 
 /// Resolved projection policy.

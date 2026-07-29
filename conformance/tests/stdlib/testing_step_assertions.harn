@@ -16,14 +16,16 @@ fn test_captain(harness: Harness, ctx) {
 
 @step(name: "checked_step")
 fn checked_step(harness: Harness, ctx) {
-  const wrapped = with_audit_receipt(harness,  harness, fn() { return {value: ctx.value + ":done"} },
+  const wrapped = with_audit_receipt(
+    harness,
+    fn() { return {value: ctx.value + ":done"} },
     {persona: "test_captain", step: "checked_step", started_at: "2026-01-01T00:00:00Z"},
   )
   return wrapped()
 }
 
 pipeline test(harness: Harness) {
-  step_assertions_begin("test_captain")
+  step_assertions_begin(harness, "test_captain")
   const result = test_captain(harness, {value: "input"})
   assert_steps_ran(["checked_step"])
   assert_step_received("checked_step", { event -> event.args[0].value == "input" })
@@ -42,6 +44,6 @@ pipeline test(harness: Harness) {
     },
     {events: [{type: "step", elapsed_ms: "<ms>", id: "<uuid>", payload: {value: "input:done"}}]},
   )
-  step_assertions_end()
+  step_assertions_end(harness)
   harness.stdio.println("testing_step_assertions ok")
 }

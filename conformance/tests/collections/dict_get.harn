@@ -1,17 +1,17 @@
 pipeline test(harness: Harness, task) {
   const d = {name: "Alice", age: 30, active: true}
   // 1-arg: key exists
-  harness.stdio.println(d.get("name"))
-  harness.stdio.println(d.get("age"))
-  harness.stdio.println(d.get("active"))
+  harness.stdio.log(d.get("name"))
+  harness.stdio.log(d.get("age"))
+  harness.stdio.log(d.get("active"))
   // 1-arg: key missing -> nil
-  harness.stdio.println(d.get("missing"))
+  harness.stdio.log(d.get("missing"))
   // 2-arg: key exists -> value (ignores default)
-  harness.stdio.println(d.get("name", "fallback"))
+  harness.stdio.log(d.get("name", "fallback"))
   // 2-arg: key missing -> default
-  harness.stdio.println(d.get("missing", 0))
-  harness.stdio.println(d.get("missing", "default_val"))
-  harness.stdio.println(d.get("missing", false))
+  harness.stdio.log(d.get("missing", 0))
+  harness.stdio.log(d.get("missing", "default_val"))
+  harness.stdio.log(d.get("missing", false))
   // 0-arg: no key -> nil
-  harness.stdio.println(d.get())
+  harness.stdio.log(d.get())
 }

@@ -5,5 +5,5 @@
 pipeline test(harness: Harness, task) {
   let a = [10, 20, 30]
   a[-100] = 999
-  harness.stdio.println(a)
+  harness.stdio.log(a)
 }

@@ -4,20 +4,20 @@ pipeline test(harness: Harness, task) {
   const text = "name,age\nalice,30\nbob,25\n"
   // No headers: list of lists
   const rows = csv_parse(text)
-  harness.stdio.println(len(rows))
-  harness.stdio.println(rows[0])
-  harness.stdio.println(rows[1][1])
+  harness.stdio.log(len(rows))
+  harness.stdio.log(rows[0])
+  harness.stdio.log(rows[1][1])
   // With headers: list of dicts
   const header_rows = csv_parse(text, {headers: true})
-  harness.stdio.println(len(header_rows))
-  harness.stdio.println(header_rows[0]["name"])
-  harness.stdio.println(header_rows[1]["age"])
+  harness.stdio.log(len(header_rows))
+  harness.stdio.log(header_rows[0]["name"])
+  harness.stdio.log(header_rows[1]["age"])
   // round-trip dict rows back to csv
   const out = csv_stringify(header_rows, {headers: true})
-  harness.stdio.println(out)
+  harness.stdio.log(out)
   // round-trip list rows
   const listy = csv_stringify([["a", "b"], ["c", "d"]])
-  harness.stdio.println(listy)
+  harness.stdio.log(listy)
   assert_error_contains({ -> csv_parse("a||b\n", {delimiter: "||"}) }, "exactly one ASCII")
   assert_error_contains({ -> csv_stringify([["a", "b"]], {delimiter: "é"}) }, "exactly one ASCII")
 }

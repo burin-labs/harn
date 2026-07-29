@@ -34,5 +34,5 @@ pipeline test(harness: Harness, task) {
   // is_nan, is_infinite
   assert(!is_nan(1.0))
   assert(!is_infinite(1.0))
-  harness.stdio.println("math ok")
+  harness.stdio.log("math ok")
 }

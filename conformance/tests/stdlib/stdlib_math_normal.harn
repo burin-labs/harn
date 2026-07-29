@@ -17,5 +17,5 @@ pipeline test(harness: Harness, task) {
   assert(roundtrip < 0.9501)
   const shifted = normal_quantile(0.5, 10, 2)
   assert(abs(shifted - 10) < 0.000001)
-  harness.stdio.println("stdlib math normal ok")
+  harness.stdio.log("stdlib math normal ok")
 }

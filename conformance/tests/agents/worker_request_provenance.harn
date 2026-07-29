@@ -21,11 +21,11 @@ pipeline main(harness: Harness) {
       harness.stdio.println(worker_action_items(handle)[0]?.id == "action_1")
       harness.stdio.println(worker_workflow_stages(handle)[1] == "implement")
       harness.stdio.println(worker_verification_steps(handle)[0] == "cargo test -p harn-vm agents_workers")
-      const done = wait_agent(handle)
+      const done = wait_agent(harness.agent, handle)
       harness.stdio.println(worker_request(done)?.task == "Investigate worker provenance")
       harness.stdio.println(worker_provenance(done)?.worker_id == done?.id)
       harness.stdio.println(contains(worker_result(done)?.summary ?? "", "background summary"))
-      const continued = send_input(done, "Follow up with implementation details")
+      const continued = send_input(harness.agent, done, "Follow up with implementation details")
       harness.stdio.println(continued?.task == "Follow up with implementation details")
       harness.stdio.println(worker_request(continued)?.task == "Investigate worker provenance")
     },

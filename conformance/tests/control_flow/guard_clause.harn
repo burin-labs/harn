@@ -5,6 +5,6 @@ pipeline test(harness: Harness, task) {
     }
     return "valid: ${x}"
   }
-  harness.stdio.println(process(5))
-  harness.stdio.println(process(-1))
+  harness.stdio.log(process(5))
+  harness.stdio.log(process(-1))
 }

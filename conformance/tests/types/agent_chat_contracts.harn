@@ -27,5 +27,5 @@ pipeline test(harness: Harness, task) {
   assert(result.turns == 0, "no agent turn ran before the operator exit")
   assert(result.stop_reason == "done", "aggregate result surfaced the exit reason")
   assert(turns_seen == 0, "on_model_turn only fires after a completed turn")
-  harness.stdio.println("agent_chat_contracts ok turns=" + to_string(result.turns))
+  harness.stdio.log("agent_chat_contracts ok turns=" + to_string(result.turns))
 }

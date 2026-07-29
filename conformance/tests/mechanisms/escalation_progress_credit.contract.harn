@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // MECHANISM CONTRACT (onramp tier): escalation/termination PROGRESS CREDIT.
 //
 // This is the FIRST committed example of the mechanism-contract tier (the
@@ -55,7 +56,7 @@ fn shrinking_error_set_case(harness: Harness) {
     }
   }
   const session = "contract-shrink-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "fix the build",
       nil,
       {

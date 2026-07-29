@@ -73,9 +73,9 @@ fn path_artifact_digest(harness: Harness, package_name: string) -> string {
   ]
   let joined = ""
   for path in inputs {
-    joined = joined + path + "\n" + harness.crypto.sha256(harness.fs.read_bytes(path)) + "\n"
+    joined = joined + path + "\n" + sha256(harness.fs.read_bytes(path)) + "\n"
   }
-  return "sha256:" + harness.crypto.sha256(joined)
+  return "sha256:" + sha256(joined)
 }
 
 fn artifact_digest(harness: Harness, package) -> string {
@@ -88,18 +88,18 @@ fn artifact_digest(harness: Harness, package) -> string {
 
 fn corpus_digest(harness: Harness, corpus_text: string, rows: list) -> string {
   let material = CORPUS_SCHEMA + "\n"
-    + harness.crypto.sha256(harness.fs.read_bytes(CORPUS_SCHEMA))
+    + sha256(harness.fs.read_bytes(CORPUS_SCHEMA))
     + "\n"
     + CORPUS
     + "\n"
-    + harness.crypto.sha256(corpus_text)
+    + sha256(corpus_text)
     + "\n"
   for row in rows {
     const fixture = CORPUS_DIR + "/" + row.fixture
-    const fixture_digest = harness.crypto.sha256(harness.fs.read_bytes(fixture))
+    const fixture_digest = sha256(harness.fs.read_bytes(fixture))
     material = material + row.language + "\n" + row.fixture + "\n" + fixture_digest + "\n"
   }
-  return "sha256:" + harness.crypto.sha256(material)
+  return "sha256:" + sha256(material)
 }
 
 fn render_receipt(harness: Harness) -> string {

@@ -3,9 +3,9 @@ import { shell_quote } from "std/runtime"
 import { resolve_harn_bin, wait_for_file_content } from "../_common.harn"
 
 pipeline default(harness: Harness) {
-  const root = harness.fs.project_root() ?? cwd()
+  const root = harness.fs.workspace_root()
   const harn_bin = resolve_harn_bin(harness, root)
-  const state_dir = path_join(harness.fs.temp_dir(), "harn-http-proxy-" + harness.random.uuid())
+  const state_dir = path_join(harness.fs.workspace_temp_dir(), "harn-http-proxy-" + harness.random.uuid())
   const port_path = path_join(state_dir, "port")
   const state_path = path_join(state_dir, "state.json")
   const pid_path = path_join(state_dir, "server.pid")
@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
   require start?.success, "proxy server started"
   // Wait for the port file to hold a non-empty value, not merely to exist:
   // the server creates it before flushing the port number.
-  const port = wait_for_file_content(harness,  harness,
+  const port = wait_for_file_content(harness,
     port_path,
     { text ->
       const trimmed = trim(text)
@@ -42,7 +42,7 @@ pipeline default(harness: Harness) {
   // Wait until the recorded request state parses as a complete JSON object,
   // not merely until the file exists: it is written after the proxied request
   // and a bare existence wait can observe a half-written document.
-  const state = wait_for_file_content(harness,  harness,
+  const state = wait_for_file_content(harness,
     state_path,
     { text ->
       const parsed = try {

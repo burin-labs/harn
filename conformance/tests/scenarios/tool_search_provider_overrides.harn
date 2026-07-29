@@ -68,7 +68,7 @@ pipeline test(harness: Harness, task) {
       assert(meta.type == "tool_search", "escape hatch emits OpenAI meta-tool")
       assert(meta.mode == "hosted", "defaults to hosted mode")
       assert(len(calls[0].tools) == 1, "native search sends the hosted search meta-tool")
-      harness.stdio.println("tool_search_provider_overrides tests passed")
+      harness.stdio.log("tool_search_provider_overrides tests passed")
     },
   )
 }

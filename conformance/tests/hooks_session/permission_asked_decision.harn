@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -5,8 +6,6 @@ import { llm_text, with_llm_script } from "std/testing"
  * policy by returning a `{decision: "allow"|"deny", reason}` dict.
  * `permission_replied` is advisory and observes the final decision.
  */
-const replies = harness.runtime.atomic(0)
-
 fn make_tools() {
   const registry = tool_registry()
   return tool_define(
@@ -18,6 +17,7 @@ fn make_tools() {
 }
 
 pipeline default(harness: Harness) {
+  const replies = harness.runtime.atomic(0)
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "permission_asked",

@@ -27,7 +27,11 @@ pub fn reset() {
 }
 
 fn __call(harness: Harness, method, params = {}) {
-  return harness.net.connector_call("slack", method, filter_nil(merge(slack_connector_config, params ?? {})))
+  return harness.net.connector_call(
+    "slack",
+    method,
+    filter_nil(merge(slack_connector_config, params ?? {})),
+  )
 }
 
 fn __configured_slack_disclosure(options) {
@@ -71,7 +75,8 @@ fn __with_slack_disclosure(harness: Harness, options) {
  */
 pub fn post_message(harness: Harness, channel, text, blocks = nil, options = nil) {
   const opts = __with_slack_disclosure(harness, options)
-  return __call(harness, 
+  return __call(
+    harness,
     "post_message",
     filter_nil(merge(opts, {channel: channel, text: text, blocks: blocks})),
   )
@@ -84,7 +89,8 @@ pub fn post_message(harness: Harness, channel, text, blocks = nil, options = nil
  * @errors: [ConnectorError]
  */
 pub fn update_message(harness: Harness, channel, ts, text, blocks = nil, options = nil) {
-  return __call(harness, 
+  return __call(
+    harness,
     "update_message",
     filter_nil((options ?? {}) + {channel: channel, ts: ts, text: text, blocks: blocks}),
   )
@@ -127,7 +133,11 @@ pub fn user_info(harness: Harness, user_id, options = nil) {
  * @errors: [ConnectorError]
  */
 pub fn api_call(harness: Harness, method, args = nil, options = nil) {
-  return __call(harness, "api_call", filter_nil((options ?? {}) + {method: method, args: args ?? {}}))
+  return __call(
+    harness,
+    "api_call",
+    filter_nil((options ?? {}) + {method: method, args: args ?? {}}),
+  )
 }
 
 /**
@@ -243,8 +253,10 @@ pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for_message(channel = nil, options = nil) {
-  return wait_for(harness, merge(
+pub fn wait_for_message(harness: Harness, channel = nil, options = nil) {
+  return wait_for(
+    harness,
+    merge(
       options ?? {},
       {source: message_source(channel, options), condition: { state -> state.matched }},
     ),
@@ -257,8 +269,10 @@ pub fn wait_for_message(channel = nil, options = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for_reaction(channel = nil, reaction = nil, options = nil) {
-  return wait_for(harness, merge(
+pub fn wait_for_reaction(harness: Harness, channel = nil, reaction = nil, options = nil) {
+  return wait_for(
+    harness,
+    merge(
       options ?? {},
       {source: reaction_source(channel, reaction, options), condition: { state -> state.matched }},
     ),

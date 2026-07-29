@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // `verify_completion` must be a closure or nil. Passing a non-callable
 // value used to silently no-op (.filter(Closure)) which made typos in
 // agent_loop options invisible. The strict parse turns the typo into a

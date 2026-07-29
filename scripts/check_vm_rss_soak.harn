@@ -131,7 +131,7 @@ fn harn_bench_argv(harness: Harness) -> list<string> {
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? "", "bench"]
   }
-  const meta = harness.process.spawn_captured(
+  const meta = harness.process.run(
     {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
   )
   if meta.success {
@@ -176,7 +176,7 @@ pipeline main(harness: Harness, task) {
   /* The runtime sandbox only permits writes inside the workspace root, so
    * the profile JSON lives there (and is removed afterward) rather than
    * under the system temp dir the Python version used. */
-  const mk = harness.process.spawn_captured(
+  const mk = harness.process.run(
     {cmd: "mktemp", args: ["-d", "harn-vm-rss-soak-XXXXXX"]},
   )
   if !mk.success {
@@ -195,7 +195,7 @@ pipeline main(harness: Harness, task) {
     "--profile-json",
     report_path,
   ]
-  const bench = harness.process.spawn_captured({cmd: bin, args: bench_args})
+  const bench = harness.process.run({cmd: bin, args: bench_args})
   /* Python inherits stdout/stderr for the bench child, so its (timing,
    * nondeterministic) output streams through. Re-emit the captured streams
    * to preserve that behavior and ordering before the verdict line. */
@@ -206,11 +206,11 @@ pipeline main(harness: Harness, task) {
     harness.stdio.eprintln(bench.stderr.trim())
   }
   if bench.exit_code != 0 {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+    harness.process.run({cmd: "rm", args: ["-rf", tmpbase]})
     return bench.exit_code
   }
   if !harness.fs.exists(report_path) {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+    harness.process.run({cmd: "rm", args: ["-rf", tmpbase]})
     harness.stdio.eprintln("error: benchmark profile did not contain enough rss_bytes samples")
     return 1
   }
@@ -219,7 +219,7 @@ pipeline main(harness: Harness, task) {
   } catch (err) {
     {}
   }
-  harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+  harness.process.run({cmd: "rm", args: ["-rf", tmpbase]})
   const samples = extract_rss_samples(report)
   const outcome = soak_outcome(samples, max_tail_growth)
   if outcome.too_few {

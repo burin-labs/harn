@@ -137,7 +137,6 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
 
 /// Register core builtins: pure/deterministic, no I/O.
 pub fn register_core_stdlib(vm: &mut Vm) {
-    crate::runtime_context::register_runtime_context_builtins(vm);
     types::register_type_builtins(vm);
     math::register_math_builtins(vm);
     strings::register_string_builtins(vm);
@@ -265,6 +264,7 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_core_stdlib(vm);
     register_io_stdlib(vm);
     register_agent_stdlib(vm);
+    vm.project_declared_capability_methods();
     if vm.harness().is_none() {
         vm.set_harness(crate::harness::Harness::real());
     }
@@ -495,17 +495,7 @@ pub fn stdlib_builtin_names() -> Vec<String> {
     let mut names = vm.builtin_names();
     // Special opcodes/keywords, not registered builtins, but linter
     // should recognize them as valid function calls.
-    for extra in [
-        "spawn",
-        "await",
-        "cancel",
-        "cancel_graceful",
-        "__signal_interrupted",
-        "__signal_off_interrupt",
-        "__signal_on_interrupt",
-        "__signal_raise",
-        "is_cancelled",
-    ] {
+    for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
         names.push(extra.to_string());
     }
     names
@@ -547,7 +537,6 @@ pub fn reset_stdlib_state() {
     hitl::reset_hitl_state();
     crate::http::reset_http_state();
     crate::external_agent::reset_external_agent_state();
-    jsonrpc::reset_jsonrpc_state();
     monitors::reset_monitor_state();
     waitpoint::reset_waitpoint_state();
     triggers_stdlib::reset_auto_resume_timeouts();
@@ -647,6 +636,28 @@ fn main(harness: Harness) {
         assert!(
             offenders.is_empty(),
             "ambient effect builtins are forbidden; route these through Harness: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn every_source_named_runtime_callable_has_a_typed_contract() {
+        let manifest_names = all_builtin_manifest()
+            .iter()
+            .map(|entry| entry.name)
+            .collect::<std::collections::HashSet<_>>();
+        let offenders = stdlib_probe_vm()
+            .builtin_names()
+            .into_iter()
+            .filter(|name| {
+                !name.starts_with("__")
+                    && !manifest_names.contains(name.as_str())
+                    && !harn_parser::builtin_signatures::is_language_intrinsic(name)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            offenders.is_empty(),
+            "runtime callables without typed source contracts bypass the Harness gate: {offenders:?}"
         );
     }
 }

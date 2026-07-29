@@ -1,3 +1,4 @@
+fn main(harness: Harness) {
 const root = harness.fs.mkdtemp("harn-harness-glob-")
 
 harness.fs.write_text(path_join(root, "alpha.toml"), "name = \"alpha\"\n")
@@ -6,12 +7,12 @@ harness.fs.write_text(path_join(root, "beta.toml"), "name = \"beta\"\n")
 
 harness.fs.write_text(path_join(root, "notes.txt"), "ignored\n")
 
-const free_matches = glob("*.toml", root)
-
 const method_matches = harness.fs.glob("*.toml", root)
 
 harness.stdio.println(len(method_matches))
 
-harness.stdio.println(method_matches == free_matches)
+harness.stdio.println(len(method_matches) == 2)
 
 harness.fs.delete(root)
+
+}

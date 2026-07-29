@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
   // RHS is iter<int>, annotation demands list<int>. Must fail.
   const xs: list<int> = iter([1, 2, 3]).map(fn(x) { return x + 1 })
-  harness.stdio.println(xs)
+  harness.stdio.log(xs)
 }

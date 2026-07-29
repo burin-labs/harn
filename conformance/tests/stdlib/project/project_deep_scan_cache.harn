@@ -3,14 +3,14 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
   const namespace = "coding-enrichment-${harness.random.uuid()}"
-  const root = path_join(harness.fs.temp_dir(), "project-deep-scan-cache-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "project-deep-scan-cache-" + harness.random.uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
   with_llm_script(
     harness.llm, [llm_text("{\"purpose\":\"root\"}")],
     { ->
       const first = project_deep_scan(
-        harness.project, root,
+        harness.project, harness.clock, root,
         {
           namespace: namespace,
           tiers: ["ambient", "config", "enriched"],
@@ -30,7 +30,7 @@ pipeline test(harness: Harness, task) {
       harness.stdio.println(len(calls) == 1)
       harness.stdio.println(contains(calls[0].messages[0].content, "Return valid JSON only."))
       const second = project_deep_scan(
-        harness.project, root,
+        harness.project, harness.clock, root,
         {
           namespace: namespace,
           tiers: ["ambient", "config", "enriched"],

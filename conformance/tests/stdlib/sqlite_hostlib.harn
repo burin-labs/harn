@@ -47,7 +47,7 @@ pipeline default(harness: Harness) {
     [3, 4],
   )
   harness.stdio.println("savepoint.count=" + to_string(savepoint_count.n))
-  const root = path_join(harness.fs.temp_dir(), "harn-sqlite-hostlib-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-sqlite-hostlib-" + harness.random.uuid())
   const db_path = path_join(root, "state", "app.sqlite")
   const file_db = harness.sqlite.open(db_path, {create: true, journal_mode: "wal"})
   sqlite_execute(file_db, "create table persisted(id integer primary key, body text not null)")
@@ -88,7 +88,7 @@ pipeline default(harness: Harness) {
     "migrate.second=" + to_string(len(second.applied)) + "/" + to_string(len(second.skipped)),
   )
   harness.stdio.println("migrate.row=" + migrated.body)
-  const mock = sqlite_mock_db(
+  const mock = harness.testing.sqlite_mock_db(
     [
       {sql: "select id from events where topic = ?", params: ["agent_events"], rows: [{id: 42}]},
       {sql: "update events set seen = 1 where id = ?", params: [42], rows_affected: 1},

@@ -1,7 +1,7 @@
 import "std/project"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "project_scan_ignored")
+  const root = path_join(harness.fs.workspace_temp_dir(), "project_scan_ignored")
   harness.fs.mkdir(path_join(root, "app/src"))
   harness.fs.mkdir(path_join(root, "ignored"))
   harness.fs.mkdir(path_join(root, "node_modules/pkg/src"))

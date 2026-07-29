@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -44,7 +45,7 @@ pipeline test(harness: Harness, task) {
       const calls = harness.llm.mock_calls()
       const last = calls[len(calls) - 1]
       assert(contains(last.system, "sticky_skill"), "resume turn keeps skill active")
-      harness.stdio.println("skill_lifecycle_session_resume tests passed")
+      harness.stdio.log("skill_lifecycle_session_resume tests passed")
     },
   )
 }

@@ -55,7 +55,7 @@ pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task) {
 
 @test
 pipeline test_temp_tree_reports_only_unclassified_python(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_file(harness, root, "scripts/affected-crates.py")
       write_file(harness, root, "conformance/helpers/http_proxy_server.py")
       write_file(harness, root, "conformance/helpers/new_mock_server.py")
@@ -87,16 +87,16 @@ pipeline test_temp_tree_reports_only_unclassified_python(harness: Harness, task)
 
 @test
 pipeline test_embedded_python_audit_rejects_control_plane_and_classifies_venv(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_text(harness, root, "scripts/bad.sh", "#!/bin/sh\npython3 - <<'PY'\nPY\n")
       write_text(harness, root, "Makefile", "bad:\n\tpython -c 'print(1)'\n")
       write_text(harness, root, ".github/workflows/bad.yml", "steps:\n  - run: python3 -c 'print(1)'\n")
-      write_text(harness, 
+      write_text(harness,
         root,
         "scripts/generate_sdk_clients.sh",
         "#!/bin/sh\n    python3 -m venv \"$venv\"\n",
       )
-      write_text(harness, 
+      write_text(harness,
         root,
         "scripts/fake_guard.sh",
         "cat > \"$fake_bin/python3\" <<'SH'\necho \"python3 must not run\" >&2\nSH\n",

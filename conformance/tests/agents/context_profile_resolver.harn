@@ -20,7 +20,7 @@ fn trace_by_id(traces, id) {
 }
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-context-profile-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-context-profile-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "Cargo.toml"),
@@ -43,7 +43,7 @@ pipeline test(harness: Harness, task) {
     opts.context_profile.token_delta.saved_tokens > 0,
     "single-match profile saves prompt tokens",
   )
-  const fragments = agent_build_turn_system_fragments(harness,  harness, {session_id: "context-profile-resolver"},
+  const fragments = agent_build_turn_system_fragments(harness, {session_id: "context-profile-resolver"},
     opts,
     0,
   )
@@ -56,5 +56,5 @@ pipeline test(harness: Harness, task) {
   assert(trace != nil, "prompt_explain traces profile fragment")
   assert(trace.included, "profile fragment is included")
   assert(contains(trace.reason, "language.rust"), "profile provenance names the matched capability")
-  harness.stdio.println("context_profile_resolver tests passed")
+  harness.stdio.log("context_profile_resolver tests passed")
 }

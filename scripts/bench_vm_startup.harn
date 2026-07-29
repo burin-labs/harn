@@ -61,7 +61,7 @@ pub fn summary_row(summary: StartupSummary) -> string {
 
 fn run_once_ms(harness: Harness, harn_bin: string, fixture: string, cache_dir: string) -> float {
   const started = harness.clock.monotonic_ms()
-  const result = harness.process.spawn_captured(
+  const result = harness.process.run(
     {cmd: harn_bin, args: ["run", fixture], env: {HARN_CACHE_DIR: cache_dir}},
   )
   const elapsed = harness.clock.monotonic_ms() - started

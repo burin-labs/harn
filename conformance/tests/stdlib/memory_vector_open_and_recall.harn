@@ -1,12 +1,18 @@
 import "std/memory"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-memory-vector-" + harness.random.uuid())
-  host_mock_clear()
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-memory-vector-" + harness.random.uuid())
+  harness.testing.clear()
   // Fixed-vector mock so any text → same embedding. Cosine similarity is
   // then 1.0 across all records and order falls through to the
   // newest-first tiebreak, which is enough to verify the wire-up.
-  host_mock("memory", "embed", {result: {vector: [0.5, 0.5, 0.5], dim: 3, model: "test"}})
+  harness.testing.respond(
+    "embed",
+    "text_response",
+    {vector: [0.5, 0.5, 0.5], dim: 3, model: "test"},
+    nil,
+    true,
+  )
   const opened = memory_open(
     harness.memory, "agent/vector",
     {backend: "vector", embed_dim: 3, embed_model_hint: "test", root: root},

@@ -4,8 +4,8 @@
  * serializers must agree.
  */
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(json_stringify(2.0))
-  harness.stdio.println(json_stringify_pretty(2.0))
-  harness.stdio.println(type_of(json_parse(json_stringify(2.0))))
-  harness.stdio.println(json_stringify({ratio: 2.0, n: 3}))
+  harness.stdio.log(json_stringify(2.0))
+  harness.stdio.log(json_stringify_pretty(2.0))
+  harness.stdio.log(type_of(json_parse(json_stringify(2.0))))
+  harness.stdio.log(json_stringify({ratio: 2.0, n: 3}))
 }

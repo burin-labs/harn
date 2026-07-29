@@ -174,7 +174,7 @@ fn detect_repo(harness: Harness, explicit: string?) -> string? {
   if env_repo != nil && (env_repo ?? "") != "" {
     return env_repo
   }
-  const remote = harness.process.spawn_captured({cmd: "git", args: ["remote", "get-url", "origin"]})
+  const remote = harness.process.run({cmd: "git", args: ["remote", "get-url", "origin"]})
   if !remote.success {
     return nil
   }

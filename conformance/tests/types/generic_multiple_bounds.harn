@@ -20,5 +20,5 @@ pipeline test(harness: Harness, task) {
   fn describe<T>(item: T) -> string where T: Named, T: Aged {
     return "${item.name()} is ${item.age()}"
   }
-  harness.stdio.println(describe(Person({name: "Alice", age: 30})))
+  harness.stdio.log(describe(Person({name: "Alice", age: 30})))
 }

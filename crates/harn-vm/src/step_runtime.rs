@@ -752,12 +752,21 @@ pub fn maybe_push_active_step(function_name: &str, frame_depth: usize, args: &[V
         );
     }
     let step_name = definition.name.clone();
+    // The root Harness is invocation authority, not domain input. Keep it out
+    // of step transcripts so explicit authority does not pollute replay,
+    // assertions, or durable step identities with a non-serializable handle.
+    let recorded_args = match args.first() {
+        Some(VmValue::Harness(handle)) if handle.kind() == crate::harness::HarnessKind::Root => {
+            &args[1..]
+        }
+        _ => args,
+    };
     STEP_STACK.with(|stack| {
         stack.borrow_mut().push(ActiveStep::new(
             frame_depth,
             definition,
             persona,
-            args.to_vec(),
+            recorded_args.to_vec(),
             span_id,
             false,
         ));

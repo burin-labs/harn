@@ -9,7 +9,7 @@ pipeline test(harness: Harness, task) {
   // so a future regression — e.g. a missing thread-local install or
   // a silent fall-through to a default — gets caught here.
   try {
-    mcp_elicit(
+    harness.tools.mcp_elicit(
       {
         message: "Pick one",
         requestedSchema: {
@@ -19,12 +19,12 @@ pipeline test(harness: Harness, task) {
         },
       },
     )
-    harness.stdio.println("BUG: mcp_elicit returned without an active MCP connection")
+    harness.stdio.log("BUG: mcp_elicit returned without an active MCP connection")
   } catch (e) {
     const message = e
     const ok = contains(message, "mcp_elicit")
       && contains(message, "no active MCP client connection")
     assert(ok, "expected 'no active MCP client connection' error, got: " + message)
-    harness.stdio.println("mcp_elicit: outside-tool-handler call raised expected error")
+    harness.stdio.log("mcp_elicit: outside-tool-handler call raised expected error")
   }
 }

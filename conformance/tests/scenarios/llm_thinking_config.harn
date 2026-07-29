@@ -71,7 +71,7 @@ pipeline test(harness: Harness, task) {
         openai_effort.thinking_summary == "checked constraints",
         "mock summary surfaces on result",
       )
-      harness.stdio.println("llm_thinking_config tests passed")
+      harness.stdio.log("llm_thinking_config tests passed")
     },
   )
 }

@@ -836,14 +836,14 @@ fn __fs_snapshot_session(harness: Harness, opts) -> string {
  * @api_stability: experimental
  * @example: let snap = fs_snapshot(harness, ["src/lib.rs"]); fs_restore(harness, snap.snapshot_id)
  */
-pub fn fs_snapshot(harness: Harness, 
+pub fn fs_snapshot(harness: Harness,
   fs: HarnessFs,
   random: HarnessRandom,
   paths: list<string> = [],
   opts = {},
 ) -> dict {
   const session = __fs_snapshot_session(harness, opts)
-  const scope = opts?.snapshot_id ?? ("snapshot-" + random.harness.random.uuid_v7())
+  const scope = opts?.snapshot_id ?? ("snapshot-" + random.uuid_v7())
   return fs.snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
 }
 

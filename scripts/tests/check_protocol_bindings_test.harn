@@ -84,12 +84,12 @@ fn fixture_payload(version: string) -> dict {
 }
 
 fn write_fake_artifacts(harness: Harness, root: string, binding_version: string, fixture_version: string) -> nil {
-  write_text(harness, 
+  write_text(harness,
     root,
     "spec/protocol-artifacts/python/harn_protocol.py",
     FAKE_PYTHON_BINDING.replace("{VERSION}", binding_version),
   )
-  write_text(harness, 
+  write_text(harness,
     root,
     "spec/protocol-artifacts/fixtures/round_trip.json",
     json_stringify_pretty(fixture_payload(fixture_version)) + "\n",
@@ -107,7 +107,7 @@ pipeline test_probe_args_pass_artifact_root_to_python(harness: Harness, task) {
 
 @test
 pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_fake_artifacts(harness, root, "test-version", "test-version")
       const report = check_python_protocol_bindings(harness, "python3", root)
       assert_eq(report.ok, true)
@@ -119,7 +119,7 @@ pipeline test_fake_python_binding_round_trip_passes(harness: Harness, task) {
 
 @test
 pipeline test_version_drift_is_reported_as_round_trip_failure(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_fake_artifacts(harness, root, "binding-version", "fixture-version")
       const report = check_python_protocol_bindings(harness, "python3", root)
       assert_eq(report.ok, false)

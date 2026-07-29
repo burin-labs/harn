@@ -11,7 +11,7 @@ fn facts_descriptor(name: string = "facts.json") -> ArtifactDescriptor<Facts> {
 }
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-run-artifacts-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-run-artifacts-" + harness.random.uuid_v7())
   const open_options: RunArtifactsOpenOptions = {root: root, run_id: "run-a"}
   const run: RunArtifactsRun = run_artifacts_open(harness, "eval", open_options)
   const paths: RunArtifactPaths = run.paths

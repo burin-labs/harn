@@ -7,7 +7,7 @@ pipeline default(harness: Harness) {
   with_llm_script(
     harness.llm, [llm_text("You are an expert.\nDIFF: shortened from 200 to 80 tokens.")],
     { ->
-      const result = refine_prompt(harness,  harness, {
+      const result = refine_prompt(harness, {
           user_prompt:
             "Please please please be careful and verbose and ramble about this topic at length",
           style: "concise",

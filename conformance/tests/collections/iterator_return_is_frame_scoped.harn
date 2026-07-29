@@ -9,5 +9,5 @@ pipeline test(harness: Harness, task) {
   for path in ["outer"] {
     seen = seen + [path + ":" + first_match()]
   }
-  harness.stdio.println(join(seen, ","))
+  harness.stdio.log(join(seen, ","))
 }

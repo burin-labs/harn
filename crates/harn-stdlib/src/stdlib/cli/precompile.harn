@@ -117,7 +117,7 @@ fn __spawn_precompile(
     args = args.appending(per_file_out)
   }
   const env = {HARN_PRECOMPILE_INNER: "1"}
-  return harness.process.spawn_captured({cmd: bin, args: args, env: env})
+  return harness.process.run({cmd: bin, args: args, env: env})
 }
 
 fn __render_failure(source: string, child: dict) -> string {

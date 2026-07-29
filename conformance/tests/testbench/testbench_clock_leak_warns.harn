@@ -7,12 +7,12 @@
  * bypassed the mock.
  */
 pipeline test(harness: Harness, task) {
-  mock_time(1767225600000)
+  harness.testing.clock_set(1767225600000)
   const _stamp = harness.clock.date_iso()
   const _stamp_again = harness.clock.date_iso()
   const leaks = harness.testing.clock_leaks()
   harness.stdio.println(len(leaks) == 1)
   harness.stdio.println(leaks[0].capability == "stdlib/date_iso")
   harness.stdio.println(leaks[0].count == 2)
-  unmock_time()
+  harness.testing.clock_reset()
 }

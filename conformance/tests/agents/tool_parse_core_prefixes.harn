@@ -10,7 +10,7 @@ import { probe, sample_registry } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
   probe(harness, "gemma tool_code prefix", "tool_code: run({ command: \"ls\" })", sample_registry())
-  probe(harness,  harness, "qwen call colon brace marker",
+  probe(harness, "qwen call colon brace marker",
     "call:run{ command: \"git status --short\" }",
     sample_registry(),
   )

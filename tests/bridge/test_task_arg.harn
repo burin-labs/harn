@@ -1,3 +1,3 @@
 pipeline default(harness: Harness, task) {
-  harness.stdio.println("Task: ${task.task}")
+  harness.stdio.log("Task: ${task.task}")
 }

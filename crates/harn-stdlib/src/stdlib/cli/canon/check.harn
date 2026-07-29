@@ -159,7 +159,7 @@ fn __render_human(harness: Harness, report: dict) {
 
 fn main(harness: Harness) -> int {
   const plan = __load_plan(harness)
-  const slice = canon_slice_from_paths(harness,  harness, safe_list(plan["paths"]),
+  const slice = canon_slice_from_paths(harness, safe_list(plan["paths"]),
     {
       root: safe_string(plan["workspace_root"], ""),
       workspace_root: safe_string(plan["workspace_root"], ""),

@@ -1,10 +1,10 @@
 pipeline test(harness: Harness, task) {
   // Iters are single-pass, fused: consuming twice yields [] the second time.
   const it = iter([1, 2, 3])
-  harness.stdio.println(it.to_list())
-  harness.stdio.println(it.to_list())
+  harness.stdio.log(it.to_list())
+  harness.stdio.log(it.to_list())
   // Same for a combinator chain.
   const chain = iter([1, 2, 3, 4]).map({ x -> x * 10 }).filter({ x -> x > 10 })
-  harness.stdio.println(chain.to_list())
-  harness.stdio.println(chain.to_list())
+  harness.stdio.log(chain.to_list())
+  harness.stdio.log(chain.to_list())
 }

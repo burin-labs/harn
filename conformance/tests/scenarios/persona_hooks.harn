@@ -1,6 +1,5 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
-
-const hook_order = harness.runtime.atomic(0)
 
 fn audit_tools() {
   const registry = tool_registry()
@@ -14,19 +13,22 @@ fn audit_tools() {
 
 @persona(name: "merge_captain")
 fn merge_captain(harness: Harness, ctx) -> string {
-  const merged = admin_merge(ctx)
+  const merged = admin_merge(harness, ctx)
   return "persona:" + merged
 }
 
 @step(name: "admin_merge")
 fn admin_merge(harness: Harness, ctx) -> string {
   return with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {tool_calls: [{id: "audit_1", name: "audit_tool", arguments: {}}]},
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      const result = agent_loop(harness, "Run the audit tool",
+      const result = agent_loop(
+        harness,
+        "Run the audit tool",
         nil,
         {
           provider: "mock",
@@ -46,6 +48,7 @@ fn admin_merge(harness: Harness, ctx) -> string {
 }
 
 pipeline default(harness: Harness) {
+  const hook_order = harness.runtime.atomic(0)
   harness.agent.clear_persona_hooks()
   harness.tools.clear_hooks()
   harness.tools.register_hook({pattern: "audit_tool", deny: "audit blocked by tool hook"})

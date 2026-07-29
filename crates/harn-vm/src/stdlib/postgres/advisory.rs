@@ -30,13 +30,15 @@
 //! identifiers ("migrations", "release-cut") work without callers picking
 //! a magic number.
 
+use std::sync::Arc;
+
 use sqlx_core::query::query;
 
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BOOL};
 use crate::value::{VmError, VmValue};
 
 use super::{
-    bind_params, handle_id, required_arg, runtime_error, tx_by_id, HANDLE_POOL, HANDLE_TX,
+    bind_params, pool_record_from_handle, required_arg, runtime_error, tx_handle, TxHandle,
 };
 
 #[harn_builtin(
@@ -94,7 +96,7 @@ async fn pg_with_advisory_lock_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_with_advisory_lock", "pool handle")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_with_advisory_lock")?;
+    let pool = pool_record_from_handle(pool_handle, "pg_with_advisory_lock")?;
     let key_value = required_arg(&args, 1, "pg_with_advisory_lock", "key")?;
     let closure = match args.get(2) {
         Some(VmValue::Closure(closure)) => closure.clone(),
@@ -107,17 +109,10 @@ async fn pg_with_advisory_lock_impl(
     let options = args.get(3).and_then(VmValue::as_dict).cloned();
     let key = resolve_key(key_value, options.as_ref(), "pg_with_advisory_lock")?;
 
-    super::run_managed_transaction(
-        &ctx,
-        &pool_id,
-        "pg_with_advisory_lock",
-        closure,
-        move |tx_id| {
-            let key = key;
-            let tx_id_owned = tx_id.to_string();
-            Box::pin(async move { take_xact_lock(&tx_id_owned, &key).await })
-        },
-    )
+    super::run_managed_transaction(&ctx, pool, "pg_with_advisory_lock", closure, move |tx| {
+        let key = key;
+        Box::pin(async move { take_xact_lock(&tx, &key).await })
+    })
     .await
 }
 
@@ -128,21 +123,20 @@ async fn advisory_xact_op(args: &[VmValue], try_only: bool) -> Result<VmValue, V
         "pg_advisory_xact_lock"
     };
     let target = required_arg(args, 0, builtin, "transaction handle")?;
-    let tx_id = handle_id(Some(target), HANDLE_TX, builtin)?;
+    let tx = tx_handle(Some(target), builtin)?;
     let key_value = required_arg(args, 1, builtin, "key")?;
     let options = args.get(2).and_then(VmValue::as_dict).cloned();
     let key = resolve_key(key_value, options.as_ref(), builtin)?;
     if try_only {
-        try_take_xact_lock(&tx_id, &key).await
+        try_take_xact_lock(&tx, &key).await
     } else {
-        take_xact_lock(&tx_id, &key).await?;
+        take_xact_lock(&tx, &key).await?;
         Ok(VmValue::Bool(true))
     }
 }
 
-async fn take_xact_lock(tx_id: &str, key: &LockKey) -> Result<(), VmError> {
-    let tx = tx_by_id(tx_id)?;
-    let mut tx = tx.lock().await;
+async fn take_xact_lock(tx: &Arc<TxHandle>, key: &LockKey) -> Result<(), VmError> {
+    let mut tx = tx.cell.lock().await;
     let tx = tx
         .as_mut()
         .ok_or_else(|| runtime_error("pg_advisory_xact_lock: transaction is closed"))?;
@@ -171,9 +165,8 @@ async fn take_xact_lock(tx_id: &str, key: &LockKey) -> Result<(), VmError> {
     Ok(())
 }
 
-async fn try_take_xact_lock(tx_id: &str, key: &LockKey) -> Result<VmValue, VmError> {
-    let tx = tx_by_id(tx_id)?;
-    let mut tx = tx.lock().await;
+async fn try_take_xact_lock(tx: &Arc<TxHandle>, key: &LockKey) -> Result<VmValue, VmError> {
+    let mut tx = tx.cell.lock().await;
     let tx = tx
         .as_mut()
         .ok_or_else(|| runtime_error("pg_try_advisory_xact_lock: transaction is closed"))?;

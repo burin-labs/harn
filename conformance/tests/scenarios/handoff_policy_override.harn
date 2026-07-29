@@ -1,3 +1,4 @@
+import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
 /**
  * Handoff policy overrides are carried on the typed envelope, surfaced in
  * tool-middleware audit records, and adopted as a replacement execution policy
@@ -109,6 +110,7 @@ pipeline main(harness: Harness) {
   const audited = mw(handoff_tool_call(), successful_handoff_result(payload))
   const routed = handoff_routed(harness, payload, routes, {})
   const dispatch = handoff_dispatch(
+    harness,
     routed,
     nil,
     {dispatchers: {review_captain: review_captain_mock}},

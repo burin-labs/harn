@@ -29,5 +29,5 @@ pipeline test(harness: Harness, task) {
     [{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}],
   )
   assert(tool_count(fresh) == 1, "tool_registry_from creates a registry")
-  harness.stdio.println("tool_define_many tests passed")
+  harness.stdio.log("tool_define_many tests passed")
 }

@@ -12,7 +12,7 @@ fn build_tools() -> dict {
 
 pipeline main(harness: Harness, task) {
   const registry = build_tools()
-  harness.stdio.println("--- with default sentinel ---")
+  harness.stdio.log("--- with default sentinel ---")
   const r1 = agent_loop(harness, "What is 17 * 23 + 5?",
     "/no_think You are a math assistant.",
     {
@@ -24,8 +24,8 @@ pipeline main(harness: Harness, task) {
       tools: registry,
     },
   )
-  harness.stdio.println("default: status=${r1.status} iters=${r1.llm.iterations}")
-  harness.stdio.println("\n--- with done_sentinel: \"\" (opt out) ---")
+  harness.stdio.log("default: status=${r1.status} iters=${r1.llm.iterations}")
+  harness.stdio.log("\n--- with done_sentinel: \"\" (opt out) ---")
   const r2 = agent_loop(harness, "What is 17 * 23 + 5?",
     "/no_think You are a math assistant.",
     {
@@ -38,8 +38,8 @@ pipeline main(harness: Harness, task) {
       done_sentinel: "",
     },
   )
-  harness.stdio.println("opt-out: status=${r2.status} iters=${r2.llm.iterations}")
-  harness.stdio.println("\n--- with done_sentinel: \"STOP\" (custom) ---")
+  harness.stdio.log("opt-out: status=${r2.status} iters=${r2.llm.iterations}")
+  harness.stdio.log("\n--- with done_sentinel: \"STOP\" (custom) ---")
   const r3 = agent_loop(harness, "What is 17 * 23 + 5?",
     "/no_think You are a math assistant.",
     {
@@ -52,5 +52,5 @@ pipeline main(harness: Harness, task) {
       done_sentinel: "STOP",
     },
   )
-  harness.stdio.println("custom: status=${r3.status} iters=${r3.llm.iterations}")
+  harness.stdio.log("custom: status=${r3.status} iters=${r3.llm.iterations}")
 }

@@ -4,5 +4,5 @@
 import { slugify_title } from "import_broken_module_lib"
 
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(slugify_title("Hello World"))
+  harness.stdio.log(slugify_title("Hello World"))
 }

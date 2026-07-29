@@ -10,10 +10,10 @@ import "std/triggers"
  * "panic arrived after every worker already drained" graceful-no-op path.
  */
 pipeline test(harness: Harness, task) {
-  const _ = lifecycle_audit_log_take()
+  const _ = lifecycle_audit_log_take(harness)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const handle: TriggerHandle = harness.runtime.trigger_register(
     {
@@ -45,7 +45,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(dispatch.result?.suspended_count)
   harness.stdio.println(dispatch.result?.skipped_count)
   harness.stdio.println(dispatch.result?.reason == "phantom_panic")
-  const audits = lifecycle_audit_log_take()
+  const audits = lifecycle_audit_log_take(harness)
   let broadcast_audits = 0
   let per_worker_audits = 0
   let summary_outcome = ""

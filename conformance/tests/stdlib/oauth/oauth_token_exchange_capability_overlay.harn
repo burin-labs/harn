@@ -102,7 +102,11 @@ pipeline test(harness: Harness, task) {
       default_scopes: [],
     },
   )
-  const bare_cli = client(harness, bare_provider, {client_id: "cli-id", storage: memory()})
+  const bare_cli = client(
+    harness,
+    bare_provider,
+    {client_id: "cli-id", storage: memory(harness.auth)},
+  )
   catches_message(
     "unsupported provider should fail closed",
     { ->
@@ -126,7 +130,11 @@ pipeline test(harness: Harness, task) {
       token_exchange: {supported: true},
     },
   )
-  const incomplete_cli = client(harness, incomplete_provider, {client_id: "cli-id", storage: memory()})
+  const incomplete_cli = client(
+    harness,
+    incomplete_provider,
+    {client_id: "cli-id", storage: memory(harness.auth)},
+  )
   catches_message(
     "capability rows without token types fail closed",
     { ->
@@ -150,7 +158,7 @@ pipeline test(harness: Harness, task) {
       token_exchange: overlay_row,
     },
   )
-  const cli = client(harness, provider, {client_id: "cli-id", storage: memory()})
+  const cli = client(harness, provider, {client_id: "cli-id", storage: memory(harness.auth)})
   catches_message(
     "overlay can disable impersonation",
     { ->
@@ -180,8 +188,8 @@ pipeline test(harness: Harness, task) {
     },
     "without actor_token",
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/exchange",
     {
@@ -207,8 +215,8 @@ pipeline test(harness: Harness, task) {
     },
     "issued_token_type",
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/exchange",
     {
@@ -232,10 +240,10 @@ pipeline test(harness: Harness, task) {
   )
   assert_eq(exchanged.access_token, "delegated-access", "overlay exchange returned token")
   assert_eq(exchanged.token_exchange_mode, "delegation", "overlay exchange mode")
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "one overlay token exchange call")
   assert_eq(calls[0].url, "https://idp.example/exchange", "overlay token_url used")
   assert(contains(calls[0].body, "actor_token=actor"), "actor token sent")
   assert_eq(cli.current_token(), nil, "token exchange does not overwrite client access token")
-  harness.stdio.println("oauth token exchange capability overlay ok")
+  harness.stdio.log("oauth token exchange capability overlay ok")
 }

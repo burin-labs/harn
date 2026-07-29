@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
@@ -56,7 +57,7 @@ pipeline test(harness: Harness, task) {
       }
       assert(saw_fixture, "custom strategy label recorded")
       assert(promoted, "custom strategy promoted deploy_tool")
-      harness.stdio.println("tool_search_custom_strategy tests passed")
+      harness.stdio.log("tool_search_custom_strategy tests passed")
     },
   )
 }

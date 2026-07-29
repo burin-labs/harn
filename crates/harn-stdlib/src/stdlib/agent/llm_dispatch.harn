@@ -138,7 +138,7 @@ pub fn agent_invoke_llm(harness: Harness, message, turn_system, llm_opts) -> dic
   if caller == nil {
     const retry_cfg = llm_opts?._llm_retry
     if retry_cfg != nil {
-      const retrying_default = with_retry(harness,  harness, { call -> __dispatch_default(harness, call.prompt, call.system, call.opts) },
+      const retrying_default = with_retry(harness, { call -> __dispatch_default(harness, call.prompt, call.system, call.opts) },
         retry_cfg + {predicate: retry_cfg?.predicate ?? agent_loop_default_retry_predicate},
       )
       return retrying_default(

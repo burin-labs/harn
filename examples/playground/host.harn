@@ -1,5 +1,5 @@
 pub fn build_prompt(task_text) {
-  return "Task: " + task_text + "\nWorkspace: " + cwd()
+  return "Task: " + task_text + "\nWorkspace: " + harness.fs.cwd()
 }
 
 pub fn request_permission(tool_name, request_args) -> bool {

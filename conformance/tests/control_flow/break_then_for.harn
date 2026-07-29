@@ -10,5 +10,5 @@ pipeline default(harness: Harness, task) {
   for j in ["x", "y", "z"] {
     result = result + j
   }
-  harness.stdio.println(result)
+  harness.stdio.log(result)
 }

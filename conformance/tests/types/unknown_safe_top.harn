@@ -9,18 +9,18 @@ pipeline test(harness: Harness, task) {
   const u3: unknown = nil
   const u4: unknown = [1, 2, 3]
   // Reading `type_of` on an unknown is fine.
-  harness.stdio.println(type_of(u1))
-  harness.stdio.println(type_of(u2))
-  harness.stdio.println(type_of(u3))
-  harness.stdio.println(type_of(u4))
+  harness.stdio.log(type_of(u1))
+  harness.stdio.log(type_of(u2))
+  harness.stdio.log(type_of(u3))
+  harness.stdio.log(type_of(u4))
   // unknown → unknown (identity through a function) is allowed.
   fn echo(x: unknown) -> unknown {
     return x
   }
-  harness.stdio.println(type_of(echo(9)))
+  harness.stdio.log(type_of(echo(9)))
   // unknown is assignable to `any` (escape hatch upward).
   fn into_any(x: unknown) -> any {
     return x
   }
-  harness.stdio.println(into_any("explicit"))
+  harness.stdio.log(into_any("explicit"))
 }

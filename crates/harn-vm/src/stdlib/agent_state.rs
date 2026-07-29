@@ -1,8 +1,8 @@
 pub mod backend;
 
-use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use backend::{
     BackendScope, BackendWriteOptions, ConflictPolicy, DurableStateBackend, FilesystemBackend,
@@ -10,11 +10,17 @@ use backend::{
 };
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
 const HANDLE_TYPE: &str = "state_handle";
 const HANDOFF_KEY: &str = "__handoff.json";
+
+struct StateHandle {
+    scope: BackendScope,
+    writer: WriterIdentity,
+    conflict_policy: ConflictPolicy,
+}
 
 pub use backend::{
     BackendWriteOutcome, ConflictRecord, DurableStateBackend as AgentStateBackend,
@@ -40,7 +46,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__agent_state_init(root_or_session: string, options_or_root?: any, options?: dict) -> dict",
+    sig = "__agent_state_init(root_or_session: string, options_or_root?: any, options?: dict) -> resource",
     runtime_only = true,
     category = "agent_state"
 )]
@@ -54,7 +60,7 @@ fn agent_state_init_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__agent_state_resume(root: string, session_id: string, options?: dict) -> dict",
+    sig = "__agent_state_resume(root: string, session_id: string, options?: dict) -> resource",
     runtime_only = true,
     category = "agent_state"
 )]
@@ -68,7 +74,7 @@ fn agent_state_resume_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__agent_state_write(handle: dict, key: string, content: string) -> nil",
+    sig = "__agent_state_write(handle: resource, key: string, content: string) -> nil",
     runtime_only = true,
     category = "agent_state"
 )]
@@ -77,17 +83,16 @@ fn agent_state_write_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let handle = handle_from_args(args, "__agent_state_write")?;
     let key = required_arg_string(args, 1, "__agent_state_write", "key")?;
     let content = required_arg_string(args, 2, "__agent_state_write", "content")?;
-    let scope = scope_from_handle(handle)?;
-    let options = write_options_from_handle(handle)?;
-    let outcome = backend.write(&scope, &key, &content, &options)?;
-    enforce_conflict_policy(handle, &outcome)?;
+    let options = write_options_from_handle(&handle)?;
+    let outcome = backend.write(&handle.scope, &key, &content, &options)?;
+    enforce_conflict_policy(&handle, &outcome)?;
     Ok(VmValue::Nil)
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__agent_state_read(handle: dict, key: string) -> string?",
+    sig = "__agent_state_read(handle: resource, key: string) -> string?",
     runtime_only = true,
     category = "agent_state"
 )]
@@ -95,8 +100,7 @@ fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let backend = FilesystemBackend::new();
     let handle = handle_from_args(args, "__agent_state_read")?;
     let key = required_arg_string(args, 1, "__agent_state_read", "key")?;
-    let scope = scope_from_handle(handle)?;
-    match backend.read(&scope, &key)? {
+    match backend.read(&handle.scope, &key)? {
         Some(content) => Ok(VmValue::String(arcstr::ArcStr::from(content))),
         None => Ok(VmValue::Nil),
     }
@@ -105,16 +109,15 @@ fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__agent_state_list(handle: dict) -> list",
+    sig = "__agent_state_list(handle: resource) -> list",
     runtime_only = true,
     category = "agent_state"
 )]
 fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let backend = FilesystemBackend::new();
     let handle = handle_from_args(args, "__agent_state_list")?;
-    let scope = scope_from_handle(handle)?;
     let items = backend
-        .list(&scope)?
+        .list(&handle.scope)?
         .into_iter()
         .map(|key| VmValue::String(arcstr::ArcStr::from(key)))
         .collect();
@@ -124,7 +127,7 @@ fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__agent_state_delete(handle: dict, key: string) -> nil",
+    sig = "__agent_state_delete(handle: resource, key: string) -> nil",
     runtime_only = true,
     category = "agent_state"
 )]
@@ -132,15 +135,14 @@ fn agent_state_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let backend = FilesystemBackend::new();
     let handle = handle_from_args(args, "__agent_state_delete")?;
     let key = required_arg_string(args, 1, "__agent_state_delete", "key")?;
-    let scope = scope_from_handle(handle)?;
-    backend.delete(&scope, &key)?;
+    backend.delete(&handle.scope, &key)?;
     Ok(VmValue::Nil)
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__agent_state_handoff(handle: dict, summary: dict) -> nil",
+    sig = "__agent_state_handoff(handle: resource, summary: dict) -> nil",
     runtime_only = true,
     category = "agent_state"
 )]
@@ -158,13 +160,12 @@ fn agent_state_handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     };
     let typed_handoff =
         crate::orchestration::normalize_handoff_artifact_json(summary_json.clone()).ok();
-    let scope = scope_from_handle(handle)?;
-    let writer = writer_from_handle(handle);
+    let writer = writer_from_handle(&handle);
     let envelope = serde_json::json!({
         "_type": "agent_state_handoff",
         "version": 1,
-        "session_id": scope.namespace,
-        "root": scope.root.to_string_lossy(),
+        "session_id": handle.scope.namespace.clone(),
+        "root": handle.scope.root.to_string_lossy(),
         "key": HANDOFF_KEY,
         "summary": summary_json,
         "handoff": typed_handoff,
@@ -173,28 +174,29 @@ fn agent_state_handoff_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     });
     let content = serde_json::to_string_pretty(&envelope)
         .map_err(|error| VmError::Runtime(format!("agent_state.handoff: encode error: {error}")))?;
-    let options = write_options_from_handle(handle)?;
-    let outcome = backend.write(&scope, HANDOFF_KEY, &content, &options)?;
-    enforce_conflict_policy(handle, &outcome)?;
+    let options = write_options_from_handle(&handle)?;
+    let outcome = backend.write(&handle.scope, HANDOFF_KEY, &content, &options)?;
+    enforce_conflict_policy(&handle, &outcome)?;
     Ok(VmValue::Nil)
 }
 
-fn handle_from_args<'a>(
-    args: &'a [VmValue],
-    fn_name: &str,
-) -> Result<&'a crate::value::DictMap, VmError> {
+fn handle_from_args<'a>(args: &'a [VmValue], fn_name: &str) -> Result<Arc<StateHandle>, VmError> {
     let handle = args
         .first()
         .ok_or_else(|| VmError::Runtime(format!("{fn_name}: `handle` is required")))?;
-    let dict = handle.as_dict().ok_or_else(|| {
-        VmError::Runtime(format!("{fn_name}: `handle` must be a state_handle dict"))
-    })?;
-    match dict.get("_type").map(VmValue::display).as_deref() {
-        Some(HANDLE_TYPE) => Ok(dict),
-        _ => Err(VmError::Runtime(format!(
-            "{fn_name}: `handle` must be a state_handle dict"
-        ))),
+    let VmValue::Resource(resource) = handle else {
+        return Err(VmError::Runtime(format!(
+            "{fn_name}: `handle` must be an opaque state_handle resource"
+        )));
+    };
+    if resource.label() != HANDLE_TYPE {
+        return Err(VmError::Runtime(format!(
+            "{fn_name}: `handle` must be an opaque state_handle resource"
+        )));
     }
+    resource
+        .downcast::<StateHandle>()
+        .ok_or_else(|| VmError::Runtime(format!("{fn_name}: invalid state_handle authority")))
 }
 
 fn required_arg_string(
@@ -338,101 +340,34 @@ fn default_session_id() -> String {
 }
 
 fn handle_value(
-    backend: &impl DurableStateBackend,
+    _backend: &impl DurableStateBackend,
     scope: &BackendScope,
     writer: &WriterIdentity,
     conflict_policy: ConflictPolicy,
 ) -> VmValue {
-    let mut handle = BTreeMap::new();
-    handle.put_str("_type", HANDLE_TYPE);
-    handle.put_str("backend", backend.backend_name());
-    handle.put_str("root", scope.root.to_string_lossy());
-    handle.put_str("session_id", scope.namespace.clone());
-    handle.put_str("handoff_key", HANDOFF_KEY);
-    handle.put_str("conflict_policy", conflict_policy.as_str());
-    handle.insert("writer".to_string(), writer_vm_value(writer));
-    VmValue::dict(handle)
+    VmValue::Resource(Arc::new(VmResourceHandle::new(
+        HANDLE_TYPE,
+        StateHandle {
+            scope: scope.clone(),
+            writer: writer.clone(),
+            conflict_policy,
+        },
+    )))
 }
 
-fn writer_vm_value(writer: &WriterIdentity) -> VmValue {
-    let mut value = BTreeMap::new();
-    value.insert(
-        "writer_id".to_string(),
-        writer
-            .writer_id
-            .as_ref()
-            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
-            .unwrap_or(VmValue::Nil),
-    );
-    value.insert(
-        "stage_id".to_string(),
-        writer
-            .stage_id
-            .as_ref()
-            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
-            .unwrap_or(VmValue::Nil),
-    );
-    value.insert(
-        "session_id".to_string(),
-        writer
-            .session_id
-            .as_ref()
-            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
-            .unwrap_or(VmValue::Nil),
-    );
-    value.insert(
-        "worker_id".to_string(),
-        writer
-            .worker_id
-            .as_ref()
-            .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
-            .unwrap_or(VmValue::Nil),
-    );
-    VmValue::dict(value)
+fn writer_from_handle(handle: &StateHandle) -> WriterIdentity {
+    handle.writer.clone()
 }
 
-fn scope_from_handle(handle: &crate::value::DictMap) -> Result<BackendScope, VmError> {
-    let root = handle
-        .get("root")
-        .map(VmValue::display)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| VmError::Runtime("state_handle is missing `root`".to_string()))?;
-    let session_id = handle
-        .get("session_id")
-        .map(VmValue::display)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| VmError::Runtime("state_handle is missing `session_id`".to_string()))?;
-    Ok(BackendScope {
-        root: PathBuf::from(root),
-        namespace: session_id,
-    })
-}
-
-fn writer_from_handle(handle: &crate::value::DictMap) -> WriterIdentity {
-    let writer = handle.get("writer").and_then(VmValue::as_dict);
-    WriterIdentity {
-        writer_id: option_string(writer, "writer_id"),
-        stage_id: option_string(writer, "stage_id"),
-        session_id: option_string(writer, "session_id"),
-        worker_id: option_string(writer, "worker_id"),
-    }
-}
-
-fn write_options_from_handle(
-    handle: &crate::value::DictMap,
-) -> Result<BackendWriteOptions, VmError> {
-    let policy = handle
-        .get("conflict_policy")
-        .map(VmValue::display)
-        .unwrap_or_else(|| "ignore".to_string());
+fn write_options_from_handle(handle: &StateHandle) -> Result<BackendWriteOptions, VmError> {
     Ok(BackendWriteOptions {
         writer: writer_from_handle(handle),
-        conflict_policy: ConflictPolicy::parse(&policy)?,
+        conflict_policy: handle.conflict_policy.clone(),
     })
 }
 
 fn enforce_conflict_policy(
-    handle: &crate::value::DictMap,
+    handle: &StateHandle,
     outcome: &backend::BackendWriteOutcome,
 ) -> Result<(), VmError> {
     let Some(conflict) = &outcome.conflict else {

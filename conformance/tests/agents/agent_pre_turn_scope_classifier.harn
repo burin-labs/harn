@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop_options } from "std/agent/options"
 import { pre_turn_scope_classifier } from "std/llm/scope_classifier"

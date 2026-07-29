@@ -24,5 +24,5 @@ pipeline test(harness: Harness, task) {
   }
   const saw_depth = is_err(result) && contains(to_string(unwrap_err(result)), "max nesting depth")
   assert_eq(saw_depth, true, "depth guard rejects pathologically nested XML")
-  harness.stdio.println("xml_lossless_parse: all tests passed")
+  harness.stdio.log("xml_lossless_parse: all tests passed")
 }

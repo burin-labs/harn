@@ -3,7 +3,7 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 type WorkspacePackage = {dir: string, name: string}
 
 fn command_stdout(harness: Harness, cmd: string, args: list<string>) -> string {
-  const result = harness.process.spawn_captured({cmd: cmd, args: args})
+  const result = harness.process.run({cmd: cmd, args: args})
   if result.exit_code != 0 {
     throw cmd + " " + args.join(" ") + " failed:\n" + result.stderr
   }

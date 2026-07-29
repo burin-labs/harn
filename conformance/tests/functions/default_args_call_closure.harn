@@ -4,6 +4,6 @@ pipeline test(harness: Harness, task) {
   fn transform(x, multiplier = 10) {
     return x * multiplier
   }
-  harness.stdio.println(items.map({ x -> transform(x) }))
-  harness.stdio.println(items.map({ x -> transform(x, 5) }))
+  harness.stdio.log(items.map({ x -> transform(x) }))
+  harness.stdio.log(items.map({ x -> transform(x, 5) }))
 }

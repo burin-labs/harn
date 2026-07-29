@@ -265,6 +265,9 @@ fn effect_kind_from_contract(kind: harn_builtin_meta::EffectKind) -> EffectKind 
         ContractKind::Tool => EffectKind::Tool {
             name: String::new(),
         },
+        ContractKind::Mcp => EffectKind::Tool {
+            name: "mcp".to_string(),
+        },
         ContractKind::Worker => EffectKind::Spawn,
         ContractKind::Process => EffectKind::Process,
         ContractKind::Env => EffectKind::Env,
@@ -744,8 +747,12 @@ fn side_effect_level_for(effect: &EffectRecord) -> &'static str {
         (EffectKind::State, _) => "workspace_write",
         (EffectKind::Host, EffectScope::Read | EffectScope::Observe) => "read_only",
         (EffectKind::Host, _) => "workspace_write",
-        (EffectKind::Llm { .. }, EffectScope::Read) => "read_only",
-        (EffectKind::Llm { .. }, _) => "network",
+        // Model inference consumes an explicitly granted `llm.call`
+        // capability but does not mutate the user's workspace or an external
+        // system. Keep its rich read/write effect scope for lineage and
+        // attenuation while classifying every LLM effect as read-only for the
+        // orthogonal tool side-effect ceiling.
+        (EffectKind::Llm { .. }, _) => "read_only",
         (EffectKind::Tool { .. }, _) => "workspace_write",
         (EffectKind::Hostcall { name }, _) if name.starts_with("process.") => "process_exec",
         (EffectKind::Hostcall { .. }, _) => "read_only",

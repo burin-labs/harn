@@ -291,12 +291,12 @@ fn __task_overlay(task) {
 // helpers
 // -------------------------------------------------------------------------------------------------
 
-fn __safe_resolved_options(opts) {
+fn __safe_resolved_options(harness: Harness, opts) {
   // Fall back to a minimal echo dict if resolved_options throws (e.g. when
   // opts.model is missing). pack_for already requires opts.model, so this
   // is defensive — never hit in normal paths.
   const r = try {
-    resolved_options(opts)
+    resolved_options(harness, opts)
   }
   if is_err(r) {
     return {model: opts?.model ?? "", provider: opts?.provider ?? ""}
@@ -314,7 +314,9 @@ fn __maybe_emit_strip(harness: Harness, opts, requested) {
     return
   }
   try {
-    agent_emit_event(harness, sid,
+    agent_emit_event(
+      harness,
+      sid,
       "pack_thinking_stripped",
       {model: opts?.model, requested: requested, reason: "claude_opus_adaptive"},
     )
@@ -375,9 +377,9 @@ pub fn pack_for(harness: Harness, opts) {
   } else {
     {model: model}
   }
-  let result = __safe_resolved_options(resolved_input)
+  let result = __safe_resolved_options(harness, resolved_input)
   // Lineage classification uses the inferred provider in the catalog.
-  const lineage = lineage_of(model)
+  const lineage = lineage_of(harness, model)
   // 2. Scale calibration. `reasoning_scale` is the policy input; `effort` is
   //    a canonical low-level request setting and is never consumed here.
   const caller_pinned_reasoning = __has_key(opts, "thinking") || __has_key(opts, "effort")
@@ -405,7 +407,8 @@ pub fn pack_for(harness: Harness, opts) {
   if opts?.prompt != nil && opts?.max_tokens == nil && !__has_key(result, "max_tokens") {
     const recommended = try {
       recommend_max_output_tokens(
-        harness, {
+        harness,
+        {
           prompt: opts.prompt,
           system: opts?.system ?? "",
           model: model,

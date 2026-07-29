@@ -618,6 +618,38 @@ pub(crate) fn register_io_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
+    use harn_builtin_meta::CapabilityId;
+    vm.register_capability_method(CapabilityId::Term, "set_color_mode", set_color_mode_builtin);
+    vm.register_capability_method(CapabilityId::Stdio, "log", log_builtin);
+    vm.register_capability_method(CapabilityId::Stdio, "progress", progress_builtin);
+    vm.register_capability_method(CapabilityId::Stdio, "read_stdin", read_stdin_builtin);
+    vm.register_capability_method(CapabilityId::Stdio, "is_stdin_tty", is_stdin_tty_builtin);
+    vm.register_capability_method(CapabilityId::Stdio, "is_stdout_tty", is_stdout_tty_builtin);
+    vm.register_capability_method(CapabilityId::Stdio, "is_stderr_tty", is_stderr_tty_builtin);
+    vm.register_capability_method(CapabilityId::Observability, "log_debug", log_debug_builtin);
+    vm.register_capability_method(CapabilityId::Observability, "log_info", log_info_builtin);
+    vm.register_capability_method(CapabilityId::Observability, "log_warn", log_warn_builtin);
+    vm.register_capability_method(CapabilityId::Observability, "log_error", log_error_builtin);
+    vm.register_capability_method(
+        CapabilityId::Observability,
+        "set_level",
+        log_set_level_builtin,
+    );
+    vm.register_capability_method(CapabilityId::Observability, "log_json", log_json_builtin);
+    vm.register_capability_method(CapabilityId::Testing, "stdin_set", mock_stdin_builtin);
+    vm.register_capability_method(CapabilityId::Testing, "stdin_reset", unmock_stdin_builtin);
+    vm.register_capability_method(CapabilityId::Testing, "tty_set", mock_tty_builtin);
+    vm.register_capability_method(CapabilityId::Testing, "tty_reset", unmock_tty_builtin);
+    vm.register_capability_method(
+        CapabilityId::Testing,
+        "capture_stderr_start",
+        capture_stderr_start_builtin,
+    );
+    vm.register_capability_method(
+        CapabilityId::Testing,
+        "capture_stderr_take",
+        capture_stderr_take_builtin,
+    );
 }
 
 #[harn_builtin(

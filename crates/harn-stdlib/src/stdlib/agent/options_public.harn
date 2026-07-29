@@ -32,7 +32,7 @@ pub fn agent_merge_llm_options(base = nil, overrides = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_refresh_tool_format_for_route(options = nil) {
+pub fn agent_refresh_tool_format_for_route(harness: Harness, options = nil) {
   let opts = options ?? {}
   if !__has_key(opts, "tool_format") && opts?.tools == nil {
     return opts
@@ -40,7 +40,7 @@ pub fn agent_refresh_tool_format_for_route(options = nil) {
   if __auto_tool_format_source(opts?._tool_format_source) {
     opts = __clear_tool_format_resolution(opts)
   }
-  const resolution = agent_tool_format_resolution(opts)
+  const resolution = agent_tool_format_resolution(harness, opts)
   return __with_resolved_tool_format(opts, resolution)
 }
 
@@ -225,7 +225,7 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
   const profile = opts?.profile ?? "tool_using"
   const defaults = __profile_defaults(profile)
   opts = defaults + opts
-  opts = agent_apply_default_retry(opts)
+  opts = agent_apply_default_retry(harness, opts)
   const llm_caller = opts?.llm_caller
   const llm_caller_transport = __normalize_llm_caller_transport(opts?.llm_caller_transport)
   const llm_retry = opts?._llm_retry
@@ -234,8 +234,8 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
   const structural_validator = opts?.structural_validator
   const input_guardrail = opts?.input_guardrail
   const pre_turn_scope_classifier = opts?.pre_turn_scope_classifier
-  opts = __with_project_context_profile(opts)
-  opts = agent_refresh_tool_format_for_route(opts)
+  opts = __with_project_context_profile(harness.project, opts)
+  opts = agent_refresh_tool_format_for_route(harness, opts)
   if !__has_key(opts, "tool_format")
     && (opts?.tools == nil
     || __client_tool_search_requested(
@@ -265,7 +265,11 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
     if __judge_enabled(opts?.verify_completion_judge) {
       opts = opts
         + {
-        verify_completion_judge: __completion_judge_defaults(harness, opts?.verify_completion_judge, opts),
+        verify_completion_judge: __completion_judge_defaults(
+          harness,
+          opts?.verify_completion_judge,
+          opts,
+        ),
       }
     } else {
       opts = opts + {verify_completion_judge: nil}
@@ -287,7 +291,7 @@ pub fn agent_loop_options(harness: Harness, options = nil) {
     tool_surface_narrowing: __normalize_tool_surface_narrowing(opts?.tool_surface_narrowing),
     read_only_stance: __normalize_read_only_stance(opts?.read_only_stance),
   }
-  opts = agent_reasoning_apply(opts)
+  opts = agent_reasoning_apply(harness, opts)
   opts = __normalize_reminder_provider_options(opts)
   opts = opts
     + {
@@ -573,7 +577,12 @@ pub fn __stack_configured_model_options(harness: Harness, cfg, prefixes) {
   const defaults = __stack_dict(cfg?.defaults) + __stack_dict(cfg?.model_defaults)
   const user = __stack_dict(cfg?.options) + __stack_dict(cfg?.llm_options)
   const provider = __stack_first_non_empty(
-    [cfg?.provider, user?.provider, __stack_first_env(harness, prefixes, "PROVIDER"), defaults?.provider],
+    [
+      cfg?.provider,
+      user?.provider,
+      __stack_first_env(harness, prefixes, "PROVIDER"),
+      defaults?.provider,
+    ],
   )
   const model = __stack_first_non_empty(
     [cfg?.model, user?.model, __stack_first_env(harness, prefixes, "MODEL"), defaults?.model],
@@ -666,7 +675,7 @@ pub fn agent_model_options(harness: Harness, config = nil) {
   const packed = __stack_pack_options(harness, configured)
   const sanitized = __stack_sanitize_result(harness, packed)
   let options = sanitized.options
-  const resolution = agent_tool_format_resolution(options)
+  const resolution = agent_tool_format_resolution(harness, options)
   if resolution.tool_format != nil {
     options = options + {tool_format: resolution.tool_format}
   }

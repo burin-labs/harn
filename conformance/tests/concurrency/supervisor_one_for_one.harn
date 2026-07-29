@@ -32,7 +32,7 @@ pipeline default(harness: Harness) {
   )
   const state = harness.runtime.supervisor_wait(sup)
   const events = harness.runtime.supervisor_events(sup)
-  const debug = runtime_context().debug
+  const debug = harness.runtime.context().debug
   harness.stdio.println(harness.runtime.atomic_get(flaky_starts))
   harness.stdio.println(harness.runtime.atomic_get(stable_starts))
   harness.stdio.println(state.status)

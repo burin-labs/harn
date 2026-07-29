@@ -26,8 +26,8 @@ pipeline test(harness: Harness, task) {
     }
     return 0
   }
-  harness.stdio.println(resolve({arguments: ["-O2", "-Wall"], command: nil}))
-  harness.stdio.println(resolve({arguments: nil, command: "cc -g"}))
-  harness.stdio.println(count({items: ["a", "b", "c"]}))
-  harness.stdio.println(count({items: nil}))
+  harness.stdio.log(resolve({arguments: ["-O2", "-Wall"], command: nil}))
+  harness.stdio.log(resolve({arguments: nil, command: "cc -g"}))
+  harness.stdio.log(count({items: ["a", "b", "c"]}))
+  harness.stdio.log(count({items: nil}))
 }

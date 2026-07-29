@@ -9,12 +9,12 @@ fn first_snapshot_line(text) {
 }
 
 pipeline main(harness: Harness) {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn-top-level-resume-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-top-level-resume-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   const script = path_join(root, "top_level_suspend.harn")
   harness.fs.write_text(
@@ -28,7 +28,7 @@ pipeline main(harness: Harness) {
       + "  harness.stdio.println(\"snapshot=\" + result.handle.snapshot_path)\n"
       + "}\n",
   )
-  const first = exec_at(root, harn_bin, "run", script)
+  const first = harness.process.exec_at(root, harn_bin, "run", script)
   harness.stdio.println(first.success)
   harness.stdio.println(contains(first.stdout, "status=suspended"))
   harness.stdio.println(contains(first.stdout, "reason=waiting on operator"))
@@ -41,7 +41,7 @@ pipeline main(harness: Harness) {
     path_join(root, snapshot)
   }
   harness.stdio.println(harness.fs.exists(snapshot_path))
-  const second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
+  const second = harness.process.exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
   harness.stdio.println(second.success)
   const lines = second.stdout.trim().split("\n")
   const final = json_parse(lines[len(lines) - 1])

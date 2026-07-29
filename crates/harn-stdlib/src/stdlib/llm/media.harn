@@ -205,13 +205,15 @@ pub fn image_vision_context(harness: Harness, source, options = nil) {
   const opts = options ?? {}
   const image = image_content(harness, source, opts?.image ?? opts)
   const ocr_result = try {
-    vision_ocr(source, opts?.ocr ?? {})
+    harness.system.vision_ocr(source, opts?.ocr ?? {})
   } catch (_e) {
     nil
   }
   return {
     image: image,
     ocr: ocr_result,
-    messages: [image_message(harness, source, opts?.prompt ?? "Analyze this image.", opts?.image ?? opts)],
+    messages: [
+      image_message(harness, source, opts?.prompt ?? "Analyze this image.", opts?.image ?? opts),
+    ],
   }
 }

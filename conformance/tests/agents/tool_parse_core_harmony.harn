@@ -14,17 +14,17 @@ import { probe, sample_registry } from "_tool_parse_probe"
 pipeline main(harness: Harness) {
   // The Fireworks shape: a full frame header, then `tool_call to=NAME` and the
   // arguments as a second message segment.
-  probe(harness,  harness, "fireworks harmony tool_call to= header",
+  probe(harness, "fireworks harmony tool_call to= header",
     "<|start|>assistant<|channel|>commentary<|message|>tool_call to=edit code<|message|>{\"action\":\"create\",\"path\":\"src/schema.zig\",\"content\":\"pub const ok = true;\"}",
     sample_registry(),
   )
   // The same leak reduced to just the message markers.
-  probe(harness,  harness, "bare harmony message leak",
+  probe(harness, "bare harmony message leak",
     "<|message|>tool_call to=run code<|message|>{\"command\":\"zig test src/schema.zig\"}",
     sample_registry(),
   )
   // Canonical blocks around a harmony leak survive.
-  probe(harness,  harness, "canonical blocks around a harmony leak",
+  probe(harness, "canonical blocks around a harmony leak",
     """<assistant_prose>
 Checking the Zig parser.
 </assistant_prose>
@@ -33,20 +33,20 @@ Checking the Zig parser.
   )
   // The `to=` name is still registry-checked: an unknown one stays prose rather
   // than becoming a parser error.
-  probe(harness,  harness, "harmony tool_call names an unknown tool",
+  probe(harness, "harmony tool_call names an unknown tool",
     "<|message|>tool_call to=unknown code<|message|>{\"command\":\"zig test\"}",
     sample_registry(),
   )
   // Full frames wrapped around an ordinary `<tool_call>` block: the frames are
   // consumed, the analysis channel becomes prose, the call dispatches.
-  probe(harness,  harness, "harmony frames around a tagged call",
+  probe(harness, "harmony frames around a tagged call",
     """<|start|>assistant<|channel|>analysis<|message|>I need to inspect the files first.<|end|><|start|>assistant<|channel|>commentary<|message|><tool_call>
 edit({ action: "create", path: "a.rs", content: "a" })
 </tool_call><|end|>""",
     sample_registry(),
   )
   // A batch where each block's close tag is corrupted into `</tool_call<|message|>`.
-  probe(harness,  harness, "harmony multicall batch with corrupted closes",
+  probe(harness, "harmony multicall batch with corrupted closes",
     """We need to inspect first.<tool_call>
 edit({ "action": "create", "path": "a.rs", "content": "a" })
 </tool_call<|message|><|start|>assistant<|channel|>analysis<|message|>Run the focused verifier.<tool_call>
@@ -55,14 +55,14 @@ run({ "command": "cargo test" })
     sample_registry(),
   )
   // A malformed OPEN tag, `<tool_call<|message|>`, after a well-formed block.
-  probe(harness,  harness, "malformed harmony tool_call open",
+  probe(harness, "malformed harmony tool_call open",
     """<tool_call>
 run({ "command": "cargo test -p core" })
 </tool_call><tool_call<|message|>run({ "command": "cargo test -p app" })""",
     sample_registry(),
   )
   // A malformed assistant header, `<assistant<|channel|>`.
-  probe(harness,  harness, "malformed harmony assistant header",
+  probe(harness, "malformed harmony assistant header",
     """<assistant<|channel|>analysis<|message|>We need to inspect the file.<tool_call>
 run({ "command": "zig test src/root.zig" })
 </tool_call>""",
@@ -70,7 +70,7 @@ run({ "command": "zig test src/root.zig" })
   )
   // A later `<|message|>` marker in prose must not swallow the call between it
   // and the header.
-  probe(harness,  harness, "malformed assistant header bounded before the call",
+  probe(harness, "malformed assistant header bounded before the call",
     """<assistant<|channel|>analysis
 <tool_call>
 run({ "command": "cargo test" })
@@ -78,7 +78,7 @@ run({ "command": "cargo test" })
 note: emit <|message|> only after the tool finishes""",
     sample_registry(),
   )
-  probe(harness,  harness, "frame header bounded before the call",
+  probe(harness, "frame header bounded before the call",
     """<|channel|>analysis
 <tool_call>
 run({ "command": "cargo test -p harn-vm" })
@@ -87,7 +87,7 @@ note: literal <|message|> marker in prose""",
     sample_registry(),
   )
   // Harmony-looking bytes inside a heredoc ARGUMENT are data, not framing.
-  probe(harness,  harness, "harmony-like text inside a heredoc argument",
+  probe(harness, "harmony-like text inside a heredoc argument",
     """<tool_call>
 edit({ action: "create", path: "a.rs", content: <<EOF
 inline <assistant<|channel|>analysis<|message|>
@@ -98,13 +98,13 @@ EOF
     sample_registry(),
   )
   // An unrecognized marker spelling stays strict.
-  probe(harness,  harness, "unknown malformed harmony marker stays strict",
+  probe(harness, "unknown malformed harmony marker stays strict",
     """<assistant<|bogus|>analysis<|message|><tool_call>
 run({ "command": "cargo test" })
 </tool_call>""",
     sample_registry(),
   )
-  probe(harness,  harness, "empty malformed harmony marker stays strict",
+  probe(harness, "empty malformed harmony marker stays strict",
     "<tool_call<||>run({ \"command\": \"cargo test\" })",
     sample_registry(),
   )

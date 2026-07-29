@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import {
   compact_preserving_test_failures,
   compact_retaining_current_plan,

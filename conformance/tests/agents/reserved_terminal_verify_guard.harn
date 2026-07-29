@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { with_llm_script } from "std/testing"
 
@@ -81,7 +82,7 @@ fn run_scenario(harness: Harness, reserved_on, reserve_iterations, green_at_iter
     ],
     { ->
       const session = "reserved-verify-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Make the build green.",
           nil,
           {

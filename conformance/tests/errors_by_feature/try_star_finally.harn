@@ -22,7 +22,7 @@ pipeline test(harness: Harness, task) {
   } catch (e) {
     "caught:${e}"
   }
-  harness.stdio.println("finally_only: ${r_a} counter=${counter_a}")
+  harness.stdio.log("finally_only: ${r_a} counter=${counter_a}")
   // --- try* inside try/catch/finally where the catch handles the
   //     rethrown error: finally must fire exactly once. ---
   let counter_b = 0
@@ -34,7 +34,7 @@ pipeline test(harness: Harness, task) {
   } finally {
     counter_b = counter_b + 1
   }
-  harness.stdio.println("catch_finally: ${r_b} counter=${counter_b}")
+  harness.stdio.log("catch_finally: ${r_b} counter=${counter_b}")
   // --- Nested: outer try/finally wraps inner try/catch where the
   //     catch catches the try* rethrow. Outer finally must NOT fire
   //     (no throw escapes the inner catch); inner has no finally. ---
@@ -50,5 +50,5 @@ pipeline test(harness: Harness, task) {
   } finally {
     counter_c = counter_c + 1
   }
-  harness.stdio.println("nested_outer_finally: ${r_c} counter=${counter_c}")
+  harness.stdio.log("nested_outer_finally: ${r_c} counter=${counter_c}")
 }

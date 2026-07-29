@@ -46,11 +46,11 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park until review.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       harness.stdio.println(suspended?.status)
-      const resumed_handle = resume_agent(handle)
+      const resumed_handle = resume_agent(harness.agent, handle)
       harness.stdio.println(resumed_handle?.status)
-      const resumed = wait_agent(handle)
+      const resumed = wait_agent(harness.agent, handle)
       harness.stdio.println(resumed?.status)
       const spans = harness.obs.trace_spans()
       const suspension_spans = spans.filter({ s -> s.kind == "suspension" })

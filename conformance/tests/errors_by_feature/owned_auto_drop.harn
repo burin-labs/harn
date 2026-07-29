@@ -4,12 +4,12 @@ pipeline test(harness: Harness, task) {
     const observable = harness.runtime.channel("obs", 4)
     if true {
       const inner: owned<channel> = observable
-      harness.stdio.println("inside: closed?")
+      harness.stdio.log("inside: closed?")
       harness.stdio.println(harness.runtime.channel_is_closed(inner))
     }
     // `observable` is the same Arc-shared handle — auto-drop on the inner
     // binding closes the underlying channel.
-    harness.stdio.println("after block: closed?")
+    harness.stdio.log("after block: closed?")
     harness.stdio.println(harness.runtime.channel_is_closed(observable))
   }
   block_scope_drop()
@@ -18,14 +18,14 @@ pipeline test(harness: Harness, task) {
     const ch = harness.runtime.channel("ret", 4)
     if true {
       const owned_ch: owned<channel> = ch
-      harness.stdio.println("before return: closed?")
+      harness.stdio.log("before return: closed?")
       harness.stdio.println(harness.runtime.channel_is_closed(owned_ch))
       return ch
     }
     return ch
   }
   const after_return = early_return_drop()
-  harness.stdio.println("after return: closed?")
+  harness.stdio.log("after return: closed?")
   harness.stdio.println(harness.runtime.channel_is_closed(after_return))
   // User-written defer runs before the synthetic auto-drop (LIFO: auto-drop
   // was pushed at the let-binding, user defer pushed later, runs first).
@@ -34,12 +34,12 @@ pipeline test(harness: Harness, task) {
     if true {
       const h: owned<channel> = visible
       defer {
-        harness.stdio.println("user defer: closed before me?")
+        harness.stdio.log("user defer: closed before me?")
         harness.stdio.println(harness.runtime.channel_is_closed(h))
       }
-      harness.stdio.println("block body")
+      harness.stdio.log("block body")
     }
-    harness.stdio.println("after block: closed?")
+    harness.stdio.log("after block: closed?")
     harness.stdio.println(harness.runtime.channel_is_closed(visible))
   }
   lifo_with_user_defer()
@@ -53,12 +53,12 @@ pipeline test(harness: Harness, task) {
       const oa: owned<channel> = a
       const ob: owned<channel> = b
       const oc: owned<channel> = c
-      harness.stdio.println("inside: a, b, c closed?")
+      harness.stdio.log("inside: a, b, c closed?")
       harness.stdio.println(harness.runtime.channel_is_closed(oa))
       harness.stdio.println(harness.runtime.channel_is_closed(ob))
       harness.stdio.println(harness.runtime.channel_is_closed(oc))
     }
-    harness.stdio.println("after: a, b, c closed?")
+    harness.stdio.log("after: a, b, c closed?")
     harness.stdio.println(harness.runtime.channel_is_closed(a))
     harness.stdio.println(harness.runtime.channel_is_closed(b))
     harness.stdio.println(harness.runtime.channel_is_closed(c))

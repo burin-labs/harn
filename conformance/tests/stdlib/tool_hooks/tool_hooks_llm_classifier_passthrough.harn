@@ -25,7 +25,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(harness,  harness, {
+      const wrapper = preset_run_command(harness, {
           llm_classifier: {
             model: "haiku",
             provider: "mock",

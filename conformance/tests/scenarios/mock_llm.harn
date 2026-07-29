@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 pipeline default(harness: Harness) {
   // Mock provider returns deterministic responses without API keys.
   // llm_call returns the canonical envelope: .text (the public answer,

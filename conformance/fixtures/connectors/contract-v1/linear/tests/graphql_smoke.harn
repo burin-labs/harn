@@ -11,9 +11,9 @@ fn recorded_header(headers, name) {
 }
 
 pipeline test(harness: Harness, task) {
-  egress_policy({allow: ["api.linear.app"], default: "deny"})
-  http_mock_clear()
-  http_mock(
+  harness.net.egress_policy({allow: ["api.linear.app"], default: "deny"})
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://api.linear.app/graphql",
     {
@@ -81,7 +81,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(ok.data.viewer.id, "usr_1")
   assert_eq(ok.meta.observed_complexity, 12)
   assert_eq(ok.meta.rate_limit.requests_limit, 1500)
-  const calls = http_mock_calls()
+  const calls = harness.testing.http_mock_calls()
   const first_auth = recorded_header(calls[0].headers, "authorization")
   assert(first_auth == "lin_api_key" || first_auth == "[redacted]")
   const sent = json_parse(calls[0].body)
@@ -169,7 +169,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(limited_error.code, "rate_limited")
   assert_eq(limited_error.status, 400)
   assert_eq(limited_error.meta.rate_limit.requests_reset, 1776859300)
-  const all_calls = http_mock_calls()
+  const all_calls = harness.testing.http_mock_calls()
   const oauth_auth = recorded_header(all_calls[1].headers, "authorization")
   assert(oauth_auth == "Bearer oauth-token" || oauth_auth == "[redacted]")
   const list_request = json_parse(all_calls[2].body)
@@ -200,7 +200,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   assert_eq(api_token.data.viewer.id, "usr_api_token")
-  const api_token_calls = http_mock_calls()
+  const api_token_calls = harness.testing.http_mock_calls()
   const api_token_auth = recorded_header(api_token_calls[len(api_token_calls) - 1].headers, "authorization")
   assert(api_token_auth == "lin_api_token" || api_token_auth == "[redacted]")
   const slash_token = call(harness, "graphql",
@@ -211,7 +211,7 @@ pipeline test(harness: Harness, task) {
     },
   )
   assert_eq(slash_token.data.viewer.id, "usr_slash_token")
-  const slash_token_calls = http_mock_calls()
+  const slash_token_calls = harness.testing.http_mock_calls()
   const slash_token_auth = recorded_header(slash_token_calls[len(slash_token_calls) - 1].headers, "authorization")
   assert(slash_token_auth == "Bearer oauth/with/slash" || slash_token_auth == "[redacted]")
   // F8: api_base_url is validated before any HTTP attempt. Non-URL inputs

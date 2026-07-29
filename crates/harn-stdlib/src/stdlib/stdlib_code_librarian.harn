@@ -566,7 +566,7 @@ const __DEFAULT_LLM_OPTIONS = {
  * @api_stability: experimental
  * @example: code_librarian_query_nl(harness, "which file defines formatDate?")
  */
-pub fn code_librarian_query_nl(harness: Harness, 
+pub fn code_librarian_query_nl(harness: Harness,
   code_index: HarnessCodeIndex,
   clock: HarnessClock,
   text: string,
@@ -629,7 +629,7 @@ fn __nl_emit_fallback(harness: Harness, opts, text, attempted_cypher, mcts) {
     return
   }
   const _ = try {
-    agent_emit_event(harness,  harness, session_id,
+    agent_emit_event(harness, session_id,
       "code_librarian_query_nl_fallback",
       {
         attempted_cypher: attempted_cypher,

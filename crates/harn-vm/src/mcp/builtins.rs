@@ -198,99 +198,117 @@ pub(crate) async fn resolve_input_required_result(
 }
 
 pub fn register_mcp_builtins(vm: &mut Vm) {
-    vm.register_builtin("mcp_roots", mcp_roots_builtin);
-    vm.register_builtin("harn.mcp.roots", mcp_roots_builtin);
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_roots",
+        mcp_roots_builtin,
+    );
     crate::mcp_file_upload::register_mcp_file_upload_builtins(vm);
-    register_harn_mcp_namespace(vm);
     register_supervised_mcp_host_builtins(vm);
 
-    vm.register_async_builtin("mcp_connect", |_ctx, args| async move {
-        let command = args.first().map(|a| a.display()).unwrap_or_default();
-        if command.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "mcp_connect: command is required",
-            ))));
-        }
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_connect",
+        |_ctx, args| async move {
+            let command = args.first().map(|a| a.display()).unwrap_or_default();
+            if command.is_empty() {
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    "mcp_connect: command is required",
+                ))));
+            }
 
-        let cmd_args: Vec<String> = match args.get(1) {
-            Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
-            _ => Vec::new(),
-        };
+            let cmd_args: Vec<String> = match args.get(1) {
+                Some(VmValue::List(list)) => list.iter().map(|v| v.display()).collect(),
+                _ => Vec::new(),
+            };
 
-        let options = mcp_connect_options(args.get(2))?;
-        let handle = mcp_connect_stdio_impl(
-            &command,
-            &cmd_args,
-            &BTreeMap::new(),
-            options.protocol_mode,
-            options.protocol_version,
-        )
-        .await?;
-        Ok(VmValue::mcp_client(handle))
-    });
+            let options = mcp_connect_options(args.get(2))?;
+            let handle = mcp_connect_stdio_impl(
+                &command,
+                &cmd_args,
+                &BTreeMap::new(),
+                options.protocol_mode,
+                options.protocol_version,
+            )
+            .await?;
+            Ok(VmValue::mcp_client(handle))
+        },
+    );
 
     // Lazy registry: ensure a registered server is booted and return its
     // live client handle. Used by skill activation (`requires_mcp`) and
     // by user code that wants to trigger a lazy connect explicitly.
-    vm.register_async_builtin("mcp_ensure_active", |_ctx, args| async move {
-        let name = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => String::new(),
-        };
-        if name.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "mcp_ensure_active: server name is required",
-            ))));
-        }
-        let handle = crate::mcp_registry::ensure_active(&name).await?;
-        Ok(VmValue::mcp_client(handle))
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_ensure_active",
+        |_ctx, args| async move {
+            let name = match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => String::new(),
+            };
+            if name.is_empty() {
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    "mcp_ensure_active: server name is required",
+                ))));
+            }
+            let handle = crate::mcp_registry::ensure_active(&name).await?;
+            Ok(VmValue::mcp_client(handle))
+        },
+    );
 
     // Decrement the binder refcount for a registered server. Called by
     // skill deactivation paths and by user code that manually bound via
     // `mcp_ensure_active`. No-op when the name isn't registered.
-    vm.register_builtin("mcp_release", |args, _out| {
-        let name = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_release: server name is required",
-                ))));
-            }
-        };
-        crate::mcp_registry::release(&name);
-        Ok(VmValue::Nil)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_release",
+        |args, _out| {
+            let name = match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_release: server name is required",
+                    ))));
+                }
+            };
+            crate::mcp_registry::release(&name);
+            Ok(VmValue::Nil)
+        },
+    );
 
     // Return the declared MCP servers and their current state as a list
     // of dicts. Purely diagnostic — useful for `harn` scripts that want
     // to show connection state in a status-line or dashboard.
-    vm.register_builtin("mcp_registry_status", |_args, _out| {
-        let mut out = Vec::new();
-        for entry in crate::mcp_registry::snapshot_status() {
-            let mut dict = BTreeMap::new();
-            dict.put_str("name", entry.name.as_str());
-            dict.put_str("transport", entry.transport.as_str());
-            if let Some(url) = entry.url {
-                dict.put_str("url", url.as_str());
-            } else {
-                dict.insert("url".to_string(), VmValue::Nil);
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_registry_status",
+        |_args, _out| {
+            let mut out = Vec::new();
+            for entry in crate::mcp_registry::snapshot_status() {
+                let mut dict = BTreeMap::new();
+                dict.put_str("name", entry.name.as_str());
+                dict.put_str("transport", entry.transport.as_str());
+                if let Some(url) = entry.url {
+                    dict.put_str("url", url.as_str());
+                } else {
+                    dict.insert("url".to_string(), VmValue::Nil);
+                }
+                dict.insert("lazy".to_string(), VmValue::Bool(entry.lazy));
+                dict.insert("active".to_string(), VmValue::Bool(entry.active));
+                dict.insert(
+                    "ref_count".to_string(),
+                    VmValue::Int(entry.ref_count as i64),
+                );
+                if let Some(card) = entry.card {
+                    dict.put_str("card", card.as_str());
+                }
+                out.push(VmValue::dict(dict));
             }
-            dict.insert("lazy".to_string(), VmValue::Bool(entry.lazy));
-            dict.insert("active".to_string(), VmValue::Bool(entry.active));
-            dict.insert(
-                "ref_count".to_string(),
-                VmValue::Int(entry.ref_count as i64),
-            );
-            if let Some(card) = entry.card {
-                dict.put_str("card", card.as_str());
-            }
-            out.push(VmValue::dict(dict));
-        }
-        Ok(VmValue::List(std::sync::Arc::new(out)))
-    });
+            Ok(VmValue::List(std::sync::Arc::new(out)))
+        },
+    );
 
     // Bulk re-auth of expired/revoked OAuth MCP tokens (harn#3358). Enumerates
     // the declared OAuth-backed HTTP servers, silently refreshes whatever can be
@@ -298,12 +316,11 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     // reauth_required | skipped | failed) so a trigger/worker can act on the
     // ones that still need interactive consent. Headless: it never opens a
     // browser; `reauth_required` outcomes carry an `authorize_url`/`state`.
-    vm.register_async_builtin("harn.mcp.reauth_expired", |_ctx, _args| async move {
-        reauth_expired_impl().await
-    });
-    vm.register_async_builtin("mcp_reauth_expired", |_ctx, _args| async move {
-        reauth_expired_impl().await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_reauth_expired",
+        |_ctx, _args| async move { reauth_expired_impl().await },
+    );
 
     // Fetch (or read from cache) the Server Card for a registered MCP
     // server, or from an explicit URL / local path.
@@ -311,352 +328,392 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
     // `mcp_server_card("notion")`           -> looks up `card = ...` in harn.toml
     // `mcp_server_card("https://.../card")` -> fetches that URL directly
     // `mcp_server_card("./card.json")`      -> reads that file directly
-    vm.register_async_builtin("mcp_server_card", |_ctx, args| async move {
-        let target = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_server_card: server name, URL, or path is required",
-                ))));
-            }
-        };
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_server_card",
+        |_ctx, args| async move {
+            let target = match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_server_card: server name, URL, or path is required",
+                    ))));
+                }
+            };
 
-        // Source resolution: if the arg looks like a URL or path
-        // (contains '/', '\\', or starts with a scheme), use it as-is.
-        // Otherwise treat it as a registered server name and look up
-        // its `card` field. This matches the user model: "I already
-        // wrote down where the card lives in harn.toml — just use it."
-        let source = if target.starts_with("http://")
-            || target.starts_with("https://")
-            || target.contains('/')
-            || target.contains('\\')
-            || target.ends_with(".json")
-        {
-            target.clone()
-        } else {
-            match crate::mcp_registry::get_registration(&target) {
-                Some(reg) => match reg.card {
-                    Some(card) => card,
+            // Source resolution: if the arg looks like a URL or path
+            // (contains '/', '\\', or starts with a scheme), use it as-is.
+            // Otherwise treat it as a registered server name and look up
+            // its `card` field. This matches the user model: "I already
+            // wrote down where the card lives in harn.toml — just use it."
+            let source = if target.starts_with("http://")
+                || target.starts_with("https://")
+                || target.contains('/')
+                || target.contains('\\')
+                || target.ends_with(".json")
+            {
+                target.clone()
+            } else {
+                match crate::mcp_registry::get_registration(&target) {
+                    Some(reg) => match reg.card {
+                        Some(card) => card,
+                        None => {
+                            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                                format!(
+                            "mcp_server_card: server '{target}' has no 'card' field in harn.toml"
+                        ),
+                            ))));
+                        }
+                    },
                     None => {
                         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                             format!(
-                            "mcp_server_card: server '{target}' has no 'card' field in harn.toml"
-                        ),
-                        ))));
-                    }
-                },
-                None => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                        format!(
                         "mcp_server_card: no MCP server '{target}' registered (check harn.toml) \
                          — pass a URL or path directly instead"
                     ),
+                        ))));
+                    }
+                }
+            };
+
+            let card = crate::mcp_card::fetch_server_card(&source, None)
+                .await
+                .map_err(|e| {
+                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                        "mcp_server_card: {e}"
+                    ))))
+                })?;
+            Ok(json_to_vm_value(&card))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_list_tools",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_list_tools: argument must be an MCP client",
                     ))));
                 }
+            };
+
+            let result = client.call("tools/list", serde_json::json!({})).await?;
+            client.record_cache_hint("tools/list", &result).await;
+            let mut tools = result
+                .get("tools")
+                .and_then(|t| t.as_array())
+                .cloned()
+                .unwrap_or_default();
+            if client.protocol_mode().await? == McpProtocolMode::Modern {
+                tools = filter_tools_for_client(&tools);
+                client.store_http_tool_headers(&tools).await;
             }
-        };
 
-        let card = crate::mcp_card::fetch_server_card(&source, None)
-            .await
-            .map_err(|e| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                    "mcp_server_card: {e}"
-                ))))
-            })?;
-        Ok(json_to_vm_value(&card))
-    });
+            // Tag every tool with its originating server name so
+            // downstream indexers (tool_search BM25) can surface them
+            // under queries like "github" or "mcp:github". Harmless to
+            // non-indexing callers — just an extra dict key.
+            let server_name = client.name.clone();
+            for tool in tools.iter_mut() {
+                if let Some(obj) = tool.as_object_mut() {
+                    obj.entry("_mcp_server")
+                        .or_insert_with(|| serde_json::Value::String(server_name.clone()));
+                }
+            }
 
-    vm.register_async_builtin("mcp_list_tools", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
+            let vm_tools: Vec<VmValue> = tools.iter().map(json_to_vm_value).collect();
+            Ok(VmValue::List(std::sync::Arc::new(vm_tools)))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_call",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_call: first argument must be an MCP client",
+                    ))));
+                }
+            };
+
+            let tool_name = args.get(1).map(|a| a.display()).unwrap_or_default();
+            if tool_name.is_empty() {
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_list_tools: argument must be an MCP client",
+                    "mcp_call: tool name is required",
                 ))));
             }
-        };
 
-        let result = client.call("tools/list", serde_json::json!({})).await?;
-        client.record_cache_hint("tools/list", &result).await;
-        let mut tools = result
-            .get("tools")
-            .and_then(|t| t.as_array())
-            .cloned()
-            .unwrap_or_default();
-        if client.protocol_mode().await? == McpProtocolMode::Modern {
-            tools = filter_tools_for_client(&tools);
-            client.store_http_tool_headers(&tools).await;
-        }
+            let arguments = match args.get(2) {
+                Some(VmValue::Dict(d)) => {
+                    let obj: serde_json::Map<String, serde_json::Value> = d
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
+                        .collect();
+                    serde_json::Value::Object(obj)
+                }
+                _ => serde_json::json!({}),
+            };
 
-        // Tag every tool with its originating server name so
-        // downstream indexers (tool_search BM25) can surface them
-        // under queries like "github" or "mcp:github". Harmless to
-        // non-indexing callers — just an extra dict key.
-        let server_name = client.name.clone();
-        for tool in tools.iter_mut() {
-            if let Some(obj) = tool.as_object_mut() {
-                obj.entry("_mcp_server")
-                    .or_insert_with(|| serde_json::Value::String(server_name.clone()));
+            Ok(json_to_vm_value(
+                &call_mcp_tool(&client, &tool_name, arguments).await?,
+            ))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_server_info",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_server_info: argument must be an MCP client",
+                    ))));
+                }
+            };
+
+            let guard = client.inner.lock().await;
+            if guard.is_none() {
+                return Err(VmError::Runtime("MCP client is disconnected".into()));
             }
-        }
+            drop(guard);
 
-        let vm_tools: Vec<VmValue> = tools.iter().map(json_to_vm_value).collect();
-        Ok(VmValue::List(std::sync::Arc::new(vm_tools)))
-    });
-
-    vm.register_async_builtin("mcp_call", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_call: first argument must be an MCP client",
-                ))));
+            let mut info = BTreeMap::new();
+            info.put_str("name", client.name.as_str());
+            info.insert("connected".to_string(), VmValue::Bool(true));
+            let initialize = client
+                .initialize_result
+                .lock()
+                .await
+                .clone()
+                .unwrap_or(serde_json::Value::Null);
+            if !initialize.is_null() {
+                if let Some(instructions) = initialize
+                    .get("instructions")
+                    .or_else(|| {
+                        initialize
+                            .get("serverInfo")
+                            .and_then(|value| value.get("instructions"))
+                    })
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty())
+                {
+                    info.put_str("instructions", instructions);
+                }
+                info.insert("initialize".to_string(), json_to_vm_value(&initialize));
             }
-        };
-
-        let tool_name = args.get(1).map(|a| a.display()).unwrap_or_default();
-        if tool_name.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "mcp_call: tool name is required",
-            ))));
-        }
-
-        let arguments = match args.get(2) {
-            Some(VmValue::Dict(d)) => {
-                let obj: serde_json::Map<String, serde_json::Value> = d
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
-                    .collect();
-                serde_json::Value::Object(obj)
+            let cache_hints = client.cache_hints.lock().await;
+            if !cache_hints.is_empty() {
+                info.insert(
+                    "cache_hints".to_string(),
+                    json_to_vm_value(&cache_hints_to_json(cache_hints.iter())),
+                );
             }
-            _ => serde_json::json!({}),
-        };
+            Ok(VmValue::dict(info))
+        },
+    );
 
-        Ok(json_to_vm_value(
-            &call_mcp_tool(&client, &tool_name, arguments).await?,
-        ))
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_disconnect",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_disconnect: argument must be an MCP client",
+                    ))));
+                }
+            };
 
-    vm.register_async_builtin("mcp_server_info", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_server_info: argument must be an MCP client",
-                ))));
-            }
-        };
-
-        let guard = client.inner.lock().await;
-        if guard.is_none() {
-            return Err(VmError::Runtime("MCP client is disconnected".into()));
-        }
-        drop(guard);
-
-        let mut info = BTreeMap::new();
-        info.put_str("name", client.name.as_str());
-        info.insert("connected".to_string(), VmValue::Bool(true));
-        let initialize = client
-            .initialize_result
-            .lock()
-            .await
-            .clone()
-            .unwrap_or(serde_json::Value::Null);
-        if !initialize.is_null() {
-            if let Some(instructions) = initialize
-                .get("instructions")
-                .or_else(|| {
-                    initialize
-                        .get("serverInfo")
-                        .and_then(|value| value.get("instructions"))
-                })
-                .and_then(|value| value.as_str())
-                .filter(|value| !value.is_empty())
-            {
-                info.put_str("instructions", instructions);
-            }
-            info.insert("initialize".to_string(), json_to_vm_value(&initialize));
-        }
-        let cache_hints = client.cache_hints.lock().await;
-        if !cache_hints.is_empty() {
-            info.insert(
-                "cache_hints".to_string(),
-                json_to_vm_value(&cache_hints_to_json(cache_hints.iter())),
-            );
-        }
-        Ok(VmValue::dict(info))
-    });
-
-    vm.register_async_builtin("mcp_disconnect", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_disconnect: argument must be an MCP client",
-                ))));
-            }
-        };
-
-        client.disconnect().await?;
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_async_builtin("mcp_list_resources", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_list_resources: argument must be an MCP client",
-                ))));
-            }
-        };
-
-        let result = client.call("resources/list", serde_json::json!({})).await?;
-        client.record_cache_hint("resources/list", &result).await;
-        let resources = result
-            .get("resources")
-            .and_then(|r| r.as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        let vm_resources: Vec<VmValue> = resources.iter().map(json_to_vm_value).collect();
-        Ok(VmValue::List(std::sync::Arc::new(vm_resources)))
-    });
-
-    vm.register_async_builtin("mcp_read_resource", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_read_resource: first argument must be an MCP client",
-                ))));
-            }
-        };
-
-        let uri = args.get(1).map(|a| a.display()).unwrap_or_default();
-        if uri.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "mcp_read_resource: URI is required",
-            ))));
-        }
-
-        let result = client
-            .call("resources/read", serde_json::json!({ "uri": uri }))
-            .await?;
-        client.record_cache_hint("resources/read", &result).await;
-
-        let contents = result
-            .get("contents")
-            .and_then(|c| c.as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        if contents.len() == 1 {
-            if let Some(text) = contents[0].get("text").and_then(|t| t.as_str()) {
-                return Ok(VmValue::String(arcstr::ArcStr::from(text)));
-            }
-        }
-
-        if contents.is_empty() {
+            client.disconnect().await?;
             Ok(VmValue::Nil)
-        } else {
-            Ok(VmValue::List(std::sync::Arc::new(
-                contents.iter().map(json_to_vm_value).collect(),
-            )))
-        }
-    });
+        },
+    );
 
-    vm.register_async_builtin("mcp_list_resource_templates", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_list_resources",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_list_resources: argument must be an MCP client",
+                    ))));
+                }
+            };
+
+            let result = client.call("resources/list", serde_json::json!({})).await?;
+            client.record_cache_hint("resources/list", &result).await;
+            let resources = result
+                .get("resources")
+                .and_then(|r| r.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            let vm_resources: Vec<VmValue> = resources.iter().map(json_to_vm_value).collect();
+            Ok(VmValue::List(std::sync::Arc::new(vm_resources)))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_read_resource",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_read_resource: first argument must be an MCP client",
+                    ))));
+                }
+            };
+
+            let uri = args.get(1).map(|a| a.display()).unwrap_or_default();
+            if uri.is_empty() {
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_list_resource_templates: argument must be an MCP client",
+                    "mcp_read_resource: URI is required",
                 ))));
             }
-        };
 
-        let result = client
-            .call("resources/templates/list", serde_json::json!({}))
-            .await?;
-        client
-            .record_cache_hint("resources/templates/list", &result)
-            .await;
+            let result = client
+                .call("resources/read", serde_json::json!({ "uri": uri }))
+                .await?;
+            client.record_cache_hint("resources/read", &result).await;
 
-        let templates = result
-            .get("resourceTemplates")
-            .and_then(|r| r.as_array())
-            .cloned()
-            .unwrap_or_default();
+            let contents = result
+                .get("contents")
+                .and_then(|c| c.as_array())
+                .cloned()
+                .unwrap_or_default();
 
-        let vm_templates: Vec<VmValue> = templates.iter().map(json_to_vm_value).collect();
-        Ok(VmValue::List(std::sync::Arc::new(vm_templates)))
-    });
+            if contents.len() == 1 {
+                if let Some(text) = contents[0].get("text").and_then(|t| t.as_str()) {
+                    return Ok(VmValue::String(arcstr::ArcStr::from(text)));
+                }
+            }
 
-    vm.register_async_builtin("mcp_list_prompts", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
+            if contents.is_empty() {
+                Ok(VmValue::Nil)
+            } else {
+                Ok(VmValue::List(std::sync::Arc::new(
+                    contents.iter().map(json_to_vm_value).collect(),
+                )))
+            }
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_list_resource_templates",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_list_resource_templates: argument must be an MCP client",
+                    ))));
+                }
+            };
+
+            let result = client
+                .call("resources/templates/list", serde_json::json!({}))
+                .await?;
+            client
+                .record_cache_hint("resources/templates/list", &result)
+                .await;
+
+            let templates = result
+                .get("resourceTemplates")
+                .and_then(|r| r.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            let vm_templates: Vec<VmValue> = templates.iter().map(json_to_vm_value).collect();
+            Ok(VmValue::List(std::sync::Arc::new(vm_templates)))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_list_prompts",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_list_prompts: argument must be an MCP client",
+                    ))));
+                }
+            };
+
+            let result = client.call("prompts/list", serde_json::json!({})).await?;
+            client.record_cache_hint("prompts/list", &result).await;
+
+            let prompts = result
+                .get("prompts")
+                .and_then(|p| p.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            let vm_prompts: Vec<VmValue> = prompts.iter().map(json_to_vm_value).collect();
+            Ok(VmValue::List(std::sync::Arc::new(vm_prompts)))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_get_prompt",
+        |_ctx, args| async move {
+            let client = match args.first() {
+                Some(VmValue::McpClient(c)) => c.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_get_prompt: first argument must be an MCP client",
+                    ))));
+                }
+            };
+
+            let name = args.get(1).map(|a| a.display()).unwrap_or_default();
+            if name.is_empty() {
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_list_prompts: argument must be an MCP client",
+                    "mcp_get_prompt: prompt name is required",
                 ))));
             }
-        };
 
-        let result = client.call("prompts/list", serde_json::json!({})).await?;
-        client.record_cache_hint("prompts/list", &result).await;
+            let arguments = match args.get(2) {
+                Some(VmValue::Dict(d)) => {
+                    let obj: serde_json::Map<String, serde_json::Value> = d
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
+                        .collect();
+                    serde_json::Value::Object(obj)
+                }
+                _ => serde_json::json!({}),
+            };
 
-        let prompts = result
-            .get("prompts")
-            .and_then(|p| p.as_array())
-            .cloned()
-            .unwrap_or_default();
+            let result = client
+                .call(
+                    "prompts/get",
+                    serde_json::json!({
+                        "name": name,
+                        "arguments": arguments,
+                    }),
+                )
+                .await?;
 
-        let vm_prompts: Vec<VmValue> = prompts.iter().map(json_to_vm_value).collect();
-        Ok(VmValue::List(std::sync::Arc::new(vm_prompts)))
-    });
-
-    vm.register_async_builtin("mcp_get_prompt", |_ctx, args| async move {
-        let client = match args.first() {
-            Some(VmValue::McpClient(c)) => c.clone(),
-            _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_get_prompt: first argument must be an MCP client",
-                ))));
-            }
-        };
-
-        let name = args.get(1).map(|a| a.display()).unwrap_or_default();
-        if name.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                "mcp_get_prompt: prompt name is required",
-            ))));
-        }
-
-        let arguments = match args.get(2) {
-            Some(VmValue::Dict(d)) => {
-                let obj: serde_json::Map<String, serde_json::Value> = d
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
-                    .collect();
-                serde_json::Value::Object(obj)
-            }
-            _ => serde_json::json!({}),
-        };
-
-        let result = client
-            .call(
-                "prompts/get",
-                serde_json::json!({
-                    "name": name,
-                    "arguments": arguments,
-                }),
-            )
-            .await?;
-
-        Ok(json_to_vm_value(&result))
-    });
+            Ok(json_to_vm_value(&result))
+        },
+    );
 }
 
 pub(crate) fn mcp_roots_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -668,233 +725,182 @@ pub(crate) fn mcp_roots_builtin(_args: &[VmValue], _out: &mut String) -> Result<
     )))
 }
 
-pub(crate) fn register_harn_mcp_namespace(vm: &mut Vm) {
-    let mcp_namespace = VmValue::dict(BTreeMap::from([
-        (
-            "_namespace".to_string(),
-            VmValue::String(arcstr::ArcStr::from("harn.mcp")),
-        ),
-        (
-            "roots".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.roots")),
-        ),
-        (
-            "client_roots".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.client_roots")),
-        ),
-        (
-            "configure".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.configure")),
-        ),
-        (
-            "file_input".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.file_input")),
-        ),
-        (
-            "upload_file".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.upload_file")),
-        ),
-        // Supervised host primitive (#2504, A.7). spawn/tools/call/stop
-        // route to `crate::mcp_host` and add restart-budget, circuit
-        // breaker, response cache, and allowlist enforcement on top of
-        // the lazy-boot `mcp_registry` they share.
-        (
-            "spawn".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.spawn")),
-        ),
-        (
-            "tools".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.tools")),
-        ),
-        (
-            "call".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.call")),
-        ),
-        (
-            "stop".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.stop")),
-        ),
-        (
-            "discover".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.discover")),
-        ),
-        (
-            "reload".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.reload")),
-        ),
-        (
-            "status".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.status")),
-        ),
-        (
-            "reauth_expired".to_string(),
-            VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.reauth_expired")),
-        ),
-    ]));
-    vm.set_global(
-        "harn",
-        VmValue::dict(BTreeMap::from([
-            (
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("harn")),
-            ),
-            (
-                "mcp_roots".to_string(),
-                VmValue::BuiltinRef(arcstr::ArcStr::from("harn.mcp.roots")),
-            ),
-            ("mcp".to_string(), mcp_namespace),
-        ])),
-    );
-}
-
 /// Register the supervised MCP host builtins owned by [`crate::mcp_host`].
 /// Each builtin is a thin adapter that converts VM values to/from JSON
 /// and delegates to the host module. The host module owns supervision
 /// state, the response cache, allowlist enforcement, and tracing spans.
 pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("harn.mcp.spawn", |_ctx, args| async move {
-        let spec_value = args
-            .first()
-            .ok_or_else(|| VmError::Runtime("harn.mcp.spawn: spec dict is required".into()))?;
-        let spec = vm_value_to_serde(spec_value);
-        let options: crate::mcp_host::SpawnOptions = match args.get(1) {
-            Some(VmValue::Dict(_)) => {
-                let options_json = vm_value_to_serde(args.get(1).unwrap());
-                serde_json::from_value(options_json).map_err(|e| {
-                    VmError::Runtime(format!("harn.mcp.spawn: invalid options dict: {e}"))
-                })?
-            }
-            _ => Default::default(),
-        };
-        let name = crate::mcp_host::spawn(spec, options).await?;
-        Ok(VmValue::String(arcstr::ArcStr::from(name)))
-    });
-
-    vm.register_async_builtin("harn.mcp.tools", |_ctx, args| async move {
-        let name = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => {
-                return Err(VmError::Runtime(
-                    "harn.mcp.tools: server name (string) is required".into(),
-                ));
-            }
-        };
-        let tools = crate::mcp_host::tools(&name).await?;
-        Ok(VmValue::List(std::sync::Arc::new(
-            tools.iter().map(json_to_vm_value).collect(),
-        )))
-    });
-
-    vm.register_async_builtin("harn.mcp.call", |_ctx, args| async move {
-        let name = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => {
-                return Err(VmError::Runtime(
-                    "harn.mcp.call: server name (string) is required".into(),
-                ));
-            }
-        };
-        let tool = match args.get(1) {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => {
-                return Err(VmError::Runtime(
-                    "harn.mcp.call: tool name (string) is required".into(),
-                ));
-            }
-        };
-        let tool_args = match args.get(2) {
-            Some(VmValue::Dict(d)) => {
-                let obj: serde_json::Map<String, serde_json::Value> = d
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
-                    .collect();
-                serde_json::Value::Object(obj)
-            }
-            Some(VmValue::Nil) | None => serde_json::json!({}),
-            Some(other) => vm_value_to_serde(other),
-        };
-        let result = crate::mcp_host::call(&name, &tool, tool_args).await?;
-        Ok(json_to_vm_value(&result))
-    });
-
-    vm.register_builtin("harn.mcp.stop", |args, _out| {
-        let name = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => {
-                return Err(VmError::Runtime(
-                    "harn.mcp.stop: server name (string) is required".into(),
-                ));
-            }
-        };
-        crate::mcp_host::stop(&name)?;
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("harn.mcp.reload", |args, _out| {
-        let name = match args.first() {
-            Some(VmValue::String(s)) => s.to_string(),
-            Some(other) => other.display(),
-            None => {
-                return Err(VmError::Runtime(
-                    "harn.mcp.reload: server name (string) is required".into(),
-                ));
-            }
-        };
-        crate::mcp_host::reload(&name)?;
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_async_builtin("harn.mcp.discover", |_ctx, _args| async move {
-        let entries = crate::mcp_host::discover().await?;
-        Ok(VmValue::List(std::sync::Arc::new(
-            entries.iter().map(json_to_vm_value).collect(),
-        )))
-    });
-
-    vm.register_async_builtin("harn.mcp.status", |_ctx, _args| async move {
-        let entries = crate::mcp_host::status().await;
-        let list: Vec<VmValue> = entries
-            .into_iter()
-            .map(|s| {
-                let mut dict = BTreeMap::new();
-                dict.put_str("name", s.name);
-                dict.put_str("transport", s.transport);
-                if let Some(url) = s.url {
-                    dict.put_str("url", url);
-                } else {
-                    dict.insert("url".to_string(), VmValue::Nil);
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_host_spawn",
+        |_ctx, args| async move {
+            let spec_value = args
+                .first()
+                .ok_or_else(|| VmError::Runtime("harn.mcp.spawn: spec dict is required".into()))?;
+            let spec = vm_value_to_serde(spec_value);
+            let options: crate::mcp_host::SpawnOptions = match args.get(1) {
+                Some(VmValue::Dict(_)) => {
+                    let options_json = vm_value_to_serde(args.get(1).unwrap());
+                    serde_json::from_value(options_json).map_err(|e| {
+                        VmError::Runtime(format!("harn.mcp.spawn: invalid options dict: {e}"))
+                    })?
                 }
-                dict.insert("active".to_string(), VmValue::Bool(s.active));
-                dict.insert("lazy".to_string(), VmValue::Bool(s.lazy));
-                dict.insert("ref_count".to_string(), VmValue::Int(s.ref_count as i64));
-                dict.insert(
-                    "restart_count".to_string(),
-                    VmValue::Int(s.restart_count as i64),
-                );
-                dict.insert(
-                    "consecutive_failures".to_string(),
-                    VmValue::Int(s.consecutive_failures as i64),
-                );
-                dict.put_str("circuit", s.circuit.as_str());
-                dict.insert("ejected".to_string(), VmValue::Bool(s.ejected));
-                dict.insert(
-                    "cache_entries".to_string(),
-                    VmValue::Int(s.cache_entries as i64),
-                );
-                if let Some(display_identity) = s.display_identity {
-                    dict.put_str("display_identity", display_identity);
-                } else {
-                    dict.insert("display_identity".to_string(), VmValue::Nil);
+                _ => Default::default(),
+            };
+            let name = crate::mcp_host::spawn(spec, options).await?;
+            Ok(VmValue::String(arcstr::ArcStr::from(name)))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_host_tools",
+        |_ctx, args| async move {
+            let name = match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => {
+                    return Err(VmError::Runtime(
+                        "harn.mcp.tools: server name (string) is required".into(),
+                    ));
                 }
-                VmValue::dict(dict)
-            })
-            .collect();
-        Ok(VmValue::List(std::sync::Arc::new(list)))
-    });
+            };
+            let tools = crate::mcp_host::tools(&name).await?;
+            Ok(VmValue::List(std::sync::Arc::new(
+                tools.iter().map(json_to_vm_value).collect(),
+            )))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_host_call",
+        |_ctx, args| async move {
+            let name = match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => {
+                    return Err(VmError::Runtime(
+                        "harn.mcp.call: server name (string) is required".into(),
+                    ));
+                }
+            };
+            let tool = match args.get(1) {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => {
+                    return Err(VmError::Runtime(
+                        "harn.mcp.call: tool name (string) is required".into(),
+                    ));
+                }
+            };
+            let tool_args = match args.get(2) {
+                Some(VmValue::Dict(d)) => {
+                    let obj: serde_json::Map<String, serde_json::Value> = d
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
+                        .collect();
+                    serde_json::Value::Object(obj)
+                }
+                Some(VmValue::Nil) | None => serde_json::json!({}),
+                Some(other) => vm_value_to_serde(other),
+            };
+            let result = crate::mcp_host::call(&name, &tool, tool_args).await?;
+            Ok(json_to_vm_value(&result))
+        },
+    );
+
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_host_stop",
+        |args, _out| {
+            let name = match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => {
+                    return Err(VmError::Runtime(
+                        "harn.mcp.stop: server name (string) is required".into(),
+                    ));
+                }
+            };
+            crate::mcp_host::stop(&name)?;
+            Ok(VmValue::Nil)
+        },
+    );
+
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_host_reload",
+        |args, _out| {
+            let name = match args.first() {
+                Some(VmValue::String(s)) => s.to_string(),
+                Some(other) => other.display(),
+                None => {
+                    return Err(VmError::Runtime(
+                        "harn.mcp.reload: server name (string) is required".into(),
+                    ));
+                }
+            };
+            crate::mcp_host::reload(&name)?;
+            Ok(VmValue::Nil)
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_host_discover",
+        |_ctx, _args| async move {
+            let entries = crate::mcp_host::discover().await?;
+            Ok(VmValue::List(std::sync::Arc::new(
+                entries.iter().map(json_to_vm_value).collect(),
+            )))
+        },
+    );
+
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_host_status",
+        |_ctx, _args| async move {
+            let entries = crate::mcp_host::status().await;
+            let list: Vec<VmValue> = entries
+                .into_iter()
+                .map(|s| {
+                    let mut dict = BTreeMap::new();
+                    dict.put_str("name", s.name);
+                    dict.put_str("transport", s.transport);
+                    if let Some(url) = s.url {
+                        dict.put_str("url", url);
+                    } else {
+                        dict.insert("url".to_string(), VmValue::Nil);
+                    }
+                    dict.insert("active".to_string(), VmValue::Bool(s.active));
+                    dict.insert("lazy".to_string(), VmValue::Bool(s.lazy));
+                    dict.insert("ref_count".to_string(), VmValue::Int(s.ref_count as i64));
+                    dict.insert(
+                        "restart_count".to_string(),
+                        VmValue::Int(s.restart_count as i64),
+                    );
+                    dict.insert(
+                        "consecutive_failures".to_string(),
+                        VmValue::Int(s.consecutive_failures as i64),
+                    );
+                    dict.put_str("circuit", s.circuit.as_str());
+                    dict.insert("ejected".to_string(), VmValue::Bool(s.ejected));
+                    dict.insert(
+                        "cache_entries".to_string(),
+                        VmValue::Int(s.cache_entries as i64),
+                    );
+                    if let Some(display_identity) = s.display_identity {
+                        dict.put_str("display_identity", display_identity);
+                    } else {
+                        dict.insert("display_identity".to_string(), VmValue::Nil);
+                    }
+                    VmValue::dict(dict)
+                })
+                .collect();
+            Ok(VmValue::List(std::sync::Arc::new(list)))
+        },
+    );
 }
 
 /// Loopback redirect used when minting an authorize URL for an interactive

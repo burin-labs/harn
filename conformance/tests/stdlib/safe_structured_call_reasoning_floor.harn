@@ -11,13 +11,14 @@ import { structured_min_max_tokens } from "std/llm/safe"
 
 pipeline test(harness: Harness, task) {
   // Non-reasoning route (mock model): flat floor, unchanged behavior.
-  const non_reasoning = structured_min_max_tokens({provider: "mock", model: "mock-model"})
+  const non_reasoning = structured_min_max_tokens(harness, {provider: "mock", model: "mock-model"})
   harness.stdio.println("non_reasoning=" + to_string(non_reasoning))
   harness.stdio.println("non_reasoning_is_512=" + to_string(non_reasoning == 512))
   // Reasoning route under Harn's auto policy (gpt-oss-120b -> effort low =
   // 1024 reasoning tokens). The floor must clear BOTH the prior 640 starvation
   // budget AND the resolved reasoning budget, with verdict headroom on top.
   const reasoning = structured_min_max_tokens(
+    harness,
     {provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b"},
   )
   harness.stdio.println("reasoning_exceeds_old_640=" + to_string(reasoning > 640))
@@ -26,6 +27,7 @@ pipeline test(harness: Harness, task) {
   // High explicit reasoning effort scales the floor further (12000 + headroom)
   // yet stays clamped to the structured ceiling.
   const high = structured_min_max_tokens(
+    harness,
     {provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b", effort: "high"},
   )
   harness.stdio.println("high_scales_above_reasoning=" + to_string(high > reasoning))
@@ -33,11 +35,13 @@ pipeline test(harness: Harness, task) {
   // Explicit reasoning-off on a reasoning-capable route collapses to the flat
   // floor (no needless inflation when the caller disabled reasoning).
   const disabled = structured_min_max_tokens(
+    harness,
     {provider: "fireworks", model: "accounts/fireworks/models/gpt-oss-120b", effort: "off"},
   )
   harness.stdio.println("disabled_is_512=" + to_string(disabled == 512))
   // The floor only RAISES: an explicit oversized budget is never lowered.
   const explicit_large = structured_min_max_tokens(
+    harness,
     {provider: "mock", model: "mock-model", max_tokens: 4096},
   )
   harness.stdio.println("floor_does_not_lower_explicit=" + to_string(explicit_large == 512))

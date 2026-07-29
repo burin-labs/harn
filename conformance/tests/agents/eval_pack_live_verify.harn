@@ -52,7 +52,7 @@ fn live_pack(root: string, workspace: string, executor_path: string, verify_name
 
 @test
 pipeline test_live_verify(harness: Harness, _task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-eval-pack-live-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-eval-pack-live-" + harness.random.uuid())
   const workspace = path_join(root, "workspace")
   harness.fs.mkdir(root)
   harness.fs.mkdir(workspace)
@@ -86,5 +86,5 @@ pipeline test_live_verify(harness: Harness, _task) {
   assert_eq(broken.cases[0].reliability.status, "all-fail")
   assert_eq(broken.cases[0].stats_row.fails, 2)
   assert_eq(broken.pass, false)
-  harness.stdio.println("eval pack live verify ok")
+  harness.stdio.log("eval pack live verify ok")
 }

@@ -164,7 +164,7 @@ pub fn build_report(
 }
 
 fn gh_api_json(harness: Harness, path: string) {
-  const result = harness.process.spawn_captured({cmd: "gh", args: ["api", path]})
+  const result = harness.process.run({cmd: "gh", args: ["api", path]})
   if !result.success {
     throw "gh api ${path} failed: ${result.stderr.trim()}"
   }

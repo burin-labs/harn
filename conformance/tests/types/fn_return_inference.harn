@@ -15,9 +15,9 @@ pipeline default(harness: Harness) {
     if n <= 1 {
       return 1
     }
-    return n * fact(harness, n - 1)
+    return n * fact(n - 1)
   }
-  harness.stdio.println(to_string(fact(harness, 5)))
+  harness.stdio.println(to_string(fact(5)))
   // Un-annotated param -> return type cannot be known, so it stays dynamic and
   // binds to any annotation without a static error.
   fn idish(x) {

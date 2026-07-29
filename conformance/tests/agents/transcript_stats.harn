@@ -1,3 +1,4 @@
+import { workflow_execute } from "std/workflow/execute"
 pipeline main(harness: Harness) {
   // --- Unit shape: transcript_stats on a hand-crafted transcript ---
   const crafted = {

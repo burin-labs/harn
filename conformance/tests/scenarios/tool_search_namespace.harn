@@ -109,7 +109,7 @@ pipeline test(harness: Harness, task) {
         true
       }
       assert(caught_bad_ns, "non-string namespace must be rejected")
-      harness.stdio.println("tool_search_namespace tests passed")
+      harness.stdio.log("tool_search_namespace tests passed")
     },
   )
 }

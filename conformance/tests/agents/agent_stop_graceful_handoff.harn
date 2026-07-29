@@ -1,4 +1,10 @@
-import { agent_lifecycle_tools, agent_stop, sub_agent_run, wait_agent } from "std/agent/workers"
+import {
+  agent_lifecycle_tools,
+  agent_stop,
+  list_agents,
+  sub_agent_run,
+  wait_agent,
+} from "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 fn nested_tools(harness: Harness) {
@@ -9,7 +15,7 @@ fn nested_tools(harness: Harness) {
     "Start a nested child agent.",
     {
       handler: { _args ->
-        const child = sub_agent_run(harness,  harness, "Leaf checks the migration guard.",
+        const child = sub_agent_run(harness, "Leaf checks the migration guard.",
           {
             provider: "mock",
             background: true,
@@ -20,7 +26,7 @@ fn nested_tools(harness: Harness) {
             anchor: {primary: "/workspace/agent-stop-middle/leaf"},
           },
         )
-        return wait_agent(child)
+        return wait_agent(harness.agent, child)
       },
       parameters: {},
       returns: {type: "object"},
@@ -51,7 +57,7 @@ pipeline main(harness: Harness) {
       },
     ],
     { ->
-      const middle = sub_agent_run(harness,  harness, "Middle should spawn a leaf then park.",
+      const middle = sub_agent_run(harness, "Middle should spawn a leaf then park.",
         {
           provider: "mock",
           background: true,
@@ -64,8 +70,8 @@ pipeline main(harness: Harness) {
           anchor: {primary: "/workspace/agent-stop-middle"},
         },
       )
-      const suspended = wait_agent(middle)
-      const stopped = agent_stop(middle, {graceful: true, reason: "parent takeover"})
+      const suspended = wait_agent(harness.agent, middle)
+      const stopped = agent_stop(harness.agent, middle, {graceful: true, reason: "parent takeover"})
       harness.stdio.println("suspended=" + suspended.status)
       harness.stdio.println("stopped=" + stopped.status)
       harness.stdio.println("worker_status=" + stopped.worker.status)
@@ -90,13 +96,13 @@ pipeline main(harness: Harness) {
           + to_string(contains(stopped.handoff.metadata.outcome, "waiting for parent stop")),
       )
       let leaf_status = ""
-      for agent in list_agents() {
+      for agent in list_agents(harness.agent, ) {
         if agent.result?.session_id == "agent-stop-leaf" {
           leaf_status = agent.status
         }
       }
       harness.stdio.println("leaf_status=" + leaf_status)
-      const hard = sub_agent_run(harness,  harness, "Hard cancel stays lossy.",
+      const hard = sub_agent_run(harness, "Hard cancel stays lossy.",
         {
           provider: "mock",
           background: true,
@@ -105,7 +111,7 @@ pipeline main(harness: Harness) {
           session_id: "agent-stop-hard",
         },
       )
-      const cancelled = agent_stop(hard, {graceful: false})
+      const cancelled = agent_stop(harness.agent, hard, {graceful: false})
       harness.stdio.println("hard=" + cancelled.status)
     },
   )

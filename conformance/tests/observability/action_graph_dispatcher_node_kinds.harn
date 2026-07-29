@@ -13,8 +13,10 @@ fn failing_handler(event: TriggerEvent) -> any {
   throw "graph-fail:" + event.kind
 }
 
-fn action_graph_has_node(trace_id: string, kind: string) -> bool {
-  const records: list<TriggerActionGraphEvent> = harness.runtime.trigger_inspect_action_graph(trace_id)
+fn action_graph_has_node(harness: Harness, trace_id: string, kind: string) -> bool {
+  const records: list<TriggerActionGraphEvent> = harness.runtime.trigger_inspect_action_graph(
+    trace_id,
+  )
   for entry in records {
     for node in entry.payload?.observability?.action_graph_nodes ?? [] {
       if node?.trace_id == trace_id && node?.kind == kind {
@@ -25,8 +27,10 @@ fn action_graph_has_node(trace_id: string, kind: string) -> bool {
   return false
 }
 
-fn action_graph_has_edge(trace_id: string, kind: string) -> bool {
-  const records: list<TriggerActionGraphEvent> = harness.runtime.trigger_inspect_action_graph(trace_id)
+fn action_graph_has_edge(harness: Harness, trace_id: string, kind: string) -> bool {
+  const records: list<TriggerActionGraphEvent> = harness.runtime.trigger_inspect_action_graph(
+    trace_id,
+  )
   for entry in records {
     for edge in entry.payload?.observability?.action_graph_edges ?? [] {
       if edge?.kind == kind {
@@ -40,21 +44,21 @@ fn action_graph_has_edge(trace_id: string, kind: string) -> bool {
 pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn-action-graph-dispatcher-" + unique)
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-action-graph-dispatcher-" + unique)
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "receiver.harn"),
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  harness.stdio.println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  const start = shell_at(
+  const start = harness.process.shell_at(
     root,
     "nohup " + harn_bin + " serve --port 0"
       + " receiver.harn >receiver.log 2>&1 </dev/null & echo $!",
@@ -176,7 +180,7 @@ pipeline test(harness: Harness, task) {
       headers: {x_delivery: "evt-a2a-" + unique},
     },
   )
-  const _ = shell("kill -TERM " + pid)
+  const _ = harness.process.shell("kill -TERM " + pid)
   wait_for_exit(harness, pid)
   harness.fs.delete(root)
   harness.stdio.println(local_fire.status == "dispatched" && worker_fire.status == "dispatched")
@@ -184,16 +188,16 @@ pipeline test(harness: Harness, task) {
     retry_fire.status == "dlq" && contains(retry_fire.error ?? "", "graph-fail:issue.opened"),
   )
   harness.stdio.println(a2a_fire.status == "dispatched" && a2a_fire.result?.trace_id == a2a_trace)
-  harness.stdio.println(action_graph_has_node(local_trace, "trigger"))
-  harness.stdio.println(action_graph_has_node(local_trace, "predicate"))
-  harness.stdio.println(action_graph_has_node(local_trace, "dispatch"))
-  harness.stdio.println(action_graph_has_node(worker_trace, "worker_enqueue"))
-  harness.stdio.println(action_graph_has_node(retry_trace, "retry"))
-  harness.stdio.println(action_graph_has_node(retry_trace, "dlq"))
-  harness.stdio.println(action_graph_has_node(a2a_trace, "a2a_hop"))
-  harness.stdio.println(action_graph_has_edge(local_trace, "trigger_dispatch"))
-  harness.stdio.println(action_graph_has_edge(local_trace, "predicate_gate"))
-  harness.stdio.println(action_graph_has_edge(retry_trace, "retry"))
-  harness.stdio.println(action_graph_has_edge(retry_trace, "dlq_move"))
-  harness.stdio.println(action_graph_has_edge(a2a_trace, "a2a_dispatch"))
+  harness.stdio.println(action_graph_has_node(harness, local_trace, "trigger"))
+  harness.stdio.println(action_graph_has_node(harness, local_trace, "predicate"))
+  harness.stdio.println(action_graph_has_node(harness, local_trace, "dispatch"))
+  harness.stdio.println(action_graph_has_node(harness, worker_trace, "worker_enqueue"))
+  harness.stdio.println(action_graph_has_node(harness, retry_trace, "retry"))
+  harness.stdio.println(action_graph_has_node(harness, retry_trace, "dlq"))
+  harness.stdio.println(action_graph_has_node(harness, a2a_trace, "a2a_hop"))
+  harness.stdio.println(action_graph_has_edge(harness, local_trace, "trigger_dispatch"))
+  harness.stdio.println(action_graph_has_edge(harness, local_trace, "predicate_gate"))
+  harness.stdio.println(action_graph_has_edge(harness, retry_trace, "retry"))
+  harness.stdio.println(action_graph_has_edge(harness, retry_trace, "dlq_move"))
+  harness.stdio.println(action_graph_has_edge(harness, a2a_trace, "a2a_dispatch"))
 }

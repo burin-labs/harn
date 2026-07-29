@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * S-11 (#1847): the daemon-loop suspend path (S-07) produces the
  * same persisted snapshot shape that the agent_loop suspend path
@@ -14,9 +15,9 @@
 pipeline main(harness: Harness) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
-  const dir = path_join(harness.fs.temp_dir(), "harn-daemon-parity-" + unique)
+  const dir = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-parity-" + unique)
   harness.fs.mkdir(dir)
   const snapshot_path = path_join(dir, "daemon.json")
   const result = agent_loop(harness, "Poll for background work",

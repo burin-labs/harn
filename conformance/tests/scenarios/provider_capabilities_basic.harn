@@ -253,5 +253,5 @@ pipeline test(harness: Harness, task) {
   assert(len(unknown.thinking_modes) == 0, "unknown provider has no thinking modes")
   assert(unknown.max_tools == nil, "unknown provider has no max_tools cap")
   assert(unknown.preferred_tool_format == nil, "unknown provider has no preferred tool format")
-  harness.stdio.println("provider_capabilities_basic tests passed")
+  harness.stdio.log("provider_capabilities_basic tests passed")
 }

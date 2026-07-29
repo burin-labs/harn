@@ -6,17 +6,23 @@ pipeline default(harness: Harness) {
   const store = {
     backend: "sqlite",
     namespace: "with-cache-" + harness.random.uuid(),
-    path: path_join(harness.fs.temp_dir(), "harn-with-cache-sqlite-" + harness.random.uuid() + ".sqlite"),
+    path: path_join(
+      harness.fs.workspace_temp_dir(),
+      "harn-with-cache-sqlite-" + harness.random.uuid() + ".sqlite",
+    ),
   }
-  cache_clear({store: store})
+  cache_clear(harness, {store: store})
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "cached answer", model: "mock-model", provider: "mock"},
       {text: "fresh answer", model: "mock-model", provider: "mock"},
     ],
     { ->
       const opts = {provider: "mock", model: "mock-model", store: store, stream: false}
-      harness.stdio.println(llm_cache_key("same prompt", "same system", opts).starts_with("sha256:"))
+      harness.stdio.println(
+        llm_cache_key("same prompt", "same system", opts).starts_with("sha256:"),
+      )
       const first = with_cache(harness, "same prompt", "same system", opts)
       const second = with_cache(harness, "same prompt", "same system", opts)
       harness.stdio.println(first.text)
@@ -31,10 +37,11 @@ pipeline default(harness: Harness) {
   const fs_store = {
     backend: "fs",
     namespace: "with-cache-fs-" + harness.random.uuid(),
-    path: path_join(harness.fs.temp_dir(), "harn-with-cache-fs-" + harness.random.uuid()),
+    path: path_join(harness.fs.workspace_temp_dir(), "harn-with-cache-fs-" + harness.random.uuid()),
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "fs cached", model: "mock-model", provider: "mock"},
       {text: "fs fresh", model: "mock-model", provider: "mock"},
     ],

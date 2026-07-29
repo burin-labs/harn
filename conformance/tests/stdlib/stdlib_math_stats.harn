@@ -35,5 +35,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(smoothed[2], 22.5)
   assert_eq(covariance([1, 2, 3], [2, 4, 6]), 4 / 3.0)
   assert_eq(correlation([1, 2, 3], [2, 4, 6]), 1.0)
-  harness.stdio.println("stdlib math stats ok")
+  harness.stdio.log("stdlib math stats ok")
 }

@@ -101,14 +101,14 @@ pub fn python_boundary_rule_for(path: string) -> dict {
 }
 
 fn git_python_files(harness: Harness, root: string) -> list<string>? {
-  const top_level = harness.process.spawn_captured(
+  const top_level = harness.process.run(
     {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
   )
   if top_level.exit_code != 0
     || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
     return nil
   }
-  const listed = harness.process.spawn_captured(
+  const listed = harness.process.run(
     {
       cmd: "git",
       args: [
@@ -191,14 +191,14 @@ fn is_embedded_text_path(path: string) -> bool {
 }
 
 fn git_embedded_text_files(harness: Harness, root: string) -> list<string>? {
-  const top_level = harness.process.spawn_captured(
+  const top_level = harness.process.run(
     {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
   )
   if top_level.exit_code != 0
     || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
     return nil
   }
-  const listed = harness.process.spawn_captured({cmd: "git", args: ["-C", root, "ls-files"]})
+  const listed = harness.process.run({cmd: "git", args: ["-C", root, "ls-files"]})
   if listed.exit_code != 0 {
     return nil
   }

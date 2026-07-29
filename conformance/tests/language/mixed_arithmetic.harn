@@ -1,14 +1,14 @@
 pipeline test(harness: Harness, task) {
   // int + float promotes to float
-  harness.stdio.println(3 + 1.5)
-  harness.stdio.println(1.5 + 3)
+  harness.stdio.log(3 + 1.5)
+  harness.stdio.log(1.5 + 3)
   // int - float
-  harness.stdio.println(10 - 2.5)
-  harness.stdio.println(2.5 - 1)
+  harness.stdio.log(10 - 2.5)
+  harness.stdio.log(2.5 - 1)
   // int * float
-  harness.stdio.println(3 * 2.5)
-  harness.stdio.println(2.5 * 4)
+  harness.stdio.log(3 * 2.5)
+  harness.stdio.log(2.5 * 4)
   // int / float
-  harness.stdio.println(7 / 2.0)
-  harness.stdio.println(10.0 / 4)
+  harness.stdio.log(7 / 2.0)
+  harness.stdio.log(10.0 / 4)
 }

@@ -9,12 +9,12 @@ fn config_error(harness: Harness, name: string) -> string {
   }
 }
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   const message = "std/cli/paths: app_name must be a single path segment"
-  harness.stdio.println(config_error(harness, _harness, "") == message)
-  harness.stdio.println(config_error(harness, _harness, ".") == message)
-  harness.stdio.println(config_error(harness, _harness, "..") == message)
-  harness.stdio.println(config_error(harness, _harness, "harn/config") == message)
-  harness.stdio.println(config_error(harness, _harness, "harn\\config") == message)
-  harness.stdio.println(config_error(harness, _harness, "harn") == "ok")
+  harness.stdio.println(config_error(harness, "") == message)
+  harness.stdio.println(config_error(harness, ".") == message)
+  harness.stdio.println(config_error(harness, "..") == message)
+  harness.stdio.println(config_error(harness, "harn/config") == message)
+  harness.stdio.println(config_error(harness, "harn\\config") == message)
+  harness.stdio.println(config_error(harness, "harn") == "ok")
 }

@@ -16,7 +16,7 @@ pipeline default(harness: Harness) {
       value: {text: "fast", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  const _ = mock_time(0)
+  const _ = harness.testing.clock_set(0)
   const fast_caller = with_timeout(harness, fast, {ms: 1000})
   const fast_env = fast_caller(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.runtime.atomic_get(seen_timeout))
   // Slow success that overran the deadline: relabel to timeout.
   const slow = { _call ->
-    let _ = advance_time(2000)
+    let _ = harness.testing.clock_advance(2000)
     return {
       ok: true,
       value: {text: "late", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
@@ -42,7 +42,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(slow_env.error.elapsed_ms >= 500)
   // Slow failure with relabel_failures: false preserves the original status.
   const slow_failure = { _call ->
-    let _ = advance_time(2000)
+    let _ = harness.testing.clock_advance(2000)
     return {ok: false, status: "rate_limited", error: "429"}
   }
   const preserve = with_timeout(harness, slow_failure, {ms: 500, relabel_failures: false})
@@ -52,5 +52,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(preserve_env.ok)
   harness.stdio.println(preserve_env.status)
   harness.stdio.println(preserve_env.elapsed_ms >= 500)
-  const _ = unmock_time()
+  const _ = harness.testing.clock_reset()
 }

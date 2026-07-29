@@ -50,7 +50,7 @@ fn record_session_put(harness: Harness) {
   counter(harness.obs, "harn.session.put_total", 1, {"harn.session.op": "put"})
   histogram(harness.obs, "harn.session.duration_ms", 12, {"harn.session.op": "put"})
   gauge(harness.obs, "harn.session.bytes", 256, {"harn.session.op": "put"})
-  harness.stdio.println("session_put_complete", "info", {"harn.session.outcome": "ok"})
+  harness.stdio.log("session_put_complete", "info", {"harn.session.outcome": "ok"})
   end_span(harness.obs, handle)
 }
 

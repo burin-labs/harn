@@ -50,7 +50,7 @@ pipeline test_normalize_protocol_text_line_endings(harness: Harness, task) {
 
 @test
 pipeline test_matching_bindings_pass_with_line_ending_normalization(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       const harn_root = path_join(root, "harn")
       const burin_root = path_join(root, "burin-code")
       write_sources(harness, harn_root, "swift\n", "type Foo = string\n")
@@ -66,7 +66,7 @@ pipeline test_matching_bindings_pass_with_line_ending_normalization(harness: Har
 
 @test
 pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       const harn_root = path_join(root, "harn")
       const burin_root = path_join(root, "burin-code")
       write_sources(harness, harn_root, "swift source\n", "ts source\n")
@@ -84,7 +84,7 @@ pipeline test_stale_and_missing_bindings_are_reported_in_target_order(harness: H
 
 @test
 pipeline test_missing_root_respects_required_flag(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       const missing = path_join(root, "missing-burin")
       const optional = check_burin_protocol_bindings(harness, missing, false, root)
       assert_eq(optional.ok, true)

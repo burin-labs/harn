@@ -47,7 +47,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>done</user_response>\n<done>##DONE##</done>"),
     ],
     { ->
-      const text_result = agent_loop(harness,  harness, "Write notes.txt.",
+      const text_result = agent_loop(harness, "Write notes.txt.",
         nil,
         {
           provider: "mock",
@@ -78,7 +78,7 @@ pipeline default(harness: Harness) {
       llm_text("##DONE##"),
     ],
     { ->
-      const native_result = agent_loop(harness,  harness, "Write notes.txt.",
+      const native_result = agent_loop(harness, "Write notes.txt.",
         nil,
         {
           provider: "mock",
@@ -111,7 +111,7 @@ pipeline default(harness: Harness) {
       llm_text("##DONE##"),
     ],
     { ->
-      const json_result = agent_loop(harness,  harness, "Write notes.txt.",
+      const json_result = agent_loop(harness, "Write notes.txt.",
         nil,
         {
           provider: "mock",
@@ -141,7 +141,7 @@ pipeline default(harness: Harness) {
       llm_text("##DONE##"),
     ],
     { ->
-      const rejected_result = agent_loop(harness,  harness, "Call the failing tool twice, then finish.",
+      const rejected_result = agent_loop(harness, "Call the failing tool twice, then finish.",
         nil,
         {
           provider: "mock",

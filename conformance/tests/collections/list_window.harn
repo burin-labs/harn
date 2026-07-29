@@ -1,4 +1,4 @@
 pipeline test(harness: Harness, task) {
-  harness.stdio.println([1, 2, 3, 4].window(2))
-  harness.stdio.println(["a", "b", "c"].window(4))
+  harness.stdio.log([1, 2, 3, 4].window(2))
+  harness.stdio.log(["a", "b", "c"].window(4))
 }

@@ -54,7 +54,7 @@ pipeline test_workspace_packages_from_metadata_uses_cargo_workspace_members(harn
 
 @test
 pipeline test_filter_for_paths_preserves_binary_and_package_mapping(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_text(harness, root, "crates/harn-cli/tests/orchestrator_http.rs", "")
       assert_eq(
         filter_for_path(harness, "crates/harn-cli/tests/orchestrator_http/admin.rs", PACKAGES, root),
@@ -82,14 +82,14 @@ pipeline test_filter_for_paths_preserves_binary_and_package_mapping(harness: Har
 // falls back to the package.
 @test
 pipeline test_filter_for_consolidated_main_rs_binary(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_text(harness, root, "crates/harn-cli/tests/harn_cli_fast/main.rs", "")
       assert_eq(
         filter_for_path(harness, "crates/harn-cli/tests/harn_cli_fast/check_cli.rs", PACKAGES, root),
         "binary(harn_cli_fast)",
       )
       assert_eq(
-        filter_for_path(harness,  harness, "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/slack.rs",
+        filter_for_path(harness, "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/slack.rs",
           PACKAGES,
           root,
         ),
@@ -105,10 +105,10 @@ pipeline test_filter_for_consolidated_main_rs_binary(harness: Harness, task) {
 
 @test
 pipeline test_nextest_filter_for_paths_dedupes_in_order(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_text(harness, root, "crates/harn-cli/tests/orchestrator_http.rs", "")
       assert_eq(
-        nextest_filter_for_paths(harness,  harness, [
+        nextest_filter_for_paths(harness, [
             "crates/harn-cli/tests/orchestrator_http/admin.rs",
             "crates/harn-cli/tests/test_util/process.rs",
             "crates/harn-vm/src/flow/slice.rs",

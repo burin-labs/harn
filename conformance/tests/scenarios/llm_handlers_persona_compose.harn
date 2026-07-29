@@ -25,7 +25,8 @@ pipeline run(harness: Harness) {
     }
   }
   const router = with_routing(
-    harness, {
+    harness,
+    {
       default: cheap,
       routes: [
         {name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: frontier},
@@ -38,7 +39,7 @@ pipeline run(harness: Harness) {
   const middleware = compose(
     [
       with_logging(harness, {level: "info", sink: sink}),
-      with_budget({max_calls: 2, on_exceed: "short_circuit"}),
+      with_budget(harness, {max_calls: 2, on_exceed: "short_circuit"}),
     ],
   )
   const persona = middleware(router)

@@ -69,7 +69,7 @@ fn build_tools() -> dict {
 }
 
 fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, registry: dict) -> dict {
-  harness.stdio.println("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
+  harness.stdio.log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
   const task =
     "Investigate this small repo and tell me what the compute function does and how it is used in main."
   const system_prompt =
@@ -78,7 +78,7 @@ fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, 
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0
     let iter = info?.iteration ?? 0
-    harness.stdio.println("  [${label}] iter=${iter} tools=${count} names=${names}")
+    harness.stdio.log("  [${label}] iter=${iter} tools=${count} names=${names}")
     nil
   }
   let opts = {
@@ -96,7 +96,7 @@ fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, 
   const result = agent_loop(harness, task, system_prompt, opts)
   const visible = result?.visible_text ?? ""
   const visible_len = len(visible)
-  harness.stdio.println(
+  harness.stdio.log(
     "  [${label}] DONE status=${result.status} iters=${result.llm.iterations} visible_len=${visible_len}",
   )
   if visible_len > 0 {
@@ -105,7 +105,7 @@ fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, 
     } else {
       400
     }
-    harness.stdio.println("  [${label}] visible=${visible[:head_len]}")
+    harness.stdio.log("  [${label}] visible=${visible[:head_len]}")
   }
   return {
     label: label,
@@ -122,8 +122,8 @@ pipeline main(harness: Harness, task) {
     run_variant(harness, "F:persistent+text+default", "text", "(default)", registry),
     run_variant(harness, "G:persistent+native+empty", "native", "", registry),
   ]
-  harness.stdio.println("\n========== EXP2b SUMMARY ==========")
+  harness.stdio.log("\n========== EXP2b SUMMARY ==========")
   for r in results {
-    harness.stdio.println("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
+    harness.stdio.log("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
   }
 }

@@ -1,6 +1,6 @@
 import { llm_call_options } from "std/llm/options"
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   const projected = llm_call_options(
     {
       output: {schema: {type: "object"}, stream_abort: false},

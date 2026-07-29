@@ -2,5 +2,5 @@ pipeline test(harness: Harness, task) {
   const results = parallel each [1, 2, 3] { x ->
     x * x
   }
-  harness.stdio.println(results)
+  harness.stdio.log(results)
 }

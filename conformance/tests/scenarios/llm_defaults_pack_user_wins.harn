@@ -11,5 +11,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(direct_effort.effort, "high")
   const direct_thinking = pack_for(harness, {model: "claude-sonnet-4-5", thinking: {budget_tokens: 2048}})
   assert_eq(direct_thinking.thinking.budget_tokens, 2048)
-  harness.stdio.println("llm_defaults_pack_user_wins passed")
+  harness.stdio.log("llm_defaults_pack_user_wins passed")
 }

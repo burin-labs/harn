@@ -1,13 +1,11 @@
 // Escalation is explicit on the interaction capability and returns a typed
 // `EscalationHandle` envelope.
 import "std/hitl"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 
 pipeline test(harness: Harness, task) {
-  clear_host_mocks()
-  mock_host_response(
-    "hitl",
-    "escalation",
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction", "escalation_response",
     {accepted: true, reviewer: "oncall-primary", reason: "took over"},
   )
   const handle = harness.interaction.escalate_to("oncall", "deploy failed during maintenance window")

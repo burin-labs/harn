@@ -1,6 +1,8 @@
 import "std/project"
 
-const root = path_join(harness.fs.temp_dir(), "meta_scratch")
+fn main(harness: Harness) {
+
+const root = path_join(harness.fs.workspace_temp_dir(), "meta_scratch")
 
 harness.fs.mkdir(root)
 
@@ -113,3 +115,5 @@ for entry in with_hidden {
 }
 
 harness.stdio.println(found_hidden)
+
+}

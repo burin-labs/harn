@@ -64,7 +64,7 @@ fn git_candidate_files(harness: Harness, root: string) -> list<string>? {
   // Test/temp trees nested inside a checkout must use the filesystem fallback;
   // otherwise git reports candidates relative to the parent repository and the
   // requested subtree is silently skipped.
-  const top_level = harness.process.spawn_captured(
+  const top_level = harness.process.run(
     {cmd: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
   )
   if top_level.exit_code != 0
@@ -92,7 +92,7 @@ fn git_candidate_files(harness: Harness, root: string) -> list<string>? {
     "*.ts",
     "*.tsx",
   ]
-  const result = harness.process.spawn_captured({cmd: "git", args: args})
+  const result = harness.process.run({cmd: "git", args: args})
   if result.exit_code != 0 && result.exit_code != 1 {
     return nil
   }
@@ -105,7 +105,7 @@ fn git_candidate_files(harness: Harness, root: string) -> list<string>? {
   }
   // `git grep` intentionally avoids walking ignored build output, but a local
   // pre-commit check must still see newly authored source before it is staged.
-  const untracked = harness.process.spawn_captured(
+  const untracked = harness.process.run(
     {cmd: "git", args: ["-C", root, "ls-files", "--others", "--exclude-standard"]},
   )
   if untracked.exit_code != 0 {

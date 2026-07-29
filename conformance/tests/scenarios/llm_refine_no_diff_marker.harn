@@ -8,7 +8,7 @@ pipeline default(harness: Harness) {
   with_llm_script(
     harness.llm, [llm_text("A short rewrite without a diff.")],
     { ->
-      const result = refine_prompt(harness,  harness, {
+      const result = refine_prompt(harness, {
           user_prompt: "ramble ramble ramble",
           style: "concise",
           model: "mock-model",

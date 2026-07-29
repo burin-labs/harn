@@ -13,17 +13,24 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_transcript_compaction_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("transcript_compact", |ctx, args| async move {
-        let transcript = args
-            .first()
-            .and_then(|value| value.as_dict())
-            .filter(|_| args.first().is_some_and(is_transcript_value))
-            .ok_or_else(|| {
-                VmError::Runtime("transcript_compact: first argument must be a transcript".into())
-            })?;
-        let options = args.get(1).and_then(|value| value.as_dict());
-        compact_transcript_impl(&ctx, transcript, options, args.get(1).cloned()).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Agent,
+        "compact_transcript",
+        |ctx, args| async move {
+            let transcript = args
+                .first()
+                .and_then(|value| value.as_dict())
+                .filter(|_| args.first().is_some_and(is_transcript_value))
+                .ok_or_else(|| {
+                    VmError::Runtime(
+                        "HarnessAgent.compact_transcript: first argument must be a transcript"
+                            .into(),
+                    )
+                })?;
+            let options = args.get(1).and_then(|value| value.as_dict());
+            compact_transcript_impl(&ctx, transcript, options, args.get(1).cloned()).await
+        },
+    );
 }
 
 #[derive(Clone)]

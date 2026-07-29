@@ -1,7 +1,7 @@
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
-  const png_path = path_join(harness.fs.temp_dir(), "vision_fixture.png")
+  const png_path = path_join(harness.fs.workspace_temp_dir(), "vision_fixture.png")
   harness.fs.write_bytes(
     png_path,
     bytes_from_hex(
@@ -51,7 +51,7 @@ pipeline test(harness: Harness, task) {
         contains(gate_error, "option `vision` is not supported"),
         "vision gate should reject non-vision models",
       )
-      harness.stdio.println("llm_call_image_content tests passed")
+      harness.stdio.log("llm_call_image_content tests passed")
     },
   )
 }

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -5,11 +6,9 @@ import { llm_text, with_llm_script } from "std/testing"
  * `{block: true}`. `post_compact` hooks observe the archived-message
  * count once compaction completes successfully.
  */
-const pre_seen = harness.runtime.atomic(0)
-
-const post_seen = harness.runtime.atomic(0)
-
 pipeline default(harness: Harness) {
+  const pre_seen = harness.runtime.atomic(0)
+  const post_seen = harness.runtime.atomic(0)
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "pre_compact",

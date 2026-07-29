@@ -1,7 +1,7 @@
 pipeline main(harness: Harness) {
-  const first = transcript.inject_reminder(transcript(), {body: "first", dedupe_key: "k1"})
-  const second = transcript.inject_reminder(first.transcript, {body: "second", dedupe_key: "k2"})
-  const cleared = transcript.clear_reminders(second.transcript, {id: first.reminder_id})
+  const first = harness.agent.transcript_inject_reminder(transcript(), {body: "first", dedupe_key: "k1"})
+  const second = harness.agent.transcript_inject_reminder(first.transcript, {body: "second", dedupe_key: "k2"})
+  const cleared = harness.agent.transcript_clear_reminders(second.transcript, {id: first.reminder_id})
   const events = transcript_events_by_kind(cleared.transcript, "system_reminder")
   harness.stdio.println(cleared.removed_count)
   harness.stdio.println(len(events))

@@ -26,7 +26,7 @@ use crate::llm::helpers::vm_value_to_json;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm, VmBuiltinArity, VmBuiltinMetadata};
+use crate::vm::{AsyncBuiltinCtx, Vm};
 use async_trait::async_trait;
 
 const DEFAULT_FEEDBACK_MAX_ITEMS: usize = 8;
@@ -40,12 +40,9 @@ pub(crate) fn register_flow_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
-    vm.register_async_builtin_with_metadata(
-        VmBuiltinMetadata::async_static("flow_evaluate_invariants")
-            .signature_static("flow_evaluate_invariants(source: string, slice: dict, options?: dict) -> dict")
-            .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-            .category_static("flow")
-            .doc_static("Evaluate Flow `@invariant` predicate functions from Harn source or a module path against a slice and return typed execution records."),
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "flow_evaluate_invariants",
         |ctx, args| async move { flow_evaluate_invariants_impl(ctx, args).await },
     );
 }

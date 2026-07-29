@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
   const data = json_parse("{\"val\": true}")
   const x = data.val + 1
-  harness.stdio.println(x)
+  harness.stdio.log(x)
 }

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
@@ -50,7 +51,7 @@ pipeline test(harness: Harness, task) {
         }
       }
       assert(saw_record, "skill.loaded trust record emitted")
-      harness.stdio.println("load_skill_rejects_unsigned_when_required passed")
+      harness.stdio.log("load_skill_rejects_unsigned_when_required passed")
     },
   )
 }

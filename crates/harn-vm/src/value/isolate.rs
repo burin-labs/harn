@@ -45,6 +45,7 @@ impl VmValue {
                 | Self::Atomic(_)
                 | Self::Rng(_)
                 | Self::SyncPermit(_)
+                | Self::Resource(_)
                 | Self::ResourceGuard(_)
                 | Self::McpClient(_)
                 | Self::VerdictReceipt(_)

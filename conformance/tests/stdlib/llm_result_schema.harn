@@ -28,14 +28,14 @@ pipeline default(harness: Harness) {
     }
     return {ok: true, value: {data: {verdict: "pass", score: 0.9}}}
   }
-  const caller1 = with_result_schema(flaky, schema, {max_attempts: 3})
+  const caller1 = with_result_schema(harness, flaky, schema, {max_attempts: 3})
   const r1 = caller1(call)
   harness.stdio.println(r1.result_schema.valid)
   harness.stdio.println(r1.result_schema.attempts)
   harness.stdio.println(r1.value.data.score)
   // Case 2 — always invalid → throws `result_schema` after max_attempts.
   const broken = { _ -> {ok: true, value: {data: {verdict: "pass"}}} }
-  const caller2 = with_result_schema(broken, schema, {max_attempts: 2})
+  const caller2 = with_result_schema(harness, broken, schema, {max_attempts: 2})
   const thrown = try {
     caller2(call)
   }

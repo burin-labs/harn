@@ -61,5 +61,5 @@ pipeline test(harness: Harness, task) {
     schema_report(with_extension, ContextEvalReport).ok,
     "unknown compatible extension is accepted",
   )
-  harness.stdio.println("context_eval_contracts ok")
+  harness.stdio.log("context_eval_contracts ok")
 }

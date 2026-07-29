@@ -1,7 +1,7 @@
 import "std/project"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "project_deep_scan_ignore")
+  const root = path_join(harness.fs.workspace_temp_dir(), "project_deep_scan_ignore")
   const namespace = "ambient-${harness.random.uuid()}"
   harness.fs.mkdir(path_join(root, "app/src"))
   harness.fs.mkdir(path_join(root, "ignored/src"))
@@ -21,7 +21,7 @@ pipeline test(harness: Harness, task) {
   )
   harness.fs.write_text(path_join(root, "node_modules/pkg/package.json"), "{\"name\":\"pkg\"}\n")
   const tree = project_deep_scan(
-    harness.project, root,
+    harness.project, harness.clock, root,
     {namespace: namespace, tiers: ["ambient"], incremental: true, depth: nil},
   )
   harness.stdio.println(tree.app.ambient.languages[0] == "rust")

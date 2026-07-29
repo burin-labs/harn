@@ -42,5 +42,5 @@ pipeline main(harness: Harness, task) {
   require len(deduped) == 1, "same dedupe_key replaces the prior reminder"
   require deduped[0].reminder.body == "second", "the latest reminder wins"
   harness.agent.close(s)
-  harness.stdio.println("agent_session_inject_reminder ephemeral ttl=1 tests passed")
+  harness.stdio.log("agent_session_inject_reminder ephemeral ttl=1 tests passed")
 }

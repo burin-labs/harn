@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -109,7 +110,7 @@ pipeline test(harness: Harness, task) {
       assert(matched >= 1, "at least one skill_matched event fired")
       assert(activated == 1, "one skill activated")
       assert(scoped == 1, "tool-scope event fired for the active skill")
-      harness.stdio.println("skill_lifecycle_metadata tests passed")
+      harness.stdio.log("skill_lifecycle_metadata tests passed")
     },
   )
 }

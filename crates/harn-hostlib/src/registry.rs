@@ -24,6 +24,7 @@ fn capability_for_module(module: &str) -> harn_builtin_meta::CapabilityId {
         "fs" => CapabilityId::Fs,
         "fs_watch" => CapabilityId::FsWatch,
         "host_lease" => CapabilityId::HostLease,
+        "host_conditions" => CapabilityId::System,
         "scanner" => CapabilityId::Scanner,
         "secret_store" => CapabilityId::SecretStore,
         "terminal_session" => CapabilityId::TerminalSession,

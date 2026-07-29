@@ -25,5 +25,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(type_of(r2.max_tokens), "int")
   assert(r2.max_tokens >= 64, "recommended max_tokens must respect the 64 floor")
   assert(r2.max_tokens <= 8192, "recommended summarize max_tokens must stay sane")
-  harness.stdio.println("llm_defaults_pack_recommend_max_tokens passed")
+  harness.stdio.log("llm_defaults_pack_recommend_max_tokens passed")
 }

@@ -18,7 +18,7 @@ import { with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   const store = mem_cache({namespace: "with-cache-caller-" + harness.random.uuid()})
-  cache_clear({store: store})
+  cache_clear(harness, {store: store})
   const caller = with_cache(harness, default_llm_caller(harness), {store: store, ttl: "1h"})
   const session_id = "with-cache-caller-session-" + harness.random.uuid()
   const hits = harness.runtime.atomic(0)
@@ -29,7 +29,10 @@ pipeline default(harness: Harness) {
     { ev ->
       if ev?.type == "cache_hit" {
         const _ = harness.runtime.atomic_add(hits, 1)
-        const _ = harness.runtime.atomic_set(last_hit_tokens, to_int(ev?.payload?.metrics?.tokens_saved ?? 0))
+        const _ = harness.runtime.atomic_set(
+          last_hit_tokens,
+          to_int(ev?.payload?.metrics?.tokens_saved ?? 0),
+        )
       }
       if ev?.type == "cache_miss" {
         const _ = harness.runtime.atomic_add(misses, 1)
@@ -40,7 +43,8 @@ pipeline default(harness: Harness) {
   // LLM result wraps them into `usage` so the cache receipt reader sees
   // the right `tokens_saved` figure on hits.
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       {text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"},
       {text: "fresh-if-uncached", model: "m", provider: "p"},
     ],
@@ -62,10 +66,14 @@ pipeline default(harness: Harness) {
       harness.stdio.println("mock_calls=" + to_string(len(harness.llm.mock_calls())))
       const tool_call = call_one + {opts: opts + {tools: []}}
       const _ = caller(tool_call)
-      harness.stdio.println("after_tool_call_mock_calls=" + to_string(len(harness.llm.mock_calls())))
+      harness.stdio.println(
+        "after_tool_call_mock_calls=" + to_string(len(harness.llm.mock_calls())),
+      )
       harness.stdio.println("misses=" + to_string(harness.runtime.atomic_get(misses)))
       harness.stdio.println("hits=" + to_string(harness.runtime.atomic_get(hits)))
-      harness.stdio.println("hit.tokens_saved=" + to_string(harness.runtime.atomic_get(last_hit_tokens)))
+      harness.stdio.println(
+        "hit.tokens_saved=" + to_string(harness.runtime.atomic_get(last_hit_tokens)),
+      )
     },
   )
 }

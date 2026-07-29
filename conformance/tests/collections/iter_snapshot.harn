@@ -4,6 +4,6 @@ pipeline test(harness: Harness, task) {
   let xs = [1, 2, 3]
   const it = iter(xs)
   xs = xs + [99]
-  harness.stdio.println(it.to_list())
-  harness.stdio.println(xs)
+  harness.stdio.log(it.to_list())
+  harness.stdio.log(xs)
 }

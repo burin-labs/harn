@@ -1,7 +1,7 @@
 import "std/memory"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-memory-primitives-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-memory-primitives-" + harness.random.uuid())
   const options = {root: root, now: "2026-04-29T00:00:00Z"}
   const namespace = "agent/customer"
   const first = memory_store(

@@ -5,7 +5,7 @@ import "std/memory"
  * flag), newest first, and honors a custom flag name.
  */
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-memrem-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-memrem-" + harness.random.uuid())
   const ns = "agent/notes"
   memory_store(
     harness.memory, ns,

@@ -1,15 +1,15 @@
 pipeline test(harness: Harness, task) {
   // Small text should pass through unchanged
   const small = microcompact("hello world", 1000)
-  harness.stdio.println(small)
+  harness.stdio.log(small)
   // Large text should be snipped
   const large = "x".repeat(50000)
   const snipped = microcompact(large, 10000)
-  harness.stdio.println(snipped.contains("snipped"))
-  harness.stdio.println(len(snipped) < 50000)
+  harness.stdio.log(snipped.contains("snipped"))
+  harness.stdio.log(len(snipped) < 50000)
   // Token estimation
   const tokens = estimate_tokens(
     [{role: "user", content: "a".repeat(400)}, {role: "assistant", content: "b".repeat(400)}],
   )
-  harness.stdio.println(tokens)
+  harness.stdio.log(tokens)
 }

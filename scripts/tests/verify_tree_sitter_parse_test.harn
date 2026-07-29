@@ -62,7 +62,7 @@ pipeline test_with_error_suffix(harness: Harness, task) {
 
 @test
 pipeline test_positive_harn_files_skips_error_fixtures_and_other_roots(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_file(harness, root, "conformance/tests/good.harn", "let x = 1\n")
       write_file(harness, root, "conformance/tests/bad.harn", "let x =\n")
       write_file(harness, root, "conformance/tests/bad.error", "expected\n")

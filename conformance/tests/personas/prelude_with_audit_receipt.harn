@@ -15,7 +15,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(ok.receipt.schema)
   harness.stdio.println(ok.receipt.step)
   harness.stdio.println(len(ok.receipt.tool_calls))
-  const failed_wrapper = with_audit_receipt(harness,  harness, fn() {
+  const failed_wrapper = with_audit_receipt(harness, fn() {
       throw "boom"
     },
     opts,

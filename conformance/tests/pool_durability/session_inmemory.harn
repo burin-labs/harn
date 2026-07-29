@@ -5,17 +5,17 @@ import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/poo
 
 pipeline default(harness: Harness) {
   const pool = pool_create({name: "session-demo", max_concurrent: 1})
-  harness.stdio.println(pool.scope)
-  harness.stdio.println(pool.durable)
+  harness.stdio.log(pool.scope)
+  harness.stdio.log(pool.durable)
   const h1 = pool.submit({ -> 11 })
   const r1 = pool_wait(h1)
-  harness.stdio.println(r1.status)
-  harness.stdio.println(r1.result)
+  harness.stdio.log(r1.status)
+  harness.stdio.log(r1.result)
   // After restart, the registry forgets the pool entirely. Re-creating
   // by the same name observes a fresh handle with no carried-over
   // tasks.
   pool_simulate_restart()
   const again = pool_create({name: "session-demo", max_concurrent: 1})
-  harness.stdio.println(again.scope)
-  harness.stdio.println(again.total)
+  harness.stdio.log(again.scope)
+  harness.stdio.log(again.total)
 }

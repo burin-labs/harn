@@ -7,7 +7,7 @@ import {
 } from "std/llm/media"
 
 pipeline test(harness: Harness, task) {
-  const png_path = path_join(harness.fs.temp_dir(), "media_helper_fixture.png")
+  const png_path = path_join(harness.fs.workspace_temp_dir(), "media_helper_fixture.png")
   harness.fs.write_bytes(
     png_path,
     bytes_from_hex(
@@ -31,5 +31,5 @@ pipeline test(harness: Harness, task) {
   const video_msg = video_message(harness, "https://example.com/demo.mp4", "summarize", {})
   assert(video_msg.content[0].text == "summarize", "video text block created")
   assert(video_msg.content[1].type == "video", "video message block created")
-  harness.stdio.println("llm_media_helpers tests passed")
+  harness.stdio.log("llm_media_helpers tests passed")
 }

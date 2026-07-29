@@ -47,8 +47,13 @@ impl Dispatcher {
             .expect("dispatcher cancel tokens poisoned")
             .push(cancel_token.clone());
         vm.install_cancel_token(cancel_token.clone());
-        let arg = event_to_handler_value(event)?;
-        let args = [arg];
+        let harness = vm.root_harness_value().ok_or_else(|| {
+            DispatchError::Local(
+                "trigger callable execution has no root Harness authority".to_string(),
+            )
+        })?;
+        let handler_event = event_to_handler_value(event)?;
+        let args = [harness, handler_event];
         let tier_policy = policy_for_autonomy_tier(autonomy_tier);
         let invocation_policy = match callable_policy {
             Some(policy) => tier_policy

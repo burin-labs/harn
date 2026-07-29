@@ -1,3 +1,4 @@
+import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
 /**
  * Per-stage policy scoping (harn#1701):
  * `@persona(stages: [...])` declares per-stage tool allowlists. While the

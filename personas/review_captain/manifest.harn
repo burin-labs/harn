@@ -137,7 +137,7 @@ fn _resolve_policy(harness: Harness, request) {
 pub pipeline run(harness: Harness, task) -> dict {
   const request = _resolve_request()
   const policy = _resolve_policy(harness, request)
-  const receipt = review_pr(request, policy, nil)
+  const receipt = review_pr(harness, request, policy, nil)
   harness.stdio.println(json_stringify(receipt))
   return receipt
 }

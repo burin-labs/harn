@@ -8,7 +8,7 @@ pipeline default(harness: Harness) {
   with_llm_script(
     harness.llm, [llm_text("noise-1"), llm_text("noise-2"), llm_text("noise-3")],
     { ->
-      const result = self_consistency(harness,  harness, "anything",
+      const result = self_consistency(harness, "anything",
         "",
         {
           n: 3,

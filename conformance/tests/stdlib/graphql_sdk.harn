@@ -11,7 +11,7 @@ import {
 } from "std/graphql"
 
 pipeline test(harness: Harness, task) {
-  const root = harness.fs.project_root() ?? cwd()
+  const root = harness.fs.workspace_root()
   const schema_text = harness.fs.read_text(
     path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"),
   )
@@ -35,7 +35,7 @@ pipeline test(harness: Harness, task) {
   )
   const generated = graphql_generate_client([operation])
   harness.stdio.println(contains(generated, "pub fn viewer"))
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     endpoint,
     {
@@ -48,7 +48,7 @@ pipeline test(harness: Harness, task) {
       },
     },
   )
-  const envelope = graphql_execute_operation(harness,  harness, {endpoint: endpoint, auth: {access_token: "linear-token"}},
+  const envelope = graphql_execute_operation(harness, {endpoint: endpoint, auth: {access_token: "linear-token"}},
     operation,
     {id: "user-1"},
   )
@@ -58,7 +58,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(envelope.meta.rate_limit.complexity)
   harness.stdio.println(envelope.meta.request_id)
   harness.stdio.println(envelope.result.meta.status)
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   harness.stdio.println(json_parse(calls[0].body).operationName)
   harness.stdio.println(calls[0].headers.authorization)
   const page = graphql_page_info(

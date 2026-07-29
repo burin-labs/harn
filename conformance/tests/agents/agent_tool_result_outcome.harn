@@ -79,5 +79,5 @@ pipeline test(harness: Harness) {
   assert_eq(prose_only.kind, "unknown")
   assert_eq(prose_only.from_structured, false)
   assert_eq(agent_tool_result_is_ok(prose_only), nil)
-  harness.stdio.println("agent tool result outcome ok")
+  harness.stdio.log("agent tool result outcome ok")
 }

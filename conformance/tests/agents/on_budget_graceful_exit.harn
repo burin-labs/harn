@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("state_kind=" + envelope.budget_state.kind)
       harness.stdio.println("state_consumed=" + to_string(envelope.budget_state.consumed_cost_usd))
       harness.stdio.println("message_contains_clean=" + to_string(envelope.message != nil))
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("audit_count=" + to_string(len(audits)))
       harness.stdio.println("audit_kind=" + audits[0].kind)
       harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)

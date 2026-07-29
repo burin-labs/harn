@@ -73,7 +73,7 @@ fn validate_record_set(value: &VmValue) -> Result<BTreeMap<String, serde_json::V
     };
     let mut fields = BTreeMap::new();
     for (key, entry) in dict.iter() {
-        fields.insert(key.to_string(), vm_to_json(entry));
+        fields.insert(key.to_string(), vm_to_json(entry)?);
     }
     match fields.get("schemaVersion") {
         None => {
@@ -605,7 +605,7 @@ fn verification_profile_record_run_impl(
         ));
     }
     let observation = match args.get(1) {
-        Some(VmValue::Dict(_)) => vm_to_json(args.get(1).expect("checked")),
+        Some(VmValue::Dict(_)) => vm_to_json(args.get(1).expect("checked"))?,
         _ => {
             return Err(VmError::Runtime(
                 "verification_profile_record_run: observation must be a dict".to_string(),
@@ -678,10 +678,12 @@ fn verification_diagnostic_classify_impl(
     let envelope = args
         .first()
         .map(vm_to_json)
+        .transpose()?
         .unwrap_or(serde_json::Value::Null);
     let current_hashes = args
         .get(1)
         .map(vm_to_json)
+        .transpose()?
         .unwrap_or_else(|| serde_json::json!({}));
     Ok(json_to_vm(&classify_diagnostic(&envelope, &current_hashes)))
 }

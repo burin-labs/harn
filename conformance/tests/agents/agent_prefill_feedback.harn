@@ -10,7 +10,7 @@ pipeline main(harness: Harness, task) {
   const public_messages = harness.agent.snapshot(public_session).messages
   harness.stdio.println(public_messages[0].role)
   harness.stdio.println(!contains(public_messages[0].content, "runtime_feedback"))
-  const control = agent_session_init(harness,  harness, "task",
+  const control = agent_session_init(harness, "task",
     nil,
     {provider: "mock", session_id: "prefill-feedback-host"},
   )

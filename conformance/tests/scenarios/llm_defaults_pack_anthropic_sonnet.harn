@@ -26,5 +26,5 @@ pipeline test(harness: Harness, task) {
   // Canonical policy fields survive for introspection.
   assert_eq(r.reasoning_policy, "medium")
   assert_eq(r.reasoning_task, "agent")
-  harness.stdio.println("llm_defaults_pack_anthropic_sonnet passed")
+  harness.stdio.log("llm_defaults_pack_anthropic_sonnet passed")
 }

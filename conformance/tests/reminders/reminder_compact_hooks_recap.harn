@@ -1,8 +1,6 @@
-const pre_seen = harness.runtime.atomic(0)
-
-const post_seen = harness.runtime.atomic(0)
-
 pipeline main(harness: Harness) {
+  const pre_seen = harness.runtime.atomic(0)
+  const post_seen = harness.runtime.atomic(0)
   harness.agent.clear_session_hooks()
   const session = harness.agent.open("reminder-compact-hooks-recap")
   harness.agent.reset(session)
@@ -33,8 +31,8 @@ pipeline main(harness: Harness) {
   )
   const opts = {strategy: "truncate", keep_last: 1, target_tokens: 1}
   const snapshot = harness.agent.snapshot(session) ?? {}
-  const blocked = transcript_compact(snapshot, opts)
-  const compacted = transcript_compact(snapshot, opts)
+  const blocked = harness.agent.compact_transcript(snapshot, opts)
+  const compacted = harness.agent.compact_transcript(snapshot, opts)
   const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   harness.stdio.println(len(transcript_events_by_kind(blocked, "compaction")))
   harness.stdio.println(harness.runtime.atomic_get(pre_seen))

@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
       + "|prior="
       + ctx.prior_text
   }
-  const out = workflow_run_repair(harness,  harness, {
+  const out = workflow_run_repair(harness, {
       task: "base",
       executor: executor,
       verify: verifier,

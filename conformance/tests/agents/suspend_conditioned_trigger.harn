@@ -44,7 +44,7 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park until the PR is merged.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       const trigger_handle = suspended?.suspension?.auto_resume_trigger
       harness.stdio.println("status=" + suspended.status)
       harness.stdio.println(
@@ -65,7 +65,7 @@ pipeline main(harness: Harness) {
         },
       )
       harness.stdio.println("dispatch_status=" + fired.status)
-      const done = wait_agent(handle)
+      const done = wait_agent(harness.agent, handle)
       harness.stdio.println("final_status=" + done.status)
       harness.stdio.println("has_transcript=" + to_string(done.has_transcript))
     },

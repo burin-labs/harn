@@ -533,11 +533,11 @@ fn __tool_using_defaults(kind) {
   }
 }
 
-fn __apply_tool_format(opts, kind) {
+fn __apply_tool_format(harness: Harness, opts, kind) {
   if kind == "summary" || kind == "verify" {
     return opts
   }
-  const resolved = agent_tool_format_resolution(opts)
+  const resolved = agent_tool_format_resolution(harness, opts)
   if resolved?.tool_format == nil {
     return opts
   }
@@ -893,7 +893,11 @@ pub fn agent_preset(harness: Harness, kind, options = nil) {
   opts = __apply_captain_tool_caller(harness, opts, resolved_kind)
   opts = __apply_captain_llm_caller(harness, opts, resolved_kind)
   opts = __apply_preset_pack(opts, resolved_kind)
-  opts = agent_apply_default_retry(opts, {wrap_existing: !caller_supplied_llm_caller})
-  opts = __apply_tool_format(opts, resolved_kind)
+  opts = agent_apply_default_retry(
+    harness,
+    opts,
+    {wrap_existing: !caller_supplied_llm_caller},
+  )
+  opts = __apply_tool_format(harness, opts, resolved_kind)
   return opts + {_preset_kind: resolved_kind}
 }

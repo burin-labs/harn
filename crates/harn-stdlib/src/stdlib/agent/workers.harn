@@ -121,11 +121,11 @@ fn __agent_stop_options(options, label) {
   return filter_nil({graceful: graceful, reason: reason == "" ? nil : reason})
 }
 
-fn __worker_resume_options(options) {
+fn __worker_resume_options(agents: HarnessAgent, options) {
   if options?.resume_when == nil {
     return options
   }
-  return options + {resume_when: parse_resume_conditions(options.resume_when)}
+  return options + {resume_when: parse_resume_conditions(agents, options.resume_when)}
 }
 
 fn __agent_tool_entry_name(entry) {
@@ -155,13 +155,22 @@ fn __agent_tool_registry_has(registry, name) {
   return false
 }
 
-fn __agent_lifecycle_tool_audit(harness: Harness, tool_name, initiator, reason, handle = nil, conditions = nil) {
+fn __agent_lifecycle_tool_audit(
+  harness: Harness,
+  tool_name,
+  initiator,
+  reason,
+  handle = nil,
+  conditions = nil,
+) {
   const session_id = harness.agent.current_id()
   if session_id == nil || session_id == "" {
     return
   }
   const _ = try {
-    agent_emit_event(harness,  harness, session_id,
+    agent_emit_event(
+      harness,
+      session_id,
       "tool_call_audit",
       {
         tool_call_id: "",
@@ -191,7 +200,7 @@ fn __subagent_pause_tool(harness: Harness, args) {
     throw "subagent_pause: reason is required"
   }
   __agent_lifecycle_tool_audit(harness, "subagent_pause", "parent", reason, handle)
-  return suspend_agent(handle, reason, {initiator: "parent"})
+  return suspend_agent(harness.agent, handle, reason, {initiator: "parent"})
 }
 
 fn __subagent_resume_tool(harness: Harness, args) {
@@ -204,7 +213,7 @@ fn __subagent_resume_tool(harness: Harness, args) {
     throw "subagent_resume: continue_transcript must be a bool"
   }
   __agent_lifecycle_tool_audit(harness, "subagent_resume", "parent", "resume requested", handle)
-  return resume_agent(handle, args?.input, continue_transcript)
+  return resume_agent(harness.agent, handle, args?.input, continue_transcript)
 }
 
 fn __subagent_stop_tool(harness: Harness, args) {
@@ -221,7 +230,7 @@ fn __subagent_stop_tool(harness: Harness, args) {
     reason = "parent requested stop"
   }
   __agent_lifecycle_tool_audit(harness, "subagent_stop", "parent", reason, handle)
-  return agent_stop(handle, {graceful: graceful, reason: reason})
+  return agent_stop(harness.agent, handle, {graceful: graceful, reason: reason})
 }
 
 fn __agent_await_resumption_tool(_args) {
@@ -379,8 +388,8 @@ fn __worker_mode(config) {
   return "stage"
 }
 
-fn __worker_workflow_config(config) {
-  const options = __worker_resume_options(__worker_dict(config?.options))
+fn __worker_workflow_config(agents: HarnessAgent, config) {
+  const options = __worker_resume_options(agents, __worker_dict(config?.options))
   return filter_nil(
     config
       + {
@@ -391,23 +400,23 @@ fn __worker_workflow_config(config) {
   )
 }
 
-fn __worker_stage_config(config) {
+fn __worker_stage_config(agents: HarnessAgent, config) {
   return filter_nil(
     config
       + {
       artifacts: __worker_list(config?.artifacts),
-      options: __worker_resume_options(__worker_dict(config?.options)),
+      options: __worker_resume_options(agents, __worker_dict(config?.options)),
     },
   )
 }
 
-fn __worker_config(config) {
+fn __worker_config(agents: HarnessAgent, config) {
   const cfg = __worker_dict(config)
   const mode = __worker_mode(cfg)
   if mode == "workflow" {
-    return __worker_workflow_config(cfg)
+    return __worker_workflow_config(agents, cfg)
   }
-  return __worker_stage_config(cfg)
+  return __worker_stage_config(agents, cfg)
 }
 
 /**
@@ -417,8 +426,8 @@ fn __worker_config(config) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn spawn_agent(config) {
-  return __host_worker_spawn(__worker_config(config))
+pub fn spawn_agent(agents: HarnessAgent, config) {
+  return agents.worker_spawn(__worker_config(agents, config))
 }
 
 /**
@@ -434,8 +443,11 @@ pub fn spawn_agent(config) {
  * @errors: [HARN-SUS-002]
  * @api_stability: experimental
  */
-pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
-  return __host_resume_conditions_parse(conditions)
+pub fn parse_resume_conditions(
+  agents: HarnessAgent,
+  conditions = nil,
+) -> ResumeConditions? {
+  return agents.parse_resume_conditions(conditions)
 }
 
 /**
@@ -460,6 +472,7 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
  */
 pub fn agent_await_resumption(
+  agents: HarnessAgent,
   reason,
   conditions = nil,
   resume_by = nil,
@@ -470,7 +483,7 @@ pub fn agent_await_resumption(
   }
   return {
     reason: normalized_reason,
-    conditions: parse_resume_conditions(conditions),
+    conditions: parse_resume_conditions(agents, conditions),
     resume_by: resume_by,
   }
 }
@@ -482,8 +495,8 @@ pub fn agent_await_resumption(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn send_input(worker, task) {
-  return __host_worker_send_input(worker, task)
+pub fn send_input(agents: HarnessAgent, worker, task) {
+  return agents.worker_send_input(worker, task)
 }
 
 /**
@@ -493,8 +506,8 @@ pub fn send_input(worker, task) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn worker_trigger(worker, payload) {
-  return __host_worker_trigger(worker, payload)
+pub fn worker_trigger(agents: HarnessAgent, worker, payload) {
+  return agents.worker_trigger(worker, payload)
 }
 
 fn __is_pool_task(value) {
@@ -508,18 +521,18 @@ fn __is_pool_task(value) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn wait_agent(worker_or_workers) {
+pub fn wait_agent(agents: HarnessAgent, worker_or_workers) {
   if __is_pool_task(worker_or_workers) {
-    return __pool_wait(worker_or_workers)
+    return agents.worker_wait(worker_or_workers)
   }
   if type_of(worker_or_workers) == "list" {
     let results = []
     for item in worker_or_workers {
-      results = results.appending(wait_agent(item))
+      results = results.appending(wait_agent(agents, item))
     }
     return results
   }
-  return __host_worker_wait(worker_or_workers)
+  return agents.worker_wait(worker_or_workers)
 }
 
 /**
@@ -534,8 +547,8 @@ pub fn wait_agent(worker_or_workers) {
  * @api_stability: experimental
  * @example: agent_stop(worker, {graceful: true})
  */
-pub fn agent_stop(worker, options: AgentStopOptions = nil) {
-  return __host_worker_stop(worker, __agent_stop_options(options, "agent_stop"))
+pub fn agent_stop(agents: HarnessAgent, worker, options: AgentStopOptions? = nil) {
+  return agents.worker_stop(worker, __agent_stop_options(options, "agent_stop"))
 }
 
 /**
@@ -545,8 +558,8 @@ pub fn agent_stop(worker, options: AgentStopOptions = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn close_agent(worker) {
-  return __host_worker_close(worker)
+pub fn close_agent(agents: HarnessAgent, worker) {
+  return agents.worker_close(worker)
 }
 
 /**
@@ -560,8 +573,8 @@ pub fn close_agent(worker) {
  * @errors: [HARN-SUS-001, HARN-SUS-002, HARN-SUS-007, HARN-SUS-008]
  * @api_stability: experimental
  */
-pub fn suspend_agent(worker, reason = "", options = nil) {
-  return __host_worker_suspend(worker, reason, options)
+pub fn suspend_agent(agents: HarnessAgent, worker, reason = "", options = nil) {
+  return agents.worker_suspend(worker, reason, options)
 }
 
 /**
@@ -577,8 +590,13 @@ pub fn suspend_agent(worker, reason = "", options = nil) {
  * @errors: [HARN-SUS-003, HARN-SUS-004, HARN-SUS-006, HARN-SUS-009, HARN-SUS-010]
  * @api_stability: experimental
  */
-pub fn resume_agent(worker_or_snapshot, resume_input = nil, continue_transcript = true) {
-  return __host_worker_resume(
+pub fn resume_agent(
+  agents: HarnessAgent,
+  worker_or_snapshot,
+  resume_input = nil,
+  continue_transcript = true,
+) {
+  return agents.worker_resume(
     worker_or_snapshot,
     {input: resume_input, continue_transcript: continue_transcript},
   )
@@ -591,8 +609,8 @@ pub fn resume_agent(worker_or_snapshot, resume_input = nil, continue_transcript 
  * @errors: []
  * @api_stability: experimental
  */
-pub fn list_agents() {
-  return __host_worker_list()
+pub fn list_agents(agents: HarnessAgent) {
+  return agents.worker_list()
 }
 
 fn __sub_agent_string(value, fallback = "") {
@@ -682,10 +700,16 @@ pub fn sub_agent_request(harness: Harness, task, options = nil) {
   if task_text == "" {
     throw "sub_agent_run: task is required"
   }
-  const opts = __worker_resume_options(__worker_options(options, "sub_agent_run"))
+  const opts = __worker_resume_options(
+    harness.agent,
+    __worker_options(options, "sub_agent_run"),
+  )
   const allowed_tools = __sub_agent_string_list(opts?.allowed_tools, "sub_agent_run.allowed_tools")
   const selected_tools = __sub_agent_selected_tools(harness, opts, allowed_tools)
-  const session_id = __sub_agent_string(opts?.session_id, "sub_agent_session_" + harness.random.uuid_v7())
+  const session_id = __sub_agent_string(
+    opts?.session_id,
+    "sub_agent_session_" + harness.random.uuid_v7(),
+  )
   return filter_nil(
     {
       _type: "sub_agent_request",
@@ -906,7 +930,8 @@ pub fn agent_fanout(harness: Harness, requests, options = nil) {
     let outcomes = []
     for request in wave {
       const outcome = try {
-        let handle = sub_agent_run(harness, 
+        let handle = sub_agent_run(
+          harness,
           request.task,
           request.options + {background: true, name: request.label},
         )
@@ -922,7 +947,7 @@ pub fn agent_fanout(harness: Harness, requests, options = nil) {
         live_handles = live_handles.appending(outcome.handle)
       }
     }
-    const waited = wait_agent(live_handles)
+    const waited = wait_agent(harness.agent, live_handles)
     let offset = 0
     let live_index = 0
     for request in wave {

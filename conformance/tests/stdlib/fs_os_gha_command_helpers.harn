@@ -10,7 +10,7 @@ import { env_bool } from "std/os"
 import { prefix_lines, single_line_or, truncate_middle, truncate_text } from "std/text"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-utility-helpers-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-utility-helpers-" + harness.random.uuid_v7())
   const json_path = path_join(root, "nested/data.json")
   write_json(harness.fs, json_path, {name: "harn", count: 2}, {pretty: true})
   const parsed = read_json(harness.fs, json_path)

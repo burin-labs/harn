@@ -17,7 +17,7 @@ import { probe_json } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
   // A body containing a line that is exactly the close tag. The count wins.
-  probe_json(harness,  harness, "body containing the tag line round trips",
+  probe_json(harness, "body containing the tag line round trips",
     """```tool
 { "name": "write_file", "args": { "path": "a.txt", "content": "<<END:5" } }
 <<END:5
@@ -31,7 +31,7 @@ END
   )
   // Every literal the fenced lane promises to carry: a bare fence, a heredoc
   // opener, a lone brace, both envelope close tags, and backticks.
-  probe_json(harness,  harness, "body with all promised literals round trips",
+  probe_json(harness, "body with all promised literals round trips",
     """```tool
 { "name": "write_file", "args": { "path": "b.txt", "content": "<<T:8" } }
 <<T:8
@@ -47,7 +47,7 @@ T
 ```""",
   )
   // An empty body is a valid segment.
-  probe_json(harness,  harness, "empty counted body",
+  probe_json(harness, "empty counted body",
     """```tool
 { "name": "write_file", "args": { "path": "empty.txt", "content": "<<T:0" } }
 <<T:0
@@ -55,7 +55,7 @@ T
 ```""",
   )
   // A ```tool separator inside a counted body is content, not a block split.
-  probe_json(harness,  harness, "tool fence inside a counted body is content",
+  probe_json(harness, "tool fence inside a counted body is content",
     """```tool
 { "name": "write_file", "args": { "path": "d.txt", "content": "<<T:3" } }
 <<T:3
@@ -67,7 +67,7 @@ T
   )
   // Two verbatim arguments in one call bind by their opener string, so the
   // trailing bodies may appear in any order relative to the JSON keys.
-  probe_json(harness,  harness, "two bodies matched by opener",
+  probe_json(harness, "two bodies matched by opener",
     """```tool
 { "name": "edit_file", "args": { "path": "x.rs", "old_string": "<<OLD:1", "new_string": "<<NEW:2" } }
 <<NEW:2
@@ -81,7 +81,7 @@ OLD
   )
   // Verbatim coexists with batching: a plain read object and a verbatim write
   // object in one block both dispatch, and the body binds only the write.
-  probe_json(harness,  harness, "verbatim coexists with a batched object",
+  probe_json(harness, "verbatim coexists with a batched object",
     """```tool
 { "name": "read_file", "args": { "path": "a.zig" } }
 { "name": "write_file", "args": { "path": "b.zig", "content": "<<C:1" } }
@@ -91,23 +91,23 @@ C
 ```""",
   )
   // A CRLF body keeps every carriage return, and a CRLF close line works.
-  probe_json(harness,  harness, "crlf counted close round trips",
+  probe_json(harness, "crlf counted close round trips",
     "```tool\r\n{\"name\":\"write_file\",\"args\":{\"content\":\"<<C:1\"}}\r\n<<C:1\r\nbody\r\n  C\r\n```",
   )
   // A value that is literally `<<EOF` with no trailing body stays a string.
-  probe_json(harness,  harness, "literal heredoc opener value without a body",
+  probe_json(harness, "literal heredoc opener value without a body",
     """```tool
 {"name": "write_file", "args": {"path": "a", "content": "<<EOF"}}
 ```""",
   )
   // A pure-JSON block is untouched by the verbatim lane.
-  probe_json(harness,  harness, "pure json block is unchanged",
+  probe_json(harness, "pure json block is unchanged",
     """```tool
 {"name": "write_file", "args": {"path": "a", "content": "x\ny"}}
 ```""",
   )
   // The rejections.
-  probe_json(harness,  harness, "wrong declared count fails loud",
+  probe_json(harness, "wrong declared count fails loud",
     """```tool
 { "name": "write_file", "args": { "path": "a", "content": "<<C:5" } }
 <<C:5
@@ -116,7 +116,7 @@ l2
 C
 ```""",
   )
-  probe_json(harness,  harness, "count overflow never downgrades",
+  probe_json(harness, "count overflow never downgrades",
     """```tool
 { "name": "write_file", "args": { "content": "<<C:184467440737095516160" } }
 <<C:184467440737095516160
@@ -124,7 +124,7 @@ body
 C
 ```""",
   )
-  probe_json(harness,  harness, "counted close with a trailing suffix",
+  probe_json(harness, "counted close with a trailing suffix",
     """```tool
 { "name": "write_file", "args": { "content": "<<C:1" } }
 <<C:1
@@ -132,12 +132,12 @@ body
 C trailing payload
 ```""",
   )
-  probe_json(harness,  harness, "counted declaration with no body",
+  probe_json(harness, "counted declaration with no body",
     """```tool
 {"name":"write_file","args":{"content":"<<C:1"}}
 ```""",
   )
-  probe_json(harness,  harness, "counted body with a mismatched tag",
+  probe_json(harness, "counted body with a mismatched tag",
     """```tool
 {"name":"write_file","args":{"content":"<<C:1"}}
 <<D:1
@@ -145,7 +145,7 @@ body
 D
 ```""",
   )
-  probe_json(harness,  harness, "one of two counted bodies missing",
+  probe_json(harness, "one of two counted bodies missing",
     """```tool
 {"name":"edit_file","args":{"old":"<<OLD:1","new":"<<NEW:1"}}
 <<OLD:1
@@ -153,7 +153,7 @@ before
 OLD
 ```""",
   )
-  probe_json(harness,  harness, "duplicate declarations need distinct bodies",
+  probe_json(harness, "duplicate declarations need distinct bodies",
     """```tool
 {"name":"edit_file","args":{"old":"<<BODY:1","new":"<<BODY:1"}}
 <<BODY:1
@@ -161,7 +161,7 @@ only one
 BODY
 ```""",
   )
-  probe_json(harness,  harness, "orphan trailing heredoc",
+  probe_json(harness, "orphan trailing heredoc",
     """```tool
 { "name": "write_file", "args": { "path": "a", "content": "x" } }
 <<ORPHAN:1

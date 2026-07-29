@@ -219,7 +219,7 @@ fn __stage_command_spec(node) {
 fn __stage_command_options(node) {
   const metadata = node?.metadata ?? {}
   const args = metadata?.command_args
-  let options = {capture: {max_inline_bytes: 65536}}
+  let options: dict = {capture: {max_inline_bytes: 65536}}
   if type_of(args) == "dict" {
     options = options
       + pick_keys(
@@ -346,7 +346,7 @@ fn __stage_prepare_manual_gate(harness: Harness, node_id, node, artifacts) {
   )
   const skippable = __stage_bool(metadata?.approval_skippable, false)
   const consumed_artifact_ids = __stage_artifact_ids(artifacts)
-  let options = {
+  let options: dict = {
     detail: {
       node_id: node_id,
       approval_id: approval_id,
@@ -536,10 +536,10 @@ fn __stage_compaction_options(node) {
   return options
 }
 
-fn __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids) {
+fn __stage_prepare_compact(agent: HarnessAgent, node_id, node, artifacts, consumed_artifact_ids) {
   const options = __stage_compaction_options(node)
   const transcript = transcript_from_messages(__stage_compaction_messages(artifacts))
-  const compacted = transcript_compact(transcript, options)
+  const compacted = agent.compact_transcript(transcript, options)
   const fallback = __stage_texts(artifacts).join("\n\n")
   const summary = __stage_string(transcript_summary(compacted), fallback)
   const text = if summary == "" {
@@ -789,7 +789,7 @@ pub fn workflow_prepare_static_stage(harness: Harness, config = nil) {
     return __stage_prepare_command(node_id, node, consumed_artifact_ids)
   }
   if kind == "stage" && mode == "compact" {
-    return __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids)
+    return __stage_prepare_compact(harness.agent, node_id, node, artifacts, consumed_artifact_ids)
   }
   return {handled: false}
 }
@@ -1049,7 +1049,8 @@ fn __stage_attempt_record(harness: Harness, attempt, status, outcome, branch, er
  * @errors: []
  * @api_stability: experimental
  */
-pub fn workflow_execute_stage_attempts(harness: Harness, 
+pub fn workflow_execute_stage_attempts(
+  harness: Harness,
   task,
   node_id,
   node = nil,
@@ -1112,7 +1113,8 @@ pub fn workflow_execute_stage_attempts(harness: Harness,
       }
       attempts = __host_stage_record_attempt(
         attempts,
-        __stage_attempt_record(harness, 
+        __stage_attempt_record(
+          harness,
           attempt,
           status,
           settled?.outcome,

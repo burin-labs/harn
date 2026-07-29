@@ -27,13 +27,13 @@ pipeline test_structured_retry_cache_cost(harness: Harness) {
       },
     ],
     { ->
-      const before = llm_session_cost().total_cost
+      const before = harness.llm.session_cost().total_cost
       const result = harness.llm.call_structured_result(
         "Choose an action.",
         schema,
         {provider: "mock", schema_retries: 1, repair: {enabled: false}},
       )
-      const charged = llm_session_cost().total_cost - before
+      const charged = harness.llm.session_cost().total_cost - before
       assert_eq(result.ok, true)
       assert_eq(result.attempts, 2)
       assert_eq(result.usage.cache_read_tokens, 1000)

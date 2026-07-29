@@ -1,8 +1,8 @@
 pipeline test(harness: Harness, task) {
   const x = "b"
   match x {
-    "a" -> { harness.stdio.println("first") }
-    "b" -> { harness.stdio.println("second") }
-    "c" -> { harness.stdio.println("third") }
+    "a" -> { harness.stdio.log("first") }
+    "b" -> { harness.stdio.log("second") }
+    "c" -> { harness.stdio.log("third") }
   }
 }

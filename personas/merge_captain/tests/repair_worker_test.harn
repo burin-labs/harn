@@ -84,7 +84,7 @@ pipeline test_dry_run_skips_executor(harness: Harness, task) {
     calls = calls + 1
     {ok: true, output: _ok_output(), raw: "should_not_run"}
   }
-  const run = invoke(harness,  harness, {
+  const run = invoke(harness, {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
       parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
@@ -99,7 +99,7 @@ pipeline test_dry_run_skips_executor(harness: Harness, task) {
 }
 
 pipeline test_blocked_when_human_approval_required(harness: Harness, task) {
-  const run = invoke(harness,  harness, {
+  const run = invoke(harness, {
       bundle: _ci_bundle(),
       policy: _human_required_policy(),
       parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
@@ -115,7 +115,7 @@ pipeline test_blocked_when_human_approval_required(harness: Harness, task) {
 }
 
 pipeline test_completed_run_attaches_output(harness: Harness, task) {
-  const run = invoke(harness,  harness, {
+  const run = invoke(harness, {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
       parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
@@ -150,7 +150,7 @@ pipeline test_default_executor_repairs_validator_failures(harness: Harness, task
 }
 
 pipeline test_schema_invalid_when_executor_fails(harness: Harness, task) {
-  const run = invoke(harness,  harness, {
+  const run = invoke(harness, {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
       parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
@@ -166,7 +166,7 @@ pipeline test_schema_invalid_when_executor_fails(harness: Harness, task) {
 
 pipeline test_validators_failed_when_output_violates_contract(harness: Harness, task) {
   const bad_output = _ok_output() + {files_changed: [{path: "secrets/key.pem", action: "created"}]}
-  const run = invoke(harness,  harness, {
+  const run = invoke(harness, {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
       parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},
@@ -189,7 +189,7 @@ pipeline test_bundle_invalid_short_circuits(harness: Harness, task) {
       allowed_write_scope: ["src/**"],
     },
   )
-  const run = invoke(harness,  harness, {
+  const run = invoke(harness, {
       bundle: bad_bundle,
       policy: _autopilot_policy(),
       dry_run: false,
@@ -210,7 +210,7 @@ pipeline test_invoke_for_ci_failure_builds_correct_bundle(harness: Harness, task
     failed_required_checks: ["ci / rust", "ci / portal"],
   }
   const policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
-  const run = invoke_for_ci_failure(harness,  harness, {
+  const run = invoke_for_ci_failure(harness, {
       observation: observation,
       policy: policy,
       sweep_id: "s",
@@ -240,7 +240,7 @@ pipeline test_invoke_for_merge_conflict_marks_force_push(harness: Harness, task)
     failed_required_checks: [],
   }
   const policy = _autopilot_policy() + {local_verification: [{name: "tests", command: "make test"}]}
-  const run = invoke_for_merge_conflict(harness,  harness, {
+  const run = invoke_for_merge_conflict(harness, {
       observation: observation,
       policy: policy,
       sweep_id: "s",
@@ -264,7 +264,7 @@ pipeline test_invoke_for_release_audit_builds_bundle(harness: Harness, task) {
     changelog_path: "CHANGELOG.md",
     changelog_excerpt: "## Unreleased",
   }
-  const run = invoke_for_release_audit(harness,  harness, {
+  const run = invoke_for_release_audit(harness, {
       repo: "burin-labs/harn",
       head_ref: "main",
       release_facts: release_facts,
@@ -283,7 +283,7 @@ pipeline test_invoke_for_release_audit_builds_bundle(harness: Harness, task) {
 }
 
 pipeline test_run_record_is_versioned(harness: Harness, task) {
-  const run = invoke(harness,  harness, {
+  const run = invoke(harness, {
       bundle: _ci_bundle(),
       policy: _autopilot_policy(),
       parent_receipt_ref: {sweep_id: "s", repo: "x/y", pr_number: 7, prior_state: "discovered"},

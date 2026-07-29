@@ -77,7 +77,7 @@ fn __agent_daemon_raw_resume_conditions(opts, timeout_ms) {
 }
 
 fn __agent_daemon_await_resumption(harness: Harness, session, opts, iteration, timeout_ms) {
-  const request = agent_await_resumption(
+  const request = agent_await_resumption(harness.agent,
     "daemon idle",
     __agent_daemon_raw_resume_conditions(opts, timeout_ms),
   )

@@ -72,7 +72,7 @@ pipeline main(harness: Harness, task) {
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0
     let iter = info?.iteration ?? 0
-    harness.stdio.println("[exp5] iter=${iter} tools=${count} names=${names}")
+    harness.stdio.log("[exp5] iter=${iter} tools=${count} names=${names}")
     nil
   }
   const result = agent_loop(harness, task_text,
@@ -87,5 +87,5 @@ pipeline main(harness: Harness, task) {
       post_turn_callback: cb,
     },
   )
-  harness.stdio.println("[exp5] DONE status=${result.status} iters=${result.llm.iterations}")
+  harness.stdio.log("[exp5] DONE status=${result.status} iters=${result.llm.iterations}")
 }

@@ -1,3 +1,4 @@
+import { workflow_execute } from "std/workflow/execute"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -89,7 +90,7 @@ pipeline test(harness: Harness, task) {
       }
       assert(seen_deploy, "scoped tool survives into the execute stage's tool schema")
       assert(!seen_metrics, "out-of-scope tool filtered out on the workflow path")
-      harness.stdio.println("skill_lifecycle_workflow tests passed")
+      harness.stdio.log("skill_lifecycle_workflow tests passed")
     },
   )
 }

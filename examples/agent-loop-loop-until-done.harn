@@ -3,6 +3,6 @@ pipeline default(harness: Harness, task) {
     "You are a helpful assistant.",
     {loop_until_done: true, max_nudges: 2},
   )
-  harness.stdio.println("Agent output:")
-  harness.stdio.println(result.text)
+  harness.stdio.log("Agent output:")
+  harness.stdio.log(result.text)
 }

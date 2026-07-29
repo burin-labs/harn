@@ -11,7 +11,7 @@ pipeline test(harness: Harness, task) {
     harness.runtime.atomic_add(completed, 1)
     item * 10
   }
-  harness.stdio.println(outcome.succeeded)
-  harness.stdio.println(outcome.failed)
+  harness.stdio.log(outcome.succeeded)
+  harness.stdio.log(outcome.failed)
   harness.stdio.println(harness.runtime.atomic_get(completed))
 }

@@ -1,7 +1,7 @@
 import "../_common"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-mcp-progress-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-mcp-progress-" + harness.random.uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -11,9 +11,9 @@ pipeline default(harness: Harness) {
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_ok(event: TriggerEvent) -> dict {\n  return {kind: event.kind, event_id: event.id}\n}\n",
   )
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
-  const result = exec(
+  const result = harness.process.exec(
     harn_bin,
     "mcp",
     "call",

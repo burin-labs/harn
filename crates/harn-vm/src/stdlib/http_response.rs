@@ -237,8 +237,8 @@ fn stream_body_chunks(body: VmValue) -> VmValue {
 }
 
 #[harn_builtin(
-    exposure = "pure",
-    effects = [],
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
     sig = "http_stream(source: any, content_type?: string?) -> dict",
     kind = "async",
     category = "http_response"
@@ -268,8 +268,8 @@ async fn http_stream_impl(
 }
 
 #[harn_builtin(
-    exposure = "pure",
-    effects = [],
+    exposure = "capability_arg:0",
+    effects = ["state.mutate@arg0"],
     sig = "http_sse(source: any, retry_ms?: int?) -> dict",
     kind = "async",
     category = "http_response"

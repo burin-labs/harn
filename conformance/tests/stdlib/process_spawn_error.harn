@@ -9,7 +9,7 @@ fn nonzero_command(harness: Harness) -> list<string> {
 
 pipeline default(harness: Harness) {
   const direct = try {
-    exec("harn-command-that-does-not-exist-5662")
+    harness.process.exec("harn-command-that-does-not-exist-5662")
   } catch (error) {
     error
   }

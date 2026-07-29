@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     "https://api.example.com/items",
     {responses: [{status: 503}, {status: 200, body: "created"}]},
@@ -9,13 +9,13 @@ pipeline test(harness: Harness, task) {
     "{}",
     {retry: {max: 1, backoff_ms: 0}},
   )
-  const no_retry_calls = http_mock_calls()
+  const no_retry_calls = harness.testing.http_mock_calls()
   assert_eq(no_retry.status, 503)
   assert_eq(len(no_retry_calls), 1)
-  harness.stdio.println("post default status: " + to_string(no_retry.status))
-  harness.stdio.println("post default calls: " + to_string(len(no_retry_calls)))
-  http_mock_clear()
-  http_mock(
+  harness.stdio.log("post default status: " + to_string(no_retry.status))
+  harness.stdio.log("post default calls: " + to_string(len(no_retry_calls)))
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://api.example.com/items",
     {responses: [{status: 503}, {status: 200, body: "created"}]},
@@ -25,9 +25,9 @@ pipeline test(harness: Harness, task) {
     "{}",
     {retry: {max: 1, backoff_ms: 0}, retry_methods: ["POST"]},
   )
-  const with_retry_calls = http_mock_calls()
+  const with_retry_calls = harness.testing.http_mock_calls()
   assert_eq(with_retry.status, 200)
   assert_eq(len(with_retry_calls), 2)
-  harness.stdio.println("post opt-in status: " + to_string(with_retry.status))
-  harness.stdio.println("post opt-in calls: " + to_string(len(with_retry_calls)))
+  harness.stdio.log("post opt-in status: " + to_string(with_retry.status))
+  harness.stdio.log("post opt-in calls: " + to_string(len(with_retry_calls)))
 }

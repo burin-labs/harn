@@ -77,7 +77,13 @@ pub fn __judge_run_checkpoint(
     judge_cfg,
   )
   const started = harness.clock.monotonic_ms()
-  const checkpoint = agent_typed_output_checkpoint(checkpoint_name, user, schema, llm_opts)
+  const checkpoint = agent_typed_output_checkpoint(
+    harness,
+    checkpoint_name,
+    user,
+    schema,
+    llm_opts,
+  )
   const duration_ms = harness.clock.monotonic_ms() - started
   if checkpoint_name == "agent.completion_judge" {
     const usage = checkpoint?.usage ?? checkpoint?.final_result?.usage ?? {}

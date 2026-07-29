@@ -1,7 +1,7 @@
 pipeline test(harness: Harness, task) {
   const list = [1, 2, 3]
-  harness.stdio.println(list.count)
-  harness.stdio.println(list.empty)
-  harness.stdio.println(list.first)
-  harness.stdio.println(list.last)
+  harness.stdio.log(list.count)
+  harness.stdio.log(list.empty)
+  harness.stdio.log(list.first)
+  harness.stdio.log(list.last)
 }

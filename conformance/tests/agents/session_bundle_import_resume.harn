@@ -34,12 +34,12 @@ fn resume_signature(final) {
 }
 
 pipeline main(harness: Harness) {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn-session-bundle-resume-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-session-bundle-resume-" + harness.random.uuid_v7())
   const source_root = path_join(root, "source")
   const dest_root = path_join(root, "dest")
   harness.fs.mkdir(source_root)
@@ -56,7 +56,7 @@ pipeline main(harness: Harness) {
 }
 """,
   )
-  const first = exec_at(source_root, harn_bin, "run", script)
+  const first = harness.process.exec_at(source_root, harn_bin, "run", script)
   harness.stdio.println("first_ok=" + to_string(first.success))
   harness.stdio.println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
   const snapshot = first_snapshot_line(first.stdout)
@@ -69,7 +69,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println("source_snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
   const snapshot_value = json_parse(harness.fs.read_text(snapshot_path))
   const bundle_path = path_join(source_root, "source.bundle.json")
-  const exported = exec_at(
+  const exported = harness.process.exec_at(
     source_root,
     harn_bin,
     "session",
@@ -79,11 +79,11 @@ pipeline main(harness: Harness) {
     bundle_path,
   )
   harness.stdio.println("export_ok=" + to_string(exported.success))
-  const validated = exec_at(source_root, harn_bin, "session", "validate", bundle_path, "--json")
+  const validated = harness.process.exec_at(source_root, harn_bin, "session", "validate", bundle_path, "--json")
   harness.stdio.println("validate_ok=" + to_string(validated.success))
   const imported_run_path = path_join(dest_root, "imported-run.json")
   const imported_snapshot_dir = path_join(dest_root, "worker-snapshots")
-  const imported = exec_at(
+  const imported = harness.process.exec_at(
     dest_root,
     harn_bin,
     "session",
@@ -136,13 +136,13 @@ pipeline main(harness: Harness) {
       imported_run.metadata.worker_snapshot_path == imported_snapshot,
     ),
   )
-  const source_resumed = exec_at(source_root, harn_bin, "run", "--resume", snapshot_path, "--json")
+  const source_resumed = harness.process.exec_at(source_root, harn_bin, "run", "--resume", snapshot_path, "--json")
   harness.stdio.println("source_resume_ok=" + to_string(source_resumed.success))
   const source_final = final_json_line(source_resumed)
   const source_signature = resume_signature(source_final)
   harness.fs.delete(source_root)
   harness.stdio.println("source_host_removed=" + to_string(!harness.fs.exists(source_root)))
-  const resumed = exec_at(dest_root, harn_bin, "run", "--resume", imported_snapshot, "--json")
+  const resumed = harness.process.exec_at(dest_root, harn_bin, "run", "--resume", imported_snapshot, "--json")
   harness.stdio.println("resume_ok=" + to_string(resumed.success))
   const final = final_json_line(resumed)
   const imported_signature = resume_signature(final)

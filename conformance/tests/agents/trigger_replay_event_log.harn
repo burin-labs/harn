@@ -2,7 +2,7 @@ import "std/triggers"
 
 fn replay_marker_path(harness: Harness, event: TriggerEvent) -> string {
   return path_join(
-    harness.fs.temp_dir(),
+    harness.fs.workspace_temp_dir(),
     "harn-trigger-replay-event-log-" + to_string(event.headers?.x_delivery ?? "unknown")
       + ".marker",
   )
@@ -20,7 +20,7 @@ fn flaky_handler(harness: Harness, event: TriggerEvent) -> dict {
 pipeline test(harness: Harness, task) {
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const delivery = "evt-replay-" + unique
   const trigger_id = "replay-trigger-" + unique
@@ -66,7 +66,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(live?.metrics?.dlq == 1)
   harness.stdio.println(live?.metrics?.dispatched == 1)
   const marker_path = path_join(
-    harness.fs.temp_dir(),
+    harness.fs.workspace_temp_dir(),
     "harn-trigger-replay-event-log-" + delivery + ".marker",
   )
   if harness.fs.exists(marker_path) {

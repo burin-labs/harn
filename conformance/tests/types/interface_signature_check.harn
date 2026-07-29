@@ -14,5 +14,5 @@ pipeline test(harness: Harness, task) {
     return item.to_str()
   }
   const n = Name({value: "hello"})
-  harness.stdio.println(show(n))
+  harness.stdio.log(show(n))
 }

@@ -44,7 +44,7 @@ pipeline test_parse_feedback_is_counted_once(harness: Harness, task) {
         done_judge: nil,
         max_iterations: 3,
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Add the two numbers, then finish.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")
@@ -101,7 +101,7 @@ pipeline test_repeated_full_parse_rejection_enters_bounded_recovery(harness: Har
           hard_stop_after_trips: 3,
         },
       }
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Add one and two, then finish.", nil, opts) },
       )
       assert_eq(captured.result.status, "done")

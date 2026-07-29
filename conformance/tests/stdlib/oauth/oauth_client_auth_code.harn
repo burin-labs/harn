@@ -13,7 +13,7 @@ import { memory } from "std/oauth/storage"
 pipeline test(harness: Harness, task) {
   const topic = "oauth.client.audit"
   const cursor = harness.obs.event_log_latest(topic) ?? 0
-  const store = memory()
+  const store = memory(harness.auth)
   const provider = custom(
     {
       id: "mock",
@@ -22,7 +22,9 @@ pipeline test(harness: Harness, task) {
       default_scopes: ["repo"],
     },
   )
-  const cli = client(harness,  harness, provider,
+  const cli = client(
+    harness,
+    provider,
     {
       client_id: "cli-id",
       client_secret: "cli-secret",
@@ -42,8 +44,8 @@ pipeline test(harness: Harness, task) {
   assert(len(pkce.code_verifier) >= 43, "verifier length >= 43")
   assert(len(pkce.code_verifier) <= 128, "verifier length <= 128")
   assert_eq(pkce.code_challenge_method, "S256", "PKCE method")
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://mock-idp.example/token",
     {
@@ -58,7 +60,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(token_set.refresh_token, "RRR", "refresh token returned to caller")
   assert_eq(token_set.token_type, "Bearer", "token_type recorded")
   assert_eq(token_set.expires_in, 3600, "expires_in propagated")
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "single token exchange call")
   assert_eq(calls[0].method, "POST", "exchange was POST")
   const body = calls[0].body
@@ -70,7 +72,7 @@ pipeline test(harness: Harness, task) {
   assert(contains(body, "scope=repo%20user"), "scopes in body")
   const access = token(cli)
   assert_eq(access, "AAA", "token() returns stored access token without refreshing")
-  const calls_after_token = http_mock_calls({include_sensitive: true})
+  const calls_after_token = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls_after_token), 1, "token() did not re-issue token call")
   const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   const logged = stream.next().value
@@ -90,5 +92,5 @@ pipeline test(harness: Harness, task) {
     }
   }
   assert(threw, "state mismatch should have thrown")
-  harness.stdio.println("oauth client auth code ok")
+  harness.stdio.log("oauth client auth code ok")
 }

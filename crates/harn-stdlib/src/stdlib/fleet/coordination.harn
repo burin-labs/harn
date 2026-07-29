@@ -96,7 +96,10 @@ fn __fleet_typed_data(value, schema, label) {
 
 fn __fleet_post(harness: Harness, scope, room, kind, subject, data, options) {
   const opts = __fleet_options(options)
-  return coord_post(harness.channels, 
+  return coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
     scope,
     room,
     {
@@ -412,7 +415,7 @@ pub fn fleet_ack(harness: Harness, scope, room, target_id, decision = "accepted"
     fleet_ack_schema(),
     "ack",
   )
-  return __fleet_post(harness, 
+  return __fleet_post(harness,
     scope,
     room,
     "ack",
@@ -446,7 +449,7 @@ pub fn fleet_done(harness: Harness, scope, room, claim_id, work_key, outcome = "
     fleet_done_schema(),
     "done receipt",
   )
-  return __fleet_post(harness, 
+  return __fleet_post(harness,
     scope,
     room,
     "done",
@@ -485,7 +488,7 @@ pub fn fleet_finding(harness: Harness, scope, room, premise, options = nil) {
     fleet_finding_schema(),
     "finding",
   )
-  return __fleet_post(harness, 
+  return __fleet_post(harness,
     scope,
     room,
     "finding",
@@ -520,7 +523,7 @@ pub fn fleet_heartbeat(harness: Harness, scope, room, state = "busy", options = 
     fleet_heartbeat_schema(),
     "heartbeat",
   )
-  return __fleet_post(harness, 
+  return __fleet_post(harness,
     scope,
     room,
     "heartbeat",
@@ -670,7 +673,7 @@ fn __fleet_liveness(heartbeat, now_ms, grace_ms) {
 /**
  * Project oldest-first coordination rows into a deterministic fleet snapshot.
  *
- * Pass rows from `coord_read(..., {include_events:true})` so liveness uses the
+ * Pass rows from `coord_read(harness.runtime, ..., {include_events:true})` so liveness uses the
  * signed channel timestamp. Raw messages without an event receipt remain
  * visible but receive `unknown` liveness. `now_ms` and `grace_ms` are injected
  * options; `now_ms` is required. This function never mutates, acknowledges,

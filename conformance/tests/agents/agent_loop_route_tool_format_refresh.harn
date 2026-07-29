@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { AgentLoopOptions } from "std/agent/options"
 
@@ -40,7 +41,7 @@ pipeline default(harness: Harness) {
     done_sentinel: "DONE",
     max_iterations: 3,
   }
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "exercise a route-only model switch", nil, opts) },
   )
   harness.stdio.println("status=" + captured.result.status)

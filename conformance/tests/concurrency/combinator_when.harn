@@ -19,12 +19,12 @@ pipeline default(harness: Harness) {
     { harness, return_value ->
       const truthy_guard = when(is_truthy_seed, cb)
       const truthy_result = truthy_guard(harness, return_value)
-      const truthy_audits = lifecycle_audit_log_take()
+      const truthy_audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("truthy=" + truthy_result)
       harness.stdio.println("truthy_audit_kind=" + truthy_audits[0].kind)
       const falsy_guard = when(always_false, cb)
       const falsy_result = falsy_guard(harness, return_value)
-      const falsy_audits = lifecycle_audit_log_take()
+      const falsy_audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("falsy=" + falsy_result)
       harness.stdio.println("falsy_audit_count=" + to_string(len(falsy_audits)))
       return return_value

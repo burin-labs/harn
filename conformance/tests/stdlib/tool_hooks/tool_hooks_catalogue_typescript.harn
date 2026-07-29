@@ -14,7 +14,7 @@ fn probe(harness: Harness, reg, cmd) {
 }
 
 pipeline default(harness: Harness) {
-  const reg = tool_hooks_seed_registry(["typescript"])
+  const reg = tool_hooks_seed_registry(harness, ["typescript"])
   /* find_versus_rg: covers .ts/.tsx/.js/.jsx/.mjs/.cjs. */
   probe(harness, reg, "find . -name '*.ts'")
   probe(harness, reg, "find . -name '*.tsx'")

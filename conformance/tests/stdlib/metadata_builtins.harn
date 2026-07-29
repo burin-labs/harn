@@ -19,5 +19,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(type_of(hash), "string")
   assert(len(hash) > 0)
   harness.project.metadata_refresh_hashes({})
-  harness.stdio.println("metadata ok")
+  harness.stdio.log("metadata ok")
 }

@@ -144,7 +144,9 @@ pipeline main(harness: Harness, task) {
   const expected_symbols = ["format_value", "serialize", "render", "encode", "decode", "print_ini"]
   require event_symbols == expected_symbols,
     "canon_event_observed_symbols preserves ordered unique observations"
-  with_fs(harness,  harness, {
+  with_fs(
+    harness,
+    {
       "canon-packs.json": manifest,
       "src/main.foo": "const bad = true;",
       "src/ok.foo": "const good = true;",
@@ -155,7 +157,9 @@ pipeline main(harness: Harness, task) {
     { dir ->
       harness.stdio.println(to_string(canon_resolve_root(harness, {canon_root: dir}) == dir))
       harness.stdio.println(
-        to_string(canon_resolve_root(harness, {project_root: dir}) == path_join(dir, ".harn", "canon")),
+        to_string(
+          canon_resolve_root(harness, {project_root: dir}) == path_join(dir, ".harn", "canon"),
+        ),
       )
       const slice = canon_slice_from_files([{path: "src/main.foo", text: "const bad = true;"}])
       const result = canon_evaluate_slice(harness, slice, {canon_root: dir, files: slice.files})
@@ -165,19 +169,25 @@ pipeline main(harness: Harness, task) {
       harness.stdio.println(to_string(contains(feedback, "no_bad")))
       const path_slice = canon_slice_from_paths(harness, ["src/main.foo"], {root: dir})
       harness.stdio.println(to_string(path_slice.files[0].text == "const bad = true;"))
-      const disabled_session_id = harness.agent.open("canon-router-disabled-" + harness.random.uuid_v7())
-      const disabled = canon_event_router(harness, disabled_session_id,
+      const disabled_session_id = harness.agent.open(
+        "canon-router-disabled-" + harness.random.uuid_v7(),
+      )
+      const disabled = canon_event_router(
+        harness,
+        disabled_session_id,
         {type: "iteration_end", changed_paths: ["src/main.foo"]},
         {enabled: false, root: dir, canon_root: dir},
       )
       require disabled == nil, "disabled canon_event_router short-circuits"
-      const disabled_symbols = store_get(
+      const disabled_symbols = harness.runtime.store_get(
         canon_feedback_state_key(disabled_session_id, "observed_symbols"),
       )
       require disabled_symbols == nil, "disabled canon_event_router does not touch session state"
       harness.agent.close(disabled_session_id)
       const session_id = harness.agent.open("canon-feedback-" + harness.random.uuid_v7())
-      const injected = canon_inject_feedback(harness, session_id,
+      const injected = canon_inject_feedback(
+        harness,
+        session_id,
         slice,
         {canon_root: dir, files: slice.files},
       )
@@ -185,17 +195,21 @@ pipeline main(harness: Harness, task) {
       harness.stdio.println(to_string(injected.injected))
       harness.stdio.println(to_string(contains(messages[len(messages) - 1].content, "harn-canon")))
       const router_session_id = harness.agent.open("canon-router-" + harness.random.uuid_v7())
-      const pre_event = canon_event_router(harness, router_session_id,
+      const pre_event = canon_event_router(
+        harness,
+        router_session_id,
         {type: "tool_call_update", observed_symbol: "format_value"},
         {root: dir, canon_root: dir},
       )
       require pre_event == nil, "non-iteration canon events only update observations"
-      const stored_symbols = store_get(
+      const stored_symbols = harness.runtime.store_get(
         canon_feedback_state_key(router_session_id, "observed_symbols"),
       )
       require stored_symbols == ["format_value"],
         "canon_event_router stores observed symbols per session"
-      const routed = canon_event_router(harness, router_session_id,
+      const routed = canon_event_router(
+        harness,
+        router_session_id,
         {type: "iteration_end", changed_paths: ["src/main.foo"]},
         {root: dir, canon_root: dir, inject: "reminder"},
       )
@@ -208,8 +222,12 @@ pipeline main(harness: Harness, task) {
       require len(routed_events) == 1, "canon_event_router injects one reminder"
       require contains(routed_events[0].reminder.body, "no_bad"), "router feedback reaches reminder"
       harness.agent.close(router_session_id)
-      const fallback_session_id = harness.agent.open("canon-router-fallback-" + harness.random.uuid_v7())
-      const fallback = canon_event_router(harness, fallback_session_id,
+      const fallback_session_id = harness.agent.open(
+        "canon-router-fallback-" + harness.random.uuid_v7(),
+      )
+      const fallback = canon_event_router(
+        harness,
+        fallback_session_id,
         {type: "iteration_end"},
         {root: dir, canon_root: dir, changed_paths_provider: { -> ["src/main.foo"] }},
       )
@@ -217,35 +235,51 @@ pipeline main(harness: Harness, task) {
       harness.agent.close(fallback_session_id)
       const install_session_id = harness.agent.open("canon-install-" + harness.random.uuid_v7())
       canon_install_feedback_sink(harness, install_session_id, {enabled: false})
-      const disabled_install = store_get(canon_feedback_state_key(install_session_id, "installed"))
+      const disabled_install = harness.runtime.store_get(
+        canon_feedback_state_key(install_session_id, "installed"),
+      )
       require disabled_install == nil,
         "disabled canon_install_feedback_sink does not mark installed"
       canon_install_feedback_sink(harness, install_session_id, {root: dir, canon_root: dir})
       canon_install_feedback_sink(harness, install_session_id, {root: dir, canon_root: dir})
-      require store_get(canon_feedback_state_key(install_session_id, "installed")),
+      require harness.runtime.store_get(canon_feedback_state_key(install_session_id, "installed")),
         "canon_install_feedback_sink installs once"
       harness.agent.close(install_session_id)
       const path_session_id = harness.agent.open("canon-path-feedback-" + harness.random.uuid_v7())
-      const path_injected = canon_inject_paths_feedback(harness, path_session_id,
+      const path_injected = canon_inject_paths_feedback(
+        harness,
+        path_session_id,
         ["src/main.foo"],
         {root: dir, canon_root: dir},
       )
       const path_messages = harness.agent.snapshot(path_session_id).messages
       harness.stdio.println(to_string(path_injected.injected))
-      harness.stdio.println(to_string(contains(path_messages[len(path_messages) - 1].content, "no_bad")))
-      const auto_session_id = harness.agent.open("canon-auto-root-feedback-" + harness.random.uuid_v7())
-      const auto_injected = canon_inject_paths_feedback(harness, auto_session_id,
+      harness.stdio.println(
+        to_string(contains(path_messages[len(path_messages) - 1].content, "no_bad")),
+      )
+      const auto_session_id = harness.agent.open(
+        "canon-auto-root-feedback-" + harness.random.uuid_v7(),
+      )
+      const auto_injected = canon_inject_paths_feedback(
+        harness,
+        auto_session_id,
         ["src/main.foo"],
         {root: dir, project_root: dir},
       )
       const auto_messages = harness.agent.snapshot(auto_session_id).messages
       harness.stdio.println(to_string(auto_injected.injected))
-      harness.stdio.println(to_string(contains(auto_messages[len(auto_messages) - 1].content, "no_bad")))
+      harness.stdio.println(
+        to_string(contains(auto_messages[len(auto_messages) - 1].content, "no_bad")),
+      )
       harness.agent.close(auto_session_id)
-      const package_session_id = harness.agent.open("canon-package-feedback-" + harness.random.uuid_v7())
+      const package_session_id = harness.agent.open(
+        "canon-package-feedback-" + harness.random.uuid_v7(),
+      )
       write_latex_canon_package(harness, dir)
       harness.fs.write_text(path_join(dir, "paper.tex"), "bad macro")
-      const package_injected = canon_inject_paths_feedback(harness, package_session_id,
+      const package_injected = canon_inject_paths_feedback(
+        harness,
+        package_session_id,
         ["paper.tex"],
         {root: dir, project_root: dir},
       )
@@ -256,8 +290,12 @@ pipeline main(harness: Harness, task) {
         to_string(contains(package_messages[len(package_messages) - 1].content, "[latex] LaTeX")),
       )
       harness.agent.close(package_session_id)
-      const reminder_session_id = harness.agent.open("canon-reminder-feedback-" + harness.random.uuid_v7())
-      const reminder_injected = canon_inject_feedback(harness, reminder_session_id,
+      const reminder_session_id = harness.agent.open(
+        "canon-reminder-feedback-" + harness.random.uuid_v7(),
+      )
+      const reminder_injected = canon_inject_feedback(
+        harness,
+        reminder_session_id,
         slice,
         {canon_root: dir, files: slice.files, inject: "reminder"},
       )
@@ -277,11 +315,17 @@ pipeline main(harness: Harness, task) {
       harness.agent.close(session_id)
     },
   )
-  with_fs(harness,  harness, {"paper.tex": "bad macro"},
+  with_fs(
+    harness,
+    {"paper.tex": "bad macro"},
     { dir ->
       write_latex_canon_package(harness, dir)
-      const package_only_session_id = harness.agent.open("canon-package-only-feedback-" + harness.random.uuid_v7())
-      const package_only_injected = canon_inject_paths_feedback(harness, package_only_session_id,
+      const package_only_session_id = harness.agent.open(
+        "canon-package-only-feedback-" + harness.random.uuid_v7(),
+      )
+      const package_only_injected = canon_inject_paths_feedback(
+        harness,
+        package_only_session_id,
         ["paper.tex"],
         {root: dir, project_root: dir},
       )
@@ -296,13 +340,17 @@ pipeline main(harness: Harness, task) {
       harness.agent.close(package_only_session_id)
     },
   )
-  with_fs(harness,  harness, {"paper.tex": "bad macro"},
+  with_fs(
+    harness,
+    {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(harness, dir)
       const package_manifest_session_id = harness.agent.open(
         "canon-package-manifest-feedback-" + harness.random.uuid_v7(),
       )
-      const package_manifest_injected = canon_inject_paths_feedback(harness, package_manifest_session_id,
+      const package_manifest_injected = canon_inject_paths_feedback(
+        harness,
+        package_manifest_session_id,
         ["paper.tex"],
         {root: dir, project_root: dir},
       )
@@ -320,7 +368,9 @@ pipeline main(harness: Harness, task) {
       harness.agent.close(package_manifest_session_id)
     },
   )
-  with_fs(harness,  harness, {"paper.tex": "bad macro"},
+  with_fs(
+    harness,
+    {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(harness, dir)
       const manifest_path = path_join(
@@ -336,7 +386,9 @@ pipeline main(harness: Harness, task) {
       harness.stdio.println(is_err(malformed))
     },
   )
-  with_fs(harness,  harness, {"paper.tex": "bad macro"},
+  with_fs(
+    harness,
+    {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(harness, dir)
       const manifest_path = path_join(
@@ -355,7 +407,9 @@ pipeline main(harness: Harness, task) {
       harness.stdio.println(is_err(invalid))
     },
   )
-  with_fs(harness,  harness, {"paper.tex": "bad macro"},
+  with_fs(
+    harness,
+    {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(harness, dir)
       const manifest_path = path_join(
@@ -374,7 +428,9 @@ pipeline main(harness: Harness, task) {
       harness.stdio.println(is_err(unsupported))
     },
   )
-  with_fs(harness,  harness, {"paper.tex": "bad macro"},
+  with_fs(
+    harness,
+    {"paper.tex": "bad macro"},
     { dir ->
       write_manifest_canon_package(harness, dir)
       const manifest_path = path_join(

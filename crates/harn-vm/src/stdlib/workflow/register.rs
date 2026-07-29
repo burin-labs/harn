@@ -1,6 +1,5 @@
 //! Top-level workflow executor and builtin registration.
 
-use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::macros::VmBuiltinDef;
 use crate::vm::Vm;
 
@@ -36,8 +35,6 @@ use super::inspect::{
     WORKFLOW_SET_CONTEXT_POLICY_BUILTIN_DEF, WORKFLOW_SET_MODEL_POLICY_BUILTIN_DEF,
     WORKFLOW_SET_OUTPUT_VISIBILITY_BUILTIN_DEF, WORKFLOW_VALIDATE_BUILTIN_DEF,
 };
-
-const WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY: &str = "workflow.stdlib";
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     // compact (token estimation, microcompaction, transcript auto-compact).
@@ -100,5 +97,4 @@ pub(crate) fn register_workflow_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
-    register_harn_entrypoint_category(vm, WORKFLOW_STDLIB_ENTRYPOINT_CATEGORY);
 }

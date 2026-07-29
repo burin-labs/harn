@@ -5,5 +5,5 @@ pipeline test(harness: Harness, task) {
   }
   harness.runtime.yield_now()
   harness.runtime.send(ch, "ok")
-  harness.stdio.println(await(h))
+  harness.stdio.log(await(h))
 }

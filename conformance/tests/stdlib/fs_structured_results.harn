@@ -106,7 +106,7 @@ fn format_typed_read_failure(failure: TypedReadFailure) -> string {
 }
 
 pipeline default(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-fs-structured-results-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-fs-structured-results-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   const object_path = path_join(root, "object.json")
   write_json(harness.fs, object_path, {})

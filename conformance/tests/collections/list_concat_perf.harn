@@ -1,16 +1,16 @@
 pipeline test(harness: Harness, task) {
   // List concat correctness
-  harness.stdio.println([1, 2] + [3, 4])
-  harness.stdio.println([] + [1])
-  harness.stdio.println([1] + [])
+  harness.stdio.log([1, 2] + [3, 4])
+  harness.stdio.log([] + [1])
+  harness.stdio.log([1] + [])
   // Dict merge
-  harness.stdio.println({a: 1} + {b: 2})
+  harness.stdio.log({a: 1} + {b: 2})
   // Dict merge override
-  harness.stdio.println({a: 1} + {a: 2})
+  harness.stdio.log({a: 1} + {a: 2})
   // Dict merge preserves keys
-  harness.stdio.println({a: 1, b: 2} + {b: 3, c: 4})
+  harness.stdio.log({a: 1, b: 2} + {b: 3, c: 4})
   // String concat
-  harness.stdio.println("hello" + " " + "world")
+  harness.stdio.log("hello" + " " + "world")
   // Repeated concat builds correctly
   let list = []
   let n = 0
@@ -21,5 +21,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(len(list), 50)
   assert_eq(list[0], 0)
   assert_eq(list[49], 49)
-  harness.stdio.println("concat ok")
+  harness.stdio.log("concat ok")
 }

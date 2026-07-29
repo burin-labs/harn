@@ -114,5 +114,5 @@ pipeline default(harness: Harness) {
       ),
     ),
   )
-  harness.stdio.println("governor pace decision ok")
+  harness.stdio.log("governor pace decision ok")
 }

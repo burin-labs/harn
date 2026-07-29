@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -31,7 +32,7 @@ pipeline default(harness: Harness) {
       llm_text("{\"verdict\":\"done\",\"reasoning\":\"progress event was emitted\"}"),
     ],
     { ->
-      const captured = agent_capture_events(harness,  harness, session_id,
+      const captured = agent_capture_events(harness, session_id,
         fn() { return agent_loop(harness, "Report progress with the progress tool.",
           nil,
           {

@@ -1,0 +1,7 @@
+fn read_env(fs: HarnessFs) -> string? {
+  return fs.get("HOME")
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(read_env(harness.fs))
+}

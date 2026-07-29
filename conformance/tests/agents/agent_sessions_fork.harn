@@ -9,5 +9,5 @@ pipeline main(harness: Harness, task) {
   harness.agent.inject(dst, {role: "user", content: "dst-only-2"})
   assert(harness.agent.length(src) == 2, "src branch evolves independently")
   assert(harness.agent.length(dst) == 3, "dst branch evolves independently")
-  harness.stdio.println("agent_sessions fork tests passed")
+  harness.stdio.log("agent_sessions fork tests passed")
 }

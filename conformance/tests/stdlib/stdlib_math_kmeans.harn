@@ -8,5 +8,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(result.counts, [2, 2])
   assert_eq(result.centroids, [[0.0, 0.5], [10.0, 10.5]])
   assert_eq(result.inertia, 1.0)
-  harness.stdio.println("stdlib math kmeans ok")
+  harness.stdio.log("stdlib math kmeans ok")
 }

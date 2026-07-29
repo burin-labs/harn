@@ -551,63 +551,35 @@ impl Compiler {
         if let Some(sn) = target {
             self.compile_top_level_declarations(program)?;
             if let Node::Pipeline {
-                name,
                 body,
                 extends,
                 params,
                 ..
             } = peel_node(sn)
             {
-                if bind_params_from_globals {
-                    let callable = self.compile_pipeline_callable(
-                        program,
-                        name,
-                        params,
-                        body,
-                        extends.as_deref(),
-                    )?;
-                    let function_index = self.chunk.functions.len();
-                    self.chunk.functions.push(Arc::new(callable));
-                    self.chunk
-                        .emit_u16(Op::Closure, function_index as u16, self.line);
-                    for param in params {
-                        if matches!(
-                            param.type_expr.as_ref(),
-                            Some(TypeExpr::Named(name)) if name == "Harness"
-                        ) {
-                            self.chunk.emit(Op::RootHarness, self.line);
-                        } else {
-                            let index = self.string_constant(&param.name);
-                            self.chunk.emit_u16(Op::GetVar, index, self.line);
+                self.compile_with_pipeline_captures(
+                    program,
+                    body,
+                    extends.as_deref(),
+                    |compiler| {
+                        let saved = std::mem::replace(&mut compiler.module_level, false);
+                        if let Some(harness) = params.first().filter(|param| {
+                            matches!(
+                                param.type_expr.as_ref(),
+                                Some(TypeExpr::Named(name)) if name == "Harness"
+                            )
+                        }) {
+                            compiler.chunk.emit(Op::RootHarness, compiler.line);
+                            compiler.emit_define_binding(&harness.name, false);
                         }
-                    }
-                    self.chunk.emit_u8(Op::Call, params.len() as u8, self.line);
-                    pipeline_emits_value = true;
-                } else {
-                    self.compile_with_pipeline_captures(
-                        program,
-                        body,
-                        extends.as_deref(),
-                        |compiler| {
-                            let saved = std::mem::replace(&mut compiler.module_level, false);
-                            if let Some(harness) = params.first().filter(|param| {
-                                matches!(
-                                    param.type_expr.as_ref(),
-                                    Some(TypeExpr::Named(name)) if name == "Harness"
-                                )
-                            }) {
-                                compiler.chunk.emit(Op::RootHarness, compiler.line);
-                                compiler.emit_define_binding(&harness.name, false);
-                            }
-                            if let Some(parent_name) = extends {
-                                compiler.compile_parent_pipeline(program, parent_name)?;
-                            }
-                            let result = compiler.compile_block(body);
-                            compiler.module_level = saved;
-                            result
-                        },
-                    )?;
-                }
+                        if let Some(parent_name) = extends {
+                            compiler.compile_parent_pipeline(program, parent_name)?;
+                        }
+                        let result = compiler.compile_block(body);
+                        compiler.module_level = saved;
+                        result
+                    },
+                )?;
             }
         }
 

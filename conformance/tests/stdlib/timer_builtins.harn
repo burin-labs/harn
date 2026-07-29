@@ -4,11 +4,11 @@ pipeline test(harness: Harness, task) {
   assert(t.start_ms > 0)
   const ms = harness.runtime.timer_end(t)
   assert(ms >= 0)
-  harness.stdio.println("timer ok")
+  harness.stdio.log("timer ok")
   // elapsed returns monotonic ms since first call
   const e1 = harness.clock.elapsed()
   const e2 = harness.clock.elapsed()
   assert(e1 >= 0)
   assert(e2 >= e1)
-  harness.stdio.println("elapsed ok")
+  harness.stdio.log("elapsed ok")
 }

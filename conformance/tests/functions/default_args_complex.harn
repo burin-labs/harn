@@ -2,11 +2,11 @@ pipeline test(harness: Harness, task) {
   fn process(items = [1, 2, 3]) {
     return items.map({ x -> x * 2 })
   }
-  harness.stdio.println(process())
-  harness.stdio.println(process([10, 20]))
+  harness.stdio.log(process())
+  harness.stdio.log(process([10, 20]))
   fn config(opts = {host: "localhost", port: 8080}) {
     return "${opts.host}:${opts.port}"
   }
-  harness.stdio.println(config())
-  harness.stdio.println(config({host: "example.com", port: 3000}))
+  harness.stdio.log(config())
+  harness.stdio.log(config({host: "example.com", port: 3000}))
 }

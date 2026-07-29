@@ -20,10 +20,13 @@ pipeline default(harness: Harness) {
     }
     return "allow"
   }
-  const id = register_guardrail({id: "policy", scan_fn: scan})
+  const id = register_guardrail(harness, {id: "policy", scan_fn: scan})
   harness.stdio.println(id)
   /* Block path: dict verdict drops the emit + writes blocked audit. */
-  const denied = harness.channels.append("ch.guardrail.policy", {ok: false, secret_key: "exfil-payload"})
+  const denied = harness.channels.append(
+    "ch.guardrail.policy",
+    {ok: false, secret_key: "exfil-payload"},
+  )
   harness.stdio.println(denied?.blocked)
   harness.stdio.println(denied?.block_reason)
   /* Warn path: emit proceeds + writes a warning audit. */

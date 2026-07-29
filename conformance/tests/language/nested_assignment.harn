@@ -1,5 +1,5 @@
 fn bump_index(harness: Harness) {
-  harness.stdio.println("index evaluated")
+  harness.stdio.log("index evaluated")
   return 1
 }
 
@@ -49,5 +49,5 @@ pipeline test(harness: Harness, task) {
   }
   assert_eq(rejected, true, "let roots stay immutable through nested paths")
   assert_eq(frozen.b.c, 1, "rejected nested write leaves the value untouched")
-  harness.stdio.println("nested assignment: all tests passed")
+  harness.stdio.log("nested assignment: all tests passed")
 }

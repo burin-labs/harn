@@ -16,8 +16,8 @@ import { memory } from "std/oauth/storage"
 pipeline test(harness: Harness, task) {
   const topic = "oauth.client.audit"
   const cursor = harness.obs.event_log_latest(topic) ?? 0
-  const _ = mock_time(1700000000000)
-  const store = memory()
+  const _ = harness.testing.clock_set(1700000000000)
+  const store = memory(harness.auth)
   const provider = custom(
     {
       id: "mockExpiredRefresh",
@@ -35,11 +35,13 @@ pipeline test(harness: Harness, task) {
     token_type: "Bearer",
   }
   store.set("mockExpiredRefresh", stored)
-  const cli = client(harness,  harness, provider,
+  const cli = client(
+    harness,
+    provider,
     {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/token",
     {
@@ -80,7 +82,7 @@ pipeline test(harness: Harness, task) {
     "storage refresh token unchanged after failed refresh",
   )
   // Confirm we did try to refresh exactly once — no silent retry.
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 1, "exactly one POST to the token endpoint")
   assert(contains(calls[0].body, "grant_type=refresh_token"), "refresh grant used")
   assert(contains(calls[0].body, "refresh_token=REFRESH-DEAD"), "old refresh token sent")
@@ -89,6 +91,6 @@ pipeline test(harness: Harness, task) {
   // cursor captured before the call.
   const latest_after = harness.obs.event_log_latest(topic) ?? 0
   assert_eq(latest_after, cursor, "no audit events emitted on failed refresh")
-  const _ = unmock_time()
-  harness.stdio.println("oauth refresh token expired ok")
+  const _ = harness.testing.clock_reset()
+  harness.stdio.log("oauth refresh token expired ok")
 }

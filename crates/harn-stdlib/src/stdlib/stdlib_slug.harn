@@ -146,8 +146,8 @@ pub fn slug_dictionary() {
 /**
  * Generate a non-secret human-readable slug from the default or supplied dictionary.
  *
- * Options: `segments`, `separator`, `pattern`, `prefix`, `suffix`, `rng`, and
- * `dictionary`.
+ * Options: `segments`, `separator`, `pattern`, `prefix`, `suffix`, and
+ * `dictionary`. Randomness always flows through `harness.random`.
  *
  * @effects: ["random"]
  * @errors: []
@@ -159,7 +159,7 @@ pub fn random_slug(harness: Harness, options = nil) {
   while index < opts.segments {
     const kind = __slug_segment_kind(opts.pattern, index, opts.segments)
     const bucket = __slug_bucket(kind, opts.dictionary)
-    words = words + [__slug_random_word(harness, bucket, opts.rng)]
+    words = words + [__slug_random_word(harness.random, bucket)]
     index = index + 1
   }
   return __slug_join_with_affixes(words, opts)
@@ -245,7 +245,6 @@ fn __slug_options(options) {
     prefix: prefix,
     suffix: suffix,
     salt: raw?.salt ?? "",
-    rng: raw?.rng,
     dictionary: {
       adjectives: __slug_nonempty_list(custom_dictionary?.adjectives, __SLUG_ADJECTIVES),
       nouns: __slug_nonempty_list(custom_dictionary?.nouns, __SLUG_NOUNS),
@@ -293,13 +292,8 @@ fn __slug_bucket(kind, dictionary) {
   return dictionary.nouns
 }
 
-fn __slug_random_word(harness: Harness, bucket, rng) {
-  let word = nil
-  if rng != nil {
-    word = harness.random.choice(rng, bucket)
-  } else {
-    word = harness.random.choice(bucket)
-  }
+fn __slug_random_word(random: HarnessRandom, bucket) {
+  const word = random.choice(bucket)
   if word == nil && len(bucket) > 0 {
     return bucket[0]
   }

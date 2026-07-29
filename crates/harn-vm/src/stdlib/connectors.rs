@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use jsonwebtoken::jwk::JwkSet;
 use serde_json::Value as JsonValue;
 

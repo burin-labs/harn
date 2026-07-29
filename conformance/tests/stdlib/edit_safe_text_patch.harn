@@ -17,20 +17,23 @@ pipeline default(harness: Harness) {
   // `hostlib_fs_safe_text_patch`, both of which require the
   // deterministic-tools feature gate (issue #2548).
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_edit_safe_text_patch_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_edit_safe_text_patch_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   // 1) Two-hunk apply against an existing file commits atomically and
   //    bumps the after-image hash. Telemetry counts one applied edit.
-  const multi_path = write_fixture(harness, 
+  const multi_path = write_fixture(
+    harness,
     root,
     "multi.txt",
     "fn alpha() { return 1 }\nfn beta() { return 2 }\nfn gamma() { return 3 }\n",
   )
   const multi_pre = "sha256:" + sha256(harness.fs.read_text(multi_path))
   const multi_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: multi_path,
       expected_hash: multi_pre,
       hunks: [
@@ -54,7 +57,9 @@ pipeline default(harness: Harness) {
   const stale_path = write_fixture(harness, root, "stale.txt", "hello\nworld\n")
   const stale_before = harness.fs.read_text(stale_path)
   const stale_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: stale_path,
       expected_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
       hunks: [{old_text: "hello", new_text: "HELLO"}],
@@ -71,7 +76,9 @@ pipeline default(harness: Harness) {
   const conflict_before = harness.fs.read_text(conflict_path)
   const conflict_pre = "sha256:" + sha256(conflict_before)
   const conflict_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: conflict_path,
       expected_hash: conflict_pre,
       hunks: [{old_text: "two", new_text: "TWO"}, {old_text: "nonexistent", new_text: "ignored"}],
@@ -88,7 +95,9 @@ pipeline default(harness: Harness) {
   const preview_before = harness.fs.read_text(preview_path)
   const preview_pre = "sha256:" + sha256(preview_before)
   const preview_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: preview_path,
       expected_hash: preview_pre,
       hunks: [{old_text: "alpha", new_text: "ALPHA"}],
@@ -105,7 +114,9 @@ pipeline default(harness: Harness) {
   //    reports `current_hash` so callers can adopt the API incrementally.
   const optional_path = write_fixture(harness, root, "optional.txt", "x = 1\n")
   const optional_result = edit_safe_text_patch(
-    harness.fs, {path: optional_path, hunks: [{old_text: "x = 1", new_text: "x = 2"}]},
+    harness.fs,
+    harness.random,
+    {path: optional_path, hunks: [{old_text: "x = 1", new_text: "x = 2"}]},
   )
   harness.stdio.println(optional_result.result)
   harness.stdio.println(optional_result.expected_hash == nil)
@@ -115,7 +126,9 @@ pipeline default(harness: Harness) {
   //    hunk_conflict.
   const noop_path = write_fixture(harness, root, "noop.txt", "stay\nstay\n")
   const noop_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: noop_path,
       hunks: [{old_text: "stay\nstay", new_text: "stay\nstay", options: {allow_noop: true}}],
     },
@@ -127,7 +140,9 @@ pipeline default(harness: Harness) {
   const fresh_path = path_join(root, "fresh.txt")
   const empty_hash = "sha256:" + sha256("")
   const fresh_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: fresh_path,
       expected_hash: empty_hash,
       hunks: [{old_text: "", new_text: "fresh content\n", options: {allow_empty_old_text: true}}],
@@ -142,7 +157,9 @@ pipeline default(harness: Harness) {
   const pre_reject_path = write_fixture(harness, root, "pre-reject.txt", "alpha\n")
   const pre_reject_before = harness.fs.read_text(pre_reject_path)
   const pre_reject = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: pre_reject_path,
       hunks: [{old_text: "alpha", new_text: "blocked"}],
       pre_apply: fn(_req) { return "pre blocked" },
@@ -153,7 +170,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.fs.read_text(pre_reject_path) == pre_reject_before)
   const rewrite_path = write_fixture(harness, root, "rewrite.txt", "alpha\n")
   const rewrite_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: rewrite_path,
       hunks: [{old_text: "alpha", new_text: "ignored"}],
       pre_apply: fn(req) { return {
@@ -166,7 +185,9 @@ pipeline default(harness: Harness) {
   const policy_path = write_fixture(harness, root, "policy.txt", "safe\n")
   const policy_before = harness.fs.read_text(policy_path)
   const policy_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: policy_path,
       hunks: [{old_text: "safe", new_text: "forbidden"}],
       write_policy: fn(_path, content, action) {
@@ -182,7 +203,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(harness.fs.read_text(policy_path) == policy_before)
   const advisory_path = write_fixture(harness, root, "advisory.txt", "before\n")
   const advisory_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: advisory_path,
       hunks: [{old_text: "before", new_text: "after"}],
       post_apply: fn(ctx) {
@@ -199,7 +222,9 @@ pipeline default(harness: Harness) {
   const rollback_path = write_fixture(harness, root, "rollback.txt", "before\n")
   const rollback_marker = path_join(root, "rollback-marker.txt")
   const rollback_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: rollback_path,
       hunks: [{old_text: "before", new_text: "bad"}],
       post_apply: fn(ctx) {
@@ -227,13 +252,15 @@ pipeline default(harness: Harness) {
   const staged_pre = "sha256:" + sha256("v1\n")
   const staged_session = "harn-edit-safe-text-patch-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   harness.fs.set_mode({session_id: staged_session, mode: "staged", root: root})
   // Sibling agent stages a competing write — overlay hash diverges from disk.
   harness.tools.write_file({session_id: staged_session, path: staged_path, content: "competing\n"})
   const stagger = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: staged_path,
       expected_hash: staged_pre,
       hunks: [{old_text: "v1", new_text: "v2"}],
@@ -248,7 +275,9 @@ pipeline default(harness: Harness) {
   // overlay's hash — commit should succeed even though disk still shows v1.
   const retry_read = harness.fs.staged_read_text({path: staged_path, session_id: staged_session})
   const retry_result = edit_safe_text_patch(
-    harness.fs, {
+    harness.fs,
+    harness.random,
+    {
       path: staged_path,
       expected_hash: retry_read.sha256,
       hunks: [

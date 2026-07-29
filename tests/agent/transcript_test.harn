@@ -170,9 +170,9 @@ pipeline test_agent_transcript_normalize_is_composable(harness: Harness, _task) 
 }
 
 pipeline test_agent_transcript_read_jsonl(harness: Harness, _task) {
-  with_temp_dir(harness,  harness, { dir ->
+  with_temp_dir(harness, { dir ->
       const path = path_join(dir, "llm_transcript.jsonl")
-      write_jsonl(harness,  harness, path,
+      write_jsonl(harness, path,
         [
           {
             type: "message",

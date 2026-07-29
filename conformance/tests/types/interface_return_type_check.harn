@@ -15,5 +15,5 @@ pipeline test(harness: Harness, task) {
     return item.size()
   }
   const b = Box({width: 3, height: 4})
-  harness.stdio.println(measure(b))
+  harness.stdio.log(measure(b))
 }

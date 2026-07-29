@@ -96,5 +96,5 @@ pipeline test(harness: Harness, task) {
   let copy = original
   copy["k"] = 99
   assert_eq(original["k"], 1, "dict assignment is a value copy, not an alias")
-  harness.stdio.println("binding mutation matrix: all tests passed")
+  harness.stdio.log("binding mutation matrix: all tests passed")
 }

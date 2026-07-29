@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 import { path_scope } from "std/tools"
 
@@ -49,7 +50,7 @@ fn run_one(harness: Harness, session, tool_name, path, permissions) {
 }
 
 fn main(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-path-scope-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-path-scope-" + harness.random.uuid())
   const primary = path_join(root, "primary")
   const mounted = path_join(root, "mounted")
   const outside_path = path_join(root, "outside")
@@ -60,7 +61,7 @@ fn main(harness: Harness) {
     "path-scope-outside",
     {workspace_anchor: {primary: primary, anchored_at: "2026-05-24T00:00:00Z"}},
   )
-  const denied = run_one(harness, 
+  const denied = run_one(harness,
     outside,
     "Read",
     path_join(outside_path, "file.txt"),
@@ -91,7 +92,7 @@ fn main(harness: Harness) {
   assert(mounted_events[0].metadata?.path == extend_path, "event includes mounted path")
   assert(mounted_events[0].metadata?.mount_mode == "extend", "event includes mount mode")
   assert(mounted_events[0].metadata?.reason == "shared", "event includes reason")
-  const allowed = run_one(harness, 
+  const allowed = run_one(harness,
     extended,
     "Read",
     path_join(extend_path, "file.txt"),
@@ -114,7 +115,7 @@ fn main(harness: Harness) {
   const roots = harness.agent.list_roots(read_only)
   const read_only_path = roots.additional[0].path
   assert(roots.additional[0].mount_mode == "read_only", "default mount mode follows session policy")
-  const read_allowed = run_one(harness, 
+  const read_allowed = run_one(harness,
     read_only,
     "Read",
     path_join(read_only_path, "file.txt"),
@@ -124,7 +125,7 @@ fn main(harness: Harness) {
     len(transcript_events_by_kind(read_allowed?.transcript, "PermissionGrant")) == 1,
     "read-only mount allows Read",
   )
-  const write_denied = run_one(harness, 
+  const write_denied = run_one(harness,
     read_only,
     "Write",
     path_join(read_only_path, "file.txt"),
@@ -137,12 +138,12 @@ fn main(harness: Harness) {
   assert(write_denied?.tools?.rejected[0] == "Write", "write call is rejected")
   const removed = harness.agent.remove_root(read_only, mounted)
   assert(removed.ok, "remove_root succeeds")
-  const removed_access = run_one(harness, 
+  const removed_access = run_one(harness,
     read_only,
     "Read",
     path_join(read_only_path, "file.txt"),
     {allow: {Read: path_scope()}},
   )
   assert(removed_access?.tools?.rejected[0] == "Read", "removing the mount restores denial")
-  harness.stdio.println("agent_path_scope_permissions tests passed")
+  harness.stdio.log("agent_path_scope_permissions tests passed")
 }

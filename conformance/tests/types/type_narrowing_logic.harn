@@ -13,10 +13,10 @@ pipeline test(harness: Harness, task) {
     // Both are nil in else path
     return "both nil"
   }
-  harness.stdio.println(and_check("hello"))
-  harness.stdio.println(and_check(42))
-  harness.stdio.println(and_check(nil))
-  harness.stdio.println(or_falsy("a", nil))
-  harness.stdio.println(or_falsy(nil, 1))
-  harness.stdio.println(or_falsy(nil, nil))
+  harness.stdio.log(and_check("hello"))
+  harness.stdio.log(and_check(42))
+  harness.stdio.log(and_check(nil))
+  harness.stdio.log(or_falsy("a", nil))
+  harness.stdio.log(or_falsy(nil, 1))
+  harness.stdio.log(or_falsy(nil, nil))
 }

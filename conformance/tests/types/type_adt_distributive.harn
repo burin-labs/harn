@@ -16,7 +16,7 @@
  */
 type Action = "create" | "edit"
 
-type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
+type ActionContainer<T> = {action: T, process_action: fn(Harness, T) -> nil}
 
 fn process_create(harness: Harness, a: "create") {
   harness.stdio.println("create " + a)
@@ -32,8 +32,8 @@ pipeline test(harness: Harness, task) {
   // literal-tagged shape on the RHS then fits one specific branch.
   const c1: ActionContainer<Action> = {action: "create", process_action: process_create}
   const c2: ActionContainer<Action> = {action: "edit", process_action: process_edit}
-  c1.process_action(c1.action)
-  c2.process_action(c2.action)
+  c1.process_action(harness, c1.action)
+  c2.process_action(harness, c2.action)
   // List case: the TS playground example verbatim. A heterogeneous
   // list of container instances assigns into `list<ActionContainer<Action>>`
   // because the element type distributes.
@@ -42,6 +42,6 @@ pipeline test(harness: Harness, task) {
     {action: "edit", process_action: process_edit},
   ]
   for c in containers {
-    c.process_action(c.action)
+    c.process_action(harness, c.action)
   }
 }

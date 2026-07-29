@@ -161,13 +161,13 @@ fn __agent_monologue_actuation_route_suppression(harness: Harness, options) -> s
   return ""
 }
 
-fn __agent_monologue_actuation_receipt(harness: Harness, 
+fn __agent_monologue_actuation_receipt(harness: Harness,
   session_id: string,
   iteration: int,
   decision: MonologueActuationDecision,
   tool_format: string,
 ) {
-  agent_emit_event(harness,  harness, session_id,
+  agent_emit_event(harness, session_id,
     "typed_checkpoint",
     {
       schema: "harn.agent_loop_monologue_actuation.v1",
@@ -198,7 +198,7 @@ fn __agent_monologue_actuation_receipt(harness: Harness,
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_monologue_actuation_take(harness: Harness, 
+pub fn agent_monologue_actuation_take(harness: Harness,
   session_id: string,
   iteration: int,
   state: MonologueActuationState,
@@ -226,7 +226,7 @@ pub fn agent_monologue_actuation_take(harness: Harness,
   const tool_format = to_string(paradigm?.kind ?? "")
   const call_open = to_string(paradigm?.call_open ?? "")
   const actuation_prefill = if trigger == "read_only_streak" {
-    agent_render_tool_call_prefix(commit_tool_name, llm_options)
+    agent_render_tool_call_prefix(harness, commit_tool_name, llm_options)
   } else {
     call_open
   }
@@ -329,7 +329,7 @@ pub fn agent_monologue_actuation_take(harness: Harness,
  * @errors: [agent_loop]
  * @api_stability: experimental
  */
-pub fn agent_monologue_actuation_take_for_turn(harness: Harness, 
+pub fn agent_monologue_actuation_take_for_turn(harness: Harness,
   session_id: string,
   iteration: int,
   state: MonologueActuationState,
@@ -341,7 +341,7 @@ pub fn agent_monologue_actuation_take_for_turn(harness: Harness,
   const config = agent_monologue_actuation_config(
     turn_options?.stall_diagnostics?.monologue_actuation,
   )
-  return agent_monologue_actuation_take(harness, 
+  return agent_monologue_actuation_take(harness,
     session_id,
     iteration,
     state,

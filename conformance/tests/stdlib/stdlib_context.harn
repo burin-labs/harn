@@ -8,9 +8,14 @@ pipeline default(harness: Harness) {
     ],
     {separator: "\n--\n"},
   )
-  const rendered = context_render(ctx)
+  const rendered = context_render(harness, ctx)
   harness.stdio.println(rendered)
-  const prompt = prompt_compose("Fix it", ctx, {system: "You are helpful", task_label: "Work"})
+  const prompt = prompt_compose(
+    harness,
+    "Fix it",
+    ctx,
+    {system: "You are helpful", task_label: "Work"},
+  )
   harness.stdio.println(prompt?.system)
   harness.stdio.println(contains(prompt?.prompt, "[repo]"))
   // The prompt wraps the task in a <workflow_task> / <label> /
@@ -18,7 +23,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(
     contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"),
   )
-  const raw = context_render({sections: [{name: "raw", content: "Visible"}]})
+  const raw = context_render(harness, {sections: [{name: "raw", content: "Visible"}]})
   harness.stdio.println(raw)
   const added = context_add(context([section("one", "1")]), section("two", "2"))
   harness.stdio.println(len(added?.sections))

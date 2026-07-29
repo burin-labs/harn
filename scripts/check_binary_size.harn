@@ -198,7 +198,7 @@ fn repo_root(harness: Harness) -> string {
 /** True when `cmd` resolves on PATH (bash `command -v`). */
 fn command_exists(harness: Harness, cmd: string) -> bool {
   const res = try {
-    harness.process.spawn_captured({cmd: "sh", args: ["-c", "command -v ${cmd}"]})
+    harness.process.run({cmd: "sh", args: ["-c", "command -v ${cmd}"]})
   } catch (err) {
     return false
   }
@@ -253,7 +253,7 @@ pipeline main(harness: Harness, task) {
   const budget_bytes = budget_bytes_of(budget_mb)
   if opts.build_release {
     const strip = env_or(harness, "CARGO_PROFILE_RELEASE_STRIP", "symbols")
-    const build = harness.process.spawn_captured(
+    const build = harness.process.run(
       {
         cmd: "cargo",
         args: ["build", "--release", "-p", "harn-cli", "--bin", "harn"] + target_args,
@@ -294,7 +294,7 @@ pipeline main(harness: Harness, task) {
      * binary whose size we checked so the script is safe to run before a
      * packaging step. The scratch dir lives in the workspace (the runtime
      * sandbox only permits writes inside the workspace root). */
-    const mk = harness.process.spawn_captured(
+    const mk = harness.process.run(
       {cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]},
     )
     if !mk.success {
@@ -303,12 +303,12 @@ pipeline main(harness: Harness, task) {
     }
     const restore_dir = mk.stdout.trim()
     const checked_binary = "${restore_dir}/harn"
-    harness.process.spawn_captured({cmd: "cp", args: ["-p", harn_bin, checked_binary]})
+    harness.process.run({cmd: "cp", args: ["-p", harn_bin, checked_binary]})
     defer {
       if harness.fs.exists(checked_binary) {
-        harness.process.spawn_captured({cmd: "cp", args: ["-p", checked_binary, harn_bin]})
+        harness.process.run({cmd: "cp", args: ["-p", checked_binary, harn_bin]})
       }
-      harness.process.spawn_captured({cmd: "rm", args: ["-rf", restore_dir]})
+      harness.process.run({cmd: "rm", args: ["-rf", restore_dir]})
     }
     let bloat_args = ["bloat", "--release", "--crates", "-p", "harn-cli", "--bin", "harn"]
       + target_args
@@ -316,7 +316,7 @@ pipeline main(harness: Harness, task) {
       bloat_args = bloat_args + ["--target-dir", cargo_target_dir]
     }
     bloat_args = bloat_args + ["-n", "40"]
-    const bloat = harness.process.spawn_captured({cmd: "cargo", args: bloat_args})
+    const bloat = harness.process.run({cmd: "cargo", args: bloat_args})
     harness.stdio.eprint(bloat.stderr)
     if !bloat.success {
       return bloat.exit_code

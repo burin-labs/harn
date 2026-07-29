@@ -1,4 +1,4 @@
 pipeline default(harness: Harness, task) {
   const x = 42
-  harness.stdio.println(x.name)
+  harness.stdio.log(x.name)
 }

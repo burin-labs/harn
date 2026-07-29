@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // Caller-managed conversation history seeding (agent_loop `history` option, #4019).
 //
 // A seeded `history` carrying a fact ("the codeword is pixel") must appear in
@@ -92,5 +93,5 @@ pipeline test(harness: Harness) {
   assert(blank_transcript[0].content == "Remember: the codeword is pixel.", "blank seed turn 0")
   assert(blank_transcript[2].role == "user", "blank seed question role")
   assert(blank_transcript[2].content == "What is the codeword?", "blank seed question content")
-  harness.stdio.println("history seeding tests passed")
+  harness.stdio.log("history seeding tests passed")
 }

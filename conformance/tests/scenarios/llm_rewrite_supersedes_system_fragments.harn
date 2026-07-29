@@ -48,7 +48,7 @@ pipeline test(harness: Harness, task) {
         harness.llm.mock_calls()[0].system == "ORIGINAL JOINED",
         "fragments retained when system untouched",
       )
-      harness.stdio.println("llm_rewrite_supersedes_system_fragments tests passed")
+      harness.stdio.log("llm_rewrite_supersedes_system_fragments tests passed")
     },
   )
 }

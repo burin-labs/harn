@@ -6,5 +6,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(type_of(defaults), "dict")
   const unknown = harness.llm.model_defaults("definitely-not-a-real-model-id-zzzzz")
   assert_eq(type_of(unknown), "dict")
-  harness.stdio.println("llm_model_defaults_basic passed")
+  harness.stdio.log("llm_model_defaults_basic passed")
 }

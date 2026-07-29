@@ -80,7 +80,7 @@ pipeline default(harness: Harness) {
       explanation: "Use --force-with-lease",
     },
   )
-  const deny_wrapper = preset_run_command(harness,  harness, {
+  const deny_wrapper = preset_run_command(harness, {
       stacks: ["rust"],
       registry: registry,
       custom_rules: [custom_rule],
@@ -100,7 +100,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(registered_denied.action)
   harness.stdio.println(registered_denied.rule_id)
   /* Passthrough-with-audit: matched, tagged, still ran. */
-  const audit_wrapper = preset_run_command(harness,  harness, {
+  const audit_wrapper = preset_run_command(harness, {
       stacks: ["python"],
       registry: registry,
       mode: tool_hooks_mode_passthrough_only_audit,
@@ -134,7 +134,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(is_err(bad_threshold))
   harness.stdio.println(contains(to_string(unwrap_err(bad_threshold)), "threshold"))
   /* Valid classifier config: constructor accepts and returns a closure. */
-  const cls_wrapper = preset_run_command(harness,  harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
+  const cls_wrapper = preset_run_command(harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
   )
   harness.stdio.println(type_of(cls_wrapper))
 }

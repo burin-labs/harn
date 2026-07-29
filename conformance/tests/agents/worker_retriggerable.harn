@@ -1,9 +1,9 @@
 import "std/agents"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn current_worker(handle) {
+fn current_worker(agents: HarnessAgent, handle) {
   const worker_id = handle?.id
-  for worker in list_agents() {
+  for worker in list_agents(agents) {
     if worker?.id == worker_id {
       return worker
     }
@@ -13,22 +13,22 @@ fn current_worker(handle) {
 
 fn wait_for_status(harness: Harness, handle, status) {
   let attempts = 0
-  let worker = current_worker(handle)
+  let worker = current_worker(harness.agent, handle)
   while attempts < 200 && worker?.status != status {
     harness.clock.sleep_ms(10ms)
-    worker = current_worker(handle)
+    worker = current_worker(harness.agent, handle)
     attempts = attempts + 1
   }
   return worker
 }
 
 fn worker_snapshot(harness: Harness, handle) {
-  const worker = current_worker(handle)
+  const worker = current_worker(harness.agent, handle)
   return json_parse(harness.fs.read_text(worker?.snapshot_path))
 }
 
 fn worker_snapshot_text(harness: Harness, handle) {
-  const worker = current_worker(handle)
+  const worker = current_worker(harness.agent, handle)
   return harness.fs.read_text(worker?.snapshot_path)
 }
 
@@ -37,10 +37,10 @@ pipeline main(harness: Harness) {
     harness.llm, [llm_text("one-shot summary")],
     { ->
       const one_shot = sub_agent_run(harness, "Answer once.", {provider: "mock", background: true})
-      const one_shot_done = wait_agent(one_shot)
+      const one_shot_done = wait_agent(harness.agent, one_shot)
       harness.stdio.println(one_shot_done?.status == "completed")
       const one_shot_trigger_error = try {
-        worker_trigger(one_shot_done, {follow_up: "again"})
+        worker_trigger(harness.agent, one_shot_done, {follow_up: "again"})
         false
       } catch (e) {
         contains(to_string(e), "not retriggerable")
@@ -64,22 +64,22 @@ pipeline main(harness: Harness) {
       harness.stdio.println(contains(first_snapshot_text, "Answer the first question."))
       const waiter = harness.runtime.channel("waiter")
       const _wait_task = spawn {
-        let done = wait_agent(loop)
+        let done = wait_agent(harness.agent, loop)
         harness.runtime.send(waiter, done?.status)
       }
       harness.clock.sleep_ms(20ms)
       harness.stdio.println(harness.runtime.try_receive(waiter) == nil)
-      const retriggered = worker_trigger(loop, {follow_up: "Need one more detail"})
+      const retriggered = worker_trigger(harness.agent, loop, {follow_up: "Need one more detail"})
       harness.stdio.println(retriggered?.status == "running")
       const second = wait_for_status(harness, loop, "awaiting")
       harness.stdio.println(second?.status == "awaiting")
       harness.stdio.println(contains(worker_result(second)?.summary ?? "", "follow-up answer"))
       harness.stdio.println(worker_request(second)?.task == "Answer the first question.")
       harness.stdio.println(worker_provenance(second)?.worker_id == loop?.id)
-      const closed = close_agent(loop)
+      const closed = close_agent(harness.agent, loop)
       harness.stdio.println(closed?.status == "cancelled")
       const final_snapshot_path = path_join(
-        harness.fs.temp_dir(),
+        harness.fs.workspace_temp_dir(),
         "worker-final-" + closed?.id + ".json",
       )
       harness.fs.copy(closed?.snapshot_path, final_snapshot_path)

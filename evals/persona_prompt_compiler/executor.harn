@@ -97,7 +97,7 @@ fn __mock_blueprint(prompt: string, expected: PersonaPromptEvalExpected) -> dict
   return blueprint
 }
 
-fn __compile_prompt(harness: Harness, 
+fn __compile_prompt(harness: Harness,
   prompt: string,
   expected: PersonaPromptEvalExpected,
   provider: string,
@@ -116,7 +116,7 @@ fn __compile_prompt(harness: Harness,
       },
     )
   }
-  return persona_compile_prompt(harness,  harness, prompt,
+  return persona_compile_prompt(harness, prompt,
     {provider: provider, model: model, max_tokens: max_tokens, name_override: expected.name},
   )
 }
@@ -293,14 +293,14 @@ fn main(harness: Harness) -> int {
   const started_ms = harness.clock.monotonic_ms()
   const raw = read_stdin()
   if raw == nil || trim(raw) == "" {
-    return __write_outcome(harness,  harness,
+    return __write_outcome(harness,
       __failure_outcome(harness, started_ms, "invalid_request", "eval executor request is empty"),
     )
   }
   const request = try {
     schema_expect(json_parse(raw), __request_schema())
   } catch (e) {
-    return __write_outcome(harness,  harness,
+    return __write_outcome(harness,
       __failure_outcome(
         harness,
         started_ms,
@@ -314,7 +314,7 @@ fn main(harness: Harness) -> int {
   const prompt = request.case.task
   const trial = request.trial
   if !__safe_token(case_id) || !__safe_token(expected.name) || trial < 1 {
-    return __write_outcome(harness,  harness,
+    return __write_outcome(harness,
       __failure_outcome(
         harness,
         started_ms,
@@ -329,7 +329,7 @@ fn main(harness: Harness) -> int {
   if !harness.fs.exists("generated") {
     harness.fs.mkdir("generated")
   }
-  const receipt = __compile_prompt(harness, 
+  const receipt = __compile_prompt(harness,
     prompt,
     expected,
     request.manifest.metadata.provider,
@@ -374,7 +374,7 @@ fn main(harness: Harness) -> int {
   const artifact_json = json_stringify_pretty(artifact)
   harness.fs.write_text(artifact_path, artifact_json)
   harness.fs.write_text(latest_artifact_path, artifact_json)
-  return __write_outcome(harness,  harness,
+  return __write_outcome(harness,
     {
       verification: if pass {
         "PASS"

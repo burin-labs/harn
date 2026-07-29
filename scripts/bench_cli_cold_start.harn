@@ -95,7 +95,7 @@ fn save_baseline(harness: Harness, path: string, payload) {
 }
 
 fn command_stdout_or(harness: Harness, cmd: string, args: list<string>, fallback: string) -> string {
-  const res = harness.process.spawn_captured({cmd: cmd, args: args})
+  const res = harness.process.run({cmd: cmd, args: args})
   if res.success {
     return res.stdout.trim()
   }
@@ -103,7 +103,7 @@ fn command_stdout_or(harness: Harness, cmd: string, args: list<string>, fallback
 }
 
 fn current_commit_sha(harness: Harness, repo_root: string) -> string {
-  const res = harness.process.spawn_captured(
+  const res = harness.process.run(
     {cmd: "git", args: ["rev-parse", "HEAD"], cwd: repo_root},
   )
   if res.success {
@@ -192,7 +192,7 @@ pub fn isolated_env_args(harness: Harness, cache_dir: string, home_dir: string) 
 
 fn command_exists(harness: Harness, cmd: string) -> bool {
   const res = try {
-    harness.process.spawn_captured({cmd: "sh", args: ["-c", "command -v " + shell_quote(cmd)]})
+    harness.process.run({cmd: "sh", args: ["-c", "command -v " + shell_quote(cmd)]})
   } catch (err) {
     return false
   }
@@ -200,7 +200,7 @@ fn command_exists(harness: Harness, cmd: string) -> bool {
 }
 
 fn reset_cache_dir(harness: Harness, cache_dir: string) -> nil {
-  harness.process.spawn_captured({cmd: "rm", args: ["-rf", cache_dir]})
+  harness.process.run({cmd: "rm", args: ["-rf", cache_dir]})
   harness.fs.mkdir(cache_dir)
   return nil
 }
@@ -234,7 +234,7 @@ fn measure_with_hyperfine(harness: Harness,
   ]
     + isolated_env_args(harness, cache_dir, home_dir)
     + invocation
-  const res = harness.process.spawn_captured({cmd: "hyperfine", args: args})
+  const res = harness.process.run({cmd: "hyperfine", args: args})
   if !res.success {
     if res.stderr != "" {
       harness.stdio.eprint(res.stderr)
@@ -269,7 +269,7 @@ fn measure_with_monotonic(harness: Harness,
   for _ in range(0, runs) {
     reset_cache_dir(harness, cache_dir)
     const start = harness.clock.monotonic_ms()
-    const res = harness.process.spawn_captured(
+    const res = harness.process.run(
       {cmd: "env", args: isolated_env_args(harness, cache_dir, home_dir) + invocation},
     )
     const elapsed = harness.clock.monotonic_ms() - start
@@ -543,10 +543,10 @@ fn main(harness: Harness) -> int {
   )
   let measurements = {}
   let failures: list<string> = []
-  const tmp_root = path_join(harness.fs.temp_dir(), "harn-cli-coldstart-" + harness.random.uuid_v7())
+  const tmp_root = path_join(harness.fs.workspace_temp_dir(), "harn-cli-coldstart-" + harness.random.uuid_v7())
   harness.fs.mkdir(tmp_root)
   defer {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_root]})
+    harness.process.run({cmd: "rm", args: ["-rf", tmp_root]})
   }
   for cmd in selection.commands {
     const key = to_string(cmd.key)

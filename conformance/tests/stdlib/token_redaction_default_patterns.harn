@@ -92,5 +92,5 @@ pipeline test(harness: Harness, task) {
     "bearer_token",
     "abcdef123456_extra-pad",
   )
-  harness.stdio.println("token_redaction defaults ok")
+  harness.stdio.log("token_redaction defaults ok")
 }

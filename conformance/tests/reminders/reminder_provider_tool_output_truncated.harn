@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 import {
   agent_reminder_providers_fire,
@@ -42,7 +43,7 @@ pipeline main(harness: Harness) {
   harness.tools.register_hook({pattern: "large_output", max_output: 200})
   const dispatch_session = harness.agent.open("reminder-provider-tool-output-dispatch")
   harness.agent.reset(dispatch_session)
-  const dispatch = agent_dispatch_tool_call(harness,  harness, {id: "large_1", name: "large_output", arguments: {}},
+  const dispatch = agent_dispatch_tool_call(harness, {id: "large_1", name: "large_output", arguments: {}},
     truncating_tools(),
     {session_id: dispatch_session, _iteration: 1},
   )

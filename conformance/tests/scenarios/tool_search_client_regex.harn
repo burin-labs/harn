@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -101,7 +102,7 @@ pipeline test(harness: Harness, task) {
       assert(contains(second_system, "edit_file"), "edit_file surfaced in turn 2")
       assert(contains(second_system, "create_file"), "create_file surfaced in turn 2")
       assert(!contains(second_system, "run_shell"), "run_shell still deferred")
-      harness.stdio.println("tool_search_client_regex tests passed")
+      harness.stdio.log("tool_search_client_regex tests passed")
     },
   )
 }

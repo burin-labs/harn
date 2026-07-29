@@ -185,6 +185,126 @@ impl HarnessKind {
     ];
 }
 
+/// Per-harness clock router used by explicit test controls.
+///
+/// The override belongs to one `HarnessInner`; tests can pin and advance time
+/// without installing thread-local state that unrelated VMs could observe.
+#[derive(Debug)]
+struct HarnessClockRouter {
+    base: Arc<dyn Clock>,
+    override_clock: Mutex<Option<Arc<PausedClock>>>,
+}
+
+impl HarnessClockRouter {
+    fn new(base: Arc<dyn Clock>) -> Self {
+        Self {
+            base,
+            override_clock: Mutex::new(None),
+        }
+    }
+
+    fn active(&self) -> Arc<dyn Clock> {
+        self.override_clock
+            .lock()
+            .expect("harness clock override poisoned")
+            .as_ref()
+            .map(|clock| Arc::clone(clock) as Arc<dyn Clock>)
+            .unwrap_or_else(|| Arc::clone(&self.base))
+    }
+
+    fn set_unix_ms(&self, unix_ms: i64) -> Result<(), crate::VmError> {
+        let nanos = i128::from(unix_ms).checked_mul(1_000_000).ok_or_else(|| {
+            crate::VmError::TypeError("HarnessTesting.clock_set timestamp overflow".to_string())
+        })?;
+        let wall = OffsetDateTime::from_unix_timestamp_nanos(nanos).map_err(|error| {
+            crate::VmError::TypeError(format!(
+                "HarnessTesting.clock_set timestamp is out of range: {error}"
+            ))
+        })?;
+        *self
+            .override_clock
+            .lock()
+            .expect("harness clock override poisoned") = Some(PausedClock::new(wall));
+        Ok(())
+    }
+
+    fn advance_ms(&self, milliseconds: i64) -> Result<i64, crate::VmError> {
+        let milliseconds = u64::try_from(milliseconds).map_err(|_| {
+            crate::VmError::TypeError(
+                "HarnessTesting.clock_advance expects non-negative milliseconds".to_string(),
+            )
+        })?;
+        let clock = self
+            .override_clock
+            .lock()
+            .expect("harness clock override poisoned")
+            .clone()
+            .ok_or_else(|| {
+                crate::VmError::Runtime(
+                    "HarnessTesting.clock_advance requires clock_set first".to_string(),
+                )
+            })?;
+        clock.advance(Duration::from_millis(milliseconds));
+        Ok(harn_clock::now_wall_ms(clock.as_ref()))
+    }
+
+    fn clear_override(&self) {
+        *self
+            .override_clock
+            .lock()
+            .expect("harness clock override poisoned") = None;
+    }
+}
+
+#[async_trait]
+impl Clock for HarnessClockRouter {
+    fn now_utc(&self) -> OffsetDateTime {
+        self.active().now_utc()
+    }
+
+    fn monotonic_ms(&self) -> i64 {
+        self.active().monotonic_ms()
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        let clock = self.active();
+        if self
+            .override_clock
+            .lock()
+            .expect("harness clock override poisoned")
+            .is_some()
+        {
+            if let Some(paused) = self
+                .override_clock
+                .lock()
+                .expect("harness clock override poisoned")
+                .clone()
+            {
+                paused.advance(duration);
+                return;
+            }
+        }
+        clock.sleep(duration).await;
+    }
+
+    async fn sleep_until_utc(&self, deadline: OffsetDateTime) {
+        let clock = self.active();
+        if let Some(paused) = self
+            .override_clock
+            .lock()
+            .expect("harness clock override poisoned")
+            .clone()
+        {
+            let now = paused.now_utc();
+            if deadline > now {
+                paused.advance_time(deadline - now);
+            }
+            return;
+        }
+        clock.sleep_until_utc(deadline).await;
+    }
+}
+
 /// Shared, refcounted state backing every sub-handle of a single `Harness`.
 ///
 /// Method implementations (in `crate::vm::methods::harness`) borrow this to
@@ -192,6 +312,7 @@ impl HarnessKind {
 /// `Send + Sync` for VM contexts that move work onto other tasks.
 pub struct HarnessInner {
     clock: Arc<dyn Clock>,
+    clock_control: Arc<HarnessClockRouter>,
     mode: HarnessMode,
     /// Per-harness `harness.net.*` access policy. `None` means the
     /// handle inherits the legacy unrestricted behaviour (subject to
@@ -235,6 +356,18 @@ impl HarnessInner {
         &self.clock
     }
 
+    pub(crate) fn set_test_clock(&self, unix_ms: i64) -> Result<(), crate::VmError> {
+        self.clock_control.set_unix_ms(unix_ms)
+    }
+
+    pub(crate) fn advance_test_clock(&self, milliseconds: i64) -> Result<i64, crate::VmError> {
+        self.clock_control.advance_ms(milliseconds)
+    }
+
+    pub(crate) fn clear_test_clock(&self) {
+        self.clock_control.clear_override();
+    }
+
     pub(crate) fn mode(&self) -> &HarnessMode {
         &self.mode
     }
@@ -276,11 +409,16 @@ struct CapabilityFixtureScopes {
 #[derive(Debug, Default, Clone)]
 struct CapabilityFixtureInner {
     enabled: bool,
-    responses: BTreeMap<
-        (harn_builtin_meta::CapabilityId, String),
-        VecDeque<Result<crate::VmValue, String>>,
-    >,
+    responses:
+        BTreeMap<(harn_builtin_meta::CapabilityId, String), VecDeque<CapabilityFixtureResponse>>,
     calls: Vec<CapabilityFixtureCall>,
+}
+
+#[derive(Debug, Clone)]
+struct CapabilityFixtureResponse {
+    when: Option<crate::value::DictMap>,
+    repeat: bool,
+    result: Result<crate::VmValue, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -288,6 +426,51 @@ pub(crate) struct CapabilityFixtureCall {
     pub(crate) capability: harn_builtin_meta::CapabilityId,
     pub(crate) method: String,
     pub(crate) args: Vec<crate::VmValue>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CapabilityDriverFixtureContract {
+    pub(crate) capability: harn_builtin_meta::CapabilityId,
+    pub(crate) method: &'static str,
+}
+
+/// Host-driver response seams whose enclosing capability remains VM-owned.
+///
+/// These are deliberately distinct from public harness methods: a fixture for
+/// `interaction.approval_response` supplies a human decision while still
+/// exercising Harn's request envelope, quorum, signing, waitpoint, and receipt
+/// logic. Keep this registry closed so testing cannot invent ambient wire
+/// operations.
+pub(crate) const CAPABILITY_DRIVER_FIXTURES: &[CapabilityDriverFixtureContract] = &[
+    CapabilityDriverFixtureContract {
+        capability: harn_builtin_meta::CapabilityId::Interaction,
+        method: "question_response",
+    },
+    CapabilityDriverFixtureContract {
+        capability: harn_builtin_meta::CapabilityId::Interaction,
+        method: "approval_response",
+    },
+    CapabilityDriverFixtureContract {
+        capability: harn_builtin_meta::CapabilityId::Interaction,
+        method: "dual_control_response",
+    },
+    CapabilityDriverFixtureContract {
+        capability: harn_builtin_meta::CapabilityId::Interaction,
+        method: "escalation_response",
+    },
+    CapabilityDriverFixtureContract {
+        capability: harn_builtin_meta::CapabilityId::Embed,
+        method: "text_response",
+    },
+];
+
+pub(crate) fn is_capability_driver_fixture(
+    capability: harn_builtin_meta::CapabilityId,
+    method: &str,
+) -> bool {
+    CAPABILITY_DRIVER_FIXTURES
+        .iter()
+        .any(|contract| contract.capability == capability && contract.method == method)
 }
 
 impl CapabilityFixtureState {
@@ -327,6 +510,8 @@ impl CapabilityFixtureState {
         capability: harn_builtin_meta::CapabilityId,
         method: &str,
         response: Result<crate::VmValue, String>,
+        when: Option<crate::value::DictMap>,
+        repeat: bool,
     ) {
         let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
         scopes.current.enabled = true;
@@ -335,7 +520,11 @@ impl CapabilityFixtureState {
             .responses
             .entry((capability, method.to_string()))
             .or_default()
-            .push_back(response);
+            .push_back(CapabilityFixtureResponse {
+                when,
+                repeat,
+                result: response,
+            });
     }
 
     pub(crate) fn dispatch(
@@ -348,21 +537,58 @@ impl CapabilityFixtureState {
         if !scopes.current.enabled {
             return None;
         }
+        let key = (capability, method.to_string());
+        if !scopes.current.responses.contains_key(&key) {
+            return None;
+        }
         scopes.current.calls.push(CapabilityFixtureCall {
             capability,
             method: method.to_string(),
             args: args.to_vec(),
         });
-        scopes
+        let queue = scopes
             .current
             .responses
-            .get_mut(&(capability, method.to_string()))
-            .and_then(VecDeque::pop_front)
-            .map(|response| {
-                response.map_err(|message| {
-                    crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(message)))
-                })
+            .get_mut(&key)
+            .expect("fixture key checked above");
+        let selector_match = |fixture: &CapabilityFixtureResponse| {
+            let Some(selector) = fixture.when.as_ref() else {
+                return false;
+            };
+            let Some(actual) = args.first().and_then(crate::VmValue::as_dict) else {
+                return false;
+            };
+            selector.iter().all(|(key, expected)| {
+                actual
+                    .get(key)
+                    .is_some_and(|value| crate::value::values_equal(value, expected))
             })
+        };
+        let matched = queue
+            .iter()
+            .position(selector_match)
+            .or_else(|| queue.iter().position(|fixture| fixture.when.is_none()));
+        match matched {
+            Some(index) => {
+                let fixture = if queue[index].repeat {
+                    Some(queue[index].clone())
+                } else {
+                    queue.remove(index)
+                };
+                fixture.map(|fixture| {
+                    fixture.result.map_err(|message| {
+                        crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(
+                            message,
+                        )))
+                    })
+                })
+            }
+            None => Some(Err(crate::VmError::Runtime(format!(
+                "no fixture for harness.{}.{method} matched arguments {}",
+                capability.field_name(),
+                crate::VmValue::List(std::sync::Arc::new(args.to_vec())).display()
+            )))),
+        }
     }
 
     pub(crate) fn calls(&self) -> Vec<CapabilityFixtureCall> {
@@ -660,21 +886,13 @@ pub struct Harness {
 }
 
 impl Harness {
-    /// Build the production handle wired to wall-clock time. Filesystem,
-    /// environment, randomness, and network access are layered on by the
-    /// E4.2-E4.4 migration tickets; the constructor only needs to succeed
-    /// without panicking today (per the E4.1 exit criteria).
+    /// Build the production handle wired to wall-clock time.
     ///
-    /// The production clock is wrapped in [`MockAwareClock`] so existing
-    /// `mock_time(...)` / `advance_time(...)` test fixtures observe
-    /// `harness.clock.*` reads identically to the ambient builtins. The
-    /// shim is part of the E4.3-E4.6 migration window and goes away once
-    /// the ambient `mock_time` test utility is retired by E4.5.
+    /// Test-time overrides are scoped to this handle and are reachable only
+    /// through `harness.testing`; production construction never consults
+    /// thread-local clock state.
     pub fn real() -> Self {
-        Self::with_mode(
-            Arc::new(MockAwareClock::new(RealClock::new())),
-            HarnessMode::Real,
-        )
+        Self::with_mode(Arc::new(RealClock::new()), HarnessMode::Real)
     }
 
     /// Build a deny-by-default test handle. Every sub-handle method records a
@@ -708,8 +926,11 @@ impl Harness {
     }
 
     fn with_mode(clock: Arc<dyn Clock>, mode: HarnessMode) -> Self {
+        let clock_control = Arc::new(HarnessClockRouter::new(clock));
+        let clock: Arc<dyn Clock> = clock_control.clone();
         let inner = Arc::new(HarnessInner {
             clock,
+            clock_control,
             mode,
             net_policy: None,
             secret_provider: None,
@@ -734,11 +955,13 @@ impl Harness {
     /// source handle.
     pub fn with_net_policy(&self, policy: crate::harness_net::NetPolicy) -> Self {
         let clock = Arc::clone(&self.inner.clock);
+        let clock_control = Arc::clone(&self.inner.clock_control);
         let mode = self.clone_mode_for_child();
         // See `with_mode` for the rationale on this suppression.
         #[allow(clippy::arc_with_non_send_sync)]
         let inner = Arc::new(HarnessInner {
             clock,
+            clock_control,
             mode,
             net_policy: Some(policy),
             secret_provider: self.inner.secret_provider.clone(),
@@ -755,10 +978,12 @@ impl Harness {
     /// lease storage, audit sinks, and scope policy.
     pub fn with_secret_provider(&self, provider: Arc<dyn crate::secrets::SecretProvider>) -> Self {
         let clock = Arc::clone(&self.inner.clock);
+        let clock_control = Arc::clone(&self.inner.clock_control);
         let mode = self.clone_mode_for_child();
         #[allow(clippy::arc_with_non_send_sync)]
         let inner = Arc::new(HarnessInner {
             clock,
+            clock_control,
             mode,
             net_policy: self.inner.net_policy.clone(),
             secret_provider: Some(provider),
@@ -1035,7 +1260,7 @@ pub struct HarnessEnv {
     inner: Arc<HarnessInner>,
 }
 
-/// random sub-handle: `gen_u64`, `gen_range`, `gen_f64`, ...
+/// random sub-handle: `u64`, `range`, `f64`, ...
 #[derive(Debug, Clone)]
 pub struct HarnessRandom {
     inner: Arc<HarnessInner>,
@@ -1239,68 +1464,6 @@ impl fmt::Debug for VmHarness {
         f.debug_struct("VmHarness")
             .field("kind", &self.kind)
             .finish_non_exhaustive()
-    }
-}
-
-/// Clock wrapper that consults the crate-wide `clock_mock` thread-local
-/// before delegating to an inner [`Clock`]. Used by [`Harness::real`] so
-/// `harness.clock.*` reads honor `mock_time(...)` / `advance_time(...)`
-/// during the E4.3-E4.6 migration. New tests should prefer
-/// [`Harness::test`] / [`PausedClock`] directly.
-#[derive(Debug)]
-pub struct MockAwareClock<C: Clock + 'static> {
-    inner: C,
-}
-
-impl<C: Clock + 'static> MockAwareClock<C> {
-    pub fn new(inner: C) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait]
-impl<C: Clock + 'static> Clock for MockAwareClock<C> {
-    fn now_utc(&self) -> OffsetDateTime {
-        if let Some(mock) = crate::clock_mock::active_mock_clock() {
-            return mock.now_utc();
-        }
-        self.inner.now_utc()
-    }
-
-    fn monotonic_ms(&self) -> i64 {
-        if let Some(mock) = crate::clock_mock::active_mock_clock() {
-            return mock.monotonic_ms();
-        }
-        self.inner.monotonic_ms()
-    }
-
-    async fn sleep(&self, duration: Duration) {
-        if duration.is_zero() {
-            return;
-        }
-        if let Some(mock) = crate::clock_mock::active_mock_clock() {
-            // Single-script tests under `mock_time(...)` rely on `sleep(...)`
-            // advancing the mock and returning immediately — the same
-            // semantics as the legacy ambient `sleep_ms` builtin. Waiting
-            // on `mock.sleep` would deadlock because nothing else is
-            // driving `advance(...)` in the same task.
-            mock.advance_std_sync(duration);
-            return;
-        }
-        self.inner.sleep(duration).await;
-    }
-
-    async fn sleep_until_utc(&self, deadline: OffsetDateTime) {
-        if let Some(mock) = crate::clock_mock::active_mock_clock() {
-            let now = mock.now_utc();
-            if deadline > now {
-                if let Ok(delta) = Duration::try_from(deadline - now) {
-                    mock.advance_std_sync(delta);
-                }
-            }
-            return;
-        }
-        self.inner.sleep_until_utc(deadline).await;
     }
 }
 
@@ -1662,7 +1825,7 @@ mod tests {
             r"fn main(harness: Harness) { harness.clock.now_ms() }",
             r#"fn main(harness: Harness) { harness.fs.read_text("/x") }"#,
             r#"fn main(harness: Harness) { harness.env.get("KEY") }"#,
-            r"fn main(harness: Harness) { harness.random.gen_u64() }",
+            r"fn main(harness: Harness) { harness.random.u64() }",
             r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
             r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
             r"fn main(harness: Harness) { harness.system.cpu() }",
@@ -1692,7 +1855,7 @@ mod tests {
                 (HarnessKind::Clock, "now_ms"),
                 (HarnessKind::Fs, "read_text"),
                 (HarnessKind::Env, "get"),
-                (HarnessKind::Random, "gen_u64"),
+                (HarnessKind::Random, "u64"),
                 (HarnessKind::Net, "get"),
                 (HarnessKind::Process, "spawn_captured"),
                 (HarnessKind::System, "cpu"),
@@ -2008,7 +2171,7 @@ fn main(harness: Harness) {
   __io_println(harness.env.get("KEY"))
   __io_println(harness.fs.read_text("/x"))
   __io_println(harness.fs.exists("/missing"))
-  __io_println(harness.random.gen_u64())
+  __io_println(harness.random.u64())
   __io_println(harness.net.get("https://example.test"))
   __io_println(sha256_hex(""))
   __io_println(len(harness.llm.catalog()) > 0)
@@ -2042,7 +2205,7 @@ fn main(harness: Harness) {
                 (HarnessKind::Env, "get".to_string()),
                 (HarnessKind::Fs, "read_text".to_string()),
                 (HarnessKind::Fs, "exists".to_string()),
-                (HarnessKind::Random, "gen_u64".to_string()),
+                (HarnessKind::Random, "u64".to_string()),
                 (HarnessKind::Net, "get".to_string()),
                 (HarnessKind::Llm, "catalog".to_string()),
             ]
@@ -2156,9 +2319,9 @@ fn main(harness: Harness) {
         let output = run_harness_source(
             r"
 fn main(harness: Harness) {
-  __io_println(harness.random.gen_u64())
-  __io_println(harness.random.gen_u64())
-  __io_println(harness.random.gen_u64())
+  __io_println(harness.random.u64())
+  __io_println(harness.random.u64())
+  __io_println(harness.random.u64())
 }
 ",
             harness,
@@ -2176,7 +2339,7 @@ fn main(harness: Harness) {
                 "MockHarness has no fs_read response for /missing",
             ),
             (
-                r"fn main(harness: Harness) { harness.random.gen_u64() }",
+                r"fn main(harness: Harness) { harness.random.u64() }",
                 "MockHarness has no random_u64 response",
             ),
             (

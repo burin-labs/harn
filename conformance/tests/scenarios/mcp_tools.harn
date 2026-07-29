@@ -11,7 +11,7 @@ pipeline test(harness: Harness, task) {
       annotations: {title: "Echo Tool", readOnlyHint: true, destructiveHint: false},
     },
   )
-  const result = mcp_tools(tools)
+  const result = harness.tools.mcp_tools(tools)
   assert(result == nil, "mcp_tools should return nil")
   harness.stdio.println("mcp_tools accepted tool_registry with annotations")
 }

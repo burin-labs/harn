@@ -197,7 +197,6 @@ pub fn is_untyped_boundary_source(name: &str) -> bool {
             | "host_call"
             | "connector_call"
             | "host_tool_call"
-            | "mcp_call"
     )
 }
 

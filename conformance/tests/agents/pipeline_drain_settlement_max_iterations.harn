@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
         return_value,
         {drain_budget_iterations: 1},
       )
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("status=" + result.status)
       harness.stdio.println("iterations=" + to_string(result.iterations))
       harness.stdio.println("budget=" + to_string(result.budget))

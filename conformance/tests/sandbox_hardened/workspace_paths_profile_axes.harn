@@ -12,7 +12,7 @@
 pipeline default(harness: Harness) {
   const base = path_join(
     harness.fs.temp_dir(),
-    "harn_workspace_paths_" + to_string(harness.random.gen_range(100000, 999999)),
+    "harn_workspace_paths_" + to_string(harness.random.range(100000, 999999)),
   )
   const root = path_join(base, "workspace")
   harness.fs.mkdir(root)
@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
   harness.runtime.with_execution_policy(
     {sandbox_profile: "workspace_paths", workspace_roots: [root]},
     { ->
-      harness.stdio.println(sandbox_active_profile())
+  harness.stdio.println(harness.system.sandbox_active_profile())
       // Path axis: enforced, exactly as under `worktree`.
       harness.fs.write_text(in_path, "ok\n")
       const write_err = try {

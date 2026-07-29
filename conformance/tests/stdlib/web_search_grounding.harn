@@ -19,7 +19,7 @@ fn has_import_status(items, package, symbol, status) {
 }
 
 pipeline test(harness: Harness, task) {
-  const curated = web_search(harness,  harness, "fastapi dependency injection",
+  const curated = web_search(harness, "fastapi dependency injection",
     {
       limit: 1,
       index: [
@@ -39,8 +39,8 @@ pipeline test(harness: Harness, task) {
   assert_eq(curated.backend.kind, "curated_index")
   assert_eq(curated.results[0].package, "fastapi")
   assert_eq(curated.results[0].provenance.evidence, "curated_index")
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://search.example/api*",
     {
@@ -60,7 +60,7 @@ pipeline test(harness: Harness, task) {
       ),
     },
   )
-  const api = web_search(harness,  harness, "harn web",
+  const api = web_search(harness, "harn web",
     {
       api: {
         url: "https://search.example/api",
@@ -78,13 +78,13 @@ pipeline test(harness: Harness, task) {
     !contains(json_stringify(api), "SECRET_SEARCH_TOKEN"),
     "web_search redacts API credentials",
   )
-  const calls = http_mock_calls({redact_sensitive: false})
+  const calls = harness.testing.http_mock_calls({redact_sensitive: false})
   assert(
     contains(calls[0].url, "https://search.example/api?"),
     "web_search used web_fetch/http mock",
   )
   assert(contains(calls[0].url, "q=harn"), "web_search forwarded query")
-  const root = path_join(harness.fs.temp_dir(), "harn-web-grounding-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-web-grounding-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "package.json"),

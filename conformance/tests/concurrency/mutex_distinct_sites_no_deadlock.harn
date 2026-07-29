@@ -3,7 +3,7 @@ pipeline test(harness: Harness, task) {
   // so nesting them no longer self-deadlocks (they are independent locks).
   mutex {
     mutex {
-      harness.stdio.println("nested bare blocks are independent locks")
+      harness.stdio.log("nested bare blocks are independent locks")
     }
   }
 }

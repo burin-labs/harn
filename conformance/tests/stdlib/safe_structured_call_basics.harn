@@ -9,7 +9,7 @@ pipeline test(harness: Harness, task) {
     required: ["verdict", "bullets"],
     properties: {verdict: {type: "string"}, bullets: {type: "array", items: {type: "string"}}},
   }
-  const envelope = safe_structured_call(harness,  harness, "Grade this output.",
+  const envelope = safe_structured_call(harness, "Grade this output.",
     schema,
     {provider: "mock", model: "mock-model", system: "you are a judge", max_tokens: 200},
   )

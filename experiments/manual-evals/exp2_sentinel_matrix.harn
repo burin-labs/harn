@@ -76,7 +76,7 @@ fn build_tools() -> dict {
 }
 
 fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, registry: dict) -> dict {
-  harness.stdio.println("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
+  harness.stdio.log("\n--- ${label} (mode=${mode}, sentinel=\"${sentinel}\") ---")
   const task =
     "Investigate this small repo and tell me what the compute function does and how it is used in main."
   const system_prompt =
@@ -85,7 +85,7 @@ fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, 
     let names = info?.tool_names ?? []
     let count = info?.tool_count ?? 0
     let iter = info?.iteration ?? 0
-    harness.stdio.println("  [${label}] iter=${iter} tools=${count} names=${names}")
+    harness.stdio.log("  [${label}] iter=${iter} tools=${count} names=${names}")
     nil
   }
   let opts = {
@@ -101,17 +101,17 @@ fn run_variant(harness: Harness, label: string, mode: string, sentinel: string, 
     opts = opts + {done_sentinel: sentinel}
   }
   const result = agent_loop(harness, task, system_prompt, opts)
-  harness.stdio.println("  [${label}] DONE status=${result.status} iters=${result.llm.iterations}")
+  harness.stdio.log("  [${label}] DONE status=${result.status} iters=${result.llm.iterations}")
   const visible = result?.visible_text ?? ""
   const visible_len = len(visible)
-  harness.stdio.println("  [${label}] visible_len=${visible_len}")
+  harness.stdio.log("  [${label}] visible_len=${visible_len}")
   if visible_len > 0 {
     const head_len = if visible_len < 200 {
       visible_len
     } else {
       200
     }
-    harness.stdio.println("  [${label}] visible[0..${head_len}]=${visible[:head_len]}")
+    harness.stdio.log("  [${label}] visible[0..${head_len}]=${visible[:head_len]}")
   }
   return {
     label: label,
@@ -129,8 +129,8 @@ pipeline main(harness: Harness, task) {
     run_variant(harness, "C:text+default", "text", "(default)", registry),
     run_variant(harness, "D:text+empty", "text", "", registry),
   ]
-  harness.stdio.println("\n========== EXP2 SUMMARY ==========")
+  harness.stdio.log("\n========== EXP2 SUMMARY ==========")
   for r in results {
-    harness.stdio.println("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
+    harness.stdio.log("${r.label}: status=${r.status} iters=${r.iters} visible_len=${r.visible_len}")
   }
 }

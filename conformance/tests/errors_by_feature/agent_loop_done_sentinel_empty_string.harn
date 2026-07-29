@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // `done_sentinel: nil` is the only no-sentinel value. Empty strings are
 // rejected so completion mode cannot accidentally depend on stringiness.
 pipeline test(harness: Harness, task) {

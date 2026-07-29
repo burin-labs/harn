@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
@@ -61,7 +62,7 @@ pipeline test(harness: Harness, task) {
       const second_tools = json_stringify(calls[1].tools)
       assert(contains(second_tools, "deploy_service"), "allowed tool remains visible")
       assert(!contains(second_tools, "query_metrics"), "out-of-scope tool is filtered")
-      harness.stdio.println("skills_load_skill_roundtrip passed")
+      harness.stdio.log("skills_load_skill_roundtrip passed")
     },
   )
 }

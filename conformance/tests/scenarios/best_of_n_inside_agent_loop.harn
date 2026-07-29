@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Cross-slice integration: agent_loop's llm_caller seam composes with
  * std/llm/ensemble::best_of_n. The custom caller routes the per-turn call to

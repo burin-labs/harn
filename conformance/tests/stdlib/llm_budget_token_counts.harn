@@ -38,5 +38,5 @@ pipeline test(harness: Harness, task) {
   assert(!unknown.known_model_family, "unknown model falls back to heuristic")
   assert_eq(estimate_text_tokens(nil, "gpt-4"), 0)
   assert_eq(estimate_text_tokens_detail(nil, "unknown-local-model").tokens, 0)
-  harness.stdio.println("llm_budget_token_counts tests passed")
+  harness.stdio.log("llm_budget_token_counts tests passed")
 }

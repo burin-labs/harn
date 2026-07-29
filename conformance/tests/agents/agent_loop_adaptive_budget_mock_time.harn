@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -26,7 +27,7 @@ fn lookup_tools() {
 }
 
 pipeline default(harness: Harness) {
-  mock_time(1700000000000)
+  harness.testing.clock_set(1700000000000)
   const start_ms = harness.clock.now_ms()
   with_llm_script(
     harness.llm, [
@@ -53,7 +54,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.adaptive_budget.extensions_used >= 1)
       harness.stdio.println(result.adaptive_budget.decisions[0].action)
       harness.stdio.println(harness.clock.now_ms() == start_ms)
-      unmock_time()
+      harness.testing.clock_reset()
     },
   )
 }

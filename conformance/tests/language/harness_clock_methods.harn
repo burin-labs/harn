@@ -1,7 +1,7 @@
 /**
  * E4.3: the `harness.clock.*` sub-handle is the canonical surface for
  * wall-clock reads, monotonic reads, and cooperative sleeps. This test
- * pins the script under `mock_time(...)` so every observation is
+ * pins the script under `harness.testing.clock_set(...)` so every observation is
  * deterministic — the same fixture that proves replay determinism.
  *
  * `harness.clock` aliases `monotonic_ms` and `elapsed` to the same
@@ -11,7 +11,7 @@
  * ambient builtin; the harness path must behave identically).
  */
 fn main(harness: Harness) {
-  mock_time(1700000000000)
+  harness.testing.clock_set(1700000000000)
   const wall_ms = harness.clock.now_ms()
   const ts = harness.clock.timestamp()
   const mono = harness.clock.monotonic_ms()
@@ -23,5 +23,5 @@ fn main(harness: Harness) {
   harness.clock.sleep_ms(250)
   harness.stdio.println(harness.clock.monotonic_ms() == 250)
   harness.stdio.println(harness.clock.now_ms() == 1700000000250)
-  unmock_time()
+  harness.testing.clock_reset()
 }

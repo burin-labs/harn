@@ -1,24 +1,24 @@
 pipeline test(harness: Harness, task) {
   // Basic integer dedup
-  harness.stdio.println([1, 2, 2, 3, 1].unique())
+  harness.stdio.log([1, 2, 2, 3, 1].unique())
   // String dedup
-  harness.stdio.println(["a", "b", "a"].unique())
+  harness.stdio.log(["a", "b", "a"].unique())
   // Mixed types stay distinct
-  harness.stdio.println([1, "1", true].unique())
+  harness.stdio.log([1, "1", true].unique())
   // Nested list dedup
-  harness.stdio.println([[1, 2], [3, 4], [1, 2]].unique())
+  harness.stdio.log([[1, 2], [3, 4], [1, 2]].unique())
   // Nested dict dedup
-  harness.stdio.println([{a: 1}, {b: 2}, {a: 1}].unique())
+  harness.stdio.log([{a: 1}, {b: 2}, {a: 1}].unique())
   // Empty list
-  harness.stdio.println([].unique())
+  harness.stdio.log([].unique())
   // Single element
-  harness.stdio.println([42].unique())
+  harness.stdio.log([42].unique())
   // Nil dedup
-  harness.stdio.println([nil, 1, nil].unique())
+  harness.stdio.log([nil, 1, nil].unique())
   // Bool dedup
-  harness.stdio.println([true, false, true, false].unique())
+  harness.stdio.log([true, false, true, false].unique())
   // Float dedup
-  harness.stdio.println([1.5, 2.5, 1.5].unique())
+  harness.stdio.log([1.5, 2.5, 1.5].unique())
   // Strings with special chars (hash collision regression)
-  harness.stdio.println(["a,b", "a", "b"].unique())
+  harness.stdio.log(["a,b", "a", "b"].unique())
 }

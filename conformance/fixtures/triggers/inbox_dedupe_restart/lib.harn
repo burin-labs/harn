@@ -1,5 +1,5 @@
 import "std/triggers"
 
 pub fn on_tick(harness: Harness, event: TriggerEvent) {
-  harness.stdio.println(event.dedupe_key)
+  harness.stdio.log(event.dedupe_key)
 }

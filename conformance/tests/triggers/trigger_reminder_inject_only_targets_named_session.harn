@@ -13,7 +13,7 @@ pipeline test(harness: Harness, task) {
   harness.agent.reset(bystander)
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const handle: TriggerHandle = harness.runtime.trigger_register(
     {

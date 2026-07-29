@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // Deterministic thrash/loop detector conditions (#2712). Exercises each new
 // trip condition in std/agent/stall directly through the public observer, plus
 // the principled polling exemption (changing observation must NOT trip;
@@ -29,7 +30,7 @@ fn run_actions(harness: Harness, config, steps) {
   let first_pattern = ""
   let trip_count = 0
   for step in steps {
-    const obs = agent_stall_observe_tool_calls(harness,  harness, "thrash-test",
+    const obs = agent_stall_observe_tool_calls(harness, "thrash-test",
       step.calls,
       1,
       config,
@@ -58,7 +59,7 @@ fn run_actions(harness: Harness, config, steps) {
 pipeline default(harness: Harness) {
   const cfg = {enabled: true, inject_feedback: false}
   // 1. Same action -> byte-identical observation, 4x -> repeated_same_observation.
-  const same_obs = run_actions(harness, 
+  const same_obs = run_actions(harness,
     cfg,
     [
       {calls: call("read", {path: "a"}), prev: nil},
@@ -83,7 +84,7 @@ pipeline default(harness: Harness) {
   // now trips `repeated_success` soft-first, even as the observation churns.
   // Real polling in production is exempt by tool (poll_command /
   // read_command_output / wait_command), so this does not nag genuine waits.
-  const polling = run_actions(harness, 
+  const polling = run_actions(harness,
     cfg,
     [
       {calls: call("poll", {job: "j"}), prev: nil},
@@ -100,7 +101,7 @@ pipeline default(harness: Harness) {
   // Guard preserved: changing observation alone NEVER trips absent identical
   // repetition. A varied action (different args each turn) resets the streak, so
   // a moving observation across DIFFERENT calls stays exempt.
-  const varied = run_actions(harness, 
+  const varied = run_actions(harness,
     cfg,
     [
       {calls: call("poll", {job: "a"}), prev: nil},
@@ -114,7 +115,7 @@ pipeline default(harness: Harness) {
   require varied.trips == 0, "different args/actions never trip (no identical repetition)"
   harness.stdio.println("varied=" + varied.pattern + ",trips=" + to_string(varied.trips))
   // 2. Same action -> same error, 3x -> repeated_error.
-  const same_err = run_actions(harness, 
+  const same_err = run_actions(harness,
     cfg,
     [
       {calls: call("build", {}), prev: nil},
@@ -125,7 +126,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("same_err=" + same_err.pattern)
   // Distinct errors from the same action do NOT trip repeated_error.
-  const distinct_err = run_actions(harness, 
+  const distinct_err = run_actions(harness,
     cfg,
     [
       {calls: call("build", {}), prev: nil},
@@ -136,7 +137,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("distinct_err=" + distinct_err.pattern + ",trips=" + to_string(distinct_err.trips))
   // 3. No-progress monologue: 3 consecutive text-only turns -> no_progress_monologue.
-  const monologue = run_actions(harness, 
+  const monologue = run_actions(harness,
     cfg,
     [
       {calls: [], text: "thinking..."},
@@ -146,7 +147,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("monologue=" + monologue.pattern)
   // A progress (tool-call) turn resets the monologue streak.
-  const monologue_reset = run_actions(harness, 
+  const monologue_reset = run_actions(harness,
     cfg,
     [
       {calls: [], text: "thinking"},
@@ -175,7 +176,7 @@ pipeline default(harness: Harness) {
   const pingpong = run_actions(harness, cfg, pingpong_steps)
   harness.stdio.println("pingpong=" + pingpong.pattern)
   // 5. Repeated context-window errors, 2x -> repeated_context_window_error.
-  const ctx = run_actions(harness, 
+  const ctx = run_actions(harness,
     cfg,
     [
       {calls: call("summarize", {}), prev: nil},
@@ -192,7 +193,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("ctx=" + ctx.pattern)
   // Hard stop after 3 consecutive un-recovered trips. We force three back-to-
   // back same-observation trips with no recovering step between them.
-  const hard = run_actions(harness, 
+  const hard = run_actions(harness,
     {enabled: true, inject_feedback: false, repeat_same_observation: 2},
     [
       {calls: call("read", {path: "a"}), prev: nil},
@@ -207,7 +208,7 @@ pipeline default(harness: Harness) {
     "hard_stop=" + to_string(hard.hard_stop) + ",consecutive=" + to_string(hard.consecutive),
   )
   // exempt_tools still works as a secondary escape hatch (back-compat).
-  const exempt = run_actions(harness, 
+  const exempt = run_actions(harness,
     {enabled: true, inject_feedback: false, exempt_tools: ["poll"]},
     [
       {calls: call("poll", {job: "j"}), prev: nil},
@@ -241,7 +242,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "thrash-judge-gate-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Finish without stalling.",
           nil,
           {

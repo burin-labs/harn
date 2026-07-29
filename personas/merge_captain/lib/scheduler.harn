@@ -211,7 +211,10 @@ fn _dispatch_repair_worker(harness: Harness, kind, args) {
   if kind == "merge_conflict" {
     return invoke_for_merge_conflict(harness, common + {conflict_paths: args.conflict_paths ?? []})
   }
-  return invoke_for_ci_failure(harness, common + {failing_check_logs: args.failing_check_logs ?? []})
+  return invoke_for_ci_failure(
+    harness,
+    common + {failing_check_logs: args.failing_check_logs ?? []},
+  )
 }
 
 /** Process a single PR: classify, persist, act, build receipt. */
@@ -227,7 +230,12 @@ pub fn process_pr(harness: Harness, args) {
     return nil
   }
   const observation = from_github(detail.pr, detail.checks, policy.required_checks)
-  const prior = prior_state_for(checkpoint_handle, observation.repo, observation.number)
+  const prior = prior_state_for(
+    harness.agent,
+    checkpoint_handle,
+    observation.repo,
+    observation.number,
+  )
   const classification = classify(observation, policy, prior)
   const edge = verify(prior, classification)
   if !edge.ok {
@@ -260,7 +268,8 @@ pub fn process_pr(harness: Harness, args) {
     } else {
       {}
     }
-    const run = _dispatch_repair_worker(harness, 
+    const run = _dispatch_repair_worker(
+      harness,
       repair_kind,
       {
         observation: observation,
@@ -295,7 +304,7 @@ pub fn process_pr(harness: Harness, args) {
   }
   const action_result = apply_action(harness, adapter, policy, observation, classification, dry_run)
   if is_terminal(classification.state) {
-    forget_checkpoint(checkpoint_handle, observation.repo, observation.number)
+    forget_checkpoint(harness.agent, checkpoint_handle, observation.repo, observation.number)
   } else {
     save_checkpoint(harness, checkpoint_handle, sweep_id, observation, classification)
   }
@@ -323,7 +332,7 @@ pub fn reconcile_disappeared(harness: Harness, args) {
   const dry_run = args.dry_run
   const observed_numbers = args.observed_numbers
   let receipts = []
-  const stale = list_all_checkpoints(checkpoint_handle).filter(
+  const stale = list_all_checkpoints(harness.agent, checkpoint_handle).filter(
     { env -> env.repo == policy.repo && !observed_numbers.contains(env.number) },
   )
   for env in stale {
@@ -371,7 +380,7 @@ pub fn reconcile_disappeared(harness: Harness, args) {
       evidence: {previously: env.last_state},
     }
     const action_result = apply_action(harness, adapter, policy, final_obs, synthetic, dry_run)
-    forget_checkpoint(checkpoint_handle, env.repo, env.number)
+    forget_checkpoint(harness.agent, checkpoint_handle, env.repo, env.number)
     const receipt = build_receipt(
       {
         sweep_id: sweep_id,
@@ -410,7 +419,8 @@ pub fn sweep(harness: Harness, args) {
     }
     for pr in trimmed {
       observed_numbers = observed_numbers + [pr.number]
-      const receipt = process_pr(harness, 
+      const receipt = process_pr(
+        harness,
         {
           adapter: adapter,
           policy: policy,
@@ -428,7 +438,8 @@ pub fn sweep(harness: Harness, args) {
         receipts_for_repo = receipts_for_repo + [receipt]
       }
     }
-    const disappeared = reconcile_disappeared(harness, 
+    const disappeared = reconcile_disappeared(
+      harness,
       {
         adapter: adapter,
         policy: policy,

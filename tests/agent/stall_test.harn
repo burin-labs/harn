@@ -54,17 +54,17 @@ pipeline test_real_tool_calls_do_not_trip_no_progress(harness: Harness, task) {
 pipeline test_mixed_turn_with_real_call_is_progress(harness: Harness, task) {
   // agent_progress alongside a real (distinct) edit is progress — the real call
   // carries the action stream, so the no-progress streak never accumulates.
-  const o1 = _observe(harness, 
+  const o1 = _observe(harness,
     agent_stall_initial_state(),
     [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "a.rs"}}],
     1,
   )
-  const o2 = _observe(harness, 
+  const o2 = _observe(harness,
     o1.state,
     [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "b.rs"}}],
     2,
   )
-  const o3 = _observe(harness, 
+  const o3 = _observe(harness,
     o2.state,
     [{name: "agent_progress", arguments: {}}, {name: "edit", arguments: {path: "c.rs"}}],
     3,
@@ -75,7 +75,7 @@ pipeline test_mixed_turn_with_real_call_is_progress(harness: Harness, task) {
 fn _observe_parse_error(harness: Harness, state, iteration) {
   // 0 tool calls + non-empty text, but the turn carried parser errors (the calls
   // were dropped). `had_parse_errors = true`.
-  return agent_stall_observe_tool_calls(harness,  harness, "unit",
+  return agent_stall_observe_tool_calls(harness, "unit",
     [],
     iteration,
     CONFIG,
@@ -89,7 +89,7 @@ fn _observe_parse_error(harness: Harness, state, iteration) {
 
 fn _observe_text_only(harness: Harness, state, iteration) {
   // Same shape but a genuine no-progress monologue (no parser errors).
-  return agent_stall_observe_tool_calls(harness,  harness, "unit",
+  return agent_stall_observe_tool_calls(harness, "unit",
     [],
     iteration,
     CONFIG,
@@ -122,7 +122,7 @@ pipeline test_parse_error_turn_uses_distinct_bounded_recovery(harness: Harness, 
 fn _observe_errored_no_call(harness: Harness, state, iteration) {
   // 0 tool calls + narration text, turn ended with a PROVIDER ERROR
   // (turn_stop_reason = "error"): the cheap-model eval-meter failure class.
-  return agent_stall_observe_tool_calls(harness,  harness, "unit",
+  return agent_stall_observe_tool_calls(harness, "unit",
     [],
     iteration,
     CONFIG,
@@ -201,7 +201,7 @@ fn _ok_dispatch() {
  * `prev_dispatch` (the prior turn's result) with `prior_made_edit`.
  */
 fn _fold(harness: Harness, state, prev_dispatch, prior_made_edit) {
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-repair",
+  return agent_stall_observe_tool_calls(harness, "unit-repair",
     _run_call(),
     1,
     REPAIR_CONFIG,
@@ -241,7 +241,7 @@ pipeline test_fold_same_failure_no_edit_increments_streak(harness: Harness, task
 }
 
 pipeline test_fold_location_shift_uses_verification_delta_normalization(harness: Harness, task) {
-  const o1 = _fold(harness, 
+  const o1 = _fold(harness,
     agent_stall_initial_state(),
     _fail_dispatch("src/a.rs:10:2: error E0425: missing foo"),
     false,
@@ -284,7 +284,7 @@ pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(harnes
     no_progress_messages: 99,
     ping_pong_cycles: 99,
   }
-  const o1 = agent_stall_observe_tool_calls(harness,  harness, "unit-stale-core",
+  const o1 = agent_stall_observe_tool_calls(harness, "unit-stale-core",
     _run_call(),
     1,
     config,
@@ -292,7 +292,7 @@ pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(harnes
     true,
     _stale_dispatch("boom"),
   )
-  const o2 = agent_stall_observe_tool_calls(harness,  harness, "unit-stale-core",
+  const o2 = agent_stall_observe_tool_calls(harness, "unit-stale-core",
     _run_call(),
     2,
     config,
@@ -435,7 +435,7 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness
     no_progress_messages: 99,
     ping_pong_cycles: 99,
   }
-  const o1 = agent_stall_observe_tool_calls(harness,  harness, "unit-repair-off",
+  const o1 = agent_stall_observe_tool_calls(harness, "unit-repair-off",
     _run_call(),
     1,
     off_config,
@@ -450,7 +450,7 @@ pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(harness: Harness
   assert(o1.state.same_diagnostic_streak == 1)
   assert(!o1.state.reverify_owed)
   assert(o1.warning == nil)
-  const o2 = agent_stall_observe_tool_calls(harness,  harness, "unit-repair-off",
+  const o2 = agent_stall_observe_tool_calls(harness, "unit-repair-off",
     _run_call(),
     2,
     off_config,
@@ -476,7 +476,7 @@ pipeline test_reset_action_preserves_failure_model(harness: Harness, task) {
   assert(o2.state.last_diagnostic_class == "fail")
   // An exempt tool triggers __agent_stall_reset_action inside the core observe.
   const reset_config = REPAIR_CONFIG + {exempt_tools: ["search"]}
-  const o3 = agent_stall_observe_tool_calls(harness,  harness, "unit-repair",
+  const o3 = agent_stall_observe_tool_calls(harness, "unit-repair",
     [{name: "search", arguments: {q: "x"}}],
     3,
     reset_config,
@@ -549,7 +549,7 @@ const STALE_GUARD_CONFIG = {
 }
 
 fn _fold_guarded(harness: Harness, state, prev_dispatch, prior_made_edit) {
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-guard",
+  return agent_stall_observe_tool_calls(harness, "unit-guard",
     _run_call(),
     1,
     GUARD_CONFIG,
@@ -563,7 +563,7 @@ fn _fold_guarded(harness: Harness, state, prev_dispatch, prior_made_edit) {
 }
 
 fn _fold_stale_guarded(harness: Harness, state, prev_dispatch, prior_made_edit) {
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-stale-guard",
+  return agent_stall_observe_tool_calls(harness, "unit-stale-guard",
     _run_call(),
     1,
     STALE_GUARD_CONFIG,
@@ -666,7 +666,7 @@ const HARD_CAP_CONFIG = {
 }
 
 fn _fold_hard_cap(harness: Harness, state, prev_dispatch, prior_made_edit) {
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-hard-cap",
+  return agent_stall_observe_tool_calls(harness, "unit-hard-cap",
     _run_call(),
     1,
     HARD_CAP_CONFIG,
@@ -741,7 +741,7 @@ pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(harness: Ha
 fn _observe_signal(harness: Harness, state, cfg, payload) {
   // Substantive "run" call with no prior dispatch: the core/repair paths never
   // trip on this turn, so any warning comes purely from the action_signal seam.
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-signal",
+  return agent_stall_observe_tool_calls(harness, "unit-signal",
     _run_call(),
     1,
     cfg,
@@ -760,7 +760,7 @@ fn _observe_noprog_signal(harness: Harness, state, cfg, text, payload) {
   // No substantive tool call + narration text = a no-progress-monologue candidate,
   // used to prove the action_signal seam does not double-fire when the core already
   // tripped this turn.
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-signal-noprog",
+  return agent_stall_observe_tool_calls(harness, "unit-signal-noprog",
     [],
     1,
     cfg,
@@ -915,7 +915,7 @@ pipeline test_action_signal_validated_loudly_at_config_time(harness: Harness, ta
   // A mistyped action_signal fails loudly at config parse time, like the sibling seams.
   assert_throws(
     { ->
-      return _observe_signal(harness, 
+      return _observe_signal(harness,
         agent_stall_initial_state(),
         {enabled: true, action_signal: "not-a-closure"},
         {},
@@ -937,7 +937,7 @@ const FLOOR_CONFIG = {
 }
 
 fn _fold_floor(harness: Harness, state, cfg, prev_dispatch, prior_made_edit) {
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-floor",
+  return agent_stall_observe_tool_calls(harness, "unit-floor",
     _run_call(),
     1,
     cfg,
@@ -1034,7 +1034,7 @@ pipeline test_turns_since_clean_verify_floor_validated_loudly(harness: Harness, 
   // A non-positive / mistyped floor fails loudly at config time.
   assert_throws(
     { ->
-      return _fold_floor(harness, 
+      return _fold_floor(harness,
         agent_stall_initial_state(),
         FLOOR_CONFIG + {turns_since_clean_verify: 0},
         _fail_dispatch("boom"),
@@ -1045,7 +1045,7 @@ pipeline test_turns_since_clean_verify_floor_validated_loudly(harness: Harness, 
   )
   assert_throws(
     { ->
-      return _fold_floor(harness, 
+      return _fold_floor(harness,
         agent_stall_initial_state(),
         FLOOR_CONFIG + {turns_since_clean_verify: "many"},
         _fail_dispatch("boom"),
@@ -1069,7 +1069,7 @@ fn _parity_drive(harness: Harness, cfg) {
     [_fail_dispatch("boom"), false],
   ]
   for step in seq {
-    const o = agent_stall_observe_tool_calls(harness,  harness, "parity",
+    const o = agent_stall_observe_tool_calls(harness, "parity",
       _run_call(),
       1,
       cfg,
@@ -1169,7 +1169,7 @@ const PRED_CONFIG = {
 fn _fold_pred(harness: Harness, state, cfg, made_edit) {
   // A substantive "run" call folding a failing verification, with the full post-turn
   // payload passed through to the progress_signal callback.
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-pred",
+  return agent_stall_observe_tool_calls(harness, "unit-pred",
     _run_call(),
     1,
     cfg,
@@ -1251,7 +1251,7 @@ const REMEDIATION_CONFIG = {
 }
 
 fn _fold_remediation(harness: Harness, state, cb, prev_dispatch) {
-  return agent_stall_observe_tool_calls(harness,  harness, "unit-rem",
+  return agent_stall_observe_tool_calls(harness, "unit-rem",
     _run_call(),
     1,
     REMEDIATION_CONFIG + {remediation_delivered: cb},
@@ -1334,7 +1334,7 @@ pipeline test_remediation_bad_return_throws(harness: Harness, task) {
   const cb = { _ctx -> "not-a-count" }
   assert_throws(
     { ->
-      return _fold_remediation(harness, 
+      return _fold_remediation(harness,
         _fold_remediation(harness, agent_stall_initial_state(), cb, _fail_dispatch("boom")).state,
         cb,
         _fail_dispatch("boom"),

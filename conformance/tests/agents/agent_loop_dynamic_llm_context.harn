@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 
 fn iteration_events(events) {
@@ -54,7 +55,7 @@ pipeline test(harness: Harness, task) {
     }
   }
   const session = "agent-loop-dynamic-llm-context-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "finish",
       nil,
       {

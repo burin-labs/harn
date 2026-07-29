@@ -5,6 +5,6 @@ pipeline test(harness: Harness, task) {
   }
   // For now, structs are constructed like dicts but tagged
   const p = {x: 10, y: 20}
-  harness.stdio.println(p.x)
-  harness.stdio.println(p.y)
+  harness.stdio.log(p.x)
+  harness.stdio.log(p.y)
 }

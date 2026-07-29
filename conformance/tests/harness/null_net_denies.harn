@@ -2,6 +2,5 @@ fn main(harness: Harness) {
   try {
     harness.net.get("https://example.test")
   } catch (e) {
-    harness.stdio.println("caught")
   }
 }

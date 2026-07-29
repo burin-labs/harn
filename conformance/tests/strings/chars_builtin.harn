@@ -25,5 +25,5 @@ pipeline test(harness: Harness, task) {
     i = i + 1
   }
   assert_eq(depth, 2)
-  harness.stdio.println("chars builtin ok")
+  harness.stdio.log("chars builtin ok")
 }

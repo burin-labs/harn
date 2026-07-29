@@ -32,7 +32,7 @@ pipeline test(harness: Harness, task) {
   const blank_failure = unwrap_err(blank)
   harness.stdio.println(blank_failure.kind)
   harness.stdio.println(blank_failure.ocr_candidate)
-  let path = path_join(harness.fs.temp_dir(), "harn-document-" + harness.random.uuid() + ".pdf")
+  let path = path_join(harness.fs.workspace_temp_dir(), "harn-document-" + harness.random.uuid() + ".pdf")
   defer {
     harness.fs.delete(path)
   }

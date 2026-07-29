@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn tools(harness: Harness) {
@@ -65,14 +66,17 @@ pipeline main(harness: Harness) {
     ),
   )
   with_llm_script(
-    harness.llm, [{tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]}, llm_text("done")],
+    harness.llm,
+    [{tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]}, llm_text("done")],
     { ->
-      agent_loop(harness, "Emit a handoff.",
+      agent_loop(
+        harness,
+        "Emit a handoff.",
         nil,
         {
           provider: "mock",
           session_id: parent,
-          tools: tools(),
+          tools: tools(harness),
           tool_format: "native",
           max_iterations: 2,
           done_judge: nil,

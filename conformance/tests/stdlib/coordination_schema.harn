@@ -19,10 +19,9 @@ import {
 import { is_type } from "std/schema"
 
 pipeline default(harness: Harness) {
-  mock_time(6000)
+  harness.testing.clock_set(6000)
   const opts = {session_id: "coord-schema-session"}
-  const receipt = coord_post(
-    harness.channels, "session",
+  const receipt = coord_post(harness.runtime, harness.channels, harness.random, "session",
     "schema",
     {
       kind: "claim",
@@ -48,8 +47,7 @@ pipeline default(harness: Harness) {
   const missing = coord_message_report({schema: "harn.coordination.message.v1", id: "missing"})
   harness.stdio.println(!missing.ok)
   harness.stdio.println(contains(join(missing.errors, "\n"), "\"scope\" is a required property"))
-  const request = coord_request(
-    harness.channels, "session",
+  const request = coord_request(harness.runtime, harness.channels, harness.random, "session",
     "schema",
     "agent-A",
     {
@@ -60,8 +58,7 @@ pipeline default(harness: Harness) {
     },
     opts + {id: "coord-schema-request"},
   )
-  const _ = coord_reply(
-    harness.channels, "session",
+  const _ = coord_reply(harness.runtime, harness.channels, harness.random, "session",
     "schema",
     request,
     {
@@ -73,18 +70,17 @@ pipeline default(harness: Harness) {
     },
     opts + {id: "coord-schema-reply"},
   )
-  const inbox = coord_inbox(harness.channels, "session", "schema", opts + {consumer_id: "agent-A"})
+  const inbox = coord_inbox(harness.runtime, harness.channels, "session", "schema", opts + {consumer_id: "agent-A"})
   harness.stdio.println(is_type(inbox, coord_inbox_schema()))
   harness.stdio.println(coord_inbox_report(inbox).ok)
-  const inbox_with_events = coord_inbox(
+  const inbox_with_events = coord_inbox(harness.runtime,
     harness.channels, "session",
     "schema",
     opts + {consumer_id: "agent-A", include_events: true},
   )
   harness.stdio.println(is_type(inbox_with_events, coord_inbox_schema()))
   harness.stdio.println(is_type(inbox_with_events.messages[0], coord_event_message_schema()))
-  const wait = coord_wait_reply(
-    harness.channels, "session",
+  const wait = coord_wait_reply(harness.runtime, harness.channels, harness.clock, "session",
     "schema",
     request,
     opts
@@ -98,5 +94,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(is_type(wait, coord_wait_reply_schema()))
   harness.stdio.println(coord_wait_reply_report(wait).ok)
   harness.stdio.println(wait.reply.data.verdict)
-  unmock_time()
+  harness.testing.clock_reset()
 }

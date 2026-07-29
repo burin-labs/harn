@@ -143,7 +143,7 @@ pipeline test_query_nl_mcts_caps_are_respected(harness: Harness, task) {
       text: "{\"cypher\": \"MATCH (f:Function {name: 'doesNotExist'}) RETURN f.path AS path\"}",
     },
   )
-  const r = code_librarian_query_nl(harness,  harness, harness.code_index, "Find any function or type containing the word main",
+  const r = code_librarian_query_nl(harness, harness.code_index, "Find any function or type containing the word main",
     {mcts_depth_max: 2, mcts_expansions_max: 10},
   )
   harness.llm.mock_pop_scope()

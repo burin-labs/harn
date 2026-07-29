@@ -8,7 +8,7 @@
  * description with optional context files.
  */
 pipeline default(harness: Harness, task) {
-  harness.stdio.println("Starting code review agent")
+  harness.stdio.log("Starting code review agent")
   const system = """
 You are a senior code reviewer.
 Review the change for correctness, security, maintainability, and tests.

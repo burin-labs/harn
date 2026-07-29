@@ -25,7 +25,7 @@ pub fn resolve_harn_bin(harness: Harness, repo_root) {
   }
   const cargo_config = path_join(repo_root, ".cargo/config.toml")
   if harness.fs.exists(cargo_config) {
-    const config = exec("cat", cargo_config).stdout
+    const config = harness.process.exec("cat", cargo_config).stdout
     const configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
     if configured {
       return path_join(configured, "debug/harn")
@@ -35,18 +35,18 @@ pub fn resolve_harn_bin(harness: Harness, repo_root) {
 }
 
 /** Return whether a subprocess still exists according to the platform shell. */
-pub fn process_alive(pid) {
-  const probe = shell("kill -0 " + pid + " >/dev/null 2>&1")
+pub fn process_alive(process: HarnessProcess, pid) {
+  const probe = process.shell("kill -0 " + pid + " >/dev/null 2>&1")
   return probe.success
 }
 
 /** Poll a subprocess log for a regex match and return the first capture group. */
 pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
-  return poll_until(harness,  harness, { ->
+  return poll_until(harness, { ->
       if !harness.fs.exists(log_path) {
         return nil
       }
-      const log = exec("cat", log_path).stdout
+      const log = harness.process.exec("cat", log_path).stdout
       const matches = regex_captures(pattern, log)
       if len(matches) > 0 {
         return matches[0].groups[0]
@@ -79,7 +79,7 @@ pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
  * prereq should follow with a descriptive `require`.
  */
 pub fn wait_for_file_content(harness: Harness, path, check) {
-  return poll_until(harness,  harness, { ->
+  return poll_until(harness, { ->
       if !harness.fs.exists(path) {
         return nil
       }
@@ -91,7 +91,7 @@ pub fn wait_for_file_content(harness: Harness, path, check) {
 
 fn log_contains(harness: Harness, log_path, needle) {
   if harness.fs.exists(log_path) {
-    const log = exec("cat", log_path).stdout
+    const log = harness.process.exec("cat", log_path).stdout
     if contains(log, needle) {
       return true
     }
@@ -114,7 +114,7 @@ fn log_contains(harness: Harness, log_path, needle) {
  * signal as a hard prereq should fail with a descriptive `require`.
  */
 pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
-  return poll_until(harness,  harness, { -> log_contains(harness, log_path, needle) },
+  return poll_until(harness, { -> log_contains(harness, log_path, needle) },
     {timeout_ms: 30000, interval_ms: 50},
   )
     ?? false
@@ -142,8 +142,8 @@ pub fn wait_for_a2a_server_url(harness: Harness, log_path) {
  * process gone for subsequent steps should pair this with `kill -KILL`.
  */
 pub fn wait_for_exit(harness: Harness, pid) {
-  return poll_until(harness,  harness, { ->
-      if !process_alive(pid) {
+  return poll_until(harness, { ->
+      if !process_alive(harness.process, pid) {
         return true
       }
       return nil

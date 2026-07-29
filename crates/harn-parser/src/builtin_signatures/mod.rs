@@ -44,6 +44,30 @@ pub use types::{
 
 pub use harn_builtin_registry::{builtin_contract, install_builtin_manifest};
 
+/// Compiler/VM opcodes that use ordinary call syntax but are implemented by
+/// the language runtime rather than the stdlib builtin registry.
+///
+/// Keeping this set explicit lets source-callability checks distinguish
+/// language intrinsics from legacy ambient builtins without an effect
+/// allowlist.
+pub const LANGUAGE_INTRINSICS: &[&str] = &[
+    "Ok",
+    "Err",
+    "spawn",
+    "await",
+    "cancel",
+    "cancel_graceful",
+    "__signal_interrupted",
+    "__signal_off_interrupt",
+    "__signal_on_interrupt",
+    "__signal_raise",
+    "is_cancelled",
+];
+
+pub fn is_language_intrinsic(name: &str) -> bool {
+    LANGUAGE_INTRINSICS.contains(&name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +94,16 @@ mod tests {
         assert!(is_builtin("await"));
         assert!(!is_builtin("definitely_not_a_builtin"));
         assert!(!is_builtin(""));
+    }
+
+    #[test]
+    fn every_language_intrinsic_has_a_static_type_contract() {
+        for name in LANGUAGE_INTRINSICS {
+            assert!(
+                lookup(name).is_some(),
+                "missing signature for intrinsic `{name}`"
+            );
+        }
     }
 
     #[test]

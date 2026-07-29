@@ -7,7 +7,7 @@ pipeline test(harness: Harness, task) {
       cleanup_ran = true
     }
   } catch (e) {
-    harness.stdio.println("outer caught: ${e}")
+    harness.stdio.log("outer caught: ${e}")
   }
-  harness.stdio.println("cleanup_ran: ${cleanup_ran}")
+  harness.stdio.log("cleanup_ran: ${cleanup_ran}")
 }

@@ -13,7 +13,7 @@
 pipeline default(harness: Harness) {
   const base = path_join(
     harness.fs.temp_dir(),
-    "harn_fs_path_scope_" + to_string(harness.random.gen_range(100000, 999999)),
+    "harn_fs_path_scope_" + to_string(harness.random.range(100000, 999999)),
   )
   const root = path_join(base, "workspace")
   harness.fs.mkdir(root)

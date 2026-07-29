@@ -24,5 +24,5 @@ pipeline main(harness: Harness, task) {
   assert(contains(fanout_snap["child_ids"], right), "fanout parent includes right child")
   assert(harness.agent.ancestry(left)["root_id"] == fanout, "left child resolves root_id")
   assert(harness.agent.ancestry(right)["root_id"] == fanout, "right child resolves root_id")
-  harness.stdio.println("agent_sessions ancestry tests passed")
+  harness.stdio.log("agent_sessions ancestry tests passed")
 }

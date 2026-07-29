@@ -42,7 +42,7 @@ pipeline test(harness: Harness, task) {
       harness.stdio.println(len(harness.llm.mock_calls()) == 0)
     },
   )
-  const unavailable_result = agent_sitrep(harness,  harness, messages,
+  const unavailable_result = agent_sitrep(harness, messages,
     {routes: [{provider: "definitely-not-a-real-provider"}]},
   )
   harness.stdio.println(unavailable_result.skipped)
@@ -52,7 +52,7 @@ pipeline test(harness: Harness, task) {
   with_llm_script(
     harness.llm, [llm_text("STATE — A.\nWORK — B.\nNEXT — C.")],
     { ->
-      const appended = agent_sitrep_append(harness,  harness, messages,
+      const appended = agent_sitrep_append(harness, messages,
         {routes: [{provider: "mock", model: "mock-sitrep"}]},
       )
       harness.stdio.println(len(appended) == len(messages) + 1)
@@ -61,7 +61,7 @@ pipeline test(harness: Harness, task) {
       harness.stdio.println(appended[len(appended) - 1].content.contains("STATE — A."))
     },
   )
-  const appended_skipped = agent_sitrep_append(harness,  harness, [],
+  const appended_skipped = agent_sitrep_append(harness, [],
     {routes: [{provider: "mock", model: "mock-sitrep"}]},
   )
   harness.stdio.println(len(appended_skipped) == 0)

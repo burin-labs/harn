@@ -45,7 +45,7 @@ pipeline test(harness: Harness, task) {
       ],
     },
   )
-  const model = verification_hud_model(harness,  harness, {
+  const model = verification_hud_model(harness, {
       started_ms: 1000,
       last_edit_ms: 61000,
       path: "src/a.tx",

@@ -1,3 +1,4 @@
+fn main(harness: Harness) {
 // Free-builtin alias for `harness.llm.providers()`. Verifies the
 // per-provider status list shape. Doesn't pin specific provider names
 // (the catalog evolves) — just asserts that every entry carries the
@@ -25,3 +26,5 @@ for entry in entries {
 }
 
 harness.stdio.println(all_valid)
+
+}

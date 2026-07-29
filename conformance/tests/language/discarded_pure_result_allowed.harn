@@ -51,5 +51,5 @@ pipeline test(harness: Harness, task) {
     []
   }
   assert_eq(from_try[0], 1, "try tail is a value, not a discard")
-  harness.stdio.println("discarded pure result allowed: all tests passed")
+  harness.stdio.log("discarded pure result allowed: all tests passed")
 }

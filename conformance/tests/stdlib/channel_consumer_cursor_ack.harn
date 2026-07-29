@@ -1,5 +1,5 @@
 pipeline default(harness: Harness) {
-  mock_time(3000)
+  harness.testing.clock_set(3000)
   const opts = {scope: "tenant", tenant_id: "coord-tenant"}
   const first = harness.channels.append("coord.ack.demo", {seq: 1}, opts + {id: "coord-ack-1"})
   const second = harness.channels.append("coord.ack.demo", {seq: 2}, opts + {id: "coord-ack-2"})
@@ -19,5 +19,5 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(len(unread))
   harness.stdio.println(unread[0].id)
-  unmock_time()
+  harness.testing.clock_reset()
 }

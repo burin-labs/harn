@@ -593,7 +593,7 @@ pub fn preset_run_command(harness: Harness, config = nil) {
    * catalogue per opted-in stack. Callers that supply `registry:` keep
    * full control — tests, vendor overrides, and migration paths are
    * unaffected. (TH-04 #1897) */
-  const {registry = tool_hooks_seed_registry(stacks), custom_rules = []} = cfg ?? {}
+  const {registry = tool_hooks_seed_registry(harness, stacks), custom_rules = []} = cfg ?? {}
   if type_of(custom_rules) != "list" {
     throw "preset_run_command: `custom_rules` must be a list of tool_rule values"
   }

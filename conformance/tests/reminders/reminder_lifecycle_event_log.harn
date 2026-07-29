@@ -1,15 +1,15 @@
 pipeline main(harness: Harness) {
   const topic = "transcript.reminder.lifecycle"
   const cursor = harness.obs.event_log_latest(topic)
-  const first = transcript.inject_reminder(
+  const first = harness.agent.transcript_inject_reminder(
     transcript(),
     {body: "first", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 2},
   )
-  const second = transcript.inject_reminder(
+  const second = harness.agent.transcript_inject_reminder(
     first.transcript,
     {body: "second", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 3},
   )
-  const _cleared = transcript.clear_reminders(second.transcript, {id: second.reminder_id})
+  const _cleared = harness.agent.transcript_clear_reminders(second.transcript, {id: second.reminder_id})
   const stream = harness.obs.event_log_subscribe(
     {topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."},
   )

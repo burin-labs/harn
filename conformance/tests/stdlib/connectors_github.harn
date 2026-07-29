@@ -49,5 +49,5 @@ pipeline test(harness: Harness, task) {
   const writeback = forge_writeback_request(forge, "Preview ready")
   assert_eq(writeback.method, "issues.create_comment", "forge writeback method")
   assert_eq(writeback.params.issue_number, 24, "forge writeback issue number")
-  harness.stdio.println("github stdlib ok")
+  harness.stdio.log("github stdlib ok")
 }

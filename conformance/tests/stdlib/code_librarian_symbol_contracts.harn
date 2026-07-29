@@ -49,8 +49,8 @@ fn member_names(surface: LibrarianMemberSurface) -> list<string> {
 
 pipeline default(harness: Harness) {
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_code_librarian_contracts_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_code_librarian_contracts_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   seed_cpp(harness, root)

@@ -15,5 +15,5 @@ pub fn deploy_activate() -> string {
 
 pipeline test_acp_skill(harness: Harness, task) {
   assert(deploy_activate() == "ready", "function still callable")
-  harness.stdio.println("attributes_acp_skill ok")
+  harness.stdio.log("attributes_acp_skill ok")
 }

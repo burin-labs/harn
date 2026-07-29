@@ -16,7 +16,7 @@ pipeline main(harness: Harness) {
   probe(harness, "unknown tool name", "fictitious_tool({ x: 1 })", sample_registry())
   // The same unknown name alongside a call that DOES parse. The valid call
   // still dispatches.
-  probe(harness,  harness, "unknown tool name beside a valid call",
+  probe(harness, "unknown tool name beside a valid call",
     """fictitious_tool({ x: 1 })
 edit({ action: "create", path: "a.go" })""",
     sample_registry(),
@@ -39,21 +39,21 @@ edit({ action: "create", path: "a.go" })""",
   probe(harness, "unknown label prefix on a known tool", "Hint: run({ command: \"ls\" })", sample_registry())
   // The guardrail against false positives: the same prefix shape where the
   // identifier is NOT a known tool must not fire the near-miss diagnostic.
-  probe(harness,  harness, "unknown label prefix on an unknown identifier",
+  probe(harness, "unknown label prefix on an unknown identifier",
     "Note: make_coffee({ strength: \"strong\" })",
     sample_registry(),
   )
   // A raw multi-line body pasted after `content:` is the dominant cause of
   // "unexpected character starting a value" from weak models. The error must
   // name the heredoc recovery and show the `<<` marker.
-  probe(harness,  harness, "raw multi-line body teaches the heredoc",
+  probe(harness, "raw multi-line body teaches the heredoc",
     """edit({ action: "replace_range", path: "a.zig", content: // helper
 } })""",
     sample_registry(),
   )
   // Truncated mid-object: the model hit its token limit before the closing
   // brace. The diagnostic names the tool.
-  probe(harness,  harness, "unclosed object literal",
+  probe(harness, "unclosed object literal",
     "edit({ action: \"create\", path: \"a.go\", content: `hello",
     sample_registry(),
   )
@@ -63,13 +63,13 @@ edit({ action: "create", path: "a.go" })""",
   probe(harness, "object literal parse error preview", "edit({ action: })", sample_registry())
   // The legacy named-argument call form is rejected in favour of strict
   // object-literal syntax.
-  probe(harness,  harness, "legacy named argument form",
+  probe(harness, "legacy named argument form",
     "edit(action=\"replace_body\", path=\"a.go\", new_body=`return 1`)",
     sample_registry(),
   )
   // Over-recovery guard for the omitted-`)` rescue: a complete object followed
   // by stray words is a hard parse error, not a recoverable call.
-  probe(harness,  harness, "omitted paren recovery rejects trailing garbage",
+  probe(harness, "omitted paren recovery rejects trailing garbage",
     "edit({ action: \"create\", path: \"a.rs\" } and then some stray words",
     sample_registry(),
   )

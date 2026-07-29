@@ -1,6 +1,6 @@
 pipeline test(harness: Harness, task) {
   // Suppress structured log output from trace_end
-  log_set_level("error")
+  harness.obs.set_level("error")
   // trace_id is nil when no active span
   assert_eq(harness.obs.trace_id(), nil)
   const span = harness.obs.trace_start("my_op")
@@ -13,6 +13,6 @@ pipeline test(harness: Harness, task) {
   // After ending, trace_id is nil again
   assert_eq(harness.obs.trace_id(), nil)
   // Restore log level for final assertion output
-  log_set_level("debug")
-  harness.stdio.println("trace ok")
+  harness.obs.set_level("debug")
+  harness.stdio.log("trace ok")
 }

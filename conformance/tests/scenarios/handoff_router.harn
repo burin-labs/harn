@@ -32,15 +32,19 @@ pipeline main(harness: Harness) {
   }
   const routed = handoff_routed(harness, seed, routes, {})
   const dispatch = handoff_dispatch(
+    harness,
     routed,
     nil,
     {dispatchers: {review_captain: review_captain_mock}},
   )
-  const exhausted = handoff_routed(harness,  harness, seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
+  const exhausted = handoff_routed(
+    harness,
+    seed + {budget_remaining: {tokens: 0, tool_calls: 0}},
     routes,
     {budget_exhausted: true},
   )
   const run = workflow_result_run(
+    harness,
     "Route merge receipt handoff",
     "merge_captain",
     {visible_text: "handoff routed"},

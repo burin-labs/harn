@@ -264,7 +264,12 @@ fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 /// The runtime representation is deliberately the canonical Harn list value;
 /// `tuple<T0, ...>` is a checked static/runtime-boundary refinement, not a
 /// second collection hierarchy.
-#[harn_builtin(sig = "tuple(...items: any) -> list", category = "types")]
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tuple(...items: any) -> list",
+    category = "types"
+)]
 fn tuple_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::List(std::sync::Arc::new(args.to_vec())))
 }
@@ -290,8 +295,8 @@ fn len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 // `==` is structural. `is_same` is identity (Arc::ptr_eq for heap values);
 // for primitive scalars it reduces to structural equality.
 #[harn_builtin(
-    exposure = "pure",
-    effects = [],
+    exposure = "capability_arg:0",
+    effects = ["state.observe@arg0"],
     sig = "is_same(a: any, b: any) -> bool", category = "types"
 )]
 fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -304,8 +309,8 @@ fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 // allocations. For hashing by identity rather than structure; primitives
 // return their display() text.
 #[harn_builtin(
-    exposure = "pure",
-    effects = [],
+    exposure = "capability_arg:0",
+    effects = ["state.observe@arg0"],
     sig = "addr_of(value: any) -> string", category = "types"
 )]
 fn addr_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

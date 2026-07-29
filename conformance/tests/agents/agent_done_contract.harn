@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { agent_done_contract } from "std/agent/judge"
 import { llm_text, with_llm_script } from "std/testing"
@@ -24,7 +25,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session_id = "done-contract-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session_id,
+      const captured = agent_capture_events(harness, session_id,
         fn() { return agent_loop(harness, "Add page-cache tests for fetch, cached fetch, LRU eviction, dirty flush, and pinned-page prevention.",
           nil,
           {

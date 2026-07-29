@@ -16,7 +16,7 @@ import { probe_drops, sample_registry } from "_tool_parse_probe"
 pipeline main(harness: Harness) {
   // An unknown dialect inside a fence, naming a tool the registry never heard
   // of: no call can be recovered, so the bytes must be recorded.
-  probe_drops(harness,  harness, "fenced unknown dialect, unregistered tool",
+  probe_drops(harness, "fenced unknown dialect, unregistered tool",
     """```
 <tool>
 search({ query: "x" })
@@ -25,7 +25,7 @@ search({ query: "x" })
     sample_registry(),
   )
   // A dialect nobody has named, caught because it is SHAPED like an invocation.
-  probe_drops(harness,  harness, "invented fenced dialect",
+  probe_drops(harness, "invented fenced dialect",
     """```
 <perform_action>
 search({ query: "x" })
@@ -34,7 +34,7 @@ search({ query: "x" })
     sample_registry(),
   )
   // Bare/native JSON across lines inside a fence, naming an unknown tool.
-  probe_drops(harness,  harness, "fenced json naming an unknown tool",
+  probe_drops(harness, "fenced json naming an unknown tool",
     """```
 {
   "name": "search",
@@ -44,7 +44,7 @@ search({ query: "x" })
     sample_registry(),
   )
   // Fenced source code is consumed as narration and still recorded.
-  probe_drops(harness,  harness, "fenced source code",
+  probe_drops(harness, "fenced source code",
     """```rust
 fn main() { println!("hi"); }
 ```""",
@@ -53,7 +53,7 @@ fn main() { println!("hi"); }
   // An unknown tool name at top level.
   probe_drops(harness, "unknown tool at top level", "fictitious_tool({ x: 1 })", sample_registry())
   // A truncated heredoc: several fragments, none of them a call.
-  probe_drops(harness,  harness, "truncated heredoc body",
+  probe_drops(harness, "truncated heredoc body",
     """edit({
     action: "create",
     path: "main.go",
@@ -65,7 +65,7 @@ func main() {
     sample_registry(),
   )
   // A fenced call the sniffer CAN execute is not a drop: the call ran.
-  probe_drops(harness,  harness, "fenced call naming a registered tool",
+  probe_drops(harness, "fenced call naming a registered tool",
     """```
 <tool>
 edit({ action: "create", path: "a.rs" })
@@ -74,7 +74,7 @@ edit({ action: "create", path: "a.rs" })
     sample_registry(),
   )
   // A well-formed call consumes nothing unaccounted for.
-  probe_drops(harness,  harness, "well formed wrapped call",
+  probe_drops(harness, "well formed wrapped call",
     """<tool_call>
 edit({ action: "create", path: "a.rs", content: "x" })
 </tool_call>""",

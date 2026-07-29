@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // The goal renders into the OUTBOUND request via the existing system-prompt
 // fragment reducer (with_goal -> with_system_fragments), with no new hook
 // surface. A capturing mock caller echoes the assembled system prompt back so we
@@ -38,5 +39,5 @@ pipeline test(harness: Harness) {
     result.visible_text.contains("Answer with the codeword PIXEL"),
     "objective must appear in the outbound request",
   )
-  harness.stdio.println("agent goal fragment test passed")
+  harness.stdio.log("agent goal fragment test passed")
 }

@@ -44,6 +44,7 @@ pub type HostAttachmentDescriptionOptions = {
 }
 
 fn __host_attachment_description_route(
+  harness: Harness,
   options: HostAttachmentDescriptionOptions,
 ) -> {provider?: string, model: string}? {
   if options.model != nil && options.model != "" {
@@ -53,7 +54,8 @@ fn __host_attachment_description_route(
     return {provider: options.provider, model: options.model}
   }
   const candidates = models_with(
-    harness, {strengths: ["vision"], available_only: true, exclude_deprecated: true},
+    harness,
+    {strengths: ["vision"], available_only: true, exclude_deprecated: true},
   )
   if len(candidates) == 0 {
     return nil
@@ -69,18 +71,22 @@ fn __host_attachment_description_route(
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn describe_host_attachment(harness: Harness, 
+pub fn describe_host_attachment(
+  harness: Harness,
   source: any,
   options: HostAttachmentDescriptionOptions = {},
 ) -> {description: string, description_model: string}? {
-  const route = __host_attachment_description_route(options)
+  const route = __host_attachment_description_route(harness, options)
   if route == nil {
     return nil
   }
   const prompt = options.prompt
     ?? "Describe this image precisely for a coding agent. Preserve visible text, state, errors, and spatial relationships."
   const messages = [
-    {role: "user", content: [text_content(prompt), image_content(harness, source, options.image ?? {})]},
+    {
+      role: "user",
+      content: [text_content(prompt), image_content(harness, source, options.image ?? {})],
+    },
   ]
   const result = try {
     if route.provider == nil {
@@ -109,7 +115,8 @@ pub fn describe_host_attachment(harness: Harness,
  * @effects: [llm.call]
  * @errors: []
  */
-pub fn prepare_host_attachment(harness: Harness, 
+pub fn prepare_host_attachment(
+  harness: Harness,
   payload: HostAttachmentPayload,
   source: any,
   options: HostAttachmentDescriptionOptions = {},
@@ -130,7 +137,8 @@ pub fn prepare_host_attachment(harness: Harness,
  * @effects: [host]
  * @errors: [runtime]
  */
-pub fn inject_host_tool_result(harness: Harness, 
+pub fn inject_host_tool_result(
+  harness: Harness,
   session_id: string,
   payload: HostToolResultPayload,
   provenance: HostInjectionProvenance,
@@ -153,7 +161,8 @@ pub fn inject_host_tool_result(harness: Harness,
  * @effects: [host]
  * @errors: [runtime]
  */
-pub fn inject_host_attachment(harness: Harness, 
+pub fn inject_host_attachment(
+  harness: Harness,
   session_id: string,
   payload: HostAttachmentPayload,
   provenance: HostInjectionProvenance,

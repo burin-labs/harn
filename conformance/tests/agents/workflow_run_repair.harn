@@ -14,7 +14,7 @@ pipeline default(harness: Harness) {
   const verifier = { r ->
     return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]}
   }
-  const out = workflow_run_repair(harness,  harness, {task: "Z", model_policy: {provider: "mock"}, verify: verifier, max_attempts: 2},
+  const out = workflow_run_repair(harness, {task: "Z", model_policy: {provider: "mock"}, verify: verifier, max_attempts: 2},
   )
   harness.stdio.println(out.ok)
   harness.stdio.println(len(out.attempts))
@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(out.text, token))
   // Attempt count is honored: a never-satisfiable verifier with max_attempts: 1
   // stops after exactly one attempt (no runaway loop) and surfaces findings.
-  const capped = workflow_run_repair(harness,  harness, {
+  const capped = workflow_run_repair(harness, {
       task: "unsatisfiable",
       model_policy: {provider: "mock"},
       verify: { r -> return {ok: false, findings: ["never satisfied"]} },

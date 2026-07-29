@@ -49,8 +49,8 @@
  * outstanding poll.
  *
  * Concurrency / time mocking: the polling sleep routes through the
- * standard `sleep(ms)` builtin and so honors `mock_time(...)` /
- * `advance_time(...)` in tests.
+ * standard `sleep(ms)` builtin and so honors `harness.testing.clock_set(...)` /
+ * `harness.testing.clock_advance(...)` in tests.
  */
 import { JsonParseFailure } from "std/json"
 

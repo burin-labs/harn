@@ -225,7 +225,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 fn checkpoint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     let value = args.get(1).unwrap_or(&VmValue::Nil);
-    let json_val = vm_to_json(value);
+    let json_val = vm_to_json(value)?;
     with_state("checkpoint", |state| {
         state.set(key, json_val).map_err(VmError::Runtime)
     })?;

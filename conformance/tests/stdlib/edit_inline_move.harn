@@ -13,42 +13,75 @@ fn write_fixture(harness: Harness, dir: string, name: string, body: string) -> s
 
 pipeline default(harness: Harness) {
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_edit_inline_move_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_edit_inline_move_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   // 1) Rust inline: replace both calls with the body expr, delete the def.
-  const rs_path = write_fixture(harness, 
+  const rs_path = write_fixture(
+    harness,
     root,
     "answer.rs",
     "fn answer() -> i64 {\n    return 42\n}\nfn user() {\n    let a = answer();\n    let b = answer();\n}\n",
   )
-  const rs_inline = edit_inline(harness.fs, {path: rs_path, symbol: {name: "answer"}})
+  const rs_inline = edit_inline(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: rs_path, symbol: {name: "answer"}},
+  )
   harness.stdio.println(rs_inline.result)
   const rs_after = harness.fs.read_text(rs_path)
   harness.stdio.println(contains(rs_after, "let a = (42);"))
   harness.stdio.println(contains(rs_after, "let b = (42);"))
   harness.stdio.println(!contains(rs_after, "fn answer"))
   // 2) Python inline.
-  const py_path = write_fixture(harness, root, "answer.py", "def answer():\n    return 42\n\nx = answer()\n")
-  const py_inline = edit_inline(harness.fs, {path: py_path, symbol: {name: "answer"}})
+  const py_path = write_fixture(
+    harness,
+    root,
+    "answer.py",
+    "def answer():\n    return 42\n\nx = answer()\n",
+  )
+  const py_inline = edit_inline(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: py_path, symbol: {name: "answer"}},
+  )
   harness.stdio.println(py_inline.result)
   harness.stdio.println(contains(harness.fs.read_text(py_path), "x = (42)"))
   harness.stdio.println(!contains(harness.fs.read_text(py_path), "def answer"))
   // 3) Unsupported: parameterized function.
-  const inc_path = write_fixture(harness, root, "inc.py", "def inc(n):\n    return n + 1\n\ny = inc(1)\n")
-  harness.stdio.println(edit_inline(harness.fs, {path: inc_path, symbol: {name: "inc"}}).result)
+  const inc_path = write_fixture(
+    harness,
+    root,
+    "inc.py",
+    "def inc(n):\n    return n + 1\n\ny = inc(1)\n",
+  )
+  harness.stdio.println(
+    edit_inline(harness.fs, harness.random, harness.ast, {path: inc_path, symbol: {name: "inc"}})
+      .result,
+  )
   // 4) Unsupported: multi-statement body.
   const two_path = write_fixture(harness, root, "two.py", "def two():\n    a = 1\n    return a\n")
-  harness.stdio.println(edit_inline(harness.fs, {path: two_path, symbol: {name: "two"}}).result)
+  harness.stdio.println(
+    edit_inline(harness.fs, harness.random, harness.ast, {path: two_path, symbol: {name: "two"}})
+      .result,
+  )
   // 5) move_decl: lift `helper` from a.py into b.py atomically (two files).
-  const a_path = write_fixture(harness, 
+  const a_path = write_fixture(
+    harness,
     root,
     "a.py",
     "import os\n\ndef helper(x):\n    return x + 1\n\ndef main():\n    return helper(2)\n",
   )
   const b_path = write_fixture(harness, root, "b.py", "# target\n")
-  const mv = edit_move_decl(harness.fs, {path: a_path, symbol: {name: "helper"}, target_file: b_path})
+  const mv = edit_move_decl(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: a_path, symbol: {name: "helper"}, target_file: b_path},
+  )
   harness.stdio.println(mv.result)
   harness.stdio.println(mv.summary.files_touched == 2)
   const a_after = harness.fs.read_text(a_path)
@@ -59,5 +92,12 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(b_after, "    return x + 1"))
   harness.stdio.println(len(mv.warnings) >= 1)
   // 6) move_decl conflict: symbol not present.
-  harness.stdio.println(edit_move_decl(harness.fs, {path: a_path, symbol: {name: "nope"}, target_file: b_path}).result)
+  harness.stdio.println(
+    edit_move_decl(
+      harness.fs,
+      harness.random,
+      harness.ast,
+      {path: a_path, symbol: {name: "nope"}, target_file: b_path},
+    ).result,
+  )
 }

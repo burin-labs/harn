@@ -12,5 +12,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(sum([]), 0)
   assert_error_contains({ -> sum([1, "2"]) }, "items must contain only numbers or nil")
   assert_eq(avg([2, 4, 6]), 4)
-  harness.stdio.println("stdlib math ok")
+  harness.stdio.log("stdlib math ok")
 }

@@ -1,7 +1,7 @@
 fn main(harness: Harness) {
-  harness.stdio.println(harness.random.gen_range(0, 0))
-  harness.stdio.println(harness.random.gen_range(42, 42))
-  const value = harness.random.gen_range(0, 100)
+  harness.stdio.println(harness.random.range(0, 0))
+  harness.stdio.println(harness.random.range(42, 42))
+  const value = harness.random.range(0, 100)
   harness.stdio.println(value >= 0 && value <= 100)
   const elements = [1, 2, 3]
   const picked = harness.random.choice(elements)

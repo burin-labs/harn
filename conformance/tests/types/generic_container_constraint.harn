@@ -13,7 +13,7 @@ pipeline test(harness: Harness, task) {
   }
   fn show_all<T>(items: list<T>) where T: Printable {
     for item in items {
-      harness.stdio.println(item.label())
+      harness.stdio.log(item.label())
     }
   }
   const items = [Item({name: "alpha"}), Item({name: "beta"})]

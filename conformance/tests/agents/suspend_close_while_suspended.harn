@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 /**
@@ -27,12 +28,12 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park, get closed, reject resume.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       harness.stdio.println("pre_close_status=" + suspended.status)
-      const closed = close_agent(handle)
+      const closed = close_agent(harness.agent, handle)
       harness.stdio.println("post_close_status=" + closed.status)
       const resume_attempt = try {
-        resume_agent(handle)
+        resume_agent(harness.agent, handle)
       }
       harness.stdio.println("resume_failed=" + to_string(is_err(resume_attempt)))
       harness.stdio.println(
@@ -41,7 +42,7 @@ pipeline main(harness: Harness) {
           contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010"),
         ),
       )
-      const closed_again = close_agent(handle)
+      const closed_again = close_agent(harness.agent, handle)
       harness.stdio.println("reclose_status=" + closed_again.status)
     },
   )

@@ -31,7 +31,7 @@ pipeline default(harness: Harness) {
         conditions: {trigger: {kind: "review.approved", provider: "github"}},
       }
       const result = chain(harness, suspension)
-      const audits = lifecycle_audit_log_take()
+      const audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("mechanism=" + result.mechanism)
       harness.stdio.println("handled=" + to_string(result.handled))
       harness.stdio.println("audit_count=" + to_string(len(audits)))
@@ -40,7 +40,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println("second_kind=" + audits[1].kind)
       harness.stdio.println("second_mechanism=" + audits[1].payload.mechanism)
       const fallback = invoke_resume_by(nil, harness, suspension)
-      const fallback_audits = lifecycle_audit_log_take()
+      const fallback_audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("nil_fallback_mechanism=" + fallback.mechanism)
       harness.stdio.println("nil_fallback_kind=" + fallback_audits[0].kind)
       return return_value

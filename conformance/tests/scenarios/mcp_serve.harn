@@ -10,7 +10,7 @@ pipeline test(harness: Harness, task) {
     {parameters: {text: "string"}, handler: { args -> args.text }},
   )
   // mcp_serve stores the registry and returns nil
-  const result = mcp_serve(tools)
+  const result = harness.tools.mcp_tools(tools)
   assert(result == nil, "mcp_serve should return nil")
-  harness.stdio.println("mcp_serve accepted tool_registry")
+  harness.stdio.log("mcp_serve accepted tool_registry")
 }

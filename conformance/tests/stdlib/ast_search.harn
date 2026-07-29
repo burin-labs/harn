@@ -72,8 +72,8 @@ pipeline default(harness: Harness) {
   harness.stdio.println(capped.matches[1].captures.lit.text == "2")
   // 5) File-path input: grammar is inferred from the extension.
   const root = path_join(
-    harness.fs.temp_dir(),
-    "harn_ast_search_" + to_string(harness.random.gen_range(100000, 999999)),
+    harness.fs.workspace_temp_dir(),
+    "harn_ast_search_" + to_string(harness.random.range(100000, 999999)),
   )
   harness.fs.mkdir(root)
   const go_path = write_fixture(harness, 

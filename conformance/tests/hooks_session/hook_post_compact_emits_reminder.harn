@@ -19,7 +19,7 @@ pipeline main(harness: Harness) {
     },
   )
   const snapshot = harness.agent.snapshot(session) ?? {}
-  transcript_compact(snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  harness.agent.compact_transcript(snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   const events = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
   // Two reminders fire post-compact: our hook reminder plus the built-in
   // compaction recap. Assert ours is present and tagged correctly.

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { with_llm_script } from "std/testing"
 
@@ -39,7 +40,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "denial-loop-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Keep trying to write the note.",
           nil,
           {

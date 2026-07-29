@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /* Verifies the per-session cap on `verify_completion_judge` veto loops:
    - a judge that always vetoes stops firing once `max_invocations` is hit,
      finalizing as `verify_capped` with stop_reason `completion_judge_cap_reached`,
@@ -38,7 +39,7 @@ fn run_capped(harness: Harness) {
     ],
     { ->
       const session_id = "verify-judge-cap-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session_id,
+      const captured = agent_capture_events(harness, session_id,
         fn() { return agent_loop(harness, "Judge keeps vetoing.",
           nil,
           {
@@ -109,7 +110,7 @@ fn run_cap_disabled(harness: Harness) {
     ],
     { ->
       const session_id = "verify-judge-disabled-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session_id,
+      const captured = agent_capture_events(harness, session_id,
         fn() { return agent_loop(harness, "Cap disabled; rely on max_verify_attempts.",
           nil,
           {
@@ -146,7 +147,7 @@ fn run_diagnosis_recovery(harness: Harness) {
     ],
     { ->
       const session_id = "verify-judge-diagnosis-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session_id,
+      const captured = agent_capture_events(harness, session_id,
         fn() { return agent_loop(harness, "Recover from malformed tool calls.",
           nil,
           {

@@ -1,7 +1,7 @@
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
 fn fixture(harness: Harness, name) {
-  const root = harness.fs.project_root() ?? cwd()
+  const root = harness.fs.workspace_root()
   return json_parse(
     harness.fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
   )

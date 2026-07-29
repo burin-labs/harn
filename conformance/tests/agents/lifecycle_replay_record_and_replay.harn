@@ -3,12 +3,12 @@
  *
  * Round-trip: a suspend → resume → drain sequence captured to a journal
  * must produce a byte-identical receipt snapshot when the same script
- * runs a second time under `mock_time(...)`. The snapshot is the
+ * runs a second time under `harness.testing.clock_set(...)`. The snapshot is the
  * primary deterministic surface — `harness.agent.lifecycle_receipts_snapshot()`
  * returns the seq-ordered entries that the replay oracle compares.
  */
 pipeline default(harness: Harness) {
-  const _ = mock_time(1700000000000)
+  const _ = harness.testing.clock_set(1700000000000)
   const suspension = harness.agent.lifecycle_receipt_record_suspension(
     {
       handle: "worker://triage/42",
@@ -60,6 +60,6 @@ pipeline default(harness: Harness) {
   harness.stdio.println("suspension_entry_seq=" + to_string(suspension.seq))
   harness.stdio.println("resumption_entry_seq=" + to_string(resumption.seq))
   harness.stdio.println("drain_entry_seq=" + to_string(drain.seq))
-  const _ = unmock_time()
+  const _ = harness.testing.clock_reset()
   return "ok"
 }

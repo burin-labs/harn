@@ -17,10 +17,10 @@ pipeline test(harness: Harness, task) {
     }
     return "other"
   }
-  harness.stdio.println(describe("hi"))
-  harness.stdio.println(describe(41))
-  harness.stdio.println(describe(nil))
-  harness.stdio.println(describe([1, 2]))
+  harness.stdio.log(describe("hi"))
+  harness.stdio.log(describe(41))
+  harness.stdio.log(describe(nil))
+  harness.stdio.log(describe([1, 2]))
   // Guard-based narrowing applies too.
   fn must_be_string(v: unknown) -> string {
     guard type_of(v) == "string" else {
@@ -28,6 +28,6 @@ pipeline test(harness: Harness, task) {
     }
     return "ok:${v}"
   }
-  harness.stdio.println(must_be_string("x"))
-  harness.stdio.println(must_be_string(7))
+  harness.stdio.log(must_be_string("x"))
+  harness.stdio.log(must_be_string(7))
 }

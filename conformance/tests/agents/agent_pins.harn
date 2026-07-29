@@ -69,8 +69,8 @@ pipeline test(harness: Harness) {
       {role: "assistant", content: "four"},
     ],
   )
-  const pinned = transcript.inject_reminder(base, pin_reminder(harness, goal_pin)).transcript
-  const compacted = transcript_compact(
+  const pinned = harness.agent.transcript_inject_reminder(base, pin_reminder(harness, goal_pin)).transcript
+  const compacted = harness.agent.compact_transcript(
     pinned,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )
@@ -92,5 +92,5 @@ pipeline test(harness: Harness) {
     without_pin.redacted_count > with_pin.redacted_count,
     "pin root keeps referenced stale result alive",
   )
-  harness.stdio.println("agent pins tests passed")
+  harness.stdio.log("agent pins tests passed")
 }

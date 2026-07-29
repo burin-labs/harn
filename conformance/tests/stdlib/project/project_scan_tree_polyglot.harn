@@ -1,7 +1,7 @@
 import "std/project"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "polyglot_tree")
+  const root = path_join(harness.fs.workspace_temp_dir(), "polyglot_tree")
   harness.fs.mkdir(path_join(root, "frontend/src"))
   harness.fs.mkdir(path_join(root, "backend/src"))
   harness.fs.write_text(path_join(root, "frontend/package.json"), "{\"name\":\"frontend\"}\n")

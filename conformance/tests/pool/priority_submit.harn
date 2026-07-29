@@ -34,9 +34,9 @@ pipeline default(harness: Harness) {
   //   mid        (priority 5, submitted before mid_second)
   //   mid_second (priority 5, FIFO tiebreak)
   //   low        (priority 0)
-  harness.stdio.println(results[0].result)  // warmup     -> 0
-  harness.stdio.println(results[3].result)  // high       -> 1
-  harness.stdio.println(results[2].result)  // mid        -> 2
-  harness.stdio.println(results[4].result)  // mid_second -> 3
-  harness.stdio.println(results[1].result)  // low        -> 4
+  harness.stdio.log(results[0].result)  // warmup     -> 0
+  harness.stdio.log(results[3].result)  // high       -> 1
+  harness.stdio.log(results[2].result)  // mid        -> 2
+  harness.stdio.log(results[4].result)  // mid_second -> 3
+  harness.stdio.log(results[1].result)  // low        -> 4
 }

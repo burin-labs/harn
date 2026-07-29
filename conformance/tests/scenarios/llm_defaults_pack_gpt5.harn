@@ -6,5 +6,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(r.provider, "openai")
   // The policy patch overrides medium scale calibration.
   assert_eq(r.effort, "high")
-  harness.stdio.println("llm_defaults_pack_gpt5 passed")
+  harness.stdio.log("llm_defaults_pack_gpt5 passed")
 }

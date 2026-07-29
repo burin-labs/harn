@@ -2,5 +2,5 @@ pipeline test(harness: Harness, task) {
   let x = )
   const y = 42
   const z = )
-  harness.stdio.println(y)
+  harness.stdio.log(y)
 }

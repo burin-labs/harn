@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -14,7 +15,7 @@ import { llm_text, with_llm_script } from "std/testing"
  * registration (see `register_auto_resume_trigger`).
  */
 pipeline main(harness: Harness) {
-  const _ = mock_time(1700000000000)
+  const _ = harness.testing.clock_set(1700000000000)
   with_llm_script(
     harness.llm, [
       {
@@ -38,19 +39,19 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park until the review timeout fires.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       harness.stdio.println("status=" + suspended.status)
       harness.stdio.println(
         "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
       )
-      const _ = advance_time(6 * 60 * 1000)
+      const _ = harness.testing.clock_advance(6 * 60 * 1000)
       harness.runtime.yield_now()
       harness.runtime.yield_now()
       harness.runtime.yield_now()
-      const resumed = wait_agent(handle)
+      const resumed = wait_agent(harness.agent, handle)
       harness.stdio.println("post_timeout_status=" + resumed.status)
       harness.stdio.println("has_transcript=" + to_string(resumed.has_transcript))
-      const _ = unmock_time()
+      const _ = harness.testing.clock_reset()
     },
   )
 }

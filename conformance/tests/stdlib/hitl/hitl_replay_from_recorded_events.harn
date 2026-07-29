@@ -1,5 +1,4 @@
 import "std/hitl"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 import "std/triggers"
 
 pub fn hitl_handler(harness: Harness, event: TriggerEvent) -> dict {
@@ -21,11 +20,10 @@ pub fn hitl_handler(harness: Harness, event: TriggerEvent) -> dict {
 }
 
 pipeline test(harness: Harness, task) {
-  clear_host_mocks()
-  mock_host_response("hitl", "question", {answer: {verdict: "approved"}})
-  mock_host_response(
-    "hitl",
-    "approval",
+  harness.testing.clear()
+  harness.testing.respond("interaction", "question_response", {answer: {verdict: "approved"}})
+  harness.testing.respond(
+    "interaction", "approval_response",
     [
       {approved: true, reviewer: "alice", responded_at: "2026-04-20T12:00:00Z"},
       {approved: true, reviewer: "bob", responded_at: "2026-04-20T12:00:01Z"},
@@ -33,7 +31,7 @@ pipeline test(harness: Harness, task) {
   )
   const unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(
-    harness.random.gen_range(100000, 999999),
+    harness.random.range(100000, 999999),
   )
   const handle: TriggerHandle = harness.runtime.trigger_register(
     {
@@ -58,7 +56,7 @@ pipeline test(harness: Harness, task) {
   )
   harness.stdio.println(fired.status == "dispatched")
   harness.stdio.println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
-  clear_host_mocks()
+  harness.testing.clear()
   const replay: DispatchHandle = harness.runtime.trigger_replay(fired.event_id)
   harness.stdio.println(replay.status == "dispatched")
   harness.stdio.println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))

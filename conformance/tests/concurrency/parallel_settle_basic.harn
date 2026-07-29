@@ -6,13 +6,13 @@ pipeline test(harness: Harness, task) {
     }
     item * 10
   }
-  harness.stdio.println(outcome.succeeded)
-  harness.stdio.println(outcome.failed)
+  harness.stdio.log(outcome.succeeded)
+  harness.stdio.log(outcome.failed)
   for r in outcome.results {
     if is_ok(r) {
-      harness.stdio.println(unwrap(r))
+      harness.stdio.log(unwrap(r))
     } else {
-      harness.stdio.println(unwrap_err(r))
+      harness.stdio.log(unwrap_err(r))
     }
   }
 }

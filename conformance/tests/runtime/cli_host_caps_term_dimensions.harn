@@ -1,3 +1,4 @@
+fn main(harness: Harness) {
 // Free-builtin aliases for `harness.term.width()` and
 // `harness.term.height()`. They fall back to a default 80x24 when the
 // host cannot report terminal dimensions, so this fixture only asserts
@@ -5,3 +6,5 @@
 harness.stdio.println(harness.term.width() > 0)
 
 harness.stdio.println(harness.term.height() > 0)
+
+}

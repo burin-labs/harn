@@ -1,28 +1,28 @@
 pipeline default(harness: Harness) {
   // Connect to the test MCP echo server
-  let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = harness.env.get("HARN_BIN") ?? "harn"
   let server_path = path_join(root, "conformance/helpers/mcp_echo_server.harn")
-  let client = mcp_connect(harn_bin, ["serve", "mcp", server_path])
+  let client = harness.tools.mcp_connect(harn_bin, ["serve", "mcp", server_path])
   // Check type
   harness.stdio.println(type_of(client))
   // List tools
-  let tools = mcp_list_tools(client)
+  let tools = harness.tools.mcp_list_tools(client)
   harness.stdio.println(tools.count)
   // Get tool names
   for t in tools {
     harness.stdio.println(t.name)
   }
   // Call echo tool
-  let result = mcp_call(client, "echo", {message: "hello from harn"})
+  let result = harness.tools.mcp_call(client, "echo", {message: "hello from harn"})
   harness.stdio.println(result)
   // Call add tool
-  let sum = mcp_call(client, "add", {a: 3, b: 7})
+  let sum = harness.tools.mcp_call(client, "add", {a: 3, b: 7})
   harness.stdio.println(sum)
   // Server info
-  let info = mcp_server_info(client)
+  let info = harness.tools.mcp_server_info(client)
   harness.stdio.println(info.connected)
   harness.stdio.println(info.instructions.contains("echo server tools"))
   // Disconnect
-  mcp_disconnect(client)
+  harness.tools.mcp_disconnect(client)
 }

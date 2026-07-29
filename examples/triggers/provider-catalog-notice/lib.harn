@@ -29,7 +29,7 @@ pub fn run_provider_catalog_notice(harness: Harness, _event: TriggerEvent) -> di
   if extraction != "" {
     args = args + ["--extraction", extraction]
   }
-  const result = harness.process.spawn_captured({cmd: "harn", args: args, cwd: root})
+  const result = harness.process.run({cmd: "harn", args: args, cwd: root})
   return {
     status: if result.exit_code == 0 {
       "completed"

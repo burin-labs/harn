@@ -7,15 +7,15 @@ pipeline main(harness: Harness) {
       {role: "assistant", content: "four"},
     ],
   )
-  const kept = transcript.inject_reminder(
+  const kept = harness.agent.transcript_inject_reminder(
     base,
     {body: "keep me", dedupe_key: "keep", ttl_turns: 2, preserve_on_compact: true},
   ).transcript
-  const mixed = transcript.inject_reminder(
+  const mixed = harness.agent.transcript_inject_reminder(
     kept,
     {body: "drop me", dedupe_key: "drop", ttl_turns: 2, preserve_on_compact: false},
   ).transcript
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     mixed,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )

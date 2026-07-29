@@ -52,7 +52,7 @@ pub fn native_lib_filename(system_name: string) -> string {
 }
 
 fn host_system_name(harness: Harness) -> string {
-  const res = harness.process.spawn_captured({cmd: "uname", args: ["-s"]})
+  const res = harness.process.run({cmd: "uname", args: ["-s"]})
   if res.success {
     return res.stdout.trim()
   }
@@ -141,7 +141,7 @@ fn ensure_compiled_library(harness: Harness, root: string) {
     0.0
   }
   if target_is_stale(harness.fs.exists(parser_c), parser_c_mtime, parser_source_mtime) {
-    const generate = harness.process.spawn_captured({cmd: cli, args: ["generate"], cwd: dir})
+    const generate = harness.process.run({cmd: cli, args: ["generate"], cwd: dir})
     if !generate.success {
       emit_failure(harness, "error: failed to regenerate tree-sitter parser", generate)
       return {ok: false, code: generate.exit_code, lib_path: native}
@@ -154,7 +154,7 @@ fn ensure_compiled_library(harness: Harness, root: string) {
     0.0
   }
   if target_is_stale(harness.fs.exists(native), native_mtime, source_mtime) {
-    const build = harness.process.spawn_captured({cmd: cli, args: ["build"], cwd: dir})
+    const build = harness.process.run({cmd: cli, args: ["build"], cwd: dir})
     if !build.success {
       emit_failure(harness, "error: failed to rebuild tree-sitter shared library", build)
       return {ok: false, code: build.exit_code, lib_path: native}
@@ -247,7 +247,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("error: no positive .harn files found for tree-sitter parse sweep")
     return 1
   }
-  const mk = harness.process.spawn_captured(
+  const mk = harness.process.run(
     {cmd: "mktemp", args: ["-d", "harn-tree-sitter-paths.XXXXXX"]},
   )
   if !mk.success {
@@ -258,9 +258,9 @@ fn main(harness: Harness) -> int {
   const paths_file = path_join(scratch_dir, "paths.txt")
   harness.fs.write_text(paths_file, paths.join("\n") + "\n")
   defer {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", scratch_dir]})
+    harness.process.run({cmd: "rm", args: ["-rf", scratch_dir]})
   }
-  const result = harness.process.spawn_captured(
+  const result = harness.process.run(
     {
       cmd: path_join(dir, "scripts/tree-sitter-cli.sh"),
       args: [

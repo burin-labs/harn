@@ -5,10 +5,10 @@ import {
 } from "std/agent/state"
 
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-reminder-project-facts-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-reminder-project-facts-" + harness.random.uuid())
   const namespace = "project/facts"
   const store_opts = {root: root, namespace: namespace}
-  store_fact(harness,  harness, harness.memory, {
+  store_fact(harness, harness.memory, {
       kind: "Decision",
       claim: "Memory module reuses the BM25 scorer for fact recall",
       confidence: 0.91,
@@ -16,7 +16,7 @@ pipeline default(harness: Harness) {
     },
     store_opts + {now: "2026-05-23T10:00:00Z"},
   )
-  store_fact(harness,  harness, harness.memory, {
+  store_fact(harness, harness.memory, {
       kind: "Constraint",
       claim: "Project facts reminder runs synchronously inside the provider",
       confidence: 0.74,
@@ -24,7 +24,7 @@ pipeline default(harness: Harness) {
     },
     store_opts + {now: "2026-05-23T10:00:01Z"},
   )
-  store_fact(harness,  harness, harness.memory, {
+  store_fact(harness, harness.memory, {
       kind: "Hypothesis",
       claim: "Low-confidence facts should not auto-inject",
       confidence: 0.2,
@@ -137,7 +137,7 @@ pipeline default(harness: Harness) {
     },
   )
   harness.stdio.println(disabled.fired_count)
-  const empty_root = path_join(harness.fs.temp_dir(), "harn-reminder-project-facts-empty-" + harness.random.uuid())
+  const empty_root = path_join(harness.fs.workspace_temp_dir(), "harn-reminder-project-facts-empty-" + harness.random.uuid())
   const empty_session = harness.agent.open("reminder-provider-project-facts-empty")
   harness.agent.reset(empty_session)
   const empty = agent_reminder_providers_fire(harness, empty_session,

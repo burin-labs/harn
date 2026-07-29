@@ -21,40 +21,40 @@ pipeline default(harness: Harness) {
     {
       label: "fs",
       store: fs_cache(
-        path_join(harness.fs.temp_dir(), "harn-cache-fs-" + stamp),
+        path_join(harness.fs.workspace_temp_dir(), "harn-cache-fs-" + stamp),
         {namespace: "cache-fs-" + stamp, max_entries: 2},
       ),
     },
     {
       label: "sqlite",
       store: sqlite_cache(
-        path_join(harness.fs.temp_dir(), "harn-cache-sqlite-" + stamp + ".sqlite"),
+        path_join(harness.fs.workspace_temp_dir(), "harn-cache-sqlite-" + stamp + ".sqlite"),
         {namespace: "cache-sqlite-" + stamp, max_entries: 2},
       ),
     },
   ]
   for entry in stores {
-    cache_clear({store: entry.store})
-    cache_stats_reset({store: entry.store})
-    const miss = cache_get("k", {store: entry.store})
+    cache_clear(harness, {store: entry.store})
+    cache_stats_reset(harness, {store: entry.store})
+    const miss = cache_get(harness, "k", {store: entry.store})
     harness.stdio.println(entry.label + " miss.hit=" + to_string(miss.hit))
     harness.stdio.println(entry.label + " miss.backend=" + to_string(miss.backend))
-    cache_put("k", {answer: 42}, {store: entry.store})
-    const hit = cache_get("k", {store: entry.store})
+    cache_put(harness, "k", {answer: 42}, {store: entry.store})
+    const hit = cache_get(harness, "k", {store: entry.store})
     harness.stdio.println(entry.label + " hit.hit=" + to_string(hit.hit))
     harness.stdio.println(entry.label + " hit.value=" + json_stringify(hit.value))
     // LRU eviction: after putting 3 keys with max_entries=2, the first key
     // is evicted regardless of backend.
-    cache_put("a", "one", {store: entry.store})
-    cache_put("b", "two", {store: entry.store})
-    cache_put("c", "three", {store: entry.store})
-    const evicted = cache_get("a", {store: entry.store})
+    cache_put(harness, "a", "one", {store: entry.store})
+    cache_put(harness, "b", "two", {store: entry.store})
+    cache_put(harness, "c", "three", {store: entry.store})
+    const evicted = cache_get(harness, "a", {store: entry.store})
     harness.stdio.println(entry.label + " evicted_a=" + to_string(!evicted.hit))
-    const stats = cache_stats({store: entry.store})
+    const stats = cache_stats(harness, {store: entry.store})
     harness.stdio.println(entry.label + " stats.hits=" + to_string(stats.hits))
     harness.stdio.println(entry.label + " stats.misses=" + to_string(stats.misses))
-    cache_clear({store: entry.store})
-    const cleared = cache_get("c", {store: entry.store})
+    cache_clear(harness, {store: entry.store})
+    const cleared = cache_get(harness, "c", {store: entry.store})
     harness.stdio.println(entry.label + " cleared=" + to_string(!cleared.hit))
   }
 }

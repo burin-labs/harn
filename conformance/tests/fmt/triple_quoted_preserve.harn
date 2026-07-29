@@ -12,6 +12,6 @@ root:
   nested:
     keep: exact  
 """
-  harness.stdio.println(template)
-  harness.stdio.println(report)
+  harness.stdio.log(template)
+  harness.stdio.log(report)
 }

@@ -6,8 +6,8 @@ pipeline test(harness: Harness, task) {
   }
   const s = Status.Pending("waiting for approval")
   match s.variant {
-    "Active" -> { harness.stdio.println("active") }
-    "Inactive" -> { harness.stdio.println("inactive") }
-    "Pending" -> { harness.stdio.println("pending: ${s.fields[0]}") }
+    "Active" -> { harness.stdio.log("active") }
+    "Inactive" -> { harness.stdio.log("inactive") }
+    "Pending" -> { harness.stdio.log("pending: ${s.fields[0]}") }
   }
 }

@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn search_tools() {
@@ -46,7 +47,7 @@ pipeline main(harness: Harness) {
         {provider: "mock", background: true},
       )
       harness.stdio.println(handle?.mode == "sub_agent")
-      const done = wait_agent(handle)
+      const done = wait_agent(harness.agent, handle)
       harness.stdio.println(done?.status == "completed")
       harness.stdio.println(done?.result?.ok)
       harness.stdio.println(contains(done?.result?.summary ?? "", "background summary"))
@@ -69,7 +70,7 @@ pipeline main(harness: Harness) {
         },
       )
       harness.stdio.println(tool_handle?.mode == "sub_agent")
-      const tool_done = wait_agent(tool_handle)
+      const tool_done = wait_agent(harness.agent, tool_handle)
       harness.stdio.println(tool_done?.status == "completed")
       harness.stdio.println(tool_done?.result?.ok)
       harness.stdio.println(contains(tool_done?.result?.summary ?? "", "background tool summary"))

@@ -1,7 +1,7 @@
 import "../_common"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-orchestrator-auth-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-orchestrator-auth-" + harness.random.uuid())
   harness.fs.mkdir(root)
   harness.fs.write_text(
     path_join(root, "harn.toml"),
@@ -9,12 +9,12 @@ pipeline test(harness: Harness, task) {
   )
   harness.fs.write_text(
     path_join(root, "lib.harn"),
-    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  harness.stdio.println(event.kind)\n}\n",
+    "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  harness.stdio.log(event.kind)\n}\n",
   )
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  const start = shell_at(
+  const start = harness.process.shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key-1,test-key-2 HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
       + harn_bin
@@ -52,7 +52,7 @@ pipeline test(harness: Harness, task) {
     {body: body, headers: {"Content-Type": "application/json", Authorization: "Bearer test-key-2"}},
   )
   harness.stdio.println(bearer.status == 200)
-  const _ = shell("kill -TERM " + pid)
+  const _ = harness.process.shell("kill -TERM " + pid)
   wait_for_exit(harness, pid)
   harness.fs.delete(root)
 }

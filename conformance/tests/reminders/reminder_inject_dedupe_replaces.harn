@@ -1,9 +1,9 @@
 pipeline main(harness: Harness) {
-  const first = transcript.inject_reminder(
+  const first = harness.agent.transcript_inject_reminder(
     transcript(),
     {body: "old", dedupe_key: "slot", ttl_turns: 2},
   )
-  const second = transcript.inject_reminder(
+  const second = harness.agent.transcript_inject_reminder(
     first.transcript,
     {body: "new", dedupe_key: "slot", ttl_turns: 3},
   )

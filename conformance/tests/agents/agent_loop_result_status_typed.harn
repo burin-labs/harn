@@ -79,5 +79,5 @@ pipeline test(harness: Harness) {
   }
   assert_eq(__tool_result_product_error(diagnostics), false)
   assert_eq(__tool_result_ok(diagnostics), true)
-  harness.stdio.println("agent loop result status typed ok")
+  harness.stdio.log("agent loop result status typed ok")
 }

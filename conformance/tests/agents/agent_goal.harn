@@ -73,5 +73,5 @@ pipeline test(harness: Harness) {
   const veto = reloop.verify_completion({visible_text: "", session_id: "x", transcript: "[]"})
   assert(!veto.confirm, "unmet goal vetoes the completion")
   assert(veto.feedback.contains("CI is green"), "veto feedback carries the unmet criterion")
-  harness.stdio.println("agent goal tests passed")
+  harness.stdio.log("agent goal tests passed")
 }

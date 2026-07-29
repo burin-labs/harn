@@ -67,6 +67,6 @@ type StructuredText = {
   stats: {token_count: int, line_count: int, block_count: int},
 }
 
-pub fn ocr(image, options = nil) -> StructuredText {
-  return vision_ocr(image, options)
+pub fn ocr(system: HarnessSystem, image, options = nil) -> StructuredText {
+  return system.vision_ocr(image, options)
 }

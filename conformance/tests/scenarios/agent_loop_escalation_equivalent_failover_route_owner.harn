@@ -1,10 +1,9 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Escalated agent-loop turns do not synthesize equivalent_failover over a
  * caller-owned routing surface.
  */
 import { AgentLoopOptions } from "std/agent/options"
-
-const calls = harness.runtime.atomic(0)
 
 fn tools() {
   const r = tool_registry()
@@ -20,6 +19,7 @@ fn tools() {
 }
 
 pipeline default(harness: Harness) {
+  const calls = harness.runtime.atomic(0)
   const caller = { call ->
     let _ = harness.runtime.atomic_add(calls, 1)
     let n = harness.runtime.atomic_get(calls)

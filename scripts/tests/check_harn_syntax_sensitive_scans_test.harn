@@ -93,14 +93,14 @@ pipeline test_scan_text_reports_all_issue_classes(harness: Harness, task) {
 
 @test
 pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write_text(harness, root, "scripts/bad.harn", "const pattern = \"let\\\\s+name\"\n")
       write_text(harness, root, "docs/bad.md", "```harn\n" + "var " + "reg = tool_registry()\n```\n")
       write_text(harness, root, "docs/good.md", "```harn\nlet reg = tool_registry()\n```\n")
       const retired = "long" + "_running"
       write_text(harness, root, "schemas/bad.json", "{\"" + retired + "\":true}\n")
       write_text(harness, root, "docs/dist/generated.md", "var " + "reg = tool_registry()\n")
-      write_text(harness, 
+      write_text(harness,
         root,
         "harn-docs-snippets-AbCd/35_concurrency_8.harn",
         "var " + "reg = tool_registry()\n",
@@ -125,13 +125,13 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, t
 
 @test
 pipeline test_git_fast_path_includes_untracked_source(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
-      const initialized = harness.process.spawn_captured(
+  with_temp_dir(harness, { root ->
+      const initialized = harness.process.run(
         {cmd: "git", args: ["-C", root, "init", "--quiet"]},
       )
       assert_eq(initialized.exit_code, 0)
       write_text(harness, root, "tracked.harn", "const pattern = \"let\\\\s+tracked\"\n")
-      const staged = harness.process.spawn_captured(
+      const staged = harness.process.run(
         {cmd: "git", args: ["-C", root, "add", "tracked.harn"]},
       )
       assert_eq(staged.exit_code, 0)

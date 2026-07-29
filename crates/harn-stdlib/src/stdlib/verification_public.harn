@@ -8,7 +8,7 @@
  * can bind diagnostics and background check results to file snapshots without
  * duplicating hostlib plumbing or inventing product-specific hash logic.
  */
-import { command_cancel, command_run, command_wait } from "std/command"
+import { CommandResult, command_cancel, command_run, command_wait } from "std/command"
 import { shell_quote } from "std/runtime"
 import { regex_first_capture, truncate_text } from "std/text"
 import "std/verification_core"
@@ -142,7 +142,11 @@ pub fn verification_affected_targets(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_ladder_plan(harness: Harness, query: dict, options = nil) -> VerificationLadderPlan {
+pub fn verification_ladder_plan(
+  harness: Harness,
+  query: dict,
+  options = nil,
+) -> VerificationLadderPlan {
   const opts = __verification_opts(options)
   const matches = harness.runtime.verification_profile_matches(query, opts?.dir)
   let selected = []
@@ -216,7 +220,8 @@ pub fn verification_hud_model(harness: Harness, state: dict, options = nil) -> d
   const dir = trim(to_string(opts?.dir ?? state?.dir ?? "."))
   const query = __verification_hud_query(state, opts)
   const plan_options = __verification_hud_plan_options(dir, opts)
-  const next_plan = verification_ladder_plan(harness, 
+  const next_plan = verification_ladder_plan(
+    harness,
     query,
     plan_options + {limit: to_int(opts?.next_limit ?? 1) ?? 1},
   )
@@ -313,7 +318,8 @@ pub fn verification_hud_text(harness: Harness, model_or_state: dict, options = n
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_diagnostic_delta(harness: Harness, 
+pub fn verification_diagnostic_delta(
+  harness: Harness,
   previous,
   current,
   options = nil,
@@ -478,7 +484,8 @@ pub fn verification_diagnostic_delta(harness: Harness,
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_gate_input(harness: Harness, 
+pub fn verification_gate_input(
+  harness: Harness,
   previous,
   current,
   current_hashes = nil,
@@ -542,8 +549,9 @@ pub fn verification_gate_input(harness: Harness,
  * @errors: []
  * @api_stability: experimental
  */
-pub fn verification_observation_from_command_result(harness: Harness, 
-  result: dict,
+pub fn verification_observation_from_command_result(
+  harness: Harness,
+  result: CommandResult,
   options = nil,
 ) -> VerificationCheckObservation {
   const opts = __verification_opts(options)
@@ -579,9 +587,10 @@ pub fn verification_observation_from_command_result(harness: Harness,
  * @errors: [invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_record_check_result(harness: Harness, 
+pub fn verification_record_check_result(
+  harness: Harness,
   row_id: string,
-  result: dict,
+  result: CommandResult,
   options = nil,
 ) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
@@ -606,14 +615,20 @@ pub fn verification_record_check_result(harness: Harness,
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_run_check(harness: Harness, row_id: string, spec, options = nil) -> VerificationRecordedCheck {
+pub fn verification_run_check(
+  harness: Harness,
+  row_id: string,
+  spec,
+  options = nil,
+) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   if opts?.command_options?.background == true {
     throw "verification_run_check: background command_options are not supported; use verification_start_check"
   }
   const captured = __verification_capture_snapshot(harness.code_index, opts)
-  const result = command_run(spec, opts?.command_options)
-  const observation = verification_observation_from_command_result(harness, 
+  const result = command_run(harness.tools, spec, opts?.command_options)
+  const observation = verification_observation_from_command_result(
+    harness,
     result,
     opts + {snapshot: captured.snapshot},
   )
@@ -634,11 +649,16 @@ pub fn verification_run_check(harness: Harness, row_id: string, spec, options = 
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_start_check(harness: Harness, row_id: string, spec, options = nil) -> VerificationStartedCheck {
+pub fn verification_start_check(
+  harness: Harness,
+  row_id: string,
+  spec,
+  options = nil,
+) -> VerificationStartedCheck {
   const opts = __verification_opts(options)
   const captured = __verification_capture_snapshot(harness.code_index, opts)
   const command_options = (opts?.command_options ?? {}) + {background: true}
-  const started = command_run(spec, command_options)
+  const started = command_run(harness.tools, spec, command_options)
   return {
     row_id: row_id,
     started: started,
@@ -663,18 +683,34 @@ pub fn verification_start_check(harness: Harness, row_id: string, spec, options 
  * @errors: [backend, invalid_argument]
  * @api_stability: experimental
  */
-pub fn verification_finish_check(harness: Harness, started_check: dict, options = nil) -> VerificationRecordedCheck {
+pub fn verification_finish_check(
+  harness: Harness,
+  started_check: dict,
+  options = nil,
+) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
   const row_id = opts?.row_id ?? started_check?.row_id
   if row_id == nil || trim(to_string(row_id)) == "" {
     throw "verification_finish_check: row_id must be supplied in the receipt or options"
   }
-  const result = command_wait(started_check.started, opts?.wait_options ?? {timeout_ms: 60000})
+  const result = command_wait(
+    harness.tools,
+    started_check.started,
+    opts?.wait_options ?? {timeout_ms: 60000},
+  )
   const observation_options = (started_check?.observation_options ?? {}) + opts
-  const observation = verification_observation_from_command_result(harness, result, observation_options)
+  const observation = verification_observation_from_command_result(
+    harness,
+    result,
+    observation_options,
+  )
   let row = nil
   if opts?.record != false && started_check?.observation_options?.record != false {
-    row = harness.runtime.verification_profile_record_run(to_string(row_id), observation, observation_options?.dir)
+    row = harness.runtime.verification_profile_record_run(
+      to_string(row_id),
+      observation,
+      observation_options?.dir,
+    )
   }
   return {result: result, observation: observation, row: row, snapshot: started_check?.snapshot}
 }
@@ -698,6 +734,7 @@ pub fn verification_finish_check(harness: Harness, started_check: dict, options 
  * @api_stability: experimental
  */
 pub fn verification_toolchain_facts(
+  tools: HarnessTools,
   rows: list<dict>,
   options = nil,
 ) -> list<VerificationToolchainFact> {
@@ -710,7 +747,7 @@ pub fn verification_toolchain_facts(
     const spec = __verification_toolchain_probe(row)
     let result = nil
     if spec != nil {
-      result = command_run(spec, __verification_toolchain_probe_options(row, opts))
+      result = command_run(tools, spec, __verification_toolchain_probe_options(row, opts))
     }
     const ok = result != nil && __verification_result_ok(result)
     const raw_version = result == nil ? "" : __verification_toolchain_raw_version(result)
@@ -760,6 +797,7 @@ pub fn verification_toolchain_facts(
  * @api_stability: experimental
  */
 pub fn verification_start_warm_state(
+  tools: HarnessTools,
   row: dict,
   options = nil,
 ) -> VerificationWarmStateLifecycleReceipt {
@@ -768,7 +806,7 @@ pub fn verification_start_warm_state(
   const name = __verification_warm_state_name(row, id)
   const existing = opts?.existing ?? opts?.receipt
   const existing_handle = __verification_warm_state_receipt_handle(existing)
-  const before = __verification_warm_state_first_fact(row, opts)
+  const before = __verification_warm_state_first_fact(tools, row, opts)
   const before_warm = before?.warm ?? false
   if before_warm {
     return {
@@ -811,10 +849,11 @@ pub fn verification_start_warm_state(
     }
   }
   const started = command_run(
+    tools,
     spec,
     __verification_warm_state_start_options(row, opts) + {background: true},
   )
-  const fact = __verification_warm_state_first_fact(row, opts)
+  const fact = __verification_warm_state_first_fact(tools, row, opts)
   const fact_warm = fact?.warm ?? false
   return {
     id: id,
@@ -841,6 +880,7 @@ pub fn verification_start_warm_state(
  * @api_stability: experimental
  */
 pub fn verification_teardown_warm_state(
+  tools: HarnessTools,
   receipt: dict,
   options = nil,
 ) -> VerificationWarmStateLifecycleReceipt {
@@ -851,14 +891,16 @@ pub fn verification_teardown_warm_state(
   const handle_id = opts?.handle_id ?? __verification_warm_state_receipt_handle(receipt)
   let cancel = nil
   if handle_id != nil {
-    cancel = command_cancel(handle_id, __verification_warm_state_cancel_options(opts))
+    cancel = command_cancel(tools, handle_id, __verification_warm_state_cancel_options(opts))
   }
   const spec = __verification_warm_state_teardown_spec(row)
   let teardown = nil
   if spec != nil {
-    teardown = command_run(spec, __verification_warm_state_teardown_options(row, opts))
+    teardown = command_run(tools, spec, __verification_warm_state_teardown_options(row, opts))
   }
-  const fact = opts?.probe_after == true ? __verification_warm_state_first_fact(row, opts) : nil
+  const fact = opts?.probe_after == true
+    ? __verification_warm_state_first_fact(tools, row, opts)
+    : nil
   return {
     id: id,
     name: name,

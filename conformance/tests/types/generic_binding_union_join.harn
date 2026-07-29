@@ -6,5 +6,5 @@ pipeline test(harness: Harness, task) {
   // matching heterogeneous list-literal inference; the call is legal and
   // the value is usable as either member after narrowing.
   const joined = keep(1, "x")
-  harness.stdio.println(type_of(joined))
+  harness.stdio.log(type_of(joined))
 }

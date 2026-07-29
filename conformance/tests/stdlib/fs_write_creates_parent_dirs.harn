@@ -6,7 +6,7 @@
  * into a fresh state dir) plus the stdlib write_file / append_file variants.
  */
 pipeline default(harness: Harness) {
-  const root = path_join(harness.fs.temp_dir(), "harn-scoped-parent-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-scoped-parent-" + harness.random.uuid())
   // harness.fs.write_text into a not-yet-created nested dir (the qmode case).
   const plan_p = path_join(root, "qmode/task-1/plan.json")
   harness.fs.write_text(plan_p, "{\"plan\":\"Redis-backed\"}")

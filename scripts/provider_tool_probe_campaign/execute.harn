@@ -247,7 +247,7 @@ pub fn __run_tool_probe(
       output_dir,
       trial,
     )
-    const child = harness.process.spawn_captured(
+    const child = harness.process.run(
       {cmd: harn_bin, args: command[1:len(command)], env: env},
     )
     const stdout = child.stdout ?? ""
@@ -339,7 +339,7 @@ pub fn provider_tool_probe_campaign_scorecard_inputs(
     }
     reports = reports
       + [
-      {path: path, sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(path))},
+      {path: path, sha256: "sha256:" + sha256(harness.fs.read_bytes(path))},
     ]
   }
   const identity = {
@@ -350,7 +350,7 @@ pub fn provider_tool_probe_campaign_scorecard_inputs(
     reports: reports,
   }
   return identity
-    + {input_sha256: "sha256:" + harness.crypto.sha256(json_stringify(identity))}
+    + {input_sha256: "sha256:" + sha256(json_stringify(identity))}
 }
 
 pub fn provider_tool_probe_campaign_source_receipt(harness: Harness) -> dict {
@@ -369,11 +369,11 @@ pub fn provider_tool_probe_campaign_source_receipt(harness: Harness) -> dict {
     if harness.fs.exists(path) {
       files = files
         + [
-        {path: path, sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(path))},
+        {path: path, sha256: "sha256:" + sha256(harness.fs.read_bytes(path))},
       ]
     }
   }
-  return {files: files, source_sha256: "sha256:" + harness.crypto.sha256(json_stringify(files))}
+  return {files: files, source_sha256: "sha256:" + sha256(json_stringify(files))}
 }
 
 pub fn provider_tool_probe_campaign_write_scorecard(
@@ -410,7 +410,7 @@ pub fn provider_tool_probe_campaign_write_scorecard(
   for report in inputs.reports {
     args = args + ["--tool-probe-report", report.path]
   }
-  const json_child = harness.process.spawn_captured(
+  const json_child = harness.process.run(
     {cmd: harn_bin, args: args + ["--json"], env: env},
   )
   if json_child.exit_code != 0 || trim(json_child.stdout ?? "") == "" {
@@ -431,7 +431,7 @@ pub fn provider_tool_probe_campaign_write_scorecard(
     }
   }
   harness.fs.write_text(scorecard_json, json_child.stdout)
-  const markdown_child = harness.process.spawn_captured(
+  const markdown_child = harness.process.run(
     {cmd: harn_bin, args: args + ["--markdown"], env: env},
   )
   if markdown_child.exit_code == 0 && trim(markdown_child.stdout ?? "") != "" {
@@ -452,14 +452,14 @@ pub fn provider_tool_probe_campaign_write_scorecard(
     input_manifest: input_manifest,
     input_sha256: inputs.input_sha256,
     scorecard_json: scorecard_json,
-    scorecard_json_sha256: "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(scorecard_json)),
+    scorecard_json_sha256: "sha256:" + sha256(harness.fs.read_bytes(scorecard_json)),
     scorecard_markdown: if markdown_child.exit_code == 0 {
       scorecard_markdown
     } else {
       ""
     },
     scorecard_markdown_sha256: if markdown_child.exit_code == 0 {
-      "sha256:" + harness.crypto.sha256(harness.fs.read_bytes(scorecard_markdown))
+      "sha256:" + sha256(harness.fs.read_bytes(scorecard_markdown))
     } else {
       ""
     },

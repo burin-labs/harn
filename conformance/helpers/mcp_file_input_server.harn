@@ -19,11 +19,11 @@ fn decode_data_uri(value: string) -> dict {
 }
 
 pipeline default(harness: Harness) {
-  harn.mcp
-    .configure(
+  harness.tools
+    .mcp_configure(
     {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},
   )
-  mcp_server_metadata({name: "test-file-input-server", version: "1.0.0"})
+  harness.tools.mcp_server_metadata({name: "test-file-input-server", version: "1.0.0"})
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -31,8 +31,8 @@ pipeline default(harness: Harness) {
     "Inspect an inline MCP file input.",
     {
       parameters: {
-        upload: harn.mcp
-          .file_input({accept: ["text/*"], max_size: 64}),
+        upload: harness.tools
+          .mcp_file_input({accept: ["text/*"], max_size: 64}),
       },
       handler: { args ->
         let decoded = decode_data_uri(args.upload)
@@ -47,5 +47,5 @@ pipeline default(harness: Harness) {
       },
     },
   )
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 }

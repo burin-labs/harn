@@ -1,7 +1,7 @@
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(500ms)
-  harness.stdio.println(5s)
-  harness.stdio.println(2m)
-  harness.stdio.println(1h)
-  harness.stdio.println(type_of(5s))
+  harness.stdio.log(500ms)
+  harness.stdio.log(5s)
+  harness.stdio.log(2m)
+  harness.stdio.log(1h)
+  harness.stdio.log(type_of(5s))
 }

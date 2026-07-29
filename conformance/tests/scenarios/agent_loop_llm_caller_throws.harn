@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * When the user's caller throws, agent_loop propagates the thrown value.
  * The test catches it with try {} and asserts the unwrapped reason matches.

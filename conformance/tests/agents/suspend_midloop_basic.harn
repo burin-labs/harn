@@ -1,3 +1,4 @@
+import { sub_agent_request, sub_agent_run, wait_agent } from "std/agent/workers"
 /**
  * S-11 (#1847): parent-initiated pause/resume crosses the worker
  * registry and the snapshot persistence layer cleanly.
@@ -32,13 +33,13 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park until parent resumes.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 4},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       const lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
       const pause_tool = tool_find(lifecycle, "subagent_pause")
       const resume_tool = tool_find(lifecycle, "subagent_resume")
       const pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
       const resumed = resume_tool.handler({handle: handle.id})
-      const done = wait_agent(handle)
+      const done = wait_agent(harness.agent, handle)
       harness.stdio.println("suspended_status=" + suspended.status)
       harness.stdio.println("pause_again_status=" + pause_again.status)
       harness.stdio.println("resume_status=" + resumed.status)

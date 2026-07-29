@@ -9,10 +9,8 @@ let nested = {a: {b: 0}}
 
 nested.a.b = counter
 
-harness.stdio.println("module init ran")
-
 pipeline test(harness: Harness, task) {
   assert_eq(counter, 2, "module-level reassignment is visible in the pipeline")
   assert_eq(nested.a.b, 2, "module-level nested assignment is visible in the pipeline")
-  harness.stdio.println("module statements: all tests passed")
+  harness.stdio.log("module statements: all tests passed")
 }

@@ -275,11 +275,11 @@ pub fn render_inference_transcripts(harness: Harness, task_root) {
   }
   return join(
     [
-      render_file_bundle(harness,  harness,
+      render_file_bundle(harness,
         path_join(task_root, "llm"),
         "Top-level and provider transcripts",
       ),
-      render_file_bundle(harness,  harness,
+      render_file_bundle(harness,
         path_join(task_root, "events"),
         "Event logs and forked session traces",
       ),

@@ -2,6 +2,7 @@ import { stream_validate_chunk, stream_validate_create, stream_validate_finalize
 
 pipeline default(harness: Harness, task) {
   const validator = stream_validate_create(
+    harness,
     {
       type: "dict",
       required: ["name", "age"],

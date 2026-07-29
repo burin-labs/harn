@@ -90,9 +90,9 @@ const CONFORMANCE_HELPER_ALLOWLIST: list<string> = ["conformance/tests/_common.h
 // Conformance fixtures that are allowed to call `sleep(<literal>)` /
 // `time.sleep(<literal>)` because they exercise real subprocess I/O,
 // real socket-bound servers, or genuine wall-clock-driven scheduler
-// behavior that cannot be expressed under `mock_time(...)`. New
-// fixtures should drive timing through `mock_time(...)` /
-// `advance_time(...)` and `harness.runtime.yield_now()` from the unified test clock
+// behavior that cannot be expressed under `harness.testing.clock_set(...)`. New
+// fixtures should drive timing through `harness.testing.clock_set(...)` /
+// `harness.testing.clock_advance(...)` and `harness.runtime.yield_now()` from the unified test clock
 // (see docs/src/dev/testing.md). Add an entry here only when there is
 // no deterministic alternative — and prefer shrinking this list over
 // growing it.
@@ -745,7 +745,7 @@ pub fn wall_clock_pattern() -> string {
 
 /**
  * True when a fixture installs a clock mock: some line's leading
- * whitespace is followed by `mock_time(` (grep `^[[:space:]]*mock_time(`).
+ * whitespace is followed by `harness.testing.clock_set(` (grep `^[[:space:]]*harness.testing.clock_set(`).
  */
 pub fn has_mock_time(text: string) -> bool {
   return regex_match(r"^[ \t\r]*mock_time\(", text, "m") != nil
@@ -760,7 +760,7 @@ pub fn has_mock_time(text: string) -> bool {
  * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
  * followed by the pre-formatted `hint_lines`; returns the violation count.
  */
-fn report_pattern(harness: Harness, 
+fn report_pattern(harness: Harness,
   files: list,
   skip: fn(string) -> bool,
   pattern: string,
@@ -822,7 +822,7 @@ pipeline main(harness: Harness, task) {
   harness.stdio.println("=== Checking test files for forbidden patterns ===")
   harness.stdio.println("--- std::thread::sleep ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     { rel -> THREAD_SLEEP_ALLOWLIST.contains(rel) },
     thread_sleep_pattern(),
@@ -830,7 +830,7 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- tokio::time::sleep ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     { rel -> TOKIO_SLEEP_ALLOWLIST.contains(rel) },
     tokio_sleep_pattern(),
@@ -843,7 +843,7 @@ pipeline main(harness: Harness, task) {
   // the comparison itself, regardless of whether it sits inside a `while`,
   // a `loop`, or an `assert!` macro inside a loop body.
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     { rel -> INSTANT_NOW_DEADLINE_ALLOWLIST.contains(rel) },
     instant_deadline_pattern(),
@@ -853,7 +853,7 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- SystemTime::now() in tests ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     { rel -> SYSTEM_TIME_ALLOWLIST.contains(rel) },
     system_time_pattern(),
@@ -861,7 +861,7 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- recv_timeout with explicit sub-second Duration ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     { rel -> RECV_TIMEOUT_MILLIS_ALLOWLIST.contains(rel) },
     recv_timeout_pattern(),
@@ -871,7 +871,7 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- obsolete harn_command helper ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     { rel -> false },
     harn_command_pattern(),
@@ -933,7 +933,7 @@ pipeline main(harness: Harness, task) {
   }
   harness.stdio.println("--- Harn E2E subprocess helper outside E2E tests ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     is_e2e_subprocess_path,
     harn_e2e_command_pattern(),
@@ -941,7 +941,7 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- spawn_orchestrator outside E2E subprocess tests ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     is_e2e_subprocess_path,
     spawn_orchestrator_pattern(),
@@ -949,7 +949,7 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- #[ignore] outside slow harn-cli integration tests ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     test_files,
     { rel -> rel.starts_with("crates/harn-cli/tests/") },
     ignore_attr_pattern(),
@@ -959,7 +959,7 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- copied conformance subprocess wait helpers ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     harn_files,
     { rel -> CONFORMANCE_HELPER_ALLOWLIST.contains(rel) },
     wait_helper_pattern(),
@@ -969,14 +969,14 @@ pipeline main(harness: Harness, task) {
   )
   harness.stdio.println("--- random fixed-port conformance server allocation ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     harn_files,
     { rel -> false },
     random_fixed_port_pattern(),
     ["    hint: Bind test servers to port 0 and read the selected port from the readiness log."],
   )
   harness.stdio.println("--- conformance sleep with fixed literal duration ---")
-  // Fixtures that drive timing via `mock_time(...)` / `advance_time(...)`
+  // Fixtures that drive timing via `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)`
   // auto-deflake their `sleep(...)` calls (the unified test clock advances
   // instantly). Anything else relies on wall-clock and should either move
   // to that pattern or be added to CONFORMANCE_REAL_TIME_ALLOWLIST with
@@ -992,7 +992,7 @@ pipeline main(harness: Harness, task) {
     }
     for hit in find_hits(f.text, literal_sleep_pattern()) {
       harness.stdio.println("  ${hit.line_no}:${hit.text}")
-      harness.stdio.println("    hint: Wrap timing-sensitive logic in mock_time(...)/unmock_time(),")
+      harness.stdio.println("    hint: Wrap timing-sensitive logic in harness.testing.clock_set(...)/harness.testing.clock_reset(),")
       harness.stdio.println("          or add the fixture to CONFORMANCE_REAL_TIME_ALLOWLIST in")
       harness.stdio.println("          scripts/lint_test_patterns.harn with reviewer justification.")
       violations = violations + 1
@@ -1016,7 +1016,7 @@ pipeline main(harness: Harness, task) {
   // -------------------------------------------------------------------------
   harness.stdio.println("--- Non-test wall-clock reads (harn-vm/harn-cli runtime) ---")
   violations = violations
-    + report_pattern(harness, 
+    + report_pattern(harness,
     runtime_files,
     { rel -> NON_TEST_WALL_CLOCK_ALLOWLIST.contains(rel) },
     wall_clock_pattern(),

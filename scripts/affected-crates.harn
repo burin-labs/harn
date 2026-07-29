@@ -45,7 +45,7 @@ pub fn global_hits(files: list<string>, global_paths: list<string>) -> list<stri
 }
 
 fn command_stdout(harness: Harness, cmd: string, args: list<string>) -> string {
-  const result = harness.process.spawn_captured({cmd: cmd, args: args})
+  const result = harness.process.run({cmd: cmd, args: args})
   if result.exit_code != 0 {
     throw cmd + " " + args.join(" ") + " failed:\n" + result.stderr
   }

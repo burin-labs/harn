@@ -38,7 +38,7 @@ fn enable_verdict() -> nil {
 pipeline test_caller_authored_evidence_is_never_a_pass(harness: Harness, _task) {
   enable_verdict()
   const dir = harness.fs.mkdtemp_in_workspace("verdict-neg")
-  const path = harness.fs.path_join(dir, "green.txt")
+  const path = path_join(dir, "green.txt")
   harness.fs.write_text(path, PASSING)
   const v = verdict_from_run(harness, {result_handle: path})
   assert_eq(verdict_disposition(v), "indeterminate")

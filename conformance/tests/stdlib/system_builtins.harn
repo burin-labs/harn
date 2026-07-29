@@ -13,7 +13,7 @@ pipeline default(harness: Harness, task) {
   // pid should be a positive integer
   harness.stdio.println(harness.system.identity().pid > 0)
   // cwd should be non-empty
-  harness.stdio.println(len(cwd()) > 0)
+  harness.stdio.println(len(harness.fs.cwd()) > 0)
   // date_iso should return ISO 8601 format
   const iso = harness.clock.date_iso()
   harness.stdio.println(len(iso) > 20)

@@ -1,9 +1,9 @@
 pipeline default(harness: Harness) {
-  const name = harn.mcp.spawn(
+  const name = harness.tools.mcp_host_spawn(
     {name: "identity-shape", transport: "http", url: "https://identity.example.invalid/mcp"},
     {lazy: true},
   )
-  const status = harn.mcp.status()
+  const status = harness.tools.mcp_host_status()
   let entry = nil
   for item in status {
     if item.name == name {
@@ -18,7 +18,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(entry.active)
   harness.stdio.println(entry.lazy)
   let registry_entry = nil
-  for item in mcp_registry_status() {
+  for item in harness.tools.mcp_registry_status() {
     if item.name == name {
       registry_entry = item
     }

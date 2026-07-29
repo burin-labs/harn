@@ -1,9 +1,8 @@
 import { coord_post, coord_subscribe } from "std/coordination"
 
 pipeline default(harness: Harness) {
-  const stream = coord_subscribe(harness.channels, "task", "handoff", {task_id: "task-1", session_id: "sess-1"})
-  const receipt = coord_post(
-    harness.channels, "task",
+  const stream = coord_subscribe(harness.runtime, harness.channels, "task", "handoff", {task_id: "task-1", session_id: "sess-1"})
+  const receipt = coord_post(harness.runtime, harness.channels, harness.random, "task",
     "handoff",
     {kind: "decision", subject: "proceed", body: "Proceed with non-overlapping work."},
     {id: "coord-task-1", task_id: "task-1", session_id: "sess-1"},

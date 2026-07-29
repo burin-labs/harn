@@ -2,8 +2,7 @@ import { coord_post, coord_remember } from "std/coordination"
 import { memory_recall } from "std/memory"
 
 pipeline default(harness: Harness) {
-  const receipt = coord_post(
-    harness.channels, "tenant",
+  const receipt = coord_post(harness.runtime, harness.channels, harness.random, "tenant",
     "facts",
     {kind: "fact", subject: "release published", body: "Harn release assets are published."},
     {id: "coord-fact-1"},

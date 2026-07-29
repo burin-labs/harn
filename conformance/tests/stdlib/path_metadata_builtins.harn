@@ -63,5 +63,5 @@ pipeline test(harness: Harness, task) {
     {namespace: "facts", options: {kind: "all"}},
   )
   assert(len(all_entries) >= 4)
-  harness.stdio.println("path metadata ok")
+  harness.stdio.log("path metadata ok")
 }

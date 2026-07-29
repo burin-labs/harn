@@ -149,8 +149,16 @@ pub pipeline run(harness: Harness, task) -> dict {
     return summary
   }
   const adapter = _adapter_for(harness, input)
-  const checkpoint_handle = open_checkpoints(input.state_root, input.session_id, input.writer_id)
-  const summary = sweep(harness,  harness, {
+  const checkpoint_handle = open_checkpoints(
+    harness.agent,
+    input.state_root,
+    input.session_id,
+    input.writer_id,
+  )
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: adapter,
       policies: policies_load.policies,
       checkpoint_handle: checkpoint_handle,

@@ -1,11 +1,9 @@
 import "std/hitl"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 
 pipeline test(harness: Harness, task) {
-  clear_host_mocks()
-  mock_host_response(
-    "hitl",
-    "approval",
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction", "approval_response",
     [
       {approved: true, reviewer: "alice", reason: "checked"},
       {approved: true, reviewer: "bob", reason: "approved"},

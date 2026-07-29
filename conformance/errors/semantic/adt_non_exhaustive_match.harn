@@ -9,7 +9,7 @@ enum Action {
 pipeline test(harness: Harness, task) {
   const a = Action.Create
   match a.variant {
-    "Create" -> { harness.stdio.println("c") }
-    "Delete" -> { harness.stdio.println("d") }
+    "Create" -> { harness.stdio.log("c") }
+    "Delete" -> { harness.stdio.log("d") }
   }
 }

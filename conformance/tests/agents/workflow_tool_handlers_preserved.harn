@@ -39,5 +39,5 @@ pipeline main(harness: Harness) {
     committed_edit_handler({}) == "replace-body-ok",
     "workflow_commit should preserve edit handler",
   )
-  harness.stdio.println("workflow tool handlers preserved")
+  harness.stdio.log("workflow tool handlers preserved")
 }

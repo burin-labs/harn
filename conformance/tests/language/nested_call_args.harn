@@ -20,17 +20,17 @@ fn make_dict(v) {
 
 pipeline test(harness: Harness, task) {
   // Simple nested call
-  harness.stdio.println(identity(identity(42)))
+  harness.stdio.log(identity(identity(42)))
   // Result of one call passed as arg to another
-  harness.stdio.println(add(double(3), double(4)))
+  harness.stdio.log(add(double(3), double(4)))
   // Three args with nested calls in each slot
-  harness.stdio.println(concat3(identity("a"), identity("b"), identity("c")))
+  harness.stdio.log(concat3(identity("a"), identity("b"), identity("c")))
   // Mixed: literal, nested call, nested call
-  harness.stdio.println(concat3("lit", identity("mid"), concat3("x", "y", "z")))
+  harness.stdio.log(concat3("lit", identity("mid"), concat3("x", "y", "z")))
   // Nested call returning a dict used as arg
   const merged = make_dict(identity("val"))
-  harness.stdio.println(merged["key"])
+  harness.stdio.log(merged["key"])
   // Nested with ?? inside call args (regression for precedence bug)
   const name = nil
-  harness.stdio.println(concat3("base", name ?? "fallback", identity(name ?? "tag")))
+  harness.stdio.log(concat3("base", name ?? "fallback", identity(name ?? "tag")))
 }

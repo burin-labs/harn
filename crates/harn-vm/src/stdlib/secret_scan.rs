@@ -7,6 +7,7 @@ use sha2::Digest;
 
 use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::secret_patterns::{compiled_default_secret_patterns, PRECISION_HEURISTIC};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -189,50 +190,26 @@ pub async fn audit_secret_scan_active(
 }
 
 pub(crate) fn register_secret_scan_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("secret_scan", |_ctx, args| async move {
-        let content = match args.first() {
-            Some(VmValue::Nil) | None => {
-                return Err(VmError::Runtime("secret_scan: content is required".into()));
-            }
-            Some(value) => value.display(),
-        };
-        let audit = secret_scan_audit_option(args.get(1))?;
-
-        let findings = scan_content(&content);
-        if audit {
-            audit_secret_scan_active("stdlib.secret_scan", content.len(), &findings).await;
-        }
-
-        let value = serde_json::to_value(findings)
-            .map_err(|error| VmError::Runtime(format!("secret_scan: {error}")))?;
-        Ok(crate::schema::json_to_vm_value(&value))
-    });
+    vm.register_builtin_def(&SECRET_SCAN_IMPL_DEF);
 }
 
-/// Parse the optional `{ audit: bool }` second argument. Audit defaults to
-/// `true` (back-compatible with the one-arg form). Callers on a hot path — e.g.
-/// a per-edit or per-command guard that only needs the catalog-backed findings
-/// — pass `{audit: false}` to skip appending an `audit.secret_scan` event on
-/// every call.
-fn secret_scan_audit_option(value: Option<&VmValue>) -> Result<bool, VmError> {
-    let map = match value {
-        None | Some(VmValue::Nil) => return Ok(true),
-        Some(VmValue::Dict(map)) => map,
-        Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "secret_scan: options must be a dict or nil; got {}",
-                other.type_name()
-            )));
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "secret_scan(content: any) -> list",
+    category = "security"
+)]
+fn secret_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let content = match args.first() {
+        Some(VmValue::Nil) | None => {
+            return Err(VmError::Runtime("secret_scan: content is required".into()));
         }
+        Some(value) => value.display(),
     };
-    match map.get("audit") {
-        None | Some(VmValue::Nil) => Ok(true),
-        Some(VmValue::Bool(flag)) => Ok(*flag),
-        Some(other) => Err(VmError::Runtime(format!(
-            "secret_scan: options.audit must be a bool; got {}",
-            other.type_name()
-        ))),
-    }
+    let findings = scan_content(&content);
+    let value = serde_json::to_value(findings)
+        .map_err(|error| VmError::Runtime(format!("secret_scan: {error}")))?;
+    Ok(crate::schema::json_to_vm_value(&value))
 }
 
 #[allow(clippy::too_many_arguments)]

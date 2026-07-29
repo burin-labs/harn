@@ -53,7 +53,7 @@ pipeline test(harness: Harness, task) {
   // Native clients register the effective OS-selected loopback port. The
   // server-side validator must accept any secure loopback port so a new
   // authorization can deliberately re-register after that port changes.
-  const loopback = register_client(harness,  harness, store,
+  const loopback = register_client(harness, store,
     {redirect_uris: ["http://127.0.0.1:54321/oauth/callback"], token_endpoint_auth_method: "none"},
   )
   assert_eq(
@@ -93,5 +93,5 @@ pipeline test(harness: Harness, task) {
     first.payload?.redacted?.client_secret == nil,
     "audit redacted shape must NOT carry client_secret",
   )
-  harness.stdio.println("oauth dynamic registration register ok")
+  harness.stdio.log("oauth dynamic registration register ok")
 }

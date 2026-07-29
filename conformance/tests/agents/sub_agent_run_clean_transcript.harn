@@ -1,3 +1,5 @@
+import { sub_agent_request, sub_agent_run, wait_agent } from "std/agent/workers"
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn child_tools() {

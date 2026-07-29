@@ -34,16 +34,20 @@ pipeline main(harness: Harness) {
       },
     ],
   }
-  const api = composition_mcp_api(tools)
+  const api = composition_mcp_api(harness, tools)
   harness.stdio.println(api.tool_count)
   harness.stdio.println(api.servers[0])
   harness.stdio.println(api.manifest.bindings[0].source)
   harness.stdio.println(api.manifest.bindings[0].deferred)
-  harness.stdio.println(contains(api.harn_api, "type DocsSearchArgs = {limit?: int, query: string}"))
+  harness.stdio.println(
+    contains(api.harn_api, "type DocsSearchArgs = {limit?: int, query: string}"),
+  )
   harness.stdio.println(contains(api.harn_api, "fn docs_search(args: DocsSearchArgs)"))
-  const searched = composition_mcp_search(tools, "runtime documentation", {limit: 1})
+  const searched = composition_mcp_search(harness, tools, "runtime documentation", {limit: 1})
   harness.stdio.println(searched.manifest.bindings[0].name)
-  const report = composition_mcp_execute(harness,  harness, "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
+  const report = composition_mcp_execute(
+    harness,
+    "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
     tools,
     {run_id: "mcp-code-mode"},
   )
@@ -52,13 +56,17 @@ pipeline main(harness: Harness) {
   harness.stdio.println(report.child_results == nil)
   harness.stdio.println(report.result.title)
   harness.stdio.println(report.result.total)
-  const full_report = composition_mcp_execute(harness,  harness, "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
+  const full_report = composition_mcp_execute(
+    harness,
+    "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
     tools,
     {run_id: "mcp-code-mode-report", include_report: true},
   )
   harness.stdio.println(full_report.child_calls[0].tool_name)
   harness.stdio.println(contains(full_report.child_results[0].raw_output, "Harn docs"))
-  const settled = composition_mcp_execute(harness,  harness, "let result = map_bounded([\"runtime\", \"stdlib\"], { q -> docs_search({query: q}) }, {concurrency: 2})\nreturn {succeeded: result.succeeded, failed: result.failed}",
+  const settled = composition_mcp_execute(
+    harness,
+    "let result = map_bounded([\"runtime\", \"stdlib\"], { q -> docs_search({query: q}) }, {concurrency: 2})\nreturn {succeeded: result.succeeded, failed: result.failed}",
     tools,
     {
       run_id: "mcp-code-mode-bounded",

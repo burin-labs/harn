@@ -10,7 +10,8 @@ pipeline default(harness: Harness) {
     harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
   }
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("Paris is the capital of France."),
       llm_text("The answer is Paris, France."),
       llm_text("Paris is the capital of France."),
@@ -21,7 +22,9 @@ pipeline default(harness: Harness) {
       llm_text("unused round four b"),
     ],
     { ->
-      const result = debate(harness,  harness, {
+      const result = debate(
+        harness,
+        {
           prompt: "What is the capital of France?",
           debaters: ["alpha", "beta"],
           n_rounds: 5,
@@ -34,7 +37,7 @@ pipeline default(harness: Harness) {
       harness.stdio.println(result.completed_rounds)
       harness.stdio.println(result.stopped_early)
       harness.stdio.println(result.stop_reason)
-      harness.stdio.println(llm_call_count())
+      harness.stdio.println(llm_call_count(harness.llm))
       harness.stdio.println(event.kind)
       harness.stdio.println(event.payload.round)
       harness.stdio.println(event.payload.requested_rounds)

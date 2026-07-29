@@ -5,12 +5,12 @@ pipeline test(harness: Harness, task) {
   fn double_default(n = n * 2) {
     return n
   }
-  harness.stdio.println(double_default())
-  harness.stdio.println(double_default(100))
+  harness.stdio.log(double_default())
+  harness.stdio.log(double_default(100))
   // A default may also reference an *earlier* parameter.
   fn sum_default(a, b = a + 1) {
     return a + b
   }
-  harness.stdio.println(sum_default(10))
-  harness.stdio.println(sum_default(10, 5))
+  harness.stdio.log(sum_default(10))
+  harness.stdio.log(sum_default(10, 5))
 }

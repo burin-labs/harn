@@ -7,7 +7,7 @@ fn record_echo_call(harness: Harness, state_file: string, args) {
 
 pipeline default(harness: Harness) {
   const state_file = harness.env.get_or("HARN_MCP_ECHO_STATE_FILE", "")
-  mcp_server_metadata(
+  harness.tools.mcp_server_metadata(
     {
       name: "test-echo-server",
       version: "1.0.0",
@@ -68,5 +68,5 @@ pipeline default(harness: Harness) {
       },
     },
   )
-  mcp_tools(tools)
+  harness.tools.mcp_tools(tools)
 }

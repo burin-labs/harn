@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -65,7 +66,7 @@ pipeline test(harness: Harness, task) {
         contains(harness.llm.mock_calls()[0].system, "disk_cleanup"),
         "explicit id tokens activate cleanup",
       )
-      harness.stdio.println("skill_lifecycle_exact_metadata tests passed")
+      harness.stdio.log("skill_lifecycle_exact_metadata tests passed")
     },
   )
 }

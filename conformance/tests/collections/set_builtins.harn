@@ -53,5 +53,5 @@ pipeline test(harness: Harness, task) {
   const tags = set("a", "b", "c")
   assert(set_contains(tags, "b"))
   assert(!set_contains(tags, "z"))
-  harness.stdio.println("set ok")
+  harness.stdio.log("set ok")
 }

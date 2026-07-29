@@ -39,11 +39,11 @@ const FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
 const FIXED_FETCHED_AT = "fixture-time"
 
 fn __install_fixture_mocks(harness: Harness) {
-  http_mock_clear()
-  egress_policy(
+  harness.testing.http_mock_clear()
+  harness.net.egress_policy(
     {allow: ["www.anthropic.com", "platform.openai.com", "openrouter.ai"], default: "deny"},
   )
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     "https://www.anthropic.com/pricing",
     {
@@ -56,7 +56,7 @@ fn __install_fixture_mocks(harness: Harness) {
       body: harness.fs.read_text(path_join(FIXTURE_DIR, "anthropic_pricing.html")),
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     "https://platform.openai.com/docs/pricing",
     {
@@ -69,7 +69,7 @@ fn __install_fixture_mocks(harness: Harness) {
       body: harness.fs.read_text(path_join(FIXTURE_DIR, "openai_pricing.html")),
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     "https://openrouter.ai/api/v1/models",
     {
@@ -85,7 +85,7 @@ fn __install_fixture_mocks(harness: Harness) {
 }
 
 fn __install_live_egress_policy() {
-  egress_policy(
+  harness.net.egress_policy(
     {
       allow: [
         "www.anthropic.com",

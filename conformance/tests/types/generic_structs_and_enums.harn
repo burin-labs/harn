@@ -9,10 +9,10 @@ pipeline test(harness: Harness, task) {
   }
   const pair: Pair<int, string> = Pair {first: 1, second: "two"}
   const maybe: Option<int> = Option.Some(pair.first)
-  harness.stdio.println(pair.first)
-  harness.stdio.println(pair.second)
+  harness.stdio.log(pair.first)
+  harness.stdio.log(pair.second)
   match maybe {
-    Option.Some(value) -> { harness.stdio.println(value) }
-    Option.None -> { harness.stdio.println("none") }
+    Option.Some(value) -> { harness.stdio.log(value) }
+    Option.None -> { harness.stdio.log("none") }
   }
 }

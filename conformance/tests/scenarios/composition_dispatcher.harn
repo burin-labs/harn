@@ -21,7 +21,7 @@ pipeline main(harness: Harness) {
       {error: "unknown binding " + name}
     }
   }
-  const report = composition_execute(
+  const report = harness.tools.composition_execute(
     "let readme = read_file({path: \"README.md\"})\nlet hits = search({query: readme.content})\nreturn {readme_content: readme.content, hits_query: hits.query, hits_count: hits.count}",
     manifest,
     {run_id: "conformance-dispatcher", dispatcher: dispatch},

@@ -355,7 +355,7 @@ pub fn command_capture_rewrite(command, capture_path) {
 }
 
 fn __cc_new_capture_path(harness: Harness) {
-  return path_join(harness.fs.temp_dir(), "harn-capture-" + harness.random.uuid() + ".out")
+  return path_join(harness.fs.workspace_temp_dir(), "harn-capture-" + harness.random.uuid() + ".out")
 }
 
 fn __cc_posix_shell(word) {

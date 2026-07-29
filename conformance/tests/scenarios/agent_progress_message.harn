@@ -8,7 +8,7 @@ fn progress_events(events) {
 
 pipeline default(harness: Harness) {
   const session_id = "agent-progress-message-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session_id,
+  const captured = agent_capture_events(harness, session_id,
     fn() {
       let session = agent_session_init(harness, "progress message", nil, {session_id: session_id})
       agent_progress(harness, {message: "working", metadata: {source: "message-test"}})
@@ -23,7 +23,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("entries=" + to_string(len(event.entries)))
   harness.stdio.println("replace=" + to_string(event.replace))
   harness.stdio.println("metadata.source=" + event.metadata.source)
-  const invalid_session = agent_session_init(harness,  harness, "invalid progress",
+  const invalid_session = agent_session_init(harness, "invalid progress",
     nil,
     {session_id: session_id + "-invalid"},
   )

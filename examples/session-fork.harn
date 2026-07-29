@@ -26,8 +26,8 @@ pipeline main(harness: Harness, task) {
   harness.agent.close(rainy)
   harness.agent.close(sunny)
   if harness.agent.length(base) == 2 {
-    harness.stdio.println("fork branches did not leak into base")
+    harness.stdio.log("fork branches did not leak into base")
   } else {
-    harness.stdio.println("warning: base was mutated by a branch — session_fork should not share state")
+    harness.stdio.log("warning: base was mutated by a branch — session_fork should not share state")
   }
 }

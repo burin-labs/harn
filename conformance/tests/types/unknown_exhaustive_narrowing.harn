@@ -34,13 +34,13 @@ pipeline test(harness: Harness, task) {
     }
     unreachable("unknown type_of variant")
   }
-  harness.stdio.println(describe("hi"))
-  harness.stdio.println(describe(41))
-  harness.stdio.println(describe(nil))
-  harness.stdio.println(describe([1, 2, 3]))
-  harness.stdio.println(describe({a: 1}))
-  harness.stdio.println(describe(true))
-  harness.stdio.println(describe(bytes_from_string("ab")))
+  harness.stdio.log(describe("hi"))
+  harness.stdio.log(describe(41))
+  harness.stdio.log(describe(nil))
+  harness.stdio.log(describe([1, 2, 3]))
+  harness.stdio.log(describe({a: 1}))
+  harness.stdio.log(describe(true))
+  harness.stdio.log(describe(bytes_from_string("ab")))
   // Partial narrowing with a plain `return` fallback is NOT an
   // exhaustiveness claim — it compiles silently and runs fine.
   fn categorize(v: unknown) -> string {
@@ -52,9 +52,9 @@ pipeline test(harness: Harness, task) {
     }
     return "other"
   }
-  harness.stdio.println(categorize("x"))
-  harness.stdio.println(categorize(1))
-  harness.stdio.println(categorize([1]))
+  harness.stdio.log(categorize("x"))
+  harness.stdio.log(categorize(1))
+  harness.stdio.log(categorize([1]))
   // Nested narrowing inside a covered branch doesn't leak coverage out.
   fn shape(v: unknown) -> string {
     if type_of(v) == "string" {
@@ -89,6 +89,6 @@ pipeline test(harness: Harness, task) {
     }
     unreachable("unknown type_of variant")
   }
-  harness.stdio.println(shape([]))
-  harness.stdio.println(shape([1, 2]))
+  harness.stdio.log(shape([]))
+  harness.stdio.log(shape([1, 2]))
 }

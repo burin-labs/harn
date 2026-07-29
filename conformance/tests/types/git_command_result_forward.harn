@@ -43,5 +43,5 @@ pipeline test(harness: Harness, task) {
   assert(common.ok, "git result satisfies the shared CommandResult contract")
   assert(common.success && result.success, "shared and git-specific fields coexist")
   assert(len(result.argv) == 3, "runner contract preserved git argv")
-  harness.stdio.println("git_command_result_forward ok argv=" + to_string(len(result.argv)))
+  harness.stdio.log("git_command_result_forward ok argv=" + to_string(len(result.argv)))
 }

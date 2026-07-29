@@ -56,5 +56,5 @@ pipeline main(harness: Harness, task) {
     harness.agent.length(forked.session_id) == 0,
     "forked session starts with an empty transcript",
   )
-  harness.stdio.println("agent_session_reanchor tests passed")
+  harness.stdio.log("agent_session_reanchor tests passed")
 }

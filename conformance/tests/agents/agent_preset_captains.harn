@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Captain presets — verify that each of the four captain shapes
  * (merge_captain, review_captain, oncall_captain, release_captain)
@@ -10,7 +11,7 @@ import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn preset_agent(harness: Harness, kind, prompt, options = nil) {
-  const opts = agent_preset(kind, options)
+  const opts = agent_preset(harness, kind, options)
   return agent_loop(harness, prompt, opts?.system, opts)
 }
 
@@ -122,7 +123,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      const merge_run = preset_agent(harness, 
+      const merge_run = preset_agent(harness,
         "merge_captain",
         "Try one read and one write.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
@@ -140,7 +141,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>Stopping.</user_response>"),
     ],
     { ->
-      const oncall_capped = preset_agent(harness, 
+      const oncall_capped = preset_agent(harness,
         "oncall_captain",
         "Hammer the same tool.",
         {
@@ -160,7 +161,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>Dry run preview.</user_response>"),
     ],
     { ->
-      const release_dry = preset_agent(harness, 
+      const release_dry = preset_agent(harness,
         "release_captain",
         "Preview the action.",
         {
@@ -181,7 +182,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>Looks good.</user_response>"),
     ],
     { ->
-      const review_run = preset_agent(harness, 
+      const review_run = preset_agent(harness,
         "review_captain",
         "Review this PR.",
         {provider: "mock", tools: registry, tool_format: "native"},
@@ -195,7 +196,7 @@ pipeline default(harness: Harness) {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      const merge_no_consent = preset_agent(harness, 
+      const merge_no_consent = preset_agent(harness,
         "merge_captain",
         "Delete with consent disabled.",
         {

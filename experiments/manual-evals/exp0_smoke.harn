@@ -7,7 +7,7 @@ pipeline main(harness: Harness, task) {
     "Evaluate a math expression",
     {parameters: {expr: {type: "string"}}, handler: { _args -> "396" }},
   )
-  harness.stdio.println("Smoke test: calling agent_loop against llamacpp provider")
+  harness.stdio.log("Smoke test: calling agent_loop against llamacpp provider")
   const result = agent_loop(harness, "What is 17 * 23 + 5? Use the calc tool.",
     "/no_think You are a math assistant. Always use the calc tool for arithmetic.",
     {
@@ -20,5 +20,5 @@ pipeline main(harness: Harness, task) {
       tools: registry,
     },
   )
-  harness.stdio.println("status=${result.status} iters=${result.llm.iterations} text=${result.text}")
+  harness.stdio.log("status=${result.status} iters=${result.llm.iterations} text=${result.text}")
 }

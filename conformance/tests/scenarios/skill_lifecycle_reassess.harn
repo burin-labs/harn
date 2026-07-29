@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -79,7 +80,7 @@ pipeline test(harness: Harness, task) {
       assert(draft_activate, "draft activated on turn 0")
       assert(review_activate, "review activated after reassess on turn 1")
       assert(draft_deactivate, "draft deactivated before review took over")
-      harness.stdio.println("skill_lifecycle_reassess tests passed")
+      harness.stdio.log("skill_lifecycle_reassess tests passed")
     },
   )
 }

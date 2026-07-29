@@ -26,5 +26,5 @@ pipeline test_durable_persona_attributes(harness: Harness, task) {
   assert_eq(merge_captain(legacy), "persona:act_with_approval:github.pr_opened")
   assert_eq(legacy.budget.daily_usd, 20)
   assert_eq(legacy.handoffs[1], "human_maintainer")
-  harness.stdio.println("attributes_durable_persona ok")
+  harness.stdio.log("attributes_durable_persona ok")
 }

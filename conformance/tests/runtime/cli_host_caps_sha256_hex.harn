@@ -1,7 +1,9 @@
-// Compatibility alias for `harness.crypto.sha256`. `sha256_hex` accepts both
-// strings and bytes and returns a lowercase hex digest.
+fn main(harness: Harness) {
+// Pure digest helpers accept strings and bytes and return lowercase hex.
 harness.stdio.println(sha256_hex(""))
 
 harness.stdio.println(sha256_hex("hello"))
 
 harness.stdio.println(sha256_hex("hello") == sha256("hello"))
+
+}

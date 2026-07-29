@@ -7,7 +7,7 @@
  * behavior-level fixtures notice.
  */
 pipeline default(harness: Harness) {
-  const backend = sandbox_active_backend()
+  const backend = harness.system.sandbox_active_backend()
   // Harn `harness.system.platform().os` returns the underlying OS slug (`darwin`,
   // `linux`, `windows`, `openbsd`); the sandbox backend names map
   // 1:1 to those except `darwin` → `macos` to keep the docs and
@@ -28,11 +28,11 @@ pipeline default(harness: Harness) {
   // which is the path axis only: cases are first-party code and several
   // legitimately shell out. `harn run` installs the stricter `worktree`
   // default, covered in CLI-specific coverage.
-  harness.stdio.println(sandbox_active_profile())
+  harness.stdio.println(harness.system.sandbox_active_profile())
   // Each shipped backend reports availability as `true` on its host.
   // (Linux Landlock/seccomp are runtime-detected by the per-mechanism
   // setup, so the backend reports `true` even on kernels missing one
   // or both — the per-mechanism unavailability surfaces as a
   // structured warning rather than a backend-availability flip.)
-  harness.stdio.println(sandbox_backend_available())
+  harness.stdio.println(harness.system.sandbox_backend_available())
 }

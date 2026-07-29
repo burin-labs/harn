@@ -36,5 +36,5 @@ pipeline test(harness: Harness, task) {
   const lookup = dict_from_pairs([["a", 1], ["b", 2], ["a", 3]])
   assert_eq(lookup.a, 3, "dict_from_pairs: last write wins")
   assert_eq(lookup.b, 2, "dict_from_pairs: distinct keys preserved")
-  harness.stdio.println("clone + merge: all tests passed")
+  harness.stdio.log("clone + merge: all tests passed")
 }

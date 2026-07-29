@@ -1,16 +1,15 @@
 // HITL operations are explicit methods on the interaction capability.
 import "std/hitl"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 
 type Choice = {answer: string}
 
 pipeline test(harness: Harness, task) {
-  clear_host_mocks()
-  mock_host_response("hitl", "question", {answer: {answer: "Ada"}})
+  harness.testing.clear()
+  harness.testing.respond("interaction", "question_response", {answer: {answer: "Ada"}})
   const response: Choice = harness.interaction.ask_user("Who should review this?", {schema: schema_of(Choice)})
   harness.stdio.println(response.answer)
-  clear_host_mocks()
-  mock_host_response("hitl", "question", {answer: "9"})
+  harness.testing.clear()
+  harness.testing.respond("interaction", "question_response", {answer: "9"})
   const selected: int = harness.interaction.ask_user("Pick a number", {default: 0})
   harness.stdio.println(selected)
 }

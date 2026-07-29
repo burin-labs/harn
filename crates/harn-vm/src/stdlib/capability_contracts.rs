@@ -43,12 +43,48 @@ capability_method!(
     "Read one line from standard input."
 );
 capability_method!(
+    stdio_read_stdin,
+    "harness.stdio.read_stdin",
+    ["stdio.read@const=stdin"],
+    "__cap_stdio_read_stdin() -> string",
+    "Read the remaining standard input."
+);
+capability_method!(
+    stdio_is_stdin_tty,
+    "harness.stdio.is_stdin_tty",
+    ["stdio.read@const=terminal"],
+    "__cap_stdio_is_stdin_tty() -> bool",
+    "Test whether standard input is attached to a terminal."
+);
+capability_method!(
+    stdio_is_stdout_tty,
+    "harness.stdio.is_stdout_tty",
+    ["stdio.read@const=terminal"],
+    "__cap_stdio_is_stdout_tty() -> bool",
+    "Test whether standard output is attached to a terminal."
+);
+capability_method!(
+    stdio_is_stderr_tty,
+    "harness.stdio.is_stderr_tty",
+    ["stdio.read@const=terminal"],
+    "__cap_stdio_is_stderr_tty() -> bool",
+    "Test whether standard error is attached to a terminal."
+);
+capability_method!(
     stdio_prompt,
     "harness.stdio.prompt",
     ["stdio.write@const=stdout", "stdio.read@const=stdin"],
     "__cap_stdio_prompt(message: string) -> any",
     "Write a prompt and read one response line."
 );
+capability_method!(
+    stdio_log,
+    "harness.stdio.log",
+    ["stdio.write@const=stdout"],
+    "__cap_stdio_log(message: any) -> nil",
+    "Write a Harn-prefixed log line."
+);
+capability_method!(stdio_progress, "harness.stdio.progress", ["stdio.write@const=stdout"], "__cap_stdio_progress(phase: string, message: string, progress_or_options?: any, total?: int) -> nil", "Write a human-readable progress line.");
 
 capability_method!(
     term_width,
@@ -78,6 +114,13 @@ capability_method!(
     "__cap_term_is_tty(stream: string) -> bool",
     "Return whether a standard stream is attached to a terminal."
 );
+capability_method!(
+    term_set_color_mode,
+    "harness.term.set_color_mode",
+    ["stdio.mutate@const=terminal-style"],
+    "__cap_term_set_color_mode(mode: string) -> nil",
+    "Set ANSI color handling for this execution."
+);
 
 capability_method!(
     clock_now_ms,
@@ -98,6 +141,13 @@ capability_method!(
     "harness.clock.monotonic_ms",
     ["clock.read@const=monotonic"],
     "__cap_clock_monotonic_ms() -> int",
+    "Read monotonic elapsed milliseconds."
+);
+capability_method!(
+    clock_elapsed,
+    "harness.clock.elapsed",
+    ["clock.read@const=monotonic"],
+    "__cap_clock_elapsed() -> int",
     "Read monotonic elapsed milliseconds."
 );
 capability_method!(
@@ -349,6 +399,13 @@ capability_method!(
     "Read the active Harn project root when one is available."
 );
 capability_method!(
+    fs_workspace_root,
+    "harness.fs.workspace_root",
+    ["fs.read@const=workspace-root"],
+    "__cap_fs_workspace_root() -> string",
+    "Read the active project root, falling back to the execution directory."
+);
+capability_method!(
     fs_home_dir,
     "harness.fs.home_dir",
     ["fs.read@const=home"],
@@ -515,6 +572,244 @@ capability_method!(
 );
 capability_method!(tools_dispatch_agent_call, "harness.tools.dispatch_agent_call", ["tool.mutate@dynamic"], "__cap_tools_dispatch_agent_call(call: dict, tools?: {_type: \"tool_registry\", tools: list}?, options?: dict?) -> dict", "Dispatch one parsed agent tool call.");
 capability_method!(tools_dispatch_agent_batch, "harness.tools.dispatch_agent_batch", ["tool.mutate@dynamic"], "__cap_tools_dispatch_agent_batch(calls: list, tools?: {_type: \"tool_registry\", tools: list}?, options?: dict?) -> list", "Dispatch a batch of parsed agent tool calls.");
+capability_method!(
+    tools_mcp_roots,
+    "harness.tools.mcp_roots",
+    ["mcp.read@const=roots"],
+    "__cap_tools_mcp_roots() -> list",
+    "Read roots exposed to MCP clients."
+);
+capability_method!(
+    tools_mcp_connect,
+    "harness.tools.mcp_connect",
+    ["mcp.mutate@arg0", "process.write@arg0"],
+    "__cap_tools_mcp_connect(command: string, args?: list, options?: dict) -> mcp_client",
+    "Connect to an MCP server over stdio."
+);
+capability_method!(
+    tools_mcp_ensure_active,
+    "harness.tools.mcp_ensure_active",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_ensure_active(name: string) -> mcp_client",
+    "Acquire a registered MCP server."
+);
+capability_method!(
+    tools_mcp_release,
+    "harness.tools.mcp_release",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_release(name: string) -> nil",
+    "Release a registered MCP server."
+);
+capability_method!(
+    tools_mcp_registry_status,
+    "harness.tools.mcp_registry_status",
+    ["mcp.read@const=registry"],
+    "__cap_tools_mcp_registry_status() -> list",
+    "Inspect registered MCP servers."
+);
+capability_method!(
+    tools_mcp_reauth_expired,
+    "harness.tools.mcp_reauth_expired",
+    ["mcp.mutate@const=oauth"],
+    "__cap_tools_mcp_reauth_expired() -> list",
+    "Refresh expired MCP OAuth sessions."
+);
+capability_method!(
+    tools_mcp_server_card,
+    "harness.tools.mcp_server_card",
+    ["mcp.read@arg0", "network.read@arg0", "fs.read@arg0"],
+    "__cap_tools_mcp_server_card(target: string) -> dict",
+    "Load an MCP Server Card."
+);
+capability_method!(
+    tools_mcp_list_tools,
+    "harness.tools.mcp_list_tools",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_list_tools(client: mcp_client) -> list",
+    "List tools exposed by an MCP server."
+);
+capability_method!(
+    tools_mcp_call,
+    "harness.tools.mcp_call",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_call(client: mcp_client, tool: string, arguments?: dict) -> any",
+    "Call an MCP tool."
+);
+capability_method!(
+    tools_mcp_server_info,
+    "harness.tools.mcp_server_info",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_server_info(client: mcp_client) -> dict",
+    "Inspect an MCP connection."
+);
+capability_method!(
+    tools_mcp_disconnect,
+    "harness.tools.mcp_disconnect",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_disconnect(client: mcp_client) -> nil",
+    "Disconnect an MCP client."
+);
+capability_method!(
+    tools_mcp_list_resources,
+    "harness.tools.mcp_list_resources",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_list_resources(client: mcp_client) -> list",
+    "List MCP resources."
+);
+capability_method!(
+    tools_mcp_read_resource,
+    "harness.tools.mcp_read_resource",
+    ["mcp.read@arg1"],
+    "__cap_tools_mcp_read_resource(client: mcp_client, uri: string) -> any",
+    "Read an MCP resource."
+);
+capability_method!(
+    tools_mcp_list_resource_templates,
+    "harness.tools.mcp_list_resource_templates",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_list_resource_templates(client: mcp_client) -> list",
+    "List MCP resource templates."
+);
+capability_method!(
+    tools_mcp_list_prompts,
+    "harness.tools.mcp_list_prompts",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_list_prompts(client: mcp_client) -> list",
+    "List MCP prompts."
+);
+capability_method!(
+    tools_mcp_get_prompt,
+    "harness.tools.mcp_get_prompt",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_get_prompt(client: mcp_client, name: string, arguments?: dict) -> dict",
+    "Render an MCP prompt."
+);
+capability_method!(
+    tools_mcp_configure,
+    "harness.tools.mcp_configure",
+    ["mcp.mutate@const=config"],
+    "__cap_tools_mcp_configure(config: dict) -> dict",
+    "Configure experimental MCP features."
+);
+capability_method!(
+    tools_mcp_file_input,
+    "harness.tools.mcp_file_input",
+    ["mcp.read@const=config"],
+    "__cap_tools_mcp_file_input(options?: dict) -> dict",
+    "Build an MCP file-input schema."
+);
+capability_method!(
+    tools_mcp_upload_file,
+    "harness.tools.mcp_upload_file",
+    ["mcp.write@arg0", "fs.read@arg1"],
+    "__cap_tools_mcp_upload_file(client: any, path: string, options?: dict) -> string",
+    "Upload a file to an MCP server."
+);
+capability_method!(
+    tools_mcp_tools,
+    "harness.tools.mcp_tools",
+    ["mcp.write@const=server"],
+    "__cap_tools_mcp_tools(registry: dict) -> nil",
+    "Expose a tool registry from an MCP server."
+);
+capability_method!(
+    tools_mcp_server_metadata,
+    "harness.tools.mcp_server_metadata",
+    ["mcp.write@const=server"],
+    "__cap_tools_mcp_server_metadata(metadata: dict) -> nil",
+    "Set MCP server metadata."
+);
+capability_method!(
+    tools_mcp_resource,
+    "harness.tools.mcp_resource",
+    ["mcp.write@const=server"],
+    "__cap_tools_mcp_resource(resource: dict) -> nil",
+    "Expose a static MCP resource."
+);
+capability_method!(
+    tools_mcp_resource_template,
+    "harness.tools.mcp_resource_template",
+    ["mcp.write@const=server"],
+    "__cap_tools_mcp_resource_template(resource: dict) -> nil",
+    "Expose an MCP resource template."
+);
+capability_method!(
+    tools_mcp_prompt,
+    "harness.tools.mcp_prompt",
+    ["mcp.write@const=server"],
+    "__cap_tools_mcp_prompt(prompt: dict) -> nil",
+    "Expose an MCP prompt."
+);
+capability_method!(
+    tools_mcp_elicit,
+    "harness.tools.mcp_elicit",
+    ["mcp.mutate@const=client"],
+    "__cap_tools_mcp_elicit(request: dict) -> dict",
+    "Request structured input from an MCP client."
+);
+capability_method!(
+    tools_mcp_client_roots,
+    "harness.tools.mcp_client_roots",
+    ["mcp.read@const=client"],
+    "__cap_tools_mcp_client_roots() -> list",
+    "Request roots from an MCP client."
+);
+capability_method!(
+    tools_mcp_report_progress,
+    "harness.tools.mcp_report_progress",
+    ["mcp.write@const=client"],
+    "__cap_tools_mcp_report_progress(progress: float|int, options?: dict) -> bool",
+    "Report progress to an MCP client."
+);
+capability_method!(
+    tools_mcp_host_spawn,
+    "harness.tools.mcp_host_spawn",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_host_spawn(spec: dict, options?: dict) -> string",
+    "Start a supervised MCP server."
+);
+capability_method!(
+    tools_mcp_host_tools,
+    "harness.tools.mcp_host_tools",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_host_tools(name: string) -> list",
+    "List tools from a supervised MCP server."
+);
+capability_method!(
+    tools_mcp_host_call,
+    "harness.tools.mcp_host_call",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_host_call(name: string, tool: string, arguments?: dict) -> any",
+    "Call a tool on a supervised MCP server."
+);
+capability_method!(
+    tools_mcp_host_stop,
+    "harness.tools.mcp_host_stop",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_host_stop(name: string) -> nil",
+    "Stop a supervised MCP server."
+);
+capability_method!(
+    tools_mcp_host_reload,
+    "harness.tools.mcp_host_reload",
+    ["mcp.mutate@arg0"],
+    "__cap_tools_mcp_host_reload(name: string) -> nil",
+    "Reload a supervised MCP server."
+);
+capability_method!(
+    tools_mcp_host_discover,
+    "harness.tools.mcp_host_discover",
+    ["mcp.read@const=host"],
+    "__cap_tools_mcp_host_discover() -> list",
+    "Discover supervised MCP servers."
+);
+capability_method!(
+    tools_mcp_host_status,
+    "harness.tools.mcp_host_status",
+    ["mcp.read@const=host"],
+    "__cap_tools_mcp_host_status() -> list",
+    "Inspect supervised MCP server status."
+);
 
 capability_method!(
     net_get,
@@ -522,6 +817,13 @@ capability_method!(
     ["network.read@arg0"],
     "__cap_net_get(url: string, options?: dict) -> dict",
     "Send an HTTP GET request."
+);
+capability_method!(
+    net_egress_policy,
+    "harness.net.egress_policy",
+    ["network.mutate@const=egress-policy"],
+    "__cap_net_egress_policy(config: dict) -> dict",
+    "Install the outbound network policy for this execution."
 );
 capability_method!(
     net_post,
@@ -566,11 +868,359 @@ capability_method!(
     "Download an HTTP response to a file."
 );
 capability_method!(
+    net_stream_open,
+    "harness.net.stream_open",
+    ["network.read@arg0"],
+    "__cap_net_stream_open(url: string, options?: dict) -> string",
+    "Open a bounded streaming HTTP response."
+);
+capability_method!(
+    net_stream_read,
+    "harness.net.stream_read",
+    ["network.read@arg0"],
+    "__cap_net_stream_read(stream: string, max_bytes?: int) -> bytes?",
+    "Read the next bounded chunk from an HTTP stream."
+);
+capability_method!(
+    net_stream_info,
+    "harness.net.stream_info",
+    ["network.observe@arg0"],
+    "__cap_net_stream_info(stream: string) -> dict",
+    "Inspect HTTP stream metadata."
+);
+capability_method!(
+    net_stream_close,
+    "harness.net.stream_close",
+    ["network.mutate@arg0"],
+    "__cap_net_stream_close(stream: string) -> bool",
+    "Close an HTTP stream."
+);
+capability_method!(
+    net_session,
+    "harness.net.session",
+    ["network.mutate@const=http-session"],
+    "__cap_net_session(options?: dict) -> string",
+    "Create a reusable HTTP client session."
+);
+capability_method!(
+    net_session_request,
+    "harness.net.session_request",
+    ["network.mutate@arg2"],
+    "__cap_net_session_request(session: string, method: string, url: string, options?: dict) -> dict",
+    "Send an HTTP request through a reusable session."
+);
+capability_method!(
+    net_session_close,
+    "harness.net.session_close",
+    ["network.mutate@arg0"],
+    "__cap_net_session_close(session: string) -> bool",
+    "Close a reusable HTTP client session."
+);
+capability_method!(
+    net_server,
+    "harness.net.server",
+    ["network.mutate@const=http-server"],
+    "__cap_net_server(options?: dict) -> dict",
+    "Create an in-process HTTP server resource."
+);
+capability_method!(
+    net_server_route,
+    "harness.net.server_route",
+    ["network.mutate@arg0"],
+    "__cap_net_server_route(server: dict, method: string, path: string, handler: closure) -> dict",
+    "Add a route to an HTTP server."
+);
+capability_method!(
+    net_server_before,
+    "harness.net.server_before",
+    ["network.mutate@arg0"],
+    "__cap_net_server_before(server: dict, handler: closure) -> dict",
+    "Add an HTTP server before hook."
+);
+capability_method!(
+    net_server_after,
+    "harness.net.server_after",
+    ["network.mutate@arg0"],
+    "__cap_net_server_after(server: dict, handler: closure) -> dict",
+    "Add an HTTP server after hook."
+);
+capability_method!(
+    net_server_request,
+    "harness.net.server_request",
+    ["network.mutate@arg0"],
+    "__cap_net_server_request(server: dict, request: dict) -> dict",
+    "Dispatch a request through an HTTP server."
+);
+capability_method!(
+    net_server_test,
+    "harness.net.server_test",
+    ["network.mutate@arg0"],
+    "__cap_net_server_test(server: dict, request: dict) -> dict",
+    "Dispatch an in-process test request through an HTTP server."
+);
+capability_method!(
+    net_server_set_ready,
+    "harness.net.server_set_ready",
+    ["network.mutate@arg0"],
+    "__cap_net_server_set_ready(server: dict, ready: bool) -> bool",
+    "Set HTTP server readiness."
+);
+capability_method!(
+    net_server_readiness,
+    "harness.net.server_readiness",
+    ["network.mutate@arg0"],
+    "__cap_net_server_readiness(server: dict, handler: closure) -> dict",
+    "Install an HTTP server readiness handler."
+);
+capability_method!(
+    net_server_ready,
+    "harness.net.server_ready",
+    ["network.observe@arg0"],
+    "__cap_net_server_ready(server: dict) -> bool",
+    "Read HTTP server readiness."
+);
+capability_method!(
+    net_server_on_shutdown,
+    "harness.net.server_on_shutdown",
+    ["network.mutate@arg0"],
+    "__cap_net_server_on_shutdown(server: dict, handler: closure) -> dict",
+    "Install an HTTP server shutdown hook."
+);
+capability_method!(
+    net_server_shutdown,
+    "harness.net.server_shutdown",
+    ["network.mutate@arg0"],
+    "__cap_net_server_shutdown(server: dict) -> bool",
+    "Shut down an HTTP server."
+);
+capability_method!(
+    net_server_tls_plain,
+    "harness.net.server_tls_plain",
+    ["network.observe@const=tls-config"],
+    "__cap_net_server_tls_plain() -> dict",
+    "Build a plaintext HTTP listener configuration."
+);
+capability_method!(
+    net_server_tls_edge,
+    "harness.net.server_tls_edge",
+    ["network.observe@const=tls-config"],
+    "__cap_net_server_tls_edge(options?: dict) -> dict",
+    "Build a TLS-at-the-edge listener configuration."
+);
+capability_method!(
+    net_server_tls_pem,
+    "harness.net.server_tls_pem",
+    ["fs.read@arg0", "fs.read@arg1"],
+    "__cap_net_server_tls_pem(cert_path: string, key_path: string) -> dict",
+    "Validate PEM inputs and build a direct TLS listener configuration."
+);
+capability_method!(
+    net_server_tls_self_signed_dev,
+    "harness.net.server_tls_self_signed_dev",
+    ["random.mutate@const=tls-private-key"],
+    "__cap_net_server_tls_self_signed_dev(hosts?: list | string) -> dict",
+    "Generate a development-only self-signed TLS listener configuration."
+);
+capability_method!(
+    net_server_security_headers,
+    "harness.net.server_security_headers",
+    ["network.observe@const=tls-config"],
+    "__cap_net_server_security_headers(tls_config: dict) -> dict",
+    "Project security headers from a TLS listener configuration."
+);
+capability_method!(
     net_unix_socket_json_request,
     "harness.net.unix_socket_json_request",
     ["network.mutate@arg0"],
-    "__cap_net_unix_socket_json_request(path: string, request: any, options?: dict) -> dict",
+    "__cap_net_unix_socket_json_request(path: string, request: any, options?: dict) -> UnixSocketJsonResult",
     "Exchange one JSON-line request over a Unix domain socket."
+);
+capability_method!(
+    net_jsonrpc_call,
+    "harness.net.jsonrpc_call",
+    ["network.write@arg0"],
+    "__cap_net_jsonrpc_call(url: string, method: string, params?: any, options?: dict|nil) -> any",
+    "Send one JSON-RPC 2.0 request."
+);
+capability_method!(
+    net_jsonrpc_batch,
+    "harness.net.jsonrpc_batch",
+    ["network.write@arg0"],
+    "__cap_net_jsonrpc_batch(url: string, calls: list, options?: dict|nil) -> list",
+    "Send a JSON-RPC 2.0 batch."
+);
+capability_method!(
+    net_sse_connect,
+    "harness.net.sse_connect",
+    ["network.read@arg1"],
+    "__cap_net_sse_connect(method: string, url: string, options?: dict) -> dict",
+    "Open a bounded Server-Sent Events client stream."
+);
+capability_method!(
+    net_sse_receive,
+    "harness.net.sse_receive",
+    ["network.read@arg0"],
+    "__cap_net_sse_receive(stream: dict, timeout_ms?: int) -> dict?",
+    "Receive one event from an SSE client stream."
+);
+capability_method!(
+    net_sse_close,
+    "harness.net.sse_close",
+    ["network.mutate@arg0"],
+    "__cap_net_sse_close(stream: dict) -> bool",
+    "Close an SSE client stream."
+);
+capability_method!(
+    net_sse_server_response,
+    "harness.net.sse_server_response",
+    ["network.mutate@const=sse-server"],
+    "__cap_net_sse_server_response(options?: dict) -> dict",
+    "Create an SSE server response stream."
+);
+capability_method!(
+    net_sse_server_send,
+    "harness.net.sse_server_send",
+    ["network.write@arg0"],
+    "__cap_net_sse_server_send(stream: dict, event: any, options?: dict) -> bool",
+    "Send one SSE server event."
+);
+capability_method!(
+    net_sse_server_heartbeat,
+    "harness.net.sse_server_heartbeat",
+    ["network.write@arg0"],
+    "__cap_net_sse_server_heartbeat(stream: dict, comment?: any) -> bool",
+    "Send an SSE heartbeat."
+);
+capability_method!(
+    net_sse_server_flush,
+    "harness.net.sse_server_flush",
+    ["network.write@arg0"],
+    "__cap_net_sse_server_flush(stream: dict) -> bool",
+    "Flush an SSE server stream."
+);
+capability_method!(
+    net_sse_server_close,
+    "harness.net.sse_server_close",
+    ["network.mutate@arg0"],
+    "__cap_net_sse_server_close(stream: dict) -> bool",
+    "Close an SSE server stream."
+);
+capability_method!(
+    net_sse_server_cancel,
+    "harness.net.sse_server_cancel",
+    ["network.mutate@arg0"],
+    "__cap_net_sse_server_cancel(stream: dict, reason?: any) -> bool",
+    "Cancel an SSE server stream."
+);
+capability_method!(
+    net_sse_server_status,
+    "harness.net.sse_server_status",
+    ["network.observe@arg0"],
+    "__cap_net_sse_server_status(stream: dict) -> dict",
+    "Inspect an SSE server stream."
+);
+capability_method!(
+    net_sse_server_disconnected,
+    "harness.net.sse_server_disconnected",
+    ["network.observe@arg0"],
+    "__cap_net_sse_server_disconnected(stream: dict) -> bool",
+    "Return whether an SSE server peer disconnected."
+);
+capability_method!(
+    net_sse_server_cancelled,
+    "harness.net.sse_server_cancelled",
+    ["network.observe@arg0"],
+    "__cap_net_sse_server_cancelled(stream: dict) -> bool",
+    "Return whether an SSE server stream was cancelled."
+);
+capability_method!(
+    net_websocket_connect,
+    "harness.net.websocket_connect",
+    ["network.mutate@arg0"],
+    "__cap_net_websocket_connect(url: string, options?: dict) -> dict",
+    "Open a WebSocket connection."
+);
+capability_method!(
+    net_websocket_server,
+    "harness.net.websocket_server",
+    ["network.mutate@arg0"],
+    "__cap_net_websocket_server(bind?: string, options?: dict) -> dict",
+    "Create a WebSocket server."
+);
+capability_method!(
+    net_websocket_route,
+    "harness.net.websocket_route",
+    ["network.mutate@arg0"],
+    "__cap_net_websocket_route(server: dict, path: string, options?: dict) -> bool",
+    "Add a route to a WebSocket server."
+);
+capability_method!(
+    net_websocket_accept,
+    "harness.net.websocket_accept",
+    ["network.mutate@arg0"],
+    "__cap_net_websocket_accept(server: dict, timeout_ms?: int) -> dict?",
+    "Accept a WebSocket connection."
+);
+capability_method!(
+    net_websocket_send,
+    "harness.net.websocket_send",
+    ["network.write@arg0"],
+    "__cap_net_websocket_send(socket: dict, message: any, options?: dict) -> bool",
+    "Send a WebSocket frame."
+);
+capability_method!(
+    net_websocket_receive,
+    "harness.net.websocket_receive",
+    ["network.read@arg0"],
+    "__cap_net_websocket_receive(socket: dict, timeout_ms?: int) -> dict?",
+    "Receive a WebSocket frame."
+);
+capability_method!(
+    net_websocket_close,
+    "harness.net.websocket_close",
+    ["network.mutate@arg0"],
+    "__cap_net_websocket_close(socket: dict) -> bool",
+    "Close a WebSocket connection."
+);
+capability_method!(
+    net_websocket_server_close,
+    "harness.net.websocket_server_close",
+    ["network.mutate@arg0"],
+    "__cap_net_websocket_server_close(server: dict) -> bool",
+    "Close a WebSocket server."
+);
+capability_method!(
+    system_vision_ocr,
+    "harness.system.vision_ocr",
+    [
+        "fs.read@arg0.path",
+        "fs.read@arg0.storage.path",
+        "process.write@const=tesseract",
+        "state.write@const=vision-ocr-audit"
+    ],
+    "__cap_system_vision_ocr(image: string|dict, options?: dict) -> StructuredText",
+    "Recognize structured text through the configured OCR backend."
+);
+capability_method!(
+    system_security_policy,
+    "harness.system.security_policy",
+    ["state.mutate@const=security-policy"],
+    "__cap_system_security_policy(config: dict) -> dict",
+    "Install a security policy for the current execution scope."
+);
+capability_method!(
+    system_security_stamp_directive,
+    "harness.system.security_stamp_directive",
+    ["secret.read@const=directive-signing-key"],
+    "__cap_system_security_stamp_directive(content: string, emitter?: string) -> string",
+    "Stamp an orchestration directive with runtime-owned provenance."
+);
+capability_method!(
+    system_security_verify_directive,
+    "harness.system.security_verify_directive",
+    ["secret.read@const=directive-signing-key"],
+    "__cap_system_security_verify_directive(content: string) -> dict",
+    "Verify the runtime-owned provenance of an orchestration directive."
 );
 
 capability_method!(
@@ -581,11 +1231,132 @@ capability_method!(
     "Run a structured child process and capture its result."
 );
 capability_method!(
+    process_exec,
+    "harness.process.exec",
+    ["process.write@arg0"],
+    "__cap_process_exec(...command: string) -> dict",
+    "Execute a program and argument vector."
+);
+capability_method!(
+    process_shell,
+    "harness.process.shell",
+    ["process.write@arg0"],
+    "__cap_process_shell(command: string) -> dict",
+    "Execute a command through the configured shell."
+);
+capability_method!(
+    process_exec_at,
+    "harness.process.exec_at",
+    ["fs.read@arg0", "process.write@arg1"],
+    "__cap_process_exec_at(directory: string, ...command: string) -> dict",
+    "Execute a program and argument vector in a working directory."
+);
+capability_method!(
+    process_shell_at,
+    "harness.process.shell_at",
+    ["fs.read@arg0", "process.write@arg1"],
+    "__cap_process_shell_at(directory: string, command: string) -> dict",
+    "Execute a shell command in a working directory."
+);
+capability_method!(
     process_default_shell,
     "harness.process.default_shell",
     ["process.read@const=shell-configuration"],
     "__cap_process_default_shell() -> dict",
     "Read the host's selected command shell."
+);
+capability_method!(
+    process_git_repo_discover,
+    "harness.process.git_repo_discover",
+    ["process.write@const=git", "fs.read@arg0"],
+    "__cap_process_git_repo_discover(path: string) -> GitDiscoverReceipt",
+    "Discover repository metadata for a path."
+);
+capability_method!(process_git_worktree_create, "harness.process.git_worktree_create", ["process.write@const=git", "fs.mutate@arg0", "fs.mutate@arg2"], "__cap_process_git_worktree_create(repo: string, branch: string, path: string, options?: dict) -> GitWorktreeCreateReceipt", "Create a Git worktree.");
+capability_method!(
+    process_git_worktree_remove,
+    "harness.process.git_worktree_remove",
+    ["process.write@const=git", "fs.mutate@arg0"],
+    "__cap_process_git_worktree_remove(path: string, options?: dict) -> GitWorktreeRemoveReceipt",
+    "Remove a Git worktree."
+);
+capability_method!(
+    process_git_fetch,
+    "harness.process.git_fetch",
+    [
+        "process.write@const=git",
+        "network.read@arg1",
+        "fs.mutate@arg0"
+    ],
+    "__cap_process_git_fetch(repo: string, remote: string, refspecs?: list) -> GitFetchReceipt",
+    "Fetch Git refs."
+);
+capability_method!(
+    process_git_rebase,
+    "harness.process.git_rebase",
+    ["process.write@const=git", "fs.mutate@arg0"],
+    "__cap_process_git_rebase(repo: string, base_ref: string) -> GitRebaseReceipt",
+    "Rebase a Git checkout."
+);
+capability_method!(
+    process_git_status,
+    "harness.process.git_status",
+    ["process.write@const=git", "fs.read@arg0"],
+    "__cap_process_git_status(repo: string) -> GitStatusReceipt",
+    "Read Git status."
+);
+capability_method!(
+    process_git_conflicts,
+    "harness.process.git_conflicts",
+    ["process.write@const=git", "fs.read@arg0"],
+    "__cap_process_git_conflicts(repo: string) -> GitConflictsReceipt",
+    "Read unresolved Git conflicts."
+);
+capability_method!(
+    process_git_push,
+    "harness.process.git_push",
+    [
+        "process.write@const=git",
+        "network.write@arg1",
+        "fs.read@arg0"
+    ],
+    "__cap_process_git_push(repo: string, remote: string, refspec: string, lease?: any) -> GitPushReceipt",
+    "Push a Git ref."
+);
+capability_method!(
+    process_git_diff,
+    "harness.process.git_diff",
+    ["process.write@const=git", "fs.read@arg0"],
+    "__cap_process_git_diff(repo: string, selector?: any) -> GitDiffReceipt",
+    "Read a Git diff."
+);
+capability_method!(
+    process_git_merge_base,
+    "harness.process.git_merge_base",
+    ["process.write@const=git", "fs.read@arg0"],
+    "__cap_process_git_merge_base(repo: string, left: string, right: string) -> GitMergeBaseReceipt",
+    "Find a Git merge base."
+);
+capability_method!(
+    process_git_tag_list,
+    "harness.process.git_tag_list",
+    ["process.write@const=git", "fs.read@arg0"],
+    "__cap_process_git_tag_list(repo: string, options?: dict) -> GitTagListReceipt",
+    "List Git tags."
+);
+capability_method!(
+    process_git_describe,
+    "harness.process.git_describe",
+    ["process.write@const=git", "fs.read@arg0"],
+    "__cap_process_git_describe(repo: string, options?: dict) -> GitDescribeReceipt",
+    "Describe a Git revision."
+);
+capability_method!(
+    process_git_ls_remote,
+    "harness.process.git_ls_remote",
+    ["process.write@const=git", "network.read@arg1"],
+    "__cap_process_git_ls_remote(repo: string, remote: string, options?: dict) -> GitLsRemoteReceipt",
+    "List refs from a Git remote."
 );
 capability_method!(
     process_list_shells,
@@ -602,6 +1373,41 @@ capability_method!(
     "Resolve a shell command into its program and argument vector."
 );
 
+capability_method!(
+    runtime_context,
+    "harness.runtime.context",
+    ["state.read@const=runtime-context"],
+    "__cap_runtime_context() -> dict",
+    "Read the current logical task and orchestration context."
+);
+capability_method!(
+    runtime_context_values,
+    "harness.runtime.context_values",
+    ["state.read@const=runtime-context-values"],
+    "__cap_runtime_context_values() -> dict",
+    "Read the current task-local context values."
+);
+capability_method!(
+    runtime_context_get,
+    "harness.runtime.context_get",
+    ["state.read@arg0"],
+    "__cap_runtime_context_get(key: string, default?: any) -> any",
+    "Read one task-local context value."
+);
+capability_method!(
+    runtime_context_set,
+    "harness.runtime.context_set",
+    ["state.write@arg0"],
+    "__cap_runtime_context_set(key: string, value: any) -> any",
+    "Set one task-local context value and return its previous value."
+);
+capability_method!(
+    runtime_context_clear,
+    "harness.runtime.context_clear",
+    ["state.mutate@arg0"],
+    "__cap_runtime_context_clear(key: string) -> any",
+    "Clear one task-local context value and return its previous value."
+);
 capability_method!(
     runtime_task,
     "harness.runtime.task",
@@ -622,6 +1428,55 @@ capability_method!(
     ["host.read@const=prompt-content"],
     "__cap_runtime_prompt_content() -> list",
     "Read normalized active prompt content."
+);
+capability_method!(
+    runtime_flow_evaluate_invariants,
+    "harness.runtime.flow_evaluate_invariants",
+    ["fs.read@arg2.path"],
+    "__cap_runtime_flow_evaluate_invariants(source: string, slice: dict, options?: dict) -> dict",
+    "Evaluate Flow invariants through the runtime predicate engine."
+);
+capability_method!(
+    runtime_store_get,
+    "harness.runtime.store_get",
+    ["state.read@arg0"],
+    "__cap_runtime_store_get(key: string) -> any",
+    "Read a value from the run store."
+);
+capability_method!(
+    runtime_store_set,
+    "harness.runtime.store_set",
+    ["state.write@arg0"],
+    "__cap_runtime_store_set(key: string, value: any) -> nil",
+    "Write a value to the run store."
+);
+capability_method!(
+    runtime_store_delete,
+    "harness.runtime.store_delete",
+    ["state.mutate@arg0"],
+    "__cap_runtime_store_delete(key: string) -> nil",
+    "Delete a value from the run store."
+);
+capability_method!(
+    runtime_store_list,
+    "harness.runtime.store_list",
+    ["state.read@const=run-store"],
+    "__cap_runtime_store_list() -> list",
+    "List run-store keys."
+);
+capability_method!(
+    runtime_store_save,
+    "harness.runtime.store_save",
+    ["state.write@const=run-store"],
+    "__cap_runtime_store_save() -> nil",
+    "Persist the run store."
+);
+capability_method!(
+    runtime_store_clear,
+    "harness.runtime.store_clear",
+    ["state.mutate@const=run-store"],
+    "__cap_runtime_store_clear() -> nil",
+    "Clear the run store."
 );
 capability_method!(
     runtime_dry_run,
@@ -698,7 +1553,7 @@ capability_method!(
     interaction_request_approval,
     "harness.interaction.request_approval",
     ["host.write@const=human-approval"],
-    "__cap_interaction_request_approval(...args: any) -> dict",
+    "__cap_interaction_request_approval(...args: any) -> ApprovalRecord",
     "Request a human approval decision."
 );
 capability_method!(
@@ -818,7 +1673,7 @@ capability_method!(
     project_context_profile,
     "harness.project.context_profile",
     ["fs.read@arg0"],
-    "__cap_project_context_profile(path?: string, options?: dict) -> dict",
+    "__cap_project_context_profile(path?: string, options?: dict) -> ProjectContextProfile",
     "Resolve the context profile for a project directory."
 );
 capability_method!(
@@ -827,6 +1682,13 @@ capability_method!(
     ["fs.read@arg0"],
     "__cap_project_scan_tree(path?: string, options?: dict) -> dict",
     "Scan project configuration throughout a directory tree."
+);
+capability_method!(
+    project_fingerprint,
+    "harness.project.fingerprint",
+    ["fs.read@arg0"],
+    "__cap_project_fingerprint(path?: string) -> ProjectFingerprint",
+    "Detect the project languages and build-system signals rooted at a path."
 );
 capability_method!(
     project_walk_tree,
@@ -845,7 +1707,12 @@ capability_method!(
 capability_method!(
     project_enrich,
     "harness.project.enrich",
-    ["fs.read@arg0", "llm.write@dynamic"],
+    [
+        "fs.read@arg0",
+        "fs.write@arg0",
+        "process.read@dynamic",
+        "llm.write@dynamic"
+    ],
     "__cap_project_enrich(path?: string, options?: dict) -> dict",
     "Enrich project evidence with the configured model."
 );
@@ -874,14 +1741,14 @@ capability_method!(
     testing_respond,
     "harness.testing.respond",
     ["state.write@arg0"],
-    "__cap_testing_respond(capability: string, method: string, value: any) -> nil",
+    "__cap_testing_respond(capability: string, method: string, value: any, when?: dict, repeat?: bool) -> nil",
     "Queue one successful response for a closed capability method."
 );
 capability_method!(
     testing_respond_error,
     "harness.testing.respond_error",
     ["state.write@arg0"],
-    "__cap_testing_respond_error(capability: string, method: string, message: string) -> nil",
+    "__cap_testing_respond_error(capability: string, method: string, message: string, when?: dict, repeat?: bool) -> nil",
     "Queue one error response for a closed capability method."
 );
 capability_method!(
@@ -890,6 +1757,146 @@ capability_method!(
     ["state.read@const=capability-fixtures"],
     "__cap_testing_calls() -> list",
     "Read calls captured by this Harness instance's capability fixtures."
+);
+capability_method!(
+    testing_clock_set,
+    "harness.testing.clock_set",
+    ["clock.mutate@const=test-clock"],
+    "__cap_testing_clock_set(unix_ms: int) -> nil",
+    "Install a virtual clock scoped to this Harness and pin its wall time."
+);
+capability_method!(
+    testing_clock_advance,
+    "harness.testing.clock_advance",
+    ["clock.mutate@const=test-clock"],
+    "__cap_testing_clock_advance(milliseconds: int) -> int",
+    "Advance this Harness's virtual clock and return its Unix milliseconds."
+);
+capability_method!(
+    testing_clock_reset,
+    "harness.testing.clock_reset",
+    ["clock.mutate@const=test-clock"],
+    "__cap_testing_clock_reset() -> nil",
+    "Remove this Harness's virtual clock override."
+);
+capability_method!(
+    testing_http_mock,
+    "harness.testing.http_mock",
+    ["state.write@arg1"],
+    "__cap_testing_http_mock(method: string, url_pattern: string, response?: dict) -> nil",
+    "Register or replace an HTTP response fixture."
+);
+capability_method!(
+    testing_http_mock_clear,
+    "harness.testing.http_mock_clear",
+    ["state.mutate@const=http-fixtures"],
+    "__cap_testing_http_mock_clear() -> nil",
+    "Clear HTTP response fixtures and captured calls."
+);
+capability_method!(
+    testing_http_mock_calls,
+    "harness.testing.http_mock_calls",
+    ["state.read@const=http-fixtures"],
+    "__cap_testing_http_mock_calls(options?: dict) -> list",
+    "Read HTTP calls captured by the fixture transport."
+);
+capability_method!(
+    testing_transport_mock_clear,
+    "harness.testing.transport_mock_clear",
+    ["state.mutate@const=streaming-transport-fixtures"],
+    "__cap_testing_transport_mock_clear() -> nil",
+    "Clear SSE and WebSocket transport fixtures and captured calls."
+);
+capability_method!(
+    testing_transport_mock_calls,
+    "harness.testing.transport_mock_calls",
+    ["state.read@const=streaming-transport-fixtures"],
+    "__cap_testing_transport_mock_calls() -> list",
+    "Read SSE and WebSocket calls captured by transport fixtures."
+);
+capability_method!(
+    testing_sse_mock,
+    "harness.testing.sse_mock",
+    ["state.write@const=sse-mocks"],
+    "__cap_testing_sse_mock(url_pattern: string, events?: any) -> nil",
+    "Install a deterministic SSE client mock."
+);
+capability_method!(
+    testing_sse_server_mock_receive,
+    "harness.testing.sse_server_mock_receive",
+    ["state.mutate@arg0"],
+    "__cap_testing_sse_server_mock_receive(stream: dict) -> dict",
+    "Receive one buffered SSE server event in a test."
+);
+capability_method!(
+    testing_sse_server_mock_disconnect,
+    "harness.testing.sse_server_mock_disconnect",
+    ["state.mutate@arg0"],
+    "__cap_testing_sse_server_mock_disconnect(stream: dict) -> bool",
+    "Simulate an SSE server peer disconnect."
+);
+capability_method!(
+    testing_websocket_mock,
+    "harness.testing.websocket_mock",
+    ["state.write@const=websocket-mocks"],
+    "__cap_testing_websocket_mock(url_pattern: string, messages?: any) -> nil",
+    "Install a deterministic WebSocket client mock."
+);
+capability_method!(
+    testing_stdin_set,
+    "harness.testing.stdin_set",
+    ["stdio.mutate@const=stdin-fixture"],
+    "__cap_testing_stdin_set(text: string) -> nil",
+    "Install deterministic standard input for this test execution."
+);
+capability_method!(
+    testing_stdin_reset,
+    "harness.testing.stdin_reset",
+    ["stdio.mutate@const=stdin-fixture"],
+    "__cap_testing_stdin_reset() -> nil",
+    "Remove deterministic standard input."
+);
+capability_method!(
+    testing_tty_set,
+    "harness.testing.tty_set",
+    ["stdio.mutate@arg0"],
+    "__cap_testing_tty_set(stream: string, is_tty: bool) -> nil",
+    "Override terminal detection for one standard stream."
+);
+capability_method!(
+    testing_tty_reset,
+    "harness.testing.tty_reset",
+    ["stdio.mutate@const=tty-fixture"],
+    "__cap_testing_tty_reset() -> nil",
+    "Remove terminal-detection overrides."
+);
+capability_method!(
+    testing_capture_stderr_start,
+    "harness.testing.capture_stderr_start",
+    ["stdio.mutate@const=stderr-capture"],
+    "__cap_testing_capture_stderr_start() -> nil",
+    "Start capturing standard error for a test."
+);
+capability_method!(
+    testing_capture_stderr_take,
+    "harness.testing.capture_stderr_take",
+    ["stdio.mutate@const=stderr-capture"],
+    "__cap_testing_capture_stderr_take() -> string",
+    "Stop standard-error capture and return its contents."
+);
+capability_method!(
+    tools_composition_execute,
+    "harness.tools.composition_execute",
+    ["tool.mutate@dynamic"],
+    "__cap_tools_composition_execute(snippet: string, manifest: dict, options?: dict) -> dict",
+    "Execute a bounded composition over explicitly supplied tool bindings."
+);
+capability_method!(
+    rules_visit,
+    "harness.rules.visit",
+    ["host.read@const=rules-engine"],
+    "__cap_rules_visit(params: dict) -> dict",
+    "Run a rule matcher and invoke its explicit visitor closure for each match."
 );
 
 capability_method!(
@@ -969,14 +1976,14 @@ capability_method!(
     postgres_connect,
     "harness.postgres.connect",
     ["network.write@const=postgres"],
-    "__cap_postgres_connect(url: string, options?: dict) -> dict",
+    "__cap_postgres_connect(url: string, options?: dict) -> resource",
     "Open a PostgreSQL connection handle."
 );
 capability_method!(
     postgres_pool,
     "harness.postgres.pool",
     ["network.write@const=postgres"],
-    "__cap_postgres_pool(url: string, options?: dict) -> dict",
+    "__cap_postgres_pool(url: string, options?: dict) -> resource",
     "Open a PostgreSQL pool handle."
 );
 
@@ -986,6 +1993,41 @@ capability_method!(
     ["host.read@const=platform"],
     "__cap_system_platform() -> dict",
     "Read operating-system information."
+);
+capability_method!(
+    system_host_conditions,
+    "harness.system.host_conditions",
+    ["host.read@const=contention"],
+    "__cap_system_host_conditions() -> HostConditionsSnapshot",
+    "Sample portable host contention observations."
+);
+capability_method!(
+    system_sandbox_active_backend,
+    "harness.system.sandbox_active_backend",
+    ["host.read@const=sandbox"],
+    "__cap_system_sandbox_active_backend() -> string",
+    "Read the active platform sandbox backend."
+);
+capability_method!(
+    system_sandbox_backend_available,
+    "harness.system.sandbox_backend_available",
+    ["host.read@const=sandbox"],
+    "__cap_system_sandbox_backend_available() -> bool",
+    "Test whether the active platform sandbox backend is available."
+);
+capability_method!(
+    system_sandbox_active_profile,
+    "harness.system.sandbox_active_profile",
+    ["host.read@const=sandbox"],
+    "__cap_system_sandbox_active_profile() -> string",
+    "Read the active sandbox enforcement profile."
+);
+capability_method!(
+    code_index_file_hash_snapshot,
+    "harness.code_index.file_hash_snapshot",
+    ["fs.read@arg0.paths"],
+    "__cap_code_index_file_hash_snapshot(request: {paths: list<string>}) -> VerificationFileHashSnapshot",
+    "Capture content hashes and index sequence metadata for files."
 );
 capability_method!(
     system_identity,
@@ -1226,6 +2268,27 @@ capability_method!(
     "__cap_llm_upload_file(path: string, provider: string) -> string",
     "Upload a local file to a model provider's reusable Files API."
 );
+capability_method!(
+    llm_session_cost,
+    "harness.llm.session_cost",
+    ["state.observe@const=llm-cost-ledger"],
+    "__cap_llm_session_cost() -> dict",
+    "Read accumulated LLM usage and cost for the current execution."
+);
+capability_method!(
+    llm_budget,
+    "harness.llm.budget",
+    ["state.mutate@const=llm-cost-budget"],
+    "__cap_llm_budget(max_cost: float | int) -> nil",
+    "Set the LLM cost ceiling for the current execution."
+);
+capability_method!(
+    llm_budget_remaining,
+    "harness.llm.budget_remaining",
+    ["state.observe@const=llm-cost-budget"],
+    "__cap_llm_budget_remaining() -> float?",
+    "Read the remaining LLM cost budget for the current execution."
+);
 
 capability_method!(
     tenant_id,
@@ -1413,6 +2476,48 @@ capability_method!(
     "Emit a structured log."
 );
 capability_method!(
+    obs_log_debug,
+    "harness.obs.log_debug",
+    ["observability.write@const=log"],
+    "__cap_obs_log_debug(message: any, fields?: dict) -> nil",
+    "Emit a debug log line."
+);
+capability_method!(
+    obs_log_info,
+    "harness.obs.log_info",
+    ["observability.write@const=log"],
+    "__cap_obs_log_info(message: any, fields?: dict) -> nil",
+    "Emit an info log line."
+);
+capability_method!(
+    obs_log_warn,
+    "harness.obs.log_warn",
+    ["observability.write@const=log"],
+    "__cap_obs_log_warn(message: any, fields?: dict) -> nil",
+    "Emit a warning log line."
+);
+capability_method!(
+    obs_log_error,
+    "harness.obs.log_error",
+    ["observability.write@const=log"],
+    "__cap_obs_log_error(message: any, fields?: dict) -> nil",
+    "Emit an error log line."
+);
+capability_method!(
+    obs_set_level,
+    "harness.obs.set_level",
+    ["observability.mutate@const=log-level"],
+    "__cap_obs_set_level(level: string) -> nil",
+    "Set the minimum structured log level."
+);
+capability_method!(
+    obs_log_json,
+    "harness.obs.log_json",
+    ["observability.write@const=log"],
+    "__cap_obs_log_json(key: string, value?: any) -> nil",
+    "Emit a structured JSON log line."
+);
+capability_method!(
     obs_counter,
     "harness.obs.counter",
     ["observability.write@arg0"],
@@ -1504,6 +2609,55 @@ capability_method!(
 // Agent sessions are durable orchestration state. The `HarnessAgent` handle is
 // the sole language-level authority for creating, observing, and mutating that
 // state; the `__host_agent_*` builtins are private implementation details.
+capability_method!(
+    agent_state_init,
+    "harness.agent.state_init",
+    ["fs.mutate@arg0"],
+    "__cap_agent_state_init(root: string, options?: dict) -> resource",
+    "Create or reopen a durable agent-state namespace."
+);
+capability_method!(
+    agent_state_resume,
+    "harness.agent.state_resume",
+    ["fs.read@arg0", "fs.mutate@arg0"],
+    "__cap_agent_state_resume(root: string, session_id: string, options?: dict) -> resource",
+    "Resume an existing durable agent-state namespace."
+);
+capability_method!(
+    agent_state_write,
+    "harness.agent.state_write",
+    ["state.write@arg0"],
+    "__cap_agent_state_write(handle: resource, key: string, content: string) -> nil",
+    "Write one durable agent-state entry."
+);
+capability_method!(
+    agent_state_read,
+    "harness.agent.state_read",
+    ["state.read@arg0"],
+    "__cap_agent_state_read(handle: resource, key: string) -> string?",
+    "Read one durable agent-state entry."
+);
+capability_method!(
+    agent_state_list,
+    "harness.agent.state_list",
+    ["state.read@arg0"],
+    "__cap_agent_state_list(handle: resource) -> list",
+    "List durable agent-state entries."
+);
+capability_method!(
+    agent_state_delete,
+    "harness.agent.state_delete",
+    ["state.mutate@arg0"],
+    "__cap_agent_state_delete(handle: resource, key: string) -> nil",
+    "Delete one durable agent-state entry."
+);
+capability_method!(
+    agent_state_handoff,
+    "harness.agent.state_handoff",
+    ["state.write@arg0"],
+    "__cap_agent_state_handoff(handle: resource, summary: dict) -> nil",
+    "Persist a typed durable handoff artifact."
+);
 capability_method!(
     agent_session_flush,
     "harness.agent.session_flush",
@@ -1739,6 +2893,97 @@ capability_method!(
     ["state.observe@arg0"],
     "__cap_agent_capture_events(session_id: string, body: closure) -> dict",
     "Capture typed events emitted while a session body runs."
+);
+capability_method!(
+    agent_transcript_inject_reminder,
+    "harness.agent.transcript_inject_reminder",
+    [
+        "state.mutate@arg0",
+        "random.mutate@const=reminder-id",
+        "observability.write@const=reminder-lifecycle"
+    ],
+    "__cap_agent_transcript_inject_reminder(transcript: list | dict | Transcript, options: dict) -> dict",
+    "Inject a pending system reminder into a transcript."
+);
+capability_method!(
+    agent_transcript_clear_reminders,
+    "harness.agent.transcript_clear_reminders",
+    [
+        "state.mutate@arg0",
+        "observability.write@const=reminder-lifecycle"
+    ],
+    "__cap_agent_transcript_clear_reminders(transcript: list | dict | Transcript, selector: dict) -> dict",
+    "Remove pending system reminders selected by id, tag, or dedupe key."
+);
+capability_method!(
+    agent_worker_spawn,
+    "harness.agent.worker_spawn",
+    ["worker.mutate@dynamic"],
+    "__cap_agent_worker_spawn(config: dict) -> any",
+    "Spawn a delegated worker from a normalized worker configuration."
+);
+capability_method!(
+    agent_parse_resume_conditions,
+    "harness.agent.parse_resume_conditions",
+    ["worker.observe@const=resume-conditions"],
+    "__cap_agent_parse_resume_conditions(conditions?: dict) -> ResumeConditions?",
+    "Validate and normalize delegated-worker resumption conditions."
+);
+capability_method!(
+    agent_worker_send_input,
+    "harness.agent.worker_send_input",
+    ["worker.write@arg0"],
+    "__cap_agent_worker_send_input(worker: any, task: any) -> any",
+    "Send input to a delegated worker."
+);
+capability_method!(
+    agent_worker_trigger,
+    "harness.agent.worker_trigger",
+    ["worker.write@arg0"],
+    "__cap_agent_worker_trigger(worker: any, payload: any) -> any",
+    "Deliver a trigger payload to a delegated worker."
+);
+capability_method!(
+    agent_worker_wait,
+    "harness.agent.worker_wait",
+    ["worker.observe@arg0"],
+    "__cap_agent_worker_wait(worker_or_pool_task: any) -> any",
+    "Wait for a delegated worker or pool task to reach a terminal state."
+);
+capability_method!(
+    agent_worker_stop,
+    "harness.agent.worker_stop",
+    ["worker.mutate@arg0"],
+    "__cap_agent_worker_stop(worker: any, options?: dict) -> any",
+    "Stop a delegated worker, optionally preserving a graceful handoff."
+);
+capability_method!(
+    agent_worker_close,
+    "harness.agent.worker_close",
+    ["worker.mutate@arg0"],
+    "__cap_agent_worker_close(worker: any) -> any",
+    "Close a delegated worker and release its runtime resources."
+);
+capability_method!(
+    agent_worker_suspend,
+    "harness.agent.worker_suspend",
+    ["worker.mutate@arg0"],
+    "__cap_agent_worker_suspend(worker: any, reason?: string, options?: dict) -> any",
+    "Suspend a delegated worker and persist its resumable snapshot."
+);
+capability_method!(
+    agent_worker_resume,
+    "harness.agent.worker_resume",
+    ["worker.mutate@arg0"],
+    "__cap_agent_worker_resume(worker_or_snapshot: any, options?: dict) -> any",
+    "Resume a suspended delegated worker or persisted worker snapshot."
+);
+capability_method!(
+    agent_worker_list,
+    "harness.agent.worker_list",
+    ["worker.observe@const=delegated-workers"],
+    "__cap_agent_worker_list() -> list",
+    "List delegated workers owned by the current runtime."
 );
 
 capability_method!(
@@ -2015,4 +3260,22 @@ capability_method!(
     ["state.mutate@arg0"],
     "__cap_agent_compact(id: string, opts?: dict) -> dict",
     "Compact a session transcript."
+);
+capability_method!(
+    agent_self_review,
+    "harness.agent.self_review",
+    [
+        "llm.write@dynamic",
+        "state.write@const=review-audit",
+        "state.write@const=trust-graph"
+    ],
+    "__cap_agent_self_review(diff: string, rubric?: any, max_rounds?: int) -> dict",
+    "Run model-assisted review and record its audit and trust evidence."
+);
+capability_method!(
+    agent_compact_transcript,
+    "harness.agent.compact_transcript",
+    ["state.mutate@arg0", "llm.write@dynamic"],
+    "__cap_agent_compact_transcript(transcript: dict, options?: dict) -> dict",
+    "Compact an immutable transcript through the runtime lifecycle."
 );

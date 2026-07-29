@@ -16,7 +16,7 @@ pipeline main(harness: Harness) {
   // still leaves malformed protocol, not harmless assistant narration.
   probe(harness, "corrupted response tag fragment", "_call>_call>", sample_registry())
   // An unrecognized top-level tag is flagged; the known block still executes.
-  probe(harness,  harness, "unknown top level tag",
+  probe(harness, "unknown top level tag",
     """<notes>my thoughts</notes><tool_call>
 edit({ action: "create", path: "a.rs", content: "x" })
 </tool_call>""",
@@ -25,13 +25,13 @@ edit({ action: "create", path: "a.rs", content: "x" })
   // An unclosed `<user_response>` whose remainder still carries another
   // top-level block keeps the precise close-tag diagnostic — and must not be
   // misreported as an unknown tag.
-  probe(harness,  harness, "unclosed user_response followed by another block",
+  probe(harness, "unclosed user_response followed by another block",
     """<user_response>Visible answer without a close tag.
 <done>##DONE##</done>""",
     sample_registry(),
   )
   // An empty `<done>` is not a completion signal.
-  probe(harness,  harness, "empty done block",
+  probe(harness, "empty done block",
     """<tool_call>
 edit({ action: "create", path: "a.rs", content: "x" })
 </tool_call>
@@ -41,14 +41,14 @@ edit({ action: "create", path: "a.rs", content: "x" })
   // A large `<tool_call>` the model truncated mid-argument at its output token
   // limit. No call can dispatch — the argument string is unterminated — but the
   // loop must see a precise truncation error naming `edit`.
-  probe(harness,  harness, "truncated unclosed tool_call",
+  probe(harness, "truncated unclosed tool_call",
     """Now I'll create the error module.
 <tool_call>
 edit({ action: "create", path: "src/error.rs", content: "//! Unified storage error types.\nuse std::io;\npub enum StorageError {\n    IoError(""",
     sample_registry(),
   )
   // A properly closed block is unaffected by the truncation branch.
-  probe(harness,  harness, "closed tool_call is not truncated",
+  probe(harness, "closed tool_call is not truncated",
     """<tool_call>
 edit({ action: "create", path: "a.rs", content: "x" })
 </tool_call>""",
@@ -57,7 +57,7 @@ edit({ action: "create", path: "a.rs", content: "x" })
   // An unclosed wrapper around a structurally COMPLETE bare call — the model
   // omitted the redundant close tag and stopped normally — is recovered, not
   // discarded with a false truncation.
-  probe(harness,  harness, "unclosed wrapper, complete heredoc call",
+  probe(harness, "unclosed wrapper, complete heredoc call",
     """<tool_call>
 edit({ "action": "create", "path": "src/main.swift", "content": <<EOF
 import Foundation
@@ -73,7 +73,7 @@ EOF
   )
   // The non-regression: an unclosed wrapper whose heredoc is genuinely cut off
   // mid-argument is a real truncation. Zero calls, never a half-written file.
-  probe(harness,  harness, "unclosed wrapper, truncated heredoc",
+  probe(harness, "unclosed wrapper, truncated heredoc",
     """<tool_call>
 edit({ "action": "create", "path": "src/main.swift", "content": <<EOF
 import Foundation

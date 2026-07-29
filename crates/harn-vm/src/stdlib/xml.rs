@@ -49,6 +49,7 @@ pub(crate) fn register_xml_builtins(vm: &mut Vm) {
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&TO_XML_IMPL_DEF, &FROM_XML_IMPL_DEF];
 
 #[harn_builtin(
+    aliases = ["__to_xml"],
     exposure = "pure",
     effects = [],
     sig = "to_xml(value: any, options?: dict) -> string",
@@ -63,6 +64,7 @@ fn to_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 }
 
 #[harn_builtin(
+    aliases = ["__from_xml"],
     exposure = "pure",
     effects = [],
     sig = "from_xml(text: string, options?: dict) -> dict",

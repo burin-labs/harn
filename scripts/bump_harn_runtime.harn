@@ -48,7 +48,7 @@ pipeline main(harness: Harness) {
   const branch = env_or(harness, "HARN_BUMP_BRANCH", "automation/bump-harn-runtime")
   const base = env_or(harness, "HARN_BUMP_BASE", "main")
   const enable_auto_merge = env_or(harness, "HARN_BUMP_ENABLE_AUTOMERGE", "true") != "false"
-  const adapter = live_bump_adapter(harness,  harness, {
+  const adapter = live_bump_adapter(harness, {
       repo: repo,
       // Readiness + latest-release resolution gate on the HARN release repo,
       // not the consumer repo being bumped (which may publish no releases).
@@ -82,7 +82,7 @@ pipeline main(harness: Harness) {
     gha_write_output(harness, "pr_number", receipt.pr_number)
     gha_write_output(harness, "pr_url", receipt.pr_url ?? "")
   }
-  gha_append_summary(harness,  harness, "### bump-harn: ${receipt.outcome}\n\n"
+  gha_append_summary(harness, "### bump-harn: ${receipt.outcome}\n\n"
       + "- target: `${receipt.target_tag}` (was `${receipt.previous_version}`)\n"
       + "- ready: ${receipt.ready}\n"
       + join(receipt.notes.map({ n -> "- ${n}" }), "\n"),

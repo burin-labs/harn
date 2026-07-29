@@ -30,5 +30,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(bytes_to_string(zip_entries[0].content), "alpha")
   assert_eq(zip_entries[1].path, "raw/data.bin")
   assert_eq(bytes_to_hex(zip_entries[1].content), "000102fffefd")
-  harness.stdio.println("compression roundtrip ok")
+  harness.stdio.log("compression roundtrip ok")
 }

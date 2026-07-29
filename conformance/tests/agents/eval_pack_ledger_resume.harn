@@ -1,12 +1,12 @@
 import "../_common"
 
 pipeline default(harness: Harness) {
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "harn-eval-ledger-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-eval-ledger-" + harness.random.uuid_v7())
   const state = path_join(root, "state")
   const script = path_join(root, "eval_ledger_child.harn")
   harness.fs.mkdir(root)
@@ -18,7 +18,7 @@ pipeline default(harness: Harness) {
       + "    usage: {total_duration_ms: 1000, total_cost: 0.25, input_tokens: 3, output_tokens: 4, call_count: 1, models: [\"mock\"]},\n"
       + "    replay_fixture: {_type: \"replay_fixture\", expected_status: status, stage_assertions: []},\n"
       + "  }\n" + "}\n" + "\n" + "fn resume_pack() -> dict {\n" + "  return {\n"
-      + "    id: \"ledger-resume-pack\",\n" + "    base_dir: cwd(),\n" + "    trials: 1,\n"
+      + "    id: \"ledger-resume-pack\",\n" + "    base_dir: harness.fs.cwd(),\n" + "    trials: 1,\n"
       + "    metadata: {model: \"mock-model\", commit: \"commit-a\", branch: \"main\", tool_format: \"native-json\", pipeline_rev: \"rev-a\", ledger_namespace: \"ledger-resume\"},\n"
       + "    fixtures: [\n"
       + "      {id: \"pass-run\", kind: \"run-record\", inline: completed_run(\"run_pass\", \"completed\")},\n"
@@ -30,7 +30,7 @@ pipeline default(harness: Harness) {
       + "      {id: \"pass-case\", run: \"pass-run\", rubrics: [\"completed\"]},\n"
       + "      {id: \"fail-case\", run: \"fail-run\", rubrics: [\"failed\"]},\n" + "    ],\n"
       + "  }\n" + "}\n" + "\n" + "fn mismatch_pack() -> dict {\n" + "  return {\n"
-      + "    id: \"ledger-mismatch-pack\",\n" + "    base_dir: cwd(),\n" + "    trials: 1,\n"
+      + "    id: \"ledger-mismatch-pack\",\n" + "    base_dir: harness.fs.cwd(),\n" + "    trials: 1,\n"
       + "    metadata: {model: \"mock-model\", commit: \"commit-b\", branch: \"main\", tool_format: \"native-json\", pipeline_rev: \"rev-a\", ledger_namespace: \"ledger-mismatch\"},\n"
       + "    fixtures: [{id: \"fail-run\", kind: \"run-record\", inline: completed_run(\"run_fail\", \"failed\")}],\n"
       + "    rubrics: [{id: \"completed\", kind: \"deterministic\", assertions: [{kind: \"run-status\", expected: \"completed\"}]}],\n"
@@ -75,7 +75,7 @@ pipeline default(harness: Harness) {
       + "    run_rerun()\n" + "  } else if mode == \"mismatch\" {\n" + "    run_mismatch()\n"
       + "  }\n" + "}\n",
   )
-  const first = exec_at(
+  const first = harness.process.exec_at(
     root,
     "env",
     "HARN_STATE_DIR=" + state,
@@ -85,7 +85,7 @@ pipeline default(harness: Harness) {
     "--",
     "preseed",
   )
-  const second = exec_at(
+  const second = harness.process.exec_at(
     root,
     "env",
     "HARN_STATE_DIR=" + state,
@@ -95,7 +95,7 @@ pipeline default(harness: Harness) {
     "--",
     "rerun",
   )
-  const mismatch = exec_at(
+  const mismatch = harness.process.exec_at(
     root,
     "env",
     "HARN_STATE_DIR=" + state,

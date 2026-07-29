@@ -8,5 +8,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(shaped.provider, "also-not-a-provider")
   assert_eq(shaped.valid, false)
   assert_eq(shaped.metadata.reason, "unknown_provider")
-  harness.stdio.println("llm_healthcheck shape ok")
+  harness.stdio.log("llm_healthcheck shape ok")
 }

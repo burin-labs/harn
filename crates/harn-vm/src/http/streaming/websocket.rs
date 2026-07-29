@@ -1160,101 +1160,137 @@ pub(super) async fn vm_websocket_close(socket_id: &str) -> Result<VmValue, VmErr
 }
 
 pub(super) fn register_websocket_builtins(vm: &mut Vm) {
-    vm.register_builtin("websocket_mock", |args, _out| {
-        let url_pattern = args.first().map(|arg| arg.display()).unwrap_or_default();
-        if url_pattern.is_empty() {
-            return Err(vm_error("websocket_mock: URL pattern is required"));
-        }
-        let (messages, echo) = parse_websocket_mock(args.get(1));
-        WEBSOCKET_MOCKS.with(|mocks| {
-            mocks.borrow_mut().push(WebSocketMock {
-                url_pattern,
-                messages,
-                echo,
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Testing,
+        "websocket_mock",
+        |args, _out| {
+            let url_pattern = args.first().map(|arg| arg.display()).unwrap_or_default();
+            if url_pattern.is_empty() {
+                return Err(vm_error("websocket_mock: URL pattern is required"));
+            }
+            let (messages, echo) = parse_websocket_mock(args.get(1));
+            WEBSOCKET_MOCKS.with(|mocks| {
+                mocks.borrow_mut().push(WebSocketMock {
+                    url_pattern,
+                    messages,
+                    echo,
+                });
             });
-        });
-        Ok(VmValue::Nil)
-    });
+            Ok(VmValue::Nil)
+        },
+    );
 
-    vm.register_async_builtin("websocket_connect", |_ctx, args| async move {
-        let url = args.first().map(|arg| arg.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(vm_error("websocket_connect: URL is required"));
-        }
-        let options = get_options_arg(&args, 1);
-        vm_websocket_connect(&url, &options).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_connect",
+        |_ctx, args| async move {
+            let url = args.first().map(|arg| arg.display()).unwrap_or_default();
+            if url.is_empty() {
+                return Err(vm_error("websocket_connect: URL is required"));
+            }
+            let options = get_options_arg(&args, 1);
+            vm_websocket_connect(&url, &options).await
+        },
+    );
 
-    vm.register_builtin("websocket_server", |args, _out| {
-        let bind = args
-            .first()
-            .map(|arg| arg.display())
-            .filter(|bind| !bind.is_empty())
-            .unwrap_or_else(|| "127.0.0.1:0".to_string());
-        let options = get_options_arg(args, 1);
-        vm_websocket_server(&bind, &options)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_server",
+        |args, _out| {
+            let bind = args
+                .first()
+                .map(|arg| arg.display())
+                .filter(|bind| !bind.is_empty())
+                .unwrap_or_else(|| "127.0.0.1:0".to_string());
+            let options = get_options_arg(args, 1);
+            vm_websocket_server(&bind, &options)
+        },
+    );
 
-    vm.register_builtin("websocket_route", |args, _out| {
-        if args.len() < 2 {
-            return Err(vm_error(
-                "websocket_route: requires server handle and route path",
-            ));
-        }
-        let server_id = handle_from_value(&args[0], "websocket_route")?;
-        let path = args[1].display();
-        if path.is_empty() || !path.starts_with('/') {
-            return Err(vm_error("websocket_route: path must start with '/'"));
-        }
-        let options = get_options_arg(args, 2);
-        vm_websocket_route(&server_id, &path, &options)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_route",
+        |args, _out| {
+            if args.len() < 2 {
+                return Err(vm_error(
+                    "websocket_route: requires server handle and route path",
+                ));
+            }
+            let server_id = handle_from_value(&args[0], "websocket_route")?;
+            let path = args[1].display();
+            if path.is_empty() || !path.starts_with('/') {
+                return Err(vm_error("websocket_route: path must start with '/'"));
+            }
+            let options = get_options_arg(args, 2);
+            vm_websocket_route(&server_id, &path, &options)
+        },
+    );
 
-    vm.register_async_builtin("websocket_accept", |_ctx, args| async move {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("websocket_accept: requires a server handle"));
-        };
-        let server_id = handle_from_value(handle, "websocket_accept")?;
-        let timeout_ms = receive_timeout_arg(&args, 1);
-        vm_websocket_accept(&server_id, timeout_ms).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_accept",
+        |_ctx, args| async move {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("websocket_accept: requires a server handle"));
+            };
+            let server_id = handle_from_value(handle, "websocket_accept")?;
+            let timeout_ms = receive_timeout_arg(&args, 1);
+            vm_websocket_accept(&server_id, timeout_ms).await
+        },
+    );
 
-    vm.register_async_builtin("websocket_send", |_ctx, args| async move {
-        if args.len() < 2 {
-            return Err(vm_error(
-                "websocket_send: requires socket handle and message",
-            ));
-        }
-        let socket_id = handle_from_value(&args[0], "websocket_send")?;
-        let message = args[1].clone();
-        let options = get_options_arg(&args, 2);
-        vm_websocket_send(&socket_id, message, &options).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_send",
+        |_ctx, args| async move {
+            if args.len() < 2 {
+                return Err(vm_error(
+                    "websocket_send: requires socket handle and message",
+                ));
+            }
+            let socket_id = handle_from_value(&args[0], "websocket_send")?;
+            let message = args[1].clone();
+            let options = get_options_arg(&args, 2);
+            vm_websocket_send(&socket_id, message, &options).await
+        },
+    );
 
-    vm.register_async_builtin("websocket_receive", |_ctx, args| async move {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("websocket_receive: requires a socket handle"));
-        };
-        let socket_id = handle_from_value(handle, "websocket_receive")?;
-        let timeout_ms = receive_timeout_arg(&args, 1);
-        vm_websocket_receive(&socket_id, timeout_ms).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_receive",
+        |_ctx, args| async move {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("websocket_receive: requires a socket handle"));
+            };
+            let socket_id = handle_from_value(handle, "websocket_receive")?;
+            let timeout_ms = receive_timeout_arg(&args, 1);
+            vm_websocket_receive(&socket_id, timeout_ms).await
+        },
+    );
 
-    vm.register_async_builtin("websocket_close", |_ctx, args| async move {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("websocket_close: requires a socket handle"));
-        };
-        let socket_id = handle_from_value(handle, "websocket_close")?;
-        vm_websocket_close(&socket_id).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_close",
+        |_ctx, args| async move {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("websocket_close: requires a socket handle"));
+            };
+            let socket_id = handle_from_value(handle, "websocket_close")?;
+            vm_websocket_close(&socket_id).await
+        },
+    );
 
-    vm.register_builtin("websocket_server_close", |args, _out| {
-        let Some(handle) = args.first() else {
-            return Err(vm_error("websocket_server_close: requires a server handle"));
-        };
-        let server_id = handle_from_value(handle, "websocket_server_close")?;
-        vm_websocket_server_close(&server_id)
-    });
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "websocket_server_close",
+        |args, _out| {
+            let Some(handle) = args.first() else {
+                return Err(vm_error("websocket_server_close: requires a server handle"));
+            };
+            let server_id = handle_from_value(handle, "websocket_server_close")?;
+            vm_websocket_server_close(&server_id)
+        },
+    );
 }
 
 #[cfg(test)]

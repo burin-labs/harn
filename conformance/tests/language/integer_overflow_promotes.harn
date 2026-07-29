@@ -8,8 +8,8 @@
 pipeline test(harness: Harness, task) {
   const big = 9223372036854775807
   const one = 1
-  harness.stdio.println(type_of(big + one))
-  harness.stdio.println(big + one > 9000000000000000000.0)
-  harness.stdio.println(type_of(2 + 3))
-  harness.stdio.println(2 + 3)
+  harness.stdio.log(type_of(big + one))
+  harness.stdio.log(big + one > 9000000000000000000.0)
+  harness.stdio.log(type_of(2 + 3))
+  harness.stdio.log(2 + 3)
 }

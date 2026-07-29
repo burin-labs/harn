@@ -5,7 +5,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(json_stringify(value))
   const parsed = json_parse("{\"z\":1,\"a\":2,\"nested\":{\"y\":2,\"x\":1}}")
   harness.stdio.println(json_stringify(parsed))
-  const root = path_join(harness.fs.temp_dir(), "harn-json-stability-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-json-stability-" + harness.random.uuid_v7())
   const compact_path = path_join(root, "compact.json")
   write_json(harness.fs, compact_path, {b: 2, a: 1}, {pretty: false})
   harness.stdio.println(json_stringify(harness.fs.read_text(compact_path)))

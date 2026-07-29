@@ -6,7 +6,7 @@ import "std/postgres"
  * (channel, payload) into the synthesized SQL `SELECT pg_notify($1, $2)`.
  */
 pipeline default(harness: Harness) {
-  const db = pg_mock_pool(
+  const db = harness.testing.pg_mock_pool(
     [
       {
         sql: "SELECT pg_notify($1, $2)",

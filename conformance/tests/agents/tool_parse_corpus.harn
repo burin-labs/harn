@@ -15,7 +15,7 @@ import { corpus_registry, probe } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
   // The most common single emission: JSON-quoted keys and two heredoc bodies.
-  probe(harness,  harness, "canonical wrapper with json keys and heredocs",
+  probe(harness, "canonical wrapper with json keys and heredocs",
     """<tool_call>
 edit({
     "action": "exact_patch",
@@ -36,7 +36,7 @@ EOF2
   // Back-to-back blocks with NO whitespace between them. The second open tag
   // used to fail the line-start check and be shredded into a stray-text
   // violation.
-  probe(harness,  harness, "back to back wrapper blocks, same line",
+  probe(harness, "back to back wrapper blocks, same line",
     """<tool_call>
 edit({ "action": "create", "path": "a.zig", "content": <<EOF
 code
@@ -47,7 +47,7 @@ verify({})
 </tool_call>""",
     corpus_registry(),
   )
-  probe(harness,  harness, "adjacent wrapper blocks with a space",
+  probe(harness, "adjacent wrapper blocks with a space",
     """<tool_call>
 verify({})
 </tool_call> <tool_call>
@@ -55,14 +55,14 @@ run({ command: "zig build test" })
 </tool_call>""",
     corpus_registry(),
   )
-  probe(harness,  harness, "done block adjacent to a wrapper block",
+  probe(harness, "done block adjacent to a wrapper block",
     """<tool_call>
 verify({})
 </tool_call><done>##DONE##</done>""",
     corpus_registry(),
   )
   // Untagged prose in front of a good call is harmless envelope drift.
-  probe(harness,  harness, "prose before a wrapper block",
+  probe(harness, "prose before a wrapper block",
     """We need to create BatteryProvider.swift and wire it into LiveSystemProvider.
 
 <tool_call>
@@ -70,7 +70,7 @@ look({ file: "Sources/SysMonCore/Providers.swift" })
 </tool_call>""",
     corpus_registry(),
   )
-  probe(harness,  harness, "bare call inside stray prose",
+  probe(harness, "bare call inside stray prose",
     """Let me inspect the parser first.
 look({ file: "src/parse.zig" })
 Then I will patch it.""",
@@ -79,7 +79,7 @@ Then I will patch it.""",
   // `<invoke>` markup inside the wrapper and inside a `<function_calls>`
   // wrapper. The wrapper tags are swallowed silently — they must not raise
   // unknown-tag violations.
-  probe(harness,  harness, "invoke markup with a string attribute inside the wrapper",
+  probe(harness, "invoke markup with a string attribute inside the wrapper",
     """<tool_call>
 <invoke name="look">
 <parameter name="file" string="true">src/root.zig</parameter>
@@ -87,7 +87,7 @@ Then I will patch it.""",
 </tool_call>""",
     corpus_registry(),
   )
-  probe(harness,  harness, "invoke markup in a function_calls wrapper",
+  probe(harness, "invoke markup in a function_calls wrapper",
     """<function_calls>
 <invoke name="look">
 <parameter name="file" string="true">src/main.zig</parameter>
@@ -96,7 +96,7 @@ Then I will patch it.""",
 </function_calls>""",
     corpus_registry(),
   )
-  probe(harness,  harness, "genuinely unterminated parameter still errors",
+  probe(harness, "genuinely unterminated parameter still errors",
     """<tool_call>
 <invoke name="look">
 <parameter name="file" string="true">src/root.zi""",
@@ -104,7 +104,7 @@ Then I will patch it.""",
   )
   // An edit-action verb used as the tool name folds to `edit` with the action
   // injected. The registered enum is the authority for the fold.
-  probe(harness,  harness, "edit action verb as the tool name",
+  probe(harness, "edit action verb as the tool name",
     """<tool_call>
 replace_range({
     "path": "src/main.zig",
@@ -123,11 +123,11 @@ EOF
   // The fold only applies when the resolved name is registered.
   probe(harness, "genuinely unknown tool name", "frobnicate({ path: \"a.zig\" })", corpus_registry())
   // Terminal answer shapes: the model finished talking and omitted the close.
-  probe(harness,  harness, "unclosed terminal user_response",
+  probe(harness, "unclosed terminal user_response",
     "<user_response>Implemented the INI schema validation system with a `Schema` definition and a `cmdCheck` command.",
     corpus_registry(),
   )
-  probe(harness,  harness, "unclosed terminal assistant_prose",
+  probe(harness, "unclosed terminal assistant_prose",
     """<assistant_prose>
 Implemented full INI schema validation:
 - Added `src/schema.zig`.
@@ -136,7 +136,7 @@ Implemented full INI schema validation:
   )
   // Not terminal: another block follows, so the unclosed tag keeps its
   // violation and the trailing block still parses.
-  probe(harness,  harness, "unclosed response tag before a call stays strict",
+  probe(harness, "unclosed response tag before a call stays strict",
     """<user_response>Done, verifying now.
 <tool_call>
 verify({})

@@ -76,5 +76,5 @@ pipeline test(harness: Harness, _task) {
   const baseline = [report.stats_rows[0]]
   const mismatch = [report.stats_rows[0] + {harness_config_fingerprint: "other-config"}]
   assert_eq(paired_case_deltas(baseline, mismatch), [])
-  harness.stdio.println("eval pack trials ok")
+  harness.stdio.log("eval pack trials ok")
 }

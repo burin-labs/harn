@@ -3,10 +3,10 @@ pipeline test(harness: Harness, task) {
   // Don't send anything — default should fire
   select {
     msg from ch1 {
-      harness.stdio.println("got: ${msg}")
+      harness.stdio.log("got: ${msg}")
     }
     default {
-      harness.stdio.println("nothing ready")
+      harness.stdio.log("nothing ready")
     }
   }
 }

@@ -54,5 +54,5 @@ pipeline test(harness: Harness, task) {
     true
   }
   assert(caught_bad_type, "non-bool defer_loading must be rejected")
-  harness.stdio.println("tool_defer_loading tests passed")
+  harness.stdio.log("tool_defer_loading tests passed")
 }

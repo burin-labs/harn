@@ -6,5 +6,5 @@ pipeline test(harness: Harness, task) {
     return x * 2
   }
   const result = 3 |> add1 |> double
-  harness.stdio.println(result)
+  harness.stdio.log(result)
 }

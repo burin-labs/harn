@@ -6,19 +6,19 @@ pipeline test(harness: Harness, task) {
     }
     return total
   }
-  harness.stdio.println(sum(1, 2, 3))
-  harness.stdio.println(sum(10))
-  harness.stdio.println(sum())
+  harness.stdio.log(sum(1, 2, 3))
+  harness.stdio.log(sum(10))
+  harness.stdio.log(sum())
   // Rest param with leading required params
   fn greet(greeting, ...names) {
     for name in names {
-      harness.stdio.println("${greeting}, ${name}!")
+      harness.stdio.log("${greeting}, ${name}!")
     }
   }
   greet("Hello", "Alice", "Bob")
   // Rest param is always a list
   fn check_type(...args) {
-    harness.stdio.println(type_of(args))
+    harness.stdio.log(type_of(args))
   }
   check_type()
 }

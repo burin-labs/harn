@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
-  http_mock(
+  harness.testing.http_mock(
     "GET",
     "https://api.example.com/retry-exhausted",
     {responses: [{status: 503}, {status: 503}, {status: 503}]},
@@ -8,9 +8,9 @@ pipeline test(harness: Harness, task) {
     "https://api.example.com/retry-exhausted",
     {retry: {max: 2, backoff_ms: 0}},
   )
-  const calls = http_mock_calls()
+  const calls = harness.testing.http_mock_calls()
   assert_eq(resp.status, 503)
   assert_eq(len(calls), 3)
-  harness.stdio.println("exhausted status: " + to_string(resp.status))
-  harness.stdio.println("exhausted calls: " + to_string(len(calls)))
+  harness.stdio.log("exhausted status: " + to_string(resp.status))
+  harness.stdio.log("exhausted calls: " + to_string(len(calls)))
 }

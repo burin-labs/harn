@@ -16,7 +16,7 @@
  * time off the journal rather than reading it off the live clock.
  */
 pipeline default(harness: Harness) {
-  const _ = mock_time(1700000002000)
+  const _ = harness.testing.clock_set(1700000002000)
   const entry = harness.agent.lifecycle_receipt_record_suspension(
     {
       handle: "worker://triage/99",
@@ -30,7 +30,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("recorded_at_ms=" + to_string(recorded_at_ms))
   // Advance the wall clock between "record" and "replay" — the
   // journaled timestamp must stay pinned to the original.
-  const _ = advance_time(5000)
+  const _ = harness.testing.clock_advance(5000)
   const signed_ok = verify_lifecycle_receipt_signature("suspension_receipt", entry.payload)
   harness.stdio.println("signed_verified=" + to_string(signed_ok.verified))
   harness.stdio.println(
@@ -56,6 +56,6 @@ pipeline default(harness: Harness) {
   harness.stdio.println(
     "tampered_error_has_sus_013=" + to_string(contains(tampered_check.error, "HARN-SUS-013")),
   )
-  const _ = unmock_time()
+  const _ = harness.testing.clock_reset()
   return "ok"
 }

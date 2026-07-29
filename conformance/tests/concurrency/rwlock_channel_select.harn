@@ -20,5 +20,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(selected["channel"], "ch2")
   assert_eq(selected["value"], "ready")
   assert_eq(harness.runtime.channel_select([ch1], 0), nil)
-  harness.stdio.println("rwlock/select ok")
+  harness.stdio.log("rwlock/select ok")
 }

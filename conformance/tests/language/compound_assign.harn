@@ -40,5 +40,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(10 % 3, 1, "modulo basic")
   assert_eq(15 % 5, 0, "modulo even")
   assert_eq(7 % 2, 1, "modulo odd")
-  harness.stdio.println("compound assignment: all tests passed")
+  harness.stdio.log("compound assignment: all tests passed")
 }

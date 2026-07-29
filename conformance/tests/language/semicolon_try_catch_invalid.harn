@@ -1,7 +1,7 @@
 pipeline test(harness: Harness, task) {
   try {
-    harness.stdio.println("body")
+    harness.stdio.log("body")
   }; catch {
-    harness.stdio.println("catch")
+    harness.stdio.log("catch")
   }
 }

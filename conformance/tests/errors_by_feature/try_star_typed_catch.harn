@@ -16,5 +16,5 @@ pipeline test(harness: Harness, task) {
   } catch (e: AppError) {
     "typed:${e.variant}"
   }
-  harness.stdio.println("matched: ${matched}")
+  harness.stdio.log("matched: ${matched}")
 }

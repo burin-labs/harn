@@ -11,11 +11,9 @@
  */
 import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
 
-const observed_active = harness.runtime.atomic(0)
-
-const observed_inactive = harness.runtime.atomic(0)
-
 pipeline default(harness: Harness) {
+  const observed_active = harness.runtime.atomic(0)
+  const observed_inactive = harness.runtime.atomic(0)
   harness.agent.clear_session_hooks()
   harness.agent.register_session_hook(
     "on_drain_decision",
@@ -34,11 +32,15 @@ pipeline default(harness: Harness) {
       const pre = __host_settlement_agent_active()
       const result = on_finish_drain(harness, return_value)
       const post = __host_settlement_agent_active()
-      const _audits = lifecycle_audit_log_take()
+      const _audits = lifecycle_audit_log_take(harness)
       harness.stdio.println("pre_active=" + to_string(pre))
       harness.stdio.println("post_active=" + to_string(post))
-      harness.stdio.println("observed_active=" + to_string(harness.runtime.atomic_get(observed_active)))
-      harness.stdio.println("observed_inactive=" + to_string(harness.runtime.atomic_get(observed_inactive)))
+      harness.stdio.println(
+        "observed_active=" + to_string(harness.runtime.atomic_get(observed_active)),
+      )
+      harness.stdio.println(
+        "observed_inactive=" + to_string(harness.runtime.atomic_get(observed_inactive)),
+      )
       harness.stdio.println("status=" + result.status)
       return result.return_value
     },

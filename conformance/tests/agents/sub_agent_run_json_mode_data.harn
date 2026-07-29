@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline main(harness: Harness) {
@@ -18,7 +19,7 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Return machine-readable JSON in the background.",
         {provider: "mock", output: "json", background: true},
       )
-      const done = wait_agent(handle)
+      const done = wait_agent(harness.agent, handle)
       harness.stdio.println(done?.status == "completed")
       harness.stdio.println(done?.result?.summary == "{\"answer\":\"background\"}")
       harness.stdio.println(done?.result?.data?.answer == "background")

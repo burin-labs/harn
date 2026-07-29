@@ -36,5 +36,5 @@ pipeline test(harness: Harness, task) {
   const ollama_warm_missing = harness.llm.healthcheck("ollama", {warm: true})
   assert_eq(ollama_warm_missing?.valid, false)
   assert_eq(ollama_warm_missing?.status, "invalid_request")
-  harness.stdio.println("All llm_config tests passed")
+  harness.stdio.log("All llm_config tests passed")
 }

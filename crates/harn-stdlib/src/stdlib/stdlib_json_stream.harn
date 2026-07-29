@@ -131,7 +131,7 @@ pub gen fn stream_object(harness: Harness, source, schema = nil, options = nil) 
  * @effects: [state.write@harness.runtime]
  * @errors: []
  */
-pub fn stream_validate_create(harness: Harness, schema) -> any {
+pub fn stream_validate_create(harness: Harness, schema) -> resource {
   return harness.runtime.json_stream_validate_create(schema)
 }
 

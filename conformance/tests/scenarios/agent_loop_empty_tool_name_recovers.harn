@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * An empty / missing / non-string tool name is a RECOVERABLE parse slip, not a
  * terminal harness error.

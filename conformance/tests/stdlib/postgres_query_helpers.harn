@@ -66,7 +66,7 @@ LIMIT {limit}
     "UPDATE {table} SET {status_column} = {status} WHERE id = {id}::uuid",
     {table: ident("receipts"), status_column: ident("status"), status: "read", id: "r1"},
   )
-  const db = pg_mock_pool(
+  const db = harness.testing.pg_mock_pool(
     [
       {sql: get_query.sql, params: get_query.params, rows: [{id: "r1"}]},
       {

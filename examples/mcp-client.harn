@@ -14,30 +14,30 @@ pipeline main(harness: Harness, task) {
   let root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = harness.env.get("HARN_BIN") ?? "harn"
   let server_path = path_join(root, "conformance/helpers/mcp_echo_server.harn")
-  harness.stdio.println("Connecting to MCP echo server...")
-  let client = mcp_connect(harn_bin, ["serve", "mcp", server_path])
-  harness.stdio.println("Connected (type: ${type_of(client)})")
+  harness.stdio.log("Connecting to MCP echo server...")
+  let client = harness.tools.mcp_connect(harn_bin, ["serve", "mcp", server_path])
+  harness.stdio.log("Connected (type: ${type_of(client)})")
   // Discover available tools
-  let tools = mcp_list_tools(client)
-  harness.stdio.println("")
-  harness.stdio.println("=== Available Tools (${tools.count}) ===")
+  let tools = harness.tools.mcp_list_tools(client)
+  harness.stdio.log("")
+  harness.stdio.log("=== Available Tools (${tools.count}) ===")
   for t in tools {
-    harness.stdio.println("  - ${t.name}: ${t.description}")
+    harness.stdio.log("  - ${t.name}: ${t.description}")
   }
   // Call the echo tool
-  harness.stdio.println("")
-  harness.stdio.println("Calling echo tool...")
-  let echo_result = mcp_call(client, "echo", {message: "hello from harn"})
-  harness.stdio.println("Echo result: ${echo_result}")
+  harness.stdio.log("")
+  harness.stdio.log("Calling echo tool...")
+  let echo_result = harness.tools.mcp_call(client, "echo", {message: "hello from harn"})
+  harness.stdio.log("Echo result: ${echo_result}")
   // Call the add tool
-  harness.stdio.println("Calling add tool...")
-  let sum = mcp_call(client, "add", {a: 17, b: 25})
-  harness.stdio.println("17 + 25 = ${sum}")
+  harness.stdio.log("Calling add tool...")
+  let sum = harness.tools.mcp_call(client, "add", {a: 17, b: 25})
+  harness.stdio.log("17 + 25 = ${sum}")
   // Check server info
-  let info = mcp_server_info(client)
-  harness.stdio.println("")
-  harness.stdio.println("Server connected: ${info.connected}")
+  let info = harness.tools.mcp_server_info(client)
+  harness.stdio.log("")
+  harness.stdio.log("Server connected: ${info.connected}")
   // Clean up
-  mcp_disconnect(client)
-  harness.stdio.println("Disconnected from MCP server.")
+  harness.tools.mcp_disconnect(client)
+  harness.stdio.log("Disconnected from MCP server.")
 }

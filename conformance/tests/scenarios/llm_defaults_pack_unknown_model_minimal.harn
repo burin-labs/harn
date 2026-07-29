@@ -8,5 +8,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(r.model, "totally-fake-model-id")
   assert_eq(type_of(r.provider), "string")
   assert(r.provider != "", "provider must be a non-empty string")
-  harness.stdio.println("llm_defaults_pack_unknown_model_minimal passed")
+  harness.stdio.log("llm_defaults_pack_unknown_model_minimal passed")
 }

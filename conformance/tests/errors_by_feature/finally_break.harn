@@ -5,10 +5,10 @@ pipeline test(harness: Harness, task) {
       if i == 2 {
         break
       }
-      harness.stdio.println("i: ${i}")
+      harness.stdio.log("i: ${i}")
     } finally {
       cleanup_count = cleanup_count + 1
     }
   }
-  harness.stdio.println("cleanup_count: ${cleanup_count}")
+  harness.stdio.log("cleanup_count: ${cleanup_count}")
 }

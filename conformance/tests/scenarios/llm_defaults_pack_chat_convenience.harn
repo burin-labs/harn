@@ -13,5 +13,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(a.top_p, b.top_p)
   assert_eq(a.schema_retries, b.schema_retries)
   assert_eq(a.output, b.output)
-  harness.stdio.println("llm_defaults_pack_chat_convenience passed")
+  harness.stdio.log("llm_defaults_pack_chat_convenience passed")
 }

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // Model-visible stdlib caps emit the same typed boundary event as Rust-owned
 // runtime caps. This exercises the real agent/tool path so the session owner,
 // subscriber fanout, and dropped-byte payload are all proven together.
@@ -12,7 +13,9 @@ fn truncating_tools(harness: Harness) {
     {
       parameters: {},
       handler: { _args ->
-        command_failure_text(harness,  harness, {status: "failed", exit_code: 1, stdout: "x".repeat(32)},
+        command_failure_text(
+          harness,
+          {status: "failed", exit_code: 1, stdout: "x".repeat(32)},
           {max_stdout_chars: 8},
         )
       },
@@ -34,14 +37,17 @@ pipeline test(harness: Harness, task) {
     },
   )
   with_llm_script(
-    harness.llm, [llm_text("<tool_call>\nshow_failure({})\n</tool_call>"), llm_text("##DONE##")],
+    harness.llm,
+    [llm_text("<tool_call>\nshow_failure({})\n</tool_call>"), llm_text("##DONE##")],
     { ->
-      const _ = agent_loop(harness, "Show the failure once.",
+      const _ = agent_loop(
+        harness,
+        "Show the failure once.",
         nil,
         {
           provider: "mock",
           session_id: session_id,
-          tools: truncating_tools(),
+          tools: truncating_tools(harness),
           tool_format: "text",
           loop_until_done: true,
           done_sentinel: "##DONE##",
@@ -50,7 +56,13 @@ pipeline test(harness: Harness, task) {
       )
     },
   )
-  assert(harness.runtime.atomic_get(seen) == 1, "the model-visible command cap emits one typed boundary")
-  assert(harness.runtime.atomic_get(dropped_bytes) == 24, "the boundary carries exact dropped source bytes")
-  harness.stdio.println("ok")
+  assert(
+    harness.runtime.atomic_get(seen) == 1,
+    "the model-visible command cap emits one typed boundary",
+  )
+  assert(
+    harness.runtime.atomic_get(dropped_bytes) == 24,
+    "the boundary carries exact dropped source bytes",
+  )
+  harness.stdio.log("ok")
 }

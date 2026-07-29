@@ -2,17 +2,17 @@ import "std/personas/prelude"
 
 @persona(output_style: "concise")
 fn styled_reviewer(harness: Harness) {
-  harness.stdio.println("reviewing")
+  harness.stdio.log("reviewing")
 }
 
 @persona(output_style: {name: "friendly", instructions: "Be warm."})
 fn styled_helper(harness: Harness) {
-  harness.stdio.println("helping")
+  harness.stdio.log("helping")
 }
 
 @persona(name: "styled_plain")
 fn styled_plain(harness: Harness) {
-  harness.stdio.println("plain")
+  harness.stdio.log("plain")
 }
 
 /**

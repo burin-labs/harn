@@ -1,12 +1,11 @@
-use crate::value::VmDictExt;
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::Mutex as SyncMutex;
 use sqlx_core::column::Column;
 use sqlx_core::connection::Connection;
 use sqlx_core::executor::Executor;
@@ -25,9 +24,10 @@ use tokio::sync::Mutex;
 use crate::llm::vm_value_to_json;
 use crate::stdlib::macros::{
     harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
+    TY_RESOURCE,
 };
 use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
 use self::circuit::{Allow, CircuitBreakerState};
@@ -38,8 +38,6 @@ pub(super) const HANDLE_MOCK: &str = "pg_mock_pool";
 
 const DEFAULT_STATEMENT_CACHE_CAPACITY: usize = 100;
 
-static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-
 pub(super) struct PoolRecord {
     pub(super) pool: Arc<PgPool>,
     pub(super) replicas: Vec<Arc<PgPool>>,
@@ -48,6 +46,17 @@ pub(super) struct PoolRecord {
     pub(super) statement_cache_capacity: usize,
     pub(super) read_routing_policy: ReadRoutingPolicy,
     pub(super) circuit: Arc<CircuitBreakerState>,
+    pub(super) described_oids: Arc<SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>>,
+}
+
+pub(super) struct PoolHandle {
+    record: Arc<PoolRecord>,
+    closed: AtomicBool,
+}
+
+pub(super) struct TxHandle {
+    cell: Mutex<Option<Transaction<'static, Postgres>>>,
+    described_oids: SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
 }
 
 #[derive(Clone)]
@@ -63,28 +72,6 @@ struct MockFixture {
 struct MockPool {
     fixtures: Vec<MockFixture>,
     calls: Vec<VmValue>,
-}
-
-type PgTxCell = Arc<Mutex<Option<Transaction<'static, Postgres>>>>;
-type PgTxRegistry = BTreeMap<String, PgTxCell>;
-
-thread_local! {
-    static POOLS: RefCell<BTreeMap<String, Arc<PoolRecord>>> = const { RefCell::new(std::collections::BTreeMap::new()) };
-    static TXS: RefCell<PgTxRegistry> =
-        const { RefCell::new(std::collections::BTreeMap::new()) };
-    static MOCKS: RefCell<BTreeMap<String, MockPool>> = const { RefCell::new(std::collections::BTreeMap::new()) };
-    /// Server-described per-slot parameter OIDs, keyed by the SQL string.
-    ///
-    /// Postgres infers every `$n` slot's type from the query *structure* (casts,
-    /// target columns, operators) — independent of which params are `nil` at
-    /// runtime — so the described OID list is stable per SQL string and can be
-    /// cached and reused for all future nil-bearing executions of that SQL. This
-    /// turns the describe round-trip into a one-time cost per distinct SQL rather
-    /// than a per-query cost (see [`described_param_oids`]). Scoped thread-local
-    /// to match the `POOLS`/`TXS`/`MOCKS` registries above (the harn VM runs on a
-    /// current-thread runtime).
-    static DESCRIBED_OIDS: RefCell<BTreeMap<String, Arc<Vec<PgTypeInfo>>>> =
-        const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
 // Counts how many times an *uncached* server describe round-trip is performed.
@@ -119,10 +106,6 @@ fn bump_describe_round_trips() {
 }
 
 pub(crate) fn reset_postgres_state() {
-    POOLS.with(|pools| pools.borrow_mut().clear());
-    TXS.with(|txs| txs.borrow_mut().clear());
-    MOCKS.with(|mocks| mocks.borrow_mut().clear());
-    DESCRIBED_OIDS.with(|oids| oids.borrow_mut().clear());
     listen::reset_state();
 }
 
@@ -225,7 +208,7 @@ pub use shared::install_shared_pool_registry;
     exposure = "runtime_internal",
     effects = [],
     sig_expr = BuiltinSignature::variadic("pg_pool", &[Param::new("args", TY_ANY
-)], TY_DICT),
+)], TY_RESOURCE),
     kind = "async",
     category = "postgres"
 )]
@@ -244,7 +227,7 @@ async fn pg_pool_impl(
     exposure = "runtime_internal",
     effects = [],
     sig_expr = BuiltinSignature::variadic("pg_connect", &[Param::new("args", TY_ANY
-)], TY_DICT),
+)], TY_RESOURCE),
     kind = "async",
     category = "postgres"
 )]
@@ -271,17 +254,8 @@ async fn pg_close_impl(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let id = handle_id(args.first(), HANDLE_POOL, "pg_close")?;
-    let removed = POOLS.with(|pools| pools.borrow_mut().remove(&id));
-    if let Some(record) = removed {
-        record.pool.close().await;
-        for replica in &record.replicas {
-            replica.close().await;
-        }
-        Ok(VmValue::Bool(true))
-    } else {
-        Ok(VmValue::Bool(false))
-    }
+    let handle = pool_handle(args.first(), "pg_close")?;
+    Ok(VmValue::Bool(!handle.closed.swap(true, Ordering::SeqCst)))
 }
 
 #[harn_builtin(
@@ -297,8 +271,8 @@ async fn pg_stmt_cache_clear_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target = required_arg(&args, 0, "pg_stmt_cache_clear", "pool handle")?;
-    if handle_kind(target).as_deref() == Some(HANDLE_MOCK) {
-        handle_id(Some(target), HANDLE_MOCK, "pg_stmt_cache_clear")?;
+    if is_resource_kind(target, HANDLE_MOCK) {
+        mock_handle(Some(target), "pg_stmt_cache_clear")?;
         return Ok(stmt_cache_clear_result(0, 0, 0));
     }
 
@@ -370,8 +344,8 @@ async fn clear_idle_statement_caches(
 /// `max_connections` of them (so we catch the one the migration ran on, which
 /// sqlx returns to the pool asynchronously and which `try_acquire` can therefore
 /// miss right after the run) — clear each one's cached statements (sqlx sends a
-/// server-side `Close`/`DEALLOCATE`), and clear the thread-local `DESCRIBED_OIDS`
-/// cache (a DDL can change the server-inferred type of a `$n` slot).
+/// server-side `Close`/`DEALLOCATE`), and clear this pool authority's described
+/// parameter cache (DDL can change the server-inferred type of a `$n` slot).
 ///
 /// Best-effort and non-fatal: the migration already committed, so a clear
 /// failure is logged and the run still reports success. The `acquire` is bounded
@@ -379,7 +353,11 @@ async fn clear_idle_statement_caches(
 /// connection still checked out by another task at recycle time is not drained
 /// here; its first post-DDL reuse would hit `0A000` once and sqlx re-prepares —
 /// the same self-healing sqlx already does for a plan invalidated out of band.
-pub(super) async fn recycle_pool_after_ddl(pool: &PgPool, max: u32) {
+pub(super) async fn recycle_pool_after_ddl(
+    pool: &PgPool,
+    described_oids: &SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
+    max: u32,
+) {
     let mut held = Vec::new();
     // Acquire (waiting, not try_acquire) so we deterministically catch the
     // just-released migration connection even though its return to the pool is
@@ -402,7 +380,7 @@ pub(super) async fn recycle_pool_after_ddl(pool: &PgPool, max: u32) {
             );
         }
     }
-    DESCRIBED_OIDS.with(|oids| oids.borrow_mut().clear());
+    described_oids.lock().clear();
 }
 
 #[harn_builtin(
@@ -482,7 +460,11 @@ async fn pg_transaction_impl(
     ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
-    let pool_id = handle_id(args.first(), HANDLE_POOL, "pg_transaction")?;
+    let pool = pool_record_from_handle(
+        args.first()
+            .ok_or_else(|| runtime_error("pg_transaction: pool handle is required"))?,
+        "pg_transaction",
+    )?;
     let closure = match args.get(1) {
         Some(VmValue::Closure(closure)) => closure.clone(),
         _ => {
@@ -497,11 +479,10 @@ async fn pg_transaction_impl(
         .and_then(|opts| opts.get("settings"))
         .and_then(VmValue::as_dict)
         .cloned();
-    run_managed_transaction(&ctx, &pool_id, "pg_transaction", closure, move |tx_id| {
-        let tx_id = tx_id.to_string();
+    run_managed_transaction(&ctx, pool, "pg_transaction", closure, move |tx| {
         Box::pin(async move {
             if let Some(settings) = settings {
-                apply_transaction_settings(&tx_id, &settings).await?;
+                apply_transaction_settings(&tx, &settings).await?;
             }
             Ok(())
         })
@@ -517,39 +498,39 @@ async fn pg_transaction_impl(
 /// rollback on any error in the closure.
 pub(super) async fn run_managed_transaction(
     ctx: &crate::vm::AsyncBuiltinCtx,
-    pool_id: &str,
+    pool: Arc<PoolRecord>,
     builtin: &'static str,
     closure: Arc<crate::value::VmClosure>,
     prepare: impl FnOnce(
-        &str,
+        Arc<TxHandle>,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), VmError>> + Send + '_>,
+        Box<dyn std::future::Future<Output = Result<(), VmError>> + Send + 'static>,
     >,
 ) -> Result<VmValue, VmError> {
-    let pool = pool_by_id(pool_id)?;
     let tx = pool
+        .pool
         .begin()
         .await
         .map_err(|error| runtime_error(format!("{builtin}: begin failed: {error}")))?;
-    let tx_id = next_id("pgtx");
-    let tx_cell = Arc::new(Mutex::new(Some(tx)));
-    register_tx(&tx_id, Arc::clone(&tx_cell));
-    let tx_handle = handle_value(HANDLE_TX, &tx_id, crate::value::DictMap::new());
+    let tx_state = Arc::new(TxHandle {
+        cell: Mutex::new(Some(tx)),
+        described_oids: SyncMutex::new(BTreeMap::new()),
+    });
+    let tx_value = VmValue::resource(VmResourceHandle::from_arc(HANDLE_TX, Arc::clone(&tx_state)));
 
-    if let Err(error) = prepare(&tx_id).await {
-        unregister_tx(&tx_id);
-        if let Some(tx) = tx_cell.lock().await.take() {
+    if let Err(error) = prepare(Arc::clone(&tx_state)).await {
+        if let Some(tx) = tx_state.cell.lock().await.take() {
             let _ = tx.rollback().await;
         }
         return Err(error);
     }
 
     let mut child_vm = ctx.child_vm();
-    let result = child_vm.call_closure_pub(&closure, &[tx_handle]).await;
+    let result = child_vm.call_closure_pub(&closure, &[tx_value]).await;
     ctx.forward_output(&child_vm.take_output());
 
-    unregister_tx(&tx_id);
-    let tx = tx_cell
+    let tx = tx_state
+        .cell
         .lock()
         .await
         .take()
@@ -629,10 +610,10 @@ async fn pg_migrate_impl(
 }
 
 #[harn_builtin(
-    exposure = "capability_arg:0",
-    effects = ["state.read@const=postgres-mock"],
+    exposure = "harness.testing.pg_mock_pool",
+    effects = ["state.mutate@dynamic"],
     sig_expr = BuiltinSignature::variadic("pg_mock_pool", &[Param::new("args", TY_ANY
-)], TY_DICT),
+)], TY_RESOURCE),
     category = "postgres"
 )]
 fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -646,17 +627,13 @@ fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             ))
         }
     };
-    let id = next_id("pgmock");
-    MOCKS.with(|mocks| {
-        mocks.borrow_mut().insert(
-            id.clone(),
-            MockPool {
-                fixtures,
-                calls: Vec::new(),
-            },
-        );
-    });
-    Ok(handle_value(HANDLE_MOCK, &id, crate::value::DictMap::new()))
+    Ok(VmValue::resource(VmResourceHandle::new(
+        HANDLE_MOCK,
+        SyncMutex::new(MockPool {
+            fixtures,
+            calls: Vec::new(),
+        }),
+    )))
 }
 
 #[harn_builtin(
@@ -667,14 +644,8 @@ fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     category = "postgres"
 )]
 fn pg_mock_calls_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let id = handle_id(args.first(), HANDLE_MOCK, "pg_mock_calls")?;
-    let calls = MOCKS.with(|mocks| {
-        mocks
-            .borrow()
-            .get(&id)
-            .map(|mock| mock.calls.clone())
-            .unwrap_or_default()
-    });
+    let mock = mock_handle(args.first(), "pg_mock_calls")?;
+    let calls = mock.lock().calls.clone();
     Ok(VmValue::List(std::sync::Arc::new(calls)))
 }
 
@@ -753,6 +724,7 @@ async fn open_pool(
         statement_cache_capacity: stmt_cache_capacity,
         read_routing_policy,
         circuit,
+        described_oids: Arc::new(SyncMutex::new(BTreeMap::new())),
     });
 
     // If sharing is enabled, publish (or adopt a racing winner's) record into
@@ -771,49 +743,23 @@ async fn open_pool(
     ))
 }
 
-/// Register `record` in the thread-local [`POOLS`] registry under a fresh
-/// opaque id and build the `pg_pool` handle the VM hands back to `.harn` code.
+/// Mint a VM-local, unforgeable authority over a possibly shared pool record.
 ///
-/// The thread-local map is still the per-request lookup table that the query
-/// builtins consult by handle id; sharing happens at the [`PoolRecord`] `Arc`
-/// level, so two requests get distinct ids that resolve to the *same* underlying
-/// pool. The handle metadata is derived from the (possibly shared) record so it
-/// always reflects the live pool rather than this caller's requested options.
+/// Sharing happens only at the [`PoolRecord`] layer. Each returned resource has
+/// independent close state, so closing one request's authority cannot revoke a
+/// sibling request that adopted the same explicitly shared pool.
 fn register_local_pool_handle(
     record: Arc<PoolRecord>,
-    single_connection: bool,
-    application_name: Option<String>,
+    _single_connection: bool,
+    _application_name: Option<String>,
 ) -> VmValue {
-    let id = next_id(if single_connection {
-        "pgconn"
-    } else {
-        "pgpool"
-    });
-    let mut meta = crate::value::DictMap::new();
-    meta.insert(
-        crate::value::intern_key("max_connections"),
-        VmValue::Int(i64::from(record.max_connections)),
-    );
-    meta.insert(
-        crate::value::intern_key("single_connection"),
-        VmValue::Bool(single_connection),
-    );
-    meta.insert(
-        crate::value::intern_key("replicas"),
-        VmValue::Int(record.replicas.len() as i64),
-    );
-    meta.insert(
-        crate::value::intern_key("statement_cache_capacity"),
-        VmValue::Int(record.statement_cache_capacity as i64),
-    );
-    meta.put_str("read_routing_policy", record.read_routing_policy.as_str());
-    if let Some(application_name) = application_name {
-        meta.put_str("application_name", application_name);
-    }
-    POOLS.with(|pools| {
-        pools.borrow_mut().insert(id.clone(), record);
-    });
-    handle_value(HANDLE_POOL, &id, meta)
+    VmValue::resource(VmResourceHandle::new(
+        HANDLE_POOL,
+        PoolHandle {
+            record,
+            closed: AtomicBool::new(false),
+        },
+    ))
 }
 
 async fn build_pool(
@@ -926,12 +872,13 @@ pub(super) async fn query_rows(
     routing: QueryRouting,
 ) -> Result<Vec<VmValue>, VmError> {
     crate::call_budget::charge_pg_query()?;
-    match handle_kind(target).as_deref() {
-        Some(HANDLE_MOCK) => return mock_query(target, sql, params, false),
-        Some(HANDLE_TX) => {
-            let id = handle_id(Some(target), HANDLE_TX, "pg_query")?;
-            let tx = tx_by_id(&id)?;
-            let mut tx = tx.lock().await;
+    match target {
+        VmValue::Resource(handle) if handle.label() == HANDLE_MOCK => {
+            return mock_query(target, sql, params, false);
+        }
+        VmValue::Resource(handle) if handle.label() == HANDLE_TX => {
+            let tx_state = tx_handle(Some(target), "pg_query")?;
+            let mut tx = tx_state.cell.lock().await;
             let tx = tx
                 .as_mut()
                 .ok_or_else(|| runtime_error("pg_query: transaction is closed"))?;
@@ -939,7 +886,9 @@ pub(super) async fn query_rows(
                 // describe-then-bind: learn the server-inferred parameter OIDs
                 // on the tx connection (cached per SQL), then bind typed NULLs
                 // for the nils.
-                let oids = described_param_oids(tx, sql, "pg_query", true).await?;
+                let oids =
+                    described_param_oids(&tx_state.described_oids, tx, sql, "pg_query", true)
+                        .await?;
                 bind_params_described(sql, &oids, params)?
                     .fetch_all(&mut **tx)
                     .await
@@ -958,9 +907,14 @@ pub(super) async fn query_rows(
     let pool = pool_for_routing(&record, routing, "pg_query")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_query")?;
     let result = if params_have_nil(params) {
-        run_described_query(&pool, sql, params, "pg_query", |q, conn| {
-            Box::pin(async move { q.fetch_all(conn).await })
-        })
+        run_described_query(
+            &pool,
+            &record.described_oids,
+            sql,
+            params,
+            "pg_query",
+            |q, conn| Box::pin(async move { q.fetch_all(conn).await }),
+        )
         .await
     } else {
         bind_params(query(AssertSqlSafe(sql)), params)?
@@ -987,7 +941,7 @@ pub(super) async fn execute_stmt(
 ) -> Result<VmValue, VmError> {
     crate::call_budget::charge_pg_query()?;
     let started = std::time::Instant::now();
-    if handle_kind(target).as_deref() == Some(HANDLE_MOCK) {
+    if is_resource_kind(target, HANDLE_MOCK) {
         let rows = mock_query(target, sql, params, true)?;
         let rows_affected = rows
             .first()
@@ -998,10 +952,9 @@ pub(super) async fn execute_stmt(
             .max(0) as u64;
         return Ok(execute_result_value(rows_affected, started.elapsed()));
     }
-    if handle_kind(target).as_deref() == Some(HANDLE_TX) {
-        let id = handle_id(Some(target), HANDLE_TX, "pg_execute")?;
-        let tx = tx_by_id(&id)?;
-        let mut tx = tx.lock().await;
+    if is_resource_kind(target, HANDLE_TX) {
+        let tx_state = tx_handle(Some(target), "pg_execute")?;
+        let mut tx = tx_state.cell.lock().await;
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_execute: transaction is closed"))?;
@@ -1009,7 +962,8 @@ pub(super) async fn execute_stmt(
             // describe-then-bind: learn the server-inferred parameter OIDs on
             // the tx connection (cached per SQL), then bind typed NULLs for the
             // nils.
-            let oids = described_param_oids(tx, sql, "pg_execute", true).await?;
+            let oids =
+                described_param_oids(&tx_state.described_oids, tx, sql, "pg_execute", true).await?;
             bind_params_described(sql, &oids, params)?
                 .execute(&mut **tx)
                 .await
@@ -1024,9 +978,14 @@ pub(super) async fn execute_stmt(
     let record = pool_record_from_handle(target, "pg_execute")?;
     let (probe, _) = enter_circuit(&record.circuit, "pg_execute")?;
     let result = if params_have_nil(params) {
-        run_described_query(&record.pool, sql, params, "pg_execute", |q, conn| {
-            Box::pin(async move { q.execute(conn).await })
-        })
+        run_described_query(
+            &record.pool,
+            &record.described_oids,
+            sql,
+            params,
+            "pg_execute",
+            |q, conn| Box::pin(async move { q.execute(conn).await }),
+        )
         .await
     } else {
         bind_params(query(AssertSqlSafe(sql)), params)?
@@ -1066,14 +1025,13 @@ async fn savepoint_op(
     // Savepoints are no-ops against mock pools; record the dispatched SQL
     // so tests can assert on it but skip the (nonexistent) transaction
     // state machine.
-    if handle_kind(target).as_deref() == Some(HANDLE_MOCK) {
+    if is_resource_kind(target, HANDLE_MOCK) {
         let sql = render_savepoint_sql(op, &name);
         let _ = mock_query(target, &sql, &[], true);
         return Ok(VmValue::Bool(true));
     }
-    let id = handle_id(Some(target), HANDLE_TX, builtin)?;
-    let tx = tx_by_id(&id)?;
-    let mut tx = tx.lock().await;
+    let tx = tx_handle(Some(target), builtin)?;
+    let mut tx = tx.cell.lock().await;
     let tx = tx
         .as_mut()
         .ok_or_else(|| runtime_error(format!("{builtin}: transaction is closed")))?;
@@ -1189,7 +1147,7 @@ fn is_allowed_transaction_setting(key: &str) -> bool {
 }
 
 async fn apply_transaction_settings(
-    tx_id: &str,
+    tx: &Arc<TxHandle>,
     settings: &crate::value::DictMap,
 ) -> Result<(), VmError> {
     for (key, value) in settings {
@@ -1216,8 +1174,7 @@ async fn apply_transaction_settings(
             VmValue::String(arcstr::ArcStr::from(value.display())),
         ];
         let sql = "select set_config($1, $2, true)";
-        let tx = tx_by_id(tx_id)?;
-        let mut tx = tx.lock().await;
+        let mut tx = tx.cell.lock().await;
         let tx = tx
             .as_mut()
             .ok_or_else(|| runtime_error("pg_transaction: transaction is closed"))?;
@@ -1393,7 +1350,7 @@ fn bind_params_described<'q>(
 }
 
 /// Server-described per-slot parameter OIDs for `sql`, looked up from the
-/// process-stable [`DESCRIBED_OIDS`] cache and computed on a miss.
+/// owning pool or transaction authority's cache and computed on a miss.
 ///
 /// The described OID list is a pure function of the SQL *structure* (Postgres
 /// infers each `$n` from casts/target columns/operators, not from the runtime
@@ -1421,20 +1378,17 @@ fn bind_params_described<'q>(
 /// `prepare_with` in a `SAVEPOINT` so a failed probe cannot abort the caller's
 /// transaction — see [`describe_param_oids_uncached`].
 async fn described_param_oids(
+    cache: &SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
     conn: &mut sqlx_postgres::PgConnection,
     sql: &str,
     builtin: &str,
     in_transaction: bool,
 ) -> Result<Arc<Vec<PgTypeInfo>>, VmError> {
-    if let Some(cached) = DESCRIBED_OIDS.with(|oids| oids.borrow().get(sql).cloned()) {
+    if let Some(cached) = cache.lock().get(sql).cloned() {
         return Ok(cached);
     }
     let oids = Arc::new(describe_param_oids_uncached(conn, sql, builtin, in_transaction).await?);
-    DESCRIBED_OIDS.with(|cache| {
-        cache
-            .borrow_mut()
-            .insert(sql.to_string(), Arc::clone(&oids));
-    });
+    cache.lock().insert(sql.to_string(), Arc::clone(&oids));
     Ok(oids)
 }
 
@@ -1563,6 +1517,7 @@ async fn describe_param_oids_uncached(
 /// this flow.
 async fn run_described_query<T>(
     pool: &PgPool,
+    cache: &SyncMutex<BTreeMap<String, Arc<Vec<PgTypeInfo>>>>,
     sql: &str,
     params: &[VmValue],
     builtin: &str,
@@ -1580,7 +1535,7 @@ async fn run_described_query<T>(
     // Autocommit pool connection: not inside a caller transaction, so no
     // savepoint (it would error outside a tx) — the probe just catches its own
     // failure and falls back to legacy text NULLs.
-    let oids = described_param_oids(&mut conn, sql, builtin, false).await?;
+    let oids = described_param_oids(cache, &mut conn, sql, builtin, false).await?;
     let query = bind_params_described(sql, &oids, params)?;
     run(query, &mut conn)
         .await
@@ -2029,26 +1984,15 @@ fn parse_ssl_mode(mode: &str) -> Result<PgSslMode, VmError> {
     }
 }
 
-pub(super) fn pool_by_id(id: &str) -> Result<Arc<PgPool>, VmError> {
-    pool_record_by_id(id).map(|record| Arc::clone(&record.pool))
-}
-
-pub(super) fn pool_record_by_id(id: &str) -> Result<Arc<PoolRecord>, VmError> {
-    POOLS.with(|pools| {
-        pools
-            .borrow()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| runtime_error(format!("pg_pool: unknown or closed pool `{id}`")))
-    })
-}
-
 pub(super) fn pool_record_from_handle(
     value: &VmValue,
     builtin: &str,
 ) -> Result<Arc<PoolRecord>, VmError> {
-    let id = handle_id(Some(value), HANDLE_POOL, builtin)?;
-    pool_record_by_id(&id)
+    let handle = pool_handle(Some(value), builtin)?;
+    if handle.closed.load(Ordering::SeqCst) {
+        return Err(runtime_error(format!("{builtin}: pool is closed")));
+    }
+    Ok(Arc::clone(&handle.record))
 }
 
 /// First-arg extractor for builtins that operate on the primary pool:
@@ -2062,63 +2006,48 @@ pub(super) fn pool_record_from_handle(
 /// that want a kind check without also reading the id.
 pub(super) fn pool_arg(args: &[VmValue], builtin: &'static str) -> Result<Arc<PgPool>, VmError> {
     let handle = required_arg(args, 0, builtin, "pool handle")?;
-    let id = handle_id(Some(handle), HANDLE_POOL, builtin)?;
-    pool_by_id(&id)
+    pool_record_from_handle(handle, builtin).map(|record| Arc::clone(&record.pool))
 }
 
-pub(super) fn tx_by_id(id: &str) -> Result<PgTxCell, VmError> {
-    TXS.with(|txs| {
-        txs.borrow()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| runtime_error(format!("pg_transaction: unknown transaction `{id}`")))
-    })
-}
-
-pub(super) fn register_tx(id: &str, cell: PgTxCell) {
-    TXS.with(|txs| {
-        txs.borrow_mut().insert(id.to_string(), cell);
-    });
-}
-
-pub(super) fn unregister_tx(id: &str) {
-    TXS.with(|txs| {
-        txs.borrow_mut().remove(id);
-    });
-}
-
-pub(super) fn handle_value(kind: &str, id: &str, mut extra: crate::value::DictMap) -> VmValue {
-    extra.put_str("_type", kind);
-    extra.put_str("id", id);
-    VmValue::dict(extra)
-}
-
-pub(super) fn handle_kind(value: &VmValue) -> Option<String> {
-    value
-        .as_dict()
-        .and_then(|dict| dict.get("_type"))
-        .map(VmValue::display)
-}
-
-pub(super) fn handle_id(
+pub(super) fn resource_handle(
     value: Option<&VmValue>,
     expected: &str,
     builtin: &str,
-) -> Result<String, VmError> {
-    let dict = value
-        .and_then(VmValue::as_dict)
-        .ok_or_else(|| runtime_error(format!("{builtin}: expected {expected} handle")))?;
-    let kind = dict.get("_type").map(VmValue::display).unwrap_or_default();
-    if kind != expected {
-        return Err(runtime_error(format!(
+) -> Result<Arc<VmResourceHandle>, VmError> {
+    match value {
+        Some(VmValue::Resource(handle)) if handle.label() == expected => Ok(Arc::clone(handle)),
+        _ => Err(runtime_error(format!(
             "{builtin}: expected {expected} handle"
-        )));
+        ))),
     }
-    let id = dict.get("id").map(VmValue::display).unwrap_or_default();
-    if id.is_empty() {
-        return Err(runtime_error(format!("{builtin}: handle is missing id")));
-    }
-    Ok(id)
+}
+
+pub(super) fn pool_handle(
+    value: Option<&VmValue>,
+    builtin: &str,
+) -> Result<Arc<PoolHandle>, VmError> {
+    resource_handle(value, HANDLE_POOL, builtin)?
+        .downcast::<PoolHandle>()
+        .ok_or_else(|| runtime_error(format!("{builtin}: invalid Postgres pool authority")))
+}
+
+pub(super) fn tx_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<TxHandle>, VmError> {
+    resource_handle(value, HANDLE_TX, builtin)?
+        .downcast::<TxHandle>()
+        .ok_or_else(|| runtime_error(format!("{builtin}: invalid Postgres transaction authority")))
+}
+
+fn mock_handle(
+    value: Option<&VmValue>,
+    builtin: &str,
+) -> Result<Arc<SyncMutex<MockPool>>, VmError> {
+    resource_handle(value, HANDLE_MOCK, builtin)?
+        .downcast::<SyncMutex<MockPool>>()
+        .ok_or_else(|| runtime_error(format!("{builtin}: invalid Postgres mock authority")))
+}
+
+pub(super) fn is_resource_kind(value: &VmValue, expected: &str) -> bool {
+    matches!(value, VmValue::Resource(handle) if handle.label() == expected)
 }
 
 pub(super) fn required_arg<'a>(
@@ -2347,10 +2276,6 @@ fn option_duration_ms(options: Option<&crate::value::DictMap>, key: &str) -> Opt
     })
 }
 
-pub(super) fn next_id(prefix: &str) -> String {
-    format!("{prefix}-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
-}
-
 pub(super) fn runtime_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(message.into())
 }
@@ -2399,13 +2324,10 @@ fn mock_query(
     params: &[VmValue],
     execute: bool,
 ) -> Result<Vec<VmValue>, VmError> {
-    let id = handle_id(Some(target), HANDLE_MOCK, "pg_mock")?;
+    let mock = mock_handle(Some(target), "pg_mock")?;
     let params_json = serde_json::Value::Array(params.iter().map(vm_value_to_json).collect());
-    MOCKS.with(|mocks| {
-        let mut mocks = mocks.borrow_mut();
-        let mock = mocks
-            .get_mut(&id)
-            .ok_or_else(|| runtime_error(format!("pg_mock: unknown mock pool `{id}`")))?;
+    {
+        let mut mock = mock.lock();
         let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
             "sql": sql,
             "params": params_json,
@@ -2438,7 +2360,7 @@ fn mock_query(
         } else {
             Ok(fixture.rows.clone())
         }
-    })
+    }
 }
 
 #[cfg(test)]

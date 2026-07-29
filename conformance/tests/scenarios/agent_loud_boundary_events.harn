@@ -1,3 +1,5 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_chat_loop } from "std/agent/chat"
 // Every boundary between model bytes and executed action is loud (harn#5142).
 //
 // The class this pins: a dialect the parser does not recognize used to degrade
@@ -24,7 +26,7 @@ fn echo_tools() {
 }
 
 /** Count `boundary_failure` events for one boundary, and remember one owner. */
-fn observe_boundary(session_id: string, boundary: string) -> dict {
+fn observe_boundary(harness: Harness, session_id: string, boundary: string) -> dict {
   const seen = harness.runtime.atomic(0)
   const owner_is_harness = harness.runtime.atomic(0)
   const owner_is_policy = harness.runtime.atomic(0)
@@ -56,9 +58,12 @@ fn observe_boundary(session_id: string, boundary: string) -> dict {
 
 fn run_text_turn(harness: Harness, session_id: string, reply: string) {
   with_llm_script(
-    harness.llm, [llm_text(reply), llm_text("##DONE##")],
+    harness.llm,
+    [llm_text(reply), llm_text("##DONE##")],
     { ->
-      const _ = agent_loop(harness, "Call echo once.",
+      const _ = agent_loop(
+        harness,
+        "Call echo once.",
         nil,
         {
           provider: "mock",
@@ -78,7 +83,7 @@ pipeline test(harness: Harness, task) {
   // 1. The #5142 case. `<tool>` is not in the grammar, so the turn produces no
   //    calls. It must not produce silence either.
   const unknown_session = "loud-boundary-unknown-" + harness.random.uuid()
-  const unknown = observe_boundary(unknown_session, "text_tool_parse")
+  const unknown = observe_boundary(harness, unknown_session, "text_tool_parse")
   run_text_turn(harness, unknown_session, "<tool>\necho({ msg: \"hi\" })\n</tool>")
   assert(
     harness.runtime.atomic_get(unknown.seen) >= 1,
@@ -88,26 +93,30 @@ pipeline test(harness: Harness, task) {
     harness.runtime.atomic_get(unknown.owner_is_harness) == 1,
     "a parse loss is owned by the harness, never attributed to the model",
   )
-  assert(harness.runtime.atomic_get(unknown.carried_excerpt) == 1, "the event carries the bytes that died")
+  assert(
+    harness.runtime.atomic_get(unknown.carried_excerpt) == 1,
+    "the event carries the bytes that died",
+  )
   // 2. A well-formed call in the SAME grammar dispatches, so there is no loss
   //    and no event. This is the control that keeps the funnel from crying wolf.
   const good_session = "loud-boundary-good-" + harness.random.uuid()
-  const good = observe_boundary(good_session, "text_tool_parse")
+  const good = observe_boundary(harness, good_session, "text_tool_parse")
   run_text_turn(harness, good_session, "<tool_call>\necho({ msg: \"hi\" })\n</tool_call>")
   assert(harness.runtime.atomic_get(good.seen) == 0, "a parsed turn must not emit boundary noise")
   // 3. Plain prose is consumed by the parser too, but consuming narration is
   //    not a loss. Only the shape verdict can tell the two apart, which is why
   //    the event is emitted above the parser rather than inside it.
   const prose_session = "loud-boundary-prose-" + harness.random.uuid()
-  const prose = observe_boundary(prose_session, "text_tool_parse")
+  const prose = observe_boundary(harness, prose_session, "text_tool_parse")
   run_text_turn(harness, prose_session, "Let me think about this before acting. ##DONE##")
   assert(harness.runtime.atomic_get(prose.seen) == 0, "ordinary prose must not emit boundary noise")
   // 4. A conversation cut short by a cap is a policy stop, not an agent that
   //    ran out of things to say.
   const chat_session = "loud-boundary-chat-" + harness.random.uuid()
-  const chat = observe_boundary(chat_session, "chat_turn_cap")
+  const chat = observe_boundary(harness, chat_session, "chat_turn_cap")
   with_llm_script(
-    harness.llm, [llm_text("first answer"), llm_text("##DONE##")],
+    harness.llm,
+    [llm_text("first answer"), llm_text("##DONE##")],
     { ->
       const _ = agent_chat_loop(
         harness,
@@ -121,6 +130,9 @@ pipeline test(harness: Harness, task) {
       )
     },
   )
-  assert(harness.runtime.atomic_get(chat.seen) == 1, "a turn cap must emit a chat_turn_cap boundary_failure")
+  assert(
+    harness.runtime.atomic_get(chat.seen) == 1,
+    "a turn cap must emit a chat_turn_cap boundary_failure",
+  )
   assert(harness.runtime.atomic_get(chat.owner_is_policy) == 1, "a cap is owned by policy")
 }

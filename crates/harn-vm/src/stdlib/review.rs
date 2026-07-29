@@ -98,9 +98,11 @@ struct ReviewTrustInput<'a> {
 }
 
 pub(crate) fn register_review_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("self_review", |ctx, args| async move {
-        self_review_impl(Some(&ctx), args).await
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Agent,
+        "self_review",
+        |ctx, args| async move { self_review_impl(Some(&ctx), args).await },
+    );
 }
 
 async fn self_review_impl(

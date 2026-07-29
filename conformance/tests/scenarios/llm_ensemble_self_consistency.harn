@@ -7,7 +7,7 @@ pipeline default(harness: Harness) {
   with_llm_script(
     harness.llm, [llm_text("A"), llm_text("B"), llm_text("A"), llm_text("C"), llm_text("A")],
     { ->
-      const result = self_consistency(harness,  harness, "Pick a letter",
+      const result = self_consistency(harness, "Pick a letter",
         "",
         {
           n: 5,

@@ -11,5 +11,5 @@ pipeline test(harness: Harness, task) {
   const loaded = harness.agent.load_skill("triage")
   assert(contains(loaded, "Long-form runbook"), "load_skill returns the full SKILL.md body")
   assert(contains(loaded, "check queues and alerts"), "long body content is preserved")
-  harness.stdio.println("skills_load_skill_builtin passed")
+  harness.stdio.log("skills_load_skill_builtin passed")
 }

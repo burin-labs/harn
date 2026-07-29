@@ -11,19 +11,19 @@ import { assert_error_contains } from "std/testing"
  */
 pipeline test(harness: Harness, task) {
   assert_error_contains(
-    { -> jsonrpc_batch("", [{method: "ping"}]) },
+    { -> harness.net.jsonrpc_batch("", [{method: "ping"}]) },
     "url is required",
     "empty url is rejected",
   )
   assert_error_contains(
-    { -> jsonrpc_batch("http://example.invalid/rpc", []) },
+    { -> harness.net.jsonrpc_batch("http://example.invalid/rpc", []) },
     "calls list cannot be empty",
     "empty calls is rejected",
   )
   assert_error_contains(
-    { -> jsonrpc_batch("http://example.invalid/rpc", [{params: [1, 2]}]) },
+    { -> harness.net.jsonrpc_batch("http://example.invalid/rpc", [{params: [1, 2]}]) },
     "missing 'method'",
     "missing method is rejected",
   )
-  harness.stdio.println("jsonrpc_batch validation: all tests passed")
+  harness.stdio.log("jsonrpc_batch validation: all tests passed")
 }

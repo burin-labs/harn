@@ -30,7 +30,7 @@ fn run(harness: Harness, dispatches, config) {
   let state = agent_stall_initial_state()
   let warnings = []
   for item in dispatches {
-    const obs = agent_stall_observe_tool_calls(harness,  harness, "stall-stale-diag-" + harness.random.uuid(),
+    const obs = agent_stall_observe_tool_calls(harness, "stall-stale-diag-" + harness.random.uuid(),
       call(),
       1,
       config,

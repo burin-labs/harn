@@ -59,17 +59,20 @@ fn _fail_check() {
   return [{name: "ci", status: "completed", conclusion: "failure"}]
 }
 
-fn _open_handle(suffix) {
+fn _open_handle(harness: Harness, suffix) {
   // Unique per invocation so re-running tests does not see stale state.
   const session = "scheduler-test-${suffix}-${to_string(harness.clock.now_ms())}"
-  return open_checkpoints(".harn/test/merge-captain", session, "merge_captain_test")
+  return open_checkpoints(harness.agent, ".harn/test/merge-captain", session, "merge_captain_test")
 }
 
 pipeline test_sweep_classifies_clean_pr(harness: Harness, task) {
   const snapshot = _snapshot([_pr(1, {})], {"1": _ok_check()})
   const adapter = fixture_adapter(snapshot)
-  const handle = _open_handle("classify-clean")
-  const summary = sweep(harness,  harness, {
+  const handle = _open_handle(harness, "classify-clean")
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: adapter,
       policies: [_policy_for(_default_repo(), true)],
       checkpoint_handle: handle,
@@ -88,8 +91,11 @@ pipeline test_sweep_persists_checkpoints(harness: Harness, task) {
     {"1": _ok_check()},
   )
   const adapter = fixture_adapter(snapshot)
-  const handle = _open_handle("persist")
-  sweep(harness,  harness, {
+  const handle = _open_handle(harness, "persist")
+  sweep(
+    harness,
+    harness,
+    {
       adapter: adapter,
       policies: [_policy_for(_default_repo(), true)],
       checkpoint_handle: handle,
@@ -97,9 +103,9 @@ pipeline test_sweep_persists_checkpoints(harness: Harness, task) {
       sweep_id: "test-persist",
     },
   )
-  const prior = prior_state_for(handle, _default_repo(), 1)
+  const prior = prior_state_for(harness.agent, handle, _default_repo(), 1)
   assert_eq(prior, "behind")
-  const all = list_all_checkpoints(handle)
+  const all = list_all_checkpoints(harness.agent, handle)
   assert_eq(len(all), 1)
 }
 
@@ -107,9 +113,12 @@ pipeline test_resume_picks_up_new_pr(harness: Harness, task) {
   const policy = _policy_for(_default_repo(), true)
   const snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
   const snapshot2 = _snapshot([_pr(1, {}), _pr(2, {})], {"1": _ok_check(), "2": _ok_check()})
-  const handle = _open_handle("resume-add")
+  const handle = _open_handle(harness, "resume-add")
   // First sweep tracks PR 1 only.
-  sweep(harness,  harness, {
+  sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot1),
       policies: [policy],
       checkpoint_handle: handle,
@@ -117,10 +126,13 @@ pipeline test_resume_picks_up_new_pr(harness: Harness, task) {
       sweep_id: "test-resume-1",
     },
   )
-  assert_eq(prior_state_for(handle, _default_repo(), 1), "queued")
-  assert_eq(prior_state_for(handle, _default_repo(), 2), "discovered")
+  assert_eq(prior_state_for(harness.agent, handle, _default_repo(), 1), "queued")
+  assert_eq(prior_state_for(harness.agent, handle, _default_repo(), 2), "discovered")
   // Second sweep absorbs the newly opened PR 2.
-  const summary = sweep(harness,  harness, {
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot2),
       policies: [policy],
       checkpoint_handle: handle,
@@ -129,15 +141,18 @@ pipeline test_resume_picks_up_new_pr(harness: Harness, task) {
     },
   )
   assert_eq(summary.pr_count, 2)
-  assert_eq(prior_state_for(handle, _default_repo(), 2), "queued")
+  assert_eq(prior_state_for(harness.agent, handle, _default_repo(), 2), "queued")
 }
 
 pipeline test_disappeared_pr_gets_terminal_receipt(harness: Harness, task) {
   const policy = _policy_for(_default_repo(), true)
   const snapshot1 = _snapshot([_pr(1, {})], {"1": _ok_check()})
   const snapshot2 = _snapshot([], {})
-  const handle = _open_handle("disappear")
-  sweep(harness,  harness, {
+  const handle = _open_handle(harness, "disappear")
+  sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot1),
       policies: [policy],
       checkpoint_handle: handle,
@@ -145,7 +160,10 @@ pipeline test_disappeared_pr_gets_terminal_receipt(harness: Harness, task) {
       sweep_id: "test-disappear-1",
     },
   )
-  const summary = sweep(harness,  harness, {
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot2),
       policies: [policy],
       checkpoint_handle: handle,
@@ -157,7 +175,7 @@ pipeline test_disappeared_pr_gets_terminal_receipt(harness: Harness, task) {
   assert_eq(summary.pr_count, 1)
   assert_eq(summary.by_state.closed, 1)
   // Checkpoint was forgotten so the next sweep stays clean.
-  const all = list_all_checkpoints(handle)
+  const all = list_all_checkpoints(harness.agent, handle)
   assert_eq(len(all), 0)
 }
 
@@ -171,8 +189,11 @@ pipeline test_failing_ci_with_local_verify_runs_dry(harness: Harness, task) {
     },
   )
   const snapshot = _snapshot([_pr(1, {})], {"1": _fail_check()})
-  const handle = _open_handle("local-verify")
-  const summary = sweep(harness,  harness, {
+  const handle = _open_handle(harness, "local-verify")
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot),
       policies: [policy_extra],
       checkpoint_handle: handle,
@@ -229,8 +250,11 @@ pipeline test_repair_worker_dispatch_attaches_run_to_receipt(harness: Harness, t
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle("repair-worker-attach")
-  const summary = sweep(harness,  harness, {
+  const handle = _open_handle(harness, "repair-worker-attach")
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot),
       policies: [policy_with_worker],
       checkpoint_handle: handle,
@@ -278,13 +302,16 @@ pipeline test_repair_worker_blocked_when_human_required(harness: Harness, task) 
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle("repair-worker-blocked")
+  const handle = _open_handle(harness, "repair-worker-blocked")
   let executor_calls = 0
   const executor = { _bundle, _options ->
     executor_calls = executor_calls + 1
     {ok: true, output: _ok_repair_output(), raw: "should_not_run"}
   }
-  const summary = sweep(harness,  harness, {
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot),
       policies: [policy],
       checkpoint_handle: handle,
@@ -313,8 +340,11 @@ pipeline test_repair_worker_disabled_falls_back_to_local_verify(harness: Harness
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle("repair-worker-disabled")
-  const summary = sweep(harness,  harness, {
+  const handle = _open_handle(harness, "repair-worker-disabled")
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot),
       policies: [policy],
       checkpoint_handle: handle,
@@ -344,12 +374,15 @@ pipeline test_repair_worker_validators_fail_writes_outside_scope(harness: Harnes
     },
   )
   const snapshot = _snapshot([_pr(1, {head_ref: "feat-1"})], {"1": _fail_check()})
-  const handle = _open_handle("repair-worker-violations")
+  const handle = _open_handle(harness, "repair-worker-violations")
   const bad_output = _ok_repair_output()
     + {
     files_changed: [{path: "secrets/key.pem", action: "created"}],
   }
-  const summary = sweep(harness,  harness, {
+  const summary = sweep(
+    harness,
+    harness,
+    {
       adapter: fixture_adapter(snapshot),
       policies: [policy],
       checkpoint_handle: handle,

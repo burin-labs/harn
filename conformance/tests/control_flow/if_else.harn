@@ -1,10 +1,10 @@
 pipeline test(harness: Harness, task) {
   if true {
-    harness.stdio.println("yes")
+    harness.stdio.log("yes")
   }
   if false {
-    harness.stdio.println("wrong")
+    harness.stdio.log("wrong")
   } else {
-    harness.stdio.println("no")
+    harness.stdio.log("no")
   }
 }

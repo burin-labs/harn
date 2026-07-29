@@ -1,3 +1,4 @@
+import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
 // Deterministic pre-approval tool-deny seam (harn pre-approval deny seam).
 //
 // Regression for the 2026-07-18 Burin dogfood repro: a `run` command that the

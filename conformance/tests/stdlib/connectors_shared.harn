@@ -18,12 +18,12 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(
     verify_hmac_signature("payload", legacy_signature, "secret", "sha1", {allow_legacy_sha1: true}),
   )
-  const root = harness.fs.project_root() ?? cwd()
+  const root = harness.fs.workspace_root()
   const private_key = harness.fs.read_text(
     path_join(root, "conformance/helpers/github_app_test_key.pem"),
   )
   const token = jwt_sign("RS256", {iss: "issuer", aud: "audience", exp: 4102444800}, private_key)
-  const jwt_result = verify_jwt(harness,  harness, token,
+  const jwt_result = verify_jwt(harness, token,
     nil,
     {
       issuer: "issuer",
@@ -143,19 +143,19 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(gitea_forge.lifecycle)
   harness.stdio.println(gitea_forge.writeback.provider)
   assert_eq(gitea_forge.pull_request.author, "sam", "forge author string")
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     "https://auth.example/token",
     {status: 200, body: "{\"access_token\":\"new-token\",\"expires_in\":3600}", headers: {}},
   )
-  const refreshed = oauth2_token_refresh(harness,  harness, "client-id",
+  const refreshed = oauth2_token_refresh(harness, "client-id",
     "client-secret",
     "refresh-token",
     "https://auth.example/token",
   )
   harness.stdio.println(refreshed.ok)
   harness.stdio.println(refreshed.access_token)
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   harness.stdio.println(contains(calls[0].body, "grant_type=refresh_token"))
   harness.stdio.println(calls[0].headers["content-type"])
 }

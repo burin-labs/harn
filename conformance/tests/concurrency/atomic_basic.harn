@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
   const counter = harness.runtime.atomic(0)
   harness.stdio.println(harness.runtime.atomic_get(counter))
-  harness.stdio.println(type_of(counter))
+  harness.stdio.log(type_of(counter))
 }

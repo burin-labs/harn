@@ -1,12 +1,12 @@
 import { page, rule, terminal_width } from "std/tui"
 
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(rule("=", 5))
-  harness.stdio.println(rule("ab", 3))
-  harness.stdio.println(terminal_width(1) > 0)
-  mock_tty("stdout", false)
+  harness.stdio.println(rule(harness, "=", 5))
+  harness.stdio.println(rule(harness, "ab", 3))
+  harness.stdio.println(terminal_width(harness, 1) > 0)
+  harness.testing.tty_set("stdout", false)
   const result = page({title: "Report", body: "alpha\nbeta", format: "markdown"})
   harness.stdio.println("paged=" + to_string(result.paged))
   harness.stdio.println("ok=" + to_string(result.ok))
-  unmock_tty()
+  harness.testing.tty_reset()
 }

@@ -46,7 +46,7 @@ fn write(harness: Harness, root: string, rel: string, text: string) -> nil {
 }
 
 fn workspace(harness: Harness, root: string) -> nil {
-  write(harness, 
+  write(harness,
     root,
     "Cargo.toml",
     """
@@ -61,7 +61,7 @@ version = "1.2.3"
 member-a = { version = "1.2", path = "crates/member-a" }
 """,
   )
-  write(harness, 
+  write(harness,
     root,
     "crates/member-a/Cargo.toml",
     """
@@ -74,7 +74,7 @@ tree-sitter-harn = { path = "../../tree-sitter-harn", version = "1.2" }
 foreign = { path = "../foreign", version = "9" }
 """,
   )
-  write(harness, 
+  write(harness,
     root,
     "crates/excluded/Cargo.toml",
     """
@@ -83,7 +83,7 @@ name = "excluded"
 version = "1.2.3"
 """,
   )
-  write(harness, 
+  write(harness,
     root,
     "tree-sitter-harn/Cargo.toml",
     """
@@ -92,7 +92,7 @@ name = "tree-sitter-harn"
 version = "1.2.3"
 """,
   )
-  write(harness, 
+  write(harness,
     root,
     "spec/acp-registry/harn/agent.json",
     """
@@ -115,7 +115,7 @@ version = "1.2.3"
 
 @test
 pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       workspace(harness, root)
       const plan = release_metadata_plan(harness, root, "minor")
       assert_eq(plan.current_version, "1.2.3")
@@ -131,7 +131,7 @@ pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task
 
 @test
 pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       workspace(harness, root)
       apply_release_metadata(harness, root, "1.3.0")
       assert_eq(current_version(root), "1.3.0")
@@ -156,8 +156,8 @@ pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, tas
 
 @test
 pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
-      write(harness, 
+  with_temp_dir(harness, { root ->
+      write(harness,
         root,
         "Cargo.toml",
         "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"bad\"\n",
@@ -168,8 +168,8 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
       )
     },
   )
-  with_temp_dir(harness,  harness, { root ->
-      write(harness, 
+  with_temp_dir(harness, { root ->
+      write(harness,
         root,
         "Cargo.toml",
         "[workspace]\nmembers = [\"missing\"]\nexclude = []\n[workspace.package]\nversion = \"1.2.3\"\n",
@@ -180,12 +180,12 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
       )
     },
   )
-  with_temp_dir(harness,  harness, { root ->
+  with_temp_dir(harness, { root ->
       write(harness, root, "a/Cargo.toml", "[package]\nname = \"same\"\nversion = \"1.0.0\"\n")
       write(harness, root, "b/Cargo.toml", "[package]\nname = \"same\"\nversion = \"1.0.0\"\n")
       assert_throws_contains(
         { ->
-          package_names_for_manifests(harness,  harness, [path_join(root, "a/Cargo.toml"), path_join(root, "b/Cargo.toml")],
+          package_names_for_manifests(harness, [path_join(root, "a/Cargo.toml"), path_join(root, "b/Cargo.toml")],
           )
         },
         "duplicate workspace package name",

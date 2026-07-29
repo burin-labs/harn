@@ -93,7 +93,7 @@ pub fn python_binding_probe_args(artifacts: string) -> list<string> {
 pub fn check_python_protocol_bindings(harness: Harness, python: string = "python3", root: string = "") -> dict {
   const artifacts = artifact_root(harness, root)
   const binding = path_join(artifacts, "python", "harn_protocol.py")
-  const compile = harness.process.spawn_captured({cmd: python, args: ["-m", "py_compile", binding]})
+  const compile = harness.process.run({cmd: python, args: ["-m", "py_compile", binding]})
   if !compile.success {
     return {
       ok: false,
@@ -103,7 +103,7 @@ pub fn check_python_protocol_bindings(harness: Harness, python: string = "python
       stderr: compile.stderr,
     }
   }
-  const probe = harness.process.spawn_captured(
+  const probe = harness.process.run(
     {cmd: python, args: python_binding_probe_args(artifacts)},
   )
   return {

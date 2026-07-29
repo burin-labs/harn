@@ -7,7 +7,7 @@ import "std/postgres"
  * the mock fixture matcher (no real Postgres required).
  */
 pipeline default(harness: Harness) {
-  const db = pg_mock_pool(
+  const db = harness.testing.pg_mock_pool(
     [
       {sql: "SAVEPOINT \"step1\"", rows_affected: 0},
       {sql: "RELEASE SAVEPOINT \"step1\"", rows_affected: 0},

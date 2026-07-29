@@ -9,11 +9,11 @@ pipeline main(harness: Harness) {
       {role: "assistant", content: "four"},
     ],
   )
-  const with_reminder = transcript.inject_reminder(
+  const with_reminder = harness.agent.transcript_inject_reminder(
     base,
     {body: "expire now", dedupe_key: "ttl", ttl_turns: 1, preserve_on_compact: true},
   ).transcript
-  const compacted = transcript_compact(
+  const compacted = harness.agent.compact_transcript(
     with_reminder,
     {strategy: "truncate", keep_last: 1, target_tokens: 1},
   )

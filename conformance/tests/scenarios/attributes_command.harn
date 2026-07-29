@@ -15,5 +15,5 @@ pipeline plan(harness: Harness, task) {
 }
 
 pipeline default(harness: Harness, task) {
-  harness.stdio.println("attributes_command ok")
+  harness.stdio.log("attributes_command ok")
 }

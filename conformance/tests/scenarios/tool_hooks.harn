@@ -5,5 +5,5 @@ pipeline test(harness: Harness, task) {
   harness.tools.register_hook({pattern: "*", max_output: 100})
   // Clear hooks should work without error
   harness.tools.clear_hooks()
-  harness.stdio.println("hooks registered and cleared")
+  harness.stdio.log("hooks registered and cleared")
 }

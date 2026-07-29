@@ -1,35 +1,35 @@
 pipeline test(harness: Harness, task) {
   // starts_with
-  harness.stdio.println(starts_with("hello world", "hello"))
-  harness.stdio.println(starts_with("hello world", "world"))
+  harness.stdio.log(starts_with("hello world", "hello"))
+  harness.stdio.log(starts_with("hello world", "world"))
   // ends_with
-  harness.stdio.println(ends_with("hello world", "world"))
-  harness.stdio.println(ends_with("hello world", "hello"))
+  harness.stdio.log(ends_with("hello world", "world"))
+  harness.stdio.log(ends_with("hello world", "hello"))
   // contains (string)
-  harness.stdio.println(contains("hello world", "lo wo"))
-  harness.stdio.println(contains("hello world", "xyz"))
+  harness.stdio.log(contains("hello world", "lo wo"))
+  harness.stdio.log(contains("hello world", "xyz"))
   // contains (list)
-  harness.stdio.println(contains([1, 2, 3], 2))
-  harness.stdio.println(contains([1, 2, 3], 5))
+  harness.stdio.log(contains([1, 2, 3], 2))
+  harness.stdio.log(contains([1, 2, 3], 5))
   // replace
-  harness.stdio.println(replace("hello world", "world", "harn"))
+  harness.stdio.log(replace("hello world", "world", "harn"))
   // join
-  harness.stdio.println(join(["a", "b", "c"], ", "))
-  harness.stdio.println(join(["x"], "-"))
+  harness.stdio.log(join(["a", "b", "c"], ", "))
+  harness.stdio.log(join(["x"], "-"))
   // len
-  harness.stdio.println(len("hello"))
-  harness.stdio.println(len([1, 2, 3]))
-  harness.stdio.println(len({}))
+  harness.stdio.log(len("hello"))
+  harness.stdio.log(len([1, 2, 3]))
+  harness.stdio.log(len({}))
   // substring (start, end?) — second arg is an exclusive end index
-  harness.stdio.println(substring("hello world", 0, 5))
-  harness.stdio.println(substring("hello world", 6))
-  harness.stdio.println(substring("hello world", 6, 9))
+  harness.stdio.log(substring("hello world", 0, 5))
+  harness.stdio.log(substring("hello world", 6))
+  harness.stdio.log(substring("hello world", 6, 9))
   // dirname
-  harness.stdio.println(dirname("/usr/local/bin/harn"))
+  harness.stdio.log(dirname("/usr/local/bin/harn"))
   // basename
-  harness.stdio.println(basename("/usr/local/bin/harn"))
+  harness.stdio.log(basename("/usr/local/bin/harn"))
   // extname
-  harness.stdio.println(extname("file.txt"))
-  harness.stdio.println(extname("archive.tar.gz"))
-  harness.stdio.println(extname("noext"))
+  harness.stdio.log(extname("file.txt"))
+  harness.stdio.log(extname("archive.tar.gz"))
+  harness.stdio.log(extname("noext"))
 }

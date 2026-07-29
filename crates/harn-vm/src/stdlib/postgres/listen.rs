@@ -33,8 +33,6 @@
 //! own lifecycle.
 
 use crate::value::VmDictExt;
-use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -44,11 +42,11 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use crate::stdlib::macros::{
-    harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BOOL, TY_DICT, TY_DICT_OR_NIL,
+    harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BOOL, TY_DICT_OR_NIL, TY_RESOURCE,
 };
-use crate::value::{VmError, VmValue};
+use crate::value::{VmError, VmResourceHandle, VmValue};
 
-use super::{handle_id, handle_value, pool_by_id, required_arg, runtime_error, HANDLE_POOL};
+use super::{pool_record_from_handle, required_arg, resource_handle, runtime_error};
 
 const HANDLE_LISTENER: &str = "pg_listener";
 
@@ -68,20 +66,15 @@ impl ListenerRecord {
     }
 }
 
-thread_local! {
-    static LISTENERS: RefCell<BTreeMap<String, Arc<ListenerRecord>>> =
-        const { RefCell::new(std::collections::BTreeMap::new()) };
-}
-
 pub(super) fn reset_state() {
-    LISTENERS.with(|listeners| listeners.borrow_mut().clear());
+    // Listener lifetime is owned by opaque VM resource values.
 }
 
 #[harn_builtin(
     exposure = "capability_arg:0",
     effects = ["network.write@const=postgres"],
     sig_expr = BuiltinSignature::variadic("pg_listen", &[Param::new("args", TY_ANY
-)], TY_DICT),
+)], TY_RESOURCE),
     kind = "async",
     category = "postgres"
 )]
@@ -90,8 +83,9 @@ async fn pg_listen_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let pool_handle = required_arg(&args, 0, "pg_listen", "pool handle")?;
-    let pool_id = handle_id(Some(pool_handle), HANDLE_POOL, "pg_listen")?;
-    let pool = pool_by_id(&pool_id)?;
+    let pool = pool_record_from_handle(pool_handle, "pg_listen")?
+        .pool
+        .clone();
     let channels_value = required_arg(&args, 1, "pg_listen", "channel name(s)")?;
     let channels = parse_channel_list(channels_value)?;
     if channels.is_empty() {
@@ -115,26 +109,10 @@ async fn pg_listen_impl(
         .await
         .map_err(|error| runtime_error(format!("pg_listen: LISTEN failed: {error}")))?;
 
-    let record = Arc::new(ListenerRecord::new(listener, bridge));
-    let id = super::next_id("pglisten");
-    LISTENERS.with(|listeners| {
-        listeners
-            .borrow_mut()
-            .insert(id.clone(), Arc::clone(&record));
-    });
-
-    let mut meta = crate::value::DictMap::new();
-    meta.insert(
-        crate::value::intern_key("channels"),
-        VmValue::List(std::sync::Arc::new(
-            channels
-                .iter()
-                .map(|c| VmValue::String(arcstr::ArcStr::from(c.as_str())))
-                .collect(),
-        )),
-    );
-    meta.insert(crate::value::intern_key("bridge"), VmValue::Bool(bridge));
-    Ok(handle_value(HANDLE_LISTENER, &id, meta))
+    Ok(VmValue::resource(VmResourceHandle::new(
+        HANDLE_LISTENER,
+        ListenerRecord::new(listener, bridge),
+    )))
 }
 
 #[harn_builtin(
@@ -154,8 +132,7 @@ async fn pg_listener_recv_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let handle = required_arg(&args, 0, "pg_listener_recv", "listener handle")?;
-    let id = handle_id(Some(handle), HANDLE_LISTENER, "pg_listener_recv")?;
-    let record = listener_by_id(&id)?;
+    let record = listener_handle(Some(handle), "pg_listener_recv")?;
     if record.closed.load(Ordering::Acquire) {
         return Err(runtime_error("pg_listener_recv: listener is closed"));
     }
@@ -223,12 +200,10 @@ async fn pg_listener_close_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let handle = required_arg(&args, 0, "pg_listener_close", "listener handle")?;
-    let id = handle_id(Some(handle), HANDLE_LISTENER, "pg_listener_close")?;
-    let removed = LISTENERS.with(|listeners| listeners.borrow_mut().remove(&id));
-    let Some(record) = removed else {
+    let record = listener_handle(Some(handle), "pg_listener_close")?;
+    if record.closed.swap(true, Ordering::AcqRel) {
         return Ok(VmValue::Bool(false));
-    };
-    record.closed.store(true, Ordering::Release);
+    }
     if let Ok(mut listener) = record.inner.try_lock() {
         // Best-effort: tell PG to stop forwarding. Even on failure, the
         // listener is dropped at the end of this fn which closes the
@@ -321,14 +296,10 @@ fn validate_channel_name(name: &str, builtin: &'static str) -> Result<(), VmErro
     super::validate_pg_identifier(name, builtin, "channel name", &['.', ':', '-'])
 }
 
-fn listener_by_id(id: &str) -> Result<Arc<ListenerRecord>, VmError> {
-    LISTENERS.with(|listeners| {
-        listeners
-            .borrow()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| runtime_error(format!("pg_listener: unknown listener `{id}`")))
-    })
+fn listener_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<ListenerRecord>, VmError> {
+    resource_handle(value, HANDLE_LISTENER, builtin)?
+        .downcast::<ListenerRecord>()
+        .ok_or_else(|| runtime_error(format!("{builtin}: invalid Postgres listener authority")))
 }
 
 #[cfg(test)]
@@ -363,6 +334,6 @@ mod tests {
     #[test]
     fn listener_handle_is_namespaced() {
         assert_eq!(HANDLE_LISTENER, "pg_listener");
-        assert_ne!(HANDLE_LISTENER, super::HANDLE_POOL);
+        assert_ne!(HANDLE_LISTENER, super::super::HANDLE_POOL);
     }
 }

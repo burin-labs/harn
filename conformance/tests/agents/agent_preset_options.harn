@@ -18,10 +18,12 @@ pipeline default(harness: Harness) {
   harness.stdio.println(audit.repair_diagnostics.reserved_terminal_verify)
   harness.stdio.println(audit.repair_diagnostics.reserved_terminal_verify_iterations)
   const json_audit = agent_loop_options(
+    harness,
     agent_preset(harness, "audit", {provider: "mock", tools: tool_registry(), tool_format: "json"}),
   )
   harness.stdio.println(json_audit.done_sentinel)
   const native_audit = agent_loop_options(
+    harness,
     agent_preset(harness, "audit", {provider: "mock", tools: tool_registry(), tool_format: "native"}),
   )
   harness.stdio.println(native_audit.done_sentinel == nil)

@@ -4,7 +4,7 @@
  */
 pipeline default(harness: Harness, task) {
   // Write a known file, then read it back via read_file_result.
-  const fixture = path_join(harness.fs.temp_dir(), "rfr_fixture.txt")
+  const fixture = path_join(harness.fs.workspace_temp_dir(), "rfr_fixture.txt")
   harness.fs.write_text(fixture, "hello result")
   const ok = harness.fs.read_text_result(fixture)
   harness.stdio.println(is_ok(ok))

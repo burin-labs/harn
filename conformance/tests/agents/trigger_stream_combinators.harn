@@ -26,5 +26,5 @@ pipeline test(harness: Harness, task) {
   assert(classified.kind == "stream.llm_classify", "llm_classify should tag plans")
   assert(classified.cache == "stream:risk:v1", "llm_classify should preserve cache key")
   assert(classified.options.model == "fast", "llm_classify should preserve options")
-  harness.stdio.println("trigger_stream_combinators tests passed")
+  harness.stdio.log("trigger_stream_combinators tests passed")
 }

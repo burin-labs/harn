@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 
 fn terminal_checkpoint(events: list) -> dict {
@@ -10,7 +11,7 @@ fn terminal_checkpoint(events: list) -> dict {
 }
 
 fn run_case(harness: Harness, session_id: string, callback) -> dict {
-  return agent_capture_events(harness,  harness, session_id,
+  return agent_capture_events(harness, session_id,
     fn() { return agent_loop(harness, "finish",
       nil,
       {
@@ -24,7 +25,7 @@ fn run_case(harness: Harness, session_id: string, callback) -> dict {
 }
 
 fn run_sentinel_case(harness: Harness, session_id: string) -> dict {
-  return agent_capture_events(harness,  harness, session_id,
+  return agent_capture_events(harness, session_id,
     fn() { return agent_loop(harness, "finish",
       nil,
       {
@@ -50,7 +51,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("sentinel=" + sentinel_checkpoint.terminal.kind)
   harness.stdio.println("sentinel_owner=" + sentinel_checkpoint.terminal.owner)
   harness.stdio.println("sentinel_reason=" + sentinel_checkpoint.terminal.reason)
-  const policy = run_case(harness, 
+  const policy = run_case(harness,
     "terminal-policy-" + harness.random.uuid(),
     { _info -> return {stop: true, stop_reason: "fixture_policy_stop"} },
   )

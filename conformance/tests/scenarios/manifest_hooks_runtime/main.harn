@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
@@ -50,7 +51,7 @@ pipeline default(harness: Harness) {
         }
       }
       assert(saw_post_hook, "post-tool hook rewrote the successful result")
-      harness.stdio.println("manifest_hooks_runtime tests passed")
+      harness.stdio.log("manifest_hooks_runtime tests passed")
     },
   )
 }

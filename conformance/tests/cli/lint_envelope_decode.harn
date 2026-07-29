@@ -2,7 +2,7 @@ import { decode_lint_envelope, decode_lint_json, lint_envelope_schema } from "st
 import { assert, assert_eq } from "std/testing"
 
 fn fixture_root(harness: Harness) -> string {
-  const root = harness.fs.project_root() ?? cwd()
+  const root = harness.fs.workspace_root()
   return path_join(root, "crates/harn-cli/src/commands/check/lint_json_fixtures")
 }
 

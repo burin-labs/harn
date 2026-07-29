@@ -13,7 +13,7 @@ pipeline test_snapshot(harness: Harness, task) {
   // primitive both locally and in CI. The env trigger (HARN_UPDATE_SNAPSHOTS)
   // and its CI-suppression are covered by the out-of-process check on the PR,
   // since a conformance run cannot mutate its own env.
-  with_temp_dir(harness,  harness, { dir ->
+  with_temp_dir(harness, { dir ->
       let opts = {dir: dir}
       let update_opts = {dir: dir, update: true}
       let content = "alpha\nbeta\n"

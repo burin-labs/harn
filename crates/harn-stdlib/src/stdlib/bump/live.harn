@@ -216,7 +216,8 @@ fn __release_finalized(release) -> bool {
 
 /** Fetch the open bump PR via the REST list endpoint (there is no typed helper). */
 fn __find_open_pr(harness: Harness, cfg: LiveBumpConfig, owner: string) {
-  const list = __rest(harness, 
+  const list = __rest(
+    harness,
     "GET",
     "/repos/${cfg.repo}/pulls?head=${owner}:${cfg.branch}&base=${cfg.base}&state=open",
   )
@@ -254,7 +255,9 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
     release_ready: fn(target) {
       let attempts = 0
       let lines = []
-      const found = poll_until(harness,  harness, { ->
+      const found = poll_until(
+        harness,
+        { ->
           attempts = attempts + 1
           const view = __release_view(harness, cfg.release_repo, target)
           const ready = view.ok && __release_finalized(view)
@@ -333,7 +336,8 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
     },
     working_changes: fn() {
       const adds = trim(
-        __git(harness, ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout ?? "",
+        __git(harness, ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout
+          ?? "",
       )
       const dels = trim(
         __git(harness, ["git", "diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout ?? "",
@@ -370,7 +374,9 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       if node_id == "" {
         return false
       }
-      const result = __graphql(harness, "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }",
+      const result = __graphql(
+        harness,
+        "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }",
         {id: node_id},
       )
       return result != nil && len(result?.errors ?? []) == 0
@@ -381,7 +387,8 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       if existing != nil {
         return __rest(harness, "PATCH", ref, {sha: base_sha, force: true}) != nil
       }
-      return __rest(harness, 
+      return __rest(
+        harness,
         "POST",
         "/repos/${cfg.repo}/git/refs",
         {ref: "refs/heads/${cfg.branch}", sha: base_sha},
@@ -391,11 +398,16 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
     create_signed_commit: fn(request) {
       let additions = []
       for path in request.additions {
-        const encoded = __shell(harness, "base64 -w0 < '${path}' || base64 < '${path}' | tr -d '\\n'")
+        const encoded = __shell(
+          harness,
+          "base64 -w0 < '${path}' || base64 < '${path}' | tr -d '\\n'",
+        )
         additions = additions + [{path: path, contents: trim(encoded.stdout ?? "")}]
       }
       const deletions = request.deletions.map({ p -> {path: p} }).to_list()
-      const result = __graphql(harness, "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+      const result = __graphql(
+        harness,
+        "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
         {
           input: {
             branch: {repositoryNameWithOwner: cfg.repo, branchName: request.branch},
@@ -426,7 +438,12 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
       const body =
         "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
       if existing != nil {
-        __rest(harness, "PATCH", "/repos/${cfg.repo}/pulls/${existing.number}", {title: title, body: body})
+        __rest(
+          harness,
+          "PATCH",
+          "/repos/${cfg.repo}/pulls/${existing.number}",
+          {title: title, body: body},
+        )
         const detail = __rest(harness, "GET", "/repos/${cfg.repo}/pulls/${existing.number}")
         return {
           number: existing.number,
@@ -435,7 +452,8 @@ pub fn live_bump_adapter(harness: Harness, config: dict = {}) -> BumpAdapter {
           created: false,
         }
       }
-      const created = __rest(harness, 
+      const created = __rest(
+        harness,
         "POST",
         "/repos/${cfg.repo}/pulls",
         {title: title, head: cfg.branch, base: cfg.base, body: body},

@@ -50,9 +50,8 @@ logs and progress always go to stderr.
 
 - File extension: `.harn`.
 - Entry points:
-  - Preferred capability-aware script entrypoint:
-    `fn main(harness: Harness) { ... }`.
-  - Workflow entrypoint: `pipeline default() { ... }` (pipeline mode —
+  - Script entrypoint: `fn main(harness: Harness) { ... }`.
+  - Pipeline entrypoint: `pipeline default(harness: Harness) { ... }` (pipeline mode —
     `compile_top_level_declarations` runs first, then the pipeline
     body).
   - Bare script with top-level statements for tiny one-off files.
@@ -79,6 +78,36 @@ logs and progress always go to stderr.
     - `return Err(msg)` → writes `msg` to stderr, exits 1.
     - `return Ok(_)` / no explicit return → exits 0.
   - Uncaught errors exit with 1 and a rendered diagnostic.
+
+### Effect authority
+
+Effects flow from the harness capability object; imports are pure.
+Importing a module binds code and types but never grants authority. Pass the
+narrowest nominal sub-handle a helper needs:
+
+```harn
+fn load_config(fs: HarnessFs, path: string) -> string {
+  return fs.read_text(path)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(load_config(harness.fs, "harn.toml"))
+}
+```
+
+Pure builtins remain ordinary globals. Effectful runtime operations are
+methods on the closed `Harness*` types; their typed contracts are the shared
+source for checking, policy, receipts, and reference generation. Test fixtures
+are scoped to one harness through `harness.testing`, including
+`respond`/`calls`, HTTP and transport mocks, and the virtual clock.
+
+Keep root `Harness` at entrypoints and genuine orchestration boundaries.
+Helpers accept the smallest coherent nominal capability interface they need.
+`capability-attenuation` warns when a helper takes root but uses only one
+sub-handle (and reports an informational suggestion for two). Harness values
+are runtime authority: never serialize, store, or checkpoint them. For public
+APIs with four or more easy-to-swap parameters of the same type,
+`homogeneous-positional-api` recommends one named closed record.
 
 ## Merge captain eval loop
 

@@ -53,8 +53,8 @@ pipeline test_rust_include_paths_extracts_normal_and_raw_literals(harness: Harne
 
 @test
 pipeline test_packaged_include_errors_accepts_existing_in_package_targets(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
-      write_text(harness, 
+  with_temp_dir(harness, { root ->
+      write_text(harness,
         root,
         "pkg/src/lib.rs",
         "include_str!(\"data/schema.json\");\ninclude_bytes!(r\"assets/raw.bin\");\n",
@@ -68,8 +68,8 @@ pipeline test_packaged_include_errors_accepts_existing_in_package_targets(harnes
 
 @test
 pipeline test_packaged_include_errors_reports_missing_absolute_and_escape_targets(harness: Harness, task) {
-  with_temp_dir(harness,  harness, { root ->
-      write_text(harness, 
+  with_temp_dir(harness, { root ->
+      write_text(harness,
         root,
         "pkg/src/lib.rs",
         join(

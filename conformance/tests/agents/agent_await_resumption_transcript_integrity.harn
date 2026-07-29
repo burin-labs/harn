@@ -1,5 +1,6 @@
+import "std/agent/workers"
 // Transcript integrity across a model-initiated suspension: when the model
-// calls agent_await_resumption (with a parallel sibling call in the same
+// calls agent_await_resumption(harness.agent, with a parallel sibling call in the same
 // turn), the persisted assistant tool_use turn must be closed out with
 // placeholder tool_results BEFORE the worker suspends. Default resume keeps
 // the transcript, and Anthropic rejects any assistant tool_use with no
@@ -30,7 +31,7 @@ pipeline main(harness: Harness) {
           max_iterations: 3,
         },
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       harness.stdio.println(suspended?.status)
       const messages = agent_session_messages(harness, session_id)
       let park_result = nil

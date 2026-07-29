@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_session_finalize } from "std/agent/state"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -15,7 +16,7 @@ pipeline main(harness: Harness, task) {
   }
   harness.stdio.println(is_err(failed))
   const stale_finalize = try {
-    agent_session_finalize(harness,  harness, "failed-bootstrap-cleanup",
+    agent_session_finalize(harness, "failed-bootstrap-cleanup",
       {final_status: "done", stop_reason: "test", iterations: 0},
     )
   }

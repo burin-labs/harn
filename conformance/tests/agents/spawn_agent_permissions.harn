@@ -20,8 +20,7 @@ pipeline main(harness: Harness) {
   with_llm_script(
     harness.llm, [{tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]}],
     { ->
-      const worker = spawn_agent(
-        {
+      const worker = spawn_agent(harness.agent, {
           name: "permission-worker",
           task: "Try to write.",
           wait: true,

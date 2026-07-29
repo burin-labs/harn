@@ -84,7 +84,7 @@ fn arg_spec() {
 }
 
 fn __run(harness: Harness, cmd: string, args: list<string>, cwd: string) -> dict {
-  return harness.process.spawn_captured({cmd: cmd, args: args, cwd: cwd})
+  return harness.process.run({cmd: cmd, args: args, cwd: cwd})
 }
 
 fn __require_success(result: dict, label: string) {
@@ -166,7 +166,7 @@ fn __assert_clean_worktree(harness: Harness, root: string) {
 }
 
 fn __existing_pr(harness: Harness, root: string, branch: string) -> string {
-  const result = __run(harness,  harness,
+  const result = __run(harness,
     "gh",
     ["pr", "list", "--head", branch, "--state", "all", "--json", "url", "--jq", ".[0].url // \"\""],
     root,
@@ -181,7 +181,7 @@ fn __switch_notice_branch(harness: Harness, root: string, branch: string) {
   if trim(current.stdout ?? "") == branch {
     return
   }
-  const exists = __run(harness,  harness,
+  const exists = __run(harness,
     "git",
     ["show-ref", "--verify", "--quiet", "refs/heads/" + branch],
     root,
@@ -276,7 +276,7 @@ fn __open_draft_pr(
   __require_success(__run(harness, "git", ["push", "-u", "origin", branch], root), "git push")
   const body_path = path_join(output_dir, "pr-body.md")
   harness.fs.write_text(body_path, __pr_body(notice, receipt, diff_result.stdout ?? ""))
-  const created = __run(harness,  harness,
+  const created = __run(harness,
     "gh",
     ["pr", "create", "--draft", "--title", title, "--body-file", body_path],
     root,
@@ -314,7 +314,7 @@ pipeline main(harness: Harness, task) {
     {classification: "candidate"}
   }
   const extraction: dict = json_parse(json_stringify(extraction_value))
-  const catalog = __read_json(harness,  harness,
+  const catalog = __read_json(harness,
     path_join(root, "spec/provider-catalog/provider-catalog.json"),
   )
   let plan = plan_notice(harness, notice_raw, extraction, catalog)

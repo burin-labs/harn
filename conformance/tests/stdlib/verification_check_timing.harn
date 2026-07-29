@@ -5,6 +5,7 @@ import {
   verification_run_check,
   verification_start_check,
 } from "std/verification"
+import { CommandResult } from "std/command"
 
 pipeline test(harness: Harness, task) {
   harness.runtime.verification_profiles_set(
@@ -18,16 +19,17 @@ pipeline test(harness: Harness, task) {
       ],
     },
   )
-  const failed_result = {
+  const failed_result: CommandResult = {
     ok: false,
     success: false,
     status: "completed",
     exit_code: 2,
+    cwd: "",
     duration_ms: 77,
     stdout: "",
     stderr: "compile failed\nline 2",
   }
-  const observation = verification_observation_from_command_result(harness,  harness, failed_result,
+  const observation = verification_observation_from_command_result(harness, failed_result,
     {warm: false, snapshot: {"src/main.harn": "hash-a"}, failure_signature_from: "stderr"},
   )
   assert_eq(observation.durationMs, 77)
@@ -36,7 +38,7 @@ pipeline test(harness: Harness, task) {
   assert(observation.snapshot != nil, "observation should carry supplied snapshot")
   assert_eq(observation.snapshot["src/main.harn"], "hash-a")
   assert_eq(observation.failureSignature, "compile failed\nline 2")
-  const recorded = verification_record_check_result(harness,  harness, "check/shell",
+  const recorded = verification_record_check_result(harness, "check/shell",
     failed_result,
     {warm: false, snapshot: {"src/main.harn": "hash-a"}, failure_signature_from: "stderr"},
   )
@@ -45,7 +47,7 @@ pipeline test(harness: Harness, task) {
   assert_eq(recorded.row.timings.samples, 1)
   assert_eq(recorded.row.lastRun.exit, 2)
   assert_eq(recorded.row.lastRun.snapshot["src/main.harn"], "hash-a")
-  const run = verification_run_check(harness,  harness, "check/shell",
+  const run = verification_run_check(harness, "check/shell",
     {mode: "shell", command: "echo verification-run"},
     {warm: true, command_options: {capture: {max_inline_bytes: 4096}}},
   )

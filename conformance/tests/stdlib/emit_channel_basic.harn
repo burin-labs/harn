@@ -1,5 +1,5 @@
 pipeline default(harness: Harness) {
-  mock_time(1000)
+  harness.testing.clock_set(1000)
   const receipt = harness.channels.append("demo.created", {n: 1}, {id: "demo-1", ttl: 5s})
   const events = harness.channels.events("demo.created")
   harness.stdio.println(receipt.name_resolved)
@@ -17,5 +17,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(duplicate.event_id == receipt.event_id)
   harness.stdio.println(duplicate.duplicate)
   harness.stdio.println(harness.channels.events("demo.created")[0].payload.n)
-  unmock_time()
+  harness.testing.clock_reset()
 }

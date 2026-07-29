@@ -1,6 +1,6 @@
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(1 < 2)
-  harness.stdio.println(2 > 3)
-  harness.stdio.println(true)
-  harness.stdio.println(1 != 2)
+  harness.stdio.log(1 < 2)
+  harness.stdio.log(2 > 3)
+  harness.stdio.log(true)
+  harness.stdio.log(1 != 2)
 }

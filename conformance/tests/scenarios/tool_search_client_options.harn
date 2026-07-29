@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -121,7 +122,7 @@ pipeline test(harness: Harness, task) {
       assert(contains(last_system, "gamma"), "most-recently-promoted tool is visible")
       assert(!contains(last_system, "alpha"), "oldest promotion evicted under budget")
       assert(!contains(last_system, "beta"), "second-oldest promotion evicted under budget")
-      harness.stdio.println("tool_search_client_options tests passed")
+      harness.stdio.log("tool_search_client_options tests passed")
     },
   )
 }

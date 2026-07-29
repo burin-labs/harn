@@ -135,5 +135,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(wrong_seed.readiness.ingest_ready, false)
   assert_eq(wrong_seed.quarantine.malformed_receipts[0]?.shard_id, first_shard.id)
   assert_eq(wrong_seed.quarantine.malformed_receipts[0]?.reason, "receipt contract mismatch")
-  harness.stdio.println("stdlib remote fanout plan -> fake adapter -> rejoin readiness ok")
+  harness.stdio.log("stdlib remote fanout plan -> fake adapter -> rejoin readiness ok")
 }

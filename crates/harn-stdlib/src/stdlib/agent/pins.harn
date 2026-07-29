@@ -333,7 +333,7 @@ fn __pin_reminder_body(harness: Harness, content, options) {
     return content
   }
   const retained = text.substring(0, limit)
-  let _ = agent_report_truncation(harness,  harness, text,
+  let _ = agent_report_truncation(harness, text,
     retained,
     "pin reminder exceeded its model-visible body budget",
   )
@@ -358,7 +358,7 @@ fn __pin_reminder_tags(base_tags, options) {
  * pin_reminder(harness, pin, opts?) lowers a PinSpec to a system-reminder options dict
  * with `preserve_on_compact: true`, `tags: ["pin", <kind>]`, the pin's
  * `dedupe_key`, and its `role_hint`. Spread it into
- * `transcript.inject_reminder(...)` or `agent_session_inject_reminder(harness, ...)` —
+ * `harness.agent.transcript_inject_reminder(...)` or `agent_session_inject_reminder(harness, ...)` —
  * this is the "survives compaction by construction" mechanism (the
  * structured-metadata twin of `[no-compact]`).
  *

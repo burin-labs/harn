@@ -3,5 +3,5 @@ pipeline test(harness: Harness, task) {
   fn offset(x) {
     return x + base
   }
-  harness.stdio.println(offset(5))
+  harness.stdio.log(offset(5))
 }

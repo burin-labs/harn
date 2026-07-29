@@ -9,7 +9,7 @@ import { AgentModelTurnCallback } from "std/agent/chat"
 pub fn with_turn_recorder(harness: Harness, next: AgentModelTurnCallback) -> AgentModelTurnCallback {
   return { turn, state ->
     // Read a deterministic, library-owned field off the typed model turn.
-    harness.stdio.println("recorded stop_reason=" + turn.stop_reason)
+    harness.stdio.log("recorded stop_reason=" + turn.stop_reason)
     return next(turn, state)
   }
 }

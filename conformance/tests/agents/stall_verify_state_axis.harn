@@ -26,7 +26,7 @@ fn observe(harness: Harness, config, state, score, wrote) {
   } else {
     {verify_score: score}
   }
-  return agent_stall_observe_tool_calls(harness,  harness, "verify-state-seam",
+  return agent_stall_observe_tool_calls(harness, "verify-state-seam",
     [{name: "edit", arguments: {}}],
     1,
     config,
@@ -46,7 +46,7 @@ fn observe(harness: Harness, config, state, score, wrote) {
  * a substantive "run" call whose prior dispatch failed with `error_text`.
  */
 fn observe_fail(harness: Harness, config, state, error_text) {
-  return agent_stall_observe_tool_calls(harness,  harness, "verify-state-churn",
+  return agent_stall_observe_tool_calls(harness, "verify-state-churn",
     [{name: "run", arguments: {cmd: "test"}}],
     1,
     config,
@@ -159,5 +159,5 @@ pipeline default(harness: Harness) {
     agent_stall_no_net_progress(churn_cfg, c),
     "churn: total recurrence (A x3) trips despite off-signature churn",
   )
-  harness.stdio.println("stall verify-state axis ok")
+  harness.stdio.log("stall verify-state axis ok")
 }

@@ -563,7 +563,7 @@ pub fn completion_policy_decision(
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_model_route(opts = {}) -> CompletionRoute {
+pub fn completion_model_route(harness: Harness, opts = {}) -> CompletionRoute {
   const raw = __dict(opts)
   const constraints = __dict(raw?.constraints)
   let query = {
@@ -729,7 +729,8 @@ fn __usage_from(proposal, usage) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_shown_event(harness: Harness, 
+pub fn completion_shown_event(
+  harness: Harness,
   proposal = {},
   context = {},
   usage = {},
@@ -800,7 +801,8 @@ pub fn completion_shown_event(harness: Harness,
  * @errors: []
  * @api_stability: experimental
  */
-pub fn completion_decision_event(harness: Harness, 
+pub fn completion_decision_event(
+  harness: Harness,
   shown_event = {},
   decision = "rejected",
   opts = {},
@@ -884,7 +886,9 @@ pub fn completion_trust_record(harness: Harness, event = {}, opts = {}) -> Compl
         ),
       ],
       trace_id: __text_or_nil(row?.record_id ?? row?.id ?? options?.trace_id ?? options?.traceID)
-        ?? harness.random.uuid_v7(),
+        ?? harness
+        .random
+        .uuid_v7(),
       timestamp: __text_or_nil(row?.timestamp ?? options?.timestamp) ?? harness.clock.date_iso(),
       autonomy_tier_at_time: __text_or_nil(options?.autonomy_tier) ?? "suggest",
     },

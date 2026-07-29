@@ -1,7 +1,7 @@
 import "std/project"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "project_scan_single")
+  const root = path_join(harness.fs.workspace_temp_dir(), "project_scan_single")
   harness.fs.mkdir(path_join(root, "src"))
   harness.fs.write_text(
     path_join(root, "Cargo.toml"),
@@ -13,7 +13,7 @@ pipeline test(harness: Harness, task) {
     "pub fn greet() -> &'static str { \"hi\" }\n",
   )
   const ev = project_scan(harness.project, root, {tiers: ["ambient", "config"]})
-  const catalog = project_catalog()
+  const catalog = project_catalog(harness.project)
   const rust_entry = catalog.filter({ entry -> entry.id == "rust" })[0]
   harness.stdio.println(ev.path.ends_with("/project_scan_single"))
   harness.stdio.println(ev.languages[0] == "rust")

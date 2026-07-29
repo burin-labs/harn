@@ -16,11 +16,11 @@ import { is_type } from "std/schema"
 
 pipeline default(harness: Harness) {
   const session = "agent-event-schema-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() {
       const args_hash = "0000000000000000000000000000000000000000000000000000000000000000"
       const result_hash = "1111111111111111111111111111111111111111111111111111111111111111"
-      agent_emit_event(harness,  harness, session,
+      agent_emit_event(harness, session,
         "tool_call_update",
         {
           tool_call_id: "call-1",
@@ -32,7 +32,7 @@ pipeline default(harness: Harness) {
           future_extension: {schema: "harn.future.event.v1"},
         },
       )
-      agent_emit_event(harness,  harness, session,
+      agent_emit_event(harness, session,
         "tool_call_audit",
         {
           tool_call_id: "call-1",
@@ -62,7 +62,7 @@ pipeline default(harness: Harness) {
           },
         },
       )
-      agent_emit_event(harness,  harness, session,
+      agent_emit_event(harness, session,
         "typed_checkpoint",
         {
           kind: "llm_call_start",

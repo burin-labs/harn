@@ -4,11 +4,11 @@ pipeline test(harness: Harness, task) {
   // the sign depend on which literal was interned first).
   const neg = -0.0
   const pos = 0.0
-  harness.stdio.println(1.0 / neg)
-  harness.stdio.println(1.0 / pos)
+  harness.stdio.log(1.0 / neg)
+  harness.stdio.log(1.0 / pos)
   // Reversed declaration order — results must be identical, not flipped.
   const pos2 = 0.0
   const neg2 = -0.0
-  harness.stdio.println(1.0 / pos2)
-  harness.stdio.println(1.0 / neg2)
+  harness.stdio.log(1.0 / pos2)
+  harness.stdio.log(1.0 / neg2)
 }

@@ -20,7 +20,7 @@ pipeline default(harness: Harness) {
   const errors = harness.runtime.atomic(0)
   // Two-sink fan-out: one to Langfuse for real export, one to a local
   // counter so the smoke can be observed without polling Langfuse.
-  const stack = compose_tool_callers(harness,  harness, [
+  const stack = compose_tool_callers(harness, [
       with_telemetry(harness, {
           sinks: [
             {

@@ -11,7 +11,7 @@ pipeline test(harness: Harness, task) {
     }
   }
   fn introduce<T>(item: T) where T: Greetable {
-    harness.stdio.println(item.greet())
+    harness.stdio.log(item.greet())
   }
   introduce(Person({name: "Alice"}))
 }

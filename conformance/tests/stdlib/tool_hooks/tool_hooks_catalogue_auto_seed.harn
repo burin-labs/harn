@@ -18,12 +18,14 @@ pipeline default(harness: Harness) {
   const inner = { args -> return {ok: true, ran: args.command} }
   const rust_wrapper = preset_run_command(harness, {stacks: ["rust"], inner: inner})
   /* Rust rule fires (rewrite). */
-  run(rust_wrapper, "cargo build --release")
+  run(harness, rust_wrapper, "cargo build --release")
   /* Universal deny fires even though we only opted into rust. */
-  const deny_wrapper = preset_run_command(harness,  harness, {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  const deny_wrapper = preset_run_command(
+    harness,
+    {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
   )
-  run(deny_wrapper, "git push --force origin main")
-  run(deny_wrapper, "rm -rf /")
+  run(harness, deny_wrapper, "git push --force origin main")
+  run(harness, deny_wrapper, "rm -rf /")
   /* Sibling-of-deny command passes through unscathed. */
   const pt = rust_wrapper({command: "echo hello"})
   harness.stdio.println(pt.ok)

@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
@@ -35,7 +36,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "step-judge-unavail-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "What is 2 + 2?",
           nil,
           {
@@ -65,7 +66,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const session = "step-judge-pass-" + harness.random.uuid()
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "What is 2 + 2?",
           nil,
           {

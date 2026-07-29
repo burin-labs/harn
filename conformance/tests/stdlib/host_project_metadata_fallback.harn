@@ -36,5 +36,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(type_of(stale.tier2), "list")
   harness.project.metadata_refresh_hashes( {dir: "zig"})
   harness.project.metadata_save( {})
-  harness.stdio.println("host project metadata fallback ok")
+  harness.stdio.log("host project metadata fallback ok")
 }

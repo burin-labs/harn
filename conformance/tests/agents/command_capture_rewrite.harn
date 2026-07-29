@@ -1,3 +1,4 @@
+import { agent_dispatch_tool_call, agent_parse_tool_calls } from "std/agent/primitives"
 import { command_capture_rewrite } from "std/agent/command_capture"
 import { agent_command_tools } from "std/agent/host_tools"
 
@@ -26,9 +27,9 @@ pipeline main(harness: Harness) {
   harness.stdio.println(command_capture_rewrite("echo hi & wc -l", cap) == nil)  // background job
   harness.stdio.println(command_capture_rewrite("a | b && c", cap) == nil)  // last statement has no pipe
   // --- end-to-end through the run_command tool ----------------------------
-  const root = path_join(harness.fs.temp_dir(), "harn-cap-int-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-cap-int-" + harness.random.uuid())
   harness.fs.mkdir(root, true)
-  const tools = agent_command_tools(harness,  harness, nil,
+  const tools = agent_command_tools(harness, nil,
     {root: root, cwd: root, allow_argv_prefixes: [["sh", "-c"]]},
   )
   const run = agent_dispatch_tool_call(harness, {

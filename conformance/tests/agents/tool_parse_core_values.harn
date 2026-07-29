@@ -15,21 +15,21 @@ pipeline main(harness: Harness) {
   // while heredocs and `\u{...}` escapes decoded correctly.
   probe(harness, "nonascii quoted value", "run({ command: \"café ☕ 日本\" })", sample_registry())
   probe(harness, "nonascii template value", "run({ command: `café ☕ 日本` })", sample_registry())
-  probe(harness,  harness, "nonascii tagged value",
+  probe(harness, "nonascii tagged value",
     """<tool_call>
 run({ command: "café ☕ 日本" })
 </tool_call>""",
     sample_registry(),
   )
   // A plain object literal surrounded by prose.
-  probe(harness,  harness, "object literal between prose lines",
+  probe(harness, "object literal between prose lines",
     """I'll write the scaffold now.
 edit({ action: "create", path: "a.go", content: "package a\n" })
 That should work.""",
     sample_registry(),
   )
   // A backtick template literal carrying a multi-line body.
-  probe(harness,  harness, "multiline template literal body",
+  probe(harness, "multiline template literal body",
     """edit({
   action: "replace_body",
   path: "a.go",
@@ -42,12 +42,12 @@ func Foo() {
     sample_registry(),
   )
   // Inside a template literal, `\`` is a literal backtick and `\\` a backslash.
-  probe(harness,  harness, "escaped backtick inside template literal",
+  probe(harness, "escaped backtick inside template literal",
     "edit({ action: \"create\", path: \"a.md\", content: `line with a \\` backtick` })",
     sample_registry(),
   )
   // A single-line template literal in a fully multi-line call.
-  probe(harness,  harness, "single line template literal",
+  probe(harness, "single line template literal",
     """edit({
     action: "create",
     path: "simple.txt",
@@ -55,7 +55,7 @@ func Foo() {
 })""",
     sample_registry(),
   )
-  probe(harness,  harness, "multiline template literal as whole value",
+  probe(harness, "multiline template literal as whole value",
     """edit({ action: "create", path: "a.go", content: `package main
 
 func main() {}
@@ -63,14 +63,14 @@ func main() {}
     sample_registry(),
   )
   // `+` between two quoted strings folds to one value.
-  probe(harness,  harness, "folds string concatenation",
+  probe(harness, "folds string concatenation",
     "edit({ action: \"create\", path: \"a.txt\", content: \"hello \" + \"world\" })",
     sample_registry(),
   )
   // The dominant corpus shape: a Go body whose backtick struct tag forces the
   // model into template + quoted + template concatenation. The fragments must
   // collapse into one string with the literal backtick tag preserved.
-  probe(harness,  harness, "folds go backtick struct tag concatenation",
+  probe(harness, "folds go backtick struct tag concatenation",
     """edit({ action: "create", path: "status.go", content: `package main
 
 type S struct {
@@ -81,11 +81,11 @@ type S struct {
   )
   // A `+` whose right operand is not a string is malformed concatenation. The
   // parser must reject loudly rather than guess at the intended value.
-  probe(harness,  harness, "rejects non-string concatenation operand",
+  probe(harness, "rejects non-string concatenation operand",
     "edit({ action: \"create\", path: \"a.txt\", content: \"x\" + 1 })",
     sample_registry(),
   )
-  probe(harness,  harness, "nested object and array literals",
+  probe(harness, "nested object and array literals",
     """edit({
     action: "create",
     path: "a.go",
@@ -94,7 +94,7 @@ type S struct {
 })""",
     sample_registry(),
   )
-  probe(harness,  harness, "trailing commas",
+  probe(harness, "trailing commas",
     """edit({
     action: "create",
     path: "a.go",
@@ -102,7 +102,7 @@ type S struct {
 })""",
     sample_registry(),
   )
-  probe(harness,  harness, "line and block comments",
+  probe(harness, "line and block comments",
     """edit({
     // Create a new file
     action: "create", /* must be a valid action */
@@ -111,21 +111,21 @@ type S struct {
 })""",
     sample_registry(),
   )
-  probe(harness,  harness, "single quoted string literals",
+  probe(harness, "single quoted string literals",
     "edit({ action: 'create', path: 'a.go' })",
     sample_registry(),
   )
-  probe(harness,  harness, "double quoted string value",
+  probe(harness, "double quoted string value",
     "run({ command: \"go test ./internal/manifest/\" })",
     sample_registry(),
   )
   // `=` is accepted as a synonym for `:` as the key/value separator, before a
   // scalar, before a template body, and before a heredoc opener.
-  probe(harness,  harness, "equals as key value separator",
+  probe(harness, "equals as key value separator",
     "edit({ action= \"create\", path: \"a.go\", content= `x` })",
     sample_registry(),
   )
-  probe(harness,  harness, "equals before heredoc value",
+  probe(harness, "equals before heredoc value",
     """edit({
     action: "create",
     path: "a.go",
@@ -137,7 +137,7 @@ EOF
   )
   // Shape 3 from the DeepSeek forensics: a leading-dot float. Recovering
   // `.100` to `0.100` keeps the whole call rather than dropping it over a char.
-  probe(harness,  harness, "leading dot floats",
+  probe(harness, "leading dot floats",
     """<tool_call>
 run({ command: "x", limit: .100, weight: -.5 })
 </tool_call>""",

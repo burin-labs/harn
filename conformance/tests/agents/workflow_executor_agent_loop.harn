@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { workflow_run_repair } from "std/workflow/repair"
 
 /**
@@ -42,7 +43,7 @@ pipeline default(harness: Harness) {
   const verifier = { r ->
     return {ok: contains(to_string(r?.visible_text), token), findings: [token]}
   }
-  const out = workflow_run_repair(harness,  harness, {task: "do the work", executor: executor, verify: verifier, max_attempts: 2},
+  const out = workflow_run_repair(harness, {task: "do the work", executor: executor, verify: verifier, max_attempts: 2},
   )
   harness.stdio.println(out.ok)
   harness.stdio.println(len(out.attempts))

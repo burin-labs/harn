@@ -16,5 +16,5 @@ pipeline test(harness: Harness, task) {
   // Implicit return (last expression)
   const square = fn(x) { x * x }
   assert(square(4) == 16, "fn expr implicit return")
-  harness.stdio.println("fn_expr tests passed")
+  harness.stdio.log("fn_expr tests passed")
 }

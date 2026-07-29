@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * Cross-slice integration: agent_loop's llm_caller seam composes with
  * std/llm/handlers::with_fallback. Caller A returns {ok: false, status: "auth"};

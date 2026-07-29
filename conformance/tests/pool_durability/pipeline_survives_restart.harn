@@ -5,7 +5,7 @@
 import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
 pipeline default(harness: Harness) {
-  const dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-pipeline-" + harness.random.uuid())
+  const dir = path_join(harness.fs.workspace_temp_dir(), "harn-pool-durability-pipeline-" + harness.random.uuid())
   const pool = pool_create(
     {
       name: "pipeline-demo",
@@ -15,15 +15,15 @@ pipeline default(harness: Harness) {
       dir: dir,
     },
   )
-  harness.stdio.println(pool.scope)
-  harness.stdio.println(pool.scope_id)
-  harness.stdio.println(pool.durable)
+  harness.stdio.log(pool.scope)
+  harness.stdio.log(pool.scope_id)
+  harness.stdio.log(pool.durable)
   // Submit and wait so the task reaches a terminal state and the
   // durable log records it as completed.
   const h1 = pool.submit({ -> 42 }, {idempotency_key: "submit-001"})
   const r1 = pool_wait(h1)
-  harness.stdio.println(r1.status)
-  harness.stdio.println(r1.result)
+  harness.stdio.log(r1.status)
+  harness.stdio.log(r1.result)
   // "Kill the process": clear the in-process registry. The .harn/pools/
   // JSONL file persists.
   pool_simulate_restart()
@@ -38,14 +38,14 @@ pipeline default(harness: Harness) {
       dir: dir,
     },
   )
-  harness.stdio.println(resumed.scope)
-  harness.stdio.println(resumed.durable)
-  harness.stdio.println(resumed.completed)
-  harness.stdio.println(resumed.total)
+  harness.stdio.log(resumed.scope)
+  harness.stdio.log(resumed.durable)
+  harness.stdio.log(resumed.completed)
+  harness.stdio.log(resumed.total)
   // Idempotent re-submission of the same key returns the persisted
   // outcome (now stringified) instead of re-running the closure.
   const h2 = resumed.submit({ -> 999 }, {idempotency_key: "submit-001"})
   const r2 = pool_wait(h2)
-  harness.stdio.println(r2.status)
-  harness.stdio.println(r2.result)
+  harness.stdio.log(r2.status)
+  harness.stdio.log(r2.result)
 }

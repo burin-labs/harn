@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
   for item in [1, 2, 3] {
-    harness.stdio.println(item)
+    harness.stdio.log(item)
   }
 }

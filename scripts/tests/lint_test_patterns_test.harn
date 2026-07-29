@@ -284,12 +284,12 @@ pipeline test_wall_clock_pattern(harness: Harness, task) {
 // --- has_mock_time ----------------------------------------------------------
 @test
 pipeline test_has_mock_time_indented(harness: Harness, task) {
-  assert_eq(has_mock_time("pipeline t(task) {\n  mock_time(0)\n}\n"), true)
+  assert_eq(has_mock_time("pipeline t(task) {\n  harness.testing.clock_set(0)\n}\n"), true)
 }
 
 @test
 pipeline test_has_mock_time_requires_line_start(harness: Harness, task) {
   // Only leading whitespace may precede the call (grep ^[[:space:]]*).
-  assert_eq(has_mock_time("let x = mock_time(0)\n"), false)
+  assert_eq(has_mock_time("let x = harness.testing.clock_set(0)\n"), false)
   assert_eq(has_mock_time("no mocks here\n"), false)
 }

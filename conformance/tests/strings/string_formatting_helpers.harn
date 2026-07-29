@@ -36,5 +36,5 @@ pipeline test(harness: Harness, task) {
   // five code points but four columns, so both words share a nine-column
   // line where a naive code-point count (five each) would have split them.
   assert_eq(word_wrap("café café", 9), "café café", "word_wrap ignores zero-width combining marks")
-  harness.stdio.println("string helpers: all tests passed")
+  harness.stdio.log("string helpers: all tests passed")
 }

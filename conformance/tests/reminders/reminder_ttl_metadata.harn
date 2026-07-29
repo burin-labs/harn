@@ -1,5 +1,5 @@
 pipeline main(harness: Harness) {
-  const injected = transcript.inject_reminder(
+  const injected = harness.agent.transcript_inject_reminder(
     transcript(),
     {body: "ttl reminder", ttl_turns: 5, preserve_on_compact: true, propagate: "none"},
   )

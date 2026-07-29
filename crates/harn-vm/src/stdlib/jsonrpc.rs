@@ -21,132 +21,130 @@
 //! mock plumbing, and the egress allowlist apply identically to RPC
 //! traffic.
 
-use crate::value::{DictRetain, VmDictExt};
-use std::cell::Cell;
-
 use crate::http::execute_http_request;
 use crate::stdlib::json::vm_value_to_data_value;
+use crate::value::{DictRetain, VmDictExt};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-thread_local! {
-    static JSONRPC_ID_COUNTER: Cell<i64> = const { Cell::new(0) };
-}
-
-pub(crate) fn reset_jsonrpc_state() {
-    JSONRPC_ID_COUNTER.with(|c| c.set(0));
-}
-
 pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
-    vm.register_async_builtin("jsonrpc_call", |_ctx, args| async move {
-        let url = args.first().map(|a| a.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(jsonrpc_err("jsonrpc_call: url is required"));
-        }
-        let method = args.get(1).map(|a| a.display()).unwrap_or_default();
-        if method.is_empty() {
-            return Err(jsonrpc_err("jsonrpc_call: method is required"));
-        }
-        let params = args.get(2).cloned().unwrap_or(VmValue::Nil);
-        let options = args.get(3).and_then(VmValue::as_dict);
-        let notify = options
-            .and_then(|d| d.get("notify"))
-            .map(VmValue::is_truthy)
-            .unwrap_or(false);
-        let id_value = options
-            .and_then(|d| d.get("id"))
-            .cloned()
-            .unwrap_or_else(|| {
-                if notify {
-                    VmValue::Nil
-                } else {
-                    next_id_value()
-                }
-            });
-        let envelope = build_envelope(&method, &params, &id_value, notify);
-        let body = encode_envelope(&envelope, "jsonrpc_call")?;
-        let request_options = build_request_options(body, options);
-        let response = execute_http_request("POST", &url, &request_options).await?;
-        if notify {
-            return Ok(VmValue::Nil);
-        }
-        unwrap_jsonrpc_response(response)
-    });
-
-    vm.register_async_builtin("jsonrpc_batch", |_ctx, args| async move {
-        let url = args.first().map(|a| a.display()).unwrap_or_default();
-        if url.is_empty() {
-            return Err(jsonrpc_err("jsonrpc_batch: url is required"));
-        }
-        let calls = match args.get(1) {
-            Some(VmValue::List(items)) => items.clone(),
-            Some(other) => {
-                return Err(jsonrpc_err(&format!(
-                    "jsonrpc_batch: calls must be a list, got {}",
-                    other.type_name()
-                )));
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "jsonrpc_call",
+        |_ctx, args| async move {
+            let url = args.first().map(|a| a.display()).unwrap_or_default();
+            if url.is_empty() {
+                return Err(jsonrpc_err("jsonrpc_call: url is required"));
             }
-            None => return Err(jsonrpc_err("jsonrpc_batch: calls list is required")),
-        };
-        if calls.is_empty() {
-            return Err(jsonrpc_err("jsonrpc_batch: calls list cannot be empty"));
-        }
-        let options = args.get(2).and_then(VmValue::as_dict);
-
-        // Build the envelope array and remember each slot's
-        // (input-index, kind) so we can stitch the response array
-        // back together by id. Notifications slot to `Nil`; non-
-        // notify calls get an auto id when none is provided.
-        let mut envelopes: Vec<VmValue> = Vec::with_capacity(calls.len());
-        let mut slots: Vec<BatchSlot> = Vec::with_capacity(calls.len());
-        for (idx, call) in calls.iter().enumerate() {
-            let call_dict = call.as_dict().ok_or_else(|| {
-                jsonrpc_err(&format!(
-                    "jsonrpc_batch: call at index {idx} must be a dict, got {}",
-                    call.type_name()
-                ))
-            })?;
-            let method = match call_dict.get("method") {
-                Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
-                _ => {
-                    return Err(jsonrpc_err(&format!(
-                        "jsonrpc_batch: call at index {idx} missing 'method'"
-                    )));
-                }
-            };
-            let params = call_dict.get("params").cloned().unwrap_or(VmValue::Nil);
-            let notify = call_dict
-                .get("notify")
+            let method = args.get(1).map(|a| a.display()).unwrap_or_default();
+            if method.is_empty() {
+                return Err(jsonrpc_err("jsonrpc_call: method is required"));
+            }
+            let params = args.get(2).cloned().unwrap_or(VmValue::Nil);
+            let options = args.get(3).and_then(VmValue::as_dict);
+            let notify = options
+                .and_then(|d| d.get("notify"))
                 .map(VmValue::is_truthy)
                 .unwrap_or(false);
-            let id_value = call_dict.get("id").cloned().unwrap_or_else(|| {
-                if notify {
-                    VmValue::Nil
-                } else {
-                    next_id_value()
-                }
-            });
-            envelopes.push(build_envelope(&method, &params, &id_value, notify));
-            slots.push(BatchSlot {
-                id: id_value,
-                notify,
-            });
-        }
-        let array = VmValue::List(std::sync::Arc::new(envelopes));
-        let body = encode_envelope(&array, "jsonrpc_batch")?;
-        let request_options = build_request_options(body, options);
-        let response = execute_http_request("POST", &url, &request_options).await?;
+            let id_value = options
+                .and_then(|d| d.get("id"))
+                .cloned()
+                .unwrap_or_else(|| {
+                    if notify {
+                        VmValue::Nil
+                    } else {
+                        VmValue::Int(1)
+                    }
+                });
+            let envelope = build_envelope(&method, &params, &id_value, notify);
+            let body = encode_envelope(&envelope, "jsonrpc_call")?;
+            let request_options = build_request_options(body, options);
+            let response = execute_http_request("POST", &url, &request_options).await?;
+            if notify {
+                return Ok(VmValue::Nil);
+            }
+            unwrap_jsonrpc_response(response)
+        },
+    );
 
-        // If every call was a notification the server is permitted
-        // to return an empty body — JSON-RPC 2.0 §6. Yield a list of
-        // Nil slots aligned with the input.
-        if slots.iter().all(|s| s.notify) {
-            return Ok(VmValue::List(std::sync::Arc::new(
-                slots.iter().map(|_| VmValue::Nil).collect(),
-            )));
-        }
-        unwrap_batch_response(response, &slots)
-    });
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Net,
+        "jsonrpc_batch",
+        |_ctx, args| async move {
+            let url = args.first().map(|a| a.display()).unwrap_or_default();
+            if url.is_empty() {
+                return Err(jsonrpc_err("jsonrpc_batch: url is required"));
+            }
+            let calls = match args.get(1) {
+                Some(VmValue::List(items)) => items.clone(),
+                Some(other) => {
+                    return Err(jsonrpc_err(&format!(
+                        "jsonrpc_batch: calls must be a list, got {}",
+                        other.type_name()
+                    )));
+                }
+                None => return Err(jsonrpc_err("jsonrpc_batch: calls list is required")),
+            };
+            if calls.is_empty() {
+                return Err(jsonrpc_err("jsonrpc_batch: calls list cannot be empty"));
+            }
+            let options = args.get(2).and_then(VmValue::as_dict);
+
+            // Build the envelope array and remember each slot's
+            // (input-index, kind) so we can stitch the response array
+            // back together by id. Notifications slot to `Nil`; non-
+            // notify calls get an auto id when none is provided.
+            let mut envelopes: Vec<VmValue> = Vec::with_capacity(calls.len());
+            let mut slots: Vec<BatchSlot> = Vec::with_capacity(calls.len());
+            for (idx, call) in calls.iter().enumerate() {
+                let call_dict = call.as_dict().ok_or_else(|| {
+                    jsonrpc_err(&format!(
+                        "jsonrpc_batch: call at index {idx} must be a dict, got {}",
+                        call.type_name()
+                    ))
+                })?;
+                let method = match call_dict.get("method") {
+                    Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+                    _ => {
+                        return Err(jsonrpc_err(&format!(
+                            "jsonrpc_batch: call at index {idx} missing 'method'"
+                        )));
+                    }
+                };
+                let params = call_dict.get("params").cloned().unwrap_or(VmValue::Nil);
+                let notify = call_dict
+                    .get("notify")
+                    .map(VmValue::is_truthy)
+                    .unwrap_or(false);
+                let id_value = call_dict.get("id").cloned().unwrap_or_else(|| {
+                    if notify {
+                        VmValue::Nil
+                    } else {
+                        VmValue::Int(idx.saturating_add(1) as i64)
+                    }
+                });
+                envelopes.push(build_envelope(&method, &params, &id_value, notify));
+                slots.push(BatchSlot {
+                    id: id_value,
+                    notify,
+                });
+            }
+            let array = VmValue::List(std::sync::Arc::new(envelopes));
+            let body = encode_envelope(&array, "jsonrpc_batch")?;
+            let request_options = build_request_options(body, options);
+            let response = execute_http_request("POST", &url, &request_options).await?;
+
+            // If every call was a notification the server is permitted
+            // to return an empty body — JSON-RPC 2.0 §6. Yield a list of
+            // Nil slots aligned with the input.
+            if slots.iter().all(|s| s.notify) {
+                return Ok(VmValue::List(std::sync::Arc::new(
+                    slots.iter().map(|_| VmValue::Nil).collect(),
+                )));
+            }
+            unwrap_batch_response(response, &slots)
+        },
+    );
 }
 
 struct BatchSlot {
@@ -198,14 +196,6 @@ fn encode_envelope(value: &VmValue, builtin: &str) -> Result<String, VmError> {
 
 fn jsonrpc_err(msg: &str) -> VmError {
     VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg)))
-}
-
-fn next_id_value() -> VmValue {
-    JSONRPC_ID_COUNTER.with(|c| {
-        let next = c.get().saturating_add(1);
-        c.set(next);
-        VmValue::Int(next)
-    })
 }
 
 fn build_envelope(method: &str, params: &VmValue, id: &VmValue, notify: bool) -> VmValue {

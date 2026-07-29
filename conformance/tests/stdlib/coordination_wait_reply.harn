@@ -1,10 +1,9 @@
 import { coord_cursor, coord_reply, coord_request, coord_wait_reply } from "std/coordination"
 
 pipeline default(harness: Harness) {
-  mock_time(5000)
+  harness.testing.clock_set(5000)
   const opts = {workspace_id: "workspace-A", tenant_id: "tenant-A"}
-  const q1 = coord_request(
-    harness.channels, "workspace",
+  const q1 = coord_request(harness.runtime, harness.channels, harness.random, "workspace",
     "peer-intent",
     "agent-A",
     {
@@ -15,8 +14,7 @@ pipeline default(harness: Harness) {
     },
     opts + {id: "coord-request-1"},
   )
-  const q2 = coord_request(
-    harness.channels, "workspace",
+  const q2 = coord_request(harness.runtime, harness.channels, harness.random, "workspace",
     "peer-intent",
     "agent-A",
     {
@@ -33,8 +31,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(q1.message.to)
   harness.stdio.println(q1.message.from.session_id)
   harness.stdio.println(q1.message.data.paths[0])
-  const _ = coord_reply(
-    harness.channels, "workspace",
+  const _ = coord_reply(harness.runtime, harness.channels, harness.random, "workspace",
     "peer-intent",
     q1,
     {
@@ -46,8 +43,7 @@ pipeline default(harness: Harness) {
     },
     opts + {id: "coord-unrelated-reply"},
   )
-  const _ = coord_reply(
-    harness.channels, "workspace",
+  const _ = coord_reply(harness.runtime, harness.channels, harness.random, "workspace",
     "peer-intent",
     q1,
     {
@@ -59,8 +55,7 @@ pipeline default(harness: Harness) {
     },
     opts + {id: "coord-reply-1"},
   )
-  const _ = coord_reply(
-    harness.channels, "workspace",
+  const _ = coord_reply(harness.runtime, harness.channels, harness.random, "workspace",
     "peer-intent",
     q2,
     {
@@ -72,8 +67,7 @@ pipeline default(harness: Harness) {
     },
     opts + {id: "coord-reply-2"},
   )
-  const wait1 = coord_wait_reply(
-    harness.channels, "workspace",
+  const wait1 = coord_wait_reply(harness.runtime, harness.channels, harness.clock, "workspace",
     "peer-intent",
     q1,
     opts
@@ -91,10 +85,9 @@ pipeline default(harness: Harness) {
   harness.stdio.println(wait1.reply.data.verdict)
   harness.stdio.println(wait1.acknowledged.consumer_id)
   harness.stdio.println(
-    coord_cursor(harness.channels, "workspace", "peer-intent", "reply.coord-request-1", opts) == wait1.next_cursor,
+    coord_cursor(harness.runtime, harness.channels, "workspace", "peer-intent", "reply.coord-request-1", opts) == wait1.next_cursor,
   )
-  const after_ack = coord_wait_reply(
-    harness.channels, "workspace",
+  const after_ack = coord_wait_reply(harness.runtime, harness.channels, harness.clock, "workspace",
     "peer-intent",
     q1,
     opts
@@ -106,8 +99,7 @@ pipeline default(harness: Harness) {
     },
   )
   harness.stdio.println(after_ack.status)
-  const wait2 = coord_wait_reply(
-    harness.channels, "workspace",
+  const wait2 = coord_wait_reply(harness.runtime, harness.channels, harness.clock, "workspace",
     "peer-intent",
     q2,
     opts
@@ -121,8 +113,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(wait2.status)
   harness.stdio.println(wait2.consumer_id)
   harness.stdio.println(wait2.reply.data.verdict)
-  const timeout = coord_wait_reply(
-    harness.channels, "workspace",
+  const timeout = coord_wait_reply(harness.runtime, harness.channels, harness.clock, "workspace",
     "peer-intent",
     "coord-missing",
     opts + {timeout_ms: 120, poll_interval_ms: 50},
@@ -130,5 +121,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(timeout.status)
   harness.stdio.println(timeout.consumer_id)
   harness.stdio.println(timeout.elapsed_ms >= 120)
-  unmock_time()
+  harness.testing.clock_reset()
 }

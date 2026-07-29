@@ -2,7 +2,7 @@ import "../_common"
 
 pipeline default(harness: Harness, task) {
   const unique = harness.random.uuid()
-  const root = path_join(harness.fs.temp_dir(), "harn-worker-claim-expiry-" + unique)
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-worker-claim-expiry-" + unique)
   const producer_dir = path_join(root, "producer")
   const failing_consumer_dir = path_join(root, "consumer-fail")
   const ok_consumer_dir = path_join(root, "consumer-ok")
@@ -32,13 +32,13 @@ pipeline default(harness: Harness, task) {
     path_join(ok_consumer_dir, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
   )
-  const repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
-  const fire = exec(
+  const fire = harness.process.exec(
     harn_bin,
     "orchestrator",
     "fire",
@@ -49,7 +49,7 @@ pipeline default(harness: Harness, task) {
     state_dir,
   )
   assert(fire.success, "producer fire failed: " + fire.stderr)
-  const first = exec(
+  const first = harness.process.exec(
     harn_bin,
     "orchestrator",
     "queue",
@@ -85,7 +85,7 @@ pipeline default(harness: Harness, task) {
   let second_data = nil
   const claim_reclaim_deadline = harness.clock.now_ms() + 5000
   while harness.clock.now_ms() < claim_reclaim_deadline {
-    second = exec(
+    second = harness.process.exec(
       harn_bin,
       "orchestrator",
       "queue",

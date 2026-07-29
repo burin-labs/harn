@@ -10,5 +10,5 @@ pipeline test(harness: Harness, task) {
     [[a, b], [c, d]] -> { a + b + c + d }
     _ -> { -1 }
   }
-  harness.stdio.println(out)
+  harness.stdio.log(out)
 }

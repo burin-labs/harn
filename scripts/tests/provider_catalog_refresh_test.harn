@@ -327,8 +327,8 @@ pipeline test_render_candidate_toml_handles_no_changes(harness: Harness, task) {
 
 @test
 pipeline test_html_adapter_parses_table(harness: Harness, task) {
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://example.com/pricing",
     {
@@ -368,8 +368,8 @@ pipeline test_html_adapter_parses_table(harness: Harness, task) {
 
 @test
 pipeline test_html_adapter_skips_columns_not_in_map(harness: Harness, task) {
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://example.com/pricing",
     {
@@ -406,8 +406,8 @@ pipeline test_html_adapter_skips_columns_not_in_map(harness: Harness, task) {
 
 @test
 pipeline test_html_adapter_reports_fetch_error(harness: Harness, task) {
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://example.com/missing",
     {status: 404, headers: {"content-type": "text/html"}, body: ""},
@@ -426,8 +426,8 @@ pipeline test_html_adapter_reports_fetch_error(harness: Harness, task) {
 
 @test
 pipeline test_json_adapter_parses_payload(harness: Harness, task) {
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://example.com/models",
     {
@@ -486,8 +486,8 @@ pipeline test_key_required_adapter_skips_without_key(harness: Harness, task) {
 
 @test
 pipeline test_key_required_adapter_runs_with_key(harness: Harness, task) {
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "GET",
     "https://api.fireworks.ai/inference/v1/models",
     {

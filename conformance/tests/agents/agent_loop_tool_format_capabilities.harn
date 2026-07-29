@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { agent_capture_events } from "std/agent/events"
 
 fn sample_tools() {
@@ -72,16 +73,16 @@ tool_mode_parity = "native_unreliable"
     harness.llm.provider_capabilities_clear()
   }
   const preferred_session = "tool-format-preferred-" + harness.random.uuid()
-  const preferred = agent_capture_events(harness,  harness, preferred_session,
-    fn() { return run_format(harness, 
+  const preferred = agent_capture_events(harness, preferred_session,
+    fn() { return run_format(harness,
       {provider: "testcatalog", model: "catalogued-native", session_id: preferred_session},
     ) },
   )
   harness.stdio.println(preferred.result.text)
   harness.stdio.println(len(events_of(preferred.events, "capability_gap")))
   const auto_session = "tool-format-auto-" + harness.random.uuid()
-  const auto = agent_capture_events(harness,  harness, auto_session,
-    fn() { return run_format(harness, 
+  const auto = agent_capture_events(harness, auto_session,
+    fn() { return run_format(harness,
       {
         provider: "testcatalog",
         model: "catalogued-native",
@@ -93,8 +94,8 @@ tool_mode_parity = "native_unreliable"
   harness.stdio.println(auto.result.text)
   harness.stdio.println(len(events_of(auto.events, "capability_gap")))
   const fallback_session = "tool-format-fallback-" + harness.random.uuid()
-  const fallback = agent_capture_events(harness,  harness, fallback_session,
-    fn() { return run_format(harness, 
+  const fallback = agent_capture_events(harness, fallback_session,
+    fn() { return run_format(harness,
       {provider: "testcatalog", model: "uncatalogued-model", session_id: fallback_session},
     ) },
   )
@@ -110,8 +111,8 @@ tool_mode_parity = "native_unreliable"
   harness.stdio.println(gaps[0].capability)
   harness.stdio.println(gaps[0].fallback_tool_format)
   const override_session = "tool-format-override-" + harness.random.uuid()
-  const override_capture = agent_capture_events(harness,  harness, override_session,
-    fn() { return run_format(harness, 
+  const override_capture = agent_capture_events(harness, override_session,
+    fn() { return run_format(harness,
       {
         provider: "testcatalog",
         model: "catalogued-native",
@@ -130,8 +131,8 @@ tool_mode_parity = "native_unreliable"
   harness.stdio.println(override_events[0].metadata?.catalog_parity)
   harness.stdio.println(override_events[0].metadata?.override_reason == nil)
   const missing_reason_session = "tool-format-native-unreliable-missing-" + harness.random.uuid()
-  const missing_reason = agent_capture_events(harness,  harness, missing_reason_session,
-    fn() { return run_format(harness, 
+  const missing_reason = agent_capture_events(harness, missing_reason_session,
+    fn() { return run_format(harness,
       {
         provider: "testcatalog",
         model: "native-unreliable-route",
@@ -148,8 +149,8 @@ tool_mode_parity = "native_unreliable"
   harness.stdio.println(missing_reason_events[0].metadata?.catalog_parity)
   harness.stdio.println(missing_reason_events[0].metadata?.override_reason == nil)
   const with_reason_session = "tool-format-native-unreliable-reason-" + harness.random.uuid()
-  const with_reason = agent_capture_events(harness,  harness, with_reason_session,
-    fn() { return run_format(harness, 
+  const with_reason = agent_capture_events(harness, with_reason_session,
+    fn() { return run_format(harness,
       {
         provider: "testcatalog",
         model: "native-unreliable-route",

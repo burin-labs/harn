@@ -1,3 +1,4 @@
+import "std/agent/workers"
 import { with_llm_script } from "std/testing"
 
 /**
@@ -11,7 +12,7 @@ import { with_llm_script } from "std/testing"
  * `advance_time`.
  */
 pipeline main(harness: Harness) {
-  const _ = mock_time(1700000100000)
+  const _ = harness.testing.clock_set(1700000100000)
   with_llm_script(
     harness.llm, [
       {
@@ -34,16 +35,16 @@ pipeline main(harness: Harness) {
       const handle = sub_agent_run(harness, "Park until the review timeout fails the worker.",
         {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
       )
-      const suspended = wait_agent(handle)
+      const suspended = wait_agent(harness.agent, handle)
       harness.stdio.println("status=" + suspended.status)
       harness.stdio.println(
         "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
       )
-      const _ = advance_time(6 * 60 * 1000)
+      const _ = harness.testing.clock_advance(6 * 60 * 1000)
       harness.runtime.yield_now()
       harness.runtime.yield_now()
       harness.runtime.yield_now()
-      const failed = wait_agent(handle)
+      const failed = wait_agent(harness.agent, handle)
       harness.stdio.println("post_timeout_status=" + failed.status)
       harness.stdio.println("has_latest_error=" + to_string(failed?.error != nil))
       harness.stdio.println(
@@ -51,10 +52,10 @@ pipeline main(harness: Harness) {
           + to_string(contains(failed?.error ?? "", "timeout")),
       )
       const resume_attempt = try {
-        resume_agent(handle)
+        resume_agent(harness.agent, handle)
       }
       harness.stdio.println("resume_failed=" + to_string(is_err(resume_attempt)))
-      const _ = unmock_time()
+      const _ = harness.testing.clock_reset()
     },
   )
 }

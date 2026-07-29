@@ -3,5 +3,5 @@ pipeline test(harness: Harness, task) {
   assert(true)
   assert_eq(2 + 2, 4)
   assert_ne(1, 2)
-  harness.stdio.println("all assertions passed")
+  harness.stdio.log("all assertions passed")
 }

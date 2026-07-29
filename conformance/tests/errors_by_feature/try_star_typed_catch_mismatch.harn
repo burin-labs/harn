@@ -16,5 +16,5 @@ pipeline test(harness: Harness, task) {
   } catch (e: OtherError) {
     "wont-fire"
   }
-  harness.stdio.println("unreachable")
+  harness.stdio.log("unreachable")
 }

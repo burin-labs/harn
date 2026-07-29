@@ -217,7 +217,7 @@ pub fn agent_required_tools_feedback(missing: list<string>) -> string {
  * @api_stability: experimental
  */
 pub fn agent_required_tools_inject_feedback(harness: Harness, session_id: string, missing: list<string>) {
-  agent_session_inject_feedback(harness,  harness, session_id,
+  agent_session_inject_feedback(harness, session_id,
     "required_tools",
     agent_required_tools_feedback(missing),
   )

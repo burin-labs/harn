@@ -208,7 +208,7 @@ pub fn agent_feedback_compose(candidates, context = nil) -> dict {
  */
 pub fn agent_feedback_emit(harness: Harness, session_id: string, candidates, context = nil) -> dict {
   const composed = agent_feedback_compose(candidates, context)
-  agent_emit_event(harness,  harness, session_id,
+  agent_emit_event(harness, session_id,
     "typed_checkpoint",
     {
       schema: "harn.agent_feedback_composition.v1",
@@ -231,6 +231,11 @@ pub fn agent_feedback_emit(harness: Harness, session_id: string, candidates, con
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_feedback_tool_example(tool_name: string, args = [], options = nil) -> string {
-  return agent_render_tool_call_exemplar(tool_name, args, options)
+pub fn agent_feedback_tool_example(
+  harness: Harness,
+  tool_name: string,
+  args = [],
+  options = nil,
+) -> string {
+  return agent_render_tool_call_exemplar(harness, tool_name, args, options)
 }

@@ -17,8 +17,8 @@ import { memory } from "std/oauth/storage"
 pipeline test(harness: Harness, task) {
   const topic = "oauth.device_flow.audit"
   const cursor = harness.obs.event_log_latest(topic) ?? 0
-  const _ = mock_time(1700000000000)
-  const store = memory()
+  const _ = harness.testing.clock_set(1700000000000)
+  const store = memory(harness.auth)
   const provider = custom(
     {
       id: "mockDevice",
@@ -28,8 +28,8 @@ pipeline test(harness: Harness, task) {
       default_scopes: ["repo"],
     },
   )
-  http_mock_clear()
-  http_mock(
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/device",
     {
@@ -39,7 +39,7 @@ pipeline test(harness: Harness, task) {
       headers: {"content-type": "application/json"},
     },
   )
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     "https://idp.example/token",
     {
@@ -60,10 +60,14 @@ pipeline test(harness: Harness, task) {
     )
     nil
   }
-  const token_set = device_flow(harness,  harness, provider,
+  const token_set = device_flow(
+    harness,
+    provider,
     {client_id: "cli-id", scopes: ["repo", "user"], storage: store, on_user_code: on_user_code},
   )
-  const handler_stream = harness.obs.event_log_subscribe({topic: handler_topic, from_cursor: handler_cursor})
+  const handler_stream = harness.obs.event_log_subscribe(
+    {topic: handler_topic, from_cursor: handler_cursor},
+  )
   const handler_event = handler_stream.next().value
   assert_eq(handler_event.kind, "called", "on_user_code was invoked")
   assert_eq(handler_event.payload.user_code, "USER-123", "on_user_code receives user_code")
@@ -79,7 +83,7 @@ pipeline test(harness: Harness, task) {
   const stored = store.get("mockDevice")
   assert_eq(stored.access_token, "AAA", "token persisted under provider id")
   assert_eq(stored.refresh_token, "RRR", "refresh token persisted")
-  const calls = http_mock_calls({include_sensitive: true})
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
   assert_eq(len(calls), 2, "device + token calls, no polling needed")
   assert_eq(calls[0].method, "POST", "first call hits device endpoint")
   assert(contains(calls[0].url, "/device"), "device endpoint URL")
@@ -103,6 +107,6 @@ pipeline test(harness: Harness, task) {
   assert(logged.payload.next?.refresh_token == nil, "audit does NOT leak refresh_token")
   assert(logged.payload?.device_code == nil, "audit does NOT include device_code")
   assert(logged.payload?.user_code == nil, "audit does NOT include user_code")
-  const _ = unmock_time()
-  harness.stdio.println("oauth device flow happy path ok")
+  const _ = harness.testing.clock_reset()
+  harness.stdio.log("oauth device flow happy path ok")
 }

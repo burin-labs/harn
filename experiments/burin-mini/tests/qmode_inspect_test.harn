@@ -12,7 +12,7 @@ fn first_group(pattern: string, text: string) {
 }
 
 fn repo_root(harness: Harness) -> string {
-  let dir = cwd()
+  let dir = harness.fs.cwd()
   let depth = 0
   while depth < 8 {
     if harness.fs.exists(path_join(dir, "Cargo.toml"))
@@ -28,7 +28,7 @@ fn repo_root(harness: Harness) -> string {
     dir = parent
     depth = depth + 1
   }
-  throw "could not find repo root from " + cwd()
+  throw "could not find repo root from " + harness.fs.cwd()
 }
 
 fn resolve_harn_bin(harness: Harness, root: string) -> string {
@@ -128,7 +128,7 @@ fn finding_messages(result: dict) -> string {
 }
 
 pipeline test_qmode_inspect_valid_fixture_passes(harness: Harness, _task) {
-  with_temp_dir(harness,  harness, { task_dir ->
+  with_temp_dir(harness, { task_dir ->
       write_valid_fixture(harness, task_dir)
       const result = qmode_inspect_task_dir(harness, task_dir)
       const output = finding_messages(result)
@@ -140,7 +140,7 @@ pipeline test_qmode_inspect_valid_fixture_passes(harness: Harness, _task) {
 }
 
 pipeline test_qmode_inspect_terminal_double_call_fails(harness: Harness, _task) {
-  with_temp_dir(harness,  harness, { task_dir ->
+  with_temp_dir(harness, { task_dir ->
       write_json(harness, path_join(task_dir, "task.json"), {task: "improve performance"})
       harness.fs.write_text(
         path_join(task_dir, "llm-mock.jsonl"),
@@ -166,7 +166,7 @@ pipeline test_qmode_inspect_terminal_double_call_fails(harness: Harness, _task) 
 }
 
 pipeline test_qmode_inspect_cli_exit_code_and_output(harness: Harness, _task) {
-  with_temp_dir(harness,  harness, { task_dir ->
+  with_temp_dir(harness, { task_dir ->
       write_valid_fixture(harness, task_dir)
       const root = repo_root(harness)
       const harn_bin = resolve_harn_bin(harness, root)

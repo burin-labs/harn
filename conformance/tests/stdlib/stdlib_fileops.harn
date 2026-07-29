@@ -1,5 +1,5 @@
 pipeline default(harness: Harness) {
-  const tmp = harness.fs.temp_dir()
+  const tmp = harness.fs.workspace_temp_dir()
   const test_dir = path_join(tmp, "harn_test_fileops")
   harness.fs.mkdir(test_dir)
   // path_join

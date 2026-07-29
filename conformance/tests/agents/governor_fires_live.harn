@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // LIVE-shape / registration guard: run a REAL agent_loop with the pace governor
 // wired through the EXISTING post_turn_callback seam, and prove it FIRES on the
 // live agent_compute_post_turn payload (positive case) and does NOT fire when
@@ -40,7 +41,7 @@ pipeline default(harness: Harness) {
         {
           loop_until_done: true,
           max_iterations: 5,
-          post_turn_callback: governor_post_turn(harness,  harness, {budget: 2.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"},
+          post_turn_callback: governor_post_turn(harness, {budget: 2.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"},
           ),
           provider: "mock",
           session_id: session,

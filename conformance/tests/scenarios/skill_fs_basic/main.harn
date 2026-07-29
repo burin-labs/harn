@@ -43,5 +43,5 @@ pipeline test(harness: Harness, task) {
   // `disable-model-invocation: false` is the default and isn't round-tripped
   // as an explicit field — keep the assertion focused on what we know to be
   // present to avoid schema fragility.
-  harness.stdio.println("skill_fs_basic passed")
+  harness.stdio.log("skill_fs_basic passed")
 }

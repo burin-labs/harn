@@ -13,10 +13,10 @@ pipeline test(harness: Harness, task) {
   }
   const calc = Calculator({base: 100})
   const args = [1, 2]
-  harness.stdio.println(calc.add(...args))
+  harness.stdio.log(calc.add(...args))
   const more = [10, 20, 30]
-  harness.stdio.println(calc.sum_three(...more))
+  harness.stdio.log(calc.sum_three(...more))
   // Mixed: regular args + spread
   const pair = [5]
-  harness.stdio.println(calc.add(3, ...pair))
+  harness.stdio.log(calc.add(3, ...pair))
 }

@@ -8,10 +8,10 @@ const SLACK_API_BASE_URL = "https://slack.com/api"
 
 @test
 pipeline test_regression_notification_posts(harness: Harness, task) {
-  egress_policy({allow: ["slack.com"], default: "deny"})
-  http_mock_clear()
+  harness.net.egress_policy({allow: ["slack.com"], default: "deny"})
+  harness.testing.http_mock_clear()
   const base = SLACK_API_BASE_URL
-  http_mock(
+  harness.testing.http_mock(
     "POST",
     base + "/chat.postMessage",
     {
@@ -43,7 +43,7 @@ pipeline test_regression_notification_posts(harness: Harness, task) {
   assert_eq(outcome.verdict.gate.status, "regression", "regression gate used")
   assert_eq(outcome.verdict.paired_delta.status, "regression", "paired delta included")
   assert_eq(len(outcome.verdict.top_regressed_cases), 1, "top regressed case included")
-  const calls = http_mock_calls()
+  const calls = harness.testing.http_mock_calls()
   assert_eq(len(calls), 1, "one Slack post")
   const body = json_parse(calls[0].body)
   assert(contains(body.text, "Eval regression detected"), "Slack digest labels regression")
@@ -51,13 +51,13 @@ pipeline test_regression_notification_posts(harness: Harness, task) {
     contains(body.blocks[2].text.text, "tool-call-schema"),
     "Slack digest includes regressed case",
   )
-  http_mock_clear()
+  harness.testing.http_mock_clear()
 }
 
 @test
 pipeline test_no_prior_baseline_skips_notification(harness: Harness, task) {
-  egress_policy({allow: ["slack.com"], default: "deny"})
-  http_mock_clear()
+  harness.net.egress_policy({allow: ["slack.com"], default: "deny"})
+  harness.testing.http_mock_clear()
   const base = SLACK_API_BASE_URL
   const namespace = "eval-notifier-test-" + harness.random.uuid()
   const config = {
@@ -72,8 +72,8 @@ pipeline test_no_prior_baseline_skips_notification(harness: Harness, task) {
   assert(!outcome.notified, "no prior baseline does not notify")
   assert(!(outcome.notify ?? false), "no prior baseline suppresses Slack")
   assert_eq(outcome.reason, "no_prior_baseline", "no baseline reason")
-  assert_eq(len(http_mock_calls()), 0, "no Slack post")
-  http_mock_clear()
+  assert_eq(len(harness.testing.http_mock_calls()), 0, "no Slack post")
+  harness.testing.http_mock_clear()
 }
 
 fn notifier_event(config, base) -> dict {

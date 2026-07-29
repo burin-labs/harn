@@ -33,7 +33,7 @@ fn classify_request(harness: Harness, task) {
 
 @step(name: "act_on_classification", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
 fn act_on_classification(harness: Harness, classified) {
-  const wrapped = with_audit_receipt(harness,  harness, fn() { return {
+  const wrapped = with_audit_receipt(harness, fn() { return {
       action: classified.result.label,
       escalated: classified.escalated,
       confidence: classified.result.confidence,

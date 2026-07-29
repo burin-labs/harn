@@ -4,6 +4,7 @@ pipeline default(harness: Harness) {
   let caught = nil
   try {
     timed(
+      harness,
       "work.fragile",
       {phase: "validate"},
       { ->

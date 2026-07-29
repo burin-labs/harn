@@ -13,54 +13,54 @@
 import { probe_json } from "_tool_parse_probe"
 
 pipeline main(harness: Harness) {
-  probe_json(harness,  harness, "single clean call",
+  probe_json(harness, "single clean call",
     """```tool
 {"name": "read_file", "args": {"path": "a.rs"}}
 ```""",
   )
-  probe_json(harness,  harness, "tool/arguments dialect aliases",
+  probe_json(harness, "tool/arguments dialect aliases",
     """```tool
 {"tool": "read_file", "arguments": {"path": "a.rs"}}
 ```""",
   )
-  probe_json(harness,  harness, "canonical keys win over aliases",
+  probe_json(harness, "canonical keys win over aliases",
     """```tool
 {"name": "canonical", "tool": "alias", "args": {"k": 1}, "arguments": {"k": 2}}
 ```""",
   )
-  probe_json(harness,  harness, "generic tool wrapper unwraps",
+  probe_json(harness, "generic tool wrapper unwraps",
     """```tool
 {"name":"tool","args":{"name":"look","args":{"intent":"read","file":"src/lib.rs"}}}
 ```""",
   )
-  probe_json(harness,  harness, "harmony channel suffix strips from the name",
+  probe_json(harness, "harmony channel suffix strips from the name",
     """```tool
 {"name":"run<|channel|>commentary","args":{"command":"cargo test"}}
 ```""",
   )
   // Delimiter soup as JSON string content: every literal survives.
-  probe_json(harness,  harness, "content with backticks, heredoc, brace, and close tag",
+  probe_json(harness, "content with backticks, heredoc, brace, and close tag",
     """```tool
 {"name": "write_file", "args": {"path": "f.go", "content": "```\nx := `raw`\n<<EOF\n}\n</tool>\n```"}}
 ```""",
   )
-  probe_json(harness,  harness, "content starting with a heredoc opener is just a string",
+  probe_json(harness, "content starting with a heredoc opener is just a string",
     """```tool
 {"name": "write_file", "args": {"content": "<<EOF\npackage main\n"}}
 ```""",
   )
-  probe_json(harness,  harness, "embedded fence does not close early",
+  probe_json(harness, "embedded fence does not close early",
     """```tool
 {"name": "w", "args": {"c": "before\n```\nafter"}}
 ```""",
   )
-  probe_json(harness,  harness, "content containing a close tool tag",
+  probe_json(harness, "content containing a close tool tag",
     """```tool
 {"name": "w", "args": {"c": "x </tool> y"}}
 ```""",
   )
   // N fences, N calls, with prose between them.
-  probe_json(harness,  harness, "two fences yield two calls",
+  probe_json(harness, "two fences yield two calls",
     """```tool
 {"name": "a", "args": {}}
 ```
@@ -70,56 +70,56 @@ some prose
 ```""",
   )
   // Absent args is an empty object; downstream validation owns required params.
-  probe_json(harness,  harness, "absent args is an empty object",
+  probe_json(harness, "absent args is an empty object",
     """```tool
 {"name": "list_dir"}
 ```""",
   )
   // Rejections. A JSON array is a single non-object entry, not a batch — a
   // batch is consecutive objects.
-  probe_json(harness,  harness, "array body is rejected as a non-object",
+  probe_json(harness, "array body is rejected as a non-object",
     """```tool
 [{"name": "a", "args": {}}]
 ```""",
   )
-  probe_json(harness,  harness, "missing name",
+  probe_json(harness, "missing name",
     """```tool
 {"args": {"path": "a"}}
 ```""",
   )
-  probe_json(harness,  harness, "empty name",
+  probe_json(harness, "empty name",
     """```tool
 {"name": "  ", "args": {}}
 ```""",
   )
-  probe_json(harness,  harness, "args is not an object",
+  probe_json(harness, "args is not an object",
     """```tool
 {"name": "a", "args": "oops"}
 ```""",
   )
   // Salvage: a complete object plus trailing non-JSON dispatches the object and
   // errors on the tail — never zero, never silent.
-  probe_json(harness,  harness, "trailing bytes after the object",
+  probe_json(harness, "trailing bytes after the object",
     """```tool
 {"name": "a", "args": {}} trailing
 ```""",
   )
   // Unterminated: fence opens, the JSON string is cut off, no close fence.
-  probe_json(harness,  harness, "truncated string is unterminated",
+  probe_json(harness, "truncated string is unterminated",
     "```tool\n{\"name\": \"write_file\", \"args\": {\"content\": \"half a str",
   )
   // A balanced object with EOF before the close fence is an implicit close.
-  probe_json(harness,  harness, "complete object without a close fence",
+  probe_json(harness, "complete object without a close fence",
     """```tool
 {"name": "a", "args": {"k": 1}}""",
   )
   // A non-tool fence is prose, not a call, in both fence spellings.
-  probe_json(harness,  harness, "unrelated backtick fence stays prose",
+  probe_json(harness, "unrelated backtick fence stays prose",
     """```python
 print('hi')
 ```""",
   )
-  probe_json(harness,  harness, "unrelated tilde fence stays prose",
+  probe_json(harness, "unrelated tilde fence stays prose",
     """~~~python
 print('hi')
 ~~~""",

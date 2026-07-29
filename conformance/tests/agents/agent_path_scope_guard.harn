@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn path_tools() {
@@ -54,5 +55,5 @@ pipeline main(harness: Harness) {
   assert(len(allowed?.tools?.rejected ?? []) == 0, "in-anchor path is allowed")
   const after_clear = run_read(harness, session, "/tmp/harn-anchor-b/another.txt")
   assert(len(after_clear?.tools?.rejected ?? []) == 0, "guard removed after clear")
-  harness.stdio.println("agent_path_scope_guard tests passed")
+  harness.stdio.log("agent_path_scope_guard tests passed")
 }

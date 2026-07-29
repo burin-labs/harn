@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // goal_reloop is a GENUINELY-LIVE bounded re-loop, not a passive struct: an
 // unmet goal vetoes the completion, threads the unmet criteria into the
 // transcript, and the agent RE-RUNS — driven through agent_loop's own
@@ -85,5 +86,5 @@ pipeline test(harness: Harness) {
   }
   assert(findings_threaded, "the unmet criteria were threaded into the attempt-2 prompt")
   assert(result.visible_text.contains("CI_IS_GREEN"), "final answer satisfies the goal")
-  harness.stdio.println("agent goal reloop test passed")
+  harness.stdio.log("agent goal reloop test passed")
 }

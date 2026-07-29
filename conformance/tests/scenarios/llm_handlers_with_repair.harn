@@ -24,7 +24,7 @@ pipeline default(harness: Harness) {
       value: {text: "fixed", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
     }
   }
-  const caller = with_repair(synthetic, {})
+  const caller = with_repair(harness, synthetic, {})
   const env = caller(
     {
       prompt: "judge this",
@@ -43,7 +43,7 @@ pipeline default(harness: Harness) {
     let _ = harness.runtime.atomic_add(other_calls, 1)
     return {ok: false, status: "rate_limited", error: "429"}
   }
-  const other_caller = with_repair(other_synth, {})
+  const other_caller = with_repair(harness, other_synth, {})
   const other_env = other_caller(
     {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )

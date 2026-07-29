@@ -16,7 +16,7 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
   let budget_exhausted_emitted = state.budget_exhausted_emitted
   let budget_decisions = state.budget_decisions
   if final_status == "budget_exhausted" && !budget_exhausted_emitted {
-    const terminal_exhaustion = __agent_loop_budget_aggregates(harness, 
+    const terminal_exhaustion = __agent_loop_budget_aggregates(harness,
       session.session_id,
       nil,
       state.loop_start_ms,
@@ -52,7 +52,7 @@ pub fn __agent_loop_finalize_session(harness: Harness, message, session, state) 
     && wrapup_tools_ok
     && __agent_loop_wrapup_eligible_status(final_status) {
     let _ = try {
-      __agent_loop_final_wrapup(harness,  harness,
+      __agent_loop_final_wrapup(harness,
         message,
         session,
         opts,
@@ -149,7 +149,7 @@ pub fn __agent_loop_project_final_result(harness: Harness, result, message, sess
     final_result = final_result + suspend_result
   }
   if terminated_ok && __agent_loop_has_terminal_output_contract(opts) {
-    final_result = __agent_loop_apply_output_contract(harness,  harness, final_result,
+    final_result = __agent_loop_apply_output_contract(harness, final_result,
       opts,
       session,
       message,

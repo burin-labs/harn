@@ -4,9 +4,9 @@ use crate::agent_events::DenialGate;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 
 use super::super::{
-    enforce_current_policy_for_builtin, enforce_current_policy_for_tool,
-    enforce_current_policy_for_tool_with_side_effect_grant, pop_execution_policy,
-    push_execution_policy, CapabilityPolicy,
+    enforce_current_policy_for_builtin, enforce_current_policy_for_harness_method,
+    enforce_current_policy_for_tool, enforce_current_policy_for_tool_with_side_effect_grant,
+    pop_execution_policy, push_execution_policy, CapabilityPolicy,
 };
 
 #[test]
@@ -29,6 +29,33 @@ fn execution_policy_allows_llm_call_under_read_only_side_effect_ceiling() {
         ..Default::default()
     });
     let result = enforce_current_policy_for_builtin("llm_call", &[]);
+    pop_execution_policy();
+    assert!(result.is_ok());
+}
+
+#[test]
+fn execution_policy_allows_harness_llm_call_under_read_only_side_effect_ceiling() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        capabilities: BTreeMap::from([("llm".to_string(), vec!["call".to_string()])]),
+        ..Default::default()
+    });
+    let result = enforce_current_policy_for_harness_method(
+        harn_builtin_meta::CapabilityId::Llm,
+        "call",
+        &[
+            crate::value::VmValue::String("prompt".into()),
+            crate::value::VmValue::Nil,
+            crate::value::VmValue::dict(
+                [(
+                    crate::value::intern_key("provider"),
+                    crate::value::VmValue::String("mock".into()),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+        ],
+    );
     pop_execution_policy();
     assert!(result.is_ok());
 }

@@ -1,7 +1,7 @@
 import "std/prompt_library"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-prompt-library-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-prompt-library-" + harness.random.uuid())
   harness.fs.mkdir(root)
   const catalog_path = path_join(root, "prompt_library_catalog.toml")
   const front_path = path_join(root, "prompt_library_front.harn.prompt")
@@ -88,5 +88,5 @@ pipeline test(harness: Harness, task) {
   const queue = prompt_library_review_queue(review_library)
   assert_eq(len(queue), 1)
   assert_eq(queue[0].members, ["a1", "a2"])
-  harness.stdio.println("prompt_library ok")
+  harness.stdio.log("prompt_library ok")
 }

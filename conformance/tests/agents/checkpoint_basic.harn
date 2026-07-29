@@ -26,5 +26,5 @@ pipeline test(harness: Harness, task) {
   harness.runtime.checkpoint_clear()
   const after_clear = harness.runtime.checkpoint_get("step1")
   assert(after_clear == nil, "should be nil after clear")
-  harness.stdio.println("checkpoint tests passed")
+  harness.stdio.log("checkpoint tests passed")
 }

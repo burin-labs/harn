@@ -1,9 +1,9 @@
+import { workflow_execute } from "std/workflow/execute"
 import { task_plan_compile } from "std/agent/task_plan"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 
 pipeline main(harness: Harness) {
-  clear_host_mocks()
-  mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
+  harness.testing.clear()
+  harness.testing.respond("interaction", "approval_response", {approved: true, reviewer: "lead", reason: "ready"})
   const argv = if harness.system.platform().os == "windows" {
     ["cmd", "/C", "echo|set /p=task-plan-command-ok"]
   } else {

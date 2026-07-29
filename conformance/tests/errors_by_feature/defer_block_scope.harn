@@ -2,70 +2,70 @@ pipeline test(harness: Harness, task) {
   // Defer is block-scoped: runs at end of its enclosing { ... } block,
   // not at end of the surrounding function.
   fn block_scoped() {
-    harness.stdio.println("before block")
+    harness.stdio.log("before block")
     if true {
       defer {
-        harness.stdio.println("if-block exit")
+        harness.stdio.log("if-block exit")
       }
-      harness.stdio.println("inside if")
+      harness.stdio.log("inside if")
     }
-    harness.stdio.println("after block")
+    harness.stdio.log("after block")
   }
   block_scoped()
   // Block-scoped defer + LIFO order inside the same block.
   fn lifo_in_block() {
     if true {
       defer {
-        harness.stdio.println("first")
+        harness.stdio.log("first")
       }
       defer {
-        harness.stdio.println("second")
+        harness.stdio.log("second")
       }
       defer {
-        harness.stdio.println("third")
+        harness.stdio.log("third")
       }
-      harness.stdio.println("body")
+      harness.stdio.log("body")
     }
-    harness.stdio.println("outside")
+    harness.stdio.log("outside")
   }
   lifo_in_block()
   // Defer inside a for-body runs at each iteration's end (block-scope).
   fn loop_per_iteration() {
     for i in [1, 2, 3] {
       defer {
-        harness.stdio.println("end iter")
+        harness.stdio.log("end iter")
       }
-      harness.stdio.println(i)
+      harness.stdio.log(i)
     }
-    harness.stdio.println("loop done")
+    harness.stdio.log("loop done")
   }
   loop_per_iteration()
   // Break still runs pending defers in the loop body before exiting.
   fn break_runs_defers() {
     for i in [1, 2, 3] {
       defer {
-        harness.stdio.println("iter cleanup")
+        harness.stdio.log("iter cleanup")
       }
       if i == 2 {
         break
       }
-      harness.stdio.println(i)
+      harness.stdio.log(i)
     }
-    harness.stdio.println("after break")
+    harness.stdio.log("after break")
   }
   break_runs_defers()
   // Continue runs pending defers in the loop body before continuing.
   fn continue_runs_defers() {
     for i in [1, 2, 3] {
       defer {
-        harness.stdio.println("iter cleanup")
+        harness.stdio.log("iter cleanup")
       }
       if i == 2 {
         continue
       }
-      harness.stdio.println(i)
+      harness.stdio.log(i)
     }
-    harness.stdio.println("after continue")
+    harness.stdio.log("after continue")
   }
   continue_runs_defers()
 }

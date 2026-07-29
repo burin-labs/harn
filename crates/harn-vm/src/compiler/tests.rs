@@ -546,6 +546,17 @@ fn runtime_builtin_name_is_not_source_callable_without_a_binding() {
 }
 
 #[test]
+fn legacy_signature_without_manifest_fails_closed() {
+    harn_builtin_registry::install_builtin_manifest(crate::stdlib::all_builtin_manifest());
+    let error = try_compile("pipeline default(harness: Harness) { store_get(\"key\") }")
+        .expect_err("a parser-only legacy signature must not grant runtime authority");
+    assert!(
+        error.message.contains("no typed runtime contract"),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn test_compile_if_else() {
     let chunk =
         compile_source(r#"pipeline test(task) { if true { log("yes") } else { log("no") } }"#);

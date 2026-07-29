@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
@@ -37,7 +38,7 @@ pipeline test(harness: Harness, task) {
       assert(!contains(second_messages, "top secret"), "gated skill body does not leak")
       const third_messages = json_stringify(calls[2].messages)
       assert(contains(third_messages, "skill_not_found"), "missing skill returns a typed error")
-      harness.stdio.println("skills_load_skill_errors passed")
+      harness.stdio.log("skills_load_skill_errors passed")
     },
   )
 }

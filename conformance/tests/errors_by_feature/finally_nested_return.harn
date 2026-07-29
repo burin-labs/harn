@@ -5,15 +5,15 @@ pipeline test(harness: Harness, task) {
       try {
         return "early"
       } finally {
-        harness.stdio.println("inner finally")
+        harness.stdio.log("inner finally")
       }
     } finally {
-      harness.stdio.println("outer finally")
+      harness.stdio.log("outer finally")
     }
-    harness.stdio.println("unreachable")
+    harness.stdio.log("unreachable")
   }
   const r = outer()
-  harness.stdio.println("result: ${r}")
+  harness.stdio.log("result: ${r}")
   // Finally with empty body should not crash
   fn with_empty_finally() {
     try {
@@ -21,5 +21,5 @@ pipeline test(harness: Harness, task) {
     } finally {
     }
   }
-  harness.stdio.println(with_empty_finally())
+  harness.stdio.log(with_empty_finally())
 }

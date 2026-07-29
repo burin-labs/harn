@@ -306,7 +306,7 @@ fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   if preview_fn == nil || !__tui_is_callable(preview_fn) {
     return {dir: nil, args: []}
   }
-  const dir = harness.fs.temp_dir() + "/harn-tui-" + harness.random.uuid_v7()
+  const dir = harness.fs.workspace_temp_dir() + "/harn-tui-" + harness.random.uuid_v7()
   harness.fs.mkdir(dir)
   let idx = 0
   for item in items {

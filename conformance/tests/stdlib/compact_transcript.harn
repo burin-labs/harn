@@ -9,7 +9,10 @@ pipeline test(harness: Harness, task) {
       {role: "assistant", content: "I found three likely hotspots."},
     ],
   )
-  const truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  const truncated = harness.agent.compact_transcript(
+    base,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
   harness.stdio.println(transcript_summary(truncated)?.contains("auto-compacted"))
   harness.stdio.println(
     transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate",
@@ -29,7 +32,7 @@ pipeline test(harness: Harness, task) {
       {role: "user", content: "All right."},
     ],
   )
-  const masked = transcript_compact(
+  const masked = harness.agent.compact_transcript(
     masked_base,
     {strategy: "observation_mask", keep_last: 1, target_tokens: 1},
   )
@@ -38,13 +41,14 @@ pipeline test(harness: Harness, task) {
     transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
   )
   with_llm_script(
-    harness.llm, [
+    harness.llm,
+    [
       llm_text("LLM compact summary"),
       llm_text("policy extension summary"),
       llm_text("policy replacement summary"),
     ],
     { ->
-      const llm_compacted = transcript_compact(
+      const llm_compacted = harness.agent.compact_transcript(
         base,
         {
           provider: "mock",
@@ -58,7 +62,7 @@ pipeline test(harness: Harness, task) {
       const prompt = llm_calls[0].messages[0].content
       harness.stdio.println(prompt.contains("Compact prompt from asset."))
       harness.stdio.println(prompt.contains("Archived count: 2"))
-      const policy_extended = transcript_compact(
+      const policy_extended = harness.agent.compact_transcript(
         base,
         {
           provider: "mock",
@@ -76,7 +80,7 @@ pipeline test(harness: Harness, task) {
       harness.stdio.println(
         extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.",
       )
-      const policy_replaced = transcript_compact(
+      const policy_replaced = harness.agent.compact_transcript(
         base,
         {
           provider: "mock",
@@ -109,7 +113,7 @@ pipeline test(harness: Harness, task) {
         },
       )
       const session_snapshot = harness.agent.snapshot(stream_session) ?? {}
-      const _ = transcript_compact(
+      const _ = harness.agent.compact_transcript(
         session_snapshot,
         {strategy: "truncate", keep_last: 1, target_tokens: 1},
       )

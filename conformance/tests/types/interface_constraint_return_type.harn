@@ -11,7 +11,7 @@ pipeline test(harness: Harness, task) {
     }
   }
   fn measure<T>(item: T) where T: Sizable {
-    harness.stdio.println(item.size())
+    harness.stdio.log(item.size())
   }
   measure(Box({width: 3}))
 }

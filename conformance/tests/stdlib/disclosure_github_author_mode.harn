@@ -30,7 +30,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(to_string(human.commit_committer == nil))
   harness.stdio.println(to_string(human.append_git_trailers))
   harness.stdio.println(human.trailers)
-  const root = path_join(harness.fs.temp_dir(), "harn-disclosure-github-mode-" + harness.random.uuid())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-disclosure-github-mode-" + harness.random.uuid())
   harness.fs.mkdir(root)
   const project_config = "[disclosure.surfaces.github]\n" + "author_mode = \"bot\"\n"
   harness.fs.write_text(path_join(root, "harn.toml"), project_config)

@@ -10,7 +10,7 @@ pipeline test(harness: Harness, task) {
   try {
     may_fail()
   } catch (e: AppError) {
-    harness.stdio.println("caught: ${e.variant}")
-    harness.stdio.println(e.fields[0])
+    harness.stdio.log("caught: ${e.variant}")
+    harness.stdio.log(e.fields[0])
   }
 }

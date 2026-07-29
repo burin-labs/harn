@@ -88,5 +88,5 @@ pipeline test(harness: Harness, task) {
   )
   assert(!stopped.ok, "stop predicate can end search before a terminal state")
   assert_eq(stopped.stop_reason, "stop")
-  harness.stdio.println("llm tree_of_thoughts ok")
+  harness.stdio.log("llm tree_of_thoughts ok")
 }

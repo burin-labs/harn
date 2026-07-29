@@ -1,4 +1,4 @@
 pipeline square(harness: Harness, task) {
   const x = 7
-  harness.stdio.println(x * x)
+  harness.stdio.log(x * x)
 }

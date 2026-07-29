@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // Live-shape / registration proof for `lane_policy` (std/agent/lanes).
 //
 // Catches dead-since-inception drift: a pure function returning the right
@@ -159,7 +160,7 @@ pipeline default(harness: Harness) {
         },
       )
         + lane_scope_classifier(default_lane_rows())
-      const captured = agent_capture_events(harness,  harness, session,
+      const captured = agent_capture_events(harness, session,
         fn() { return agent_loop(harness, "Fix the off-by-one bug in src/widget.py.", nil, opts) },
       )
       const verdict_events = captured.events.filter(

@@ -283,7 +283,7 @@ pub fn load_platform_baseline(text: string, platform: string) -> dict {
 }
 
 fn platform_name(harness: Harness) -> string {
-  const uname = harness.process.spawn_captured({cmd: "uname", args: ["-s"]})
+  const uname = harness.process.run({cmd: "uname", args: ["-s"]})
   if !uname.success {
     return "unknown"
   }
@@ -302,7 +302,7 @@ fn harn_argv(harness: Harness) -> list<string> {
   if bin_override != nil && bin_override != "" {
     return [bin_override ?? ""]
   }
-  const metadata = harness.process.spawn_captured(
+  const metadata = harness.process.run(
     {cmd: "cargo", args: ["metadata", "--format-version=1", "--no-deps"]},
   )
   if !metadata.success {
@@ -424,7 +424,7 @@ fn run_parallel(harness: Harness, root: string, platform: string, test_files: li
   }
   script = script
     + "failed=0\nfor pid in $pids; do wait \"$pid\" || failed=1; done\nexit \"$failed\"\n"
-  const fanout = harness.process.spawn_captured({cmd: "sh", args: ["-c", script]})
+  const fanout = harness.process.run({cmd: "sh", args: ["-c", script]})
   let runs = []
   let errors = []
   for index in range(0, test_files.count) {
@@ -439,7 +439,7 @@ fn run_parallel(harness: Harness, root: string, platform: string, test_files: li
     const status = int_number(harness.fs.read_text(status_path).trim())
     const diagnose = parse_diagnose_output(stderr)
     const timing = parse_time_output(stderr)
-    harness.process.spawn_captured(
+    harness.process.run(
       {cmd: "rm", args: ["-rf", path_join(run_root, "home"), path_join(run_root, "cache")]},
     )
     if status != 0 {
@@ -480,7 +480,7 @@ fn measure_round(harness: Harness, platform: string) -> dict {
   const execution = run_parallel(harness, root, platform, test_files)
   const metrics = aggregate_runs(execution.runs)
   if execution.errors.count == 0 {
-    harness.process.spawn_captured({cmd: "rm", args: ["-rf", root]})
+    harness.process.run({cmd: "rm", args: ["-rf", root]})
   } else {
     harness.stdio.eprintln("error: preserved failed workload at " + root)
   }

@@ -32,7 +32,7 @@ pipeline default(harness: Harness) {
     ],
     { ->
       const inner = { args -> {ok: true, ran: args.command} }
-      const wrapper = preset_run_command(harness,  harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+      const wrapper = preset_run_command(harness, {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
       )
       const above = wrapper({command: "echo above"})
       harness.stdio.println(above.action)

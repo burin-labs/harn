@@ -62,5 +62,5 @@ pipeline test_closures(harness: Harness, task) {
 
 /** This pipeline is NOT a test (no test_ prefix) — should be ignored */
 pipeline helper(harness: Harness, task) {
-  harness.stdio.println("I should not run during tests")
+  harness.stdio.log("I should not run during tests")
 }

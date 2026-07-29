@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 // C13: a smart-escalation turn whose escalated provider fails fast
 // (pre-dispatch `provider_error`) must NOT silently break the loop and let a
 // stale cheap-model turn masquerade as success. The non-tracked provider-error
@@ -99,7 +100,7 @@ fn escalation_fallback_case(harness: Harness) {
     return nil
   }
   const session = "esc-fallback-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "do the task",
       nil,
       {
@@ -158,7 +159,7 @@ fn primary_provider_error_case(harness: Harness) {
     }
   }
   const session = "esc-primary-err-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "do the task",
       nil,
       {
@@ -223,7 +224,7 @@ fn escalation_transient_transport_abort_case(harness: Harness) {
     return nil
   }
   const session = "esc-transport-" + harness.random.uuid()
-  const captured = agent_capture_events(harness,  harness, session,
+  const captured = agent_capture_events(harness, session,
     fn() { return agent_loop(harness, "do the task",
       nil,
       {

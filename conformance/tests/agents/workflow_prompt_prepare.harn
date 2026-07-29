@@ -26,7 +26,7 @@ pipeline default(harness: Harness) {
     {render: "json"},
   )
   harness.stdio.println(contains(json_context, "\"text\":\"{"))
-  const verification = workflow_render_verification_context(harness,  harness, [
+  const verification = workflow_render_verification_context(harness, [
       {
         source_node: "build",
         required_identifiers: ["rate<Limit"],
@@ -37,7 +37,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(verification, "<source_node>build</source_node>"))
   harness.stdio.println(contains(verification, "- rate&lt;Limit"))
   harness.stdio.println(contains(verification, "- command: cargo test (must pass)"))
-  const prepared = workflow_prepare_stage_prompt(harness,  harness, {
+  const prepared = workflow_prepare_stage_prompt(harness, {
       task: "  Ship it  ",
       task_label: "  Implement <X>  ",
       artifacts: artifacts,
@@ -49,7 +49,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(prepared.prompt, "Ship it"))
   harness.stdio.println(prepared.rendered_context == xml_context)
   harness.stdio.println(prepared.rendered_verification == "")
-  const ordered = workflow_prepare_stage_prompt(harness,  harness, {
+  const ordered = workflow_prepare_stage_prompt(harness, {
       task: "Create the missing test file with one edit call.",
       task_label: "Create Required Outputs",
       rendered_context:
@@ -73,7 +73,7 @@ pipeline default(harness: Harness) {
     contains(ordered.prompt, "do only what the current workflow task and system prompt authorize"),
   )
   harness.stdio.println(contains(ordered.prompt, "When the current stage is complete, stop"))
-  const prepared_override = workflow_prepare_stage_prompt(harness,  harness, {task: "Task", rendered_context: "override", verification_contracts: []},
+  const prepared_override = workflow_prepare_stage_prompt(harness, {task: "Task", rendered_context: "override", verification_contracts: []},
   )
   harness.stdio.println(prepared_override.rendered_context)
 }

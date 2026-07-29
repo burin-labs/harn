@@ -18,9 +18,9 @@ fn find_match(name) {
 }
 
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(find_match("ts"))
-  harness.stdio.println(find_match("python"))
-  harness.stdio.println(find_match("go"))
-  harness.stdio.println(find_match("rust"))
-  harness.stdio.println(find_match("missing"))
+  harness.stdio.log(find_match("ts"))
+  harness.stdio.log(find_match("python"))
+  harness.stdio.log(find_match("go"))
+  harness.stdio.log(find_match("rust"))
+  harness.stdio.log(find_match("missing"))
 }

@@ -10,5 +10,5 @@ pipeline test(harness: Harness, task) {
   assert_eq(parts["no_match"], [1, 3])
   assert_eq(dedup_by(["a", "A", "bb", "BB"], { x -> lowercase(x) }), ["a", "bb"])
   assert_eq(flat_map([1, 2, 3], { x -> [x, x * 10] }), [1, 10, 2, 20, 3, 30])
-  harness.stdio.println("collection helpers ok")
+  harness.stdio.log("collection helpers ok")
 }

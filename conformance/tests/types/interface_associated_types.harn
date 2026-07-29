@@ -14,7 +14,7 @@ pipeline test(harness: Harness, task) {
     }
   }
   fn first<C>(collection: C) where C: Collection {
-    harness.stdio.println(collection.get(0))
+    harness.stdio.log(collection.get(0))
   }
   first(Names {})
 }

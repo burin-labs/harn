@@ -87,5 +87,5 @@ pipeline test(harness: Harness, task) {
   const good = register_client(harness, store, {redirect_uris: ["https://app.example/ok"]})
   assert(good.client_id != nil, "valid registration after rejections succeeds")
   assert_eq(len(list_clients(harness.auth, store)), cursor_before + 1, "valid registration appears in store")
-  harness.stdio.println("oauth dynamic registration rejects ok")
+  harness.stdio.log("oauth dynamic registration rejects ok")
 }

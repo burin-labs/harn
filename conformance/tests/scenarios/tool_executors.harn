@@ -53,5 +53,5 @@ pipeline test(harness: Harness, task) {
   )
   const alias_tool = tool_find(r2, "alias_check")
   assert(alias_tool.executor == "harn", "harn_builtin alias canonicalizes to harn")
-  harness.stdio.println("tool_executors tests passed")
+  harness.stdio.log("tool_executors tests passed")
 }

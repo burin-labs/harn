@@ -6,5 +6,5 @@
 pipeline test(harness: Harness, task) {
   const a = 1
   const b = 2
-  harness.stdio.println("value=${a b}")
+  harness.stdio.log("value=${a b}")
 }

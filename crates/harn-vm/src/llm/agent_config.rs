@@ -4,7 +4,6 @@
 use crate::value::VmDictExt;
 use std::sync::Arc;
 
-use crate::stdlib::harn_entry::register_harn_entrypoint_category;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
@@ -16,7 +15,6 @@ use super::helpers::{
 };
 use super::tools::build_assistant_response_message;
 
-const AGENT_STDLIB_ENTRYPOINT_CATEGORY: &str = "agent.stdlib";
 const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
 
 const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
@@ -311,13 +309,10 @@ fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: Str
     candidates.push(candidate);
 }
 
-pub(crate) fn register_agent_loop(vm: &mut Vm) {
-    register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
-}
+pub(crate) fn register_agent_loop(_vm: &mut Vm) {}
 
-pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
+pub fn register_agent_loop_with_bridge(_vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
     super::agent_runtime::install_current_host_bridge(bridge);
-    register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {

@@ -13,18 +13,18 @@ pipeline test(harness: Harness, task) {
   assert(cost < decimal("0.0005"), "cost should be < 0.0005")
   // Formatting accepts the decimal amount directly.
   assert_eq(llm_format_usd(cost), "$0.000450")
-  harness.stdio.println("cost ok")
+  harness.stdio.log("cost ok")
   // Unknown model returns an exact zero decimal
   const unknown_cost = llm_cost("unknown-model", 1000, 500)
   assert_eq(unknown_cost, decimal("0"))
-  harness.stdio.println("unknown ok")
+  harness.stdio.log("unknown ok")
   // Budget builtins
-  llm_budget(10.0)
-  const remaining = llm_budget_remaining()
+  harness.llm.budget(10.0)
+  const remaining = harness.llm.budget_remaining()
   assert_eq(remaining, 10.0)
-  harness.stdio.println("budget ok")
+  harness.stdio.log("budget ok")
   // Session cost starts at 0
-  const session = llm_session_cost()
+  const session = harness.llm.session_cost()
   assert_eq(session.total_cost, 0.0)
-  harness.stdio.println("session ok")
+  harness.stdio.log("session ok")
 }

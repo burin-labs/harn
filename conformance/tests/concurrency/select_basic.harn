@@ -9,10 +9,10 @@ pipeline test(harness: Harness, task) {
   harness.clock.sleep_ms(50ms)
   select {
     msg from ch1 {
-      harness.stdio.println("ch1: ${msg}")
+      harness.stdio.log("ch1: ${msg}")
     }
     msg from ch2 {
-      harness.stdio.println("ch2: ${msg}")
+      harness.stdio.log("ch2: ${msg}")
     }
   }
 }

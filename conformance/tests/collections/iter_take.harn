@@ -1,5 +1,5 @@
 pipeline test(harness: Harness, task) {
-  harness.stdio.println(iter([1, 2, 3, 4, 5]).take(3).to_list())
-  harness.stdio.println(iter([1, 2, 3]).take(10).to_list())
-  harness.stdio.println(iter([1, 2, 3]).take(0).to_list())
+  harness.stdio.log(iter([1, 2, 3, 4, 5]).take(3).to_list())
+  harness.stdio.log(iter([1, 2, 3]).take(10).to_list())
+  harness.stdio.log(iter([1, 2, 3]).take(0).to_list())
 }

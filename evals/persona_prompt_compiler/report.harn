@@ -203,7 +203,7 @@ fn main(harness: Harness) -> int {
   const raw = eval_pack_manifest(
     toml_parse(harness.fs.read_text(manifest_path)) + {base_dir: harness.fs.source_dir()},
   )
-  const manifest = persona_prompt_eval_manifest(harness,  harness, raw,
+  const manifest = persona_prompt_eval_manifest(harness, raw,
     split,
     minimum_trials,
     provider,

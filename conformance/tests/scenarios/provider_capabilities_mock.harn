@@ -16,5 +16,5 @@ pipeline test(harness: Harness, task) {
   assert(as_legacy.native_tools, "mock+gpt-4o still has native tools")
   const as_unknown = harness.llm.provider_capabilities("mock", "mystery-model-7b")
   assert(!as_unknown.defer_loading, "mock+unknown has no capabilities")
-  harness.stdio.println("provider_capabilities_mock tests passed")
+  harness.stdio.log("provider_capabilities_mock tests passed")
 }

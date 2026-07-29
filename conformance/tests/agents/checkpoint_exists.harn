@@ -19,5 +19,5 @@ pipeline test(harness: Harness, task) {
   harness.runtime.checkpoint("nil_key", nil)
   assert(harness.runtime.checkpoint_exists("nil_key"), "key with nil value should still exist")
   harness.runtime.checkpoint_clear()
-  harness.stdio.println("checkpoint_exists tests passed")
+  harness.stdio.log("checkpoint_exists tests passed")
 }

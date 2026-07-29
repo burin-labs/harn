@@ -38,5 +38,5 @@ pipeline test(harness: Harness, task) {
   if !contains(after, "ACME-ABCDEF123456") {
     throw "after clearing, ACME tokens should not be scrubbed: " + after
   }
-  harness.stdio.println("token_redaction custom ok")
+  harness.stdio.log("token_redaction custom ok")
 }

@@ -473,7 +473,7 @@ pub fn self_consistency(harness: Harness, prompt, system, opts = nil) {
   const session_id = to_string(cfg?._session_id ?? "")
   if winner.tie && session_id != "" {
     const _ = try {
-      agent_emit_event(harness,  harness, session_id,
+      agent_emit_event(harness, session_id,
         "self_consistency_tie",
         {answer: winner.key, total: dist.total, distribution: dist.distribution},
       )

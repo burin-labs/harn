@@ -13,5 +13,5 @@ pub fn echo(msg: string) -> string {
 
 pipeline test_acp_tool(harness: Harness, task) {
   assert(echo("hello") == "hello", "function still callable")
-  harness.stdio.println("attributes_acp_tool ok")
+  harness.stdio.log("attributes_acp_tool ok")
 }

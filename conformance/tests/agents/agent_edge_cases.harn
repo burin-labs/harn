@@ -38,5 +38,6 @@ pipeline test(harness: Harness, task) {
   const cfg2 = agent_config(a2, "test")
   assert_eq(cfg2.options.provider, "mock")
   assert_eq(cfg2.options.tool_format, "native")
-  harness.stdio.println("agent edge case tests passed")
+  harness.stdio.log("agent edge case tests passed")
 }
+import { agent, agent_config } from "std/agent/workers"

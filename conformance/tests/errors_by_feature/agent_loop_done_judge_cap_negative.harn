@@ -1,3 +1,4 @@
+import { agent_loop } from "std/agent/loop"
 /**
  * `done_judge.max_invocations` caps the per-session veto loop and must be a
  * non-negative integer (0 disables the cap). A negative value is a

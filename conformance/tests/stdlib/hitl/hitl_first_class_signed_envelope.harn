@@ -3,13 +3,11 @@
 // `approved: true` does NOT produce signatures matching the SHA-256
 // receipt format, so downstream consumers can detect counterfeits.
 import "std/hitl"
-import { clear_host_mocks, mock_host_response } from "std/testing"
 
 pipeline test(harness: Harness, task) {
-  clear_host_mocks()
-  mock_host_response(
-    "hitl",
-    "approval",
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction", "approval_response",
     [
       {approved: true, reviewer: "alice", reason: "ok"},
       {approved: true, reviewer: "bob", reason: "ok"},

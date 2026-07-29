@@ -34,7 +34,9 @@ pipeline default(harness: Harness) {
   expect_eq(waited.stdout, "out", "waited.stdout")
   expect_eq(waited.stderr, "err", "waited.stderr")
   const streamed = command_run_streaming(
-    harness.tools, mixed_command(harness),
+    harness.tools,
+    harness.stdio,
+    mixed_command(harness),
     {tee: false, poll_interval_ms: 10, capture: {max_inline_bytes: 100}},
   )
   expect_eq(streamed.status, "completed", "streamed.status")
@@ -42,7 +44,9 @@ pipeline default(harness: Harness) {
   expect_eq(streamed.stdout, "out", "streamed.stdout")
   expect_eq(streamed.stderr, "err", "streamed.stderr")
   const timed = command_run_streaming(
-    harness.tools, timeout_command(harness),
+    harness.tools,
+    harness.stdio,
+    timeout_command(harness),
     {tee: false, timeout_ms: 200, poll_interval_ms: 50, capture: {max_inline_bytes: 100}},
   )
   expect_eq(timed.status, "timed_out", "timed.status")

@@ -146,6 +146,7 @@ fn effect_kind_name(kind: EffectKind) -> &'static str {
         EffectKind::Process => "process",
         EffectKind::Llm => "llm",
         EffectKind::Tool => "tool",
+        EffectKind::Mcp => "mcp",
         EffectKind::Host => "host",
         EffectKind::Worker => "worker",
         EffectKind::Secret => "secret",

@@ -10,7 +10,7 @@
  * keys.
  */
 pipeline default(harness: Harness) {
-  const _ = mock_time(1700000001000)
+  const _ = harness.testing.clock_set(1700000001000)
   const original_input = {approved: true, comment: "ship it", reviewer: "alice"}
   const receipt = harness.agent.lifecycle_receipt_record_resumption(
     {
@@ -40,6 +40,6 @@ pipeline default(harness: Harness) {
   const h1 = lifecycle_resume_input_hash(original_input)
   const h2 = lifecycle_resume_input_hash(reordered)
   harness.stdio.println("hash_canonical=" + to_string(h1 == h2))
-  const _ = unmock_time()
+  const _ = harness.testing.clock_reset()
   return "ok"
 }

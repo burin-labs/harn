@@ -39,7 +39,7 @@ const EVENT_BAD_VERSION =
   "{\"content\":\"x\",\"content_hash\":\"c\",\"hash\":\"h\",\"schema_version\":99,\"timestamp\":\"7.0\",\"type\":\"system_prompt\"}"
 
 pipeline test(harness: Harness, task) {
-  const root = path_join(harness.fs.temp_dir(), "harn-agent-artifacts-" + harness.random.uuid_v7())
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-agent-artifacts-" + harness.random.uuid_v7())
   harness.fs.mkdir(root)
   // ---- Agent result JSON reader: the six distinct outcomes + byte round trip.
   const legacy_path = path_join(root, "agent-result.json")

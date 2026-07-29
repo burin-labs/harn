@@ -10,7 +10,7 @@ pipeline test(harness: Harness, task) {
     max_iterations: 5,
     progress_required: true,
   }
-  const completed = bounded_loop(harness,  harness, 0,
+  const completed = bounded_loop(harness, 0,
     fn(state) {
       let next = state + 1
       return {state: next, progress: true, done: next >= 3}

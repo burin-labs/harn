@@ -28,14 +28,14 @@ pipeline test(harness: Harness, task) {
   with_llm_script(
     harness.llm, [{text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"}],
     { ->
-      mock_time(1767225600000)
+      harness.testing.clock_set(1767225600000)
       const before = harness.clock.now_ms()
       const resp = harness.llm.call("replay test", nil, {provider: "mock", model: "mock"})
-      advance_time(1000)
+      harness.testing.clock_advance(1000)
       const after = harness.clock.now_ms()
       harness.stdio.println(resp.text == "fidelity-response")
       harness.stdio.println(after - before == 1000)
-      unmock_time()
+      harness.testing.clock_reset()
     },
   )
 }

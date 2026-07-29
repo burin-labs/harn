@@ -8,7 +8,7 @@
  */
 pipeline test(harness: Harness, task) {
   const z = 0.0
-  harness.stdio.println(1.0 / z)
-  harness.stdio.println(-1.0 / z)
-  harness.stdio.println(z / z)
+  harness.stdio.log(1.0 / z)
+  harness.stdio.log(-1.0 / z)
+  harness.stdio.log(z / z)
 }
