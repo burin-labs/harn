@@ -639,7 +639,7 @@ fn test_parses_persona_check_flags() {
         args.manifest,
         Some(PathBuf::from("examples/personas/harn.toml"))
     );
-    let PersonaCommand::Check(check) = args.command else {
+    let PersonaCommand::Check(check) = *args.command else {
         panic!("expected persona check command");
     };
     assert_eq!(
@@ -663,7 +663,7 @@ fn test_parses_manual_persona_new_flags() {
     let Command::Persona(args) = cli.command.unwrap() else {
         panic!("expected persona command");
     };
-    let PersonaCommand::New(new) = args.command else {
+    let PersonaCommand::New(new) = *args.command else {
         panic!("expected persona new command");
     };
     assert_eq!(new.name.as_deref(), Some("incident_triager"));
@@ -696,7 +696,7 @@ fn test_parses_persona_compile_prompt_flags() {
     let Command::Persona(args) = cli.command.unwrap() else {
         panic!("expected persona command");
     };
-    let PersonaCommand::CompilePrompt(compile) = args.command else {
+    let PersonaCommand::CompilePrompt(compile) = *args.command else {
         panic!("expected persona compile-prompt command");
     };
     assert_eq!(compile.prompt, "Triage Slack alerts.");
@@ -726,7 +726,7 @@ fn test_parses_persona_new_from_prompt_flags() {
     let Command::Persona(args) = cli.command.unwrap() else {
         panic!("expected persona command");
     };
-    let PersonaCommand::New(new) = args.command else {
+    let PersonaCommand::New(new) = *args.command else {
         panic!("expected persona new command");
     };
     assert!(new.name.is_none());
@@ -772,7 +772,7 @@ fn test_parses_persona_materialize_flags() {
     let Command::Persona(args) = cli.command.unwrap() else {
         panic!("expected persona command");
     };
-    let PersonaCommand::Materialize(materialize) = args.command else {
+    let PersonaCommand::Materialize(materialize) = *args.command else {
         panic!("expected persona materialize command");
     };
     assert_eq!(
@@ -799,7 +799,7 @@ fn test_parses_persona_materialize_compile_receipt() {
     let Command::Persona(args) = cli.command.unwrap() else {
         panic!("expected persona command");
     };
-    let PersonaCommand::Materialize(materialize) = args.command else {
+    let PersonaCommand::Materialize(materialize) = *args.command else {
         panic!("expected persona materialize command");
     };
     assert!(materialize.blueprint.is_none());
@@ -829,7 +829,7 @@ fn test_parses_persona_materialize_apply() {
         panic!("expected persona command");
     };
     assert_eq!(args.manifest, Some(PathBuf::from("project/harn.toml")));
-    let PersonaCommand::Materialize(materialize) = args.command else {
+    let PersonaCommand::Materialize(materialize) = *args.command else {
         panic!("expected persona materialize command");
     };
     assert!(materialize.activate);
@@ -945,7 +945,7 @@ fn test_parses_persona_activation_attenuation() {
     let Command::Persona(args) = cli.command.unwrap() else {
         panic!("expected persona command");
     };
-    let PersonaCommand::Activate(activate) = args.command else {
+    let PersonaCommand::Activate(activate) = *args.command else {
         panic!("expected persona activate command");
     };
     assert_eq!(activate.name, "agents/reviewer");

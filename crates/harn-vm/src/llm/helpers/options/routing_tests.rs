@@ -82,7 +82,6 @@ fn test_provider(url: &str) -> ProviderDef {
 fn test_equivalent_model(provider: &str, group: &str) -> ModelDef {
     test_equivalent_model_with_context(provider, group, 32_000)
 }
-
 fn test_equivalent_model_with_context(
     provider: &str,
     group: &str,
@@ -90,6 +89,7 @@ fn test_equivalent_model_with_context(
 ) -> ModelDef {
     ModelDef {
         name: format!("{provider} equivalent model"),
+        display_name: None,
         blurb: None,
         provider: provider.to_string(),
         context_window,

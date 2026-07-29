@@ -47,6 +47,9 @@ pub struct ProviderDef {
     /// This is intentionally separate from provider process fields such as
     /// `command`/`args`, which are used for ACP or external provider adapters.
     pub local_runtime: Option<LocalRuntimeDef>,
+    /// Whether zero-valued cache usage fields from this provider represent a
+    /// real cache miss. `None` means accounting has not been verified.
+    pub cache_usage_accounting: Option<bool>,
     pub features: Vec<String>,
     /// Fallback provider name to try if this provider fails.
     pub fallback: Option<String>,
@@ -130,6 +133,8 @@ struct ProviderDefWire {
     #[serde(default)]
     local_runtime: Option<LocalRuntimeDef>,
     #[serde(default)]
+    cache_usage_accounting: Option<bool>,
+    #[serde(default)]
     features: Vec<String>,
     #[serde(default)]
     fallback: Option<String>,
@@ -182,6 +187,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             mcp_servers: wire.mcp_servers,
             healthcheck: wire.healthcheck,
             local_runtime: wire.local_runtime,
+            cache_usage_accounting: wire.cache_usage_accounting,
             features: wire.features,
             fallback: wire.fallback,
             retry_count: wire.retry_count,
@@ -221,6 +227,7 @@ impl Default for ProviderDef {
             mcp_servers: Vec::new(),
             healthcheck: None,
             local_runtime: None,
+            cache_usage_accounting: None,
             features: Vec::new(),
             fallback: None,
             retry_count: None,
@@ -271,6 +278,10 @@ impl ProviderDef {
         merge_vec(&mut self.mcp_servers, &overlay.mcp_servers);
         merge_option(&mut self.healthcheck, &overlay.healthcheck);
         merge_option(&mut self.local_runtime, &overlay.local_runtime);
+        merge_option(
+            &mut self.cache_usage_accounting,
+            &overlay.cache_usage_accounting,
+        );
         merge_vec(&mut self.features, &overlay.features);
         merge_option(&mut self.fallback, &overlay.fallback);
         merge_option(&mut self.retry_count, &overlay.retry_count);

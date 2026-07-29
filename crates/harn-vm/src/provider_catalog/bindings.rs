@@ -32,7 +32,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 6
+  schema_version: 7
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -53,6 +53,7 @@ export interface HarnCatalogProvider {
   auth: HarnProviderAuth
   extra_headers?: Record<string, string>
   healthcheck?: HarnProviderHealthcheck
+  cache_usage_accounting: boolean
   protocols: string[]
   features: string[]
   caveats: string[]
@@ -149,6 +150,7 @@ export interface HarnAliasToolCalling {
 export interface HarnCatalogModel {
   id: string
   name: string
+  display_name: string
   blurb?: string
   provider: string
   aliases: string[]
@@ -422,6 +424,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public let auth: HarnProviderAuth
     public let extraHeaders: [String: String]?
     public let healthcheck: HarnProviderHealthcheck?
+    private let encodedCacheUsageAccounting: Bool?
+    public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
     public let protocols: [String]
     public let features: [String]
     public let caveats: [String]
@@ -440,6 +444,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case auth
         case extraHeaders = "extra_headers"
         case healthcheck
+        case encodedCacheUsageAccounting = "cache_usage_accounting"
         case protocols
         case features
         case caveats
@@ -606,6 +611,7 @@ public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
 public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
+    public let displayName: String
     public let blurb: String?
     public let provider: String
     public let aliases: [String]
@@ -652,6 +658,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case displayName = "display_name"
         case blurb
         case provider
         case aliases
@@ -694,6 +701,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name
         blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
         provider = try container.decode(String.self, forKey: .provider)
         aliases = try container.decode([String].self, forKey: .aliases)

@@ -846,6 +846,7 @@ mod tests {
             "qwen-test".to_string(),
             crate::llm_config::ModelDef {
                 name: "Qwen Test".to_string(),
+                display_name: None,
                 blurb: None,
                 provider: "ollama".to_string(),
                 context_window: 100_000,
@@ -959,6 +960,7 @@ mod tests {
             "qwen-test".to_string(),
             crate::llm_config::ModelDef {
                 name: "Qwen Test".to_string(),
+                display_name: None,
                 blurb: None,
                 provider: "ollama".to_string(),
                 context_window: 100_000,
@@ -1221,6 +1223,7 @@ mod tests {
             "devstral-small-2:24b".to_string(),
             crate::llm_config::ModelDef {
                 name: "Devstral Small 2 24B".to_string(),
+                display_name: None,
                 blurb: None,
                 provider: "ollama".to_string(),
                 context_window: 262_144,

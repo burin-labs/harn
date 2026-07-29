@@ -37,6 +37,7 @@ pub struct CatalogProvider {
     pub extra_headers: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub healthcheck: Option<CatalogProviderHealthcheck>,
+    pub cache_usage_accounting: bool,
     pub protocols: Vec<String>,
     pub features: Vec<String>,
     pub caveats: Vec<String>,
@@ -123,6 +124,7 @@ pub struct CatalogAlias {
 pub struct CatalogModel {
     pub id: String,
     pub name: String,
+    pub display_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blurb: Option<String>,
     pub provider: String,

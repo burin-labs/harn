@@ -98,6 +98,11 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
     let mut model_pairs = BTreeSet::new();
     let mut dispatch_pairs = BTreeSet::new();
     for model in &artifact.models {
+        if model.display_name.trim().is_empty() {
+            result
+                .errors
+                .push(format!("model {} display_name cannot be empty", model.id));
+        }
         if !model_ids.insert(model.id.as_str()) {
             result
                 .errors

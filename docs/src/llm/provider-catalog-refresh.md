@@ -403,10 +403,13 @@ available:
 - REST: `GET /v1/provider-catalog`
 - ACP: JSON-RPC request method `_harn/providerCatalog`
 
-Both return the same provider catalog v6 artifact shape:
+Both return the same provider catalog v7 artifact shape:
 `schema_version`, `schema`, `generated_by`,
 `providers`, `models`, `aliases`, `variants`, `families`, `routing_routes`, and
-`qc_defaults`. The
+`qc_defaults`. Each model owns a non-empty `display_name` for compact status
+surfaces alongside its full `name` identity. Each provider's
+`cache_usage_accounting` distinguishes a verified zero-hit cache report from a
+route that does not expose cache usage. The
 response is already normalized through the server's effective provider
 and capability overlays, so clients can render model pickers, key
 requirements, aliases, local/cloud grouping, context windows, tool

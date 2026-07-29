@@ -703,6 +703,11 @@ pub struct ModelLadderStepDef {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelDef {
     pub name: String,
+    /// Compact label for persistent UI chrome. When omitted, provider-catalog
+    /// generation derives one from `name`; full route identity remains in the
+    /// model id, provider, and serving metadata.
+    #[serde(default)]
+    pub display_name: Option<String>,
     /// One-sentence, plain-language trade-off description for model pickers.
     #[serde(default)]
     pub blurb: Option<String>,

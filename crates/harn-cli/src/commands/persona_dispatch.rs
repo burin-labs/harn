@@ -7,16 +7,20 @@ pub(crate) async fn run(args: PersonaArgs) -> Result<(), String> {
         state_dir,
     } = args;
     let manifest = manifest.as_deref();
-    match command {
-        PersonaCommand::New(args) => super::persona_scaffold::run_new(&args).await,
+    match *command {
+        PersonaCommand::New(args) => Box::pin(super::persona_scaffold::run_new(&args)).await,
         PersonaCommand::CompilePrompt(args) => {
-            super::persona_prompt::run_compile_prompt(&args).await
+            Box::pin(super::persona_prompt::run_compile_prompt(&args)).await
         }
         PersonaCommand::Materialize(args) if args.activate => {
-            super::persona_apply::run(manifest, &args).await
+            Box::pin(super::persona_apply::run(manifest, &args)).await
         }
-        PersonaCommand::Materialize(args) => super::persona_scaffold::run_materialize(&args).await,
-        PersonaCommand::Doctor(args) => super::persona_doctor::run_doctor(manifest, &args).await,
+        PersonaCommand::Materialize(args) => {
+            Box::pin(super::persona_scaffold::run_materialize(&args)).await
+        }
+        PersonaCommand::Doctor(args) => {
+            Box::pin(super::persona_doctor::run_doctor(manifest, &args)).await
+        }
         PersonaCommand::Check(args) => {
             super::persona::run_check(manifest, &args);
             Ok(())
@@ -37,23 +41,32 @@ pub(crate) async fn run(args: PersonaArgs) -> Result<(), String> {
             super::persona_activation::run_activations(manifest, &args)
         }
         PersonaCommand::Status(args) => {
-            super::persona::run_status(manifest, &state_dir, &args).await
+            Box::pin(super::persona::run_status(manifest, &state_dir, &args)).await
         }
-        PersonaCommand::Pause(args) => super::persona::run_pause(manifest, &state_dir, &args).await,
+        PersonaCommand::Pause(args) => {
+            Box::pin(super::persona::run_pause(manifest, &state_dir, &args)).await
+        }
         PersonaCommand::Resume(args) => {
-            super::persona::run_resume(manifest, &state_dir, &args).await
+            Box::pin(super::persona::run_resume(manifest, &state_dir, &args)).await
         }
         PersonaCommand::Disable(args) => {
-            super::persona::run_disable(manifest, &state_dir, &args).await
+            Box::pin(super::persona::run_disable(manifest, &state_dir, &args)).await
         }
-        PersonaCommand::Tick(args) => super::persona::run_tick(manifest, &state_dir, &args).await,
+        PersonaCommand::Tick(args) => {
+            Box::pin(super::persona::run_tick(manifest, &state_dir, &args)).await
+        }
         PersonaCommand::Trigger(args) => {
-            super::persona::run_trigger(manifest, &state_dir, &args).await
+            Box::pin(super::persona::run_trigger(manifest, &state_dir, &args)).await
         }
-        PersonaCommand::Spend(args) => super::persona::run_spend(manifest, &state_dir, &args).await,
+        PersonaCommand::Spend(args) => {
+            Box::pin(super::persona::run_spend(manifest, &state_dir, &args)).await
+        }
         PersonaCommand::Supervision(args) => match args.command {
             PersonaSupervisionCommand::Tail(args) => {
-                super::persona_supervision::run_tail(manifest, &state_dir, &args).await
+                Box::pin(super::persona_supervision::run_tail(
+                    manifest, &state_dir, &args,
+                ))
+                .await
             }
         },
     }

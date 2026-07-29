@@ -1335,7 +1335,6 @@ fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerIn
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn calculate_cost_uses_catalog_model_pricing() {
         let _guard = crate::llm::env_guard();
@@ -1344,6 +1343,7 @@ mod tests {
             "gpt-4o-mini".to_string(),
             crate::llm_config::ModelDef {
                 name: "Test GPT-4o Mini".to_string(),
+                display_name: None,
                 blurb: None,
                 provider: "openai".to_string(),
                 context_window: 128_000,
@@ -1424,8 +1424,7 @@ mod tests {
                 "rate {raw} should recover as {written}"
             );
         }
-        // Guard the whole point of the helper: it must NOT equal the lossy
-        // `from_f64_retain` decimal for an inexact literal.
+        // It must NOT equal the lossy `from_f64_retain` decimal.
         assert_ne!(
             authored_rate_decimal(0.1),
             Decimal::from_f64_retain(0.1).unwrap()
@@ -1440,6 +1439,7 @@ mod tests {
             "gpt-4o-mini".to_string(),
             crate::llm_config::ModelDef {
                 name: "Test GPT-4o Mini".to_string(),
+                display_name: None,
                 blurb: None,
                 provider: "openai".to_string(),
                 context_window: 128_000,

@@ -402,6 +402,27 @@ impl ResolvedProvider {
         format!("{}{}", self.base_url, self.endpoint)
     }
 
+    /// Secret-free base URL suitable for durable telemetry. Invalid or
+    /// non-HTTP URLs are omitted rather than persisted verbatim.
+    pub fn telemetry_base_url(&self) -> Option<String> {
+        let mut url = reqwest::Url::parse(&self.base_url).ok()?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return None;
+        }
+        url.set_username("").ok()?;
+        url.set_password(None).ok()?;
+        url.set_query(None);
+        url.set_fragment(None);
+        Some(url.to_string().trim_end_matches('/').to_string())
+    }
+
+    pub fn reports_cache_usage(&self) -> bool {
+        self.pdef
+            .as_ref()
+            .and_then(|provider| provider.cache_usage_accounting)
+            .unwrap_or(false)
+    }
+
     pub fn apply_headers(
         &self,
         mut req: reqwest::RequestBuilder,
@@ -419,7 +440,7 @@ impl ResolvedProvider {
 
 #[cfg(test)]
 mod no_credentials_tests {
-    use crate::llm::no_credentials_message;
+    use crate::llm::{helpers::ResolvedProvider, no_credentials_message};
 
     #[test]
     fn message_includes_canonical_env_vars_and_doctor_hint() {
@@ -436,6 +457,30 @@ mod no_credentials_tests {
         assert!(msg.contains("harn models recommend"));
         assert!(msg.contains("local Ollama"));
         assert!(msg.contains("harn-secret://namespace/name"));
+    }
+
+    #[test]
+    fn telemetry_base_url_preserves_route_but_strips_secrets() {
+        let resolved = ResolvedProvider {
+            pdef: None,
+            base_url: "https://user:password@example.test/provider/v1?api_key=secret#fragment"
+                .to_string(),
+            endpoint: "/chat/completions".to_string(),
+        };
+        assert_eq!(
+            resolved.telemetry_base_url().as_deref(),
+            Some("https://example.test/provider/v1")
+        );
+    }
+
+    #[test]
+    fn telemetry_base_url_rejects_non_http_routes() {
+        let resolved = ResolvedProvider {
+            pdef: None,
+            base_url: "file:///tmp/provider".to_string(),
+            endpoint: "/chat/completions".to_string(),
+        };
+        assert_eq!(resolved.telemetry_base_url(), None);
     }
 }
 

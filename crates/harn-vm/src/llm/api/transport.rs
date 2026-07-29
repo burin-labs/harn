@@ -165,6 +165,21 @@ pub(super) async fn vm_call_llm_api(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
+    let resolved = crate::llm::helpers::ResolvedProvider::resolve(&opts.provider);
+    let mut result = vm_call_llm_api_inner(opts, delta_tx).await?;
+    result.telemetry.serving_base_url = resolved.telemetry_base_url();
+    if !resolved.reports_cache_usage() {
+        result.cache_read_tokens = 0;
+        result.cache_write_tokens = 0;
+        result.cache_supported = false;
+    }
+    Ok(result)
+}
+
+async fn vm_call_llm_api_inner(
+    opts: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+) -> Result<LlmResult, VmError> {
     let provider = &opts.provider;
 
     if crate::llm::providers::AcpProvider::is_configured_acp(provider) {

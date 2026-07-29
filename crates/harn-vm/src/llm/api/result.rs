@@ -205,6 +205,10 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
         crate::value::intern_key("cache_write_tokens"),
         VmValue::Int(result.cache_write_tokens),
     );
+    usage.insert(
+        crate::value::intern_key("cache_supported"),
+        VmValue::Bool(result.cache_supported),
+    );
     if result.cache_supported {
         usage.insert(
             crate::value::intern_key("cache_hit_ratio"),
@@ -878,6 +882,7 @@ mod cache_supported_serde_tests {
             "cost_usd",
             "cache_read_tokens",
             "cache_write_tokens",
+            "cache_supported",
             "cache_hit_ratio",
             "cache_visibility",
             "cache_savings_usd",
