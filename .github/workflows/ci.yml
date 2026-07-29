@@ -976,7 +976,10 @@ jobs:
       needs.changes.outputs.rust == 'true'
       && needs.rust-check-inputs.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # The pinned tree-sitter parser regeneration is CPU-bound and runs beside
+    # conformance. Keep enough headroom for slower hosted cores without
+    # weakening the gate.
+    timeout-minutes: 20
     permissions:
       actions: read
       contents: read

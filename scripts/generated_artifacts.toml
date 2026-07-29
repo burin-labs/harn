@@ -148,6 +148,28 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "tree-sitter-parser"
+description = "Compiled tree-sitter Harn parser tables and metadata generated from grammar.js and its modules by the CLI pinned in tree-sitter-harn/package-lock.json."
+gen = "gen-tree-sitter-parser"
+check = "check-tree-sitter-parser"
+outputs = [
+  "tree-sitter-harn/src/parser.c",
+  "tree-sitter-harn/src/grammar.json",
+  "tree-sitter-harn/src/node-types.json",
+]
+sources = [
+  "tree-sitter-harn/grammar.js",
+  "tree-sitter-harn/grammar/",
+  "tree-sitter-harn/package.json",
+  "tree-sitter-harn/package-lock.json",
+  "tree-sitter-harn/tree-sitter.json",
+  "tree-sitter-harn/scripts/tree-sitter-cli.sh",
+  "scripts/tree_sitter_generated.sh",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "grammar-fitness"
 description = "Resolved Tree-sitter artifact provenance and versioned parse/search/safe-edit corpus fitness receipt consumed by ParserHealth."
 gen = "gen-grammar-fitness"
@@ -467,6 +489,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
 "check-run-view-fixtures" = "excluded"        # cargo test -p harn-vm (build + test)
 "check-bindings" = "excluded"                 # go vet/test round-trip (external toolchain)
+"check-tree-sitter-parser" = "excluded"       # pinned npm tree-sitter CLI generation (external toolchain)
 "check-burin-protocol-artifacts" = "excluded" # needs a sibling burin-code checkout (ci = false)
 "check-docs-workflow-quickstart" = "excluded" # executes workflow fixtures (behavioural runtime guard)
 "check-vm-rss-soak" = "excluded"              # RSS perf soak (build + run)
