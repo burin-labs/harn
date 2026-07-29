@@ -1007,7 +1007,12 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
         tokio::spawn(async move {
             client
                 .post(first_url)
-                .json(&json!({"task_id": "task-1", "sender": "alpha"}))
+                .header("x-a2a-delivery", "delivery-1")
+                .json(&json!({
+                    "task_id": "task-1",
+                    "sender": "alpha",
+                    "timestamp": "2026-07-28T12:00:00Z"
+                }))
                 .send()
                 .await
                 .expect("first request")
@@ -1033,7 +1038,12 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
     assert_eq!(
         client
             .post(&second_url)
-            .json(&json!({"task_id": "task-2", "sender": "beta"}))
+            .header("x-a2a-delivery", "delivery-2")
+            .json(&json!({
+                "task_id": "task-2",
+                "sender": "beta",
+                "timestamp": "2026-07-28T12:00:01Z"
+            }))
             .send()
             .await
             .expect("second request")
@@ -1077,8 +1087,53 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
                 .map(|value| value.to_string())
         })
         .collect();
+    let kinds: Vec<String> = events
+        .iter()
+        .filter_map(|(_, event)| {
+            event
+                .payload
+                .get("event")
+                .and_then(|value| value.get("kind"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .collect();
+    let dedupe_keys: Vec<String> = events
+        .iter()
+        .filter_map(|(_, event)| {
+            event
+                .payload
+                .get("event")
+                .and_then(|value| value.get("dedupe_key"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .collect();
+    let occurred_at: Vec<String> = events
+        .iter()
+        .filter_map(|(_, event)| {
+            event
+                .payload
+                .get("event")
+                .and_then(|value| value.get("occurred_at"))
+                .and_then(JsonValue::as_str)
+                .map(ToString::to_string)
+        })
+        .collect();
     assert_eq!(versions, vec![1, 2]);
     assert_eq!(task_ids, vec!["task-1".to_string(), "task-2".to_string()]);
+    assert_eq!(kinds, vec!["push".to_string(), "push".to_string()]);
+    assert_eq!(
+        dedupe_keys,
+        vec!["delivery-1".to_string(), "delivery-2".to_string()]
+    );
+    assert_eq!(
+        occurred_at,
+        vec![
+            "2026-07-28T12:00:00Z".to_string(),
+            "2026-07-28T12:00:01Z".to_string()
+        ]
+    );
 
     listener
         .shutdown(Duration::from_secs(5))
