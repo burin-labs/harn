@@ -42,6 +42,9 @@ impl TypeChecker {
             self.check_node(snode, scope);
             return false;
         };
+        if self.check_contextual_tuple_literal(snode, expected, scope) {
+            return true;
+        }
         if self.check_contextual_closure(snode, expected, scope) {
             return true;
         }

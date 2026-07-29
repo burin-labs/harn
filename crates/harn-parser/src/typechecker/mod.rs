@@ -185,6 +185,7 @@ impl TypeChecker {
             TypeExpr::Union(members) | TypeExpr::Intersection(members) => {
                 members.iter().any(Self::contains_wildcard_type)
             }
+            TypeExpr::Tuple(items) => items.iter().any(Self::contains_wildcard_type),
             TypeExpr::Shape(fields) => fields
                 .iter()
                 .any(|field| Self::contains_wildcard_type(&field.type_expr)),
@@ -223,6 +224,9 @@ impl TypeChecker {
             TypeExpr::Union(members) | TypeExpr::Intersection(members) => members
                 .iter()
                 .any(|member| Self::contains_type_param(member, type_params)),
+            TypeExpr::Tuple(items) => items
+                .iter()
+                .any(|item| Self::contains_type_param(item, type_params)),
             TypeExpr::Shape(fields) => fields
                 .iter()
                 .any(|field| Self::contains_type_param(&field.type_expr, type_params)),
@@ -272,6 +276,9 @@ impl TypeChecker {
             TypeExpr::Union(members) | TypeExpr::Intersection(members) => members
                 .iter()
                 .any(|member| self.contains_abstract_type(member, scope)),
+            TypeExpr::Tuple(items) => items
+                .iter()
+                .any(|item| self.contains_abstract_type(item, scope)),
             TypeExpr::Shape(fields) => fields
                 .iter()
                 .any(|field| self.contains_abstract_type(&field.type_expr, scope)),

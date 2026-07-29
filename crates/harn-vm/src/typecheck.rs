@@ -179,6 +179,14 @@ fn matches_type_with_generics(
                 .all(|v| matches_type_with_generics(v, inner, type_params, nominal_type_names)),
             _ => false,
         },
+        TypeExpr::Tuple(elements) => match value {
+            VmValue::List(items) if items.len() == elements.len() => {
+                items.iter().zip(elements).all(|(value, expected)| {
+                    matches_type_with_generics(value, expected, type_params, nominal_type_names)
+                })
+            }
+            _ => false,
+        },
         TypeExpr::DictType(_, vt) => match value {
             VmValue::Dict(map) => map
                 .values()
@@ -547,6 +555,17 @@ mod tests {
         let bad = VmValue::List(std::sync::Arc::new(vec![vm_int(1), vm_string("x")]));
         assert!(matches_type(&good, &list_int));
         assert!(!matches_type(&bad, &list_int));
+    }
+
+    #[test]
+    fn tuple_validates_arity_and_each_position() {
+        let tuple = TypeExpr::Tuple(vec![ty_int(), ty_string()]);
+        let good = VmValue::List(std::sync::Arc::new(vec![vm_int(1), vm_string("x")]));
+        let wrong_position = VmValue::List(std::sync::Arc::new(vec![vm_string("x"), vm_int(1)]));
+        let wrong_arity = VmValue::List(std::sync::Arc::new(vec![vm_int(1)]));
+        assert!(matches_type(&good, &tuple));
+        assert!(!matches_type(&wrong_position, &tuple));
+        assert!(!matches_type(&wrong_arity, &tuple));
     }
 
     #[test]

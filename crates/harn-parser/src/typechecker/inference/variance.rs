@@ -213,6 +213,11 @@ impl TypeChecker {
                 // matching `list` arm in `subtyping.rs`).
                 self.walk_variance(decl_kind, inner, polarity, declared, span);
             }
+            TypeExpr::Tuple(items) => {
+                for item in items {
+                    self.walk_variance(decl_kind, item, polarity, declared, span);
+                }
+            }
             TypeExpr::DictType(k, v) => {
                 // dict<K, V> is covariant in its value V (value semantics, as
                 // above) and invariant in its key K.

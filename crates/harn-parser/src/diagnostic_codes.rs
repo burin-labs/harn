@@ -19,7 +19,6 @@
 //! ```
 
 use std::{fmt, str::FromStr};
-
 /// Top-level diagnostic category used in a stable Harn diagnostic code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Category {
@@ -204,6 +203,7 @@ diagnostic_codes! {
     InvalidPatternBinding, "HARN-TYP-024", Typ, "pattern binding is invalid for the expected type";
     InvalidOptionalAccess, "HARN-TYP-025", Typ, "optional access is invalid for the receiver type";
     ThrowsTypeMismatch, "HARN-TYP-026", Typ, "thrown value type is not covered by the callable's declared throws set";
+    TupleIndexOutOfBounds, "HARN-TYP-027", Typ, "constant tuple index is outside the fixed arity";
     ParserUnexpectedToken, "HARN-PAR-001", Par, "parser found an unexpected token";
     ParserUnexpectedEof, "HARN-PAR-002", Par, "parser reached end of file while expecting syntax";
     ParserUnexpectedCharacter, "HARN-PAR-003", Par, "lexer found an unexpected character";

@@ -1,0 +1,26 @@
+fn label(row: tuple<string, int>) -> string {
+  return "${row[0]}:${row[1]}"
+}
+
+fn sum_values(values: list<int>) -> int {
+  let total = 0
+  for value in values {
+    total += value
+  }
+  return total
+}
+
+pipeline default() {
+  const row = tuple("jobs", 3)
+  __io_println(row[0])
+  __io_println(row[-1])
+  const contextual: tuple<string, int> = ["workers", 4]
+  __io_println(label(contextual))
+  __io_println(label(["retries", 2]))
+  const [name, count] = row
+  __io_println("${name}:${count}")
+  const numbers = tuple(1, 2, 3)
+  __io_println(sum_values(numbers))
+  const expanded = tuple(...numbers)
+  __io_println(sum_values(expanded))
+}

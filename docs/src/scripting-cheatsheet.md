@@ -250,6 +250,19 @@ for path in argv {
 `argv` is always defined as `list<string>`; empty when no positional
 args were given.
 
+## Fixed-arity tuples
+
+```harn
+const row = tuple("retries", 3)          // tuple<string, int>
+const key: string = row[0]               // exact positional type
+const value: int = row[-1]               // negative indexes work
+const typed: tuple<string, int> = ["timeout", 30]
+```
+
+Bracket literals remain lists unless a `tuple<...>` annotation or function
+parameter supplies tuple context. Constant out-of-bounds indexes are
+`HARN-TYP-027`; dynamic indexes return the union of all positions plus `nil`.
+
 ## Regex
 
 ```harn

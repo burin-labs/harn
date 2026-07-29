@@ -59,6 +59,14 @@ pub fn format_type(ty: &TypeExpr) -> String {
             format!("{{{}}}", parts.join(", "))
         }
         TypeExpr::List(inner) => format!("list<{}>", format_type(inner)),
+        TypeExpr::Tuple(elements) => {
+            let elements = elements
+                .iter()
+                .map(format_type)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("tuple<{elements}>")
+        }
         TypeExpr::Iter(inner) => format!("iter<{}>", format_type(inner)),
         TypeExpr::Generator(inner) => format!("Generator<{}>", format_type(inner)),
         TypeExpr::Stream(inner) => format!("Stream<{}>", format_type(inner)),

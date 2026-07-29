@@ -209,6 +209,16 @@ fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     }
 }
 
+/// Construct a fixed-arity positional value.
+///
+/// The runtime representation is deliberately the canonical Harn list value;
+/// `tuple<T0, ...>` is a checked static/runtime-boundary refinement, not a
+/// second collection hierarchy.
+#[harn_builtin(sig = "tuple(...items: any) -> list", category = "types")]
+fn tuple_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::List(std::sync::Arc::new(args.to_vec())))
+}
+
 #[harn_builtin(
     sig = "len(value: string | bytes | list | dict | set | range | nil) -> int",
     category = "types"
@@ -275,6 +285,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TO_INT_IMPL_DEF,
     &TO_FLOAT_IMPL_DEF,
     &DECIMAL_IMPL_DEF,
+    &TUPLE_IMPL_DEF,
     &OK_CTOR_IMPL_DEF,
     &ERR_CTOR_IMPL_DEF,
     &IS_OK_IMPL_DEF,

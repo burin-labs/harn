@@ -322,6 +322,7 @@ shape mismatch is.
 const numbers: list<int> = [1, 2, 3]
 const also_numbers: [int] = [1, 2, 3]
 const headers: dict<string, string> = {content_type: "json"}
+const pair: tuple<string, int> = ["retries", 3]
 ```
 
 `[T]` is shorthand for `list<T>` in type positions. User-defined functions,
@@ -353,6 +354,49 @@ fn values<T>(steps: list<Step<T>>) -> list<T> { ... }
 const inferred: list<int> = values([int_step()])
 const explicit: list<int> = values<int>([])
 ```
+
+### Fixed-arity tuples
+
+`tuple<T0, T1, ...>` describes a fixed-length positional value. Tuples use the
+same value-semantic list representation and operations as lists, but retain
+their arity and the type of each position:
+
+```harn
+const row = tuple("retries", 3)          // tuple<string, int>
+const name: string = row[0]              // precise, not string?
+const count: int = row[-1]               // negative constant indexes are precise
+
+fn consume(row: tuple<string, int>) -> int {
+  return row[1]
+}
+
+consume(["timeout", 30])                  // contextual tuple literal
+```
+
+The `tuple(...)` constructor infers a tuple type. A bracket literal is inferred
+as a list unless a `tuple<...>` annotation or parameter supplies its expected
+type. This preserves list builders and APIs while making fixed arity an
+intentional contract. A spread argument to `tuple(...)` has unknown arity and
+therefore produces a list rather than a tuple.
+
+Tuple indexes follow the runtime's negative-index convention. A constant
+in-bounds index selects exactly one positional type; a constant out-of-bounds
+index is `HARN-TYP-027`. A dynamic index may address any position or be out of
+bounds, so its type is the union of all element types plus `nil`. Iteration
+visits present positions and therefore yields the element union without `nil`.
+Destructuring preserves positional types.
+
+Tuple-to-tuple subtyping is covariant at each position and requires equal
+arity. A tuple widens to `list<T>` when every position is compatible with `T`;
+an arbitrary list cannot narrow to a tuple because it proves neither arity nor
+positional types. Operations that can change arity, including slicing,
+`appending`, and collection transforms, widen to a list of the element union.
+
+Because Harn collections are values rather than shared mutable references, a
+`let` tuple may be updated safely. A constant-index write must satisfy that
+position. A dynamic write must satisfy every position it might select, which
+usually rejects writes to heterogeneous tuples. As with list writes, an
+out-of-bounds write remains a runtime error.
 
 ### Structural types (shapes)
 
@@ -850,6 +894,11 @@ An honest element accessor therefore returns the optional element type:
 `fn first<T>(xs: list<T>) -> T? { return xs[0] }`. Index *writes*
 (`xs[i] = v`) are unaffected: the assigned slot keeps its bare element
 type `T`, since a write stores a present value.
+
+A `tuple<T0, T1, ...>` is the fixed-arity exception: a constant in-bounds
+index yields its exact positional type, and a constant out-of-bounds index is
+a static error. A dynamic tuple index remains optional because its value may
+be outside the known arity.
 
 #### Truthiness
 

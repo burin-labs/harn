@@ -312,6 +312,7 @@ impl TypeChecker {
             TypeExpr::Shape(_)
             | TypeExpr::OpenShape { .. }
             | TypeExpr::List(_)
+            | TypeExpr::Tuple(_)
             | TypeExpr::DictType(..)
             | TypeExpr::Applied { .. }
             | TypeExpr::Union(_)
@@ -717,6 +718,22 @@ impl TypeChecker {
             }
             // Shape expected, dict<K, V> actual → gradual: allow since dict may have the fields
             (TypeExpr::Shape(_), TypeExpr::DictType(_, _)) => true,
+            // Tuples are fixed-arity positional values. Tuple-to-tuple
+            // widening is element-wise and preserves arity; a tuple may widen
+            // to a list when every position satisfies the list's element
+            // contract. The reverse is unsound because an arbitrary list does
+            // not prove either arity or positional types.
+            (TypeExpr::Tuple(expected), TypeExpr::Tuple(actual)) => {
+                expected.len() == actual.len()
+                    && expected
+                        .iter()
+                        .zip(actual)
+                        .all(|(expected, actual)| self.types_compatible(expected, actual, scope))
+            }
+            (TypeExpr::List(expected), TypeExpr::Tuple(actual)) => actual
+                .iter()
+                .all(|actual| self.types_compatible(expected, actual, scope)),
+            (TypeExpr::Named(name), TypeExpr::Tuple(_)) if name == "list" => true,
             // list<T> is covariant in T. The classic covariance-with-mutation
             // hole — push a `float` through a `list<float>` alias, then read it
             // back as `int` through the original `list<int>` — requires *shared*
@@ -891,6 +908,12 @@ impl TypeChecker {
             TypeExpr::List(inner) => {
                 TypeExpr::List(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
             }
+            TypeExpr::Tuple(items) => TypeExpr::Tuple(
+                items
+                    .iter()
+                    .map(|item| self.resolve_alias_inner(item, scope, visiting))
+                    .collect(),
+            ),
             TypeExpr::Iter(inner) => {
                 TypeExpr::Iter(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
             }

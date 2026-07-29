@@ -200,7 +200,9 @@ impl TypeChecker {
     ) -> bool {
         match &object.node {
             Node::Identifier(name) => {
-                scope.is_annotated(name) || self.is_named_contract_type(raw, scope)
+                scope.is_annotated(name)
+                    || matches!(raw, TypeExpr::Tuple(_))
+                    || self.is_named_contract_type(raw, scope)
             }
             _ => true,
         }
@@ -392,6 +394,7 @@ impl TypeChecker {
     pub(super) fn check_subscript_access(
         &mut self,
         object: &SNode,
+        index: &SNode,
         scope: &TypeScope,
         span: Span,
         optional: bool,
@@ -410,6 +413,20 @@ impl TypeChecker {
             return;
         };
         let resolved = self.resolve_alias(&raw, scope);
+        let non_nil = without_nil(&resolved).unwrap_or_else(|| resolved.clone());
+        if let TypeExpr::Tuple(elements) = self.resolve_alias(&non_nil, scope) {
+            if let Some(Err(index_value)) = Self::tuple_position(index, elements.len()) {
+                self.error_at(
+                    Code::TupleIndexOutOfBounds,
+                    format!(
+                        "tuple index {index_value} is out of bounds for arity {}",
+                        elements.len()
+                    ),
+                    index.span,
+                );
+                return;
+            }
+        }
         if !self.is_strict_access_source(object, &raw, scope) {
             return;
         }
@@ -519,7 +536,7 @@ impl TypeChecker {
 
         // Concrete builtin receivers with a closed method set.
         let closed: Option<(&str, &[&str])> = match &resolved {
-            TypeExpr::List(_) => Some(("list", reg::LIST_METHODS)),
+            TypeExpr::List(_) | TypeExpr::Tuple(_) => Some(("list", reg::LIST_METHODS)),
             TypeExpr::Named(name) => match name.as_str() {
                 "string" => Some(("string", reg::STRING_METHODS)),
                 "list" => Some(("list", reg::LIST_METHODS)),
@@ -681,14 +698,14 @@ impl TypeChecker {
             Node::SubscriptAccess { object, index }
             | Node::OptionalSubscriptAccess { object, index } => {
                 let optional = matches!(&target.node, Node::OptionalSubscriptAccess { .. });
-                self.check_subscript_access(object, scope, target.span, optional, true);
+                self.check_subscript_access(object, index, scope, target.span, optional, true);
                 let raw = self.infer_write_target_object_type(object, scope)?;
                 if !self.is_strict_access_source(object, &raw, scope) {
                     return None;
                 }
                 let resolved = self.resolve_alias(&raw, scope);
                 let expected_index: Option<TypeExpr> = match &resolved {
-                    TypeExpr::List(_) => Some(TypeExpr::Named("int".into())),
+                    TypeExpr::List(_) | TypeExpr::Tuple(_) => Some(TypeExpr::Named("int".into())),
                     TypeExpr::DictType(key, _) => Some(key.as_ref().clone()),
                     _ => None,
                 };

@@ -22,6 +22,7 @@ mod flow;
 mod generic_bindings;
 mod hitl;
 mod literal_union;
+mod match_patterns;
 mod pipe;
 mod statements;
 mod subtyping;

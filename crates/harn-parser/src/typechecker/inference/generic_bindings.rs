@@ -2,12 +2,98 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::{ShapeField, TypeExpr};
+use crate::ast::{Node, SNode, ShapeField, TypeExpr};
 
+use super::super::schema_inference::schema_type_expr_from_node;
+use super::super::scope::TypeScope;
 use super::super::union::simplify_union;
 use super::super::TypeChecker;
 
 impl TypeChecker {
+    /// Bind type parameters by walking a parameter type against an argument AST
+    /// node. This preserves structural information that ordinary inferred
+    /// argument types can erase, including inline schemas and contextual
+    /// tuples.
+    pub(in crate::typechecker) fn bind_from_arg_node(
+        &self,
+        param: &TypeExpr,
+        arg: &SNode,
+        type_params: &BTreeSet<String>,
+        bindings: &mut BTreeMap<String, TypeExpr>,
+        scope: &TypeScope,
+    ) -> Result<(), String> {
+        let resolved_param = self.resolve_alias(param, scope);
+        if resolved_param != *param {
+            return self.bind_from_arg_node(&resolved_param, arg, type_params, bindings, scope);
+        }
+        match param {
+            TypeExpr::Applied { name, args } if name == "Schema" && args.len() == 1 => {
+                if let TypeExpr::Named(type_param) = &args[0] {
+                    if type_params.contains(type_param) {
+                        if let Some(resolved) = schema_type_expr_from_node(arg, scope) {
+                            Self::bind_type_param(type_param, &resolved, bindings)?;
+                        }
+                    }
+                }
+            }
+            TypeExpr::Shape(fields) => {
+                if let Node::DictLiteral(entries) = &arg.node {
+                    for field in fields {
+                        if let Some(entry) = entries.iter().find(|entry| {
+                            matches!(
+                                &entry.key.node,
+                                Node::StringLiteral(key) | Node::Identifier(key)
+                                    if key == &field.name
+                            )
+                        }) {
+                            self.bind_from_arg_node(
+                                &field.type_expr,
+                                &entry.value,
+                                type_params,
+                                bindings,
+                                scope,
+                            )?;
+                        }
+                    }
+                    return Ok(());
+                }
+                self.bind_from_inferred_arg(param, arg, type_params, bindings, scope)?;
+            }
+            TypeExpr::Tuple(params) => {
+                if let Node::ListLiteral(items) = &arg.node {
+                    if params.len() == items.len()
+                        && items
+                            .iter()
+                            .all(|item| !matches!(item.node, Node::Spread(_)))
+                    {
+                        for (param, item) in params.iter().zip(items) {
+                            self.bind_from_arg_node(param, item, type_params, bindings, scope)?;
+                        }
+                        return Ok(());
+                    }
+                }
+                self.bind_from_inferred_arg(param, arg, type_params, bindings, scope)?;
+            }
+            _ => self.bind_from_inferred_arg(param, arg, type_params, bindings, scope)?,
+        }
+        Ok(())
+    }
+
+    fn bind_from_inferred_arg(
+        &self,
+        param: &TypeExpr,
+        arg: &SNode,
+        type_params: &BTreeSet<String>,
+        bindings: &mut BTreeMap<String, TypeExpr>,
+        scope: &TypeScope,
+    ) -> Result<(), String> {
+        if let Some(arg_type) = self.infer_type(arg, scope) {
+            let arg_type = self.resolve_alias(&arg_type, scope);
+            Self::extract_type_bindings(param, &arg_type, type_params, bindings)?;
+        }
+        Ok(())
+    }
+
     /// Recursively extract type parameter bindings from matching param/arg types.
     /// E.g., param_type=list<T> + arg_type=list<Dog> → binds T=Dog.
     pub(in crate::typechecker) fn extract_type_bindings(
@@ -22,6 +108,18 @@ impl TypeChecker {
             }
             (TypeExpr::List(p_inner), TypeExpr::List(a_inner)) => {
                 Self::extract_type_bindings(p_inner, a_inner, type_params, bindings)
+            }
+            (TypeExpr::Tuple(params), TypeExpr::Tuple(args)) if params.len() == args.len() => {
+                for (param, arg) in params.iter().zip(args) {
+                    Self::extract_type_bindings(param, arg, type_params, bindings)?;
+                }
+                Ok(())
+            }
+            (TypeExpr::List(param), TypeExpr::Tuple(args)) => {
+                for arg in args {
+                    Self::extract_type_bindings(param, arg, type_params, bindings)?;
+                }
+                Ok(())
             }
             // A collection may infer a union element type before the generic
             // call is checked (for example `list<Step<int> | Step<string>>`).
@@ -195,6 +293,98 @@ impl TypeChecker {
                 Self::extract_type_bindings(p_ret, a_ret, type_params, bindings)
             }
             _ => Ok(()),
+        }
+    }
+
+    pub(in crate::typechecker) fn apply_type_bindings(
+        ty: &TypeExpr,
+        bindings: &BTreeMap<String, TypeExpr>,
+    ) -> TypeExpr {
+        match ty {
+            TypeExpr::Named(name) => bindings
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| TypeExpr::Named(name.clone())),
+            TypeExpr::Union(items) => TypeExpr::Union(
+                items
+                    .iter()
+                    .map(|item| Self::apply_type_bindings(item, bindings))
+                    .collect(),
+            ),
+            TypeExpr::Intersection(items) => TypeExpr::Intersection(
+                items
+                    .iter()
+                    .map(|item| Self::apply_type_bindings(item, bindings))
+                    .collect(),
+            ),
+            TypeExpr::Shape(fields) => TypeExpr::Shape(
+                fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
+                        ..field.clone()
+                    })
+                    .collect(),
+            ),
+            TypeExpr::OpenShape { fields, rests } => {
+                let fields = fields
+                    .iter()
+                    .map(|field| ShapeField {
+                        type_expr: Self::apply_type_bindings(&field.type_expr, bindings),
+                        ..field.clone()
+                    })
+                    .collect();
+                let rests = rests
+                    .iter()
+                    .map(|rest| Self::apply_type_bindings(rest, bindings))
+                    .collect();
+                super::super::binary_ops::fold_open_shape(fields, rests)
+            }
+            TypeExpr::List(inner) => {
+                TypeExpr::List(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
+            TypeExpr::Tuple(items) => TypeExpr::Tuple(
+                items
+                    .iter()
+                    .map(|item| Self::apply_type_bindings(item, bindings))
+                    .collect(),
+            ),
+            TypeExpr::Iter(inner) => {
+                TypeExpr::Iter(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
+            TypeExpr::Generator(inner) => {
+                TypeExpr::Generator(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
+            TypeExpr::Stream(inner) => {
+                TypeExpr::Stream(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
+            TypeExpr::DictType(key, value) => TypeExpr::DictType(
+                Box::new(Self::apply_type_bindings(key, bindings)),
+                Box::new(Self::apply_type_bindings(value, bindings)),
+            ),
+            TypeExpr::Applied { name, args } => TypeExpr::Applied {
+                name: name.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| Self::apply_type_bindings(arg, bindings))
+                    .collect(),
+            },
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => TypeExpr::FnType {
+                params: params
+                    .iter()
+                    .map(|param| Self::apply_type_bindings(param, bindings))
+                    .collect(),
+                return_type: Box::new(Self::apply_type_bindings(return_type, bindings)),
+            },
+            TypeExpr::Never => TypeExpr::Never,
+            TypeExpr::LitString(value) => TypeExpr::LitString(value.clone()),
+            TypeExpr::LitInt(value) => TypeExpr::LitInt(*value),
+            TypeExpr::Owned(inner) => {
+                TypeExpr::Owned(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
         }
     }
 }

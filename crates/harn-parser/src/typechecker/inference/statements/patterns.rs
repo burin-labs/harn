@@ -69,26 +69,35 @@ impl TypeChecker {
                 }
             }
             BindingPattern::List(elements) => {
-                // Homogeneous element type. Positional/tuple-precise element
-                // typing is deferred — see destructuring_inference @xfail.
-                let elem_ty = source_ty
-                    .as_ref()
-                    .and_then(|t| self.iterable_item_type(t, scope));
-                for elem in elements {
+                let resolved = source_ty.as_ref().map(|ty| self.resolve_alias(ty, scope));
+                let elem_ty = resolved.as_ref().and_then(|ty| match ty {
+                    TypeExpr::Tuple(items) => Some(Self::tuple_element_type(items)),
+                    other => self.iterable_item_type(other, scope),
+                });
+                for (position, elem) in elements.iter().enumerate() {
                     let ty = if elem.is_rest {
                         // `...rest` collects the remaining elements into a new
                         // list with the same element type as the source.
-                        match &elem_ty {
-                            Some(inner) => Some(TypeExpr::List(Box::new(inner.clone()))),
-                            None => Some(TypeExpr::Named("list".into())),
+                        match &resolved {
+                            Some(TypeExpr::Tuple(items)) => Some(TypeExpr::List(Box::new(
+                                Self::tuple_element_type(&items[position..]),
+                            ))),
+                            _ => match &elem_ty {
+                                Some(inner) => Some(TypeExpr::List(Box::new(inner.clone()))),
+                                None => Some(TypeExpr::Named("list".into())),
+                            },
                         }
                     } else {
+                        let positional_ty = match &resolved {
+                            Some(TypeExpr::Tuple(items)) => items.get(position).cloned(),
+                            _ => elem_ty.clone(),
+                        };
                         match &elem.default_value {
                             Some(default) => {
                                 let default_ty = self.infer_type(default, scope);
-                                infer_binary_op_type("??", &elem_ty, &default_ty)
+                                infer_binary_op_type("??", &positional_ty, &default_ty)
                             }
-                            None => elem_ty.clone(),
+                            None => positional_ty,
                         }
                     };
                     define(scope, &elem.name, ty);

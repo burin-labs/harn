@@ -31,6 +31,7 @@ mod row_merge;
 mod soundness;
 mod strict_types;
 mod throws;
+mod tuples;
 mod typing;
 mod value_calls;
 

@@ -279,30 +279,6 @@ impl TypeChecker {
             .unwrap_or_else(|| TypeExpr::Named("list".into()))
     }
 
-    fn infer_match_expr_type(
-        &self,
-        value: &SNode,
-        arms: &[MatchArm],
-        scope: &TypeScope,
-    ) -> InferredType {
-        let value_type = self.infer_type(value, scope);
-        let mut arm_types = Vec::new();
-        for arm in arms {
-            let mut arm_scope = scope.child();
-            self.define_match_pattern_bindings(&arm.pattern, value_type.as_ref(), &mut arm_scope);
-            self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);
-            if let Some(arm_type) = self.infer_block_type(&arm.body, &arm_scope).into_inferred() {
-                arm_types.push(arm_type);
-            }
-        }
-        match (arms.is_empty(), arm_types.len()) {
-            (true, _) => Some(TypeExpr::Never),
-            (false, 0) => None,
-            (false, 1) => arm_types.pop(),
-            (false, _) => Some(simplify_union(arm_types)),
-        }
-    }
-
     fn infer_llm_call_result_type(
         &self,
         name: &str,
@@ -343,176 +319,6 @@ impl TypeChecker {
             }
         }
         data_type.map(|ty| (ty, data_required))
-    }
-
-    pub(in crate::typechecker) fn define_match_pattern_bindings(
-        &self,
-        pattern: &SNode,
-        value_type: Option<&TypeExpr>,
-        scope: &mut TypeScope,
-    ) {
-        match &pattern.node {
-            Node::Identifier(name) if name != "_" => {
-                scope.define_var(name, value_type.cloned());
-            }
-            Node::ListLiteral(elements) => {
-                let item_type = value_type.and_then(|ty| match self.resolve_alias(ty, scope) {
-                    TypeExpr::List(inner) => Some(*inner),
-                    _ => None,
-                });
-                for element in elements {
-                    match &element.node {
-                        // Leading element pattern: binds the element type `T`.
-                        Node::Identifier(name) if name != "_" => {
-                            scope.define_var(name, item_type.clone());
-                        }
-                        // `...rest` collects the tail into a `list<T>` (parity
-                        // with `let`-destructuring rest typing).
-                        Node::Spread(inner) => {
-                            if let Node::Identifier(name) = &inner.node {
-                                if name != "_" {
-                                    let rest_ty = Some(match &item_type {
-                                        Some(t) => TypeExpr::List(Box::new(t.clone())),
-                                        None => TypeExpr::Named("list".into()),
-                                    });
-                                    scope.define_var(name, rest_ty);
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Node::DictLiteral(entries) => {
-                for entry in entries {
-                    let Some(key) = (match &entry.key.node {
-                        Node::StringLiteral(key) | Node::Identifier(key) => Some(key.as_str()),
-                        _ => None,
-                    }) else {
-                        continue;
-                    };
-                    let Node::Identifier(name) = &entry.value.node else {
-                        continue;
-                    };
-                    if name == "_" {
-                        continue;
-                    }
-                    let binding_type =
-                        value_type.and_then(|ty| match self.resolve_alias(ty, scope) {
-                            TypeExpr::Shape(fields) => fields
-                                .into_iter()
-                                .find(|field| field.name == key)
-                                .map(|field| field.type_expr),
-                            TypeExpr::DictType(_, value) => Some(*value),
-                            _ => None,
-                        });
-                    scope.define_var(name, binding_type);
-                }
-            }
-            Node::EnumConstruct {
-                enum_name,
-                variant,
-                args,
-            } => {
-                self.define_enum_pattern_bindings(enum_name, variant, args, value_type, scope);
-            }
-            Node::MethodCall {
-                object,
-                method,
-                args,
-            } => {
-                if let Node::Identifier(enum_name) = &object.node {
-                    self.define_enum_pattern_bindings(enum_name, method, args, value_type, scope);
-                }
-            }
-            // Bare call-shaped variant patterns use the same catalog decision
-            // as codegen. The scrutinee type refines payload types only after
-            // a globally unique owner has established the pattern's identity.
-            Node::FunctionCall { name, args, .. } => {
-                let catalog = scope.lexical_match_pattern_catalog();
-                if let crate::lexical::BareVariantResolution::Unique(enum_name) =
-                    catalog.resolve_bare_variant(name)
-                {
-                    self.define_enum_pattern_bindings(enum_name, name, args, value_type, scope);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    pub(in crate::typechecker) fn define_enum_pattern_bindings(
-        &self,
-        enum_name: &str,
-        variant: &str,
-        args: &[SNode],
-        value_type: Option<&TypeExpr>,
-        scope: &mut TypeScope,
-    ) {
-        let Some(enum_info) = scope.get_enum(enum_name) else {
-            return;
-        };
-        let Some(variant_info) = enum_info.variants.iter().find(|v| v.name == variant) else {
-            return;
-        };
-        // Instantiate the variant's declared field types with the scrutinee's
-        // type arguments: matching a `Result<int, string>` must bind
-        // `Result.Ok(v)`'s payload as `int`, not the raw declaration-side
-        // parameter `T`. When the scrutinee's arguments are unknown (bare
-        // `Result`, or no static type), a field type that still mentions a
-        // declaration parameter is degraded to gradual instead of leaking a
-        // phantom named type into the arm scope.
-        // Declaration params that are NOT also generic params of the
-        // enclosing scope: after substitution these have no meaning at the
-        // match site (inside `fn f<T>(r: Result<T, E2>)` the surviving `T`
-        // is the function's own parameter and stays).
-        let unbound_param_names: std::collections::BTreeSet<String> = enum_info
-            .type_params
-            .iter()
-            .map(|tp| tp.name.clone())
-            .filter(|name| !scope.is_generic_type_param(name))
-            .collect();
-        let type_bindings: BTreeMap<String, TypeExpr> = value_type
-            .map(|ty| self.resolve_alias(ty, scope))
-            .and_then(|resolved| match resolved {
-                TypeExpr::Applied { name, args: targs }
-                    if name == enum_name && targs.len() == enum_info.type_params.len() =>
-                {
-                    Some(
-                        enum_info
-                            .type_params
-                            .iter()
-                            .map(|tp| tp.name.clone())
-                            .zip(targs)
-                            .collect(),
-                    )
-                }
-                _ => None,
-            })
-            .unwrap_or_default();
-        let bindings: Vec<(String, InferredType)> = args
-            .iter()
-            .zip(&variant_info.fields)
-            .filter_map(|(arg, field)| match &arg.node {
-                Node::Identifier(name) if name != "_" => {
-                    let field_ty = field.type_expr.as_ref().map(|ty| {
-                        if type_bindings.is_empty() {
-                            ty.clone()
-                        } else {
-                            Self::apply_type_bindings(ty, &type_bindings)
-                        }
-                    });
-                    let field_ty = field_ty.filter(|ty| {
-                        // Unbound declaration params stay gradual, not phantom.
-                        !Self::contains_type_param(ty, &unbound_param_names)
-                    });
-                    Some((name.clone(), field_ty))
-                }
-                _ => None,
-            })
-            .collect();
-        for (name, ty) in bindings {
-            scope.define_var(&name, ty);
-        }
     }
 
     /// Infer the type of an expression.
@@ -646,6 +452,22 @@ impl TypeChecker {
                 type_args,
                 args,
             } => {
+                let source_defined = scope
+                    .get_fn(name)
+                    .is_some_and(|signature| signature.definition_span.is_some());
+                if name == "tuple" && !source_defined {
+                    if args.iter().any(|arg| matches!(arg.node, Node::Spread(_))) {
+                        return Some(TypeExpr::Named("list".into()));
+                    }
+                    return Some(TypeExpr::Tuple(
+                        args.iter()
+                            .map(|arg| {
+                                self.infer_type(arg, scope)
+                                    .unwrap_or_else(Self::wildcard_type)
+                            })
+                            .collect(),
+                    ));
+                }
                 if name == "schema_of" && args.len() == 1 {
                     if let Node::Identifier(alias) = &args[0].node {
                         if let Some(resolved) = scope.resolve_type(alias) {
@@ -840,10 +662,14 @@ impl TypeChecker {
                 self.infer_subscript_access_type(object, index, scope, true)
             }
             Node::SliceAccess { object, .. } => {
-                // Slicing a list returns the same list type; slicing a string returns string
+                // A slice has runtime-selected arity, so slicing a tuple widens
+                // to an ordinary list of its possible element types.
                 let obj_type = self.infer_type(object, scope);
                 match &obj_type {
                     Some(TypeExpr::List(_)) => obj_type,
+                    Some(TypeExpr::Tuple(elements)) => {
+                        Some(TypeExpr::List(Box::new(Self::tuple_element_type(elements))))
+                    }
                     Some(TypeExpr::Named(n)) if n == "list" => obj_type,
                     Some(TypeExpr::Named(n)) if n == "string" => {
                         Some(TypeExpr::Named("string".into()))
@@ -991,6 +817,11 @@ impl TypeChecker {
                         Some(TypeExpr::List(inner)) => {
                             return Some(result(TypeExpr::Iter(Box::new((**inner).clone()))));
                         }
+                        Some(TypeExpr::Tuple(elements)) => {
+                            return Some(result(TypeExpr::Iter(Box::new(
+                                Self::tuple_element_type(elements),
+                            ))));
+                        }
                         Some(TypeExpr::Generator(inner)) | Some(TypeExpr::Stream(inner)) => {
                             return Some(result(TypeExpr::Iter(Box::new((**inner).clone()))));
                         }
@@ -1019,6 +850,7 @@ impl TypeChecker {
                 // to the opaque `list`/`dict` type for unparameterized receivers.
                 let list_elem: Option<TypeExpr> = match &resolved_recv {
                     Some(TypeExpr::List(inner)) => Some((**inner).clone()),
+                    Some(TypeExpr::Tuple(elements)) => Some(Self::tuple_element_type(elements)),
                     _ => None,
                 };
                 let (dict_key, dict_val): (Option<TypeExpr>, Option<TypeExpr>) =
@@ -1117,6 +949,19 @@ impl TypeChecker {
                         Some(e) => Some(result(list_of(e.clone()))),
                         None => Some(result(TypeExpr::Named("list".into()))),
                     },
+                    "appending" => {
+                        let Some(TypeExpr::Tuple(elements)) = &resolved_recv else {
+                            return None;
+                        };
+                        let appended = args
+                            .first()
+                            .and_then(|arg| self.infer_type(arg, scope))
+                            .unwrap_or_else(Self::wildcard_type);
+                        Some(result(list_of(simplify_union(vec![
+                            Self::tuple_element_type(elements),
+                            appended,
+                        ]))))
+                    }
                     "window" | "each_cons" | "sliding_window" => match &list_elem {
                         Some(e) => Some(result(TypeExpr::List(Box::new(TypeExpr::List(
                             Box::new(e.clone()),
@@ -1423,6 +1268,10 @@ impl TypeChecker {
             TypeExpr::List(inner) => {
                 Self::list_property_type(Some(inner.as_ref()), property, optional)
             }
+            TypeExpr::Tuple(elements) => {
+                let element = Self::tuple_element_type(elements);
+                Self::list_property_type(Some(&element), property, optional)
+            }
             TypeExpr::DictType(_, value) => Some(*value.clone()),
             TypeExpr::Applied { name, args } if name == "Pair" && args.len() == 2 => match property
             {
@@ -1533,6 +1382,25 @@ impl TypeChecker {
                 optional.then(|| TypeExpr::Named("nil".into()))
             }
             TypeExpr::List(inner) => Some(Self::index_slot_type((**inner).clone(), mode)),
+            TypeExpr::Tuple(elements) => match Self::tuple_position(index, elements.len()) {
+                Some(Ok(position)) => Some(elements[position].clone()),
+                Some(Err(_)) => None,
+                None => {
+                    let element = Self::tuple_element_type(elements);
+                    Some(match mode {
+                        SubscriptMode::Read => Self::index_slot_type(element, mode),
+                        SubscriptMode::Write => {
+                            if elements.is_empty() {
+                                TypeExpr::Never
+                            } else if elements.iter().all(|candidate| candidate == &elements[0]) {
+                                elements[0].clone()
+                            } else {
+                                TypeExpr::Intersection(elements.clone())
+                            }
+                        }
+                    })
+                }
+            },
             TypeExpr::DictType(_, value) => Some(Self::index_slot_type((**value).clone(), mode)),
             TypeExpr::Shape(fields) => {
                 if let Node::StringLiteral(key) = &index.node {
@@ -1877,6 +1745,7 @@ impl TypeChecker {
     fn flatten_one_level(ty: TypeExpr) -> TypeExpr {
         match ty {
             TypeExpr::List(inner) | TypeExpr::Iter(inner) => *inner,
+            TypeExpr::Tuple(elements) => Self::tuple_element_type(&elements),
             other => other,
         }
     }
@@ -1949,6 +1818,10 @@ impl TypeChecker {
             TypeExpr::DictType(_, _) => false,
             TypeExpr::List(inner) => {
                 Self::list_property_type(Some(inner), property, false).is_some()
+            }
+            TypeExpr::Tuple(elements) => {
+                let element = Self::tuple_element_type(elements);
+                Self::list_property_type(Some(&element), property, false).is_some()
             }
             TypeExpr::Named(name) if name == "list" => {
                 Self::list_property_type(None, property, false).is_some()

@@ -134,20 +134,21 @@ only in covariant positions.
 | Constructor | Variance |
 |---|---|
 | `iter<T>` | covariant in `T` (read-only) |
-| `list<T>` | invariant in `T` (index assignment writes `T`) |
-| `dict<K, V>` | invariant in both `K` and `V` (index assignment writes `V`) |
+| `list<T>` | covariant in `T` (value semantics prevent shared mutable aliases) |
+| `tuple<T0, ...>` | covariant at each fixed position |
+| `dict<K, V>` | invariant in `K`, covariant in `V` |
 | `Result<T, E>` | covariant in both `T` and `E` |
 | `fn(P1, ...) -> R` | parameters **contravariant**, return covariant |
 | Shape `{ field: T, ... }` | covariant per field (width subtyping) |
 
-`list` and `dict` are invariant because index assignment can *write* through
-them, which makes them read-write positions. Methods such as `appending` are not a
-reason: they return a new collection and never modify the receiver, so they are
-covariant reads. See [Binding mutability](04-scope-rules.md#binding-mutability).
+Harn collections have value semantics: binding or passing a collection creates
+an independent value, so a write cannot mutate a narrower alias retained by
+the caller. Lists and tuple positions are therefore covariant, as is a dict's
+value type. Dict keys remain invariant because key widening changes the lookup
+domain. See [Binding mutability](04-scope-rules.md#binding-mutability).
 
 The numeric widening `int <: float` only applies in covariant
-positions. In invariant or contravariant positions it is suppressed —
-that is what makes `list<int>` to `list<float>` a type error.
+positions. In invariant or contravariant positions it is suppressed.
 
 #### Function subtyping
 

@@ -271,6 +271,12 @@ impl Compiler {
             TypeExpr::List(inner) => {
                 TypeExpr::List(Box::new(self.expand_alias_inner(inner, visiting)))
             }
+            TypeExpr::Tuple(elements) => TypeExpr::Tuple(
+                elements
+                    .iter()
+                    .map(|element| self.expand_alias_inner(element, visiting))
+                    .collect(),
+            ),
             TypeExpr::Iter(inner) => {
                 TypeExpr::Iter(Box::new(self.expand_alias_inner(inner, visiting)))
             }
@@ -716,6 +722,12 @@ impl Compiler {
                 out.insert("items".to_string(), item_schema);
                 Some(VmValue::dict(out))
             }
+            // The canonical Harn schema vocabulary currently has homogeneous
+            // `items` but no positional-items contract. Returning `None`
+            // deliberately selects the compiled TypeExpr runtime guard, which
+            // preserves exact arity and slot types instead of weakening a
+            // tuple to a homogeneous list schema.
+            harn_parser::TypeExpr::Tuple(_) => None,
             harn_parser::TypeExpr::DictType(key, value) => {
                 let mut out = BTreeMap::new();
                 out.put_str("type", "dict");
