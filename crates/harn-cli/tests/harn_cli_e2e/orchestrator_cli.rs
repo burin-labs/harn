@@ -431,9 +431,13 @@ handler = "handlers::on_task"
     assert!(legacy_inbox.is_empty(), "legacy_inbox={legacy_inbox:?}");
 
     let outbox = read_topic_events(&event_log, "trigger.outbox").await;
-    assert!(outbox.iter().any(|(_, event)| {
-        event.kind == "dispatch_succeeded" && event.payload["result"] == serde_json::json!("push")
-    }));
+    assert!(
+        outbox.iter().any(|(_, event)| {
+            event.kind == "dispatch_succeeded"
+                && event.payload["result"] == serde_json::json!("push")
+        }),
+        "outbox={outbox:?}"
+    );
 
     let snapshot_contents =
         fs::read_to_string(temp.path().join("state/orchestrator-state.json")).unwrap();

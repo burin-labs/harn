@@ -89,8 +89,8 @@ pub(super) async fn normalize_request(
         }
     };
 
-    let trigger_kind = webhook_event_kind(&normalized_body);
-    let dedupe_key = webhook_dedupe_key(normalized_headers, &normalized_body, body);
+    let trigger_kind = core_ingress_event_kind(&provider, &normalized_body);
+    let dedupe_key = core_ingress_dedupe_key(&provider, normalized_headers, &normalized_body, body);
     let provider_payload = harn_vm::ProviderPayload::normalize(
         &provider,
         &trigger_kind,
@@ -532,39 +532,49 @@ fn normalize_body(body: &[u8], headers: &BTreeMap<String, String>) -> JsonValue 
     })
 }
 
-fn webhook_event_kind(body: &JsonValue) -> String {
-    body.get("type")
-        .and_then(JsonValue::as_str)
-        .or_else(|| body.get("event").and_then(JsonValue::as_str))
-        .unwrap_or("webhook")
-        .to_string()
+fn core_ingress_event_kind(provider: &harn_vm::ProviderId, body: &JsonValue) -> String {
+    match provider.as_str() {
+        "a2a-push" => "push".to_string(),
+        _ => body
+            .get("type")
+            .and_then(JsonValue::as_str)
+            .or_else(|| body.get("event").and_then(JsonValue::as_str))
+            .unwrap_or("webhook")
+            .to_string(),
+    }
 }
 
-fn webhook_dedupe_key(
+fn core_ingress_dedupe_key(
+    provider: &harn_vm::ProviderId,
     headers: &BTreeMap<String, String>,
     body: &JsonValue,
     raw_body: &[u8],
 ) -> String {
-    header_value(headers, "webhook-id")
-        .map(ToString::to_string)
-        .or_else(|| {
-            body.get("id")
-                .and_then(JsonValue::as_str)
-                .map(ToString::to_string)
-        })
-        .unwrap_or_else(|| fallback_body_digest(raw_body))
+    match provider.as_str() {
+        "a2a-push" => header_value(headers, "x-a2a-delivery")
+            .map(ToString::to_string)
+            .unwrap_or_else(|| fallback_body_digest(raw_body)),
+        _ => header_value(headers, "webhook-id")
+            .map(ToString::to_string)
+            .or_else(|| {
+                body.get("id")
+                    .and_then(JsonValue::as_str)
+                    .map(ToString::to_string)
+            })
+            .unwrap_or_else(|| fallback_body_digest(raw_body)),
+    }
 }
 
 fn infer_occurred_at(payload: &harn_vm::ProviderPayload) -> Option<OffsetDateTime> {
-    let harn_vm::ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Webhook(
-        payload,
-    )) = payload
-    else {
+    let harn_vm::ProviderPayload::Known(payload) = payload else {
         return None;
     };
-    payload
-        .raw
-        .get("timestamp")
+    let raw = match payload {
+        harn_vm::triggers::event::KnownProviderPayload::Webhook(payload) => &payload.raw,
+        harn_vm::triggers::event::KnownProviderPayload::A2aPush(payload) => &payload.raw,
+        _ => return None,
+    };
+    raw.get("timestamp")
         .and_then(JsonValue::as_str)
         .and_then(|value| {
             OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
