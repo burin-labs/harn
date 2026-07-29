@@ -394,6 +394,79 @@ they use OpenAI-style `tool_calls` / `tools` and OpenAI-style structured-output
 parameters rather than Gemini `functionCall`, `functionResponse`, or
 `responseJsonSchema` parts.
 
+#### Gemini Interactions API
+
+Google serves the Gemini models over two synchronous endpoints, and Harn models
+that as a second capability axis rather than as a model-name guess.
+`message_wire_format = "gemini"` says the route is a Gemini route;
+`live_endpoint_family` says which endpoint it dispatches to:
+
+| `live_endpoint_family` | Endpoint | Notes |
+| --- | --- | --- |
+| `gemini_generate_content` (default) | `POST /v1beta/models/{model}:generateContent` | The legacy path. Everything above applies. |
+| `gemini_interactions` | `POST /v1beta/interactions` | Google's recommended path for new projects (GA June 2026). |
+
+Batch is a separate axis again: Gemini Batch accepts `generateContent`-shaped
+bodies only, so a route on `gemini_interactions` still submits batches with
+`batch_wire_format = "gemini"` at the published 50% discount. Vertex AI is
+unaffected either way — it owns its own Google Cloud request envelope and always
+delegates to the `generateContent` body builder.
+
+Interactions models a turn as an ordered list of typed *steps* —
+`user_input`, `thought`, `model_output`, `function_call`, `function_result` —
+instead of `contents[].parts[]`. Harn projects both onto the same transcript
+blocks, so scripts and tools see one contract. What the Interactions family adds:
+
+- **Provider-side conversation state.** `previous_response_id` chains from the
+  previous interaction rather than replaying history, so a chained turn sends
+  only the new user input or tool results. Read the handle back from
+  `result.telemetry.request_id`.
+- **Streaming.** Text arrives as `step.delta` events and tool arguments arrive
+  as a JSON object split across frames; `generateContent` has no streaming path
+  in Harn.
+- **Background execution.** `background: true` returns an in-progress
+  interaction instead of blocking.
+
+Three departures are worth knowing before you switch a route over:
+
+- **Storage is opt-in.** The provider default is to retain the interaction;
+  Harn sends `store: false` unless you set `store` explicitly or chain from a
+  `previous_response_id`, because Harn owns transcripts. Chaining requires
+  storage, so passing `previous_response_id` implies `store: true`.
+- **Thinking is a four-rung ladder, not a budget.** `generation_config`
+  takes `thinking_level` (`minimal` / `low` / `medium` / `high`) and has no
+  "off" rung, so `thinking: {mode: "disabled"}` becomes `minimal`. A
+  `budget_tokens` request has no representation and is dropped — the dry-run
+  request audit reports the omission.
+- **Fewer sampling knobs.** `frequency_penalty`, `presence_penalty`, and a
+  named `tool_choice` pin have no Interactions field. A named tool choice
+  narrows to "must call some tool"; the penalties are reported as omitted.
+
+Selecting the family is a capability override in `harn.toml`. `extends = true`
+makes it a one-field overlay; without it the row *replaces* the shipped
+capability row and takes the thinking budgets and media flags with it:
+
+```toml
+[[capabilities.provider.gemini]]
+model_match = "gemini-3.5*"
+extends = true
+live_endpoint_family = "gemini_interactions"
+```
+
+Not every model is served by both endpoints — Google rolls newer Gemini models
+onto Interactions — so check the route before switching it. The
+`provider_capabilities` builtin returns the resolved `live_endpoint_family` and
+honors project overrides:
+
+```harn
+const caps = provider_capabilities("gemini", "gemini-3.5-flash")
+__io_println(to_string(caps.live_endpoint_family ?? "nil"))   // gemini_interactions
+```
+
+`harn provider dispatch-explain gemini <model>` also prints `live_endpoint`, but
+it is a built-in-registry lookup and does not read project capability
+overrides.
+
 ### OpenAI Responses API
 
 OpenAI has two Harn paths. The default path is the generic
@@ -547,6 +620,7 @@ accepts these fields:
 | `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
 | `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
+| `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |

@@ -112,6 +112,13 @@ presence_penalty_supported = false
 
 [provider_defaults.gemini]
 message_wire_format = "gemini"
+# Live synchronous traffic defaults to the legacy `:generateContent` endpoint.
+# `gemini_interactions` is the second family Harn can speak (see
+# `live_endpoint_family` in 00-base.toml); it is opt-in per model row or per
+# project so an existing route's wire bytes never change underneath it.
+# Independent of `batch_wire_format`: Gemini Batch stays `generateContent`-only
+# whichever live family a route selects.
+live_endpoint_family = "gemini_generate_content"
 file_upload_wire_format = "gemini"
 files_api_supported = true
 batch_wire_format = "gemini"

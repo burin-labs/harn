@@ -27,6 +27,15 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.native_tools),
     );
     dict.put_str("message_wire_format", caps.message_wire_format.as_str());
+    // Absent for every dialect that serves one live endpoint; only the Gemini
+    // routes carry a value, so scripts can tell `:generateContent` from
+    // Interactions without matching on model names.
+    dict.insert(
+        crate::value::intern_key("live_endpoint_family"),
+        caps.live_endpoint_family
+            .map(|family| VmValue::String(arcstr::ArcStr::from(family.as_str())))
+            .unwrap_or(VmValue::Nil),
+    );
     dict.put_str(
         "native_tool_wire_format",
         caps.native_tool_wire_format.clone(),

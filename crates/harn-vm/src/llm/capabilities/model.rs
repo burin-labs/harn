@@ -95,6 +95,10 @@ pub struct ProviderDefaults {
     /// Known values are `openai`, `anthropic`, `gemini`, and `ollama`.
     #[serde(default)]
     pub message_wire_format: Option<String>,
+    /// Which synchronous endpoint family the dialect's routes dispatch to.
+    /// See [`LiveEndpointFamily`].
+    #[serde(default)]
+    pub live_endpoint_family: Option<LiveEndpointFamily>,
     /// Native tool definition wire shape. Known values are `openai`
     /// and `anthropic`.
     #[serde(default)]
@@ -187,6 +191,7 @@ pub(super) fn fill_opt<T: Clone>(dst: &mut Option<T>, src: &Option<T>) {
 macro_rules! merge_provider_defaults {
     ($dst:expr, $src:expr, $op:path) => {{
         $op(&mut $dst.message_wire_format, &$src.message_wire_format);
+        $op(&mut $dst.live_endpoint_family, &$src.live_endpoint_family);
         $op(
             &mut $dst.native_tool_wire_format,
             &$src.native_tool_wire_format,
@@ -259,6 +264,7 @@ impl ProviderDefaults {
 
     pub(super) fn has_any_field(&self) -> bool {
         self.message_wire_format.is_some()
+            || self.live_endpoint_family.is_some()
             || self.native_tool_wire_format.is_some()
             || self.image_url_input_supported.is_some()
             || self.file_upload_wire_format.is_some()
@@ -352,6 +358,57 @@ impl WireDialect {
     /// Whether this route speaks Google Gemini's `generateContent` shape.
     pub fn is_gemini(self) -> bool {
         matches!(self, WireDialect::Gemini)
+    }
+}
+
+/// Which synchronous ("live") endpoint family a route dispatches to.
+///
+/// [`WireDialect`] answers "what does the JSON look like"; most dialects have
+/// exactly one live endpoint, so the two questions collapse. Gemini is the
+/// exception: Google serves the same models over two incompatible synchronous
+/// shapes, so a second axis is needed to say *which* one a route uses.
+///
+/// This axis is deliberately independent of `batch_wire_format`. Gemini Batch
+/// only accepts `generateContent`-shaped bodies, so a route can select
+/// [`LiveEndpointFamily::GeminiInteractions`] for its live traffic while its
+/// batch submissions stay `batch_wire_format = "gemini"`.
+///
+/// It is also deliberately independent of the advisory `recommended_endpoint`
+/// string: this is the value the runtime actually switches on, so it is typed
+/// and an unknown value in a capability source fails the load instead of
+/// silently falling back to the legacy transport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveEndpointFamily {
+    /// Google Gemini `POST /v1beta/models/{model}:generateContent`. The legacy
+    /// path, still the only shape Gemini Batch accepts and the only one Vertex
+    /// delegates to.
+    GeminiGenerateContent,
+    /// Google Gemini `POST /v1beta/interactions` (GA June 2026). Adds
+    /// server-side conversation state (`previous_interaction_id`), observable
+    /// execution steps, streaming, and background execution.
+    GeminiInteractions,
+}
+
+impl LiveEndpointFamily {
+    /// The canonical capability-source string for display and round-trip.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GeminiGenerateContent => "gemini_generate_content",
+            Self::GeminiInteractions => "gemini_interactions",
+        }
+    }
+
+    /// Whether this endpoint family keeps conversation state on the provider,
+    /// making the `previous_response_id` / `store` / `background` options
+    /// meaningful on the route.
+    pub const fn is_stateful(self) -> bool {
+        matches!(self, Self::GeminiInteractions)
+    }
+
+    /// Whether this route dispatches over Gemini's Interactions transport.
+    pub const fn is_gemini_interactions(self) -> bool {
+        matches!(self, Self::GeminiInteractions)
     }
 }
 
@@ -496,6 +553,11 @@ pub struct Capabilities {
     pub prefers_role_developer: bool,
     pub prefers_xml_tools: bool,
     pub thinking_block_style: String,
+    /// Which synchronous ("live") endpoint family this route dispatches to,
+    /// when its wire dialect serves more than one. `None` means the dialect has
+    /// exactly one live endpoint, so there is nothing to select. See
+    /// [`LiveEndpointFamily`].
+    pub live_endpoint_family: Option<LiveEndpointFamily>,
     /// Whether this route emits its reasoning INLINE in the text channel as
     /// `<think>...</think>` blocks (local Ollama/llama.cpp reasoning models,
     /// Qwen3 via vLLM, Kimi) rather than in a separate provider reasoning
@@ -637,6 +699,7 @@ impl Default for Capabilities {
             prefers_role_developer: false,
             prefers_xml_tools: false,
             thinking_block_style: "none".to_string(),
+            live_endpoint_family: None,
             emits_inline_reasoning: false,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,

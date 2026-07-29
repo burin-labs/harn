@@ -39,6 +39,10 @@ pub mod source {
     pub const ANTHROPIC_USAGE: &str = "anthropic_usage";
     /// Google Gemini `usageMetadata` block from `generateContent`.
     pub const GEMINI_USAGE: &str = "gemini_usage";
+    /// Google Gemini `usage` block from the Interactions API. Named apart from
+    /// [`GEMINI_USAGE`] because the two families spell every counter
+    /// differently, so eval joins can tell which endpoint served a call.
+    pub const GEMINI_INTERACTIONS_USAGE: &str = "gemini_interactions_usage";
     /// Provider responded but we did not capture anything beyond what
     /// already lives on `LlmResult` (e.g. mock / fake providers, or a
     /// stream that finished without a usage frame).
@@ -273,6 +277,27 @@ impl ProviderTelemetry {
             .and_then(serde_json::Value::as_i64);
         telemetry.server_output_tokens = usage
             .get("candidatesTokenCount")
+            .and_then(serde_json::Value::as_i64);
+        if let Some(request_id) = request_id.filter(|value| !value.is_empty()) {
+            telemetry.request_id = Some(request_id.to_string());
+        }
+        telemetry
+    }
+
+    /// Extract Gemini Interactions `usage` counts. The Interactions envelope
+    /// spells prompt/output counts as `total_input_tokens` /
+    /// `total_output_tokens` and carries the interaction id (the handle a
+    /// follow-up turn chains from) as `id`.
+    pub fn from_gemini_interactions_usage(
+        usage: &serde_json::Value,
+        request_id: Option<&str>,
+    ) -> Self {
+        let mut telemetry = Self::new(source::GEMINI_INTERACTIONS_USAGE);
+        telemetry.server_prompt_tokens = usage
+            .get("total_input_tokens")
+            .and_then(serde_json::Value::as_i64);
+        telemetry.server_output_tokens = usage
+            .get("total_output_tokens")
             .and_then(serde_json::Value::as_i64);
         if let Some(request_id) = request_id.filter(|value| !value.is_empty()) {
             telemetry.request_id = Some(request_id.to_string());

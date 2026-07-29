@@ -232,7 +232,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/provider.rs"
-statics = ["PROVIDER_NAMES"]
+statics = ["PROVIDER_NAMES", "DEFAULTS_REGISTERED"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 

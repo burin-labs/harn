@@ -32,6 +32,10 @@ pub(crate) struct DispatchExplanation {
     pub model: String,
     pub wire_format: String,
     pub message_wire_format: String,
+    /// Which synchronous endpoint family the route dispatches to, when its
+    /// dialect serves more than one. `None` for every single-endpoint dialect.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_endpoint_family: Option<String>,
     pub native_tool_wire_format: String,
     pub base_url_host: String,
     pub tool_format: String,
@@ -293,6 +297,9 @@ pub(crate) fn explain(
     let caps = harn_vm::llm::capabilities::lookup(provider, model);
     let wire_format = harn_vm::llm::resolved_dispatch::wire_format_for(provider, model);
     let message_wire_format = caps.message_wire_format.as_str().to_string();
+    let live_endpoint_family = caps
+        .live_endpoint_family
+        .map(|family| family.as_str().to_string());
     let base_url = harn_vm::llm_config::provider_config(provider)
         .map(|def| harn_vm::llm_config::resolve_base_url(&def))
         .unwrap_or_else(|| default_base_url_for(wire_format));
@@ -326,6 +333,7 @@ pub(crate) fn explain(
         model: model.to_string(),
         wire_format: wire_format.to_string(),
         message_wire_format,
+        live_endpoint_family,
         native_tool_wire_format: caps.native_tool_wire_format,
         base_url_host,
         tool_format,
@@ -1180,6 +1188,9 @@ fn print_human_explanation(report: &DispatchExplanation) {
     println!("dispatch-explain {}:{}", report.provider, report.model);
     println!("  wire_format:      {}", report.wire_format);
     println!("  message_wire:     {}", report.message_wire_format);
+    if let Some(family) = &report.live_endpoint_family {
+        println!("  live_endpoint:    {family}");
+    }
     println!("  tool_wire:        {}", report.native_tool_wire_format);
     println!("  base_url_host:    {}", report.base_url_host);
     println!("  tool_format:      {}", report.tool_format);

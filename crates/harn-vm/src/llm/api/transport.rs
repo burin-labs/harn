@@ -205,18 +205,31 @@ pub(super) async fn vm_call_llm_api(
     // Fallback for unregistered providers: dispatch by wire dialect. A single
     // capability lookup yields the typed dialect instead of two independent
     // predicate lookups that could disagree.
+    //
+    // Exhaustive on purpose. This used to be an `if is_ollama / else if
+    // is_anthropic / else OpenAI-compat` chain, which quietly sent a
+    // Gemini-dialect route's OpenAI-shaped body to the Gemini base URL instead
+    // of failing. A `match` makes a new dialect a compile error here.
     let dialect = crate::llm::capabilities::lookup(provider, &opts.model).message_wire_format;
 
-    if dialect.is_ollama() {
-        return crate::llm::providers::OllamaProvider
-            .chat_impl(opts, delta_tx)
-            .await;
-    }
-
-    let body = if dialect.is_anthropic() {
-        crate::llm::providers::AnthropicProvider::build_request_body(opts)
-    } else {
-        crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, false)
+    let body = match dialect {
+        WireDialect::Ollama => {
+            return crate::llm::providers::OllamaProvider
+                .chat_impl(opts, delta_tx)
+                .await;
+        }
+        // Owns both Gemini live endpoint families; see `providers::gemini`.
+        WireDialect::Gemini => {
+            return crate::llm::providers::GeminiProvider
+                .chat_impl(opts, delta_tx)
+                .await;
+        }
+        WireDialect::Anthropic => {
+            crate::llm::providers::AnthropicProvider::build_request_body(opts)
+        }
+        WireDialect::OpenAiCompat => {
+            crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, false)
+        }
     };
 
     vm_call_llm_api_with_body(opts, delta_tx, body, dialect).await
