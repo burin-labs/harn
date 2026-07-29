@@ -1,7 +1,7 @@
 //! What the compiler emits before anything runs.
 //!
-//! Named-pipeline parameter binding, binding params from globals, local type
-//! aliases surviving as runtime schema values, and the disassembler output.
+//! Named-pipeline invocation, local type aliases surviving as runtime schema
+//! values, and the disassembler output.
 
 use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
@@ -44,38 +44,95 @@ pipeline selected(task) {
 }
 
 #[test]
-fn compile_named_with_param_globals_binds_params_from_globals() {
+fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
+        tokio::task::LocalSet::new()
             .run_until(async {
-                let source = r#"
-pipeline selected(value) {
-  log("${value}")
-}
-"#;
-                let mut lexer = Lexer::new(source);
-                let tokens = lexer.tokenize().unwrap();
-                let mut parser = Parser::new(tokens);
-                let program = parser.parse().unwrap();
-                let chunk = Compiler::new()
-                    .compile_named_with_param_globals(&program, "selected")
+                let source = "pipeline selected(value: int) { return value + 1 }";
+                let program = parse(source);
+                let entry = Compiler::new()
+                    .compile_named_pipeline_entry(&program, "selected", None)
                     .unwrap();
 
                 let mut vm = Vm::new();
                 register_vm_stdlib(&mut vm);
-                vm.set_global("value", VmValue::Int(42));
-                let result = vm.execute(&chunk).await.unwrap();
+                assert!(matches!(
+                    vm.execute_callable_entry_with_timeout(
+                        &entry,
+                        &[VmValue::Int(41)],
+                        std::time::Duration::from_secs(1),
+                    )
+                    .await,
+                    Ok(VmValue::Int(42))
+                ));
 
-                assert!(matches!(result, VmValue::Nil));
-                assert_eq!(vm.output().trim_end(), "[harn] 42");
+                let mut wrong_type = Vm::new();
+                register_vm_stdlib(&mut wrong_type);
+                let error = wrong_type
+                    .execute_callable_entry_with_timeout(
+                        &entry,
+                        &[VmValue::string("forty-one")],
+                        std::time::Duration::from_secs(1),
+                    )
+                    .await
+                    .unwrap_err();
+                assert!(
+                    error.to_string().contains("expected int"),
+                    "unexpected type error: {error}"
+                );
             })
             .await;
     });
+}
+
+#[test]
+fn callable_entry_runs_fixture_and_pipeline_in_one_initialized_vm() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let source = r"
+let fixture_calls = 0
+fn fixture() -> {calls: int} {
+  fixture_calls = fixture_calls + 1
+  return {calls: fixture_calls}
+}
+pipeline selected(fx: {calls: int}, value: int) {
+  return fx.calls * 40 + value
+}
+";
+                let program = parse(source);
+                let entry = Compiler::new()
+                    .compile_named_pipeline_entry(&program, "selected", Some("fixture"))
+                    .unwrap();
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                assert!(matches!(
+                    vm.execute_callable_entry_with_timeout(
+                        &entry,
+                        &[VmValue::Int(2)],
+                        std::time::Duration::from_secs(1),
+                    )
+                    .await,
+                    Ok(VmValue::Int(42))
+                ));
+            })
+            .await;
+    });
+}
+
+fn parse(source: &str) -> Vec<harn_parser::SNode> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    Parser::new(tokens).parse().unwrap()
 }
 
 #[test]

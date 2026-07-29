@@ -39,7 +39,7 @@ esac
 SH
 chmod +x "$fake_bin/cargo"
 
-unset HARN_BIN
+unset HARN_BIN HARN_BIN_NO_BUILD
 
 env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
   CARGO_TARGET_DIR="$target_dir" \

@@ -56,7 +56,7 @@ fi
 # Missing binary must not fail the commit path.
 set +e
 (
-  unset HARN_BIN
+  unset HARN_BIN HARN_BIN_NO_BUILD
   PATH="/nonexistent"
   cd "$tmp_root"
   # No scripts/warn… here and no harn on PATH.

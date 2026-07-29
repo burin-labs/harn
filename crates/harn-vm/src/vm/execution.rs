@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 use crate::chunk::{Chunk, ChunkRef, Op};
 use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
-use super::state::{ExecutionDeadlineState, ScopeSpan};
+use super::callable_entry::TopLevelEntry;
+use super::state::ExecutionDeadlineState;
 use super::{CallFrame, LocalSlot, Vm};
 
 const CANCEL_GRACE_ASYNC_OP: Duration = Duration::from_millis(250);
@@ -82,13 +83,22 @@ impl Vm {
         chunk: &Chunk,
         timeout: Duration,
     ) -> Result<VmValue, VmError> {
+        self.execute_top_level_with_timeout(TopLevelEntry::Chunk(Arc::new(chunk.clone())), timeout)
+            .await
+    }
+
+    pub(super) async fn execute_top_level_with_timeout(
+        &mut self,
+        entry: TopLevelEntry,
+        timeout: Duration,
+    ) -> Result<VmValue, VmError> {
         let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
             VmError::Runtime("execution timeout exceeds the platform clock range".to_string())
         })?;
         crate::orchestration::scope_ambient_transaction(async {
             let pipeline_checkpoint = crate::orchestration::checkpoint_pipeline_lifecycle();
             let deadline_guard = self.execution_deadline.install(deadline);
-            let result = crate::tracing::checkpoint_future(self.execute(chunk)).await;
+            let result = crate::tracing::checkpoint_future(self.execute_top_level(entry)).await;
             deadline_guard.complete();
             pipeline_checkpoint.complete();
             result
@@ -102,33 +112,7 @@ impl Vm {
     /// re-running the same chunk is a refcount bump rather than an
     /// `O(code + constants)` copy.
     pub async fn execute_arc(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
-        self.ensure_execution_available()?;
-        let registry = self.pool_registry.clone();
-        let owner = crate::observability::execution_scope::mint_execution_scope();
-        let ambient = crate::orchestration::AmbientExecutionScope::capture_for_top_level_execution(
-            owner,
-            self.llm_mock_context.clone(),
-        );
-        let execution = crate::stdlib::pool::with_pool_registry_scope(registry, async {
-            self.execute_scoped(chunk).await
-        });
-        crate::orchestration::scope_ambient(ambient, execution).await
-    }
-
-    async fn execute_scoped(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
-        let _execution_activity = self
-            .wait_for_graph
-            .register_task(self.runtime_context.task_id.clone());
-        let _span = ScopeSpan::new(crate::tracing::SpanKind::Pipeline, "main".into());
-        let result = self.run_chunk(chunk).await;
-        let result = match result {
-            Ok(value) => self.run_pipeline_finish_lifecycle(value).await,
-            Err(error) => {
-                crate::orchestration::clear_pipeline_on_finish();
-                Err(error)
-            }
-        };
-        result
+        self.execute_top_level(TopLevelEntry::Chunk(chunk)).await
     }
 
     /// Run the pipeline-finish lifecycle: `PreFinish`, optional
@@ -137,7 +121,10 @@ impl Vm {
     /// else is advisory.
     ///
     /// Tracked: <https://github.com/burin-labs/harn/issues/1854>.
-    async fn run_pipeline_finish_lifecycle(&mut self, value: VmValue) -> Result<VmValue, VmError> {
+    pub(super) async fn run_pipeline_finish_lifecycle(
+        &mut self,
+        value: VmValue,
+    ) -> Result<VmValue, VmError> {
         use crate::orchestration::{
             take_pipeline_on_finish, unsettled_state_snapshot_async, HookEvent,
         };

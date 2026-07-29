@@ -30,11 +30,11 @@ impl TypeChecker {
     ) {
         for attr in attributes {
             match attr.name.as_str() {
-                "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
-                | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
-                | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy"
-                | "scopes" | "policy" | "route" | "stream" | "raw" | "job" | "schedule"
-                | "queue" | "retry" => {}
+                "deprecated" | "test" | "test_fixture" | "complexity" | "acp_tool"
+                | "acp_skill" | "invariant" | "deterministic" | "semantic" | "archivist"
+                | "retroactive" | "persona" | "step" | "trigger" | "handoff" | "budget"
+                | "command" | "serial" | "heavy" | "scopes" | "policy" | "route" | "stream"
+                | "raw" | "job" | "schedule" | "queue" | "retry" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
@@ -44,13 +44,8 @@ impl TypeChecker {
                 }
             }
             self.validate_standard_attribute_args(attr);
-            // `@test` marks test pipelines discovered by `harn test`.
-            if attr.name == "test" && !matches!(inner.node, Node::Pipeline { .. }) {
-                self.warning_at(
-                    Code::InvalidAttributeTarget,
-                    "`@test` only applies to pipeline declarations".to_string(),
-                    attr.span,
-                );
+            if matches!(attr.name.as_str(), "test" | "test_fixture") {
+                self.validate_test_attribute_target(attr, inner);
             }
             if attr.name == "acp_tool" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
@@ -230,13 +225,8 @@ impl TypeChecker {
             "schedule" => self.validate_schedule_args(attr),
             "queue" => self.validate_queue_args(attr),
             "retry" => self.validate_retry_args(attr),
-            "test" if !attr.args.is_empty() => {
-                self.warning_at(
-                    Code::InvalidAttributeArgument,
-                    "`@test` does not accept arguments".to_string(),
-                    attr.span,
-                );
-            }
+            "test" => self.validate_test_args(attr),
+            "test_fixture" => self.validate_test_fixture_args(attr),
             _ => {}
         }
     }

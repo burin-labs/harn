@@ -500,28 +500,13 @@ impl Compiler {
         program: &[SNode],
         pipeline_name: &str,
     ) -> Result<Chunk, CompileError> {
-        self.compile_named_inner(program, pipeline_name, false)
-    }
-
-    /// Compile a named pipeline and materialize its parameters from VM globals.
-    ///
-    /// This is for hosts that supply one binding set out-of-band, such as the
-    /// CLI test runner's `@test(cases: ...)` rows. Plain `compile_named` keeps
-    /// the historical behavior where unused pipeline parameters do not require
-    /// ambient globals.
-    pub fn compile_named_with_param_globals(
-        self,
-        program: &[SNode],
-        pipeline_name: &str,
-    ) -> Result<Chunk, CompileError> {
-        self.compile_named_inner(program, pipeline_name, true)
+        self.compile_named_inner(program, pipeline_name)
     }
 
     fn compile_named_inner(
         mut self,
         program: &[SNode],
         pipeline_name: &str,
-        bind_params_from_globals: bool,
     ) -> Result<Chunk, CompileError> {
         self.prepare_module_context(program);
 
@@ -539,58 +524,28 @@ impl Compiler {
             |sn| matches!(peel_node(sn), Node::Pipeline { name, .. } if name == pipeline_name),
         );
 
-        let mut pipeline_emits_value = false;
         if let Some(sn) = target {
             self.compile_top_level_declarations(program)?;
-            if let Node::Pipeline {
-                name,
-                body,
-                extends,
-                params,
-                ..
-            } = peel_node(sn)
-            {
-                if bind_params_from_globals {
-                    let callable = self.compile_pipeline_callable(
-                        program,
-                        name,
-                        params,
-                        body,
-                        extends.as_deref(),
-                    )?;
-                    let function_index = self.chunk.functions.len();
-                    self.chunk.functions.push(Arc::new(callable));
-                    self.chunk
-                        .emit_u16(Op::Closure, function_index as u16, self.line);
-                    for param in params {
-                        let index = self.string_constant(&param.name);
-                        self.chunk.emit_u16(Op::GetVar, index, self.line);
-                    }
-                    self.chunk.emit_u8(Op::Call, params.len() as u8, self.line);
-                    pipeline_emits_value = true;
-                } else {
-                    self.compile_with_pipeline_captures(
-                        program,
-                        body,
-                        extends.as_deref(),
-                        |compiler| {
-                            if let Some(parent_name) = extends {
-                                compiler.compile_parent_pipeline(program, parent_name)?;
-                            }
-                            let saved = std::mem::replace(&mut compiler.module_level, false);
-                            let result = compiler.compile_block(body);
-                            compiler.module_level = saved;
-                            result
-                        },
-                    )?;
-                }
+            if let Node::Pipeline { body, extends, .. } = peel_node(sn) {
+                self.compile_with_pipeline_captures(
+                    program,
+                    body,
+                    extends.as_deref(),
+                    |compiler| {
+                        if let Some(parent_name) = extends {
+                            compiler.compile_parent_pipeline(program, parent_name)?;
+                        }
+                        let saved = std::mem::replace(&mut compiler.module_level, false);
+                        let result = compiler.compile_block(body);
+                        compiler.module_level = saved;
+                        result
+                    },
+                )?;
             }
         }
 
         self.drain_finallys_to_floor(0)?;
-        if !pipeline_emits_value {
-            self.chunk.emit(Op::Nil, self.line);
-        }
+        self.chunk.emit(Op::Nil, self.line);
         self.chunk.emit(Op::Return, self.line);
         super::ensure_chunk_addressable(&self.chunk, "the pipeline body", self.line)?;
         Ok(self.chunk)

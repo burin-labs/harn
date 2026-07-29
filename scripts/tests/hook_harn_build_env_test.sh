@@ -51,7 +51,10 @@ BIN
 esac
 SH
 chmod +x "$fake_bin/cargo"
-unset HARN_BIN
+# Resolver tests below own both the explicit binary and build policy. Clear the
+# pair so callers that intentionally reuse a prebuilt Harn binary cannot change
+# the fake-Cargo path under test.
+unset HARN_BIN HARN_BIN_NO_BUILD
 
 hook_repo="$tmp_root/hook-repo"
 mkdir -p "$hook_repo/.githooks" "$hook_repo/scripts/lib"

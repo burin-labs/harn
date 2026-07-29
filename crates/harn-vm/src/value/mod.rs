@@ -5,6 +5,7 @@ mod env;
 mod error;
 mod handles;
 mod io_error;
+mod isolate;
 pub(crate) mod recursion;
 mod set;
 mod storage_json;
@@ -37,6 +38,7 @@ pub use handles::{
 pub use io_error::{
     environment_io_error_thrown, io_error_kind_str, io_error_thrown, io_error_value,
 };
+pub use isolate::IsolateValue;
 pub use set::VmSet;
 pub(crate) use storage_json::vm_to_storage_json;
 pub use structural::{

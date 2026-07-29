@@ -46,9 +46,14 @@ fn register_manifest_host_operations(extensions: &crate::package::RuntimeExtensi
 
 #[derive(Debug)]
 enum CaseOutcome {
-    Passed,
+    Passed(harn_vm::VmValue),
     RuntimeError(String),
     ExecutionTimedOut,
+}
+
+struct InvocationExecution {
+    result: TestResult,
+    value: Option<harn_vm::VmValue>,
 }
 
 pub(super) async fn execute_case(
@@ -60,6 +65,121 @@ pub(super) async fn execute_case(
     stdio_available: bool,
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> TestResult {
+    let total_start = Instant::now();
+    let compile_start = Instant::now();
+    let compiler = crate::compiler_with_imported_enum_candidates(
+        case.imported_enum_candidates.iter().cloned(),
+    );
+    let case_fixture = case
+        .fixture
+        .as_ref()
+        .filter(|fixture| fixture.scope == super::FixtureScope::Case)
+        .map(|fixture| fixture.name.as_str());
+    let entry = match compiler.compile_named_pipeline_entry(
+        &case.program,
+        &case.pipeline_name,
+        case_fixture,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            return compile_failure(case, &case.name, e, compile_start, total_start);
+        }
+    };
+    let compile_ms = compile_start.elapsed().as_millis() as u64;
+    let mut args = case.args.clone();
+    if let Some(value) = &case.file_fixture_value {
+        args.insert(0, value.instantiate());
+    }
+    execute_compiled(
+        case,
+        &case.name,
+        &entry,
+        &args,
+        execution_cwd,
+        timeout_ms,
+        loaded_skills,
+        prepared_module_cache,
+        stdio_available,
+        operator_approval_grant,
+        compile_ms,
+        total_start,
+    )
+    .await
+    .result
+}
+
+pub(super) async fn execute_file_fixture(
+    case: &TestCase,
+    fixture: &super::TestFixture,
+    execution_cwd: &Path,
+    timeout_ms: u64,
+    loaded_skills: &crate::skill_loader::LoadedSkills,
+    prepared_module_cache: &harn_vm::PreparedModuleCache,
+    stdio_available: bool,
+    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+) -> Result<harn_vm::IsolateValue, TestResult> {
+    let total_start = Instant::now();
+    let compile_start = Instant::now();
+    let compiler = crate::compiler_with_imported_enum_candidates(
+        case.imported_enum_candidates.iter().cloned(),
+    );
+    let entry = match compiler.compile_named_function_entry(&case.program, &fixture.name) {
+        Ok(entry) => entry,
+        Err(error) => {
+            return Err(compile_failure(
+                case,
+                &format!("<fixture {}>", fixture.name),
+                error,
+                compile_start,
+                total_start,
+            ));
+        }
+    };
+    let compile_ms = compile_start.elapsed().as_millis() as u64;
+    let execution = execute_compiled(
+        case,
+        &format!("<fixture {}>", fixture.name),
+        &entry,
+        &[],
+        execution_cwd,
+        timeout_ms,
+        loaded_skills,
+        prepared_module_cache,
+        stdio_available,
+        operator_approval_grant,
+        compile_ms,
+        total_start,
+    )
+    .await;
+    match execution.value {
+        Some(value) => value.try_into_isolate_value().map_err(|error| {
+            let mut result = execution.result;
+            result.passed = false;
+            result.error = Some(format!(
+                "file fixture `{}` returned a value that cannot cross test isolates: {error}",
+                fixture.name
+            ));
+            result
+        }),
+        None => Err(execution.result),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_compiled(
+    case: &TestCase,
+    result_name: &str,
+    entry: &harn_vm::CompiledCallableEntry,
+    args: &[harn_vm::VmValue],
+    execution_cwd: &Path,
+    timeout_ms: u64,
+    loaded_skills: &crate::skill_loader::LoadedSkills,
+    prepared_module_cache: &harn_vm::PreparedModuleCache,
+    stdio_available: bool,
+    operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
+    compile_ms: u64,
+    total_start: Instant,
+) -> InvocationExecution {
     let _egress_scope = harn_vm::egress::scope_egress_policy_for_current_thread();
     harn_vm::reset_thread_local_state();
     let _operator_approval_guard = operator_approval_grant
@@ -68,35 +188,10 @@ pub(super) async fn execute_case(
     let _stdio_guard = (!stdio_available).then(harn_vm::reserve_stdio_for_current_thread);
     reset_hostlib_state();
 
-    let mut phases = PhaseTimings::default();
-    let total_start = Instant::now();
-
-    let compile_start = Instant::now();
-    let compiler = crate::compiler_with_imported_enum_candidates(
-        case.imported_enum_candidates.iter().cloned(),
-    );
-    let chunk = match if case.bindings.is_empty() {
-        compiler.compile_named(&case.program, &case.pipeline_name)
-    } else {
-        compiler.compile_named_with_param_globals(&case.program, &case.pipeline_name)
-    } {
-        Ok(c) => c,
-        Err(e) => {
-            phases.compile_ms = compile_start.elapsed().as_millis() as u64;
-            return TestResult {
-                name: case.name.clone(),
-                file: case.file.display().to_string(),
-                passed: false,
-                error: Some(format!("Compile error: {e}")),
-                captured_output: None,
-                timeout: None,
-                duration_ms: total_start.elapsed().as_millis() as u64,
-                phases: Some(phases),
-            };
-        }
+    let mut phases = PhaseTimings {
+        compile_ms,
+        ..PhaseTimings::default()
     };
-    phases.compile_ms = compile_start.elapsed().as_millis() as u64;
-
     let local = tokio::task::LocalSet::new();
     let file_display = case.file.display().to_string();
     let setup_start = Instant::now();
@@ -181,21 +276,22 @@ pub(super) async fn execute_case(
                 .await
                 .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             vm.set_harness(harn_vm::Harness::real());
-            for (name, value) in &case.bindings {
-                vm.set_global(name, value.clone());
-            }
             let setup_ms = setup_start.elapsed().as_millis() as u64;
             let exec_start = Instant::now();
             let outcome = match vm
-                .execute_with_timeout(&chunk, std::time::Duration::from_millis(timeout_ms))
+                .execute_callable_entry_with_timeout(
+                    entry,
+                    args,
+                    std::time::Duration::from_millis(timeout_ms),
+                )
                 .await
             {
-                Ok(_) => CaseOutcome::Passed,
+                Ok(value) => CaseOutcome::Passed(value),
                 Err(harn_vm::VmError::ExecutionDeadlineExceeded) => CaseOutcome::ExecutionTimedOut,
                 Err(error) => CaseOutcome::RuntimeError(vm.format_runtime_error(&error)),
             };
             let execute_ms = exec_start.elapsed().as_millis() as u64;
-            let execute_ms = if matches!(outcome, CaseOutcome::ExecutionTimedOut) {
+            let execute_ms = if matches!(&outcome, CaseOutcome::ExecutionTimedOut) {
                 execute_ms.max(timeout_ms)
             } else {
                 execute_ms
@@ -231,13 +327,15 @@ pub(super) async fn execute_case(
     phases.teardown_ms = teardown_start.elapsed().as_millis() as u64;
 
     let elapsed_ms = total_start.elapsed().as_millis() as u64;
-    let (passed, error, timeout, duration_ms) = match result {
+    let (passed, error, timeout, duration_ms, value) = match result {
         Ok((outcome, setup_ms, execute_ms)) => {
             phases.setup_ms = setup_ms;
             phases.execute_ms = execute_ms;
             match outcome {
-                CaseOutcome::Passed => (true, None, None, elapsed_ms),
-                CaseOutcome::RuntimeError(message) => (false, Some(message), None, elapsed_ms),
+                CaseOutcome::Passed(value) => (true, None, None, elapsed_ms, Some(value)),
+                CaseOutcome::RuntimeError(message) => {
+                    (false, Some(message), None, elapsed_ms, None)
+                }
                 CaseOutcome::ExecutionTimedOut => (
                     false,
                     Some(format!("execute phase timed out after {timeout_ms}ms")),
@@ -246,23 +344,49 @@ pub(super) async fn execute_case(
                         limit_ms: timeout_ms,
                     }),
                     elapsed_ms,
+                    None,
                 ),
             }
         }
         Err(setup_error) => {
             phases.setup_ms = failed_setup_ms.unwrap_or_default();
-            (false, Some(setup_error), None, elapsed_ms)
+            (false, Some(setup_error), None, elapsed_ms, None)
         }
     };
 
+    InvocationExecution {
+        result: TestResult {
+            name: result_name.to_string(),
+            file: file_display,
+            passed,
+            error,
+            captured_output,
+            timeout,
+            duration_ms,
+            phases: Some(phases),
+        },
+        value,
+    }
+}
+
+fn compile_failure(
+    case: &TestCase,
+    result_name: &str,
+    error: harn_vm::CompileError,
+    compile_start: Instant,
+    total_start: Instant,
+) -> TestResult {
     TestResult {
-        name: case.name.clone(),
-        file: file_display,
-        passed,
-        error,
-        captured_output,
-        timeout,
-        duration_ms,
-        phases: Some(phases),
+        name: result_name.to_string(),
+        file: case.file.display().to_string(),
+        passed: false,
+        error: Some(format!("Compile error: {error}")),
+        captured_output: None,
+        timeout: None,
+        duration_ms: total_start.elapsed().as_millis() as u64,
+        phases: Some(PhaseTimings {
+            compile_ms: compile_start.elapsed().as_millis() as u64,
+            ..PhaseTimings::default()
+        }),
     }
 }

@@ -7655,6 +7655,52 @@ pipeline add_case(left, right, expected) {
 }
 ```
 
+### Reusable fixtures
+
+`@test_fixture(scope: file|case)` marks a zero-argument function with an
+explicit return type as reusable test setup. Select it by name with
+`@test(fixture: fixture_name)`; the fixture value is injected as the test
+pipeline's first parameter and table-row `args` supply the remaining
+parameters.
+
+```harn
+@test_fixture(scope: file)
+fn fixture() -> dict {
+  return {prefix: "user", rows: []}
+}
+
+@test(
+  cases: [
+    {name: "alice", args: ["alice", "user:alice"]},
+    {name: "bob", args: ["bob", "user:bob"]},
+  ],
+  fixture: fixture,
+)
+pipeline test_query(fx: dict, input: string, expected: string) {
+  fx.rows.push(input)
+  assert_eq("${fx.prefix}:${input}", expected)
+}
+```
+
+A `file` fixture runs once for the selected cases that reference it. Its
+return value must be isolate-safe data: scalars, bytes, ranges, and nested
+lists, dicts, sets, structs, enums, or pairs. Each case receives an isolated
+copy-on-write clone, so mutation in one case cannot leak to a sibling.
+Execution-bound values such as closures, channels, atomics, task/resource
+handles, generators, streams, iterators, or harness capabilities are rejected
+as one file-level setup failure.
+
+A `case` fixture runs inside each case's fresh VM immediately before the test
+pipeline. Use it for resources or other execution-bound values. The fixture
+and test share one timeout and one pipeline lifecycle. VM/resource drop is the
+teardown contract for both scopes; there is no separate teardown hook.
+
+If file fixture setup fails, the runner emits one named file-level failure,
+suppresses only the cases that reference that fixture, and continues other
+files and unrelated tests. `--fail-fast` stops before case scheduling instead.
+Fixture declarations, references, scopes, arity, row shape, and row names are
+validated during discovery with source locations.
+
 ### Assertions
 
 Three assertion builtins are available. They can be called anywhere, but
