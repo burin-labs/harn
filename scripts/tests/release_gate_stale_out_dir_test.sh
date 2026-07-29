@@ -184,7 +184,7 @@ fi
 count=$((count + 1))
 printf '%s\n' "$count" > "$FAKE_CARGO_STATE/package-count"
 if [[ "$count" -eq 1 ]]; then
-  package_build="$CARGO_TARGET_DIR/package-check-target/build"
+  package_build="$HARN_PACKAGE_VERIFY_BUILD_DIR"
   echo "error: couldn't read $package_build/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out/bindgen.rs: No such file or directory (os error 2)" >&2
   exit 101
 fi
@@ -483,9 +483,13 @@ if [[ "$(<"$package_state/package-count")" -ne 2 ]]; then
   exit 1
 fi
 if [[ "$(<"$package_state/cargo-env-record")" != \
-  "$package_target/package-check-target"$'\t'"$package_target/package-check-target/build" ]]; then
+  "$package_target-package-check"$'\t'"$package_target-package-check/build" ]]; then
   echo "package-audit recovery should clean in the package verification Cargo context" >&2
   cat "$package_state/cargo-env-record" >&2
+  exit 1
+fi
+if [[ "$package_target-package-check" == "$package_target"/* ]]; then
+  echo "package verification target must not be nested under the main audit target" >&2
   exit 1
 fi
 if ! grep -Fxq 'clean -p libsqlite3-sys' "$package_state/cargo-record"; then

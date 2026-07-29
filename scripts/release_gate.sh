@@ -19,6 +19,10 @@ default_release_gate_target_dir() {
   printf '%s/harn-release-gate-target-%s\n' "$tmp_root" "$(release_gate_target_name)"
 }
 
+default_release_gate_package_target_dir() {
+  printf '%s-package-check\n' "${CARGO_TARGET_DIR%/}"
+}
+
 configure_release_gate_cargo_env() {
   if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
     export CARGO_TARGET_DIR
@@ -26,6 +30,14 @@ configure_release_gate_cargo_env() {
   fi
   if [[ -z "${CARGO_BUILD_BUILD_DIR:-}" ]]; then
     harn_export_cargo_build_dir_for_target "$CARGO_TARGET_DIR" || true
+  fi
+  if [[ -z "${HARN_PACKAGE_VERIFY_TARGET_DIR:-}" ]]; then
+    export HARN_PACKAGE_VERIFY_TARGET_DIR
+    HARN_PACKAGE_VERIFY_TARGET_DIR="$(default_release_gate_package_target_dir)"
+  fi
+  if [[ -z "${HARN_PACKAGE_VERIFY_BUILD_DIR:-}" ]]; then
+    export HARN_PACKAGE_VERIFY_BUILD_DIR
+    HARN_PACKAGE_VERIFY_BUILD_DIR="$HARN_PACKAGE_VERIFY_TARGET_DIR/build"
   fi
 }
 
@@ -604,8 +616,8 @@ cmd_audit() {
     local recovery_target_dir="$CARGO_TARGET_DIR"
     local recovery_build_dir="$CARGO_BUILD_BUILD_DIR"
     if [[ "$step" == "package-audit" ]]; then
-      recovery_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$CARGO_TARGET_DIR/package-check-target}"
-      recovery_build_dir="${HARN_PACKAGE_VERIFY_BUILD_DIR:-$recovery_target_dir/build}"
+      recovery_target_dir="$HARN_PACKAGE_VERIFY_TARGET_DIR"
+      recovery_build_dir="$HARN_PACKAGE_VERIFY_BUILD_DIR"
     fi
 
     local classification_status=0
