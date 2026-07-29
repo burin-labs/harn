@@ -1,6 +1,176 @@
 use super::*;
 
 impl TypeChecker {
+    /// Fully check list literals whose expected type contains a tuple at the
+    /// current position. Ordinary contextual compound checking can recurse to
+    /// closures while still comparing the inferred outer type afterward. A
+    /// tuple is different: the expected type is what selects tuple semantics,
+    /// so re-inferring the same bracket literal would intentionally produce a
+    /// list and create a false mismatch.
+    pub(super) fn check_contextual_tuple_literal(
+        &mut self,
+        snode: &SNode,
+        expected: &TypeExpr,
+        scope: &mut TypeScope,
+    ) -> bool {
+        let expected = self.resolve_alias(expected, scope);
+        match (&snode.node, expected) {
+            (Node::ListLiteral(items), TypeExpr::Tuple(elements))
+                if items.len() == elements.len()
+                    && items
+                        .iter()
+                        .all(|item| !matches!(item.node, Node::Spread(_))) =>
+            {
+                for (position, (item, expected_item)) in
+                    items.iter().zip(elements.iter()).enumerate()
+                {
+                    self.check_contextual_tuple_item(item, expected_item, position, scope);
+                }
+                true
+            }
+            (Node::ListLiteral(items), TypeExpr::List(inner))
+                if Self::contains_tuple_contract(&inner) =>
+            {
+                for (position, item) in items.iter().enumerate() {
+                    if let Node::Spread(spread) = &item.node {
+                        let expected_spread = TypeExpr::List(inner.clone());
+                        self.check_contextual_tuple_item(spread, &expected_spread, position, scope);
+                    } else {
+                        self.check_contextual_tuple_item(item, &inner, position, scope);
+                    }
+                }
+                true
+            }
+            (Node::DictLiteral(entries), TypeExpr::DictType(_, value))
+                if Self::contains_tuple_contract(&value) =>
+            {
+                for (position, entry) in entries.iter().enumerate() {
+                    self.check_dict_key(&entry.key, scope);
+                    self.check_contextual_tuple_item(&entry.value, &value, position, scope);
+                }
+                true
+            }
+            (Node::DictLiteral(entries), TypeExpr::Shape(fields))
+                if fields
+                    .iter()
+                    .any(|field| Self::contains_tuple_contract(&field.type_expr)) =>
+            {
+                let all_required_present =
+                    fields.iter().filter(|field| !field.optional).all(|field| {
+                        entries.iter().any(|entry| {
+                            matches!(
+                                &entry.key.node,
+                                Node::StringLiteral(key) | Node::Identifier(key)
+                                    if key == &field.name
+                            )
+                        })
+                    });
+                if !all_required_present {
+                    return false;
+                }
+                for (position, entry) in entries.iter().enumerate() {
+                    self.check_dict_key(&entry.key, scope);
+                    let expected_field = match &entry.key.node {
+                        Node::StringLiteral(key) | Node::Identifier(key) => {
+                            fields.iter().find(|field| field.name == *key)
+                        }
+                        _ => None,
+                    };
+                    if let Some(field) = expected_field {
+                        self.check_contextual_tuple_item(
+                            &entry.value,
+                            &field.type_expr,
+                            position,
+                            scope,
+                        );
+                    } else {
+                        self.check_node(&entry.value, scope);
+                    }
+                }
+                true
+            }
+            (_, TypeExpr::Union(members)) => {
+                let mut non_nil = members
+                    .iter()
+                    .filter(|member| !self.type_is_nil(member, scope));
+                let Some(member) = non_nil.next() else {
+                    return false;
+                };
+                if non_nil.next().is_some() {
+                    return false;
+                }
+                self.check_contextual_tuple_literal(snode, member, scope)
+            }
+            _ => false,
+        }
+    }
+
+    fn check_contextual_tuple_item(
+        &mut self,
+        item: &SNode,
+        expected: &TypeExpr,
+        position: usize,
+        scope: &mut TypeScope,
+    ) {
+        if self.check_contextual_tuple_literal(item, expected, scope) {
+            return;
+        }
+        if self.check_node_with_expected(item, Some(expected), scope) {
+            return;
+        }
+        let Some(actual) = self.infer_type(item, scope) else {
+            return;
+        };
+        if !self.types_compatible(expected, &actual, scope) {
+            self.type_mismatch_at(
+                Code::TypeMismatch,
+                format!("tuple position {position}"),
+                expected,
+                &actual,
+                item.span,
+                (None, Some(item.span)),
+                scope,
+            );
+        }
+    }
+
+    fn contains_tuple_contract(ty: &TypeExpr) -> bool {
+        match ty {
+            TypeExpr::Tuple(_) => true,
+            TypeExpr::List(inner)
+            | TypeExpr::Iter(inner)
+            | TypeExpr::Generator(inner)
+            | TypeExpr::Stream(inner)
+            | TypeExpr::Owned(inner) => Self::contains_tuple_contract(inner),
+            TypeExpr::Union(items) | TypeExpr::Intersection(items) => {
+                items.iter().any(Self::contains_tuple_contract)
+            }
+            TypeExpr::DictType(key, value) => {
+                Self::contains_tuple_contract(key) || Self::contains_tuple_contract(value)
+            }
+            TypeExpr::Shape(fields) => fields
+                .iter()
+                .any(|field| Self::contains_tuple_contract(&field.type_expr)),
+            TypeExpr::OpenShape { fields, rests } => {
+                fields
+                    .iter()
+                    .any(|field| Self::contains_tuple_contract(&field.type_expr))
+                    || rests.iter().any(Self::contains_tuple_contract)
+            }
+            TypeExpr::Applied { args, .. } => args.iter().any(Self::contains_tuple_contract),
+            TypeExpr::FnType {
+                params,
+                return_type,
+            } => {
+                params.iter().any(Self::contains_tuple_contract)
+                    || Self::contains_tuple_contract(return_type)
+            }
+            TypeExpr::Named(_) | TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => {
+                false
+            }
+        }
+    }
+
     pub(in crate::typechecker) fn iterable_item_type(
         &self,
         iter_type: &TypeExpr,
@@ -13,6 +183,7 @@ impl TypeChecker {
             | TypeExpr::Iter(inner)
             | TypeExpr::Generator(inner)
             | TypeExpr::Stream(inner) => Some(*inner),
+            TypeExpr::Tuple(elements) => Some(Self::tuple_element_type(&elements)),
             TypeExpr::Applied { name, args } if name == "Iter" && args.len() == 1 => {
                 Some(args[0].clone())
             }

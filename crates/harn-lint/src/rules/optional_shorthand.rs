@@ -434,6 +434,11 @@ impl<'a, 'd> State<'a, 'd> {
                     self.visit_type(m, parent_span);
                 }
             }
+            TypeExpr::Tuple(items) => {
+                for item in items {
+                    self.visit_type(item, parent_span);
+                }
+            }
             TypeExpr::List(inner)
             | TypeExpr::Iter(inner)
             | TypeExpr::Generator(inner)

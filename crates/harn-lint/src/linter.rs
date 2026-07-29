@@ -603,7 +603,7 @@ impl<'a> Linter<'a> {
             TypeExpr::Named(name) => {
                 self.type_references.insert(name.clone());
             }
-            TypeExpr::Union(types) | TypeExpr::Intersection(types) => {
+            TypeExpr::Union(types) | TypeExpr::Intersection(types) | TypeExpr::Tuple(types) => {
                 for inner in types {
                     self.record_type_expr_references(inner);
                 }

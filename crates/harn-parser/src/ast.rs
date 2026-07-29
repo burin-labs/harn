@@ -747,6 +747,12 @@ pub enum TypeExpr {
     },
     /// A list type: `list<int>`.
     List(Box<TypeExpr>),
+    /// A fixed-arity positional type: `tuple<string, int>`.
+    ///
+    /// Tuples are a static refinement of Harn's value-semantic list runtime
+    /// representation. Each position has its own type and the arity is part of
+    /// the contract.
+    Tuple(Vec<TypeExpr>),
     /// A dict type with key and value types: `dict<string, int>`.
     DictType(Box<TypeExpr>, Box<TypeExpr>),
     /// A lazy iterator type: `iter<int>`. Yields values of the inner type

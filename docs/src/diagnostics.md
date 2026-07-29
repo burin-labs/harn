@@ -35,7 +35,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 
 | Category | Title | Codes |
 |---|---|---:|
-| [`TYP`](#typ--type-checker) | Type checker | 26 |
+| [`TYP`](#typ--type-checker) | Type checker | 27 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 13 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
@@ -89,6 +89,7 @@ Harn's static type checker rejects programs whose types do not unify. Type error
 | [`HARN-TYP-024`](#harn-typ-024) | pattern binding is invalid for the expected type | — | — |
 | [`HARN-TYP-025`](#harn-typ-025) | optional access is invalid for the receiver type | — | — |
 | [`HARN-TYP-026`](#harn-typ-026) | thrown value type is not covered by the callable's declared throws set | — | — |
+| [`HARN-TYP-027`](#harn-typ-027) | constant tuple index is outside the fixed arity | — | — |
 
 ## PAR — Parser / lexer
 
@@ -704,6 +705,19 @@ handled) or this error fires.
 - Convert the thrown value to a declared type before it leaves the callable.
 - Remove the `throws` clause entirely if the callable should not constrain what
   it throws (this reverts to the historical unconstrained behavior).
+
+### `HARN-TYP-027`
+
+**Category:** `TYP` (Type checker) &nbsp;·&nbsp; **API stability:** `stable`
+
+constant tuple index is outside the fixed arity
+
+A `tuple<T0, ...>` has a statically known number of positions. A constant
+subscript must name one of those positions, including Harn's negative-index
+spelling (`-1` is the final position).
+
+Use an in-bounds index, destructure the tuple, or widen it to a `list<T>` when
+the collection is intentionally variable-length.
 
 ### `HARN-PAR-001`
 

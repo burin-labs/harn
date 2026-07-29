@@ -280,9 +280,15 @@ impl Parser {
         }
         if self.check(&TokenKind::Lt) {
             self.advance();
+            if name == "tuple" && self.check(&TokenKind::Gt) {
+                self.advance();
+                return Ok(TypeExpr::Tuple(Vec::new()));
+            }
             let mut type_args = self.parse_type_arg_list()?;
             if name == "list" && type_args.len() == 1 {
                 return Ok(TypeExpr::List(Box::new(type_args.remove(0))));
+            } else if name == "tuple" {
+                return Ok(TypeExpr::Tuple(type_args));
             } else if name == "dict" && type_args.len() == 2 {
                 return Ok(TypeExpr::DictType(
                     Box::new(type_args.remove(0)),

@@ -1,0 +1,7 @@
+fn tuple(value: int) -> string {
+  return "user:${value}"
+}
+
+pipeline default() {
+  __io_println(tuple(9))
+}

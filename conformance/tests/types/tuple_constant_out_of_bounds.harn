@@ -1,0 +1,4 @@
+pipeline default() {
+  const row = tuple("jobs", 3)
+  __io_println(row[2])
+}

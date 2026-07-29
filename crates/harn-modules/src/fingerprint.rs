@@ -340,6 +340,10 @@ fn format_type_expr(ty: &TypeExpr) -> String {
             format!("{{{}|{}}}", format_shape_fields(fields), tails.join(","))
         }
         TypeExpr::List(inner) => format!("list<{}>", format_type_expr(inner)),
+        TypeExpr::Tuple(items) => {
+            let rendered: Vec<String> = items.iter().map(format_type_expr).collect();
+            format!("tuple<{}>", rendered.join(","))
+        }
         TypeExpr::DictType(k, v) => {
             format!("dict<{},{}>", format_type_expr(k), format_type_expr(v))
         }

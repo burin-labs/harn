@@ -1165,14 +1165,14 @@ impl TypeChecker {
             }
             Node::SubscriptAccess { object, index } => {
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
-                self.check_subscript_access(object, scope, span, false, false);
+                self.check_subscript_access(object, index, scope, span, false, false);
                 self.check_node(object, scope);
                 self.check_node(index, scope);
             }
             Node::OptionalSubscriptAccess { object, index } => {
                 self.check_unnecessary_safe_subscript_access(snode, object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
-                self.check_subscript_access(object, scope, span, true, false);
+                self.check_subscript_access(object, index, scope, span, true, false);
                 self.check_node(object, scope);
                 self.check_node(index, scope);
             }

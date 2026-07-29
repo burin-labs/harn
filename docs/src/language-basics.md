@@ -108,6 +108,7 @@ Harn is dynamically typed with optional type annotations.
 | `bool` | `true`, `false` | |
 | `nil` | `nil` | Null value |
 | `list` | `[1, 2, 3]` | Heterogeneous, ordered |
+| `tuple<T0, T1, ...>` | `tuple("retries", 3)` | Fixed-length positional list |
 | `dict` | `{name: "Alice"}` | String-keyed map |
 | `closure` | `{ x -> x + 1 }` | First-class function |
 | `duration` | `5s`, `100ms` | Time duration |
@@ -120,6 +121,7 @@ Annotations are optional and checked at compile time:
 const x: int = 42
 const name: string = "hello"
 const nums: list<int> = [1, 2, 3]
+const pair: tuple<string, int> = ["retries", 3]
 
 fn add(a: int, b: int) -> int {
   return a + b
@@ -127,8 +129,34 @@ fn add(a: int, b: int) -> int {
 ```
 
 Supported type expressions: `int`, `float`, `decimal`, `string`, `bool`, `nil`,
-`list`, `list<T>`, `dict`, `dict<K, V>`, union types (`string | nil`), and
-structural shape types (`{name: string, age: int}`).
+`list`, `list<T>`, `tuple<T0, T1, ...>`, `dict`, `dict<K, V>`, union types
+(`string | nil`), and structural shape types (`{name: string, age: int}`).
+
+### Fixed-arity tuples
+
+Use a tuple when length and position are part of the contract:
+
+```harn
+const row = tuple("retries", 3)  // tuple<string, int>
+const name: string = row[0]
+const count: int = row[-1]
+
+fn retry_count(row: tuple<string, int>) -> int {
+  return row[1]
+}
+retry_count(["timeout", 5])       // bracket literal is contextually a tuple
+```
+
+Ordinary bracket literals still infer lists. A `tuple<...>` annotation or
+parameter can contextually type a bracket literal, and `tuple(...)` requests
+tuple inference explicitly. Constant indexes preserve the exact positional
+type and an out-of-bounds constant is a static error. A dynamic index is the
+union of all positions plus `nil`.
+
+Tuples use the same value-semantic runtime representation and operations as
+lists. They widen to lists when an operation changes arity, and can be passed
+to `list<T>` when every position satisfies `T`. A general list cannot narrow
+to a tuple because it does not prove a fixed length.
 
 ### Decimal (exact arithmetic)
 
@@ -1181,8 +1209,9 @@ type Reader<out T> = fn() -> T          // T is produced
 interface Sink<in T> { fn accept(v: T) -> int }  // T is consumed
 ```
 
-Built-in containers carry sensible variance: `iter<T>` is covariant
-(read-only), but `list<T>` and `dict<K, V>` are invariant (mutable).
+Built-in containers carry variance matching their semantics: `iter<T>` and
+value-semantic `list<T>` are covariant. Fixed-arity tuples are covariant
+position by position; `dict<K, V>` is invariant in `K` and covariant in `V`.
 Function types are contravariant in their parameters and covariant in
 their return type — `fn(float)` can stand in for `fn(int)`, but not
 the other way around. The full variance table lives in the spec under

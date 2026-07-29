@@ -66,14 +66,23 @@ impl Compiler {
                 }
             }
             BindingPattern::List(elements) => {
-                let Some(TypeExpr::List(item_type)) = type_expr else {
+                let Some(type_expr) = type_expr else {
                     return;
                 };
-                for element in elements {
-                    let element_type = if element.is_rest {
-                        TypeExpr::List(item_type.clone())
-                    } else {
-                        (*item_type).clone()
+                for (position, element) in elements.iter().enumerate() {
+                    let element_type = match &type_expr {
+                        TypeExpr::List(item_type) if element.is_rest => {
+                            TypeExpr::List(item_type.clone())
+                        }
+                        TypeExpr::List(item_type) => item_type.as_ref().clone(),
+                        TypeExpr::Tuple(items) if element.is_rest => {
+                            TypeExpr::List(Box::new(Self::tuple_element_type(&items[position..])))
+                        }
+                        TypeExpr::Tuple(items) => items
+                            .get(position)
+                            .cloned()
+                            .unwrap_or(TypeExpr::Named("nil".into())),
+                        _ => return,
                     };
                     self.define_type_fact(&element.name, element_type);
                 }
@@ -161,6 +170,20 @@ impl Compiler {
                 }
             }
             Node::ListLiteral(items) => self.infer_list_literal_type(items),
+            Node::FunctionCall { name, args, .. } if name == "tuple" => {
+                if args.iter().any(|arg| matches!(arg.node, Node::Spread(_))) {
+                    Some(TypeExpr::Named("list".into()))
+                } else {
+                    Some(TypeExpr::Tuple(
+                        args.iter()
+                            .map(|arg| {
+                                self.infer_expr_type(arg)
+                                    .unwrap_or_else(|| TypeExpr::Named("_".into()))
+                            })
+                            .collect(),
+                    ))
+                }
+            }
             Node::DictLiteral(entries) => {
                 let mut fields = Vec::new();
                 for entry in entries {
@@ -190,6 +213,7 @@ impl Compiler {
             | TypeExpr::Iter(item)
             | TypeExpr::Generator(item)
             | TypeExpr::Stream(item) => Some(*item),
+            TypeExpr::Tuple(items) => Some(Self::tuple_element_type(&items)),
             TypeExpr::DictType(key, value) => Some(TypeExpr::Applied {
                 name: "Pair".into(),
                 args: vec![*key, *value],
@@ -280,6 +304,28 @@ impl Compiler {
         Some(TypeExpr::List(Box::new(
             item_type.unwrap_or_else(|| TypeExpr::Named("_".into())),
         )))
+    }
+
+    fn tuple_element_type(items: &[TypeExpr]) -> TypeExpr {
+        let mut members = Vec::new();
+        for item in items {
+            match item {
+                TypeExpr::Union(nested) => {
+                    for member in nested {
+                        if !members.contains(member) {
+                            members.push(member.clone());
+                        }
+                    }
+                }
+                item if !members.contains(item) => members.push(item.clone()),
+                _ => {}
+            }
+        }
+        match members.len() {
+            0 => TypeExpr::Never,
+            1 => members.remove(0),
+            _ => TypeExpr::Union(members),
+        }
     }
 
     pub(super) fn infer_binary_result_type(

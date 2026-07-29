@@ -375,6 +375,14 @@ pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
         TypeExpr::List(inner) => {
             format!("list<{}>", format_type_expr(inner))
         }
+        TypeExpr::Tuple(elements) => {
+            let elements = elements
+                .iter()
+                .map(format_type_expr)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("tuple<{elements}>")
+        }
         TypeExpr::Iter(inner) => {
             format!("iter<{}>", format_type_expr(inner))
         }
@@ -465,6 +473,10 @@ pub(crate) fn format_type_expr_wrapped_with_suffix(
                 suffix_width + 1,
             )
         ),
+        TypeExpr::Tuple(elements) => {
+            let elements = elements.iter().collect::<Vec<_>>();
+            format_applied_type_wrapped("tuple", &elements, indent, line_width)
+        }
         TypeExpr::Iter(inner) => format!(
             "iter<{}>",
             format_type_expr_wrapped_with_suffix(

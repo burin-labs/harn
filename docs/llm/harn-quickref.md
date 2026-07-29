@@ -780,12 +780,31 @@ interface Sink<in T> { fn accept(v: T) -> int }
 fn map<in A, out B>(value: A) -> B { ... }
 ```
 
-Built-ins: `iter<T>` covariant; `list<T>` and `dict<K, V>` invariant
-(mutable); `Result<T, E>` covariant in both. Function types are
+Built-ins: `iter<T>` and value-semantic `list<T>` are covariant;
+`dict<K, V>` is invariant in `K` and covariant in `V`;
+`tuple<T0, T1, ...>` is covariant at each fixed position; `Result<T, E>` is
+covariant in both. Function types are
 **contravariant in parameters**, covariant in return — `fn(float)`
 stands in for `fn(int)`, never the reverse. The numeric widening
-`int <: float` is suppressed in invariant positions, so `list<int>`
-does not flow into `list<float>`.
+`int <: float` is suppressed in invariant positions.
+
+### Fixed-arity tuples
+
+`tuple(a, b)` infers `tuple<A, B>`. A bracket literal remains a list by
+default, but a `tuple<...>` annotation or parameter contextually checks each
+position:
+
+```harn
+const row = tuple("retries", 3)
+const name: string = row[0]
+const same: tuple<string, int> = ["retries", 3]
+```
+
+Constant positive or negative indexes select an exact position; a constant
+out-of-bounds index is `HARN-TYP-027`. A dynamic index returns the positional
+union plus `nil`, while iteration returns the union without `nil`. Tuples widen
+to compatible lists; arity-changing operations also return lists. Lists never
+narrow to tuples.
 
 ## Results and errors
 
