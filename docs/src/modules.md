@@ -589,6 +589,34 @@ The intervals in `std/eval/stats` are fixed-sample reports. Do not repeatedly
 inspect them while accumulating trials and stop when one becomes favorable.
 Use `std/eval/sequential` for that workflow.
 
+### std/eval/remote_fanout
+
+Deterministic, transport-neutral planning and rejoin for remote evaluation.
+Import it from an installed Harn release; callers do not need a source checkout.
+
+```harn
+import {
+  remote_eval_fanout_plan,
+  remote_eval_fanout_rejoin_receipt,
+  remote_eval_fanout_trial_receipt,
+} from "std/eval/remote_fanout"
+```
+
+`remote_eval_fanout_plan(options, catalog)` expands catalog groups, assigns
+stable shard ids and seeds, renders the caller's argv template, validates
+concurrency and artifact budgets, and binds the plan with a checksum. Transport
+adapters receive that plan unchanged and return payloads keyed by its shard ids.
+
+Use `remote_eval_fanout_trial_receipt` to bind each result to the plan and
+`remote_eval_fanout_rejoin_receipt` to validate shuffled transport results.
+Rejoin quarantines missing, duplicate, unknown, failed, and malformed receipts
+and returns typed `readiness.ingest_ready`. It does not interpret
+application-specific verdicts or mutate an external ledger.
+
+`remote_eval_fanout_artifact_manifest` produces a checksummed remote-to-local
+path rewrite map. Image construction, credentials, remote function declaration,
+byte transport, and container invocation remain adapter responsibilities.
+
 ### std/eval/sequential
 
 Anytime-valid confidence sequences and best-arm decisions for experiments that
