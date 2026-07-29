@@ -65,6 +65,10 @@ pub struct ProviderTelemetry {
     /// captured.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source: String,
+    /// Sanitized provider base URL used for this request. Credentials, query
+    /// strings, and fragments are removed at the transport boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serving_base_url: Option<String>,
     /// Total server-side wall clock (Ollama `total_duration`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_total_ms: Option<u64>,
@@ -141,6 +145,7 @@ impl ProviderTelemetry {
     pub fn is_empty(&self) -> bool {
         let Self {
             source,
+            serving_base_url,
             server_total_ms,
             server_load_ms,
             server_prompt_eval_ms,
@@ -158,6 +163,7 @@ impl ProviderTelemetry {
             provider_metadata,
         } = self;
         source.is_empty()
+            && serving_base_url.is_none()
             && server_total_ms.is_none()
             && server_load_ms.is_none()
             && server_prompt_eval_ms.is_none()
@@ -355,6 +361,9 @@ impl ProviderTelemetry {
         let mut dict: crate::value::DictMap = crate::value::DictMap::new();
         if !self.source.is_empty() {
             dict.put_str("source", self.source.as_str());
+        }
+        if let Some(ref serving_base_url) = self.serving_base_url {
+            dict.put_str("serving_base_url", serving_base_url.as_str());
         }
         insert_opt_u64(&mut dict, "server_total_ms", self.server_total_ms);
         insert_opt_u64(&mut dict, "server_load_ms", self.server_load_ms);
@@ -615,6 +624,7 @@ mod tests {
     fn as_vm_dict_serializes_all_present_fields() {
         let telemetry = ProviderTelemetry {
             source: source::OLLAMA_CHAT.to_string(),
+            serving_base_url: Some("https://provider.example/v1".to_string()),
             server_total_ms: Some(100),
             client_wall_ms: Some(120),
             runtime_loaded_model: Some("qwen".to_string()),
@@ -625,6 +635,12 @@ mod tests {
         assert_eq!(
             dict.get("source").map(VmValue::display).as_deref(),
             Some(source::OLLAMA_CHAT)
+        );
+        assert_eq!(
+            dict.get("serving_base_url")
+                .map(VmValue::display)
+                .as_deref(),
+            Some("https://provider.example/v1")
         );
         assert_eq!(
             dict.get("server_total_ms").and_then(|v| match v {

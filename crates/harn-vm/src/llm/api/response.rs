@@ -8,6 +8,9 @@ use super::openai_normalize::{append_paragraph, normalize_openai_message_text};
 use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::ProviderTelemetry;
 
+#[cfg(test)]
+mod cache_mapping_tests;
+
 mod boundary;
 mod item_kinds;
 use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kind};
@@ -1592,7 +1595,6 @@ mod tests {
 
         assert_eq!(extract_cache_write_tokens(&usage), 100);
     }
-
     #[test]
     fn cache_tokens_support_openai_responses_details_shape() {
         let usage = serde_json::json!({
@@ -1607,7 +1609,6 @@ mod tests {
         assert_eq!(extract_cache_read_tokens(&usage), 120);
         assert_eq!(extract_cache_write_tokens(&usage), 40);
     }
-
     #[test]
     fn cache_tokens_support_deepseek_prompt_cache_hit_field() {
         // DeepSeek (and some OpenRouter passthrough shapes for it) reports
@@ -1621,7 +1622,6 @@ mod tests {
         });
         assert_eq!(extract_cache_read_tokens(&usage), 8800);
     }
-
     #[test]
     fn cache_tokens_support_openrouter_cache_subobject_shape() {
         // OpenRouter's newer 2026-04 "Caching → Anthropic" wire shape
